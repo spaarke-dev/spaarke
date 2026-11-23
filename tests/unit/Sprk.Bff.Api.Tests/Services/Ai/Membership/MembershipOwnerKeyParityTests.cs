@@ -208,7 +208,9 @@ public class MembershipOwnerKeyParityTests
             scopeFactory,
             new StaticOptionsMonitor<MembershipReconciliationOptions>(new MembershipReconciliationOptions
             {
-                EntityTypes = new List<string> { Matter }, FetchPageSize = 50, OrphanFetchPageSize = 50,
+                EntityTypes = new List<string> { Matter },
+                FetchPageSize = 50,
+                OrphanFetchPageSize = 50,
             }),
             NullLogger<MembershipReconciliationJob>.Instance);
 

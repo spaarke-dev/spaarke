@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // CustomerRunGuardOptions.cs
 //
 // L2 CONTROL-PLANE per-customer serialization guard configuration (task 059).

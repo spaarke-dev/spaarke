@@ -5,13 +5,13 @@ techStack: [react, typescript, webpack, vite, dataverse]
 appliesTo: ["**/code-pages/**", "**/solutions/**", "deploy code page", "deploy web resource", "build webresource", "deploy wizard"]
 alwaysApply: false
 exemplar: src/client/code-pages/DocumentRelationshipViewer/
-last-reviewed: 2026-05-16
+last-reviewed: 2026-11-03
 ---
 
 # Code Page Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Reviewed**: 2026-05-16
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
 > **Exemplar rationale**: `DocumentRelationshipViewer` is the canonical Code Page (React 18 standalone dialog) — well-structured, current with the May 2026 auth bootstrap, and named throughout this skill's body.
 
@@ -76,6 +76,18 @@ src/client/code-pages/{PageName}/
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Recompile shared libraries first if `@spaarke/ui-components` or `@spaarke/auth` changed
+- [ ] Clear build cache, then build (Two Build Pipelines: Webpack or Vite)
+- [ ] Verification After Build: expected string found in the built output
+- [ ] Deployment: Option A (build, inline) or Option B (manual upload, publish)
+- [ ] Confirm the page loads in Dataverse (Option B step 3, Verify)
+```
+
 ## 🚨 Critical: Clear Build Cache Before EVERY Build (MANDATORY)
 
 **Vite and Webpack cache resolved dependencies. If a shared library (`@spaarke/ui-components`, `@spaarke/auth`) was modified, the build cache will contain STALE code. The deployed bundle will silently use old code even though the source files are correct.**
@@ -127,6 +139,8 @@ grep -oP '.{10}your_expected_string.{10}' out/sprk_{pagename}.html
 ```
 
 **If the string is NOT found, the cache was stale. Clear and rebuild.**
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ---
 
@@ -249,7 +263,7 @@ When the user wants to deploy manually for fastest iteration:
 
 ## Dual-Deploy Warning — Aliased-Source Pairs (added 2026-07-02 by `spaarke-dataset-grid-framework-r2` FR-09)
 
-**The trap**: Code page A's `vite.config.ts` aliases another code page B's source tree (e.g., `resolve.alias: { "@spaarke/legal-workspace": path.resolve(__dirname, "../LegalWorkspace/src") }`). When B's source is edited and B is deployed, A does NOT automatically pick up the change — A keeps whatever it bundled at its own last build. Deploying B alone is a NO-OP for A's consumers.
+**The trap**: Code page A's `vite.config.ts` aliases another code page B's source tree (e.g., `resolve.alias: { "my-workspace": path.resolve(__dirname, "../OtherCodePage/src") }`). When B's source is edited and B is deployed, A does NOT automatically pick up the change — A keeps whatever it bundled at its own last build. Deploying B alone is a NO-OP for A's consumers.
 
 **Recipe to detect aliased-source pairs before deployment:**
 
@@ -265,9 +279,9 @@ grep -rn 'resolve.alias\|__dirname' src/solutions/*/vite.config.ts
 
 If a target code page's `vite.config.ts` aliases into another code page's `src/` tree, BOTH consumers must be rebuilt + redeployed for a source-file edit to reach every runtime.
 
-**Known historical case (RESOLVED)**: `SpaarkeAi` ← `LegalWorkspace` — SpaarkeAi's `vite.config.ts` aliased `@spaarke/legal-workspace` → `../LegalWorkspace/src`. Resolved 2026-07-02 by R2 FR-10: LegalWorkspace's section registry was extracted into a proper shared package at `src/client/shared/Spaarke.LegalWorkspace/` (RE-EXPORT strategy — barrel re-exports source that stays in LegalWorkspace). SpaarkeAi now consumes via a normal `file:` dep. See `projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md`.
+**Live case**: `SpaarkeAi` ← `LegalWorkspace`. SpaarkeAi bundles LegalWorkspace's source through a declared `file:` dependency (`"legal-workspace": "file:../LegalWorkspace"`, resolved via that solution's `exports` entry `./src/index.ts`). History: a raw Vite alias until 2026-07-02, then a `@spaarke/legal-workspace` re-export facade (R2 FR-10) until it was retired on 2026-11-13 (reuse-governance-tightening-r1 task 032). None of the three changes the bundling: an edit under `src/solutions/LegalWorkspace/src/` reaches SpaarkeAi only when SpaarkeAi is rebuilt and redeployed. On master, `deploy-spaarke-ai.yml` covers this with its `src/solutions/LegalWorkspace/**` path trigger; a manual deploy of LegalWorkspace alone does not.
 
-**Why the warning stays even after FR-10 resolved the LegalWorkspace case**: the aliased-source pattern is likely to recur in future workspace-hosting code pages. Any future dual-consumer pattern should either use a proper shared package (preferred) OR the operator must know to redeploy every dependent consumer.
+**Why the warning stays**: any code page that bundles another code page's source, by alias or by `file:` dependency, has this coupling. A dependency declares it; it does not remove it. Either the consumer's deploy trigger includes every source tree it bundles, or the operator redeploys every dependent consumer. `deploy-spaarke-ai.yml` covers LegalWorkspace this way, but not the other trees SpaarkeAi's `vite.config.ts` bundles (Compose, Communication and Notifications components, DocumentUploadWizard, FindSimilarCodePage, WorkspaceLayoutWizard): an edit to one of those alone reaches the Console only when SpaarkeAi is redeployed. A shared package is the answer only when the code passes ADR-012's three tests.
 
 ---
 

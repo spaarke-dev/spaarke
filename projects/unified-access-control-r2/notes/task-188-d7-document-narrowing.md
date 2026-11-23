@@ -1895,3 +1895,65 @@ merge #2186 from here.
 - **`DocumentDestroyAuthorizationTestFixture.cs`.** Keep both constructor arguments. `RecordingDocumentDataverseService`
   takes `deleted, updated, onUpdated` (master) plus `childCounts, rowDeleteFaults` (slice D), and the factory passes all
   five.
+
+## 22. #2669 chain bound is visible
+
+### The defect
+
+The narrowing hides a document when its parent chain is longer than `MaxHops` = 3 (`ChainTooLong`) or loops (`Cycle`).
+On an external list, that row was withheld silently: `truncated` stayed false, and the only trace was a reason count in
+the per-request cost line (Debug, or Information above the threshold). Nested attachments four or more levels deep
+disappeared without a trace, which breaks NFR-03 (caps are visible). Found by the ebilling-r1 F3b review (EB-D-215);
+it is the document-side counterpart of `EXT-INVOICE-WALK-PAST-BOUND`.
+
+### The fix
+
+- `DocumentNarrowingResult.IsPastBound(reason)`: `ChainTooLong` or `Cycle`, and nothing else.
+- `DecideCoreAsync` records the last hop each subject's walk reached, and the result keeps it for past-bound rows only
+  (`HopsFor(row)`). The decision itself is unchanged.
+- `ExternalDocumentNarrowing.ReportHiddenPastBound(narrowing, rows, caller, logger)` logs one Warning per past-bound row
+  and returns whether any row was hidden that way. The event code is `[EXT-DOCUMENT-CHAIN-PAST-BOUND]`. The fields are
+  `Table`, `DocumentId`, `Hops`, `Plane` (`contact` / `systemuser`) and `Reason` (`chain_too_long` / `chain_cycle`),
+  with no name and no title.
+- Both external LIST sites OR the result into the existing `Truncated` flag (no second flag):
+  - `ExternalDataService.GetDocumentsAsync` → `ExternalCollectionResponse.Truncated`;
+  - `ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync` → `narrowingTruncated` → `FetchResponseDto.Truncated`.
+- Every other reason keeps its behaviour: Restricted, ancestor Restricted, a hidden communication, a root not granted.
+  Each is a decision, not a cap, so it neither sets `truncated` nor warns.
+- Single-record reads are unchanged. `IsDocumentVisibleAsync` (download, versions) still refuses fail-closed and does not
+  call the reporter. The module single-record route is still safe (`IsRecordAccessible` never matches a child document).
+- No new service, DI registration, endpoint or public member. The new members are internal, on the existing class and
+  result.
+
+### Tests (`ExternalDocumentNarrowingRouteTests`)
+
+- (a) `List_ARowHiddenPastTheChainBound_SaysTruncated_AndWarnsOncePerRow("four-hop-chain")`, and the module-fetch twin:
+  the row is omitted, `truncated` = true, and exactly one Warning is logged with the code, `hops=3`, `plane=contact` and
+  structured keys equal to the five fields.
+- (b) The same for `"cycle"` (`hops=2`, `chain_cycle`), plus `DocumentsModuleFetch_ASystemUserFlaggedExternal_...`
+  (`plane=systemuser`).
+- (c) `List_RowsHiddenOnlyForAnOrdinaryReason_...` (own, parent and grandparent Restricted, an internal-only
+  communication, a document also filed to a secure root not granted), and the module twin: `truncated` = false, no
+  warning.
+- (d) `List_AChainOfExactlyMaxHops_IsShown_...`, and the module twin (three parents): the row is shown, `truncated` =
+  false, no warning.
+- Changed: `List_HidesTheDocument` now expects `truncated` = true for the three past-bound cases (`four-hop-chain`,
+  `cycle`, `own-visible-link-four-hop-chain`) and false for the rest. Its old assertion ("not a fault") pinned the
+  defect.
+
+Before the fix: 8 failed, 69 passed (77). The 8 are the 5 new past-bound cases and the 3 past-bound cases of
+`List_HidesTheDocument`; each failed on `Truncated` false. The must-not-fire and boundary tests pass before and after,
+by design. After the fix: 77 passed, 0 failed.
+
+### Gates (#2669)
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit, filtered (`ExternalDocument`, `ExternalAccess`, `Narrowing`) | 5,263 passed, 0 failed |
+| ArchTests, build + `--no-build` test | 0 errors, 0 warnings; 2,144 passed, 0 failed |
+| `dotnet format whitespace --verify-no-changes` on the 4 changed `.cs` | clean |
+
+Not changed (outside the brief): the assistant's `dataverse.*` tools, the AI retrieval trim and the internal-plane
+document routes. They narrow through `AppOnlyDocumentNarrowing` / `InternalRouteDocumentNarrowing`, which have no
+`truncated` flag, so a past-bound row there is still visible only as a reason count.

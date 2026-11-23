@@ -32,23 +32,27 @@ vi.mock('../src/components/shell/NotificationBell', async () => {
     },
   };
 });
-vi.mock('../src/components/detail/RecordDetailModal', () => ({
-  RecordDetailModal: (props: {
-    entityName: string;
+vi.mock('../src/components/record/RecordTemplateModal', () => ({
+  RecordTemplateModal: (props: {
+    open: boolean;
+    config: { entity: string };
     recordIds: readonly string[];
     index: number;
     onSettled?: () => void;
   }) => {
     // The real modal reports a settled record (loaded, denied, not found) once its read answers; the deep link keeps
-    // `record` in the address bar until then. This stub settles at once.
-    const { onSettled } = props;
+    // `record` in the address bar until then. This stub settles at once, while open. Like the real modal, a closed stub
+    // renders nothing: the opener keeps it mounted and closes it with open={false} (#2658).
+    const { onSettled, open } = props;
+    const id = props.recordIds[props.index];
     React.useEffect(() => {
-      onSettled?.();
-    }, [onSettled]);
+      if (open) onSettled?.();
+    }, [open, id, onSettled]);
+    if (!open) return null;
     return React.createElement('div', {
       role: 'dialog',
       'data-testid': 'detail',
-      'data-entity': props.entityName,
+      'data-entity': props.config.entity,
       'data-id': props.recordIds[props.index],
     });
   },

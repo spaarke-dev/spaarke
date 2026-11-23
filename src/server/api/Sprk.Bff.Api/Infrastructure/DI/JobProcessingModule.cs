@@ -37,6 +37,10 @@ public static class JobProcessingModule
         // #2159: the durable retry of an F3 release a re-file could not record inline (ADR-052: queue → ADR-004
         // IJobHandler). Its dependency, DocumentContainerRelocator, is registered unconditionally (DocumentsModule).
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Documents.RelocationReleaseRetryJobHandler>();
+        // Field-mapping-server-write-path-r1 task 049 Part B: the "Assigned *" pass of a created root, queued by
+        // RecordCreationService (ADR-052: queue → ADR-004 IJobHandler). It resolves AssignedAccessMaterializer (ExternalAccessModule)
+        // only when it runs; IScheduledJobLease is SchedulingModule's. Both are registered unconditionally.
+        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.AssignedAccessCreateGrantJobHandler>();
         // AI-coupled handlers relocated to Services/Ai/Jobs/ per task 051 (FR-E3); JobType strings unchanged
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.EmailAnalysisJobHandler>();

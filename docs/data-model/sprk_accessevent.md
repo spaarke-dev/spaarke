@@ -12,14 +12,13 @@
 > **Schema Version**: 1.0
 > **Created**: 2026-09-09
 > **Project**: `unified-access-control-r2` (task 086 — FR-32 schema half)
-> **Status**: 🟡 **AUTHORED, NOT DEPLOYED.** As of **2026-09-09** this table does **not** exist in
-> `spaarkedev1.crm.dynamics.com` — verified by
-> `GET EntityDefinitions(LogicalName='sprk_accessevent')` → `404 NotFound`. Deployment is an
-> explicit **operator** step: run
-> [`scripts/Deploy-AccessEventEntity.ps1`](../../scripts/Deploy-AccessEventEntity.ps1)
-> (start with `-DryRun`). This document is the *contract* the script writes and task 087's appender
-> reads — not a record of a live environment. Re-verify against live metadata after deployment and
-> flip this banner.
+> **Status**: ⛔ **SUPERSEDED, NOT DEPLOYED** (corrected at uac-r2 task 090, absorbing task 087). The
+> table does **not** exist in any environment (on 2026-09-09 `GET EntityDefinitions(LogicalName='sprk_accessevent')`
+> answered `404 NotFound` on dev), and **nothing writes it**: task 087's appender was cut by owner round 59
+> because Dataverse auditing, on for every access table since 2026-09-10, is the source, and a second log
+> whose failed write would fail every grant is a duplicate mechanism.
+> [`scripts/Deploy-AccessEventEntity.ps1`](../../scripts/Deploy-AccessEventEntity.ps1) refuses to run
+> without `-Force`. Do not deploy it outside #1303's design.
 
 **Related tables** (documented alongside their solution, not here — see *Where the sibling docs live* at the end):
 

@@ -43,15 +43,23 @@
 name: mutation-nightly
 
 on:
-  # schedule re-enabled after a dispatch run completes end to end within its cap, see issue #1870.
-  # When re-adding (cron '0 5 * * *'): 05:00 UTC is an hour before nightly-health (06:00) so the
-  # two do not contend for runners, and early enough that the 24h window ends just before it.
+  # Re-enabled for #1870: proof run 38601727169 completed end to end (2 files, 124 min), and the
+  # scope step now caps a night at `max_files` files. 05:00 UTC is an hour before nightly-health
+  # (06:00) so the two do not contend for runners, and early enough that the 24h window ends just
+  # before it.
+  schedule:
+    - cron: '0 5 * * *'
   workflow_dispatch:
     inputs:
       since:
         description: 'Optional git ref: mutate allowlisted files changed since this ref (default: commits from the last 24h)'
         required: false
         type: string
+      max_files:
+        description: 'Most allowlisted files to mutate in one run (smallest first; the rest are reported as deferred). Default 2, which the 190-min cap fits.'
+        required: false
+        type: string
+        default: '2'
       dry_run_alert:
         description: 'Print the quality-alert decision instead of opening/updating/closing the issue'
         required: false
@@ -86,6 +94,7 @@ jobs:
     outputs:
       verdict: ${{ steps.summarize.outputs.verdict }}
       alert_summary: ${{ steps.summarize.outputs.alert_summary }}
+      deferred: ${{ steps.scope.outputs.deferred }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -97,6 +106,7 @@ jobs:
         shell: bash
         env:
           SINCE_INPUT: ${{ inputs.since }}
+          MAX_FILES_INPUT: ${{ inputs.max_files }}
         run: |
           set -euo pipefail
 
@@ -125,6 +135,39 @@ jobs:
             "${bff_prefix}Infrastructure/Authentication/*.cs" \
             "${bff_prefix}Services/Access/*.cs" \
             "${dv_prefix}*AccessRights*.cs" > "$RUNNER_TEMP/changed.txt"
+
+          # Per-night file cap (#1870). The one complete proof run mutated 2 files in 124 min;
+          # 14 files did not finish in 240. Allowlisted files changed on 35 of the 60 days to
+          # 2026-11-10, often more than 2 in a day, so without a cap a busy night is cancelled
+          # and measures nothing. Keep the smallest files (fewest mutants, so the most files
+          # finish) and report the rest as deferred: they are listed in the run summary
+          # every time, and in the alert body when the night is failing (a clean night closes
+          # the alert, and the action posts no body then). Known bias: a large file changed on
+          # a busy day is the one deferred. Cover it with a dispatch run (`since` + `max_files`).
+          max_files="${MAX_FILES_INPUT:-2}"
+          case "$max_files" in ''|*[!0-9]*|0) echo "::error::max_files must be a positive integer"; exit 1 ;; esac
+          : > "$RUNNER_TEMP/deferred.txt"
+          if [ "$(wc -l < "$RUNNER_TEMP/changed.txt" | tr -d ' ')" -gt "$max_files" ]; then
+            while IFS= read -r f; do
+              printf '%s\t%s\n' "$(wc -l < "$f" | tr -d ' ')" "$f"
+            done < "$RUNNER_TEMP/changed.txt" | sort -t$'\t' -k1,1n -k2,2 | cut -f2 > "$RUNNER_TEMP/ranked.txt"
+            head -n "$max_files" "$RUNNER_TEMP/ranked.txt" > "$RUNNER_TEMP/changed.txt"
+            tail -n +"$((max_files + 1))" "$RUNNER_TEMP/ranked.txt" > "$RUNNER_TEMP/deferred.txt"
+          fi
+          deferred_count="$(wc -l < "$RUNNER_TEMP/deferred.txt" | tr -d ' ')"
+          deferred_md=""
+          if [ "$deferred_count" != "0" ]; then
+            echo "Deferred by the ${max_files}-file cap:"
+            cat "$RUNNER_TEMP/deferred.txt"
+            deferred_md="**Not mutated tonight** (${deferred_count} changed allowlisted file(s) over the ${max_files}-file cap; run \`workflow_dispatch\` with \`since\` and a larger \`max_files\` to cover them):"$'\n'"$(sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/deferred.txt")"
+            printf '\n%s\n' "$deferred_md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          delimiter="DEFERRED_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "deferred<<${delimiter}"
+            printf '%s\n' "$deferred_md"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
 
           { grep "^${bff_prefix}" "$RUNNER_TEMP/changed.txt" || true; } | sort -u > "$RUNNER_TEMP/changed-bff.txt"
           { grep "^${dv_prefix}"  "$RUNNER_TEMP/changed.txt" || true; } | sort -u > "$RUNNER_TEMP/changed-dataverse.txt"
@@ -289,6 +332,7 @@ jobs:
           MUTATE_RESULT: ${{ needs.mutate.result }}
           VERDICT: ${{ needs.mutate.outputs.verdict }}
           ALERT_SUMMARY: ${{ needs.mutate.outputs.alert_summary }}
+          DEFERRED: ${{ needs.mutate.outputs.deferred }}
         run: |
           set -euo pipefail
           status=ok
@@ -306,6 +350,9 @@ jobs:
             status=failing
             summary="$ALERT_SUMMARY"
           fi
+          # Files the per-night cap left out are appended to the alert body. The action uses the
+          # body only when failing; on a clean night they are in the run summary only.
+          if [ -n "${DEFERRED//[[:space:]]/}" ]; then summary+=$'\n\n'"$DEFERRED"; fi
 
           echo "status=${status}" >> "$GITHUB_OUTPUT"
           delimiter="ALERT_SUMMARY_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"

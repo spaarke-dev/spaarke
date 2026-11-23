@@ -3,10 +3,10 @@
  * Project creation service for the Create New Project wizard.
  *
  * Responsibilities:
- *   1. Search reference tables (project types, practice areas, contacts)
- *   2. Create sprk_project Dataverse record via IDataService
+ *   1. Search reference tables (project types, practice areas, contacts) through IDataService
+ *   2. Create the sprk_project record through the BFF child-records route (task 022, FR-16)
  *
- * Follows the same patterns as CreateMatter/matterService.ts:
+ * Follows the same patterns as CreateMatterWizard/matterService.ts:
  *   - Navigation property discovery via EntityDefinitions metadata API
  *   - OData @odata.bind syntax for lookup bindings
  *   - Cached nav-prop map per entity
@@ -18,16 +18,12 @@
 import { describeWebApiCreateError } from '../../utils/webApiCreateError';
 import type { ICreateProjectFormState } from './projectFormTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
+import { searchOrganizationsAsLookup } from '../CreateMatterWizard/matterService';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
-import {
-  EntityCreationService,
-  type IUserBuCascadeDefaults,
-  type AuthenticatedFetchFn,
-} from '../../services/EntityCreationService';
+import type { IUserBuCascadeDefaults, AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { discoverNavProps, findNavProp, cleanGuid } from '../../services/PolymorphicResolverService';
-import { applyFieldMappings } from '../../services/FieldMappingService';
-import { syncAssignedAccess } from '../../services/assignedAccessSync';
+import { createRecordViaBffWithWarnings, type IBffCreateOptions } from '../../utils/adapters/bffChildWriteAdapter';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -42,8 +38,24 @@ export interface ICreateProjectResult {
   success: boolean;
   /** Human-readable error message (set when success is false). */
   errorMessage?: string;
-  /** Non-fatal warnings (e.g. field-mapping profile fetch failures). Empty when none. */
+  /** Non-fatal warnings (the server's: a mapping source it could not read, a mapped value it did not write). Empty when none. */
   warnings: string[];
+  /**
+   * Task 049 fix round 2: the project was created secure from creation (the BFF create with `secure=true`), so the
+   * provisioning call that follows only does what is left — its `already_provisioned` answer is then success. Task 022:
+   * every secure-requested create that succeeds sends the intent, so this is set on every such success.
+   */
+  securedAtCreate?: boolean;
+}
+
+/**
+ * Whether a create-failure message already says the project was not saved ("The project was not created: …", "…, so the
+ * project was not created.", "The project was not saved: …" — the BFF's refusal details and this service's fail-closed
+ * sentence). Callers that put their own "failed" prefix in front of `errorMessage` skip it then, so the sentence is not
+ * said two or three times.
+ */
+export function saysProjectNotCreated(message: string): boolean {
+  return /\bproject was not (created|saved)\b/i.test(message);
 }
 
 // ---------------------------------------------------------------------------
@@ -63,10 +75,9 @@ export class ProjectService {
   constructor(
     private readonly _dataService: IDataService,
     /**
-     * Injected BFF-authenticated fetch. Optional — only required to activate the
-     * Field Mapping Framework engine (task 020, spec FR-12). Lookup-only callers
-     * (searchProjectTypes/searchPracticeAreas/etc.) may omit it. When absent,
-     * the engine call is a graceful no-op — identical to today's behavior.
+     * Injected BFF-authenticated fetch. Required by `createProject`, which creates through the BFF child-records route
+     * (task 022); without it (or without a base URL) the create is refused and nothing is written. Lookup-only callers
+     * (searchProjectTypes/searchPracticeAreas/etc.) may omit it.
      */
     private readonly _authenticatedFetch?: AuthenticatedFetchFn,
     /** BFF API base URL. See {@link _authenticatedFetch}. */
@@ -175,70 +186,66 @@ export class ProjectService {
    * Returns up to 10 matching organizations as ILookupItem.
    */
   async searchOrganizations(nameFilter: string): Promise<ILookupItem[]> {
-    if (!nameFilter || nameFilter.trim().length < 2) {
-      return [];
-    }
-
-    const safeFilter = nameFilter.trim().replace(/'/g, "''");
-    const query =
-      `?$select=sprk_organizationid,sprk_name` +
-      `&$filter=contains(sprk_name,'${safeFilter}')` +
-      `&$orderby=sprk_name asc` +
-      `&$top=10`;
-
-    console.info('[ProjectService] searchOrganizations query:', 'sprk_organization', query);
-    try {
-      const result = await this._dataService.retrieveMultipleRecords('sprk_organization', query);
-      console.info('[ProjectService] searchOrganizations results:', result.entities.length);
-      return result.entities.map(e => ({
-        id: e['sprk_organizationid'] as string,
-        name: e['sprk_name'] as string,
-      }));
-    } catch (err) {
-      console.error('[ProjectService] searchOrganizations error:', err);
-      throw err;
-    }
+    // sprk_organization's name column is sprk_organizationname (it has no sprk_name), so the
+    // matter wizard's search is the one source of the query (F-R4-1, ontology UAT 2026-11-12).
+    return searchOrganizationsAsLookup(this._dataService, nameFilter);
   }
 
   // ── Record creation ───────────────────────────────────────────────────
 
   /**
-   * Create a sprk_project record in Dataverse.
+   * Create a sprk_project record through the BFF child-records route (`POST /api/v1/child-records/sprk_project`).
    *
-   * Uses navigation property discovery to resolve the correct OData
-   * @odata.bind syntax for each lookup field.
+   * Field-mapping write path (project field-mapping-server-write-path-r1, task 022, FR-16, FR-15): the payload holds ONLY
+   * what the user entered or picked. This method does not map fields, default a search index, resolve an owner or write
+   * the secure flag — the server does each of them in the one create (fill-only mapping FR-02, owner FR-09, search index
+   * FR-38/FR-40, the project number by the platform autonumber). The create names no parent, so its owner is the acting
+   * user's business-unit team; the matter's team follows only after the later filing and the ownership jobs. A mapped value the caller may not write is dropped by
+   * the server with a warning, which arrives in `warnings`. It never falls back to `Xrm.WebApi`: with no BFF connection
+   * the create is refused and nothing is written.
    *
-   * BU cascade (FR-WIZ-02, fixes latent gap G2): when `cascadeDefaults` is provided,
-   * applies `sprk_searchindexname` from the user's owning Business Unit to the create
-   * payload via {@link EntityCreationService.applyUserBuDefaults}, guarded by INV-5 —
-   * an explicit value pre-existing on the payload is preserved. `sprk_containerid` is
-   * NOT written here (task 076): provisioning's Step 7 is its only writer, which is what
-   * lets the server read "owned by the secure team, no container" as resumable (task 133). Callers (typically `CreateProjectWizard.tsx`) resolve the
-   * defaults via {@link EntityCreationService.resolveUserBuDefaults}.
+   * Uses navigation property discovery to resolve the correct OData @odata.bind syntax for each lookup field.
    *
    * Returns ICreateProjectResult — never throws.
    *
-   * @param formValues Form state captured by the wizard.
-   * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
-   *   When omitted/undefined the cascade step is a no-op (legacy behavior). New
-   *   wizard call sites pass the resolved value; tests can omit it.
-   * @param association Optional parent record selected via the wizard's
-   *   AssociateToStep (Matter/Account today; same-entity Project parents are
-   *   not precluded — no source===target guard, per ADR-024/design.md §10).
-   *   When supplied, drives the Field Mapping Framework engine (spec FR-12):
-   *   `sourceEntity`/`sourceId` = `association.entityType`/`recordId`. When
-   *   omitted, the engine call is skipped — a graceful no-op identical to
-   *   today's behavior.
-   *
-   * @see spec.md FR-WIZ-02
-   * @see spec.md FR-WIZ-08 (INV-5)
-   * @see design.md §5.0 (BU cascade source)
+   * @param formValues Form state captured by the wizard. `isSecure` asks for the project to be secure from creation
+   *   (`secure=true` on the route, task 049 fix round 2): the server creates it into isolation, and the caller's
+   *   provisioning call afterwards does only what is left.
+   * @param _cascadeDefaults BU-derived defaults. Accepted so existing hosts keep compiling, but not read: neither index
+   *   column is written onto the project (both are the server's, FR-38; the index follows the content type, FR-40), and
+   *   `sprk_containerid` is provisioning's (task 076).
+   * @param association Optional parent record selected via the wizard's AssociateToStep (Matter/Account today). It is
+   *   sent as the explicit mapping source (`?mappingSourceEntity=&mappingSourceId=`), because the project payload carries
+   *   no filing key the server could infer the source from: the wizard files the project under its matter AFTER the
+   *   create (task 195; task 049's known limit). The body never carries it. When omitted, no source is named and the
+   *   server maps nothing.
+   * @param parentSecure True when the selected matter is secure (the wizard locks Secure on): a refusal of the rights a
+   *   secure create needs then says that a project under a secure matter needs them, never "create it without Secure".
    */
   async createProject(
     formValues: ICreateProjectFormState,
-    cascadeDefaults?: IUserBuCascadeDefaults,
-    association?: AssociationResult | null
+    _cascadeDefaults?: IUserBuCascadeDefaults,
+    association?: AssociationResult | null,
+    parentSecure?: boolean
   ): Promise<ICreateProjectResult> {
+    const warnings: string[] = [];
+
+    // Fail closed: the create is the server's. With no BFF connection nothing is sent to Xrm.WebApi, which would make the
+    // project user-owned, unmapped and (for a secure request) briefly ordinary.
+    const authenticatedFetch = this._authenticatedFetch;
+    const bffBaseUrl = this._bffBaseUrl;
+    if (!authenticatedFetch || !bffBaseUrl) {
+      console.error(
+        '[ProjectService] createRecord refused: no BFF connection (authenticatedFetch / bffBaseUrl missing)'
+      );
+      return {
+        success: false,
+        errorMessage:
+          'The project was not created: this screen is not connected to the Spaarke service, which must save it.',
+        warnings,
+      };
+    }
+
     // Discover correct OData navigation property names from entity metadata.
     // Matches by referenced (target) entity to avoid hardcoding column names
     // which can differ between entities (e.g. sprk_mattertype vs sprk_projecttyperef).
@@ -253,18 +260,16 @@ export class ProjectService {
       entity['sprk_projectdescription'] = formValues.description.trim();
     }
 
-    // `sprk_issecure` is NEVER written here (unified-access-control-r2 task 150). The column is field-secured: only the
-    // BFF application user may create or update it, so a create payload naming it is REFUSED for every user. A secure
-    // project is asked for by calling provisioning (`provisionSecureProject`), which marks it secure as its first
-    // write. `formValues.isSecure` therefore drives the CALLER's provisioning call, not this payload.
-
-    // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_searchindexname` from the current
-    // user's owning Business Unit (INV-5: an explicit value is preserved). Not
-    // `sprk_containerid` — task 076 removed that write; the server owns it.
-    if (cascadeDefaults) {
-      const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
-      console.info('[ProjectService] BU cascade applied:', applied);
-    }
+    // Task 022 (FR-16): the payload is the user's own values — nothing else.
+    //   - `sprk_issecure` is NEVER written (unified-access-control-r2 task 150: field-secured, the server's). A secure
+    //     project is asked for with the route's `secure=true` query parameter, never in the body.
+    //   - The BU cascade (`sprk_searchindexname`, the `sprk_ai_search_index` bind) is NOT written: both columns are the
+    //     server's on a project (FR-38; `RecordTableRule.SearchIndexed`), and since task 041 (FR-40) the index follows
+    //     the content type.
+    //   - `sprk_containerid` stays unwritten (task 076): provisioning records it.
+    //   - No owner, owning team or impersonation value (FR-09): the BFF decides ownership. With no parent named in the
+    //     create, that is the acting user's business-unit team until the project is filed under its matter.
+    //   - No mapped value (FR-02): the server maps fill-only, so a value the user typed here wins.
 
     // Add lookup bindings — match by referenced entity name (robust).
     // columnHint disambiguates when multiple lookups point to the same entity (e.g. contact).
@@ -318,16 +323,6 @@ export class ProjectService {
       });
     }
 
-    // Phase G: cascade BU's `sprk_ai_search_index` lookup onto the new Project.
-    if (cascadeDefaults?.searchIndexId) {
-      lookups.push({
-        referencedEntity: 'sprk_aisearchindex',
-        entitySet: 'sprk_aisearchindexes',
-        guid: cascadeDefaults.searchIndexId,
-        label: 'AI Search Index',
-      });
-    }
-
     for (const lk of lookups) {
       const navProp = findNavProp(navProps, lk.referencedEntity, lk.columnHint);
       if (navProp) {
@@ -339,56 +334,65 @@ export class ProjectService {
       }
     }
 
-    const warnings: string[] = [];
-
-    // Field Mapping Framework (spec FR-12, task 020): apply the configured
-    // {parent -> sprk_project} mapping profile (if any) onto the create
-    // payload. Runs AFTER the lookup-binding block above and BEFORE
-    // createRecord, on the SAME payload object. The engine never throws and
-    // is a graceful no-op when there's no association, no profile, or the BFF
-    // deps are unavailable (e.g. a lookup-only construction site) -- no
-    // behavior change in any of those cases. No source===target guard (
-    // same-entity mapping is a supported scenario per ADR-024/design.md §10).
-    if (association?.recordId && association.entityType && this._authenticatedFetch && this._bffBaseUrl) {
-      const mappingResult = await applyFieldMappings({
-        sourceEntity: association.entityType,
-        sourceId: association.recordId,
-        targetEntity: 'sprk_project',
-        payload: entity,
-        dataService: this._dataService,
-        authenticatedFetch: this._authenticatedFetch,
-        bffBaseUrl: this._bffBaseUrl,
-      });
-      warnings.push(...mappingResult.warnings);
+    // The route's query: the association as the explicit mapping source, and the secure intent. Both travel in the query
+    // string, so the body stays the user's own values.
+    const options: IBffCreateOptions = {};
+    if (association?.recordId && association.entityType) {
+      options.mappingSource = { entity: association.entityType, id: association.recordId };
     }
+    const secure = formValues.isSecure === true;
+    if (secure) options.secure = true;
 
     try {
       console.info('[ProjectService] createRecord payload:', JSON.stringify(entity, null, 2));
-      // IDataService.createRecord returns Promise<string> (just the id)
-      const projectId = await this._dataService.createRecord('sprk_project', entity);
+      // Task 022 (FR-16): the create goes to the BFF child-records route, never to Xrm.WebApi. The server maps the fields
+      // fill-only (the user's own value wins), decides the owner, and the platform autonumber issues the project number.
+      // The create names no parent (the matter filing is a later PATCH), so the server's owner is the acting user's
+      // business-unit team; the matter's team takes over only after `fileProjectUnderMatter` succeeds and the ownership
+      // jobs run (the filing itself writes no owner). A secure request is created INTO isolation (task 049 fix round 2): there is no moment at which
+      // the secure-requested project exists as an ordinary record.
+      const created = await createRecordViaBffWithWarnings(
+        authenticatedFetch,
+        bffBaseUrl,
+        'sprk_project',
+        entity,
+        Object.keys(options).length > 0 ? options : undefined
+      );
+      const projectId = created.id;
+      warnings.push(...created.warnings);
       console.info('[ProjectService] createRecord success, projectId:', projectId);
 
-      // Task 142 (owner Q5 + R3): the project's "Assigned *" people get their access now — unless it is about to be
-      // SECURED, in which case the wizard syncs AFTER provisioning so the rule sees a secure record and SUGGESTS
-      // (owner A3 = prompt) instead of granting first. Never throws, never fails the create.
-      if (!formValues.isSecure) {
-        await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'project', projectId);
-      }
+      // The project's "Assigned *" people get their access from the create above, not from a client call: on a root
+      // create the server grants the maker's own share inside the request and queues the full I-12 L1 pass for every other
+      // subject (tasks 049/049b); for a secure-from-creation project it waits for the securing, and the reconciliation job
+      // grants it when the create could not finish it. So there is no client access sync here (task 022; the Matter
+      // wizard dropped its call in task 021).
 
       return {
         projectId,
         projectName: formValues.projectName.trim(),
         success: true,
         warnings,
+        ...(secure ? { securedAtCreate: true } : {}),
       };
     } catch (err) {
       console.error('[ProjectService] createRecord error:', err);
       // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
-      const described = describeWebApiCreateError(err, 'project');
+      // The create names no parent (the wizard files the project after it), so the route's uniform not-found can only be
+      // one of the values the user selected: the root-create sentence, never "filed under".
+      const described = describeWebApiCreateError(err, 'project', {
+        rootCreate: true,
+        ...(parentSecure ? { secureParent: 'matter' } : {}),
+      });
       const message = described.message;
+      // A server refusal usually says itself that nothing was saved ("The project was not created: …", "…, so the project
+      // was not created."); a prefix would then say it twice.
       return {
         success: false,
-        errorMessage: described.isAccessDenied ? message : `Failed to create project record: ${message}`,
+        errorMessage:
+          described.isAccessDenied || saysProjectNotCreated(message)
+            ? message
+            : `Failed to create project record: ${message}`,
         warnings,
       };
     }

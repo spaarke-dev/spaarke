@@ -227,9 +227,9 @@ public class OwnerCreatorColumnAppOnlyWriterTests
                 Lookups: null, ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_event", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("ownerid@odata.bind")),
-            It.IsAny<CancellationToken>(), user), Times.Once);
+            user, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -242,10 +242,10 @@ public class OwnerCreatorColumnAppOnlyWriterTests
                 Lookups: null),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_event", Row,
             It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_createdbypersonname") && f.ContainsKey("ownerid_note")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Output mapping (DataverseUpdateHandler, app-only) ────────────────────────────────────────────────────────
@@ -270,10 +270,10 @@ public class OwnerCreatorColumnAppOnlyWriterTests
             new Dictionary<string, object?> { ["sprk_createdbypersonname"] = "x", ["ownerid_note"] = "y" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_event", Row,
             It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_createdbypersonname") && f.ContainsKey("ownerid_note")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Field-mapping push (a rule targeting the owner or the creator is skipped; the rest of the push applies) ──
@@ -293,10 +293,10 @@ public class OwnerCreatorColumnAppOnlyWriterTests
 
         (updated, failed, skipped).Should().Be((1, 0, 0));
         errors.Should().BeEmpty();
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             table, Row,
             It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
-            It.IsAny<CancellationToken>(), Caller), Times.Once);
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
         results.Should().ContainSingle(r => r.TargetField == target)
             .Which.Should().Match<FieldMappingResultDto>(r =>
                 r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));
@@ -308,6 +308,7 @@ public class OwnerCreatorColumnAppOnlyWriterTests
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
         string table, params FieldMappingRuleDto[] rules) =>
         FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object,
             new StampWorld().Restamper,
             rules,

@@ -98,7 +98,7 @@ See `knowledge/foundry-iq/samples/agent-grounding-wiring/` for the agent → KB 
 
 ## Conventions
 
-- Foundry workflows: YAML graph definitions live under `src/server/api/Sprk.Bff.Api/agents/workflows/`
+- Foundry workflows: none exist in the repo yet. Put the first YAML graph definitions under `Sprk.Bff.Api/agents/workflows/` (a planned folder, not created)
 - Agent Framework loops: C# in `src/server/api/Sprk.Bff.Api/Services/Ai/` alongside tool handlers
 - Foundry IQ KB IDs: stored in `appsettings.json` (or Key Vault for production secrets) — never inline
 

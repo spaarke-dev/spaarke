@@ -56,12 +56,11 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry>();
 
         // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — TRULY UNCONDITIONAL.
-        // ISearchIndexNameResolver is consumed by RagIndexingJobHandler / BulkRagIndexingJobHandler /
-        // IndexingWorkerHostedService — all 3 are registered unconditionally as scoped IJobHandler / IHostedService.
-        // The resolver delegates to IGenericEntityService (registered unconditionally via GraphModule).
-        // Registered HERE at the top of the module (above the documentIntelligence/analysis conditionals)
-        // so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
-        // expectations + Dataverse Web API client lifetime).
+        // ISearchIndexNameResolver (since task 041, FR-40: only the G-9 default index name) is consumed by
+        // RagIndexingJobHandler, PostUploadIndexingEnqueuer and the RAG endpoints, which are registered or mapped
+        // unconditionally. Registered HERE at the top of the module (above the documentIntelligence/analysis
+        // conditionals) so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
+        // expectations).
         services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
 
         // R6 Pillar 7 (task 065, D-C-18) — IPinnedContextRepository.
@@ -718,7 +717,7 @@ public static class AnalysisServicesModule
 
         // ⚠ NOTE: ISearchIndexNameResolver was incorrectly placed HERE (inside
         // AddNullObjectsForCompoundOff) — that method only runs on the AI-OFF path,
-        // so RagIndexingJobHandler / BulkRagIndexingJobHandler / IndexingWorkerHostedService
+        // so its consumers (then RagIndexingJobHandler / BulkRagIndexingJobHandler / IndexingWorkerHostedService)
         // failed at startup in the AI-ON live env with
         // "Unable to resolve service for type ISearchIndexNameResolver".
         // FIXED 2026-06-08: registration moved to the TOP of AddAnalysisServicesModule

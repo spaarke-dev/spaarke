@@ -448,7 +448,8 @@ public sealed partial class DecisionRecordWriterTests
     {
         var h = new Harness();
         var act = () => h.Writer.WriteAsync(Request(steps: [Skipped("send-budget-inquiry"), Skipped("revise-budget")], reason: "not-material - Not material")
-            with { UnnamedNextSteps = ["revise-budget"] });
+            with
+        { UnnamedNextSteps = ["revise-budget"] });
 
         (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
             .Should().Be(DecisionRecordRefusalReason.RecordClassUnderivable);
@@ -460,7 +461,8 @@ public sealed partial class DecisionRecordWriterTests
     {
         var h = new Harness();
         var result = await h.Writer.WriteAsync(Request(steps: [Skipped("send-budget-inquiry"), Skipped("revise-budget")])
-            with { UnnamedNextSteps = ["send-email"] });
+            with
+        { UnnamedNextSteps = ["send-email"] });
 
         result.RecordClass.Should().Be(RecordedDecisionClass.Judgement, "a notification went out; this is not a dismissal");
         using var followOns = JsonDocument.Parse(h.Row.GetAttributeValue<string>("sprk_followons"));

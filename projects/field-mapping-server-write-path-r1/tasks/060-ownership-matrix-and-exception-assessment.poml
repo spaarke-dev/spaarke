@@ -4,7 +4,7 @@
     <title>Per-table ownership matrix next to I-6 + assessment of the notification outbox and DecisionRecordWriter communication-owner exceptions (FR-26)</title>
     <phase>6 W6 Standard, guards, docs, retirement</phase>
     <gate>033+034 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation task with a security-relevant assessment; no code. Verified against the registry by reading, not by tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -88,7 +88,7 @@
     <criterion testable="true">Docs merged to the working branch cleanly (no conflict markers) and the doc renders; follow-up issues for any convert decision are filed.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-26, Unresolved Q3. Feeds task 062 (I-6 update) and may add exceptions to FR-21.</notes>
+  <notes>Spec FR-26, Unresolved Q3. Feeds task 062 (I-6 update) and may add exceptions to FR-21. Completed 2026-11-08: section 5.2 matrix (25 rows = 25 registry tables), I-6 pointer; outbox and gate-record exceptions kept; DI-023 #2636 filed. Detail: notes/task-060-notes.md. rework: none task 060</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

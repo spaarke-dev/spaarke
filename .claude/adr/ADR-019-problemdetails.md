@@ -69,7 +69,7 @@ await writer.WriteAsync($"data: {JsonSerializer.Serialize(new {
 })}\n\n");
 ```
 
-**See**: [SSE Error Pattern](../patterns/api/sse-errors.md)
+**See**: [SSE Error Pattern](../patterns/ai/streaming-endpoints.md)
 
 ### Status Code Mapping
 
@@ -106,7 +106,7 @@ return ProblemDetailsHelper.InternalError(context.TraceIdentifier);
 |-----|--------------|
 | [ADR-001](ADR-001-minimal-api.md) | Single exception handling middleware |
 | [ADR-013](ADR-013-ai-architecture.md) | AI endpoint error codes |
-| [ADR-015](ADR-015-ai-governance.md) | No content in error messages |
+| [ADR-015](ADR-015-ai-data-governance.md) | No content in error messages |
 
 ---
 

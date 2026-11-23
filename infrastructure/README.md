@@ -167,7 +167,7 @@ The App Service is configured with these environment variables:
 
 - [Infrastructure Packaging Strategy](../docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md)
 - [AI Architecture](../docs/architecture/AI-ARCHITECTURE.md)
-- [ADR-012: Infrastructure Packaging](../docs/reference/adr/ADR-012-infrastructure-packaging.md) (TODO)
+- ADR-012: Infrastructure Packaging (TODO)
 
 ## Troubleshooting
 

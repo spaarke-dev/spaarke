@@ -40,6 +40,9 @@ public sealed record SecureSetupHeldPrivilege(Guid PrivilegeId, string? Name, st
 /// <summary>A user member of a field-security profile.</summary>
 public sealed record SecureSetupProfileUser(Guid UserId, Guid? ApplicationId);
 
+/// <summary>A systemuser holding a role directly; <paramref name="ApplicationId"/> is null for an interactive (non-application) user.</summary>
+public sealed record SecureSetupRoleUser(Guid UserId, Guid? ApplicationId);
+
 /// <summary>One field permission on a column: which profile, which table, and its Read/Create/Update grants (4 = allowed).</summary>
 public sealed record SecureSetupFieldPermission(Guid ProfileId, string EntityName, int CanRead, int CanCreate, int CanUpdate);
 
@@ -114,6 +117,27 @@ public interface ISecureRecordSetupDataverse
     /// <summary>S4: the roles of this name in the unit (at most two returned).</summary>
     Task<IReadOnlyList<SecureSetupRole>> FindRolesAsync(SecureRecordSetupTarget target, string name, Guid businessUnitId, CancellationToken cancellationToken);
 
+    /// <summary>S23: every copy of the role of this name, in every business unit (Dataverse copies a root role into each unit).</summary>
+    Task<IReadOnlyList<SecureSetupRole>> FindRoleCopiesAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken);
+
+    /// <summary>S23: the systemusers holding the role directly, with their application id (null = interactive).</summary>
+    Task<IReadOnlyList<SecureSetupRoleUser>> ListRoleUsersAsync(SecureRecordSetupTarget target, Guid roleId, CancellationToken cancellationToken);
+
+    /// <summary>S23: the roles a systemuser holds directly.</summary>
+    Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
+
+    /// <summary>S24: the teams a systemuser is a member of, its business unit's default team included (it inherits their roles).</summary>
+    Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
+
+    /// <summary>S24: the field-security profiles a systemuser is a direct member of.</summary>
+    Task<IReadOnlyList<Guid>> ListUserProfilesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// S24 (task 267): the field-security profiles a team is a member of — the per-TEAM answer
+    /// (<see cref="ListProfileTeamsAsync"/> answers per profile). The ontology writer unit's default team must be in none.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken);
+
     /// <summary>S7/S8/T4: the roles a team holds.</summary>
     Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken);
 
@@ -169,6 +193,9 @@ public interface ISecureRecordSetupDataverse
 
     /// <summary>S7: gives the team the role.</summary>
     Task AssociateTeamRoleAsync(SecureRecordSetupTarget target, Guid teamId, Guid roleId, CancellationToken cancellationToken);
+
+    /// <summary>S23: gives the systemuser the role (the copy in the user's own business unit).</summary>
+    Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken);
 
     /// <summary>S8: takes the role from the team.</summary>
     Task DisassociateTeamRoleAsync(SecureRecordSetupTarget target, Guid teamId, Guid roleId, CancellationToken cancellationToken);

@@ -2,8 +2,9 @@
  * ScopeNoiseStep - step 5 of the rule wizard: where the rule applies and how much noise it may make (spaarke-ontology-platform-r1
  * task 102; D-22).
  *
- * Scope (task 102b, D-165): a rule about matters can be limited to ONE matter, picked with the shared `LookupField` over the host's
- * `MatterPicker` (its search runs as the caller; the wizard holds no matter list, names no table and sends only the id), or apply to all
+ * Scope (task 102b, D-165): a rule about matters can be limited to ONE matter, picked with the shared `DataverseLookupField` over the host's
+ * `MatterPicker` (D-219 Q5: the Dataverse side pane when the host passes a navigation service, otherwise the inline search; both run as
+ * the caller; the wizard holds no matter list and sends only the id), or apply to all
  * matters. The picker is offered only for a rule about the picker's subject; a limit left set otherwise is shown with the BFF's refusal
  * (`scope_subject_mismatch`, placed on this field) and can be removed. A new version starts with the
  * rule's current scope and can change it. There is no tenant scope (every environment is single-tenant). Priority and "counts toward
@@ -16,7 +17,7 @@
 import * as React from 'react';
 import { Button, Input, Switch, Text } from '@fluentui/react-components';
 import type { ILookupItem } from '../../../../types/LookupTypes';
-import { LookupField } from '../../../LookupField/LookupField';
+import { DataverseLookupField } from '../../../LookupField/DataverseLookupField';
 import { priorityProblem, QUIET_WINDOW_LANE, quietWindowProblem } from '../ruleDraft';
 import type { MatterPicker, RuleWizardMode } from '../ruleWizardTypes';
 import { errorMessage, Facts, RefusableField, useStepStyles } from '../stepCommon';
@@ -77,9 +78,11 @@ export const ScopeNoiseStep: React.FC<ScopeNoiseStepProps> = ({
         ) : null}
         {matterPicker !== undefined && aboutMatters && !locked ? (
           <div data-testid="rule-wizard-matter-picker">
-            <LookupField
+            <DataverseLookupField
               label="Limit to one matter"
               placeholder="Search matters by name"
+              entityType={matterPicker.subject}
+              navigationService={matterPicker.navigationService}
               value={
                 draft.matterId === null
                   ? null

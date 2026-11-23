@@ -260,7 +260,9 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         // SignalWriter hard-codes Open 100000000, Acknowledged 100000001 (refresh rule) and the freeze on Resolved 100000002.
         labels.Should().Equal(new Dictionary<int, string>
         {
-            [100000000] = "Open", [100000001] = "Acknowledged", [100000002] = "Resolved",
+            [100000000] = "Open",
+            [100000001] = "Acknowledged",
+            [100000002] = "Resolved",
         });
 
     }
@@ -377,8 +379,9 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         // so the link store is never read (PersonalToDoAssignee answers "no single user" from the To Do row itself); an in-memory
         // one with nobody linked stands in for it. No probe re-owns a Signal, so no reconciler is registered.
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore>(
-            services, _ => new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore());
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation>(
+            services, _ => Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.Representation(
+                new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore()));
         var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<
             Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(
             Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));

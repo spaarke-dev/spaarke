@@ -4,7 +4,7 @@ MCP server with rich Fluent UI React widgets for managing HR consultants, projec
 
 <a href="https://www.youtube.com/watch?v=kNXT7Syf9fQ" target="_blank"><img src="../../demos/fake-play-thumbnail.png" alt="Watch the demo"></a>
 
-> **<a href="https://www.youtube.com/watch?v=kNXT7Syf9fQ" target="_blank">Watch the demo on YouTube</a>** | [Demo video file](../../demos/trey-demo.mp4)
+> **<a href="https://www.youtube.com/watch?v=kNXT7Syf9fQ" target="_blank">Watch the demo on YouTube</a>** | Demo video file
 
 ## Prerequisites
 

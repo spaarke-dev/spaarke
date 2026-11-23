@@ -645,6 +645,7 @@ public class CommunicationServiceMessageSendTests
         persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
         RegardingFieldsOf(persisted).Should().BeEmpty("a regarding is never guessed for a thread that cannot be read");
         persisted.Contains("sprk_regardingrecordid").Should().BeFalse();
+        persisted.Contains("sprk_associationstatus").Should().BeFalse("nothing was filed, so nothing is marked settled");
     }
 
     // -- Fix round 2 (owner 2026-10-14, D1): a message posted into a record's thread is linked to that record, so the
@@ -696,6 +697,9 @@ public class CommunicationServiceMessageSendTests
         persisted.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ThreadInvoiceId.ToString());
         persisted.GetAttributeValue<string>("sprk_regardingrecordname").Should().Be("INV-001");
         persisted.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+        (persisted.GetAttributeValue<OptionSetValue>("sprk_associationstatus")?.Value).Should().Be(
+            Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Resolved,
+            "a message posted into a record's thread is filed to that record, so the email page shows it linked, not for review");
     }
 
     [Fact]

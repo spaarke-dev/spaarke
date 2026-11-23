@@ -4,7 +4,7 @@
     <title>Calibration report from corrections and the evaluation set</title>
     <phase>7 Evaluation and rollout (WP7) — wave W7-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Analysis and a report under notes/; a scoring harness under the project folder; no src change. Recommendations are applied by 162, not here.</rigor-reason>
     <model-tier>sonnet</model-tier>

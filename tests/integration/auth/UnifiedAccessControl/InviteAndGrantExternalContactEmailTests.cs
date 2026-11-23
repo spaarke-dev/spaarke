@@ -75,7 +75,7 @@ public class InviteAndGrantExternalContactEmailTests
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
                 .Build(),
             Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer("acme"),
-            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
     private static InviteAndGrantResponse OkBody(IResult result) =>
         result.Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;

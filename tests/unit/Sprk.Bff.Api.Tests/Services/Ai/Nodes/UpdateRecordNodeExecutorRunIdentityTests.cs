@@ -37,11 +37,11 @@ public class UpdateRecordNodeExecutorRunIdentityTests
             .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>()))
             .Returns((string template, Dictionary<string, object?> _) => template);
         _writes
-            .Setup(w => w.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>(
-                (table, _, fields, _, person) => _written.Add((table, fields, person)))
+            .Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>(
+                (table, _, fields, person, _) => _written.Add((table, fields, person)))
             .Returns(Task.CompletedTask);
     }
 
@@ -51,9 +51,9 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     /// <summary>Dataverse answers 403 to a write made AS <paramref name="person"/> (no Write / no AppendTo).</summary>
     private void DataverseRefuses(Guid person) =>
         _writes
-            .Setup(w => w.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                person))
+            .Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), person,
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("403 (Forbidden)", inner: null, HttpStatusCode.Forbidden));
 
     private static string LegacyConfig(string table, Guid recordId, string field, string value) =>
@@ -150,6 +150,9 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     [InlineData("sprk_matter", "sprk_containerid", "b!forged", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
     [InlineData("systemuser", "sprk_primarycontact@odata.bind", "/contacts(22570000-0000-4000-8000-00000000c0c0)",
         InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    // #2250: a root's Assigned-To column (it would cause an Assigned-To grant), even AS the run's person.
+    [InlineData("sprk_matter", "sprk_assignedattorney1@odata.bind", "/contacts(22570000-0000-4000-8000-00000000c0c0)",
+        InheritedAccessPermission.PlaybookAssignedToWriteReasonCode)]
     public async Task APersonsRun_ANodeThatWritesAnAccessTableOrColumn_IsRefused_AndNothingIsWritten(
         string table, string column, string value, string code)
     {
@@ -192,8 +195,8 @@ public class UpdateRecordNodeExecutorRunIdentityTests
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(PlaybookRunWriteIdentity.WriteAccessDeniedCode);
         result.ErrorMessage.Should().StartWith(PlaybookRunWriteIdentity.WriteAccessDeniedCode);
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()),
             Times.Never, "a refused person's write is never repeated app-only");
     }
 
@@ -214,8 +217,8 @@ public class UpdateRecordNodeExecutorRunIdentityTests
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(PlaybookRunWriteIdentity.WriteAccessDeniedCode);
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -269,7 +272,8 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     {
         // The default is fail closed: a context built without StartedBy is a person's run.
         var context = Context(LegacyConfig("sprk_matter", Matter, "sprk_performancesummary", "x"), PlaybookRunStartedBy.Person, null)
-            with { StartedBy = default };
+            with
+        { StartedBy = default };
 
         var result = await Executor().ExecuteAsync(context, CancellationToken.None);
 
@@ -309,8 +313,8 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     public async Task AnAppOnlyWrite_ThatDataverseRefuses_IsNotReportedAsThePersonsRefusal()
     {
         _writes
-            .Setup(w => w.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
+            .Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("403 (Forbidden)", inner: null, HttpStatusCode.Forbidden));
 
         var result = await Executor().ExecuteAsync(
@@ -325,8 +329,8 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     public async Task APersonsWrite_ThatFailsForAnotherReason_IsNotReportedAsAnAccessRefusal()
     {
         _writes
-            .Setup(w => w.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), Person))
+            .Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), Person, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("500", inner: null, HttpStatusCode.InternalServerError));
 
         var result = await Executor().ExecuteAsync(

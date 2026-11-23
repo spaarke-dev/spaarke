@@ -1,8 +1,13 @@
 <#
 .SYNOPSIS
-    Drift audit (READ-ONLY) of `sprk_containerid` + `sprk_searchindexname` values across
-    Spaarke parent entities (Matter / Project / Invoice / WorkAssignment / Event) and
-    `sprk_document` records. Implements FR-BF-03 per design.md §5.4.
+    Drift audit (READ-ONLY) of `sprk_containerid` values across Spaarke parent entities
+    (Matter / Project / Invoice / WorkAssignment / Event) and of the container
+    (`sprk_graphdriveid`) of `sprk_document` records. Implements FR-BF-03 per design.md §5.4.
+
+    field-mapping-server-write-path-r1 task 041 (FR-40, #2502): the search index follows
+    the content type, never the record or its business unit, so this audit no longer reads
+    `sprk_searchindexname` on any record or business unit and reports no index drift. Only
+    the container half remains.
 
 .DESCRIPTION
     *********************************************************************************
@@ -25,33 +30,32 @@
     For each parent record (sprk_matter / sprk_project / sprk_invoice /
     sprk_workassignment / sprk_event) and each sprk_document, the script:
 
-      1. Reads stored `sprk_containerid` + `sprk_searchindexname` from the record.
-      2. Computes the chain-derived value(s) using the SAME logic as the two
-         write-path backfill scripts (so this audit is a true mirror):
+      1. Reads the stored container: `sprk_containerid` on a parent,
+         `sprk_graphdriveid` on a Document.
+      2. Computes the chain-derived container using the SAME logic as the
+         parent backfill script (so this audit is a true mirror):
            - Parent record:
                * if >=1 child Documents -> mode of child Documents' sprk_graphdriveid
                * if  0 child Documents  -> owner BU's current sprk_containerid
-               * sprk_searchindexname derived by mapping the container id via §5.1
            - Document:
-               * sprk_searchindexname derived by mapping its own sprk_graphdriveid via §5.1
+               * its own sprk_graphdriveid
       3. Compares stored vs derived. Classifies the row:
 
-         - "override"  : stored value differs from BU's value AND the record's
-                         modifiedon predates the BU's modifiedon for the
-                         container/index fields. Heuristic indicator of an
-                         intentional explicit override (e.g. Protected Matter).
+         - "override"  : stored container differs from BU's AND the record's
+                         modifiedon is NEWER than the BU's modifiedon.
+                         Heuristic indicator of an intentional explicit
+                         override (e.g. Protected Matter).
                          Recommendation: no action — intentional (per INV-5).
 
-         - "drift"     : stored value differs from BU's value AND the record's
+         - "drift"     : stored container differs from BU's AND the record's
                          modifiedon is OLDER than the BU's modifiedon. Per INV-3,
                          BU change does NOT propagate; coexistence is the design.
                          Recommendation: no action — BU changed post-create.
 
-         - "anomaly"   : container is NOT present in the §5.1 map, OR a parent's
+         - "anomaly"   : container is NOT a known container, OR a parent's
                          sprk_containerid does NOT match the mode of its child
-                         Documents' sprk_graphdriveid, OR a Document's stored
-                         sprk_searchindexname does not match the §5.1 mapping of
-                         its sprk_graphdriveid. Recommendation: operator review.
+                         Documents' sprk_graphdriveid.
+                         Recommendation: operator review.
 
     Output: dual format — CSV + Markdown — written to caller-supplied paths
     (default: `./audit-drift-{timestamp}.csv` + `./audit-drift-{timestamp}.md`).
@@ -95,8 +99,9 @@
     Project: spaarke-multi-container-multi-index-r1
     Task:    052
     Spec:    spec.md FR-BF-03
-    Design:  design.md §5.4 (drift audit), §5.1 (container -> index map),
+    Design:  design.md §5.4 (drift audit), §5.1 (known containers),
              INV-3 (no BU fan-out), INV-5 (explicit overrides sacred)
+    Updated: field-mapping-server-write-path-r1 task 041 — index half removed (FR-40).
 
     Conservative classification policy (per task notes):
     When in doubt between `override` and `drift`, classify as `anomaly` and let the
@@ -132,12 +137,13 @@ if ([string]::IsNullOrWhiteSpace($OutputCsvPath))       { $OutputCsvPath      = 
 if ([string]::IsNullOrWhiteSpace($OutputMarkdownPath))  { $OutputMarkdownPath = "./audit-drift-$timestamp.md"  }
 
 # -----------------------------------------------------------------------------
-# §5.1 hardcoded container -> index map (design.md §5.1)
+# Known containers (the container column of design.md §5.1). The index column is
+# gone: the index follows the content type (task 041, FR-40).
 # -----------------------------------------------------------------------------
-$ContainerIndexMap = @{
-    'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50' = 'spaarke-files-index'
-    'b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh' = 'spaarke-files-index'
-}
+$KnownContainers = @(
+    'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50'
+    'b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh'
+)
 
 # -----------------------------------------------------------------------------
 # Parent entity catalog. Each entry: logical name, plural collection,
@@ -205,7 +211,7 @@ if (-not [string]::IsNullOrWhiteSpace($EntityFilter)) {
 # Banner
 # -----------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== Multi-Container/Multi-Index Drift Audit (READ-ONLY) ===" -ForegroundColor Cyan
+Write-Host "=== Multi-Container Drift Audit (READ-ONLY; container only since task 041) ===" -ForegroundColor Cyan
 Write-Host "  Environment        : $EnvironmentUrl"
 Write-Host "  Output (CSV)       : $OutputCsvPath"
 Write-Host "  Output (Markdown)  : $OutputMarkdownPath"
@@ -276,18 +282,17 @@ function Get-DataversePaged {
 
 function Get-BusinessUnit {
     <#
-        Returns a hashtable: { businessunitid -> [pscustomobject]@{ ContainerId, IndexName, ModifiedOn } }
+        Returns a hashtable: { businessunitid -> [pscustomobject]@{ ContainerId, ModifiedOn } }
         Loaded once at startup; small footprint (typically <10 BUs).
     #>
-    Write-Host "Loading Business Units (containerid + searchindexname + modifiedon)..." -ForegroundColor DarkCyan
-    $uri = "$EnvironmentUrl/api/data/v9.2/businessunits?`$select=businessunitid,name,sprk_containerid,sprk_searchindexname,modifiedon&`$top=500"
+    Write-Host "Loading Business Units (containerid + modifiedon)..." -ForegroundColor DarkCyan
+    $uri = "$EnvironmentUrl/api/data/v9.2/businessunits?`$select=businessunitid,name,sprk_containerid,modifiedon&`$top=500"
     $rows = Get-DataversePaged -Uri $uri
     $map = @{}
     foreach ($r in $rows) {
         $map[$r.businessunitid] = [pscustomobject]@{
             Name        = $r.name
             ContainerId = $r.sprk_containerid
-            IndexName   = $r.sprk_searchindexname
             ModifiedOn  = if ($r.modifiedon) { [datetime]$r.modifiedon } else { $null }
         }
     }
@@ -311,28 +316,26 @@ function Get-ModeContainer {
     return $top[0].Name
 }
 
-function Resolve-IndexFromContainer {
+function Test-KnownContainer {
     <#
-        Looks up an index name in $ContainerIndexMap. Returns $null if unknown
-        (caller classifies as anomaly).
+        True when the container is one of $KnownContainers. An unknown container
+        is classified as an anomaly by the caller.
     #>
     [CmdletBinding()]
     param([string]$ContainerId)
-    if ([string]::IsNullOrWhiteSpace($ContainerId)) { return $null }
-    if ($ContainerIndexMap.ContainsKey($ContainerId)) { return $ContainerIndexMap[$ContainerId] }
-    return $null
+    if ([string]::IsNullOrWhiteSpace($ContainerId)) { return $false }
+    return $KnownContainers -contains $ContainerId
 }
 
 function Classify-DriftRow {
     <#
-        Classification heuristic (design.md §5.4 + INV-3 + INV-5):
+        Classification heuristic (design.md §5.4 + INV-3 + INV-5), container only:
 
-          - If derived value is unmapped (not in §5.1)            -> anomaly
-          - If parent's stored container != mode of children      -> anomaly
-          - If document's stored index   != map(stored drive id)  -> anomaly
+          - If stored container is not a known container            -> anomaly
+          - If parent's stored container != mode of children        -> anomaly
           - If stored != BU value AND record.modifiedon  > BU.modifiedon -> override
           - If stored != BU value AND record.modifiedon <= BU.modifiedon -> drift
-          - If stored == derived value                            -> match (omit)
+          - If stored == derived value                              -> match (omit)
 
         Conservative tie-break: when timestamps are missing or ambiguous, classify
         as `anomaly` (per task notes: false positives recoverable, false negatives
@@ -344,22 +347,18 @@ function Classify-DriftRow {
         [Parameter(Mandatory)]$Row,
         $RecordModifiedOn,
         $BuContainerId,
-        $BuIndexName,
         $BuModifiedOn,
         [string]$StoredContainer,
-        [string]$StoredIndex,
         [string]$DerivedContainer,
-        [string]$DerivedIndex,
-        [bool]$ParentDocMismatch = $false,
-        [bool]$IndexMappingMismatch = $false
+        [bool]$ParentDocMismatch = $false
     )
 
-    # 1. Unmapped container in stored value -> anomaly
-    if ($StoredContainer -and -not (Resolve-IndexFromContainer -ContainerId $StoredContainer) `
+    # 1. Unknown container in stored value -> anomaly
+    if ($StoredContainer -and -not (Test-KnownContainer -ContainerId $StoredContainer) `
         -and ($StoredContainer -notmatch '^\s*$')) {
         return [pscustomobject]@{
             Classification = 'anomaly'
-            Recommendation = "Stored container '$StoredContainer' is not in §5.1 map. Operator must either extend the map (add (container -> index) pair in design.md §5.1 + backfill scripts) or correct the record."
+            Recommendation = "Stored container '$StoredContainer' is not a known container. Operator must either extend the known-container list (design.md §5.1 + backfill scripts) or correct the record."
         }
     }
 
@@ -371,50 +370,40 @@ function Classify-DriftRow {
         }
     }
 
-    # 3. Document's stored index does not match §5.1 mapping of its stored drive id
-    if ($IndexMappingMismatch) {
-        return [pscustomobject]@{
-            Classification = 'anomaly'
-            Recommendation = "Document's stored sprk_searchindexname ('$StoredIndex') does NOT match the §5.1 mapping ('$DerivedIndex') of its sprk_graphdriveid ('$StoredContainer'). Operator must investigate."
-        }
-    }
-
-    # 4. Stored matches derived -> not a drift row; caller will skip
-    if ($StoredContainer -eq $DerivedContainer -and $StoredIndex -eq $DerivedIndex) {
+    # 3. Stored matches derived -> not a drift row; caller will skip
+    if ($StoredContainer -eq $DerivedContainer) {
         return $null
     }
 
-    # 5. Differs from BU -> distinguish override (record newer than BU) from drift (BU newer than record)
-    $differsFromBu =
-        ($BuContainerId -and $StoredContainer -ne $BuContainerId) -or
-        ($BuIndexName   -and $StoredIndex     -ne $BuIndexName)
+    # 4. Differs from BU -> distinguish override (record newer than BU) from drift (BU newer than record)
+    $differsFromBu = ($BuContainerId -and $StoredContainer -ne $BuContainerId)
 
     if ($differsFromBu -and $RecordModifiedOn -and $BuModifiedOn) {
         if ($RecordModifiedOn -gt $BuModifiedOn) {
             return [pscustomobject]@{
                 Classification = 'override'
-                Recommendation = "No action — record was modified AFTER the BU's container/index fields. Treated as an explicit override (e.g., Protected Matter). Sacred per INV-5."
+                Recommendation = "No action — record was modified AFTER the BU's container field. Treated as an explicit override (e.g., Protected Matter). Sacred per INV-5."
             }
         }
         elseif ($RecordModifiedOn -lt $BuModifiedOn) {
             return [pscustomobject]@{
                 Classification = 'drift'
-                Recommendation = "No action — BU's container/index changed AFTER this record was last modified. Coexistence is the design per INV-3 (BU changes do not propagate)."
+                Recommendation = "No action — BU's container changed AFTER this record was last modified. Coexistence is the design per INV-3 (BU changes do not propagate)."
             }
         }
         else {
             # Equal timestamps — ambiguous; conservative classification as anomaly
             return [pscustomobject]@{
                 Classification = 'anomaly'
-                Recommendation = "Record and BU container/index were last modified at the same instant; classification ambiguous. Operator must inspect manually."
+                Recommendation = "Record and BU container were last modified at the same instant; classification ambiguous. Operator must inspect manually."
             }
         }
     }
 
-    # 6. Differs from derived but missing timestamps -> anomaly (conservative)
+    # 5. Differs from derived but missing timestamps -> anomaly (conservative)
     return [pscustomobject]@{
         Classification = 'anomaly'
-        Recommendation = "Stored value differs from chain-derived value but classification heuristic could not run (missing record.modifiedon or BU.modifiedon, or BU container/index null). Operator must inspect manually."
+        Recommendation = "Stored container differs from chain-derived container but classification heuristic could not run (missing record.modifiedon or BU.modifiedon, or BU container null). Operator must inspect manually."
     }
 }
 
@@ -429,18 +418,17 @@ if ($AuditParents) {
     foreach ($ent in $ParentEntities) {
         Write-Host ("Auditing " + $ent.Logical + " ...") -ForegroundColor Yellow
 
-        $select = @($ent.IdAttr, $ent.NameAttr, 'sprk_containerid', 'sprk_searchindexname', 'modifiedon', '_owningbusinessunit_value') -join ','
-        $filter = 'sprk_containerid ne null or sprk_searchindexname ne null'
+        $select = @($ent.IdAttr, $ent.NameAttr, 'sprk_containerid', 'modifiedon', '_owningbusinessunit_value') -join ','
+        $filter = 'sprk_containerid ne null'
         $uri    = "$EnvironmentUrl/api/data/v9.2/$($ent.Collection)?`$select=$select&`$filter=$filter&`$top=$BatchSize"
 
         $records = Get-DataversePaged -Uri $uri
-        Write-Host ("  Loaded " + $records.Count + " " + $ent.Logical + " records with container/index set") -ForegroundColor DarkGray
+        Write-Host ("  Loaded " + $records.Count + " " + $ent.Logical + " records with container set") -ForegroundColor DarkGray
 
         foreach ($r in $records) {
             $recId      = $r.($ent.IdAttr)
             $recName    = $r.($ent.NameAttr)
             $stContId   = $r.sprk_containerid
-            $stIdxName  = $r.sprk_searchindexname
             $recModOn   = if ($r.modifiedon) { [datetime]$r.modifiedon } else { $null }
             $buId       = $r.'_owningbusinessunit_value'
 
@@ -453,7 +441,6 @@ if ($AuditParents) {
             $modeContainer = Get-ModeContainer -Children $children
 
             $derivedContainer = if ($modeContainer) { $modeContainer } else { if ($bu) { $bu.ContainerId } else { $null } }
-            $derivedIndex     = Resolve-IndexFromContainer -ContainerId $derivedContainer
 
             # Detect parent/Document mismatch (anomaly source)
             $parentDocMismatch = $false
@@ -466,14 +453,10 @@ if ($AuditParents) {
                 -Row                 $r `
                 -RecordModifiedOn    $recModOn `
                 -BuContainerId       $(if ($bu) { $bu.ContainerId } else { $null }) `
-                -BuIndexName         $(if ($bu) { $bu.IndexName }   else { $null }) `
                 -BuModifiedOn        $(if ($bu) { $bu.ModifiedOn }  else { $null }) `
                 -StoredContainer     $stContId `
-                -StoredIndex         $stIdxName `
                 -DerivedContainer    $derivedContainer `
-                -DerivedIndex        $derivedIndex `
-                -ParentDocMismatch   $parentDocMismatch `
-                -IndexMappingMismatch $false
+                -ParentDocMismatch   $parentDocMismatch
 
             if ($null -ne $cls) {
                 [void]$Findings.Add([pscustomobject]@{
@@ -481,9 +464,7 @@ if ($AuditParents) {
                     recordId          = $recId
                     recordName        = $recName
                     currentContainer  = $stContId
-                    currentIndex      = $stIdxName
                     derivedContainer  = $derivedContainer
-                    derivedIndex      = $derivedIndex
                     classification    = $cls.Classification
                     recommendation    = $cls.Recommendation
                 })
@@ -496,45 +477,32 @@ if ($AuditParents) {
 if ($AuditDocuments) {
     Write-Host "Auditing sprk_document ..." -ForegroundColor Yellow
 
-    $select = 'sprk_documentid,sprk_documentname,sprk_graphdriveid,sprk_searchindexname,modifiedon,_owningbusinessunit_value'
-    $filter = 'sprk_graphdriveid ne null or sprk_searchindexname ne null'
+    $select = 'sprk_documentid,sprk_documentname,sprk_graphdriveid,modifiedon,_owningbusinessunit_value'
+    $filter = 'sprk_graphdriveid ne null'
     $uri    = "$EnvironmentUrl/api/data/v9.2/sprk_documents?`$select=$select&`$filter=$filter&`$top=$BatchSize"
 
     $records = Get-DataversePaged -Uri $uri
-    Write-Host ("  Loaded " + $records.Count + " sprk_document records with drive/index set") -ForegroundColor DarkGray
+    Write-Host ("  Loaded " + $records.Count + " sprk_document records with a drive set") -ForegroundColor DarkGray
 
     foreach ($d in $records) {
         $recId     = $d.sprk_documentid
         $recName   = $d.sprk_documentname
         $stDrive   = $d.sprk_graphdriveid
-        $stIdxName = $d.sprk_searchindexname
         $recModOn  = if ($d.modifiedon) { [datetime]$d.modifiedon } else { $null }
         $buId      = $d.'_owningbusinessunit_value'
 
         $bu = if ($buId -and $BuMap.ContainsKey($buId)) { $BuMap[$buId] } else { $null }
 
-        # Derived index = §5.1 map of the Document's own sprk_graphdriveid
-        $derivedIndex = Resolve-IndexFromContainer -ContainerId $stDrive
-
-        # Index mapping mismatch = stored index disagrees with the §5.1 mapping
-        $indexMappingMismatch = $false
-        if ($stDrive -and $derivedIndex -and $stIdxName -and ($stIdxName -ne $derivedIndex)) {
-            $indexMappingMismatch = $true
-        }
-
+        # A Document's container is its own drive: only an unknown container is reported.
         $cls = Classify-DriftRow `
             -Entity              'sprk_document' `
             -Row                 $d `
             -RecordModifiedOn    $recModOn `
             -BuContainerId       $(if ($bu) { $bu.ContainerId } else { $null }) `
-            -BuIndexName         $(if ($bu) { $bu.IndexName }   else { $null }) `
             -BuModifiedOn        $(if ($bu) { $bu.ModifiedOn }  else { $null }) `
             -StoredContainer     $stDrive `
-            -StoredIndex         $stIdxName `
             -DerivedContainer    $stDrive `
-            -DerivedIndex        $derivedIndex `
-            -ParentDocMismatch   $false `
-            -IndexMappingMismatch $indexMappingMismatch
+            -ParentDocMismatch   $false
 
         if ($null -ne $cls) {
             [void]$Findings.Add([pscustomobject]@{
@@ -542,9 +510,7 @@ if ($AuditDocuments) {
                 recordId          = $recId
                 recordName        = $recName
                 currentContainer  = $stDrive
-                currentIndex      = $stIdxName
                 derivedContainer  = $stDrive
-                derivedIndex      = $derivedIndex
                 classification    = $cls.Classification
                 recommendation    = $cls.Recommendation
             })
@@ -557,7 +523,7 @@ if ($AuditDocuments) {
 # -----------------------------------------------------------------------------
 Write-Host ""
 Write-Host ("Writing CSV report to " + $OutputCsvPath + " ...") -ForegroundColor Cyan
-$Findings | Select-Object entity, recordId, recordName, currentContainer, currentIndex, derivedContainer, derivedIndex, classification, recommendation `
+$Findings | Select-Object entity, recordId, recordName, currentContainer, derivedContainer, classification, recommendation `
     | Export-Csv -Path $OutputCsvPath -NoTypeInformation -Encoding UTF8
 
 # -----------------------------------------------------------------------------
@@ -573,13 +539,14 @@ $nAnomaly   = ($Findings | Where-Object { $_.classification -eq 'anomaly' }).Cou
 $entityTotals = $Findings | Group-Object entity | Sort-Object Count -Descending
 
 $md = New-Object System.Text.StringBuilder
-[void]$md.AppendLine("# Multi-Container / Multi-Index Drift Audit Report")
+[void]$md.AppendLine("# Multi-Container Drift Audit Report")
 [void]$md.AppendLine()
 [void]$md.AppendLine("> **Generated**: " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "  ")
 [void]$md.AppendLine("> **Environment**: ``$EnvironmentUrl``  ")
 [void]$md.AppendLine("> **Mode**: READ-ONLY (no record mutations)  ")
 [void]$md.AppendLine("> **Spec**: FR-BF-03  ")
-[void]$md.AppendLine("> **Design**: design.md §5.4 (drift audit), §5.1 (container -> index map), INV-3, INV-5  ")
+[void]$md.AppendLine("> **Design**: design.md §5.4 (drift audit), §5.1 (known containers), INV-3, INV-5  ")
+[void]$md.AppendLine("> **Scope**: container only; the search index follows the content type (field-mapping-server-write-path-r1 task 041)  ")
 [void]$md.AppendLine()
 [void]$md.AppendLine("## Summary")
 [void]$md.AppendLine()
@@ -587,8 +554,8 @@ $md = New-Object System.Text.StringBuilder
 [void]$md.AppendLine("|---|---:|---|---|")
 [void]$md.AppendLine("| **override** | $nOverride | Record modified AFTER BU change; intentional override | None — sacred per INV-5 |")
 [void]$md.AppendLine("| **drift**    | $nDrift    | BU changed AFTER record; coexistence is the design     | None — by design per INV-3 |")
-[void]$md.AppendLine("| **anomaly**  | $nAnomaly  | Unmapped container, parent/child mismatch, or ambiguous classification | Operator review required |")
-[void]$md.AppendLine("| **TOTAL**    | $total     | (rows where stored differs from chain-derived value)   |  |")
+[void]$md.AppendLine("| **anomaly**  | $nAnomaly  | Unknown container, parent/child mismatch, or ambiguous classification | Operator review required |")
+[void]$md.AppendLine("| **TOTAL**    | $total     | (rows where stored differs from chain-derived container) |  |")
 [void]$md.AppendLine()
 [void]$md.AppendLine("## Findings by entity")
 [void]$md.AppendLine()
@@ -601,16 +568,16 @@ foreach ($g in $entityTotals) {
 [void]$md.AppendLine("## Recommended next actions")
 [void]$md.AppendLine()
 if ($nAnomaly -gt 0) {
-    [void]$md.AppendLine("- **Anomalies present (count: $nAnomaly)** — operator review required. Open the CSV, filter `classification = anomaly`, and inspect each `recommendation`. Common causes: a new SPE container was added without updating the §5.1 map in design.md + backfill scripts, or a parent record was migrated across containers without re-routing its children.")
+    [void]$md.AppendLine("- **Anomalies present (count: $nAnomaly)** — operator review required. Open the CSV, filter `classification = anomaly`, and inspect each `recommendation`. Common causes: a new SPE container was added without updating the known-container list in design.md §5.1 + backfill scripts, or a parent record was migrated across containers without re-routing its children.")
 }
 if ($nOverride -gt 0) {
     [void]$md.AppendLine("- **Overrides present (count: $nOverride)** — informational. These are intentional explicit settings (e.g., Protected Matters). No action.")
 }
 if ($nDrift -gt 0) {
-    [void]$md.AppendLine("- **Drift rows present (count: $nDrift)** — informational. BU's container/index changed AFTER these records were created. INV-3 guarantees BU changes do NOT propagate; coexistence is the design.")
+    [void]$md.AppendLine("- **Drift rows present (count: $nDrift)** — informational. BU's container changed AFTER these records were created. INV-3 guarantees BU changes do NOT propagate; coexistence is the design.")
 }
 if ($total -eq 0) {
-    [void]$md.AppendLine("- **No drift detected.** All audited records match the chain-derived value.")
+    [void]$md.AppendLine("- **No drift detected.** All audited records match the chain-derived container.")
 }
 [void]$md.AppendLine()
 
@@ -620,13 +587,13 @@ foreach ($classification in @('anomaly', 'override', 'drift')) {
 
     [void]$md.AppendLine("## " + $classification.Substring(0,1).ToUpper() + $classification.Substring(1) + " ($($rows.Count))")
     [void]$md.AppendLine()
-    [void]$md.AppendLine("| entity | recordId | recordName | currentContainer | currentIndex | derivedContainer | derivedIndex | recommendation |")
-    [void]$md.AppendLine("|---|---|---|---|---|---|---|---|")
+    [void]$md.AppendLine("| entity | recordId | recordName | currentContainer | derivedContainer | recommendation |")
+    [void]$md.AppendLine("|---|---|---|---|---|---|")
     foreach ($row in $rows) {
         # Markdown-safe: pipe and backtick escape
         $safeName = if ($row.recordName) { $row.recordName -replace '\|', '\|' } else { '' }
         $safeRec  = if ($row.recommendation) { $row.recommendation -replace '\|', '\|' -replace '\r?\n', ' ' } else { '' }
-        $line = "| ``$($row.entity)`` | ``$($row.recordId)`` | $safeName | ``$($row.currentContainer)`` | ``$($row.currentIndex)`` | ``$($row.derivedContainer)`` | ``$($row.derivedIndex)`` | $safeRec |"
+        $line = "| ``$($row.entity)`` | ``$($row.recordId)`` | $safeName | ``$($row.currentContainer)`` | ``$($row.derivedContainer)`` | $safeRec |"
         [void]$md.AppendLine($line)
     }
     [void]$md.AppendLine()

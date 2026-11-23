@@ -372,8 +372,23 @@ public class OfficeDocumentPersistence
                 // free-text description for documents (FR-07 "Description" -> "Profile").
                 SaveContentType.Document => null,
                 _ => null
-            }
+            },
+            // Task 030b: the SPE pointer is part of the CREATE. The upload above ran first, so it is final here.
+            FilePointer = new DocumentFilePointer(driveId, itemId, webUrl),
         };
+
+        // Task 030b (field-mapping-server-write-path-r1, FR-18, word gaps G1/G2): the association is part of the CREATE, so
+        // the document is filed — its root (I-1) and the record its owner was decided over (I-6) — from its first write, and
+        // no longer depends on the follow-up update below. Shared map — see Spaarke.Dataverse.DocumentAssociationMap for why
+        // four copies of this switch became one.
+        if (request.TargetEntity != null
+            && !DocumentAssociationMap.TryApply(createRequest, request.TargetEntity.EntityType, request.TargetEntity.EntityId))
+        {
+            _logger.LogWarning(
+                "Target entity type {EntityType} has no sprk_document lookup — document will be " +
+                "created UNASSOCIATED. Known gap: account (no column exists).",
+                request.TargetEntity.EntityType);
+        }
 
         // Task 130 (#2126): an email-derived document is created linked to its email's communication, or — when none
         // could be identified — Restricted. In the create itself, so no document exists, even briefly, with neither.
@@ -390,33 +405,15 @@ public class OfficeDocumentPersistence
             LogCreatedRestricted(_logger, documentId, jobId, HasUsableMessageId(messageIdLookupKey));
         }
 
-        // Update with SPE pointers and additional metadata
+        // Update with the file metadata. Never the association or the SPE pointer (task 030b: both are in the create above).
         var updateRequest = new UpdateDocumentRequest
         {
-            GraphDriveId = driveId,
-            GraphItemId = itemId,
             FileName = fileName,
             FileSize = fileSize,
             MimeType = OfficeJobQueue.GetMimeType(request),
             HasFile = true,
-            FilePath = webUrl,  // SharePoint Embedded web URL (maps to sprk_filepath in Dataverse)
             CanonicalHash = canonicalHash  // FR-C3: stamp the content identity (null when unavailable)
         };
-
-        // Set entity association lookup based on target entity
-        if (request.TargetEntity != null)
-        {
-            // Shared map — see Spaarke.Dataverse.DocumentAssociationMap for why four copies of this
-            // switch became one.
-            if (!DocumentAssociationMap.TryApply(
-                    updateRequest, request.TargetEntity.EntityType, request.TargetEntity.EntityId))
-            {
-                _logger.LogWarning(
-                    "Target entity type {EntityType} has no sprk_document lookup — document will be " +
-                    "created UNASSOCIATED. Known gap: account (no column exists).",
-                    request.TargetEntity.EntityType);
-            }
-        }
 
         // Set email-specific fields
         if (request.ContentType == SaveContentType.Email && request.Email != null)

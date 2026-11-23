@@ -240,6 +240,41 @@ describe('InvoiceSubmissionWizard — submit and result', () => {
     expect(utils.submit.mock.calls[0][0].poNumber).toBeUndefined();
   });
 
+  it('082c-3: the 202 warning reaches the result screen as a caption under Processing and is dropped at the terminal answer; a 202 without one shows none', async () => {
+    const warning = { code: 'ebilling.submission.procedure_gap', message: 'PROVISIONAL SERVER SENTENCE.' };
+    const getStatus = jest
+      .fn()
+      .mockResolvedValueOnce(view({ status: 'Processing' }))
+      .mockResolvedValue(view({ status: 'Accepted' }));
+    const warned = mount(
+      { pollIntervalMs: 150 },
+      {
+        getStatus,
+        submit: jest.fn().mockResolvedValue({ submissionId: SUBMISSION_ID, trackingNumber: 'TRK-0001', warning }),
+      }
+    );
+    await toDetails(warned);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    expect(await screen.findByTestId('invoice-submission-provisional-warning')).toHaveTextContent(
+      'PROVISIONAL SERVER SENTENCE.'
+    );
+    expect(await screen.findByText(/The invoice was accepted/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('invoice-submission-provisional-warning')).not.toBeInTheDocument();
+    warned.unmount();
+
+    const plain = mount(
+      { pollIntervalMs: 150 },
+      { getStatus: jest.fn().mockResolvedValue(view({ status: 'Processing' })) }
+    );
+    await toDetails(plain);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    await screen.findByText('Invoice received');
+    expect((await screen.findAllByText('Processing')).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('invoice-submission-provisional-warning')).not.toBeInTheDocument();
+  });
+
   it('Rejected shows the reason code and the report placeholder', async () => {
     const utils = mount(
       {},
@@ -352,6 +387,42 @@ describe('InvoiceSubmissionWizard — refusals do not advance the flow', () => {
     fireEvent.click(submitButton());
     expect(await screen.findByText(/could not be confirmed/i)).toBeInTheDocument();
     expect(utils.onSubmitted).not.toHaveBeenCalled();
+  });
+});
+
+describe('InvoiceSubmissionWizard — the title-bar close while a submit is pending (ebilling review fix F2)', () => {
+  it('is ignored while the request is in flight, shows the refusal that follows, and works once it settled', async () => {
+    let refuse!: (error: unknown) => void;
+    const submit = jest.fn().mockReturnValue(new Promise((_resolve, reject) => (refuse = reject)));
+    const utils = mount({}, { submit });
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+
+    // The shell's own x (title bar): nothing closes while the request is out.
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
+    expect(utils.onClose).not.toHaveBeenCalled();
+
+    await act(async () =>
+      refuse(new InvoiceSubmissionError({ statusCode: 403, errorCode: 'ebilling.submission.firm_forbidden' }))
+    );
+    expect(await screen.findByText(/not allowed to submit invoices for this firm/i)).toBeInTheDocument();
+    expect(utils.onClose).not.toHaveBeenCalled();
+
+    // Settled: the x closes again.
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
+    expect(utils.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('must-not-fire: the success screen keeps the raw onClose (Done and the x close it)', async () => {
+    const utils = mount();
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    expect(await screen.findByText('Invoice received')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^done$/i }));
+    expect(utils.onClose).toHaveBeenCalledTimes(1);
   });
 });
 

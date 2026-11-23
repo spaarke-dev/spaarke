@@ -21,6 +21,8 @@ import {
 import { PeopleRegular, BuildingRegular } from '@fluentui/react-icons';
 import { getContacts, getOrganizations, ODataContact, ODataOrganization } from '../api/web-api-client';
 import { TruncatedListNotice } from './TruncatedListNotice';
+import { ACCESS_LEVEL_LABELS } from './record/recordAccess';
+import type { AccessLevel } from '../types';
 import { SectionCard } from './SectionCard';
 
 // ---------------------------------------------------------------------------
@@ -69,16 +71,8 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 function getAccessLevelLabel(value: number): string {
-  switch (value) {
-    case 100000000:
-      return 'View Only';
-    case 100000001:
-      return 'Collaborate';
-    case 100000002:
-      return 'Full Access';
-    default:
-      return 'Participant';
-  }
+  // The SPA's one label map (task 011, D-11); a level it does not know is a plain participant.
+  return ACCESS_LEVEL_LABELS[value as AccessLevel] ?? 'Participant';
 }
 
 function getAccessLevelColor(value: number): 'brand' | 'success' | 'informative' | 'warning' {

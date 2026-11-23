@@ -3,7 +3,8 @@
  *
  * What runs for real: `RecordDeepLink`, `RecordOpenerProvider`, react-router's location, the `record-targets` parser, the
  * return-to helpers in msal-auth (the same ones AuthGuard uses to carry a URL across the sign-in redirect), the task 041
- * backend-selection seam (`resolveBackendSelection`), and, for the denied case, the real `RecordDetailModal`. What is
+ * backend-selection seam (`resolveBackendSelection`), and, for the denied case, the real `RecordTemplateModal` (R4 task
+ * 005; was R3's `RecordDetailModal`). What is
  * substituted: the network seam (`bffApiCall`) and, outside the denied case, the detail view (a stub that records which
  * entity and id it was asked to show).
  *
@@ -31,34 +32,38 @@ vi.mock('../src/auth/bff-client', async () => {
 });
 
 // The detail view: a recording stub, or (h.real) the real modal for the denied-state case.
-vi.mock('../src/components/detail/RecordDetailModal', async () => {
-  const actual = await vi.importActual<typeof import('../src/components/detail/RecordDetailModal')>(
-    '../src/components/detail/RecordDetailModal'
+vi.mock('../src/components/record/RecordTemplateModal', async () => {
+  const actual = await vi.importActual<typeof import('../src/components/record/RecordTemplateModal')>(
+    '../src/components/record/RecordTemplateModal'
   );
-  type Props = React.ComponentProps<typeof actual.RecordDetailModal>;
-  const Stub = (props: Props): React.ReactElement => {
+  type Props = React.ComponentProps<typeof actual.RecordTemplateModal>;
+  const Stub = (props: Props): React.ReactElement | null => {
     React.useEffect(() => {
       h.stubMounts.count += 1;
     }, []);
-    const { onSettled } = props;
+    // Like the real modal: the opener keeps it mounted and closes it with open={false} (#2658), so a closed stub renders
+    // nothing and settles nothing, and a record shown in its place settles again (the real one settles per id).
+    const { onSettled, open } = props;
+    const id = props.recordIds[props.index];
     React.useEffect(() => {
-      if (h.settle.value) onSettled?.();
-    }, [onSettled]);
+      if (open && h.settle.value) onSettled?.();
+    }, [open, id, onSettled]);
+    if (!open) return null;
     return React.createElement(
       'div',
       {
         role: 'dialog',
         'aria-label': 'Record detail',
         'data-testid': 'detail',
-        'data-entity': props.entityName,
+        'data-entity': props.config.entity,
         'data-id': props.recordIds[props.index],
       },
       React.createElement('button', { onClick: props.onClose }, 'Close detail')
     );
   };
   return {
-    RecordDetailModal: (props: Props) =>
-      h.real.value ? React.createElement(actual.RecordDetailModal, props) : React.createElement(Stub, props),
+    RecordTemplateModal: (props: Props) =>
+      h.real.value ? React.createElement(actual.RecordTemplateModal, props) : React.createElement(Stub, props),
   };
 });
 

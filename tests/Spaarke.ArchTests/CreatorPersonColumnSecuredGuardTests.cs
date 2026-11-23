@@ -40,6 +40,8 @@ public class CreatorPersonColumnSecuredGuardTests
     /// sprk_policy's and sprk_policyversion's do not define the column), and the script lists all four in its <c>$Tables</c>.
     /// Task 090 (uac-r2 round-2 K1): sprk_ruleset (its Entity.xml does not define the column) and sprk_procedureassignment (no
     /// Entity.xml), both in the script's <c>$Tables</c>.
+    /// Task 086: sprk_storedfile (no Entity.xml; Deploy-EbillingStoredFileSchema.ps1 created the column unsecured, 088), in the
+    /// script's <c>$Tables</c>.
     /// </summary>
     internal static readonly DeployScriptSecured[] SecuredOnlyByDeployScript =
     [
@@ -49,6 +51,7 @@ public class CreatorPersonColumnSecuredGuardTests
         new("sprk_policyversion", EbillingScriptReason, ChildCreatorPersonScript),
         new("sprk_ruleset", EbillingScriptReason, ChildCreatorPersonScript),
         new("sprk_procedureassignment", EbillingScriptReason, ChildCreatorPersonScript),
+        new("sprk_storedfile", EbillingScriptReason, ChildCreatorPersonScript),
     ];
 
     private const string ChildCreatorPersonScript = "scripts/Set-ChildRecordCreatorPersonSchema.ps1";

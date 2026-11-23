@@ -99,7 +99,7 @@ internal sealed record BlobListingItem(
     IReadOnlyDictionary<string, string> Metadata,
     ETag? ETag = null);
 
-/// <summary>The answer of a write-once create.</summary>
+/// <summary>The outcome of a create that writes only when no blob of that name exists.</summary>
 internal enum BlobCreateOutcome
 {
     /// <summary>The blob did not exist and was written.</summary>
@@ -108,6 +108,30 @@ internal enum BlobCreateOutcome
     /// <summary>A blob already exists under the name; nothing was written (If-None-Match: *).</summary>
     AlreadyExists,
 }
+
+/// <summary>The answer of <see cref="BlobGateway.CreateIfNotExistsAsync"/>.</summary>
+/// <param name="Outcome">Whether the blob was written.</param>
+/// <param name="ETag">The new blob's ETag (DEF-044): present exactly when <paramref name="Outcome"/> is <see cref="BlobCreateOutcome.Created"/>,
+/// so a later delete of a blob this caller wrote can be pinned to the version it wrote.</param>
+internal readonly record struct BlobCreateResult(BlobCreateOutcome Outcome, ETag? ETag = null);
+
+/// <summary>The outcome of <see cref="BlobGateway.OverwriteIfMatchAsync"/>.</summary>
+internal enum BlobOverwriteOutcome
+{
+    /// <summary>The blob still had the expected ETag and its content was replaced.</summary>
+    Overwritten,
+
+    /// <summary>The blob's ETag is no longer the expected one (HTTP 412 <c>ConditionNotMet</c>): someone changed it since it was read. Nothing was written.</summary>
+    PreconditionFailed,
+
+    /// <summary>No blob of that name exists (deleted since it was read). Nothing was written.</summary>
+    NotFound,
+}
+
+/// <summary>The answer of <see cref="BlobGateway.OverwriteIfMatchAsync"/>.</summary>
+/// <param name="Outcome">Whether the content was replaced.</param>
+/// <param name="ETag">The blob's new ETag: present exactly when <paramref name="Outcome"/> is <see cref="BlobOverwriteOutcome.Overwritten"/>.</param>
+internal readonly record struct BlobOverwriteResult(BlobOverwriteOutcome Outcome, ETag? ETag = null);
 
 /// <summary>
 /// The blob boundary: one managed-identity Azure Blob client, addressed by (container, blob name). Callers own their name rules
@@ -128,10 +152,23 @@ internal abstract class BlobGateway
 
     /// <summary>
     /// Writes <paramref name="content"/> only when no blob of that name exists (<c>If-None-Match: *</c>), with
-    /// <paramref name="metadata"/> in the same request. An existing blob is left unchanged.
+    /// <paramref name="metadata"/> in the same request, and answers the new blob's ETag. An existing blob is left unchanged.
     /// </summary>
-    public abstract Task<BlobCreateOutcome> CreateIfNotExistsAsync(
+    public abstract Task<BlobCreateResult> CreateIfNotExistsAsync(
         string container, string blobName, Stream content, string? contentType, IReadOnlyDictionary<string, string> metadata,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// ebilling-r1 DEF-044 (owner, option B, 2026-11-05): replaces the content of the blob that still has the ETag
+    /// <paramref name="ifMatch"/> (<c>If-Match</c>), writing <paramref name="contentType"/> and <paramref name="metadata"/> in the same
+    /// request, and answers the new ETag. A content write moves the blob's ETag and Last-Modified and makes Defender for Storage scan
+    /// it again, which a metadata-only write does not. The one caller is the Finance file store's reuse of a staged blob
+    /// (<c>StoredFileBlobs.StageAsync</c>), which writes the same verified bytes back so that a delete judged against the old ETag is
+    /// refused. A blob that no longer has <paramref name="ifMatch"/> is <see cref="BlobOverwriteOutcome.PreconditionFailed"/> and one
+    /// that is gone is <see cref="BlobOverwriteOutcome.NotFound"/>: typed outcomes, not exceptions. Any other fault throws.
+    /// </summary>
+    public abstract Task<BlobOverwriteResult> OverwriteIfMatchAsync(
+        string container, string blobName, Stream content, string? contentType, IReadOnlyDictionary<string, string> metadata, ETag ifMatch,
         CancellationToken cancellationToken);
 
     /// <summary>The whole blob and its content type, or <c>null</c> when the blob does not exist.</summary>
@@ -188,7 +225,7 @@ internal sealed class AzureBlobGateway : BlobGateway
         await Blob(container, blobName).UploadAsync(content, options, cancellationToken).ConfigureAwait(false);
     }
 
-    public override async Task<BlobCreateOutcome> CreateIfNotExistsAsync(
+    public override async Task<BlobCreateResult> CreateIfNotExistsAsync(
         string container, string blobName, Stream content, string? contentType, IReadOnlyDictionary<string, string> metadata,
         CancellationToken cancellationToken)
     {
@@ -204,12 +241,45 @@ internal sealed class AzureBlobGateway : BlobGateway
 
         try
         {
-            await Blob(container, blobName).UploadAsync(content, options, cancellationToken).ConfigureAwait(false);
-            return BlobCreateOutcome.Created;
+            var response = await Blob(container, blobName).UploadAsync(content, options, cancellationToken).ConfigureAwait(false);
+            return new BlobCreateResult(BlobCreateOutcome.Created, response.Value.ETag);
         }
         catch (RequestFailedException ex) when (IsAlreadyExists(ex))
         {
-            return BlobCreateOutcome.AlreadyExists;
+            return new BlobCreateResult(BlobCreateOutcome.AlreadyExists);
+        }
+    }
+
+    public override async Task<BlobOverwriteResult> OverwriteIfMatchAsync(
+        string container, string blobName, Stream content, string? contentType, IReadOnlyDictionary<string, string> metadata, ETag ifMatch,
+        CancellationToken cancellationToken)
+    {
+        // The same headers and metadata a create writes, in one request, conditioned on the ETag the caller read (If-Match). The
+        // metadata is sent whole: a Put Blob REPLACES the blob's metadata, so a key left out here would be dropped.
+        var options = new BlobUploadOptions
+        {
+            Conditions = new BlobRequestConditions { IfMatch = ifMatch },
+            Metadata = new Dictionary<string, string>(metadata, StringComparer.Ordinal),
+        };
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            options.HttpHeaders = new BlobHttpHeaders { ContentType = contentType };
+        }
+
+        try
+        {
+            var response = await Blob(container, blobName).UploadAsync(content, options, cancellationToken).ConfigureAwait(false);
+            return new BlobOverwriteResult(BlobOverwriteOutcome.Overwritten, response.Value.ETag);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 412)
+        {
+            // A single-shot Put Blob answers 412 ConditionNotMet; a large (block-list) upload answers it when the list is committed.
+            return new BlobOverwriteResult(BlobOverwriteOutcome.PreconditionFailed);
+        }
+        catch (RequestFailedException ex) when (ex.ErrorCode == BlobErrorCode.BlobNotFound)
+        {
+            // Narrowed to the blob: a missing CONTAINER (ContainerNotFound) is not "gone", it reaches the caller as a fault.
+            return new BlobOverwriteResult(BlobOverwriteOutcome.NotFound);
         }
     }
 

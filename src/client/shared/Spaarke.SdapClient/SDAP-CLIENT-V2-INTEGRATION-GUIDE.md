@@ -682,4 +682,4 @@ app.UseCors(policy => policy
 
 **Document Version:** 1.0
 **Last Updated:** December 2, 2025
-**Next:** See [MIGRATION-PLAN.md](./MIGRATION-PLAN.md) for step-by-step migration guide
+**Next:** See [MIGRATION-PLAN.md](./SDAP-CLIENT-V2-MIGRATION-PLAN.md) for step-by-step migration guide

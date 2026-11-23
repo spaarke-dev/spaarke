@@ -49,12 +49,11 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// The substitution is at the <see cref="IAccessDataSource"/> boundary (a recording fake that answers "what may
 /// this caller do to record X of set S" and logs every question asked) and at the Dataverse service seams the
 /// handlers sit on. No HTTP handler is mocked (ADR-038).</para>
-/// <para><b>Why the finance recalculate 200 is not asserted here.</b> <see cref="FinanceRollupService"/> reads
-/// through a concrete Dataverse <c>ServiceClient</c> unwrapped from <see cref="IDataverseService"/>, which no
-/// in-process double can stand in for. The authorized finance route is therefore shown to REACH its handler
-/// (which then fails on the unwrappable double, a 500 that a denial can never produce); its 200 is proven by
-/// the task's manual live gate (b). The scorecard routes, whose reads go through an interface, are asserted
-/// 200 end to end.</para>
+/// <para><b>Why the finance recalculate 200 is not asserted here.</b> The authorized finance route is shown to REACH its
+/// handler, which then fails on the strict <see cref="IDataverseService"/> double with no reads set up (a 500 that a denial
+/// can never produce); its 200 is proven by the task's manual live gate (b). (Until task 165b-4 the rollup read through an
+/// unwrapped <c>ServiceClient</c>; it now reads through the interface, and its figures are tested in
+/// <c>SpendServerWrittenSourcesTests</c>.) The scorecard routes are asserted 200 end to end.</para>
 /// </remarks>
 public class FinanceEndpointsAuthorizationContractTests
 {
@@ -312,10 +311,28 @@ public class FinanceEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(BuildRequest(route, parentId));
 
-        // The filter let the request through: the handler ran FinanceRollupService, which cannot unwrap a
-        // ServiceClient from the in-process double and fails with the handler's own 500. A denial is a 404.
+        // The filter let the request through: the handler ran FinanceRollupService, whose first spend read hits the strict
+        // in-process double (no read is set up; task 165b-4 removed the ServiceClient unwrap) and fails with the handler's own 500.
+        // A denial is a 404.
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         (await response.Content.ReadAsStringAsync()).Should().Contain("An error occurred while recalculating financial fields");
+    }
+
+    [Theory(DisplayName = "095g review 2 (uniform-404 mode): a degraded Read on a faulted answer reaches the handler; no rights on a faulted answer is the uniform 404, as before")]
+    [InlineData("finance-matter-recalculate", Matters, AccessRights.Read, HttpStatusCode.InternalServerError)]
+    [InlineData("finance-project-recalculate", Projects, AccessRights.Read, HttpStatusCode.InternalServerError)]
+    [InlineData("finance-matter-recalculate", Matters, AccessRights.AppendTo, HttpStatusCode.NotFound)]
+    public async Task Recalculate_FaultedAnswer_DecidedByTheRightsItCarries(string route, string expectedSet, AccessRights granted, HttpStatusCode expected)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var parentId = Guid.NewGuid();
+        host.Access.Grant(expectedSet, parentId, granted);
+        host.Access.Fault(expectedSet, parentId);
+
+        var response = await host.SendAsync(BuildRequest(route, parentId));
+
+        // 500 is the handler's own (see Recalculate_FinanceReader_ReachesTheRollupHandler): the filter let the request through.
+        response.StatusCode.Should().Be(expected);
     }
 
     [Theory]
@@ -398,6 +415,37 @@ public class FinanceEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_rights");
         host.Access.Calls.Should().ContainSingle().Which.Set.Should().Be(Matters);
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact(DisplayName = "095g review 2 (must not fire): a Read-only route given a DEGRADED Read on a faulted answer is allowed - the request gets the rights it always did")]
+    public async Task Summary_DegradedReadOnAFault_Gets200()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var matterId = Guid.NewGuid();
+        host.Access.Grant(Matters, matterId, AccessRights.Read); // readable: the source's fallback answers Read, marked faulted
+        host.Access.Fault(Matters, matterId);
+        host.Summary.Setup(s => s.GetSummaryAsync(matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSummaryDto { MatterId = matterId, CurrentSpend = 10m });
+
+        var response = await host.SendAsync(BuildRequest("summary", matterId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Access.Calls.Should().ContainSingle().Which.Should().Be(new AccessCall(AccessPath.Record, Matters, matterId, HasToken: true));
+    }
+
+    [Fact(DisplayName = "095g review 2 control (must fire): the same route given NO rights on a faulted answer is refused as before (403 insufficient_rights)")]
+    public async Task Summary_NoRightsOnAFault_Gets403()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var matterId = Guid.NewGuid();
+        host.Access.Grant(Matters, matterId, AccessRights.AppendTo); // not readable: the fallback answers None, marked faulted
+        host.Access.Fault(Matters, matterId);
+
+        var response = await host.SendAsync(BuildRequest("summary", matterId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_rights");
         host.VerifyNoServiceWasInvoked();
     }
 
@@ -1246,6 +1294,31 @@ public class FinanceEndpointsAuthorizationContractTests
             return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
         }
 
+        /// <summary>Privileges whose question answers <see cref="CallerPrivilegeAnswer.Faulted"/> (an OBO, WhoAmI or privilege-read fault).</summary>
+        public HashSet<string> FaultFor { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The three-state question (ebilling-r1 task 095a review F1: the by-email route's fail-closed mode asks it). Held when the privilege is
+        /// held, NotHeld when it is not, Faulted for a privilege in <see cref="FaultFor"/> or with no caller token (as the real probe answers
+        /// it); <see cref="ThrowOnEveryCall"/> throws.
+        /// </summary>
+        public override Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            Calls.Add(new PrivilegeCall(privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
+            if (ThrowOnEveryCall is not null)
+            {
+                return Task.FromException<CallerPrivilegeAnswer>(ThrowOnEveryCall);
+            }
+
+            if (string.IsNullOrEmpty(callerBearerToken) || FaultFor.Contains(privilegeName))
+            {
+                return Task.FromResult(CallerPrivilegeAnswer.Faulted);
+            }
+
+            return Task.FromResult(_held.Contains(privilegeName) ? CallerPrivilegeAnswer.Held : CallerPrivilegeAnswer.NotHeld);
+        }
+
         /// <summary>
         /// What WhoAmI on the caller's OBO token answers (task 162 f1, the personal-analysis creator match). Null — the
         /// default, and the base class's answer without OBO configuration — means "the caller's systemuserid could not be
@@ -1293,7 +1366,9 @@ public class FinanceEndpointsAuthorizationContractTests
     internal sealed class RollupSeam : FinanceRollupService
     {
         public RollupSeam(IDataverseService reads, IFieldMappingDataverseService writes)
-            : base(reads, writes, NullLogger<FinanceRollupService>.Instance)
+            : base(reads, writes, new BillingDecisionRecorder(new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness().Writer,
+                    new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object, NullLogger<BillingDecisionRecorder>.Instance),
+                NullLogger<FinanceRollupService>.Instance)
         {
         }
 
@@ -1338,7 +1413,11 @@ public class FinanceEndpointsAuthorizationContractTests
         /// <summary>The rights granted on a record (None when none were).</summary>
         public AccessRights RightsOf(string set, Guid id) => _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None;
 
-        /// <summary>Dataverse gave no answer for this record: rights None with <see cref="AccessSnapshot.Faulted"/> true (an unknown, not a denial).</summary>
+        /// <summary>
+        /// Dataverse gave no full answer for this record (<see cref="AccessSnapshot.Faulted"/> true: an unknown, not a denial), in the
+        /// shapes the production source emits: a degraded Read when the record is readable (rights granted here include Read), otherwise
+        /// None. Any other granted right is NOT returned on a fault.
+        /// </summary>
         public void Fault(string set, Guid id) => _faulted.Add((set, id));
 
         public Task<AccessSnapshot> GetUserAccessAsync(
@@ -1363,12 +1442,14 @@ public class FinanceEndpointsAuthorizationContractTests
                 return Task.FromException<AccessSnapshot>(ThrowOnEveryCall);
             }
 
+            var granted = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None;
+            var faulted = _faulted.Contains((set, id));
             return Task.FromResult(new AccessSnapshot
             {
                 UserId = userId,
                 ResourceId = id.ToString(),
-                AccessRights = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
-                Faulted = _faulted.Contains((set, id)),
+                AccessRights = faulted ? granted & AccessRights.Read : granted,
+                Faulted = faulted,
             });
         }
     }

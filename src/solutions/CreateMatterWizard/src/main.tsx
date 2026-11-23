@@ -4,9 +4,11 @@ import { FluentProvider } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
+import { launchAssociationFromParams } from "@spaarke/ui-components/utils/launchAssociation";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
+import { createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
 import { CreateMatterWizard, mapMatterHandoffSeed } from "@spaarke/ui-components/components/CreateMatterWizard";
 import { EntityCreationService, type IUserBuCascadeDefaults } from "@spaarke/ui-components/services/EntityCreationService";
 import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
@@ -52,6 +54,11 @@ function App() {
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const uploadService = React.useMemo(() => createXrmUploadService(resolvedBffBaseUrl), [resolvedBffBaseUrl]);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: resolvedBffBaseUrl || undefined }),
+    [resolvedBffBaseUrl]
+  );
 
   // Assistant → surface hand-off pre-seed (spaarkeai-assistant-enhancements-r1
   // task 013): when this wizard was launched from the Assistant's surface_launch
@@ -75,6 +82,14 @@ function App() {
     if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
   }, [handoff]);
+
+  // Task 195 (#2352): opened from a project's form command or its "New" on the Project <-> Matter subgrid
+  // (sprk_wizard_commands), the launch envelope names that project — pre-select it and lock the Associate-To step.
+  // Only the project table is taken; any other launch record, or none, leaves the step as it was.
+  const { initialAssociation, lockAssociation } = React.useMemo(
+    () => launchAssociationFromParams(params, "sprk_project"),
+    [params]
+  );
 
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
@@ -105,7 +120,9 @@ function App() {
   }, []);
 
   // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): resolve BU cascade defaults
-  // (sprk_containerid + sprk_searchindexname) from the current user's owning BU.
+  // (sprk_containerid + sprk_searchindexname) from the current user's owning BU. Since task 021 the wizard passes
+  // them to MatterService but nothing reads them (the matter's index and container columns are the server's,
+  // FR-38/FR-40; the uploaded files are indexed without naming an index); the callback stays as the host's contract.
   // Matches CreateProjectWizard / CreateEventWizard / CreateWorkAssignmentWizard
   // solution wiring exactly — Xrm.Utility.getGlobalContext().userSettings.userId is
   // the correct documented API in the Code Page host (Xrm.Utility.getUserId does NOT
@@ -136,6 +153,7 @@ function App() {
         dataService={dataService}
         uploadService={uploadService}
         navigationService={navigationService}
+        emailComposeHandlers={emailComposeHandlers}
         embedded={true}
         onClose={handleClose}
         onComplete={handleComplete}
@@ -146,6 +164,8 @@ function App() {
         tenantId={resolvedTenantId}
         initialFormValues={initialFormValues}
         initialFileRefs={initialFileRefs}
+        initialAssociation={initialAssociation}
+        lockAssociation={lockAssociation}
       />
     </FluentProvider>
   );

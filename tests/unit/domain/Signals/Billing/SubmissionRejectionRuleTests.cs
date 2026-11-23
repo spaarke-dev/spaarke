@@ -841,7 +841,8 @@ public class SubmissionRejectionRuleTests
         // 071 round 2: a withheld Duplicate renders and stores only the withheld template and writes no tracking number anywhere.
         const string hiddenTrackingNumber = "INV-100.1";
         var rule = Version("CD-DUPLICATE", RuleType.Duplicate, template: BillingRuleDraftTranslator.Wording(RuleType.Duplicate).Template)
-            with { Consequence = Reject };
+            with
+        { Consequence = Reject };
         var request = Request(Fee(0));
         var acrossTheWall = Prior(hiddenTrackingNumber, "INV-100", 1, BillingPriorStatus.Active,
             new BillingPriorLine { Date = LineDate, TimekeeperId = Matched().TimekeeperId, Hours = 1.0m }) with
@@ -891,7 +892,8 @@ public class SubmissionRejectionRuleTests
     {
         // 071 round 2: the default Duplicate template is chosen by subject, so an invoice-level Duplicate is written with its wording.
         var rule = Version("CD-DUPLICATE", RuleType.Duplicate, """{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""",
-            template: BillingRuleDraftTranslator.Wording(RuleType.Duplicate).Template) with { Consequence = Reject };
+            template: BillingRuleDraftTranslator.Wording(RuleType.Duplicate).Template) with
+        { Consequence = Reject };
         var request = Request(Fee(0));
         var result = Evaluator().Evaluate(request, Loaded(rule) with { PriorSubmissions = [Prior("INV-100.1", "INV-100", 1)] });
 

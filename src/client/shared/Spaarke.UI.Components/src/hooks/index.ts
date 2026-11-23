@@ -15,6 +15,12 @@ export * from './useTwoPanelLayout';
 export * from './useTheme';
 export * from './useUiScale';
 
+// Document command-bar actions (open in web / desktop, download, delete, email a link, send to index)
+// through the BFF. Consumed by SemanticSearch and Compose. Main barrel only, not pcf-safe.ts.
+// Moved here from the retired document-operations package (reuse-governance-tightening-r1 task 033).
+export { useDocumentActions } from './useDocumentActions';
+export type { UseDocumentActionsOptions, UseDocumentActionsResult } from './useDocumentActions';
+
 // DataGrid framework (task 003)
 export { DataGridContextProvider, useDataGridContext, useDataGridContextOptional } from './useDataGridContext';
 export type { DataGridContextValue, DataGridContextProviderProps, DataGridParentContext } from './useDataGridContext';

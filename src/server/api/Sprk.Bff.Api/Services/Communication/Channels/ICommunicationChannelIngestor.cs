@@ -61,6 +61,13 @@ public sealed record ChannelIngestRequest
     /// </summary>
     public string? ProviderThreadId { get; init; }
 
+    /// <summary>
+    /// Provider-assigned identity of the sender (the ACS raw id of a chat message's sender), captured at the pipeline
+    /// boundary. Task 054: mapped to the sending systemuser when the message joins a Direct thread. Null when the event
+    /// carries none.
+    /// </summary>
+    public string? ProviderSenderId { get; init; }
+
     /// <summary>Correlation id for tracing (mirrors <see cref="ChannelSendRequest.CorrelationId"/>).</summary>
     public required string CorrelationId { get; init; }
 }

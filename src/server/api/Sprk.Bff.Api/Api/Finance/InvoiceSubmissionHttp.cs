@@ -106,29 +106,39 @@ internal static class InvoiceSubmissionHttp
         .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
     /// <summary>202 with <c>Location</c> = the channel's status URL, or the refusal as ProblemDetails (ADR-019).</summary>
-    internal static IResult ToResult(InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId) => outcome.Kind switch
-    {
-        InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId)),
-        InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
-            ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
-            : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
-        _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept),
-    };
+    /// <remarks>ebilling-r1 082c-3: <paramref name="warning"/> is the external route's provisional pre-check warning, carried only on a 202; a refusal never carries it.</remarks>
+    internal static IResult ToResult(
+        InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId, SubmissionHoldWarning? warning = null) => outcome.Kind switch
+        {
+            InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId), warning),
+            InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
+                ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
+                : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
+            _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept, outcome.Extensions),
+        };
 
-    private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl) =>
-        Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl));
+    private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl, SubmissionHoldWarning? warning) =>
+        Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl, warning));
 
     /// <summary>
     /// The route's own refusal: ProblemDetails with a top-level <c>errorCode</c>. <paramref name="filingKept"/> (contract section 6, "After step A",
     /// changed 2026-10-29) adds the top-level boolean <c>filingKept: true</c> to a refusal that comes after step A filed the communication; a refusal
     /// with nothing filed does not carry the field.
     /// </summary>
-    internal static IResult Refused(int statusCode, string errorCode, string detail, bool filingKept = false)
+    /// <remarks>Task 097b: <paramref name="fields"/> (a Correction's <c>reason</c> and <c>invoiceStatus</c>) are added as top-level members; a
+    /// refusal without them renders exactly as before.</remarks>
+    internal static IResult Refused(
+        int statusCode, string errorCode, string detail, bool filingKept = false, IReadOnlyDictionary<string, object?>? fields = null)
     {
         var extensions = new Dictionary<string, object?> { ["errorCode"] = errorCode };
         if (filingKept)
         {
             extensions[FilingKeptField] = true;
+        }
+
+        foreach (var (key, value) in fields ?? new Dictionary<string, object?>())
+        {
+            extensions.TryAdd(key, value);
         }
 
         return Results.Problem(statusCode: statusCode, detail: detail, extensions: extensions);

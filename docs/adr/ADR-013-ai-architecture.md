@@ -668,7 +668,7 @@ The BFF forwards these into `PlaybookRunRequest.UserContext` + `.Document`; down
 
 | Artifact | Path |
 |---|---|
-| Facade interface (post-amendment) | [`src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs) |
+| Facade interface (post-amendment) | `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs` |
 | Real implementation | `Services/Ai/PublicContracts/InvokePlaybookAi.cs` |
 | Kill-switch null-impl (ADR-032 P3) | `Services/Ai/PublicContracts/NullInvokePlaybookAi.cs` |
 | First consumer | `Api/ComposeEndpoints.cs` (`DispatchAction`) |

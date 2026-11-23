@@ -37,6 +37,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// EB-D-165: whoever made an earlier attempt).</item>
 /// <item>The file store's configuration (<see cref="StoredFileService.CanStageAsync"/>), read-only, so a store that is not configured is
 /// a 422 that files nothing (review round 5).</item>
+/// <item>The invoice reader's configuration (<see cref="InvoiceSubmissionService.ReaderNotConfiguredRefusal"/>, task 191), read-only and
+/// after the store's: a reader that is not set up is a 422 that files and writes nothing.</item>
 /// <item>The marked parts, read out of the saved <c>.eml</c> (<see cref="EmlMarkedPartReader"/>: ordinal, name and SHA-256 must match;
 /// its <c>versionnumber</c> is the source version). Read-only, so before step A (review round 5): a <c>.eml</c> that is gone, holds no
 /// file or no longer carries a part as marked is a permanent 422, a read fault a 503, and neither leaves a filing behind.</item>
@@ -133,6 +135,13 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
                 "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was submitted.", filed: false);
         }
 
+        // ── 2c. Task 191: the invoice reader, read-only and after the file store (the store's code wins when both are missing), so a
+        //        reader that is not set up is a 422 that files nothing and tracks nothing, not a submission that fails in the job. ──
+        if (_submissions.ReaderNotConfiguredRefusal() is { } readerRefusal)
+        {
+            return Refused(readerRefusal.StatusCode, readerRefusal.ErrorCode!, readerRefusal.Detail!, filed: false);
+        }
+
         // ── 3. The marked parts, out of the saved .eml: read-only, so before step A (review round 5, pass-2 F1-2 / uac-r2 K2-b: a refused
         //       submission never leaves a filing behind). A part that is gone or differs from its mark is permanent (a retry reads the same
         //       .eml), so it is a 422, never a 503 the client would retry. ──
@@ -224,6 +233,16 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         row!["sprk_name"] = input.FirmInvoiceNumber;
         row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received);
         row["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        if (input.ResubmissionOf is { } earlierSubmission)
+        {
+            // Task 097b: the Correction's target, as the intake's guard found it (Validate ties it to InvoiceId).
+            row[InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference(InvoiceSubmissionService.SubmissionEntity, earlierSubmission);
+        }
+
+        // Task 095a: the .eml this attempt was read from, in the same create; the id the stage recorded as the Stored Files' source.
+        row[InvoiceSubmissionService.SourceEmailDocumentColumn] =
+            new EntityReference(InvoiceSubmissionService.DocumentEntity, input.SourceEmlDocumentId);
+
         row["sprk_receivedon"] = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(input.PoNumber))
         {
@@ -257,6 +276,11 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             case TrackingNumberOutcome.AlreadyCreated:
                 _logger.LogInformation("From-email submission {SubmissionId} already existed (a concurrent request of the same attempt)", submissionId);
                 return FromEmailSubmitResult.AlreadyCreated(filed);
+            case TrackingNumberOutcome.Refused when allocation.Reason == TrackingNumberReasons.FirmRequired:
+                // Task 095c-2: defence in depth. The route refuses a no-firm request before anything is saved while the scope key is not
+                // Active; the allocator holds the same rule on its own (nothing written), answered with the route's own 400.
+                _logger.LogWarning("From-email submission {SubmissionId}: the allocator refused a submission with no firm ({Reason})", submissionId, allocation.Reason);
+                return Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.", filed);
             case TrackingNumberOutcome.Refused:
                 _logger.LogWarning("From-email submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
                 return Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
@@ -266,7 +290,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         // ── 7. The job ──
         try
         {
-            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(input.JobId, submissionId, input.CorrelationId), write);
+            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(input.JobId, submissionId, input.CorrelationId, input.CorrectionNote), write);
         }
         catch (Exception ex)
         {
@@ -281,11 +305,11 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
     }
 
     /// <inheritdoc />
-    public async Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct)
+    public async Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, string? correctionNote, CancellationToken ct)
     {
         try
         {
-            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(jobId, submissionId, correlationId), CancellationToken.None);
+            await _jobs.SubmitJobAsync(InvoiceSubmissionService.BuildJob(jobId, submissionId, correlationId, correctionNote), CancellationToken.None);
             return true;
         }
         catch (Exception ex)
@@ -373,9 +397,16 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         ArgumentNullException.ThrowIfNull(input);
         if (input.SubmissionId == Guid.Empty || input.JobId == Guid.Empty || input.SourceEmlDocumentId == Guid.Empty
             || input.CommunicationId == Guid.Empty || input.CallerSystemUserId == Guid.Empty || input.Generation < 1
-            || string.IsNullOrWhiteSpace(input.FirmInvoiceNumber) || input.Mode != FromEmailModes.New
+            || string.IsNullOrWhiteSpace(input.FirmInvoiceNumber)
+            // Task 097b: New names no invoice and no target; a Correction names both, and the target is the invoice's own submission.
+            || !(input.Mode == FromEmailModes.New && input.InvoiceId is null && input.ResubmissionOf is null
+                || input.Mode == FromEmailModes.Correction && input.InvoiceId is { } invoiceId && invoiceId != Guid.Empty
+                    && input.ResubmissionOf is { } target && InvoiceBlockedHold.IsOwnSubmission(invoiceId, target))
+            // Task 095f: only a Correction carries a note, and it is the route's already-checked text (never over the column's length).
+            || input.CorrectionNote is not null && (input.Mode != FromEmailModes.Correction || input.CorrectionNote.Length > InvoiceCorrectionNote.MaxLength)
             // Review round 5 (pass-2 F4-2): the route's body shape and 095's own checks refuse these first, with the contract's answers.
-            || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty
+            // EB-D-223 (task 095e): a submission names a firm; the service refuses a null one first, so this is defence in depth.
+            || input.FirmId is null || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty
             || input.FirmInvoiceNumber.Trim().Length > TrackingNumberAllocator.MaxFirmInvoiceNumberLength
             || input.PoNumber?.Trim().Length > InvoiceSubmissionService.MaxPoNumberLength
             || input.MarkedParts.Count(p => p.Mark == FromEmailMarks.Invoice) != 1

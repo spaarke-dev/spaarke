@@ -1,8 +1,8 @@
 # ADR-012: Shared Component Library (Concise)
 
-> **Status**: Accepted (Amended 2026-07-12)
+> **Status**: Accepted (Amended 2026-11-10)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-07-12 (Amendment: `@spaarke/visuals` presentational sibling — see below)
+> **Last Updated**: 2026-11-13 (census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
 
 ---
 
@@ -42,7 +42,42 @@ Adding another shared package is a high bar. **All three** MUST hold — otherwi
 
 Absent all three, the root [CLAUDE.md §11](../../CLAUDE.md) three-question reuse test applies: extend the existing package.
 
-**Sanctioned shared packages (as of this amendment)**: `@spaarke/ui-components` (UX components + abstracted-I/O services), `@spaarke/visuals` (presentational data-viz), `@spaarke/auth` (auth), plus the domain component libraries (`@spaarke/events-components`, etc.). New siblings require an ADR amendment.
+The sanctioned packages are enumerated in the census below; the earlier open-ended "domain component libraries (… etc.)" wording is withdrawn. New siblings require an ADR amendment.
+
+---
+
+## Amendment (2026-11-10): Enumerated Shared-Package Census
+
+> Path B amendment per [CLAUDE.md §6.5](../../CLAUDE.md). The 2026-07-12 text sanctioned "the domain component libraries (`@spaarke/events-components`, etc.)". That "etc." covered 11 of the 15 packages in `src/client/shared/`, nine of which no ADR names — so the bar above was never applied to them. This amendment replaces it with a closed list.
+
+**Decision**: the table below is the complete list of shared packages (every `src/client/shared/*/package.json`).
+
+- **Sanctioned**: has an ADR-backed contract. Extend it before adding anything new.
+- **Grandfathered — under review**: existed before this census and was never assessed against the three-test bar above. Each one may be used and extended. Each one is later either sanctioned (by an amendment that adds an ADR citation) or consolidated into a sanctioned package. A grandfathered package is not a precedent for adding another.
+
+**Enforced by**: `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs`. It fails when a folder is missing from this table, when the table lists a package that does not exist, and when the table and the test's census disagree on a package's status. Adding a package therefore takes an ADR amendment and a census entry together.
+
+<!-- shared-package-census:start -->
+| Package | Folder | Status | Contract / reason |
+|---|---|---|---|
+| `@spaarke/ui-components` | `Spaarke.UI.Components` | Sanctioned | UX components + abstracted-I/O services (`IDataService`); the default home (this ADR) |
+| `@spaarke/visuals` | `Spaarke.Visuals` | Sanctioned | Presentational data-viz; `react-charting` quarantine; `@types/react@18` pin (2026-07-12 amendment) |
+| `@spaarke/auth` | `Spaarke.Auth` | Sanctioned | The single SSO / token / authenticated-fetch implementation for every surface (ADR-028) |
+| `@spaarke/events-components` | `Spaarke.Events.Components` | Sanctioned | Events + Tasks components shared by the EventsPage code page and the SpaarkeAi Calendar widget (named in the 2026-07-12 amendment) |
+| `@spaarke/notifications` | `Spaarke.Notifications` | Sanctioned | Host-agnostic notification-spine client: SignalR delivery with poll fallback (ADR-047) |
+| `@spaarke/ai-widgets` | `Spaarke.AI.Widgets` | Sanctioned | Workspace + context widgets for the three-pane shell (ADR-030 pane event bus, ADR-031 stage lifecycle) |
+| `@spaarke/sdap-client` | `Spaarke.SdapClient` | Grandfathered — under review | SDAP API client used by PCF and TS apps (18 consumers); overlap with the BFF adapters in `@spaarke/ui-components` not yet assessed |
+| `@spaarke/smart-todo-components` | `Spaarke.SmartTodo.Components` | Grandfathered — under review | Smart To Do components (Pattern D dual-use); a feature area, not a distinct contract |
+| `@spaarke/communication-components` | `Spaarke.Communication.Components` | Grandfathered — under review | Communications workspace components (Pattern D dual-use); a feature area, not a distinct contract |
+| `@spaarke/daily-briefing-components` | `Spaarke.DailyBriefing.Components` | Grandfathered — under review | Daily Briefing components (Pattern D dual-use); a feature area, not a distinct contract |
+| `@spaarke/compose-components` | `Spaarke.Compose.Components` | Grandfathered — under review | TipTap Compose workspace; TipTap may justify quarantine, not yet assessed against the three tests |
+| `@spaarke/ai-outputs` | `Spaarke.AI.Outputs` | Grandfathered — under review | AI output / source pane widgets; boundary with `@spaarke/ai-widgets` not yet assessed |
+<!-- shared-package-census:end -->
+
+**Census changes since 2026-11-10** (each one owner-approved in `projects/reuse-governance-tightening-r1/notes/package-reviews.md`):
+- 2026-11-13: `@spaarke/ai-context` retired. It held only six types; they moved to `@spaarke/ai-widgets` (`src/types/aiContext.ts`, exported from its barrel).
+- 2026-11-13: `@spaarke/legal-workspace` retired. It was a one-line re-export of the LegalWorkspace solution with one consumer. SpaarkeAi now declares a `file:` dependency on that solution (package `legal-workspace`, `exports` `./src/index.ts`). A solution exposing its own entry point to another solution is not a shared package.
+- 2026-11-13: `@spaarke/document-operations` retired. Its one hook, `useDocumentActions`, moved unchanged into `@spaarke/ui-components` (`src/hooks/useDocumentActions.ts`), exported from the main barrel only, not `pcf-safe`. Both consumers (SemanticSearch, Compose) already imported from ui-components.
 
 ---
 

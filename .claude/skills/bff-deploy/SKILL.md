@@ -5,13 +5,13 @@ techStack: [dotnet, azure, app-service]
 appliesTo: ["deploy bff", "deploy api", "publish bff", "bff deploy", "update bff api"]
 alwaysApply: false
 exemplar: scripts/Deploy-BffApi.ps1
-last-reviewed: 2026-05-16
+last-reviewed: 2026-11-03
 ---
 
 # BFF API Deployment
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-16
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — `leave-alone-justified`; extracted future-migration section to references/; otherwise gold-standard incident-grounded skill)
 > **Exemplar rationale**: The deploy script `Deploy-BffApi.ps1` IS the canonical operational pattern — it's exercised every deploy. Recent change history is the most useful reference.
 > **Hardened 2026-05-14**: Default health-check window 120 s (Linux cold-start tolerance); hash-verify + auto-recover for silent file-lock failures; FAILURE-MODES.md G-2 documents the incident.
@@ -111,6 +111,16 @@ If the zip is missing DLLs (e.g., created from wrong directory or with wrong glo
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Step 1: Clean Previous Publish Output
+- [ ] Step 2: Deploy (`scripts/Deploy-BffApi.ps1`; "All 6 critical files match" and health check passed)
+- [ ] Step 3: Verify Endpoints (signed-in request returns anything but 404)
+```
+
 ## Procedure
 
 ### Step 1: Clean Previous Publish Output
@@ -159,6 +169,8 @@ TOKEN=$(az account get-access-token --resource api://<BFF-API-APP-ID> --query ac
 curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN"   https://spaarke-bff-dev.azurewebsites.net/api/documents/00000000-0000-0000-0000-000000000000/preview-url
 # Expected: 403 (routed; the per-document filter refuses the unknown id). 404 = the route did NOT register.
 ```
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 **Key verification rule**: prove registration with a **signed-in** request — anything but 404 means the route is
 registered. An **anonymous** request answers **401 whether or not the route exists**: since UAC-r2 task 167 the BFF's

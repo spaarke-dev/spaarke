@@ -70,9 +70,9 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
 
     private static int Mask(string rightsCsv) => RecordShareLevels.MaskForRightsCsv(rightsCsv);
 
-    private static int Mirror => RecordShareLevels.ChildMirrorMask(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights));
+    private static int Mirror => RecordShareLevels.InheritedRootMirrorMask(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights));
 
-    private static int ViewMirror => RecordShareLevels.ChildMirrorMask(Mask(RecordShareLevels.ViewOnlyRights));
+    private static int ViewMirror => RecordShareLevels.InheritedRootMirrorMask(Mask(RecordShareLevels.ViewOnlyRights));
 
     private static readonly RootRecordFlags SecureFlags = new(IsSecure: true, IsRestricted: false);
 

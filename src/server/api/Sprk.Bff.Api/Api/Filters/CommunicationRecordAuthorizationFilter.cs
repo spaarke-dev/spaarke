@@ -451,7 +451,9 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             // own read of the communication must show the typed lookup for that type set to that record.
             var lookupColumn = $"_{field}_value";
             var row = await ReadVisibleCommunicationAsync(id, new[] { lookupColumn });
-            if (row is null || ReadGuid(row, lookupColumn) != targetId)
+            // Fix round 3e: through the one fail-closed lookup reader. A column the read did not return is unreadable, an explicit
+            // null is not filed; neither shows the typed lookup set to the target, so both are the no-op.
+            if (row is null || !Guid.TryParse(ExternalMultiRootRule.LookupOf(row, lookupColumn), out var filedTo) || filedTo != targetId)
                 return noOp;
 
             return await HasRightsAsync(CommunicationEntitySet, id, AccessRights.Write) ? null : noOp;
@@ -693,7 +695,15 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
 
                 foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
                 {
-                    if (ReadGuid(source, $"_{field}_value") is not { } copiedId || copiedId == Guid.Empty)
+                    // Fix round 3e: a Web API row lists an empty lookup as an explicit JSON null (not filed: nothing to copy). A
+                    // column the read did not return, or one that is not a GUID, is UNREADABLE: which record the send would be
+                    // filed against is unknown, so it is denied like any other regarding we cannot address, never skipped.
+                    var copied = ExternalMultiRootRule.LookupOf(source, $"_{field}_value");
+                    if (copied is null)
+                        continue;
+                    if (!Guid.TryParse(copied, out var copiedId))
+                        return Forbidden(reasonCode);
+                    if (copiedId == Guid.Empty)
                         continue;
 
                     var set = RegardingNameFields.EntitySetName(entityLogicalName);
@@ -887,10 +897,5 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             _http.Request.RouteValues.TryGetValue(key, out var raw) && Guid.TryParse(raw?.ToString(), out var id)
                 ? id
                 : Guid.Empty;
-
-        private static Guid? ReadGuid(IReadOnlyDictionary<string, JsonElement> row, string key) =>
-            row.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g)
-                ? g
-                : null;
     }
 }

@@ -742,7 +742,9 @@ public sealed class H0PreflightHandlerTests
         {
             TierMonthlyCostCeilingsUsd = new Dictionary<string, decimal>(StringComparer.Ordinal)
             {
-                ["smb"] = 800m, ["enterprise"] = 3000m, ["dedicated"] = 6000m,
+                ["smb"] = 800m,
+                ["enterprise"] = 3000m,
+                ["dedicated"] = 6000m,
             },
         };
 

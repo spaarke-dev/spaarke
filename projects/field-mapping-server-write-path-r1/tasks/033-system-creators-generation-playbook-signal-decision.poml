@@ -4,7 +4,7 @@
     <title>System creators (To Do generation, TaskActionCore, SignalWriter, DecisionRecordWriter) create through the system principal (FR-21 part a)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>019 complete</gate>
-    <status>not-started</status>
+    <status>dropped</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, jobs, ai-nodes, ownership; touches ontology-owned writers with a restricted writer identity (security); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -17,7 +17,7 @@
     <estimated-effort>10-14 hours</estimated-effort>
   </metadata>
 
-  <prompt>Route four system creators through `RecordCreationService` using the SYSTEM principal (`RequestedBy` when known): To Do generation (`Services/Workspace/TodoGenerationService.cs` create ~:1082), playbook create-task (`Services/Ai/Nodes/ActionCore/TaskActionCore.cs` create ~:315), `Services/Signals/SignalWriter.cs` (create ~:583) and `Services/Signals/DecisionRecordWriter.cs` (create ~:1223). Existing accepted ownership exceptions become NAMED registry rules with a rationale. Do NOT decide the `DecisionRecordWriter` communication-owner case (~:1479); record it for task 060.</prompt>
+  <prompt>RE-SCOPE REQUIRED (2026-11-05, owner decision D-204, notes/decisions.md): `RecordCreationService` now refuses sprk_signal, sprk_decisionrecord and sprk_budgetrevision (task 042c), and WriterOnlyTablesWritersGuardTests forbids SignalWriter / DecisionRecordWriter from reaching the general create. Do NOT route SignalWriter or DecisionRecordWriter; this task covers To Do generation and playbook create-task only, and the main session rewrites this POML before it runs. Original text follows. Route four system creators through `RecordCreationService` using the SYSTEM principal (`RequestedBy` when known): To Do generation (`Services/Workspace/TodoGenerationService.cs` create ~:1082), playbook create-task (`Services/Ai/Nodes/ActionCore/TaskActionCore.cs` create ~:315), `Services/Signals/SignalWriter.cs` (create ~:583) and `Services/Signals/DecisionRecordWriter.cs` (create ~:1223). Existing accepted ownership exceptions become NAMED registry rules with a rationale. Do NOT decide the `DecisionRecordWriter` communication-owner case (~:1479); record it for task 060.</prompt>
   <role>SPAARKE platform developer, .NET 10 BFF, background/AI-node writers and the ontology Signal/Decision write path. Follow ADRs strictly.</role>
   <goal>Each of the four creators makes its row create through the service with the system principal and gets the same owner, stamp and mapping a caller create under the same parent would get; every existing exception is a named registry rule; the census test lists each creator as routed.</goal>
 
@@ -138,4 +138,5 @@
   <notes>Spec FR-21 part a, FR-07, FR-11, NFR-01, NFR-08. Inbound communication and document ingestion are task 034. The ownership matrix and exception assessment (notification outbox, Decision Record communication owner) are task 060.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <!-- Dropped 2026-11-07 (owner, in fm's session): under the W3 direction these system creators (generation, playbook, Signal, Decision) stay outside RecordCreationService as named exceptions; ontology-r1 agreed leaving the ledger writers out is valid. Its one piece other tasks needed, wiring the app-only column-metadata reader into Repair, moves to task 052. -->
 </task>

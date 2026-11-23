@@ -3,7 +3,7 @@
 > **Project**: AI Playbook Node Builder R2
 > **Status**: Pending
 > **Priority**: High (ENH-001), Medium (ENH-002)
-> **Related**: [design.md](../../projects/ai-playbook-node-builder-r2/design.md)
+> **Related**: [design.md](../../projects/x-ai-playbook-node-builder-r2/design.md)
 
 ---
 

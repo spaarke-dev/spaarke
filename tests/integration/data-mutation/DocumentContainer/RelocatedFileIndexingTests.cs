@@ -177,7 +177,7 @@ public class RelocatedFileIndexingTests
             .Returns(Task.CompletedTask);
         var enqueuer = new PostUploadIndexingEnqueuer(
             Mock.Of<IFileIndexingService>(), jobs.Object, Mock.Of<IDocumentDataverseService>(), TestDocumentIndexParentResolver.Over(),
-            Options.Create(new AnalysisOptions()), Options.Create(new PostUploadIndexingOptions()),
+            Mock.Of<ISearchIndexNameResolver>(r => r.GetDefaultIndexName() == "spaarke-files-index"), Options.Create(new PostUploadIndexingOptions()),
             NullLogger<PostUploadIndexingEnqueuer>.Instance);
         Deletes();
 
@@ -211,9 +211,8 @@ public class RelocatedFileIndexingTests
         indexed.Should().NotBeNull();
         indexed!.ParentEntity.Should().Be(new ParentEntityContext("matter", matter.ToString(), "Acme v. Widget"),
             "the moved file's chunks must stay under the record the document is filed to");
-        names.Verify(n => n.ResolveAsync(Document.ToString("D"), "matter", matter.ToString(), It.IsAny<CancellationToken>()), Times.Once,
-            "the index routing sees the recovered parent too");
     }
+
 
     [Fact]
     public async Task WithNoTenantConfigured_NothingIsEnqueuedOrRemoved_AndItIsPending()

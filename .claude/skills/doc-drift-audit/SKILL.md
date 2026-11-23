@@ -34,7 +34,7 @@ Detect documentation drift — stale file paths, deleted class references, broke
 - Explicitly invoked with `/doc-drift-audit`
 
 ### Auto-Trigger Integration
-- `project-pipeline` Step 0.7: Run on docs changed since last project
+- New project iteration: run it before `project-pipeline` Step 2 on docs changed since the last project (manual; the pipeline does not call it)
 - `project-continue` when resuming after a long gap
 
 ## Distinct from other skills
@@ -80,7 +80,7 @@ REPORT: "Auditing drift in {N} files changed between {FROM} and {TO}"
 Group changed files by type:
 - **Source code changes**: `src/**` — may have moved/renamed classes, changing what docs should reference
 - **Doc changes**: `docs/**` — may have introduced new refs that need validation
-- **Pattern/constraint changes**: `.claude/patterns/**`, `.claude/constraints/**` — pointer files that must stay accurate
+- **Pattern/constraint changes**: `.claude/patterns/**`, `.claude/constraints/**` — pointer files that must stay accurate, including the capability index `.claude/patterns/CAPABILITY-INDEX.md`
 
 ### Step 3: Build Audit Task List
 
@@ -90,6 +90,7 @@ For each category, generate audit checks:
 - For each deleted file in src/: grep docs/ and .claude/ for references → flag stale
 - For each renamed class/file: grep for old name → flag stale
 - For each new class: check if it should be added to a pattern/architecture doc
+- For each deleted, moved or renamed canonical component, or changed extension point: check its row in `.claude/patterns/CAPABILITY-INDEX.md`. The PR that changes the component updates its row; a stale row is drift
 
 **Doc changes → validate internal references**:
 - For each file path mentioned in a changed doc: check it exists
@@ -212,7 +213,7 @@ A successful audit:
 
 | Skill | Integration |
 |---|---|
-| `project-pipeline` | Can invoke as Step 0.7 (after master staleness check) |
+| `project-pipeline` | Run manually before its Step 2 on a new iteration (the pipeline has no step that calls it) |
 | `project-continue` | Can invoke when resuming after >1 month gap |
 | `merge-to-master` | Can invoke before merge to catch drift early |
 | `adr-check` | Complementary — adr-check validates code, this validates docs |

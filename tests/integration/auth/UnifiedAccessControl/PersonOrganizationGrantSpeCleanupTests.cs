@@ -38,6 +38,24 @@ public class PersonOrganizationGrantSpeCleanupTests
     private readonly List<Guid> _updates = new();
     private bool _membershipReadFails;
 
+    /// <summary>Fix round 3e: membership rows as the Web API returns them, from JSON (so a column can be ABSENT or an explicit null).</summary>
+    private readonly List<string> _membershipRowJson = new();
+
+    /// <summary>Fix round 3g: organization grant rows as the Web API returns them, from JSON (so a column can be ABSENT or an explicit null).</summary>
+    private readonly List<string> _grantRowJson = new();
+
+    private static ExternalGrantRow ReadGrant(string json)
+        => System.Text.Json.JsonSerializer.Deserialize<ExternalGrantRow>(
+            json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+
+    private string GrantJson(params string[] columns)
+        => "{\"sprk_externalrecordaccessid\":\"" + Guid.NewGuid() + "\",\"statecode\":0,\"_sprk_organization_value\":\"" + Organization + "\"" +
+           string.Concat(columns.Select(c => "," + c)) + "}";
+
+    private static ExternalOrganizationMembership.ContactOrganizationRow ReadRow(string json)
+        => System.Text.Json.JsonSerializer.Deserialize<ExternalOrganizationMembership.ContactOrganizationRow>(
+            json, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+
     // ── Must fire ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -156,6 +174,72 @@ public class PersonOrganizationGrantSpeCleanupTests
         cleanup.PermissionsRemoved.Should().Be(0);
     }
 
+    // ── Fix round 3e: an organization column the read did not return is UNRESOLVED, never "no organization" ─────────
+
+    [Fact]
+    public async Task AMembershipRowWithoutTheOrganizationColumn_IsCounted_AndTheCleanupIsNotCompleted()
+    {
+        _memberships.Add((Contact, Organization, 0));
+        OrganizationGrant(Organization, ProjectId);
+        _membershipRowJson.Add("{\"_sprk_contact_value\":\"" + Contact + "\"}"); // the organization column was not returned
+        var spe = Spe(Removed());
+
+        var cleanup = await Run(spe, Secure());
+
+        cleanup.Completed.Should().BeFalse("a membership whose organization could not be read cannot be checked, so the run is not complete");
+        cleanup.Failed.Should().Be(1, "the unresolved row is counted with the other parts of the cleanup that could not be checked");
+        cleanup.PermissionsRemoved.Should().Be(1, "the organization that was read is still cleaned: nothing is kept on a guess");
+    }
+
+    [Fact]
+    public async Task AMembershipRowWithAnExplicitNullOrganization_IsNotUnresolved_AndTheCleanupCompletes()
+    {
+        _memberships.Add((Contact, Organization, 0));
+        OrganizationGrant(Organization, ProjectId);
+        _membershipRowJson.Add("{\"_sprk_contact_value\":\"" + Contact + "\",\"_sprk_organization_value\":null}");
+        var spe = Spe(Removed());
+
+        var cleanup = await Run(spe, Secure());
+
+        cleanup.Completed.Should().BeTrue("an explicit null names no organization: there is nothing to resolve");
+        cleanup.Failed.Should().Be(0);
+        cleanup.PermissionsRemoved.Should().Be(1);
+    }
+
+    // ── Fix round 3g: a grant column the read did not return is UNDECIDABLE (retried), never "nothing to clean" ──────
+
+    [Fact]
+    public async Task AnOrganizationGrantRowWithoutARootColumn_IsCounted_AndTheCleanupIsNotCompleted_AndNoContainerIsTouched()
+    {
+        _memberships.Add((Contact, Organization, 0));
+        // The project, matter and work-assignment columns: only the project one is returned; the matter column was not.
+        _grantRowJson.Add(GrantJson("\"_sprk_project_value\":\"" + ProjectId + "\"", "\"_sprk_workassignment_value\":null",
+            "\"_sprk_contact_value\":null"));
+        var spe = Spe(Removed());
+
+        var cleanup = await Run(spe, Secure());
+
+        cleanup.Completed.Should().BeFalse("a grant row that did not carry a root column cannot be placed on a root, so it cannot be checked");
+        cleanup.Failed.Should().Be(1);
+        cleanup.PermissionsRemoved.Should().Be(0);
+        spe.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AnOrganizationGrantRowWithExplicitNullOtherRoots_IsNotUndecidable_AndTheCleanupCompletes()
+    {
+        _memberships.Add((Contact, Organization, 0));
+        _grantRowJson.Add(GrantJson("\"_sprk_project_value\":\"" + ProjectId + "\"", "\"_sprk_matter_value\":null",
+            "\"_sprk_workassignment_value\":null", "\"_sprk_contact_value\":null"));
+        var spe = Spe(Removed());
+
+        var cleanup = await Run(spe, Secure());
+
+        cleanup.Completed.Should().BeTrue("an explicit null names no other root: nothing to resolve");
+        cleanup.Failed.Should().Be(0);
+        cleanup.PermissionsRemoved.Should().Be(1);
+    }
+
     // ── World ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static SpeContainerMembershipResult Removed() => new(true, "perm-c2c", null);
@@ -167,8 +251,13 @@ public class PersonOrganizationGrantSpeCleanupTests
     {
         Id = Guid.NewGuid(),
         StateCode = 0,
+        ContactId = null,
         OrganizationId = organizationId,
         ProjectId = projectId,
+        MatterId = null,
+        WorkAssignmentId = null,
+        GrantedBySystemUserId = null,
+        GrantedByContactId = null,
     });
 
     private static Mock<SpeContainerMembershipService> Spe(SpeContainerMembershipResult answer)
@@ -220,6 +309,7 @@ public class PersonOrganizationGrantSpeCleanupTests
                 return _memberships
                     .Where(m => m.Contact == Contact && m.State == 0)
                     .Select(m => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = m.Contact, OrganizationId = m.Organization })
+                    .Concat(_membershipRowJson.Select(ReadRow))
                     .ToList();
             });
 
@@ -230,7 +320,8 @@ public class PersonOrganizationGrantSpeCleanupTests
             {
                 var organization = Guid.Parse(Regex.Match(filter!, @"_sprk_organization_value eq ([0-9a-fA-F-]{36})").Groups[1].Value);
                 filter.Should().Be(ExternalGrantLifecycle.ActiveOrganizationGrantsFilter(organization));
-                return _grants.Where(g => g.OrganizationId == organization && g.ContactId is null && g.StateCode == 0)
+                return _grants.Concat(_grantRowJson.Select(ReadGrant))
+                    .Where(g => g.OrganizationId == organization && g.ContactId is null && g.StateCode == 0)
                     .Take(top ?? int.MaxValue).ToList();
             });
 

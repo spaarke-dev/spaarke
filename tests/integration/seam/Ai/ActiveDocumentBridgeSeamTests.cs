@@ -102,7 +102,8 @@ public sealed class ActiveDocumentBridgeSeamTests : TypedToolHandlerTestFixture
             HostContext: null,
             AdditionalDocumentIds: null,
             UploadedFiles: uploadedFile is null ? null : new[] { uploadedFile })
-        { OwnerOid = TestSessionOwner.Oid,
+        {
+            OwnerOid = TestSessionOwner.Oid,
             ActiveDocument = activeDocument,
         };
         await _sessions.UpdateSessionCacheAsync(session);

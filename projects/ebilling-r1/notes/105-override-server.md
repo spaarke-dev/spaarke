@@ -206,6 +206,7 @@ is closed as **Acted**, never Dismissed.
   - The writer refuses to read the set (more than one record under the key, or a set it cannot read): it never picks one (ReviewInvalid).
   - The invoice is gone: there is nothing to authorize the close against.
   - A caller without the rights (or a probe that cannot answer, which is a no): the app-identity writer closes only for an authorized caller (FR-51).
+  - A repeat by a different person (a principal change): the repeat's rights are asked of whoever repeats it, not of the original decider. A different person who lacks Write on the Signal subjects (or AppendTo on the core record) is refused the re-close and the repeat answers `alreadyDecided` with one warning (not a 403: the first decision stands), so the Signals stay open and only the original decider's retry, or another person who holds those rights, completes the closes. The closes are made in the stored decider's name (the writer-created record's `sprk_confirmedby`), never the repeating caller's. (ontology-r1 ask 1)
 - **Races.** Losing the race at the set store to a concurrent run of the same decision is the same `AlreadyDecided` no-op as losing it at
   the state write; any other change is `concurrent_change`.
 
@@ -251,7 +252,7 @@ Seeded mutations (each applied alone, the filtered suites run, the source restor
 | Mutation | Caught by |
 |---|---|
 | 105 trusts the findings' set (no row check, no bounds) | 105 F1-1 (c) foreign Signal ×2; F1-1 (3) read time ×2; F1-1 own Signal trusted |
-| repeat takes record id and decider from the stamp | 105 F1-1 (2) "never from an edited stamp" |
+| repeat takes record id and decider from the stamp | 105 F1-1 (2) "never from the stamp" |
 | no writer-created record → fall back to the findings' set and stamp | 105 F1-1 (2) "NO writer-created record re-closes nothing" |
 | read-time bounds removed | 049 and 105 F1-1 (3) read time ×2 each |
 | 049 resumes a stored set unchecked | 049 F1-1 foreign Signal; 049 read time ×2 |

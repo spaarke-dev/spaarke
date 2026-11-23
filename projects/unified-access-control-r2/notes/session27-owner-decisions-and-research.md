@@ -1855,7 +1855,7 @@ Owner answers:
    - S4: one SPE item invite on a document under `fa328db3…`.
 
    Each write is undone afterwards. Out of bounds: `65a3fab2…`, the Secure Record business unit, the 3 Restricted matters, and Key Vault.
-2. **Test user: the existing flagged guest `e44317a0…`**, the only enabled flagged user. It owns no rows and holds only self-shares. It is moved back to the root business unit, with its direct role restored, afterwards.
+2. **Test user: an existing flagged test user**, chosen by the owner. It is restored to its pre-spike state (business unit, roles, teams, shares) afterwards. (Identity and holding details removed 2026-11-11 under the public-repo rule; the decision is unchanged.)
 
 ## Round 122 (2026-10-22): a linked .eml archive's access matches its parent
 

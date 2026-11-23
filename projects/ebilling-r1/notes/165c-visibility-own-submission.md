@@ -1,0 +1,341 @@
+# 165c — visibility counts only a submission's own invoice
+
+Task 165c (uac-r2 ruling 2026-11-06, class (c)). Rigor FULL. Branch `task/ebilling-165c` from `work/ebilling-r1` at `2fac72b8a5`.
+
+## 1. What changed
+
+One rule, one place: `InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId)` (new, pure) — the submission's immutable id derives the
+invoice's (`InvoiceSubmissionPersister.InvoiceIdFor`). 165a's `OwnSubmissionOf` now calls it. Every site below uses it; that no other source
+spells the rule is enforced as far as section 7 says (a scan of the source, which does not follow a derived id into a parameter):
+
+| Site | Before | After |
+|---|---|---|
+| `InvoiceBlockedHold.OwnSubmissionOf` / `ReadOwnSubmissionAsync` (165a) | inline predicate | `IsOwnSubmission` |
+| `ExternalInvoiceVisibility.DecideSubmissionsAsync` (reader 1) | the link alone | `IsOwnSubmission` |
+| `ExternalInvoiceVisibility.ReadSubmissionSourcesAsync` (reader 2) | the link alone | `IsOwnSubmission` |
+| `InvoiceSubmissionService.ReadOwnSubmissionAsync` (EB-D-179 intake, 097e prefill) | its own query + `SingleOrDefault(InvoiceIdFor(s.Id) == invoiceId)` | `InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, CorrectionSubmissionColumns, ct)` (same query: entity, link condition, columns, no TopCount) |
+| `InvoiceAssignFirmService.ReadStateAsync` | two inline `InvoiceIdFor(s.Id) ==/!= invoiceId` filters | the same split over `IsOwnSubmission` |
+
+Set firm keeps its split, not `OwnSubmissionOf`: it needs the other linked rows too (`State.OtherSubmissions`, the ontology F1 open-holds
+read), and it refuses when the own count is not exactly one. The intake moved from `SingleOrDefault` to `FirstOrDefault`; the two differ
+only when two returned rows share one primary key, which Dataverse cannot return. Existing tests of both sites are unmodified.
+
+**Reader 1** (`DecideSubmissionsAsync`: the external submission routes and the assistant tools' submission rows). After the firm withhold
+(step 0, unchanged), a submission whose invoice link is a GUID that is not its own invoice is withheld with the new reason
+`InvoiceLinkNotOwn` (`invoice_link_not_own`) and is not passed to the invoice decision. A link that is not a GUID is decided as before.
+Placing it after step 0 keeps the firm withhold's reason for a row both rules withhold (`InvoiceSubmissionRerunTests.Job`, unmodified).
+
+**Reader 2** (`ReadSubmissionSourcesAsync`, inside the invoice predicate). A submission row whose link is not its own invoice adds nothing to
+that invoice: no source document, and no hide from its channel or empty link. The invoice's own submission and its Stored Files still decide
+it. Justification for "nothing" rather than "no source only": the row is not the invoice's submission, so neither its document nor its channel
+describes the invoice. Beyond the contract (one line): a row whose own id cannot be read hides the invoice (`source_link_unreadable`), since it
+cannot be shown to be the invoice's own (fail closed; Dataverse always returns the key).
+
+**Event.** Both readers log `ebilling.visibility.invoice_link_not_own` (reader 1 at Warning; reader 2 at Debug for a pair reader 1 logged in the same call, at Information otherwise, since pass 2) with the submission id and the invoice id only
+(`ExternalInvoiceVisibility.InvoiceLinkNotOwnEvent`).
+
+**Escalation check (POML trigger).** No legitimate path writes a link that is not the submission's own invoice: the only server writer of
+`sprk_invoicesubmission.sprk_invoice` is `InvoiceSubmissionPersister.BuildSubmissionUpdate`, called from `PersistCoreAsync` with
+`invoiceId = InvoiceIdFor(submissionId)`; `SubmissionCommitGate` only clears it. Corrections record `sprk_resubmissionof`, not the link. No
+other code writes it; the form shows it read-only (pass 1 fix round, K-3).
+
+No schema, field-security, endpoint, DI registration or package change.
+
+## 2. Tests
+
+New, `ExternalInvoiceVisibilityTests.OwnSubmission.cs` (19 cases):
+
+- Reader 1 must fire: `Reader1_ALinkThatIsNotItsOwnInvoice_IsWithheld_AndTheInvoiceIsNotAsked` (contact, flagged systemuser; the invoice's
+  Stored Files are not read), `Reader1_TheAssistantTools_HideARowLinkedToAnInvoiceThatIsNotItsOwn` (control: the own row is visible).
+- Reader 1 must not fire: `Reader1_AnAgreeingLink_OrNoLink_IsDecidedAsBefore` (agreeing link, unlinked Spa, unlinked Internal; no event).
+- Reader 2 must fire: `Reader2_ARowLinkedToAnInvoiceThatIsNotItsOwn_AddsNothingToIt` (a Restricted document, an empty Internal link, an
+  unknown channel; the document is not read).
+- Reader 2 must not fire: `Reader2_TheOwnSubmissionsDocument_StillDecidesTheInvoice` (source_hidden, no event).
+- `Reader2_ARowWhoseIdCannotBeRead_HidesTheInvoice`; `TheEvent_CarriesOnlyItsCodeAndTheIds` (keys exactly EventCode, SubmissionId, InvoiceId).
+
+Fixture: `InvoiceWorld.NewInvoice()` returns an invoice id derived from a new submission id; the first submission seeded on it without an
+explicit id is that own submission (later ones only point at it). Existing tests that seed a submission on an invoice now use derived ids, as
+the persister writes them. `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` became
+`ConfirmRoute_AnotherSubmissionWhoseDocumentLinkIsEmpty_LeavesTheInvoiceVisible` in the pass 1 fix round (section 6).
+One expectation changed: `UnlinkedOrRepointed_StaysWithheld_ByItsOwnInvoicesMarker` ("repointed") stays withheld after the commit, with
+`invoice_link_not_own`. `NewService` takes an optional logger.
+
+Fixtures outside the visibility tests, same reason (their ids were not derived, a shape the persister never writes):
+`InvoiceSubmissionPersisterTests.ProjectForTheFirm` seeds the committed submission under its own id;
+`InvoiceSubmissionEndpointsContractTests` derives `HiddenInvoice` and the 097f `Old`/`New`/`Second`/`Other` invoice ids from their submission
+ids (`SubmissionRow` takes an optional id), and the 098 / EB-D-169 cases derive the invoice from the submission. No expectation changed there.
+
+Seeds (each applied, the visibility tests run, then restored byte-identical and rebuilt):
+
+| Seed | Fails |
+|---|---|
+| S1: the own-invoice check dropped from reader 1 | 5 (reader 1 must fire x2, assistant tools, event, repointed) |
+| S2: the own-invoice check dropped from reader 2 | 6 (reader 2 must fire, 3 shapes x 2 callers) |
+
+Gates: see section 4.
+
+## 3. Dev count
+
+Re-run read-only on spaarkedev1 (2026-11-07, Dataverse MCP): 6 linked submissions, 0 whose link is not their own invoice. Nothing for uac-r2.
+
+## 4. Gates and publish size
+
+Filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submission|InvoiceAssignFirm`): 11979 passed, 0 failed, 4 skipped.
+ArchTests: 2122 passed, 0 failed. BFF build: 0 warnings, 0 errors. Before the fixture updates the filtered suite had 13 failures, all
+fixtures whose invoice ids were not derived (section 2).
+
+Publish size: section 5.
+
+Step 9.5 (code-review, adr-check) not run here: the lead runs two adversarial passes after this task.
+
+The other inline copies of the same comparison and a guard against new ones: done in the pass 1 fix round (section 6, K-4).
+
+## 5. Publish size
+
+Fresh short-path worktrees, `dotnet publish -c Release src/server/api/Sprk.Bff.Api/` (framework-dependent, linux-x64), zipped with
+`Compress-Archive -CompressionLevel Optimal`, PDBs included (4 each), 191 files each.
+
+| Build | Zip | Uncompressed |
+|---|---|---|
+| master `23567b2f93` | 41,168,234 B (39.26 MiB) | 136,858,433 B |
+| this branch `86dbc05da4` | 41,451,523 B (39.53 MiB) | 137,737,217 B |
+| Delta | +283,289 B (+0.27 MiB) | +878,784 B |
+
+The delta includes all of `work/ebilling-r1` not yet on master; 165c adds no package, endpoint or registration. Below every threshold
+(+5 MB, 55 MB, 60 MB).
+
+## 6. Pass 1 fix round
+
+| Finding | Change | Test |
+|---|---|---|
+| F3-1: the empty-link shape of the reader 2 must-fire case was masked (the own row's `SpaUpload` also wrote an InvoicePdf, so the invoice stayed visible with the check dropped; only the log assertion failed) | `Reader2_ARowLinkedToAnInvoiceThatIsNotItsOwn_AddsNothingToIt` seeds the own row as Spa with no document and no Stored File, so the visibility assertion proves every shape. `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` duplicated `Internal_AnEmptyDocumentLink_AndNoStoredFile_IsHidden`; it is now `ConfirmRoute_AnotherSubmissionWhoseDocumentLinkIsEmpty_LeavesTheInvoiceVisible` (the own row with a readable document, plus another row with an empty link and no Stored File: visible) | seed S2 below |
+| K-1: reader 2 logged a Warning per row on every read, and a second one when reader 1 had already withheld the row in the same call | `DecideSubmissionsAsync` records the pairs it logs and passes them to the invoice decision (a `DecideAsync` overload; the three-argument one passes none). Reader 2 logs a pair reader 1 already logged at Debug, any other at Warning. One Warning per (submission, invoice) pair per call; the event content is unchanged (`TheEvent_CarriesOnlyItsCodeAndTheIds`, unmodified) | `TheEvent_IsOneWarningPerPairPerCall` (new; fails with reader 2 always at Warning), `TheEvent_OnAnInvoiceDecisionAlone_IsAWarning` (new control) |
+| K-3: the link columns were editable on the submission form | `Deploy-EbillingFormsViews.ps1`: the `links` section lists `sprk_invoice`, `sprk_document` and `sprk_resubmissionof` as `ReadOnly`, like `sprk_vendororg`. No test pinned that section; the script was not run (an operator applies it) | ArchTest `InvoiceSubmissionFormLinksReadOnlyTests` (new: the pin, one must-not-fire and two must-fire parser controls; the pin fails on the previous script) |
+| K-4: six inline copies of the own-submission comparison | `SubmissionOverrideService.cs` (:621, :760, :1661), `InvoiceSubmissionService.cs:846`, `SubmissionEvaluationOutcome.cs:253` and `SubmitInvoiceFromEmailOperation.cs:404` call `InvoiceBlockedHold.IsOwnSubmission`. Behaviour is the same except that `Guid.Empty` on either side now gives false (stricter). Their tests pass unmodified | ArchTest `OwnSubmissionRuleSingleSourceTests` (new): outside `InvoiceBlockedHold.cs` and `InvoiceSubmissionPersister.cs`, no `src/server/**` source uses a direct `InvoiceIdFor(...)` call as an operand of `==` or `!=`; must-fire and must-not-fire controls; the baseline is empty. On the previous sources it reports exactly the six sites. Pass 1 stated this as "no source compares the derived id"; it did not cover a comparison through a local or `Equals` (widened in section 7) |
+
+Seeds (each applied, the tests run, then the file restored byte-identical, checked by hash, and rebuilt):
+
+| Seed | Fails |
+|---|---|
+| S2 again: the own-invoice check dropped from reader 2 | 10: reader 2 must fire, all 6 (3 shapes x 2 callers), each on the visibility assertion; the repurposed confirm-route case x2; the two new event tests |
+| Reader 2 always at Warning | 1: `TheEvent_IsOneWarningPerPairPerCall` |
+| The six sites as before this round | `OwnSubmissionRuleSingleSourceTests` main case (the six sites listed) |
+| The forms script as before this round | `InvoiceSubmissionFormLinksReadOnlyTests` pin |
+
+Gates: filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submission|InvoiceAssignFirm|SubmissionOverride|SubmitInvoiceFromEmail`) 11981 passed, 0 failed, 4 skipped (+2 new); ArchTests 2130 passed, 0 failed (+8 new); BFF build 0 warnings, 0 errors. No package, endpoint or registration added.
+
+## 7. Pass 2 follow-ups
+
+| Finding | Change | Test |
+|---|---|---|
+| K-1: the guard missed a comparison through a local (`var invoiceId = InvoiceIdFor(s); ... link != invoiceId`) or through `Equals`, so three live sites passed it | `InvoiceSubmissionRerun.Signals.cs` (:126 and the findings check at :168), `InvoiceSubmissionRerun.cs` (:330) and `InvoiceSubmissionAfterSteps.cs` (:331) call `InvoiceBlockedHold.IsOwnSubmission`. The locals stay (they are still passed on). Behaviour is the same except that `Guid.Empty` on either side now gives false, and the :331 check also requires the invoice to be the submission's own (on the first-run path it already was; on the resume path the invoice id is read from the link itself, so an unlinked-to-own submission is now refused there too). The :168 check (the stored findings name the invoice) was the one remaining true hit of the extended guard; it is the same rule spelled on the findings' invoice, so it moved too. Their tests pass unmodified | `OwnSubmissionRuleSingleSourceTests` extended |
+| The guard's claim (`InvoiceBlockedHold.IsOwnSubmission` remarks, section 1 and section 6) was wider than what it checked | The remarks and these sections now say what is enforced: a direct `InvoiceIdFor(...)` operand of `==`, `!=` or `Equals` (either side, either spelling), and a local assigned from `InvoiceIdFor(...)` that is an operand of the same within its block (not against `Guid.Empty`, `default` or `null`). Not enforced, stated in the test remarks: a derived id passed to a method that compares it, a comparison through a field or property or a second local, and a comparison on a parameter. The :331 site and the `InvoiceSubmissionRerun.cs` site compare a parameter, so reverting them is not caught | as above |
+| K-3: four `ExternalInvoiceVisibilityTests.RerunPending.cs` cases seeded `Guid.NewGuid()` invoices with `SpaUpload`, which is no submission's own invoice | Seeded with `_world.NewInvoice()` (a derived id), so the rows are the invoice's own. The assertions are unchanged and pass; none changed meaning (each is about the firm hold, which the own-submission rule does not touch) | the same four tests |
+| K-2: reader 2 logged a Warning for a row it met alone | Information (still the code and the two ids only). Reader 1 stays at Warning; a pair reader 1 already logged stays at Debug | `TheEvent_OnAnInvoiceDecisionAlone_IsInformation` (renamed from `_IsAWarning`; asserts Information 1, Warning 0, Debug 0) |
+
+Controls added: must fire - a local compared with `!=` and `==` (either side), `Equals` on a local (three spellings), `Equals` on the call itself (four spellings and a nested one);
+must not fire - a local only written, passed, interpolated, copied or compared with `Guid.Empty`/`default`/`null`; the same name as a parameter in another method of the same
+file or as a different local in another file; a name inside a string.
+
+Seed: the :126 comparison of `InvoiceSubmissionRerun.Signals.cs` put back as it was; `NoServerSource_ComparesADerivedInvoiceId_OutsideTheRule` failed naming `InvoiceSubmissionRerun.Signals.cs:126`; restored.
+
+rework: none task 165c
+
+## 8. Task 165e — decides only from the invoice's own submission, failing closed
+
+Task 165e (scope confirmed by uac-r2 2026-11-07, with additions (a)-(c)). Rigor FULL. Branch `task/ebilling-165e` from `work/ebilling-r1` at
+`e6f413514f`.
+
+### 8.1 What changed
+
+`ExternalInvoiceVisibility` only; no schema, field-security, endpoint, DI registration, package or client change. No new query: the
+submissions linked to the asked invoices are read in the same batch as before (one read per 50 invoices).
+
+| Site | Change |
+|---|---|
+| Reader 2 (`ReadSubmissionSourcesAsync`, inside `DecideAsync`) | An invoice whose submissions were read whole, and none of which is its own (`InvoiceBlockedHold.IsOwnSubmission`, the one rule; no copy), is hidden with the new reason `OwnSubmissionMissing` (`own_submission_missing`). A row whose id cannot be read keeps its 165c reason (`source_link_unreadable`) and is not reported as missing, since it may be the own row. A chunk the read could not use (truncated, or a row the filter cannot produce) has already hidden its invoices and reports nothing more |
+| `ReadRowsOfInvoicesAsync` | Also returns the invoices whose chunk was read whole (used only by the reader 2 check above) |
+| Reader 1 (`DecideSubmissionsAsync`) | Unchanged decision order. A submission that takes its invoice's verdict is withheld with `own_submission_missing` when the invoice read gives that reason (every invoice reader 1 asks is its submission's own, after the 165c withhold) |
+| `InvoiceHiddenReason`, `CodeOf` | `OwnSubmissionMissing` / `own_submission_missing` |
+
+An own submission linked to another invoice (criterion (b)) is not among the rows linked to its invoice, so that invoice is hidden by the
+same check; the submission itself stays withheld by 165c (`invoice_link_not_own`). An own submission that is found but cannot be read
+(its id, or its channel) hides the invoice through the existing checks. A read fault throws, and the caller-aware seams
+(`HideInvoicesForAsync`, `HideSubmissionsForAsync`) hide every asked invoice or withhold every asked submission, as before (criterion (a)).
+Internal systemusers are not decided by this predicate (unchanged; no read).
+
+**Event.** `ebilling.visibility.own_submission_missing` (`ExternalInvoiceVisibility.OwnSubmissionMissingEvent`), ids only, with 165c's level
+split: reader 1 logs (submission, invoice) at Warning; reader 2 logs the invoice id at Information, or at Debug when reader 1 of the same call
+reports it. Reader 1 passes the invoices it asks to the invoice decision (a fifth `DecideAsync` argument) so reader 2 knows to log at Debug.
+Reader 1 logs only when `own_submission_missing` is the invoice's recorded reason; an invoice already hidden by its Stored Files keeps
+that reason, and reader 2 then logs the missing own submission at Information, so it is never logged at Debug alone.
+
+**Escalation check (POML trigger).** Not fired. The only server writer of `sprk_invoice` rows is `InvoiceSubmissionPersister` (through
+`InvoiceLifecycleService.BuildInvoiceCreateRequest`), which creates the invoice under `InvoiceIdFor(submissionId)` and links that submission
+to it in the same transaction, for both channels and for a Correction (a Correction is a new submission with `sprk_resubmissionof`, and its
+invoice derives from that new submission). The re-run updates an existing invoice. The client creates no invoice (task 052).
+
+### 8.2 Tests
+
+New, `ExternalInvoiceVisibilityTests.OwnSubmissionRequired.cs` (18 cases):
+
+- Must fire: `NoOwnSubmission_HidesTheInvoice` (no submission, or only another submission; a sourceless InvoicePdf that would show it
+  otherwise; contact and flagged systemuser); `AnUnreadableOwnSubmission_HidesTheInvoice` (its id, or its channel, cannot be read).
+- Must not fire: `AnInvoiceWithItsOwnSubmission_IsShown` (no event; an internal systemuser still sees an invoice without one).
+- (a): `Reader2_TheOwnSubmissionReadFaults_HidesTheInvoice`, `Reader1_TheOwnSubmissionReadFaults_WithholdsTheSubmission` (both faulted).
+- (b): `AnOwnSubmissionLinkedToAnotherInvoice_HidesTheInvoice` (control: the other invoice, with its own submission, stays visible).
+- Reader 1 and the event: `Reader1_TheInvoicesOwnSubmissionNotFound_IsWithheld_OneWarningPerPair`,
+  `Reader1_AnInvoiceHiddenForAnotherReason_StillLogsTheMissingOwnSubmission`, `TheOwnMissingEvent_CarriesOnlyItsCodeAndTheId`.
+
+Fixtures (same reason as 165c section 2: shapes the persister never writes). `InvoiceWorld.OwnedInvoice()` (new) seeds an invoice with its
+own submission on the Spa channel and no document, so the Stored Files still decide it; the 44 tests that seeded a bare `Guid.NewGuid()`
+invoice for the Stored File rules use it, and the taint-closure case uses it for every table but the submission table (whose family row is
+the own submission). `InvoiceSubmissionRerunTests.Job.PartnerDecisionAsync` answers the submission read with the submission itself (Spa,
+never a source). No expectation changed.
+
+Seed: the check dropped from reader 2 (applied, the visibility tests run, restored byte-identical by hash, rebuilt): 8 fail (must fire x4,
+(b), the two reader 1 cases, the event case).
+
+### 8.3 Dev count (criterion (c))
+
+Read-only on spaarkedev1 (2026-11-08, Dataverse MCP): 6 invoices (2 of them Corrections, 5 Internal and 1 Spa submission), 10 submissions
+(6 linked, 4 not yet linked). Each of the 6 invoices has its own submission linked to it (`InvoiceIdFor` recomputed for every linked
+submission); none of the 4 unlinked submissions derives an existing invoice. Invoices that become hidden: **0**. Re-count at the dev deploy.
+
+### 8.4 Gates
+
+Filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submission`): 12038 passed, 0 failed, 4 skipped. Before the fixture
+updates it had 59 failures, all fixtures with no own submission (section 8.2). BFF build: 0 warnings, 0 errors. ArchTests: 2132 passed, 0
+failed (`OwnSubmissionRuleSingleSourceTests` included; no derived-id comparison added). No package, endpoint or registration added.
+
+Step 9.5 (code-review, adr-check) not run here: the lead runs two adversarial passes after this task.
+
+rework: none task 165e
+
+## 9. Task 165f — decides only from the submission's own document
+
+Task 165f (assigned by uac-r2 2026-11-07). Rigor FULL. Branch `task/ebilling-165f` from `work/ebilling-r1` at `a3d1dfebad`.
+
+### 9.1 What changed
+
+`ExternalInvoiceVisibility` only; no schema, field-security, endpoint, DI registration, package or client change. The rule is the
+persister's existing one, `InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId)` (a document is a source only
+for a submission derived from it), called, not copied.
+
+| Site | Change |
+|---|---|
+| Reader 1 (`DecideSubmissionsAsync`) | After the firm withhold and the 165c invoice-link withhold: an Internal submission whose document link is a GUID that is not its own document is decided as if it had no document (withheld, `source_link_unreadable`), and the document is not read. A link that is not a GUID is decided as before |
+| Reader 2 (`ReadSubmissionSourcesAsync`) | The invoice's own Internal submission naming a document that is not its own document adds no source; the invoice is decided as for an empty link (its InvoicePdf decides; with none it is hidden) |
+| Reader 1, 165e K1 | A submission with no invoice link whose own invoice (`InvoiceIdFor`, as `InvoiceKeysOf` names it) exists takes that invoice's verdict, as a linked one does. Existence is read app-only through the predicate's OData reader (`sprk_invoices`, key only, one read per 50 such submissions, `ReadExistingInvoicesAsync`). A row the filter cannot produce counts its chunk as existing (decided by the invoice, fail closed). A submission whose invoice does not exist yet (Received, Processing) is decided by channel, as before |
+| `DecideAsync` (internal overload) | Takes the (submission, document) pairs reader 1 logged, for the level split |
+
+**Event.** `ebilling.visibility.document_link_not_own` (`ExternalInvoiceVisibility.DocumentLinkNotOwnEvent`), the code and the submission
+and document ids only. Reader 1 logs at Warning; reader 2 at Information, or at Debug for a pair reader 1 of the same call logged.
+
+**Fail closed.** Every read here throws on a fault, and the caller-aware seams hide every asked invoice or withhold every asked submission
+(the existence read included).
+
+**Component justification (CLAUDE.md §11) for `ReadExistingInvoicesAsync`, a private helper.** (1) Existing: `ReadFirmHeldInvoicesAsync`
+reads the same rows but answers only "held"; `ReadLinksAsync` reads family rows by id but needs an invoice link column. (2) Extension: the
+firm-hold reader's delegate would change type at every binding; this helper reuses the predicate's existing app-only reader and chunking, with
+no new delegate, binding or registration. (3) Cost of doing nothing: a submission with no invoice link whose invoice exists is decided by
+channel alone, not by its invoice (165e pass 1, K1).
+
+**Escalation check (POML trigger).** Not fired. The only server writer of `sprk_invoicesubmission.sprk_document` is the confirm /
+from-document intake (`InvoiceSubmissionService`, the submission created under `ExistingDocumentSubmissionIdFor(documentId, generation)`,
+Corrections included); the from-email route creates its submission with no document; the upload routes write none. Dev data agrees (9.3).
+
+### 9.2 Tests
+
+New, `ExternalInvoiceVisibilityTests.OwnDocument.cs` (41 cases):
+
+- Reader 1 must fire: `Reader1_ADocumentThatIsNotItsOwn_ContributesNothing` (withheld as if no document; the document is not read; one
+  Warning), `Reader1_TheAssistantTools_HideARowNamingADocumentThatIsNotItsOwn` (control: the row derived from the document is visible).
+  Must not fire: `Reader1_ItsOwnDocument_StillDecidesIt` (readable visible, Restricted withheld; no event).
+- Reader 2 must fire: `Reader2_ADocumentThatIsNotItsOwn_ContributesNothing` (with a sourceless InvoicePdf: visible; with none: hidden,
+  `source_link_unreadable`; the document is not read; Information only). Must not fire: `Reader2_ItsOwnDocument_StillDecidesTheInvoice`.
+- Read faults: `Reader1_AReadFault_WithholdsTheSubmission` (the document read, the existence read), `Reader1_TheToolsRowReadFaults_Throws`,
+  `Reader2_AReadFault_HidesTheInvoice` (the submission read, the document read). All faulted.
+- Event: `TheDocumentEvent_CarriesOnlyItsCodeAndTheIds`, `TheDocumentEvent_IsOneWarningPerPairPerCall` (Warning once, Debug once).
+- K1: `K1_AnUnlinkedSubmission_WhoseOwnInvoiceIsHidden_IsWithheld` (a Spa row: linked since its view was read, the invoice's source
+  Restricted; or the invoice with no own submission linked), `K1_TheAssistantTools_DecideAnUnlinkedRowByItsOwnInvoice`. Controls:
+  `K1_AnUnlinkedSubmission_WhoseOwnInvoiceIsVisible_IsVisible`, `K1_ASubmissionWithNoInvoiceYet_IsDecidedByChannel` (Received and
+  Processing, Spa and an own readable document: visible, no invoice decided).
+
+Fixtures (same reason as 165c section 2: shapes the intake never writes). `InvoiceWorld.NewInvoice()` derives its own submission from a
+reserved document id (`OwnDocumentOf`); `SubmissionSource`, `FamilyRow` and `PendingSubmission` name that own document; `SubmissionFor(document)`
+gives the derived submission id; `SubmissionEml` takes an optional id. Tests whose Internal rows named a document under a random submission
+id now derive the id from the document (main visibility file, 165c file, and `InvoiceSubmissionEndpointsContractTests.SubmissionRow`, whose
+default id is now derived from its document). Changed expectations, both from K1: `NoInvoice_Spa_IsVisible` and
+`NoFirm_Spa_IsWithheld_AndASpaRowWithAFirmIsVisible` expected no read; each now expects exactly one `sprk_invoices` existence read (for the
+firmless row, none). `ThePageOfSubmissions_IsDecidedInBatchedReads_NotOnePerSubmission` also asserts one existence read for the page.
+Before the fixture updates the filtered suite had 54 failures, all such fixtures or those two read-count expectations.
+
+Guard: `OwnSubmissionRuleSingleSourceTests` takes the derivation as a parameter (same mechanics, same blind spots, see its remarks) and adds
+`NoServerSource_ComparesADerivedDocumentSubmissionId_OutsideTheRule`: outside `InvoiceSubmissionService.cs`, no `src/server/**` source compares
+`ExistingDocumentSubmissionIdFor(...)` or a local assigned from it. Baseline empty. Controls: must fire (direct, through a local, `Equals`),
+must not fire (derivation, passing on, guard against `Guid.Empty`, the shared rule, a comment), and the rule's file defines both methods.
+
+Seeds (each applied, the tests run, the file restored byte-identical by SHA-256 and rebuilt):
+
+| Seed | Fails |
+|---|---|
+| S1: the own-document check dropped from reader 1 | 5 (reader 1 must fire x2, the tools case, the event case, the one-Warning case) |
+| S2: the own-document check dropped from reader 2 | 5 (reader 2 must fire x4, the one-Warning case) |
+| S3: the own-invoice existence lookup dropped from reader 1 (K1) | 7 (K1 must fire x4, the tools case, the visible control x2) |
+| S4: guard must fire, `SubmissionEvaluationOutcome.cs:197` written as `ExistingDocumentSubmissionIdFor(source) != row.Id` | 1: the new guard, naming `SubmissionEvaluationOutcome.cs:197` |
+
+### 9.3 Dev count
+
+Read-only on spaarkedev1 (2026-11-08, Dataverse MCP): 10 submissions; **0** carry a document link, so **0** fail the rule. 4 have no invoice
+link; their own invoices (`InvoiceIdFor` recomputed, checked against a linked row) do not exist: **0** submissions with no invoice link whose
+own invoice exists. 6 invoices. Nothing changes visibility on dev today. Re-count at the dev deploy.
+
+### 9.4 Gates
+
+Filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submission`): 12079 passed, 0 failed, 4 skipped (+41 new). BFF
+build: 0 warnings, 0 errors. ArchTests: 2146 passed, 0 failed (+4 new guard cases in `OwnSubmissionRuleSingleSourceTests`). No package,
+endpoint or registration added.
+
+Step 9.5 (code-review, adr-check) not run here: the lead runs two adversarial passes after this task.
+
+### 9.5 Fix round 1
+
+Review findings F3-1, F3-2, K2-1, K3-1. Test and guard changes only; `ExternalInvoiceVisibility` is unchanged.
+
+- **F3-1, F3-2, sibling name.** In the no-firm cases whose row names a document (`NoFirm_TheAssistantTools_...` `internal-readable-document`,
+  `External_list_withholds_a_returned_submission_with_no_firm` `internal-with-document`, and
+  `NoFirm_Internal_WithAReadableDocument_IsWithheld_...`) the firmless row had a random id with the shared document, so the own-document rule
+  withheld it whether or not the firm check ran. Each firmless row now has its own readable document and the id derived from it, so only the
+  firm check can withhold it. The sibling's name is now true; its `firm_missing=1` reason assertion is kept.
+  Seed: `HasNoFirm` removed from the firm withhold in `DecideSubmissionsAsync`; 11 cases fail, including `internal-readable-document`,
+  `internal-with-document` and the sibling x2; restored byte-identical.
+- **K2-1.** `IsComparedBefore`, `IsComparedAfter` and `IsLocalCompared` skip grouping parentheses (a balanced `(`...`)` pair around only the
+  operand, not a call's) and whitespace. New cases: must fire `(ExistingDocumentSubmissionIdFor(d)) == s`, `s != (X.ExistingDocumentSubmissionIdFor(d))`,
+  `( ( ... ) ) != s`, the parenthesised local `((e) == s)`, `s != ( e )`, `(e).Equals(s)`, and the invoice derivation; must not fire a
+  parenthesised derivation that is passed on, returned, guarded against `Guid.Empty`, or wrapped in a call that is itself compared. Seed:
+  grouping skip disabled; the must-fire case fails, the rest pass.
+  Known limits of the scan (a full fix needs a Roslyn analyzer): `is var` patterns, `.Contains` on a set of derived ids, `CompareTo`, a
+  derivation re-spelled through `InvoiceSubmissionPersister.IdOf` literals, and the exempt files.
+- **K3-1.** New in `ExternalInvoiceVisibilityTests.OwnDocument.cs` (9 cases): a row the filter cannot produce (another id, or no id) in the
+  existence read withholds the submission (control: without it the Spa submission is visible); 60 unlinked submissions read two chunks, both
+  are read and each chunk's invoice decides its submission; a fault in the second chunk faults the decision and withholds that chunk's
+  submissions (and, the decision being one, the page). `InvoiceWorld` gained `Stray` and `FaultOn` hooks. Seeds: stray row ignored, 4 fail;
+  only the first chunk used, 2 fail; each restored byte-identical.
+  **Known limit, cost log.** The existence read is not counted in `InvoiceVisibilityCost`, so it is absent from the per-request cost line.
+  Counting it is not a one-line change (the helper returns the set only, the cost object is created after it, and the log template in
+  `ExternalDataService` lists each counter), so it is left; the firm-hold read has the same gap today. Both reads are one per 50 ids.
+
+### 9.6 165f guard follow-up
+
+Guard and test changes only (`OwnSubmissionRuleSingleSourceTests.cs`, one assertion in `ExternalInvoiceVisibilityTests.OwnDocument.cs`); nothing under `src/` changed.
+
+- **Lambda arrow.** `IsCallParen` no longer treats the `(` after `=>` as a call, so `x => (ExistingDocumentSubmissionIdFor(d)) == s` (and an expression-bodied member) is caught. Control: a generic call `Get<Guid>(D(d)) == s` keeps its parenthesis as a call, so it does not fire.
+- **Wrapped `Equals`.** The grouping-parenthesis skip (now `Widen`) is also applied to an `Equals` argument and an `Equals` receiver: `Equals((D(d)), s)`, `s.Equals((D(d)))`, `(D(d)).Equals(s)` fire; `Equals((Pick(d)), s)` and a derivation nested in another call do not. The receiver form was added with the argument form, as one change to the same helper (justification for going past the two named cases: a wrapped receiver is the same blind spot).
+- **Cast operand.** A parenthesised type name directly before an operand (`(Guid?)`, `(System.Guid?)`) is skipped like a grouping parenthesis, for a call and for a tracked local. It adds no hit on the existing server source (the real-code scan passes). Controls: a cast that is only assigned, passed on, returned or chosen does not fire.
+- **Exemption narrowed.** `InvoiceSubmissionService.cs` is scanned like any other file; only the span of `IsExistingDocumentSubmissionIdOf` (located by its signature and matched braces, `RuleSpan`) is left out. The derivation's own definition needs no exemption (it is not a comparison). `RuleSpan` throws if the signature is not found exactly once or the body is not closed; `TheDocumentRulesFile_Exists_AndDefinesTheRule` also asserts the span is a real body. Seed: `internal static bool SeedProbe(Guid x, Guid y) => ExistingDocumentSubmissionIdFor(x) == y;` added outside the rule method; the guard failed at that line; reverted (file identical to its base), the guard passed.
+- **Fixtures added (7):** lambda must-fire and must-not-fire, wrapped `Equals` must-fire and must-not-fire, cast must-fire and must-not-fire, and the rule-file span fixture (a comparison elsewhere in the file is reported, the rule method's own is not, a missing rule method throws). Seed: the lambda, cast and wrapped-`Equals` changes each disabled, the three must-fire fixtures fail and the rest pass; restored.
+- **Fault-path tests (item 5).** Checked by temporarily changing the two `ReadFailed(asked)` returns in `ExternalDataService.HideInvoicesForAsync` / `HideSubmissionsForAsync` to `NotHidden(asked)`: `Reader1_AReadFault_WithholdsTheSubmission` (4 cases), `Reader2_AReadFault_HidesTheInvoice` (4) and `K3_AFaultInTheSecondChunk_WithholdsItsSubmissions` (2) all fail, so none is vacuous; restored. `Reader1_TheToolsRowReadFaults_Throws` asserted `ThrowAsync<Exception>`, which any setup error would satisfy; it now asserts `ExternalDataService.DataverseUnavailableException` (one line). Seed: the row read swallows `DataverseUnavailableException` and returns no rows; the test fails ("no exception was thrown"); restored. The stray-row test (`K3_AStrayRowInTheExistenceRead_...`) is not a fault-path test and was already seeded in fix round 1.
+- **Known limits that remain.** A local assigned from a cast of the derivation (`var a = (Guid?)D(d);`, then `a == s`) is not tracked, because the local's assignment pattern is a plain call. The limits listed in 9.5 stand (a derived id passed to another method that compares it, a field or property, a second local copied from the first, `is var` patterns, `.Contains`, `CompareTo`, a derivation re-spelled through `IdOf` literals). A full fix needs a Roslyn analyzer.
+
+rework: none task 165f

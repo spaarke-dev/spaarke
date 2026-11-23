@@ -17,10 +17,12 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// </remarks>
 internal sealed class MappingSourceReader
 {
-    private MappingSourceReader(CallerRecordAccessProbe? probe, string? callerBearerToken)
+    private MappingSourceReader(
+        CallerRecordAccessProbe? probe, string? callerBearerToken, Func<Guid, CancellationToken, Task<bool>>? documentShown)
     {
         Probe = probe;
         CallerBearerToken = callerBearerToken;
+        DocumentShown = documentShown;
     }
 
     /// <summary>The caller-rights probe, or <see langword="null"/> for the system principal.</summary>
@@ -29,15 +31,26 @@ internal sealed class MappingSourceReader
     /// <summary>The caller's bearer token (OBO input). Never logged.</summary>
     internal string? CallerBearerToken { get; }
 
+    /// <summary>
+    /// Task 043 (owner 2026-11-04): whether THE external document narrowing (<c>InternalPlaneDocumentNarrowing</c>) shows a
+    /// document to this caller, as the ROUTE decided it, or <see langword="null"/> when the route gave no answer. With no
+    /// answer a <c>sprk_document</c> source is not mapped (as before this task). Asked only for a document source, only after
+    /// the caller's Read has allowed it, and before the document is read app-only. <see langword="false"/> and a throw both
+    /// mean "not shown".
+    /// </summary>
+    internal Func<Guid, CancellationToken, Task<bool>>? DocumentShown { get; }
+
     /// <summary>True for the system principal: the source is read app-only without a caller probe.</summary>
     internal bool IsSystem => Probe is null;
 
     /// <summary>A system creator (generation job, playbook node, ingestion, the repair pass): reads app-only.</summary>
-    internal static MappingSourceReader System { get; } = new(null, null);
+    internal static MappingSourceReader System { get; } = new(null, null, null);
 
-    /// <summary>A caller: the source is read only after <see cref="MappingSourceReadProbe.CheckCallerReadAsync"/> answers Read.</summary>
-    internal static MappingSourceReader ForCaller(CallerRecordAccessProbe probe, string? callerBearerToken)
-        => new(probe ?? throw new ArgumentNullException(nameof(probe)), callerBearerToken);
+    /// <summary>A caller: the source is read only after <see cref="MappingSourceReadProbe.CheckCallerReadOfSourceAsync"/>
+    /// answers Read and, for a document, <paramref name="documentShown"/> shows it.</summary>
+    internal static MappingSourceReader ForCaller(
+        CallerRecordAccessProbe probe, string? callerBearerToken, Func<Guid, CancellationToken, Task<bool>>? documentShown = null)
+        => new(probe ?? throw new ArgumentNullException(nameof(probe)), callerBearerToken, documentShown);
 }
 
 /// <summary>A resolved mapping source: the record whose fields a new record inherits (FR-03).</summary>
@@ -62,7 +75,8 @@ internal enum CallerReadDecision
     /// <summary>The caller holds Read.</summary>
     Allowed,
 
-    /// <summary>The type is not in <see cref="EntityAccessFilter.TryResolveEntitySet"/>'s table, so its access cannot be evaluated.</summary>
+    /// <summary>The type is not in <see cref="EntityAccessFilter.TryResolveEntitySet"/>'s table (for a mapping source: nor the
+    /// Document table), so its access cannot be evaluated.</summary>
     EntityTypeNotAuthorizable,
 
     /// <summary>The probe threw (not a cancellation of <c>ct</c>).</summary>
@@ -125,6 +139,38 @@ internal static class MappingSourceReadProbe
     internal const string SourceUnavailableWarning =
         "The related record is not available to you, so no fields were copied from it.";
 
+    /// <summary>The Document table's logical name: the one mapping source outside <see cref="EntityAccessFilter"/>'s map (task 043).</summary>
+    internal const string DocumentLogicalName = "sprk_document";
+
+    /// <summary>True when <paramref name="entityLogicalName"/> names the Document table (trimmed, any case, as the map compares).</summary>
+    internal static bool IsDocumentSource(string? entityLogicalName) =>
+        string.Equals(entityLogicalName?.Trim(), DocumentLogicalName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 043 (owner 2026-11-04): THE entity set of a field-mapping source, shared by the three mapping-source readers
+    /// (<see cref="CheckCallerReadOfSourceAsync"/>, <see cref="MappingSourceCallerMask.ApplyAsync"/> and the push's source
+    /// check). <see cref="EntityAccessFilter.TryResolveEntitySet"/> first, so every table in that map resolves exactly as
+    /// before; then <c>sprk_document</c> to the Document access path's set (<see cref="FinanceAuthorizationFilter.DocumentEntitySet"/>).
+    /// Any other table is a miss. The association lockstep map itself is unchanged: upload, record-route and Compose
+    /// authorization still find no document entry in it.
+    /// </summary>
+    internal static bool TryResolveSourceEntitySet(string? entityLogicalName, out string entitySet)
+    {
+        if (EntityAccessFilter.TryResolveEntitySet(entityLogicalName, out entitySet))
+        {
+            return true;
+        }
+
+        if (IsDocumentSource(entityLogicalName))
+        {
+            entitySet = FinanceAuthorizationFilter.DocumentEntitySet;
+            return true;
+        }
+
+        entitySet = string.Empty;
+        return false;
+    }
+
     /// <summary>
     /// The caller's Read decision on (<paramref name="entityLogicalName"/>, <paramref name="recordId"/>) — the shared
     /// sequence (entity-set resolve → caller-rights probe → <c>HasRequiredRights(rights, "read")</c>) with its exception
@@ -152,6 +198,36 @@ internal static class MappingSourceReadProbe
             return new CallerReadCheck(CallerReadDecision.EntityTypeNotAuthorizable, string.Empty, AccessRights.None, null);
         }
 
+        return await AskReadAsync(probe, callerBearerToken, entitySet, recordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 043: <see cref="CheckCallerReadAsync"/> for a FIELD-MAPPING SOURCE: the same decision over
+    /// <see cref="TryResolveSourceEntitySet"/>, so a <c>sprk_document</c> is asked on the Document access path's set. The
+    /// quick-create filter keeps <see cref="CheckCallerReadAsync"/>, so its responses are unchanged (NFR-07). Never throws
+    /// except a cancellation of <paramref name="ct"/>.
+    /// </summary>
+    internal static async Task<CallerReadCheck> CheckCallerReadOfSourceAsync(
+        CallerRecordAccessProbe probe,
+        string? callerBearerToken,
+        string? entityLogicalName,
+        Guid recordId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+
+        if (!TryResolveSourceEntitySet(entityLogicalName, out var entitySet))
+        {
+            return new CallerReadCheck(CallerReadDecision.EntityTypeNotAuthorizable, string.Empty, AccessRights.None, null);
+        }
+
+        return await AskReadAsync(probe, callerBearerToken, entitySet, recordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The probe, then <c>HasRequiredRights(rights, "read")</c>, on a resolved entity set (the shared second half).</summary>
+    private static async Task<CallerReadCheck> AskReadAsync(
+        CallerRecordAccessProbe probe, string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct)
+    {
         AccessRights rights;
         try
         {
@@ -201,7 +277,16 @@ internal static class MappingSourceReadProbe
 
         if (reader.Probe is { } probe)
         {
-            var check = await CheckCallerReadAsync(
+            // Task 043 review (K1): a route that carries no document decision can never map from a document, so the
+            // caller-rights probe is not asked. The answer depends only on the route and the table, never on the record.
+            if (IsDocumentSource(source.EntityLogicalName) && reader.DocumentShown is null)
+            {
+                logger?.LogInformation(
+                    "[FIELD-MAPPING-SOURCE] This create carries no document decision for the caller; a document source maps nothing.");
+                return MappingSourceRead.Unavailable;
+            }
+
+            var check = await CheckCallerReadOfSourceAsync(
                     probe, reader.CallerBearerToken, source.EntityLogicalName, source.RecordId, ct)
                 .ConfigureAwait(false);
 
@@ -222,12 +307,24 @@ internal static class MappingSourceReadProbe
 
                 return MappingSourceRead.Unavailable;
             }
+
+            // Task 043 (UAC-r2 task 188): a document is also put to THE external document narrowing, as the route decided it,
+            // before anything of it is read app-only. Not shown, no answer and a fault are the same Unavailable.
+            if (IsDocumentSource(source.EntityLogicalName)
+                && !await IsDocumentShownAsync(reader, source.RecordId, logger, ct).ConfigureAwait(false))
+            {
+                return MappingSourceRead.Unavailable;
+            }
         }
 
         if (columns.Count == 0)
         {
             return new MappingSourceRead(true, null, null);
         }
+
+        // Task 049c (UAC-r2 A2): an Allowed answer that arrives after the read was cancelled (a probe that does not observe its
+        // token) starts no app-only read of the source.
+        ct.ThrowIfCancellationRequested();
 
         Entity? record;
         try
@@ -249,5 +346,43 @@ internal static class MappingSourceReadProbe
         }
 
         return record is null ? MappingSourceRead.Unavailable : new MappingSourceRead(true, record, null);
+    }
+
+    /// <summary>
+    /// The route's answer to the external document narrowing for <paramref name="documentId"/>
+    /// (<see cref="MappingSourceReader.DocumentShown"/>): <see langword="false"/> when the route gave none, when it answers
+    /// "not shown", and when it throws. A cancellation of <paramref name="ct"/> propagates.
+    /// </summary>
+    private static async Task<bool> IsDocumentShownAsync(
+        MappingSourceReader reader, Guid documentId, ILogger? logger, CancellationToken ct)
+    {
+        if (reader.DocumentShown is not { } documentShown)
+        {
+            // Unreachable since review round 1 (ReadAsync returns before the probe when there is no decision); kept as defence in depth.
+            logger?.LogInformation(
+                "[FIELD-MAPPING-SOURCE] This create carries no document decision for the caller; a document source maps nothing.");
+            return false;
+        }
+
+        try
+        {
+            if (await documentShown(documentId, ct).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            logger?.LogInformation(
+                "[FIELD-MAPPING-SOURCE] The external document narrowing does not show the document source; no mapping.");
+            return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "[FIELD-MAPPING-SOURCE] The document decision faulted; no mapping (fail closed).");
+            return false;
+        }
     }
 }

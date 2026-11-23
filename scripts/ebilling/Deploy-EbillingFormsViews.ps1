@@ -11,8 +11,10 @@
     What it does (spec FR-08 / FR-35 / FR-48; tasks/029-wp1-apply-and-export.poml steps 2-3):
       Forms   Rewrites the stub main form of sprk_ebillingsetting, sprk_ratecard, sprk_ratecardrate, sprk_billingcodeset,
               sprk_billingcode, sprk_ruleset, sprk_invoicesubmission, sprk_invoiceapproval, sprk_externalidentifier,
-              sprk_billingexport and sprk_invoicecorrection (all controls read-only) from the table below; the rate card form gets a
-              rates subgrid, the code set form a codes subgrid, the approval form an "Eligible approvers" (N:N contact) subgrid.
+              sprk_billingexport and sprk_invoicecorrection from the table below (the correction form is all read-only; the batch form
+              disables only Sent to AP Date, and its "AP emails" subgrid needs Deploy-EbillingCommunicationBatchLink.ps1 run first); the
+              rate card form gets a rates subgrid, the code set form a codes subgrid, the approval form an "Eligible approvers" (N:N
+              contact) subgrid.
               On the EXISTING sprk_timekeeper, sprk_invoice and sprk_billingevent main forms only the section "section_ebilling" is
               added or refreshed (everything else on those forms is left byte for byte). Read-only (task 014/016 constraint):
               the five invoice totals and sprk_billingevent.sprk_amount (the Adjustment line amount is computed by
@@ -82,7 +84,7 @@ $Spec = [ordered]@{
             @{ Name = 'approvers'; Label = 'Approver defaults (used when a record has no approver role)'; Cols = 'sprk_matterapproverroles', 'sprk_projectapproverroles', 'sprk_workassignmentapproverroles' }
             @{ Name = 'reliability'; Label = 'Reliability and confidence weights'; Cols = 'sprk_reliabilitythreshold', 'sprk_weightanalyzer', 'sprk_weightarithmetic', 'sprk_weightreferencematch', 'sprk_weightselfreport', 'sprk_arithmeticfailcap', 'sprk_referencemissingcap' }
             @{ Name = 'processing'; Label = 'Processing'; Cols = 'sprk_codingchunksize', 'sprk_relatedwindowdays', 'sprk_firmnoticeaienabled' }
-            @{ Name = 'apexport'; Label = 'AP export'; Cols = 'sprk_apexportmapping' }
+            @{ Name = 'apexport'; Label = 'AP export'; Cols = 'sprk_apexportemail', 'sprk_apexportmapping' }
         )
         View = 'sprk_name', 'sprk_defaultcodeset', 'sprk_reliabilitythreshold', 'sprk_codingchunksize', 'sprk_relatedwindowdays', 'modifiedon'
     }
@@ -93,7 +95,7 @@ $Spec = [ordered]@{
     }
     sprk_ratecard          = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_sourcedocument', 'ownerid' })
+        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'ownerid' })
         Subgrids = @(@{ Name = 'rates'; Label = 'Rates'; Target = 'sprk_ratecardrate'; Relationship = 'sprk_ratecard_ratecardrate_ratecard' })
         View = 'sprk_name', 'sprk_firm', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_effectivefrom', 'sprk_effectiveto'
     }
@@ -116,15 +118,22 @@ $Spec = [ordered]@{
     }
     sprk_ruleset           = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_domain', 'sprk_scope', 'sprk_firm', 'sprk_visibletofirms', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_sourcedocument', 'statuscode', 'ownerid' }
-            @{ Name = 'notconverted'; Label = 'Source clauses not converted'; Cols = 'sprk_notconverted' })
+        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_domain', 'sprk_scope', 'sprk_firm', 'sprk_visibletofirms', 'sprk_effectivefrom', 'sprk_effectiveto', 'statuscode', 'ownerid' })
+        # Task 116 fix round 1: no not-converted section. Since 116 the list is the Procedure Version's (sprk_procedureversion.sprk_notconvertedlist);
+        # nothing writes sprk_ruleset.sprk_notconverted any more.
         View = 'sprk_name', 'sprk_domain', 'sprk_scope', 'sprk_firm', 'sprk_visibletofirms', 'sprk_effectivefrom', 'sprk_effectiveto', 'statuscode'
     }
     sprk_invoicesubmission = @{
         Form = 'Replace'; FormName = 'Information'
         Sections = @(
-            @{ Name = 'general'; Label = 'Submission'; Cols = 'sprk_name', 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_submissionsequence', 'sprk_vendororg', 'sprk_submitter', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_ponumber', 'sprk_outcomereasoncode', 'sprk_adminattention', 'sprk_correlationid', 'ownerid' }
-            @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument' }
+            @{ Name = 'general'; Label = 'Submission'; Cols = 'sprk_name', 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_submissionsequence', 'sprk_vendororg', 'sprk_submitter', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_ponumber', 'sprk_outcomereasoncode', 'sprk_adminattention', 'sprk_correlationid', 'ownerid'
+                # Task 095c-4: the firm (setting it natively bypasses the pipeline and the tracking scope) and the outcome reason (it holds
+                # the invoice: firm_missing, Blocked) are written only by the BFF's typed writers: disabled on the form.
+                ReadOnly = 'sprk_vendororg', 'sprk_outcomereasoncode' }
+            # Task 165c: the invoice link, the source document and the correction target are written only by the BFF (the submission's own
+            # invoice and its source): read-only on the form, like the firm.
+            @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument'
+                ReadOnly = 'sprk_invoice', 'sprk_document', 'sprk_resubmissionof' }
             @{ Name = 'regarding'; Label = 'Regarding'; Cols = 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingworkassignment' }
             @{ Name = 'findings'; Label = 'Firm notice'; Cols = 'sprk_firmnoticetext' }  # task 122 (#2235): sprk_findingsjson is BFF-only, never on a form
         )
@@ -143,9 +152,16 @@ $Spec = [ordered]@{
     }
     sprk_billingexport     = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_csvdocument', 'sprk_jsondocument', 'ownerid' }
+        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_senttoapdate', 'ownerid'
+                # Task 151c-1a: the BFF is the one writer of the Sent to AP Date (set once, never overwritten): disabled on the form.
+                ReadOnly = 'sprk_senttoapdate' }
             @{ Name = 'mapping'; Label = 'Mapping snapshot'; Cols = 'sprk_mappingsnapshot' })
-        View = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'createdon'
+        # Task 151c-2: the AP emails sent for this batch, through the sprk_communication.sprk_billingexport relationship
+        # (Deploy-EbillingCommunicationBatchLink.ps1, which must have run first). The BFF is the only writer of the link; the view is the
+        # existing "All Outgoing Email" (to, from, subject, sent). A plain related-records subgrid: nothing on the form writes the link.
+        Subgrids = @(@{ Name = 'apemails'; Label = 'AP emails'; Target = 'sprk_communication'; Relationship = 'sprk_communication_billingexport_billingexport'; ViewName = 'All Outgoing Email' })
+        # Task 151c-1b: the Sent to AP Date joins the Active view (a batch's delivery state is visible in the list).
+        View = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_senttoapdate', 'createdon'
     }
     sprk_invoicecorrection = @{
         Form = 'Replace'; FormName = 'Information'; AllReadOnly = $true
@@ -163,7 +179,10 @@ $Spec = [ordered]@{
                 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal'
                 ReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal' })
         # IInvoiceTotalsService is the one owner of the five totals (I-1): disabled, never editable on a form.
-        ForceReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal'
+        # Task 095c-4: the firm is set only by the submission pipeline (and 095d's assign-firm); a native edit would bypass it: disabled.
+        # Task 166 (EB-D-200): the billed total is server-written too (the submission create; the Invoice Review correction), so it is disabled as well.
+        # The quick-create form is not touched by this script: its sprk_totalamount control is disabled in the SpaarkeMaster source.
+        ForceReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal', 'sprk_vendororg', 'sprk_totalamount'
     }
     sprk_billingevent      = @{
         Form = 'Section'; FormName = 'Billing Event main form'
@@ -268,7 +287,22 @@ function Get-ActiveViewId([string]$Table, [string]$Name) {
     return $rows[0].savedqueryid
 }
 
+# Task 151c-2: a subgrid names its relationship in the form XML, and Dataverse accepts a form whose subgrid relationship does not exist
+# (it shows an empty or broken grid). So the relationship is read first, in -WhatIf and in a real run, before any form is written. Cached.
+$script:SubgridRelationshipsChecked = @{}
+function Assert-SubgridRelationship($Sub) {
+    $rel = $Sub.Relationship
+    if ($script:SubgridRelationshipsChecked.ContainsKey($rel)) { return }
+    $r = Get-DvOrNull "RelationshipDefinitions(SchemaName='$rel')?`$select=SchemaName" -Retries 2
+    if (-not $r) {
+        $hint = if ($rel -eq 'sprk_communication_billingexport_billingexport') { 'run Deploy-EbillingCommunicationBatchLink.ps1 first' } else { 'create the relationship first' }
+        throw "The subgrid '$($Sub.Name)' uses relationship '$rel', which does not exist in ${EnvironmentUrl} ($hint). Nothing was written."
+    }
+    $script:SubgridRelationshipsChecked[$rel] = $true
+}
+
 function New-SubgridSectionXml($Table, $Sub) {
+    Assert-SubgridRelationship $Sub
     $seed = "$Table/sub/$($Sub.Name)"
     $viewId = (Get-ActiveViewId $Sub.Target $Sub["ViewName"])
     $label = Esc $Sub.Label
@@ -470,6 +504,11 @@ if ($collateral.Count -gt 0) {
     $collateral | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
 }
 $Evidence['collateralBefore'] = @($collateral)
+
+# Task 151c-2: every subgrid's relationship must exist before any form is written (read only; fails in -WhatIf as well).
+foreach ($t in $Spec.Keys) {
+    if ($Spec[$t].ContainsKey('Subgrids')) { foreach ($sub in $Spec[$t].Subgrids) { Assert-SubgridRelationship $sub } }
+}
 
 Write-Host "`n1. Forms"
 foreach ($t in $Spec.Keys) { Write-Host " $t"; Sync-Form $t $Spec[$t] }

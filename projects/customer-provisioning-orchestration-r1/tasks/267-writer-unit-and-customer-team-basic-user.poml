@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="267" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Ontology writer in its own business unit; "Spaarke Basic User" on the customer unit's default team (#2618)</title>
+    <phase>Model 1 dedicated-stamp remediation — follow-up to task 266 (owner decision 2026-11-10)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in H10 and H7b; moves an identity between business units and gives a role to a team holding every customer user (auth, tenant isolation, least privilege).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Least-privilege boundary across two handlers plus a live-data migration path (moving the ACME writer); tags auth and tenant-isolation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes H7b SecureRecordSetupProcedure.cs and its ProcedureVersion; sequential with any other H7b work.</parallel-reason>
+    <deps>266</deps>
+    <tags>provisioning, provisioning-handler, l2-controlplane, auth, tenant-isolation, dataverse, model1-dedicated, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Resolve #2618 per the owner's decision (2026-11-10, option 3 + Basic User): the customer unit's default team gets the customer-unit copy of "Spaarke Basic User" (so it can own ordinary records — Dataverse requires the owner to hold Read), and the ontology writer's application user moves to its own memberless business unit so it inherits nothing from that team.</prompt>
+
+  <role>SPAARKE platform developer (L2 handlers H10 and H7b). Least privilege for the ontology writer is the point; customer users gain nothing new (H11 already gives each of them "Spaarke Basic User").</role>
+
+  <goal>
+    A new stamp run ends with: (1) a business unit "Spaarke Ontology Writer" directly under the root, holding exactly one user — the
+    ontology writer's application user — whose default team holds no role and is in NO field-security profile; (2) that writer holding
+    exactly the WRITER-UNIT copy of "Spaarke Ontology Service" and exactly the two ontology-writer profiles (S24 unchanged otherwise);
+    (3) the customer unit's default team holding the customer-unit copy of "Spaarke Basic User". A run against an environment whose
+    writer sits in the customer unit (ACME, task 266 placement) moves it to the writer unit and S24 re-grants its role.
+  </goal>
+
+  <context>
+    <background>
+      #2618: the deployment guide's external-access row asks for a contact role on the customer unit's default team (ordinary records,
+      contacts included, are owned by that team — ContactIdentityBinder.ResolveCustomerOwnerTeamAsync; I-6). Task 266 put the ontology
+      writer's application user in the customer unit, so it would inherit any role on that team, and S24 refuses (fail-closed).
+      Owner decision 2026-11-10: "Spaarke Basic User" (shipped in SpaarkeMaster; contact/account/matter/project/document/event Read at
+      Deep; H11's DefaultGuestSecurityRoleName, so every customer user already holds it) on the customer default team, AND the writer in
+      a dedicated memberless unit (option 3). The writer's "Spaarke Ontology Service" grants are Global and SignalWriter owns rows by a
+      TEAM (ownerid = resolver answer; owningbusinessunit derives from it), so the writer's unit does not change what it can write and
+      moving it moves no records. ontology-platform-r1 was told 2026-11-10.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/H10DataverseAppUserGraphParityHandler.cs — (8b) reserved names gain the writer unit; new (8c) EnsureCustomerBusinessUnitAsync for the writer unit (reserved: Secure Record + customer name); (10b) creates the writer in the writer unit and moves it from the customer unit; records InterStepState.OntologyWriterBusinessUnitId</file>
+      <file role="modify">.../DataverseAppUserGraphParity/IDataverseAppUserCreator.cs + DataverseWebApiAppUserCreator.cs — optional DataverseAppUserCreationRequest.MoveFromBusinessUnitId (only with SecurityRoleName null): an existing row found in exactly that unit, whose azureactivedirectoryobjectid matches, is PATCHed to BusinessUnitId and read back; Success carries whether it moved</file>
+      <file role="modify">.../DataverseAppUserGraphParity/CustomerBusinessUnitIntake.cs — the writer unit's name is reserved too (first filter, same fold)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/InterStepState.cs + Reconciler/HandlerRunInputs.cs — OntologyWriterBusinessUnitId (producer H10, reader H7b; copy OntologyWriterSystemUserId)</file>
+      <file role="modify">.../SecureRecordSetup/SecureRecordSetupProcedure.cs — S24 checks the writer's own unit; S11/S16 skip the writer unit's default team; new S25 (Basic User on the customer default team); verify for both</file>
+      <file role="modify">.../SecureRecordSetup/ISecureRecordSetupDataverse.cs + DataverseWebApiSecureRecordSetup.cs — ListTeamProfilesAsync(team) (teamprofiles_association)</file>
+      <file role="modify">.../SecureRecordSetup/H7bSecureRecordSetupHandler.cs — pass the writer unit; ProcedureVersion → "secure-setup-procedure=8"</file>
+      <file role="modify">.../SecureRecordSetup/SecureRecordSetupRejectionCodes.cs — new codes</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md — H10 / H7b rows and the external-access row (#2618 resolved)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-21 / least privilege">The writer's unit holds no user but the writer; its default team holds no role and is in no field-security profile; the writer holds only the writer-unit copy of "Spaarke Ontology Service" and the two writer profiles. S11/S16 never add the writer unit's default team to a reader profile; verify fails if it is there.</constraint>
+    <constraint source="T259 / tenant isolation">The writer unit is a DIRECT child of the root and is neither the customer unit nor the Secure Record unit — compared by business-unit ID (Dataverse matches names without case or accents), at H10 (reserved lists both ways) and again at H7b.</constraint>
+    <constraint source="move scope">H10 moves a user ONLY when: SecurityRoleName is null, the row was found by the writer's applicationid, its azureactivedirectoryobjectid equals the writer's principal id, and its current unit is exactly the customer unit. Any other foreign unit stays InForeignBusinessUnit (QuarantineRequired). The BFF app users are never moved. The move is read back.</constraint>
+    <constraint source="S25">S25 resolves exactly one "Spaarke Basic User" in the customer unit (else Resumable naming SpaarkeMaster) and exactly one default team there; refuses QuarantineRequired if that copy holds Read on a codified secure table (config/secure-record-owner-role.json) at Global depth; writes only the missing association; never removes a role from the team.</constraint>
+    <constraint source="H7b idempotency">ProcedureVersion → "secure-setup-procedure=8" with a test that a v7-completed run does not short-circuit (copy the v6→v7 test).</constraint>
+    <constraint source="run-context contract">OntologyWriterBusinessUnitId has one producer (H10), is declared in HandlerRunInputs; RunContextContractTests stay green. A run whose H10 completed before this task lacks it: H7b refuses Resumable "start a new run".</constraint>
+    <constraint source="ontology request">Committed text names identities, units, roles and profiles; no privilege specifics beyond what the guide already states; no client or object ids.</constraint>
+    <constraint source="owner">No live Azure/Dataverse change and no deploy in this task. Moving ACME's writer (a new run, or a hand step) is a separate owner-OK'd action recorded in the T186 run log.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-6)</file>
+      <file>projects/customer-provisioning-orchestration-r1/tasks/266-stamp-ontology-writer-identity.poml (notes: review findings and known limits)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Intake + H10: writer unit name constant (one place, beside OntologyServiceRoleName); reserved both ways; ensure the writer unit; create/adopt/move the writer there; InterStepState + HandlerRunInputs; tests (fresh create, adopt in writer unit, move from customer unit, refuse from any other unit, refuse moved row with wrong object id, name collisions both ways).</step>
+    <step order="2">H7b S24: writer unit resolved by id (exists, parent = root, ≠ customer, ≠ Secure Record, only the writer in it); role copy from the writer unit; extra-access check also refuses the writer unit's default team in any profile; S11/S16 + verify skip it and fail if it is there.</step>
+    <step order="3">H7b S25: Basic User copy on the customer default team, guards per constraints, verify; ProcedureVersion 8.</step>
+    <step order="4">Guide rows; dotnet test control-plane tests; ArchTests; code-review + adr-check; adversarial pass ×2 (auth, tenant-isolation).</step>
+    <step order="5">TASK-INDEX `✅ [done]`; notes; current-task.md; comment on #2618.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any code path proves the writer's unit DOES change what it can write (a BU-scoped privilege in "Spaarke Ontology Service", or a writer that owns rows by user), STOP and tell ontology-platform-r1 and the owner before moving it.</trigger>
+    <trigger>If "Spaarke Basic User" holds Global Read on a codified secure table, STOP (S25 refuses) and report to the owner — do not change the role here.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>EnsureCustomerBusinessUnitAsync (H10's find-or-create-under-root with ID-based reserved check), EnsureAppUserAsync, S23/S24 in SecureRecordSetupProcedure.cs, S11/S16 default-team loops, ListTeamRolesAsync/AssociateTeamRoleAsync.</existing>
+    <extension>Yes — the writer unit is a second call of EnsureCustomerBusinessUnitAsync; S25 extends the procedure as S23 did. New members: DataverseAppUserCreationRequest.MoveFromBusinessUnitId (without it the ACME writer can only be moved by hand and every stamp from task 266 stays blocked); ISecureRecordSetupDataverse.ListTeamProfilesAsync (the only way to prove the writer unit's default team is in no profile — ListProfileTeamsAsync answers per profile, not per team); InterStepState.OntologyWriterBusinessUnitId (H7b has no other input naming the writer unit).</extension>
+    <cost-of-doing-nothing>The customer unit's default team cannot own ordinary records (contacts included) without a role, and any role there reaches the ontology writer, which S24 refuses — so either external-access contact ownership fails or the writer exceeds least privilege (#2618).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">L2 handlers H10 and H7b (S24, S25), the H10 creator seam, the H7b Dataverse seam, InterStepState, HandlerRunInputs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests (H10, creator, intake, procedure, H7b handler, run-context tests)</output>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">H10 creates the writer unit under the root and the writer app user in it (no role); adopts both when present; records OntologyWriterBusinessUnitId.</criterion>
+    <criterion testable="true">H10 moves a writer found in the customer unit (object id matching) to the writer unit and reads the move back; Success reports the move.</criterion>
+    <criterion testable="true">Negative: H10 refuses (QuarantineRequired) a writer in any other foreign unit, a found row with a wrong object id (never moved), a writer unit that resolves to the customer or Secure Record unit, and a customer name that resolves to the writer unit; intake 400s the writer unit's name.</criterion>
+    <criterion testable="true">S24 passes with the writer in its unit holding the writer-unit role copy and both profiles; writes nothing when already configured.</criterion>
+    <criterion testable="true">Negative: S24 refuses a writer unit that is missing, not under the root, equal to the customer or Secure Record unit, or holding another user; a role on its default team; its default team in any field-security profile; a pre-task run with no OntologyWriterBusinessUnitId (Resumable, "start a new run").</criterion>
+    <criterion testable="true">S11/S16 never add the writer unit's default team; verify passes without it and fails when it is present.</criterion>
+    <criterion testable="true">S25 adds "Spaarke Basic User" to the customer default team when absent and writes nothing when present; Resumable when the role copy is missing; QuarantineRequired when it holds Global Read on a codified secure table.</criterion>
+    <criterion testable="true">A v7-completed run does not short-circuit past S24/S25.</criterion>
+    <criterion testable="true">RunContextContractTests and all Sprk.Provisioning.ControlPlane tests pass; ArchTests pass. Test scope: the stated contract plus the negatives above; anything beyond needs a one-line justification in notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-11-10">Created from #2618 after the owner's decision (option 3 + Basic User). Owner said "Build it now".</note>
+    <note date="2026-11-10">Implemented (one opus implementer, Step 8.0: coupled through InterStepState): 416e1697ab code + tests, f84c769001 guide. 3399 control-plane pass / 1 skip; ArchTests 2108. Deviations: BasicUserRoleName reuses H11's constant; schema not-pattern also matches the writer unit name; a wrong-oid writer row is InForeignBusinessUnit with a reason.</note>
+    <note date="2026-11-10">Step 9.5. code-review (main session): no Critical; my items folded into the fix round (oid GUID guard; DoNotRemoveRolesOnChangeBusinessUnit hint). adr-check: no violations (002/010/020/028/038/044 compliant; 001/007/008/009/013/021/052 N/A). Adversarial x2 (opus; tenant-isolation, auth/correctness): C# clean; F = nine operator scripts still added EVERY default team (incl. the writer unit's) to the reader profiles and their -Verify demanded it; F = stale guide H7b row. Rework: one round - 008efdd4dd (shared scripts/common/OntologyWriterUnit.ps1 + nine scripts + OntologyWriterUnitScriptGuardTests), 87d6b531e9 (H10 refuses writer == BffAppRegId; creator move guard needs a GUID oid; S24 kept-on-move hint; behavioural app-user-set=2 re-run test; ArchTests NonLookupCallees += OptionalId, marker removed), 0eff2c8cf6 (guide). Scoped re-check (sonnet): clean on the fix diff; found ebilling scripts with the same loop -> ArchTest now scans scripts/** with a ratchet baseline (1c922dff6b: KnownOffenders = 4 ebilling scripts with reasons, stale-entry check, comment stripping, later-clause and comment-only must-fire controls; guide states per-script exit codes). ebilling-r1 fixes all 7 sites in 6 scripts on work/ebilling-r1 (copying the helper byte-for-byte) and leaves the test to us: whichever merge meets their fix second must DROP their 4 baseline entries (and must not add the money / firm-hold scripts). Final: control plane 3402 pass / 1 skip; ArchTests 2116; Sprk.Bff.Api.Tests SecureFlagFieldSecurity 43 pass. Rework: 1 fix round + 2 follow-ups (census, ratchet).</note>
+    <note date="2026-11-10">Cross-project. ontology-r1: the writer reads NO field-secured column as itself (all writer reads via OntologyWriterDataverseClient; FinanceBaseValues/RuleSetService run as sysadmin) - excluding its unit's team costs it nothing. uac-r2: its live census SecureFlagFieldSecurityAssertion clause 2 falsely flagged the writer unit's team; fixed on this branch at uac-r2's request (77446a5222: exempt only that team, WRITER UNIT READS/AMBIGUOUS/PLACEMENT findings), APPROVED by uac-r2. Pre-merge gate (uac-r2): run the census's new read-only businessunits query on dev before #2618 merges.</note>
+    <note date="2026-11-10">Known limits: K1 H10 adopts an existing root-child unit named "Spaarke Ontology Writer" without checking it is clean (H7b S24 refuses it afterwards, fail-closed). K2 the businessunitid PATCH vs SetBusinessSystemUser is unverified live (refusal or failed read-back = Resumable). K3 an environment that keeps roles on a unit change leaves the customer-unit role on the moved writer -> S24 quarantines with a hint (remove by hand, owner OK). K4 verify does not repeat the S25 Global check or the writer-unit user count (next run catches a concurrent change). K5 on a live stamp the moved writer holds no role between H10 and H7b S24 (guide says so). K6 intake schema not-pattern is ASCII-case only (endpoint folds accents). K7 only Set-ChildRecordCreatorPersonSchema has behavioural Pester cases; the other eight scripts are covered by the source guard. No live change; ACME migration is a separate owner-approved run.</note>
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -129,6 +129,12 @@ describe('Assign Task: Send email notification', () => {
       'The task was assigned, but no email was sent: whether the assignee can see this record could not be checked.'
     );
   });
+
+  it('task 176: an inquiry email that was sent but not archived reads as a sentence, not a code', () => {
+    expect(describeWarning('inquiry_email_not_archived')).toBe(
+      'The inquiry email was sent, but a copy of it could not be saved to the matter.'
+    );
+  });
 });
 
 describe('must not fire', () => {

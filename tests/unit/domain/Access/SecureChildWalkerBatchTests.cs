@@ -56,93 +56,93 @@ public class SecureChildWalkerBatchTests
         switch (name)
         {
             case "no-root":
-            {
-                var bare = Secure(Comm);
-                var underOrdinary = UserOwned(Comm, ("sprk_regardingmatter", "sprk_matter", ordinaryMatter));
-                groups = [G((Comm, bare)), G((Comm, underOrdinary))];
-                break;
-            }
+                {
+                    var bare = Secure(Comm);
+                    var underOrdinary = UserOwned(Comm, ("sprk_regardingmatter", "sprk_matter", ordinaryMatter));
+                    groups = [G((Comm, bare)), G((Comm, underOrdinary))];
+                    break;
+                }
             case "one-root":
-            {
-                var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
-                groups = [G((Comm, c))];
-                break;
-            }
+                {
+                    var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
+                    groups = [G((Comm, c))];
+                    break;
+                }
             case "several-roots":
-            {
-                var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter), ("sprk_regardingproject", "sprk_project", secureProject));
-                var t = Secure(Todo, ("sprk_regardingcommunication", Comm, c), ("sprk_regardingmatter", "sprk_matter", ordinaryMatter));
-                groups = [G((Comm, c)), G((Todo, t)), G((Comm, c), (Todo, t))];
-                break;
-            }
+                {
+                    var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter), ("sprk_regardingproject", "sprk_project", secureProject));
+                    var t = Secure(Todo, ("sprk_regardingcommunication", Comm, c), ("sprk_regardingmatter", "sprk_matter", ordinaryMatter));
+                    groups = [G((Comm, c)), G((Todo, t)), G((Comm, c), (Todo, t))];
+                    break;
+                }
             case "nested-secure":
-            {
-                var e = Secure(Evt, ("sprk_regardingproject", "sprk_project", secureProject));
-                var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter), ("sprk_regardingevent", Evt, e));
-                var t = Secure(Todo, ("sprk_regardingcommunication", Comm, c));
-                groups = [G((Todo, t)), G((Comm, c)), G((Evt, e))];
-                break;
-            }
+                {
+                    var e = Secure(Evt, ("sprk_regardingproject", "sprk_project", secureProject));
+                    var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter), ("sprk_regardingevent", Evt, e));
+                    var t = Secure(Todo, ("sprk_regardingcommunication", Comm, c));
+                    groups = [G((Todo, t)), G((Comm, c)), G((Evt, e))];
+                    break;
+                }
             case "ordinary-under-secure":
-            {
-                var c = Ordinary(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
-                var t = Secure(Todo, ("sprk_regardingcommunication", Comm, c));
-                groups = [G((Todo, t)), G((Comm, c))];
-                break;
-            }
+                {
+                    var c = Ordinary(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
+                    var t = Secure(Todo, ("sprk_regardingcommunication", Comm, c));
+                    groups = [G((Todo, t)), G((Comm, c))];
+                    break;
+                }
             case "user-owned-through":
-            {
-                var c = UserOwned(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
-                var t = Ordinary(Todo, ("sprk_regardingcommunication", Comm, c));
-                groups = [G((Todo, t))];
-                break;
-            }
+                {
+                    var c = UserOwned(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
+                    var t = Ordinary(Todo, ("sprk_regardingcommunication", Comm, c));
+                    groups = [G((Todo, t))];
+                    break;
+                }
             case "missing-parent":
-            {
-                var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", Guid.NewGuid()), ("sprk_regardingproject", "sprk_project", secureProject));
-                var t = Secure(Todo, ("sprk_regardingcommunication", Comm, Guid.NewGuid()), ("sprk_regardingmatter", "sprk_matter", secureMatter));
-                groups = [G((Comm, c)), G((Todo, t)), G((Comm, c), (Todo, t))];
-                break;
-            }
+                {
+                    var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", Guid.NewGuid()), ("sprk_regardingproject", "sprk_project", secureProject));
+                    var t = Secure(Todo, ("sprk_regardingcommunication", Comm, Guid.NewGuid()), ("sprk_regardingmatter", "sprk_matter", secureMatter));
+                    groups = [G((Comm, c)), G((Todo, t)), G((Comm, c), (Todo, t))];
+                    break;
+                }
             case "flagged-not-isolated":
-            {
-                var flagged = Root(w.FlaggedNotIsolatedRoot, "sprk_matter");
-                var masked = Root(w.MaskedFlagNotIsolatedRoot, "sprk_project");
-                var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", flagged), ("sprk_regardingproject", "sprk_project", secureProject));
-                var d = Secure(Comm, ("sprk_regardingproject", "sprk_project", masked));
-                groups = [G((Comm, c)), G((Comm, d))];
-                break;
-            }
+                {
+                    var flagged = Root(w.FlaggedNotIsolatedRoot, "sprk_matter");
+                    var masked = Root(w.MaskedFlagNotIsolatedRoot, "sprk_project");
+                    var c = Secure(Comm, ("sprk_regardingmatter", "sprk_matter", flagged), ("sprk_regardingproject", "sprk_project", secureProject));
+                    var d = Secure(Comm, ("sprk_regardingproject", "sprk_project", masked));
+                    groups = [G((Comm, c)), G((Comm, d))];
+                    break;
+                }
             case "deeper-than-six":
-            {
-                // e0 -> e1 -> ... -> e7 -> secure matter: from e0 the matter is past the bound; from e3 it is within it.
-                var chain = new Guid[8];
-                chain[7] = Secure(Evt, ("sprk_regardingmatter", "sprk_matter", secureMatter));
-                for (var i = 6; i >= 0; i--)
-                    chain[i] = Secure(Evt, ("sprk_regardingevent", Evt, chain[i + 1]), ("sprk_regardingproject", "sprk_project", secureProject));
-                groups = [G((Evt, chain[0])), G((Evt, chain[3])), G((Evt, chain[1]))];
-                break;
-            }
+                {
+                    // e0 -> e1 -> ... -> e7 -> secure matter: from e0 the matter is past the bound; from e3 it is within it.
+                    var chain = new Guid[8];
+                    chain[7] = Secure(Evt, ("sprk_regardingmatter", "sprk_matter", secureMatter));
+                    for (var i = 6; i >= 0; i--)
+                        chain[i] = Secure(Evt, ("sprk_regardingevent", Evt, chain[i + 1]), ("sprk_regardingproject", "sprk_project", secureProject));
+                    groups = [G((Evt, chain[0])), G((Evt, chain[3])), G((Evt, chain[1]))];
+                    break;
+                }
             case "cycle":
-            {
-                var e1 = Guid.NewGuid();
-                var e2 = Secure(Evt, ("sprk_regardingevent", Evt, e1), ("sprk_regardingmatter", "sprk_matter", secureMatter));
-                w.SecureChild(Evt, e1, ("sprk_regardingevent", Evt, e2));
-                children.Add((Evt, e1));
-                groups = [G((Evt, e1)), G((Evt, e2))];
-                break;
-            }
+                {
+                    var e1 = Guid.NewGuid();
+                    var e2 = Secure(Evt, ("sprk_regardingevent", Evt, e1), ("sprk_regardingmatter", "sprk_matter", secureMatter));
+                    w.SecureChild(Evt, e1, ("sprk_regardingevent", Evt, e2));
+                    children.Add((Evt, e1));
+                    groups = [G((Evt, e1)), G((Evt, e2))];
+                    break;
+                }
             case "signal-and-subject":
-            {
-                // As the worklist places a Signal: the Signal and its subject in one group, the subject also a parent of the Signal.
-                var c1 = UserOwned(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
-                var c2 = Secure(Comm, ("sprk_regardingproject", "sprk_project", secureProject), ("sprk_regardingmatter", "sprk_matter", ordinaryMatter));
-                var s1 = Secure("sprk_signal", ("sprk_regardingcommunication", Comm, c1), ("sprk_matter", "sprk_matter", secureMatter));
-                var s2 = Ordinary("sprk_signal", ("sprk_regardingcommunication", Comm, c2));
-                var s3 = Ordinary("sprk_signal", ("sprk_regardingcommunication", Comm, Guid.NewGuid()));
-                groups = [G(("sprk_signal", s1), (Comm, c1)), G(("sprk_signal", s2), (Comm, c2)), G(("sprk_signal", s3))];
-                break;
-            }
+                {
+                    // As the worklist places a Signal: the Signal and its subject in one group, the subject also a parent of the Signal.
+                    var c1 = UserOwned(Comm, ("sprk_regardingmatter", "sprk_matter", secureMatter));
+                    var c2 = Secure(Comm, ("sprk_regardingproject", "sprk_project", secureProject), ("sprk_regardingmatter", "sprk_matter", ordinaryMatter));
+                    var s1 = Secure("sprk_signal", ("sprk_regardingcommunication", Comm, c1), ("sprk_matter", "sprk_matter", secureMatter));
+                    var s2 = Ordinary("sprk_signal", ("sprk_regardingcommunication", Comm, c2));
+                    var s3 = Ordinary("sprk_signal", ("sprk_regardingcommunication", Comm, Guid.NewGuid()));
+                    groups = [G(("sprk_signal", s1), (Comm, c1)), G(("sprk_signal", s2), (Comm, c2)), G(("sprk_signal", s3))];
+                    break;
+                }
             default:
                 throw new ArgumentOutOfRangeException(nameof(name), name, null);
         }

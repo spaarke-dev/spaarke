@@ -750,6 +750,18 @@ public static class ProjectClosureEndpoint
                 continue;
             }
 
+            if (members.UnreadableRows > 0)
+            {
+                // Fix round 3e: a membership row that did not carry the contact column names a member who cannot be resolved.
+                // It is counted with the other grantees that could not be enumerated or keyed, which is what sends the sweep to
+                // the container-wide confirmation below (and, failing that, reports it not complete).
+                logger.LogError(
+                    "[CLOSE-PROJECT] {Count} membership row(s) of organization {OrganizationId} did not carry the contact column; "
+                    + "those members cannot be resolved and their container permissions may remain.",
+                    members.UnreadableRows, organizationId);
+                unresolved += members.UnreadableRows;
+            }
+
             foreach (var memberId in members.ContactIds)
             {
                 contactIds.Add(memberId);

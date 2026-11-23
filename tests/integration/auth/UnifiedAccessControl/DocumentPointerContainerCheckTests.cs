@@ -477,7 +477,10 @@ public class DocumentPointerContainerCheckTests
     {
         var hierarchy = new Dictionary<Guid, Guid?>
         {
-            [Root] = null, [CustomerA] = Root, [CustomerA1] = CustomerA, [CustomerB] = Root,
+            [Root] = null,
+            [CustomerA] = Root,
+            [CustomerA1] = CustomerA,
+            [CustomerB] = Root,
         };
 
         RecordContainerResolver.CustomerSubtree(CustomerA1, hierarchy).Should().BeEquivalentTo(new[] { CustomerA, CustomerA1 });

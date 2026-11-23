@@ -62,7 +62,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
 
     private static int Mask(string rightsCsv) => RecordShareLevels.MaskForRightsCsv(rightsCsv);
 
-    private static int Mirror => RecordShareLevels.ChildMirrorMask(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights));
+    private static int Mirror => RecordShareLevels.InheritedRootMirrorMask(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights));
 
     private void ShouldBeSecure(Guid id, string because)
     {
@@ -334,6 +334,165 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         row.State.Should().Be(AssignedAccessState.Revoked);
         row.Reason.Should().Be(AssignedAccessReason.AccessRemoved);
         _fixture.ShareMaskOf(workAssignment, Creator).Should().Be(Mask(ProvisionProjectEndpoint.CreatorAccessRights), "the creator is untouched");
+    }
+
+    /// <summary>
+    /// Task 193 G2b: the matter's unshare removes the inherited share on the filed work assignment, and the grant there
+    /// PAIRED with that share ("Add person" on the work assignment) ends with it — the share first, then the grant.
+    /// </summary>
+    [Fact]
+    public async Task G2b_RemovingTheInheritedShare_EndsTheGrantPairedWithIt_OnTheFiledRecord()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        var grants = new AssignedAccessTestDoubles.Harness();
+        var paired = PairedGrantOn(grants, workAssignment);
+
+        var result = await UnshareAsync("matter", matter, Colleague);
+
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "its access there came from the matter");
+        grants.Grants.ActiveRowsOf(workAssignment).Should().NotContain(r => r.Id == paired, "the paired grant follows the share");
+    }
+
+    /// <summary>
+    /// Task 193 G2b: a paired grant that cannot be ended leaves the inherited share removed and the matter's unshare NOT
+    /// complete (the filed record is reported not updated), so it is never reported done while the grant may be active.
+    /// </summary>
+    [Fact]
+    public async Task G2b_WhenThePairedGrantCannotBeEnded_TheShareStaysRemoved_AndTheFiledRecordIsReportedNotDone()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        var grants = new AssignedAccessTestDoubles.Harness();
+        var paired = PairedGrantOn(grants, workAssignment);
+        grants.Grants.FailDeactivations = true;
+
+        var result = await UnshareAsync("matter", matter, Colleague);
+
+        var (status, code, body) = Problem(result);
+        status.Should().Be(StatusCodes.Status500InternalServerError);
+        code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().BeGreaterThan(0);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the share removal stands");
+        grants.Grants.ActiveRowsOf(workAssignment).Should().Contain(r => r.Id == paired, "left active; the next pass, a repeated removal or R5 (writes on) ends it");
+    }
+
+    /// <summary>Task 193 G2b: a grant on the filed record paired with <see cref="Colleague"/>, ended through this harness.</summary>
+    private Guid PairedGrantOn(AssignedAccessTestDoubles.Harness grants, Guid workAssignment)
+    {
+        var row = grants.Grants.Seed(ExternalGrantRootType.WorkAssignment, workAssignment, Guid.NewGuid(), null,
+            (int)ExternalAccessLevel.Collaborate, null);
+        grants.Grants.PairedUsers[row.Id] = Colleague;
+        _fixture.PairedGrantsOverride = () => grants.PairedGrantRevokeFor("sprk_workassignment", workAssignment);
+        return row.Id;
+    }
+
+    /// <summary>
+    /// Task 193 G4a (A-F1): the end of the paired grant failed, so the inherited row stays live; repeating the matter's unshare
+    /// (the user holds no share there any more) ends the grant, then the row. The answer named the paired grant apart from the
+    /// shares, and promised no automatic removal for it.
+    /// </summary>
+    [Fact]
+    public async Task G4a_WhenThePairedGrantCouldNotBeEnded_RepeatingTheUnshareEndsIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        var grants = new AssignedAccessTestDoubles.Harness();
+        var paired = PairedGrantOn(grants, workAssignment);
+        grants.Grants.FailDeactivations = true;
+
+        var first = await UnshareAsync("matter", matter, Colleague);
+
+        var detail = first.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Detail;
+        detail.Should().Contain("paired with it could not be confirmed ended").And.Contain("Try again to end it")
+            .And.NotContain("removed automatically", "a paired grant left behind is not removed by any job on its own");
+        var live = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        live.State.Should().Be(AssignedAccessState.Shared, "the row stays live while the paired grant remains");
+        live.Reason.Should().Be(AssignedAccessReason.PairedGrantPending, "the known cause is on record");
+        grants.Grants.FailDeactivations = false;
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        grants.Grants.ActiveRowsOf(workAssignment).Should().NotContain(r => r.Id == paired, "the repeat ends the paired grant");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Revoked);
+    }
+
+    /// <summary>Task 193 G4a (A-F1): the same, completed by the secure-root inheritance job's next pass.</summary>
+    [Fact]
+    public async Task G4a_WhenThePairedGrantCouldNotBeEnded_TheJobsNextPassEndsIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        var grants = new AssignedAccessTestDoubles.Harness();
+        var paired = PairedGrantOn(grants, workAssignment);
+        grants.Grants.FailDeactivations = true;
+        await UnshareAsync("matter", matter, Colleague);
+        grants.Grants.FailDeactivations = false;
+
+        await _job.RunAsync();
+
+        grants.Grants.ActiveRowsOf(workAssignment).Should().NotContain(r => r.Id == paired, "the job's next pass ends it");
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Revoked);
+        row.Reason.Should().Be(AssignedAccessReason.AccessRemoved, "removed by the rule, never read as an out-of-band removal");
+    }
+
+    /// <summary>
+    /// Task 193 review F1: the inherited share was ALREADY gone (removed in the model-driven app) when the matter's unshare
+    /// tried to end the paired grant, and that end failed. The row records the known cause, so the job's next pass ends the
+    /// paired grant instead of reading the missing share as an operator's removal and leaving the grant active.
+    /// </summary>
+    [Fact]
+    public async Task G4a_AShareAlreadyRemovedOutOfBand_WhenThePairedGrantCouldNotBeEnded_TheJobsNextPassStillEndsIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        var grants = new AssignedAccessTestDoubles.Harness();
+        var paired = PairedGrantOn(grants, workAssignment);
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Colleague)); // outside the BFF
+        grants.Grants.FailDeactivations = true;
+        await UnshareAsync("matter", matter, Colleague);
+        var live = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        live.State.Should().Be(AssignedAccessState.Shared, "the row stays live while the paired grant remains");
+        live.Reason.Should().Be(AssignedAccessReason.PairedGrantPending, "the known cause is on record");
+        grants.Grants.FailDeactivations = false;
+
+        await _job.RunAsync();
+
+        grants.Grants.ActiveRowsOf(workAssignment).Should().NotContain(r => r.Id == paired, "the job's next pass ends it");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Revoked);
+    }
+
+    /// <summary>Task 193 G4a (A-F2): ending the paired grant with the inherited share is a SYSTEM removal: no decline is recorded.</summary>
+    [Fact]
+    public async Task G4a_EndingThePairedGrant_LeavesTheContactsAssignedToSuggestionAlone()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        var grants = new AssignedAccessTestDoubles.Harness();
+        var paired = PairedGrantOn(grants, workAssignment);
+        var contact = grants.Grants.Rows.Single(r => r.Id == paired).ContactId!.Value;
+        var suggestion = grants.Store.SeedRow(ExternalGrantRootType.WorkAssignment, workAssignment, "sprk_assignedattorney1",
+            new AssignedSubject(AssignedSubjectKind.Contact, contact), AssignedAccessState.PendingConfirmation);
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        grants.Grants.ActiveRowsOf(workAssignment).Should().NotContain(r => r.Id == paired);
+        grants.Store.Ledger.Single(r => r.Id == suggestion.Id).State.Should().Be(AssignedAccessState.PendingConfirmation,
+            "a system removal records no operator decline");
     }
 
     /// <summary>A4: a share the user already held directly on the filed record (at least the mirror) is never removed by the parent's unshare.</summary>
@@ -1342,7 +1501,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         var result = await UnshareAsync("matter", matter, Colleague);
 
         result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
-        var viewOnly = RecordShareLevels.ChildMirrorMask(Mask(RecordShareLevels.ViewOnlyRights));
+        var viewOnly = RecordShareLevels.InheritedRootMirrorMask(Mask(RecordShareLevels.ViewOnlyRights));
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(viewOnly,
             "never kept at the matter's level by a parent that carries less; the project's own level, at once");
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague
@@ -1392,7 +1551,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
 
         _fixture.FailShareForPrincipal = null;
         (await _job.RunAsync()).Success.Should().BeTrue();
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(RecordShareLevels.ChildMirrorMask(Mask(RecordShareLevels.ViewOnlyRights)),
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(RecordShareLevels.InheritedRootMirrorMask(Mask(RecordShareLevels.ViewOnlyRights)),
             "the job gives it back");
     }
 

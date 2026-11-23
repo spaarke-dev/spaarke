@@ -108,11 +108,83 @@
         <Button Alt="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.Alt" Command="sprk.Wizard.Matter.UploadDocuments.Command" Id="sprk.Wizard.Matter.UploadDocuments.Button" Image32by32="/_imgs/ribbon/DocumentAdd_32.png" Image16by16="/_imgs/ribbon/DocumentAdd_16.png" LabelText="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.UploadDocuments.Button.ToolTipDescription" />
       </CommandUIDefinition>
     </CustomAction>
+    <CustomAction Id="sprk.ProjectMatterLink.sprk_matter.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_matter.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.ProjectMatterLink.sprk_matter.SubGrid.New" Command="sprk.ProjectMatterLink.sprk_matter.New.Command" LabelText="$LocLabels:sprk.ProjectMatterLink.sprk_matter.New.LabelText" Alt="$LocLabels:sprk.ProjectMatterLink.sprk_matter.New.LabelText" ToolTipTitle="$LocLabels:sprk.ProjectMatterLink.sprk_matter.New.LabelText" ToolTipDescription="$LocLabels:sprk.ProjectMatterLink.sprk_matter.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
   </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
   </Templates>
   <CommandDefinitions>
+    <CommandDefinition Id="Mscrm.AddExistingRecordFromSubGridAssociated">
+      <EnableRules>
+        <EnableRule Id="Mscrm.AppendToPrimary" />
+        <EnableRule Id="Mscrm.EntityFormIsEnabled" />
+        <EnableRule Id="sprk.ProjectMatterLink.sprk_matter.NotLinkGrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.AddExisting" />
+        <DisplayRule Id="Mscrm.ShowForManyToManyGrids" />
+        <DisplayRule Id="Mscrm.AppendToPrimary" />
+        <DisplayRule Id="Mscrm.AppendPrimary" />
+        <DisplayRule Id="Mscrm.AppendSelected" />
+        <DisplayRule Id="Mscrm.AppendToSelected" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.AddFromSubGrid.addExistingFromSubGridAssociated" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedEntityTypeName" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Mscrm.AddExistingRecordFromSubGridStandard">
+      <EnableRules>
+        <EnableRule Id="Mscrm.AppendToPrimary" />
+        <EnableRule Id="Mscrm.EntityFormIsEnabled" />
+        <EnableRule Id="Mscrm.IsEntityAvailableForUserInMocaOffline" />
+        <EnableRule Id="Mscrm.IsRelationshipEnabledInMocaOffline" />
+        <EnableRule Id="sprk.ProjectMatterLink.sprk_matter.NotLinkGrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.AddExisting" />
+        <DisplayRule Id="Mscrm.ShowForOneToManyGrids" />
+        <DisplayRule Id="Mscrm.AppendToPrimary" />
+        <DisplayRule Id="Mscrm.AppendSelected" />
+        <DisplayRule Id="Mscrm.CanWriteSelected" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.AddFromSubGrid.addExistingFromSubGridStandard" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedEntityTypeName" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="Mscrm.AddNewRecordFromSubGridStandard">
+      <EnableRules>
+        <EnableRule Id="Mscrm.AppendToPrimary" />
+        <EnableRule Id="Mscrm.EntityFormIsEnabled" />
+        <EnableRule Id="Mscrm.IsEntityAvailableForUserInMocaOffline" />
+        <EnableRule Id="sprk.ProjectMatterLink.sprk_matter.NotLinkGrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.ShowForOneToManyGrids" />
+        <DisplayRule Id="Mscrm.AppendToPrimary" />
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+        <DisplayRule Id="Mscrm.AppendSelected" />
+        <DisplayRule Id="Mscrm.HideAddNewForChildEntities" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="XrmCore.Commands.Open.addNewFromSubGridStandard" Library="$webresource:Main_system_library.js">
+          <CrmParameter Value="SelectedEntityTypeName" />
+          <CrmParameter Value="PrimaryEntityTypeName" />
+          <CrmParameter Value="FirstPrimaryItemId" />
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
     <CommandDefinition Id="Mscrm.SharePrimaryRecord">
       <EnableRules>
         <EnableRule Id="Mscrm.FormStateNotNew" />
@@ -381,6 +453,20 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <CommandDefinition Id="sprk.ProjectMatterLink.sprk_matter.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ProjectMatterLink.sprk_matter.IsLinkGrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_matter.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openLinkedWizardFromSubGrid" Library="$webresource:sprk_wizard_commands">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
@@ -464,6 +550,16 @@
       </EnableRule>
       <EnableRule Id="sprk.Wizard.Matter.Form.EnableRule">
         <FormStateRule State="Existing" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.ProjectMatterLink.sprk_matter.IsLinkGrid.EnableRule">
+        <CustomRule Library="$webresource:sprk_wizard_commands" FunctionName="Spaarke.Commands.Wizards.isProjectMatterLinkGrid" Default="false">
+          <CrmParameter Value="SelectedControl" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.ProjectMatterLink.sprk_matter.NotLinkGrid.EnableRule">
+        <CustomRule Library="$webresource:sprk_wizard_commands" FunctionName="Spaarke.Commands.Wizards.isNotProjectMatterLinkGrid" Default="true">
+          <CrmParameter Value="SelectedControl" />
+        </CustomRule>
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>
@@ -756,6 +852,16 @@
     <LocLabel Id="sprk.Wizard.Matter.UploadDocuments.Button.ToolTipTitle">
       <Titles>
         <Title description="Upload Documents" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ProjectMatterLink.sprk_matter.New.LabelText">
+      <Titles>
+        <Title description="New Matter" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ProjectMatterLink.sprk_matter.New.ToolTipDescription">
+      <Titles>
+        <Title description="Create a matter linked to this project in the Create Matter wizard" languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

@@ -166,6 +166,48 @@ describe('Email tab (task 096) — capability-gated, after Find', () => {
   });
 });
 
+// Task 133 (package 1.1.4, owner UAT 2026-11-03: "shouldn't Submit Invoice just be a tab"): the Invoice tab follows
+// To Do, gated on the `canGetAttachments` CAPABILITY (Outlook read mode) — never a host list (NFR-10).
+describe('Invoice tab (task 133) — a received email only', () => {
+  const labels = (tabs: { label: string }[]) => tabs.map(t => t.label);
+
+  it('Outlook read mode (canGetAttachments true): Save · To Do · Invoice · Find', () => {
+    expect(labels(getAvailableTabs('outlook', { canEmailFromPane: false, canGetAttachments: true }))).toEqual([
+      'Save',
+      'To Do',
+      'Invoice',
+      'Find',
+    ]);
+  });
+
+  it('must-not-fire: Outlook compose, Word, and no capabilities never get it', () => {
+    expect(labels(getAvailableTabs('outlook', { canEmailFromPane: false, canGetAttachments: false }))).not.toContain(
+      'Invoice'
+    );
+    expect(labels(getAvailableTabs('word', { canEmailFromPane: true, canGetAttachments: false }))).not.toContain(
+      'Invoice'
+    );
+    expect(labels(getAvailableTabs('outlook'))).not.toContain('Invoice');
+  });
+
+  it('the live toolbar renders it after To Do, and selecting it reports the invoice tab', () => {
+    const onTabChange = jest.fn();
+    renderWithProvider(
+      <TaskPaneToolbar
+        hostType="outlook"
+        capabilities={{ canEmailFromPane: false, canGetAttachments: true }}
+        isAuthenticated
+        selectedTab="save"
+        onTabChange={onTabChange}
+      />
+    );
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.indexOf(screen.getByRole('tab', { name: 'Invoice' }))).toBe(2);
+    fireEvent.click(screen.getByRole('tab', { name: 'Invoice' }));
+    expect(onTabChange).toHaveBeenCalledWith('invoice');
+  });
+});
+
 // Task 106 (owner UAT round 8: "the 'send email should be in the tool bar next to Find"): Outlook's Send Email
 // is an ACTION button in the toolbar, directly after the last tab — not a tab, and absent unless supplied.
 describe('Send action (task 106) — Outlook toolbar, after Find', () => {

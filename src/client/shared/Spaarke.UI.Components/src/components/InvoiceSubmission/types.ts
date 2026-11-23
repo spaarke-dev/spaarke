@@ -67,6 +67,16 @@ export interface InvoiceSubmissionInput {
   firmId?: string;
 }
 
+/**
+ * A received invoice that is on hold for its billing terms (ebilling-r1 082c). `message` is the server's own fixed
+ * sentence, shown as written (one copy of the wording, the server's); `code` is the stable reason code, which this UI
+ * never branches on (tests only).
+ */
+export interface InvoiceSubmissionWarning {
+  code: string;
+  message: string;
+}
+
 /** The 202 body of the submit route. */
 export interface InvoiceSubmissionAccepted {
   submissionId: string;
@@ -74,6 +84,13 @@ export interface InvoiceSubmissionAccepted {
   /** Never null from the BFF today (D-87 / D-91); tolerated as null so a host adapter cannot break the screen. */
   trackingNumber: string | null;
   statusUrl?: string | null;
+  /**
+   * ebilling-r1 082c-3: the PROVISIONAL warning of the server's advisory pre-check (today no billing terms are set up
+   * for the record). Absent on a 202 without one (an older server, an internal route, or terms in force). The result
+   * screen shows it as a quiet note under Processing and drops it when the terminal status arrives: the status view's
+   * own {@link InvoiceSubmissionStatusView.warning} (or none) is then authoritative.
+   */
+  warning?: InvoiceSubmissionWarning | null;
 }
 
 /** The server-side lifecycle of a submission. `Received` and `Processing` both read as "Processing" to the user. */
@@ -90,6 +107,12 @@ export interface InvoiceSubmissionStatusView {
   /** The stable reason code of a terminal outcome, when the job set one. */
   outcomeReasonCode?: string | null;
   receivedOn?: string | null;
+  /**
+   * ebilling-r1 082c-2 / 082c-3: an Accepted invoice that is held for review for its billing terms. Absent when the
+   * invoice is not held. When present, the Accepted screen shows ONE warning bar (the server's `message`) in place of
+   * the green Accepted bar.
+   */
+  warning?: InvoiceSubmissionWarning | null;
 }
 
 /** The data callbacks a host provides (`loadFirms` is optional). */

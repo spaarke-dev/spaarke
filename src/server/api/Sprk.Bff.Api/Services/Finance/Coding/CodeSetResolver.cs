@@ -79,9 +79,19 @@ public sealed class CodeSetResolver
     /// <paramref name="coreRecord"/>.
     /// </summary>
     /// <exception cref="LineCodingException"><see cref="LineCodingException.NoCodeSet"/>: no step produced a usable set.</exception>
+    public Task<ResolvedCodeSet> ResolveAsync(
+        CodingCoreRecord coreRecord,
+        IReadOnlyList<InvoiceLineToCode> lines,
+        CancellationToken cancellationToken = default) =>
+        ResolveAsync(coreRecord, lines, includeFirmCodes: true, cancellationToken);
+
+    /// <inheritdoc cref="ResolveAsync(CodingCoreRecord, IReadOnlyList{InvoiceLineToCode}, CancellationToken)"/>
+    /// <param name="includeFirmCodes">False skips step 1 (the firm's own codes): ebilling-r1 task 095c-3, an invoice submitted without a firm.
+    /// Steps 2 to 5 are unchanged.</param>
     public async Task<ResolvedCodeSet> ResolveAsync(
         CodingCoreRecord coreRecord,
         IReadOnlyList<InvoiceLineToCode> lines,
+        bool includeFirmCodes,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coreRecord);
@@ -93,11 +103,8 @@ public sealed class CodeSetResolver
                 nameof(coreRecord));
         }
 
-        // 1. The firm's own task codes.
-        var firmCodes = DistinctFirmTaskCodes(lines);
-        var firmSetId = await FindSetContainingAllAsync(firmCodes, cancellationToken).ConfigureAwait(false);
-        if (firmSetId is { } fromFirm
-            && await LoadAsync(fromFirm, CodeSetSource.FirmCodes, cancellationToken).ConfigureAwait(false) is { } firm)
+        // 1. The firm's own task codes (skipped for an invoice with no firm, task 095c-3).
+        if (includeFirmCodes && await ResolveFirmCodesAsync(lines, cancellationToken).ConfigureAwait(false) is { } firm)
         {
             return firm;
         }
@@ -155,7 +162,29 @@ public sealed class CodeSetResolver
             "No UTBMS code set could be resolved: no firm codes, mapping or suggestion applied and the settings default code set is missing or has no task codes.");
     }
 
+    /// <summary>
+    /// Loads the code set a line's coding RECORDED (its <c>coding.codeSetId</c>, 047/049): the set the AI was offered, in the same shape the
+    /// resolution produced. This is not a second resolution order: nothing is chosen, the FR-22 outcome stored at coding time is read back
+    /// (task 101: a reviewer's code correction is judged against that set). <c>null</c> when the set is missing, inactive or has no task codes.
+    /// </summary>
+    public Task<ResolvedCodeSet?> LoadRecordedAsync(Guid codeSetId, CodeSetSource source, CancellationToken cancellationToken = default) =>
+        LoadAsync(codeSetId, source, cancellationToken);
+
     // ── Step 1 ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// FR-22 step 1 alone: the set that holds every task code the firm billed on <paramref name="lines"/>, or <c>null</c> when none does (or
+    /// the firm billed none). <see cref="ResolveAsync(CodingCoreRecord, IReadOnlyList{InvoiceLineToCode}, bool, CancellationToken)"/> runs it
+    /// first. Ebilling-r1 task 095d-2a-1 (EB-D-186): the re-run after Set firm asks only this step, because it is the only step the firm
+    /// changes; steps 2-5 gave the same set at intake, so no AI suggestion (step 4) is asked to decide whether a line is re-coded.
+    /// </summary>
+    internal async Task<ResolvedCodeSet?> ResolveFirmCodesAsync(IReadOnlyList<InvoiceLineToCode> lines, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        return await FindSetContainingAllAsync(DistinctFirmTaskCodes(lines), cancellationToken).ConfigureAwait(false) is { } fromFirm
+            ? await LoadAsync(fromFirm, CodeSetSource.FirmCodes, cancellationToken).ConfigureAwait(false)
+            : null;
+    }
 
     private static List<string> DistinctFirmTaskCodes(IReadOnlyList<InvoiceLineToCode> lines)
     {

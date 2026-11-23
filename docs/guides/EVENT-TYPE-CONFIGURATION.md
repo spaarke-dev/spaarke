@@ -415,7 +415,7 @@ Coverage: 80+ tests covering parsing, computation, validation, and edge cases.
 ## Related Documentation
 
 - [Event Type Configuration Guide](../product-documentation/event-type-configuration-guide.md) - Admin guide
-- [ADR-012: Shared Component Library](.claude/adr/ADR-012-shared-component-library.md)
+- [ADR-012: Shared Component Library](../adr/ADR-012-shared-component-library.md)
 
 ---
 

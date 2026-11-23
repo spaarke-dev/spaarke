@@ -4,7 +4,7 @@
     <title>Decide lane "Assign Task" creates a sprk_event of type Task; the no-budget rule offers Add To Do and Assign Work as Next steps (D-178, UAT round 1)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-178, owner 2026-10-22)</gate>
-    <status>in-progress (steps 1-2 done on branch task/159-assign-task; steps 3-4 pending: merge, R3 deploy, owner OK, apply v2, dev proof; see notes/task-159-notes.md)</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a catalog action and an executor in Sprk.Bff.Api (.cs) and a new policy version.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -80,4 +80,8 @@
       <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
     </files>
   </knowledge>
+  <completion>
+    2026-11-06: owner UAT round 3 re-check PASS on dev BFF 20669df6a9 (notes/uat-v4-log.md, Round 3). Email footer finding F-R3-1 tracked separately.
+  </completion>
+
 </task>

@@ -12,7 +12,6 @@ src/shared/ @spaarke-dev @api-team
 # CI/CD and infrastructure
 .github/ @spaarke-dev @devops-team
 scripts/ @spaarke-dev @devops-team
-Directory.Packages.props @spaarke-dev @devops-team
 
 # Security and architecture decisions
 docs/adr/ @spaarke-dev @architecture-team

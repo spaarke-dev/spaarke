@@ -259,7 +259,7 @@ When closing a GitHub Issue, also flip the project notes entry status. The two M
 | Skill | Hook |
 |---|---|
 | `project-setup` (called by `project-pipeline`) | Generated CLAUDE.md MUST include a "Deferrals & Issues" section pointing operators at this skill — see template addition below |
-| `project-pipeline` Step 2.5 (enrich plan.md) | Add a "Tracked deferrals/issues" subsection that includes `gh issue list` filtered by `{project-name}` label |
+| `project-pipeline` Step 4.2 | Creates the `{project-name}` label this skill files issues under (no issues exist yet at project start) |
 | `push-to-github` Step 1.6 (NEW) | Before push: scan `notes/defer-issues.md` for entries with empty GitHub Issue URL. If found, prompt: "You have N defer/issue entries without GitHub issues. File them now? [y/n]" |
 | `merge-to-master` Step 0.5 | Scan all entries with status=Open across all merged projects; report rollup |
 | `task-execute` Step 9.5 | If quality gate uncovers an issue the task can't fix, prompt: "File as ISS-{NNN}?" |

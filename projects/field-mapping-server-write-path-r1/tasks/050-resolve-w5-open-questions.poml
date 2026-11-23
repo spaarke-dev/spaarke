@@ -4,7 +4,7 @@
     <title>Resolve the repair-marker question (createdby vs impersonation) and verify live quick-create flags (spec Unresolved Q1, Q2)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>019 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Read-only investigation producing notes; no code or schema change.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -2,7 +2,7 @@
 
 > **Category**: Operations (Tier 3) — end-to-end unified-master deploy
 > **Created**: 2026-06-11 (after the 4-parallel-session deploy collision was resolved)
-> **Last Reviewed**: 2026-10-11 — Step 0.5 clobber check + restore point, ~13 missing surfaces added, no `git stash`, read-back verification (first full run under these rules: 28 pages + 1 JS on 2026-10-11, 0 clobbers)
+> **Last Reviewed**: 2026-11-03 — Step 0.5 clobber check + restore point, ~13 missing surfaces added, no `git stash`, read-back verification (first full run under these rules: 28 pages + 1 JS on 2026-10-11, 0 clobbers)
 > **When to use**: After multiple PRs have merged to master and the entire deployable surface needs to land on `spaarkedev1` from one unified master HEAD. The single source of truth for "deploy everything from master."
 > **When NOT to use**: A single small change to one Code Page → use that surface's individual `Deploy-*.ps1` directly. A BFF-only change → use `/bff-deploy`.
 
@@ -24,10 +24,10 @@
 | 5 | SpeAdminApp | `sprk_speadmin` | `scripts/Deploy-SpeAdminApp.ps1` |
 | 6 | EventDetailSidePane | `sprk_eventdetailsidepane.html` | `scripts/Deploy-EventDetailSidePane.ps1` |
 | 7 | CalendarSidePane | `sprk_calendarsidepane.html` | `scripts/Deploy-CalendarSidePane.ps1` |
-| 8-19 | 12 wizards/CodePages | (see Deploy-WizardCodePages.ps1) | `scripts/Deploy-WizardCodePages.ps1` (one batch) |
-| 20 | **BFF API** | `spaarke-bff-dev` App Service | `/bff-deploy` skill |
+| 8-22 | 15 wizards/CodePages | (see Deploy-WizardCodePages.ps1) | `scripts/Deploy-WizardCodePages.ps1` (one batch) |
+| 23 | **BFF API** | `spaarke-bff-dev` App Service | `/bff-deploy` skill |
 
-The 12 surfaces in `Deploy-WizardCodePages.ps1`: CreateMatter, CreateProject, CreateEvent, CreateTodo, CreateWorkAssignment, SummarizeFiles, FindSimilar, PlaybookLibrary, DocumentUpload, AllDocuments, WorkspaceLayoutWizard, sprk_wizard_commands.
+The 15 surfaces in `Deploy-WizardCodePages.ps1`: CreateMatter, CreateProject, CreateEvent, CreateInvoice, CreateReportCard, CreateTodo, CreateWorkAssignment, SummarizeFiles, FindSimilar, PlaybookLibrary, RecordFamily (`sprk_recordfamily`, the Family view the Push Updates ribbon opens; deploy it before `sprk_fieldmapping_push.js` v1.3.0), DocumentUpload, AllDocuments, WorkspaceLayoutWizard, sprk_wizard_commands.
 
 **Also deployed by this skill (added 2026-10-11 — these were missing, so a "master deploy" left them stale on dev for months):**
 
@@ -44,6 +44,22 @@ The 12 surfaces in `Deploy-WizardCodePages.ps1`: CreateMatter, CreateProject, Cr
 `scripts/Deploy-WebResourceInline.ps1` PATCHes the exact bytes and publishes **only that web resource** (scoped `PublishXml`), like every other script here.
 
 **Excluded** (intentional): `sprk_tododetailsidepane` (deleted by #373), `sprk_corporateworkspace` (retired by OC-R4-05), `sprk_analysisbuilder` / `sprk_analysisworkspace` (no source on master), PCF controls (`/pcf-deploy` — each needs a version bump).
+
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Step 0: Pre-flight (master HEAD, branch, open PRs, clean detached deploy worktree)
+- [ ] Step 0.5: Clobber check and restore point (`BRANCH_ONLY` is a hard stop)
+- [ ] Step 1: Build shared libs
+- [ ] Step 2: Build all Vite solutions
+- [ ] Step 3: Deploy 12 wizards via batch script
+- [ ] Step 4: Deploy 6 individual web resource scripts
+- [ ] Step 5: Deploy Reporting
+- [ ] Step 6: Deploy BFF via /bff-deploy skill
+- [ ] Step 7: Verification (read back every web resource, `/healthz` and `/ping`)
+```
 
 ## Pre-flight (Step 0 — always run)
 
@@ -87,15 +103,14 @@ Master is the only deploy source, but sessions do deploy branch builds while the
 Order matters (each later one consumes earlier ones via path-mapped dist):
 
 1. `src/client/shared/Spaarke.Auth` — `npm install --legacy-peer-deps --no-audit --no-fund && npm run build`
-2. `src/client/shared/Spaarke.AI.Context` — same
-3. `src/client/shared/Spaarke.SdapClient` — same. **Important**: this lib's `tsconfig.json` must have `declarationMap: false` and `sourceMap: false` (see Failure Mode F-1). The current source-tree version has this set correctly.
-4. `src/client/shared/Spaarke.UI.Components` — same. Path map for `@spaarke/sdap-client` must point to `dist/index.d.ts` not `src/index.ts` (Failure Mode F-1).
-5. `src/client/shared/Spaarke.AI.Outputs` — same
-6. `src/client/shared/Spaarke.AI.Widgets` — same. tsc may report 70+ TS2307 errors in shared-lib path resolution; these are advisory and the emitted dist is still usable.
-7. `src/client/shared/Spaarke.Events.Components` — same. Build script is `tsc --noEmit`; the lib is consumed via Vite source aliasing.
-8. `src/client/shared/Spaarke.SmartTodo.Components` — same. Build script is `tsc --noEmit`; consumed via source aliasing.
+2. `src/client/shared/Spaarke.SdapClient` — same. **Important**: this lib's `tsconfig.json` must have `declarationMap: false` and `sourceMap: false` (see Failure Mode F-1). The current source-tree version has this set correctly.
+3. `src/client/shared/Spaarke.UI.Components` — same. Path map for `@spaarke/sdap-client` must point to `dist/index.d.ts` not `src/index.ts` (Failure Mode F-1).
+4. `src/client/shared/Spaarke.AI.Outputs` — same
+5. `src/client/shared/Spaarke.AI.Widgets` — same. tsc may report 70+ TS2307 errors in shared-lib path resolution; these are advisory and the emitted dist is still usable.
+6. `src/client/shared/Spaarke.Events.Components` — same. Build script is `tsc --noEmit`; the lib is consumed via Vite source aliasing.
+7. `src/client/shared/Spaarke.SmartTodo.Components` — same. Build script is `tsc --noEmit`; consumed via source aliasing.
 
-The list above is the core; on 2026-10-11 a clean worktree needed **all 15** `src/client/shared/*` libs installed and built before the solutions resolved (`@spaarke/ui-components` resolves to `dist/index.js`). Also build Notifications, DocumentOperations, Compose.Components, DailyBriefing.Components, Visuals, Communication.Components and LegalWorkspace. `tsc` failures in AI.Widgets and LegalWorkspace are peer-dependency resolution only (`react`/`@fluentui/*` not installed in the lib under `--legacy-peer-deps`); the emitted `dist` is usable.
+The list above is the core; on 2026-10-11 a clean worktree needed **all** `src/client/shared/*` libs (15 then; 12 since `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` were retired on 2026-11-13) installed and built before the solutions resolved (`@spaarke/ui-components` resolves to `dist/index.js`). Also build Notifications, Compose.Components, DailyBriefing.Components, Visuals, Communication.Components, AI.Outputs and SdapClient. `tsc` failures in AI.Widgets are peer-dependency resolution only (`react`/`@fluentui/*` not installed in the lib under `--legacy-peer-deps`); the emitted `dist` is usable.
 
 ## Step 2 — Build all Vite solutions
 
@@ -190,6 +205,8 @@ curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev.azurewebsites.n
 ```
 
 If `/healthz` is slow (90-120 s after Linux App Service cold-start) but hash-verify in Step 6 passed: don't redeploy, just re-curl after 60 s.
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 The user should hard-refresh **`spaarkedev1`** in Incognito to verify SpaarkeAi shows all merged work — that's the eyeball check this skill can't do for them.
 

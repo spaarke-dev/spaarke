@@ -89,6 +89,7 @@ public sealed class GraphAppRoleParityT3ProbeTests
     private const string KeyVaultName = "sprk-acme-prod-kv";
     private const string AppServiceName = "sprk-acme-prod-bff";
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
+    private const string WriterObjectId = "9a9a9a9a-0000-4000-8000-0000000000ee";   // T266: the writer's principal id
 
     // ---------- T1 kind ----------
 
@@ -117,6 +118,96 @@ public sealed class GraphAppRoleParityT3ProbeTests
         verifier.CallCount.Should().Be(1, "one read for the Entra roles");
         verifier.ExtrasCallCount.Should().Be(1, "one read proving nothing outside the stamp set is held (task 261)");
         verifier.LastAllowedRoles!.Select(r => r.Value).Should().Equal("FileStorageContainer.Selected");
+    }
+
+    // ---------- T266 (#2605): the ontology writer identity holds no Graph app role ----------
+
+    private static FakeParityVerifier PassingStamp(FakeGraphAppRolesRegistry registry)
+        => FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value));
+
+    [Fact]
+    public async Task ProbeAsync_ChecksTheWriterByItsPrincipalId_InTheRunsTenant()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = PassingStamp(registry);
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        (await probe.ProbeAsync(BuildRequest(), CancellationToken.None)).Should().BeOfType<TrapVerificationOutcome.Passed>();
+
+        verifier.AnyRolesCallCount.Should().Be(1);
+        verifier.LastAnyRolesObjectId.Should().Be(WriterObjectId, "a managed identity's principal id is its service principal's object id");
+        verifier.LastAnyRolesTenantId.Should().Be(TenantId);
+    }
+
+    [Theory]
+    [InlineData("FileStorageContainer.Selected")]
+    [InlineData("Directory.Read.All")]
+    public async Task ProbeAsync_WriterHoldsAnyGraphRole_ReturnsFailed(string role)
+    {
+        // Even the stamp's own role: the writer writes Dataverse only.
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = PassingStamp(registry);
+        verifier.WriterRoles = [role];
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("ontology writer").And.Contain(role).And.Contain(WriterObjectId);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task ProbeAsync_RunCarriesNoWriter_ReturnsFailed_AndReadsNothingForIt(string writer)
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = PassingStamp(registry);
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest() with { OntologyWriterObjectId = writer }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("no InterStepState.OntologyWriterObjectId").And.Contain("Start a new run");
+        verifier.AnyRolesCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_WriterReadUnknown_IsInfraFault_NeverPassed()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = PassingStamp(registry);
+        verifier.WriterOverride = new GraphAppRoleExtrasResult.Unknown("graph 503");
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        (await probe.ProbeAsync(BuildRequest(), CancellationToken.None))
+            .Should().BeOfType<TrapVerificationOutcome.InfraFault>().Which.Diagnostic.Should().Contain("graph 503");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_WriterReadThrows_IsInfraFault()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = PassingStamp(registry);
+        verifier.WriterThrows = new InvalidOperationException("boom");
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        (await probe.ProbeAsync(BuildRequest(), CancellationToken.None)).Should().BeOfType<TrapVerificationOutcome.InfraFault>();
+    }
+
+    [Fact]
+    public async Task ProbeAsync_StampFails_ReportsTheStamp_WriterNotChecked()
+    {
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value).Append("Sites.ReadWrite.All"));
+        verifier.WriterRoles = ["Directory.Read.All"];
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Which.Diagnostic.Should().Contain("outside the stamp set");
+        verifier.AnyRolesCallCount.Should().Be(0);
     }
 
     [Fact]
@@ -595,7 +686,8 @@ public sealed class GraphAppRoleParityT3ProbeTests
         UamiClientId: UamiClientId,
         KeyVaultName: KeyVaultName,
         AppServiceName: AppServiceName,
-        ResourceGroupName: ResourceGroupName);
+        ResourceGroupName: ResourceGroupName,
+        OntologyWriterObjectId: WriterObjectId);
 
     private static HttpResponseMessage JsonResponse(HttpStatusCode statusCode, string body) =>
         new(statusCode)
@@ -640,6 +732,29 @@ public sealed class GraphAppRoleParityT3ProbeTests
         public IReadOnlyList<GraphAppRoleEntry>? LastAllowedRoles { get; private set; }
         public GraphAppRoleExtrasResult? ExtrasOverride { get; set; }
         public bool ReturnNullExtras { get; set; }
+
+        /// <summary>T266: what the writer identity holds (default none); <see cref="WriterOverride"/> wins when set.</summary>
+        public string[] WriterRoles { get; set; } = [];
+        public GraphAppRoleExtrasResult? WriterOverride { get; set; }
+        public Exception? WriterThrows { get; set; }
+        public int AnyRolesCallCount { get; private set; }
+        public string? LastAnyRolesObjectId { get; private set; }
+        public string? LastAnyRolesTenantId { get; private set; }
+
+        public Task<GraphAppRoleExtrasResult> FindAnyRolesAsync(
+            string servicePrincipalObjectId, string tenantId, CancellationToken cancellationToken)
+        {
+            AnyRolesCallCount++;
+            LastAnyRolesObjectId = servicePrincipalObjectId;
+            LastAnyRolesTenantId = tenantId;
+            if (WriterThrows is not null)
+            {
+                throw WriterThrows;
+            }
+            return Task.FromResult(WriterOverride ?? (WriterRoles.Length == 0
+                ? new GraphAppRoleExtrasResult.None()
+                : new GraphAppRoleExtrasResult.Found(WriterRoles)));
+        }
 
         public Task<GraphAppRoleExtrasResult> FindUnexpectedRolesAsync(
             string uamiServicePrincipalObjectId,

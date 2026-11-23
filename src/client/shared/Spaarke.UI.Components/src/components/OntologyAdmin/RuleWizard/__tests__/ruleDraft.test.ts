@@ -16,6 +16,7 @@ import {
   emptyRow,
   hasWork,
   newPolicyRequest,
+  NO_TEST_PROBLEM,
   priorityProblem,
   quietWindowProblem,
   scopeChangeSentence,
@@ -49,8 +50,14 @@ const bodyOf = (condition: ConditionDraft, quiet = ''): Record<string, unknown> 
 };
 
 describe('buildRuleBody - Existence', () => {
-  it('writes the type, the subject and nothing else for a bare condition', () => {
-    expect(bodyOf(existence())).toEqual({ type: 'Existence', subject: 'zz_widget', all: [] });
+  it('writes the type, the subject, the test and nothing else for a one-test condition', () => {
+    const when = [row({ field: 'zz_state', value: 'open' })];
+    expect(bodyOf(existence({ when }))).toEqual({
+      type: 'Existence',
+      subject: 'zz_widget',
+      when: { zz_state: 'open' },
+      all: [],
+    });
   });
 
   it('writes "=" as a bare scalar and the other comparisons as {op: value}, typed', () => {
@@ -129,8 +136,53 @@ describe('buildRuleBody - Existence', () => {
   });
 
   it('writes the quiet window only when it is set', () => {
-    expect(bodyOf(existence(), '')).not.toHaveProperty('quietWindowDays');
-    expect(bodyOf(existence(), ' 30 ')).toHaveProperty('quietWindowDays', 30);
+    const when = [row({ field: 'zz_state', value: 'open' })];
+    expect(bodyOf(existence({ when }), '')).not.toHaveProperty('quietWindowDays');
+    expect(bodyOf(existence({ when }), ' 30 ')).toHaveProperty('quietWindowDays', 30);
+  });
+});
+
+describe('buildRuleBody - an Existence rule needs at least one test (task 193)', () => {
+  it('stops a table with no record test and no related-record test, and writes no body', () => {
+    const built = buildRuleBody(existence(), '', catalog);
+    expect(built.ruleBody).toBeNull();
+    expect(built.issues).toEqual({ all: NO_TEST_PROBLEM });
+    expect(NO_TEST_PROBLEM).toBe('Add at least one test on the record or one related-record test.');
+  });
+
+  it('stops it through the draft too, so the Condition step cannot be left', () => {
+    const draft: RuleDraft = { ...emptyDraft(catalog), condition: existence(), lane: 'Decide' };
+    expect(buildDraftBody(draft, catalog)).toEqual({ ruleBody: null, issues: { all: NO_TEST_PROBLEM } });
+  });
+
+  it('lets one record test through, unchanged', () => {
+    const built = buildRuleBody(existence({ when: [row({ field: 'zz_state', value: 'open' })] }), '', catalog);
+    expect(built.issues).toEqual({});
+    expect(built.ruleBody).not.toBeNull();
+  });
+
+  it('lets one related-record test through with no record test, unchanged', () => {
+    const clause = { ...emptyClause(catalog, 'zz_note'), filter: [row({ field: 'zz_kind', value: 'x' })] };
+    const built = buildRuleBody(existence({ clauses: [clause] }), '', catalog);
+    expect(built.issues).toEqual({});
+    expect(JSON.parse(built.ruleBody as string)).toEqual({
+      type: 'Existence',
+      subject: 'zz_widget',
+      all: [{ exists: 'zz_note', path: 'zz_widgetref', filter: { zz_kind: 'x' } }],
+    });
+  });
+
+  it('does not add the sentence over an unfinished row: that row says what to fix', () => {
+    const built = buildRuleBody(existence({ when: [row({ field: '', value: 'x' })] }), '', catalog);
+    expect(built.ruleBody).toBeNull();
+    expect(built.issues).not.toHaveProperty('all');
+  });
+
+  it('leaves a Threshold rule with no record test unchanged', () => {
+    const threshold = existence({ ruleType: 'Threshold', thresholdField: 'zz_load', thresholdValue: '80' });
+    const built = buildRuleBody(threshold, '', catalog);
+    expect(built.issues).toEqual({});
+    expect(built.ruleBody).not.toBeNull();
   });
 });
 
@@ -198,7 +250,8 @@ describe('buildRuleBody - only what cannot be written is refused here', () => {
 
 describe('quiet window and priority', () => {
   it('the quiet window is written for the Decide lane only', () => {
-    const base: RuleDraft = { ...emptyDraft(catalog), condition: existence(), quietWindowDays: '30' };
+    const condition = existence({ when: [row({ field: 'zz_state', value: 'open' })] });
+    const base: RuleDraft = { ...emptyDraft(catalog), condition, quietWindowDays: '30' };
     expect(JSON.parse(buildDraftBody({ ...base, lane: 'Decide' }, catalog).ruleBody as string)).toHaveProperty(
       'quietWindowDays',
       30

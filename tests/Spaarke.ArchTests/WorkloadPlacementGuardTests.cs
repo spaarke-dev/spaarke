@@ -59,7 +59,7 @@ public class WorkloadPlacementGuardTests
     //   shared library the BFF registers, is not inventoried — none exists today (task-102 code review). Review
     //   catches those; widen the scan if one appears.
     // =============================================================================================
-    private const int TimerServiceBaseline = 11; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165); 12 → 11: DemoExpirationService → DemoExpirationJob (#1363) — all migrated to IScheduledJob
+    private const int TimerServiceBaseline = 10; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165); 12 → 11: DemoExpirationService → DemoExpirationJob (#1363); 11 → 10: InboundPollingBackupService (#2749) — all migrated to IScheduledJob
 
     private const int OtherServiceBaseline = 9;
 
@@ -71,7 +71,6 @@ public class WorkloadPlacementGuardTests
         ["SessionFilesCleanupJob"] = "PeriodicTimer session-files cleanup loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["MembershipReconcileSweepService"] = "Task.Delay sweep loop for communication membership. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["MailboxDeltaReconciliationService"] = "PeriodicTimer mailbox delta reconciliation. Migrates when next touched (ADR-052 §1, ADR-036).",
-        ["InboundPollingBackupService"] = "PeriodicTimer inbound-mail polling backup. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["GraphSubscriptionManager"] = "PeriodicTimer Graph subscription renewal. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["StaleCheckoutSweeperHostedService"] = "Task.Delay (TimeProvider) stale-checkout sweep loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["SpeWebhookRenewalHostedService"] = "Task.Delay (TimeProvider) SPE webhook renewal loop. Migrates when next touched (ADR-052 §1, ADR-036).",

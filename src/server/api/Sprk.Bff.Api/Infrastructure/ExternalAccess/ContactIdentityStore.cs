@@ -75,6 +75,35 @@ public sealed record BusinessUnitLookup(LookupStatus Status, IReadOnlyList<Guid>
     public static BusinessUnitLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<Guid>());
 }
 
+/// <summary>
+/// r3 task 079 (#2458, #2491): one contact's stored home directory (<c>sprk_externaltenantid</c>), read by id in a query of its
+/// own (<see cref="IContactIdentityStore.ReadHomeTenantAsync"/>). <see cref="HomeTenantId"/> is set ONLY when the read ended
+/// <see cref="LookupStatus.Read"/> on this contact's row and the stored value is a non-empty GUID. Every other answer is
+/// "could not tell", never "no tenant": a null, absent, empty or non-GUID value (a column the BFF cannot read comes back
+/// null), a contact that was not found (all <see cref="LookupStatus.Read"/> with no tenant), an answer about another row or
+/// one that cannot be parsed (<see cref="LookupStatus.Failed"/>), a column that is not provisioned
+/// (<see cref="LookupStatus.ColumnMissing"/>).
+/// </summary>
+public sealed record HomeTenantLookup(LookupStatus Status, Guid? HomeTenantId)
+{
+    /// <summary>A home-tenant read that could not be read.</summary>
+    public static HomeTenantLookup Failed { get; } = new(LookupStatus.Failed, null);
+
+    /// <summary>A home-tenant read whose column does not exist here (the A9 schema is not applied).</summary>
+    public static HomeTenantLookup ColumnMissing { get; } = new(LookupStatus.ColumnMissing, null);
+
+    /// <summary>
+    /// A read of this contact's row whose stored value is <paramref name="rawStored"/>: its tenant when that is a non-empty
+    /// GUID (surrounding white space ignored), otherwise no tenant (could not tell). The one parse rule for the stored value.
+    /// </summary>
+    public static HomeTenantLookup FromStored(string? rawStored)
+        => new(LookupStatus.Read,
+            Guid.TryParse(rawStored?.Trim(), out var tenant) && tenant != Guid.Empty ? tenant : null);
+
+    /// <summary>Never prints the tenant (ADR-015: logs carry ids and outcome codes only).</summary>
+    public override string ToString() => $"HomeTenantLookup {{ Status = {Status}, HasTenant = {HomeTenantId is not null} }}";
+}
+
 /// <summary>How a store write ended.</summary>
 public enum StoreWriteStatus
 {
@@ -294,6 +323,15 @@ public interface IContactIdentityStore
     /// <paramref name="homeTenantId"/> and whose binding is <paramref name="homeObjectId"/>. Any state, two rows. Read-only.
     /// </summary>
     Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// r3 task 079 (#2458, #2491): <paramref name="contactId"/>'s stored home directory (<c>sprk_externaltenantid</c>), read by
+    /// id in ONE query of its own that selects <c>contactid</c> and that column only (never in <c>ContactSelect</c>, which
+    /// leaves the A9 column out by design), so the answer is checked to be about this contact and a missing column reads as
+    /// <see cref="LookupStatus.ColumnMissing"/> here and nowhere else. Read-only. Anything but a tenant is "could not tell"
+    /// (<see cref="HomeTenantLookup"/>): a caller never reads a missing tenant as "not linked".
+    /// </summary>
+    Task<HomeTenantLookup> ReadHomeTenantAsync(Guid contactId, CancellationToken ct);
 
     /// <summary>
     /// ADR-028 A9 (r3 task 047): ENABLED systemusers whose <c>internalemailaddress</c> OR <c>domainname</c> equals
@@ -952,6 +990,47 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
            + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} eq {ContactBindingDecision.WorkforceHomePlaneValue}"
            + $" and {ContactBindingDecision.ExternalTenantIdColumn} eq '{homeTenantId:D}'"
            + $" and {ContactBindingDecision.ExternalObjectIdColumn} eq '{homeObjectId:D}'&$top=2";
+
+    /// <summary>
+    /// r3 task 079: one contact's stored home directory, by id, in its own query (never in <see cref="ContactSelect"/>). The
+    /// contact id is selected too, so the answer is checked to be about this contact (<see cref="InterpretHomeTenantRead"/>).
+    /// </summary>
+    public static string BuildHomeTenantReadPath(Guid contactId)
+        => $"contacts({contactId:D})?$select=contactid,{ContactBindingDecision.ExternalTenantIdColumn}";
+
+    /// <summary>
+    /// r3 task 079 — what the home-tenant read's answer says (<see cref="BuildHomeTenantReadPath"/>). Pure.
+    /// <list type="bullet">
+    ///   <item>A fault stays that fault (<c>ColumnMissing</c>, <c>Failed</c>); its body is ignored.</item>
+    ///   <item>A 404 is <c>Read</c> with no tenant: the contact is not there, so nothing says which directory it signs in with.</item>
+    ///   <item>A body that is absent, not JSON, not an object, or about another contact (its <c>contactid</c> missing or
+    ///   different) is <c>Failed</c>: an answer we cannot read is never this contact's tenant.</item>
+    ///   <item>Otherwise <see cref="HomeTenantLookup.FromStored"/> of the stored value: a non-empty GUID is the tenant; a null,
+    ///   absent, empty or non-GUID value (a masked column reads null) is no tenant (could not tell).</item>
+    /// </list>
+    /// </summary>
+    public static HomeTenantLookup InterpretHomeTenantRead(LookupStatus status, HttpStatusCode code, string? body, Guid contactId)
+    {
+        if (status != LookupStatus.Read)
+        {
+            return status == LookupStatus.ColumnMissing ? HomeTenantLookup.ColumnMissing : HomeTenantLookup.Failed;
+        }
+
+        if (code == HttpStatusCode.NotFound)
+        {
+            return HomeTenantLookup.FromStored(null);
+        }
+
+        using var doc = body is null ? null : TryParseJson(body);
+        if (doc is null
+            || doc.RootElement.ValueKind != JsonValueKind.Object
+            || GuidOf(doc.RootElement, "contactid") != contactId)
+        {
+            return HomeTenantLookup.Failed;
+        }
+
+        return HomeTenantLookup.FromStored(StringOf(doc.RootElement, ContactBindingDecision.ExternalTenantIdColumn));
+    }
 
     /// <summary>Parses one stored-link row from Web API JSON. <c>isdisabled</c> that is not a boolean reads as null.</summary>
     public static HomeLinkRow? ParseHomeLinkRow(JsonElement row)
@@ -1717,7 +1796,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public async Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
     {
-        var (status, _, body, _) = await GetAsync(BuildHomeLinkLookupPath(homeTenantId, homeObjectId), ct).ConfigureAwait(false);
+        var (status, _, body, _) = await GetAsync(
+            BuildHomeLinkLookupPath(homeTenantId, homeObjectId), ct, logLabel: "home link lookup").ConfigureAwait(false);
         if (status != LookupStatus.Read || body is null)
         {
             if (status == LookupStatus.ColumnMissing)
@@ -1797,6 +1877,23 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
         var rows = Values(doc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList();
         return await ProvenAsync(new ContactLookup(LookupStatus.Read, rows), ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// No readability proof is made: an empty value is never trusted as "no tenant" (it reads as could not tell), so a masked
+    /// column can only refuse, never widen.
+    /// </remarks>
+    public async Task<HomeTenantLookup> ReadHomeTenantAsync(Guid contactId, CancellationToken ct)
+    {
+        var (status, code, body, _) = await GetAsync(
+            BuildHomeTenantReadPath(contactId), ct, logLabel: "home tenant read").ConfigureAwait(false);
+        if (status == LookupStatus.ColumnMissing)
+        {
+            LogHomeSchemaMissing("home tenant read");
+        }
+
+        return InterpretHomeTenantRead(status, code, body, contactId);
     }
 
     /// <inheritdoc />
@@ -2366,7 +2463,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <param name="path">The request path (never logged when <paramref name="logLabel"/> is given).</param>
     /// <param name="logLabel">
     /// UAC review K2: a FIXED label logged in place of the path by a read whose OData filter carries the caller's email
-    /// (PII, URL-escaped in the path). Null for every other read, which logs its path.
+    /// (PII, URL-escaped in the path). Null for every other read, which logs its path. R3 079 also labels the home link lookup
+    /// (its path carries the home tenant and oid) and the home tenant read: ADR-015, no tenant value in a log line.
     /// </param>
     private async Task<(LookupStatus Status, HttpStatusCode Code, string? Body, string? Error)> GetAsync(
         string path, CancellationToken ct, string? prefer = null, string? logLabel = null)

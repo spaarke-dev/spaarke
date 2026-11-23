@@ -57,7 +57,8 @@ public sealed class AgreementReviewDepthModelTierSeamTests : IClassFixture<Agree
                 {
                     ExtractedText = "This Mutual NDA governs...",
                 },
-            }) { OwnerOid = TestSessionOwner.Oid });
+            })
+        { OwnerOid = TestSessionOwner.Oid });
         return sessionId;
     }
 

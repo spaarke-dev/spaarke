@@ -297,7 +297,13 @@ export function DocumentUploadWizardDialog({
     // The Send Email step registers a controller here; on Finish we check for an unsent
     // composed email and prompt (Send / Finish without sending / Keep editing).
     const emailControllerRef = useRef<IDocumentEmailComposeController | null>(null);
-    const [unsentPrompt, setUnsentPrompt] = useState<{ resolve: (choice: "send" | "finish" | "cancel") => void } | null>(null);
+    // The prompt stays set after it is answered: the ChoiceModal is closed with `open={false}`, never unmounted while
+    // open, which would leave the wizard behind it aria-hidden (#2658). `seq` keys each prompt, so each one starts fresh.
+    const [unsentPrompt, setUnsentPrompt] = useState<{
+        resolve: (choice: "send" | "finish" | "cancel") => void;
+        open: boolean;
+        seq: number;
+    } | null>(null);
 
     // (Find Similar now opens in a new tab via nextStepLauncher — no inline state needed)
 
@@ -670,9 +676,9 @@ export function DocumentUploadWizardDialog({
         const controller = emailControllerRef.current;
         if (controller?.hasUnsentEmail()) {
             const choice = await new Promise<"send" | "finish" | "cancel">((resolve) => {
-                setUnsentPrompt({ resolve });
+                setUnsentPrompt((prev) => ({ resolve, open: true, seq: (prev?.seq ?? 0) + 1 }));
             });
-            setUnsentPrompt(null);
+            setUnsentPrompt((prev) => (prev ? { ...prev, open: false } : prev));
             if (choice === "cancel") {
                 // Abort the finish and keep the wizard open on the step. An empty message
                 // leaves WizardShell's finishError falsy, so no error bar is shown.
@@ -721,7 +727,8 @@ export function DocumentUploadWizardDialog({
 
             {unsentPrompt && (
                 <ChoiceModal
-                    open={true}
+                    key={unsentPrompt.seq}
+                    open={unsentPrompt.open}
                     onClose={() => unsentPrompt.resolve("cancel")}
                     title="Send your email?"
                     message="You've started an email but haven't sent it yet."

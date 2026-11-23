@@ -312,7 +312,9 @@ public class CoreUserWizardLinkingGuardTests
         ["sprk_ServiceRequest"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
         ["sprk_Budget"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
         ["sprk_analysis"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
-        ["sprk_ReportCard"] = "Read=Deep",
+        // G1 (field-mapping-server-write-path-r1 task 046b, owner 2026-11-05): the Report Card wizard's Create and Append, and
+        // AppendTo for a KPI assessment filed under a report card (config/feature-role-privileges.json).
+        ["sprk_ReportCard"] = "Create=Deep Read=Deep Append=Deep AppendTo=Deep",
         ["sprk_Todo"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
     };
 

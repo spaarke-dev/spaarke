@@ -217,16 +217,23 @@ public class CommunicationByRegardingReadTests
     }
 
     [Fact]
-    public async Task ReadByRegardingAsync_NoVisibleThreads_ReturnsEmptyAndNeverQueriesMessages()
+    public async Task ReadByRegardingAsync_NoVisibleThreads_ReturnsEmptyAndNeverFansOutOverThreads()
     {
+        // Ontology task 177 (D-217): with no anchored thread the read still asks for messages filed to the record by their OWN
+        // lookup (one impersonated query), but it never issues the thread-id fan-out.
+        var messageQueries = new List<string>();
         SetupThreads(/* none */);
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => messageQueries.Add(odata!))
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
 
         var result = await Sut().ReadByRegardingAsync("sprk_matter", RecordId, Caller(), CancellationToken.None);
 
         result.ThreadCount.Should().Be(0);
         result.MessageCount.Should().Be(0);
-        _query.Verify(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
-            Times.Never, "no visible threads ⇒ no message fan-out");
+        messageQueries.Should().ContainSingle()
+            .Which.Should().Contain($"_sprk_regardingmatter_value eq {RecordId}")
+            .And.NotContain("_sprk_communicationthread_value eq", "no visible threads ⇒ no message fan-out over threads");
     }
 
     [Fact]

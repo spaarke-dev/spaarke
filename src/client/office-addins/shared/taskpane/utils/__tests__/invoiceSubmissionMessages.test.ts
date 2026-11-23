@@ -6,11 +6,19 @@
 import {
   describeInvoiceOutcome,
   describeSubmissionRefusal,
+  describeCorrectionBlock,
+  describeUncorrectableStatus,
+  SUPERSEDED_INVOICE_MESSAGE,
   GENERIC_FAILED_OUTCOME_MESSAGE,
   GENERIC_OUTCOME_MESSAGE,
   FILING_KEPT_MESSAGE,
   GENERIC_SUBMISSION_MESSAGE,
   HELD_FOR_REVIEW_MESSAGE,
+  FIRM_MISSING_CODE,
+  REPLACED_BY_CORRECTION_CODE,
+  describeAcceptedOutcome,
+  NO_FIRM_LINKED_MESSAGE,
+  CORRECTION_NO_FIRM_MESSAGE,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
 } from '../invoiceSubmissionMessages';
@@ -55,6 +63,7 @@ const PINNED_REFUSAL_CODES = [
   'ebilling.submission.source_communication_mismatch',
   'COMMUNICATION_REFILE_FORBIDDEN',
   'ebilling.submission.storage_not_configured',
+  'ebilling.submission.reader_not_configured', // ebilling task 191 (fdd3c79b7f)
   'ebilling.tracking.unavailable',
   'ebilling.submission.email_save_failed',
   'ebilling.submission.document_unavailable',
@@ -81,7 +90,16 @@ const EMAIL_UNIDENTIFIABLE_REASONS = [
   'no_communication',
   'eml_ambiguous',
 ];
-const CORRECTION_REASONS = ['not_available', 'invoice_status', 'different_firm', 'different_core_record'];
+// 097b (2026-10-30): `not_available` is no longer sent; `different_invoice_number`, `no_submission` and
+// `submission_in_progress` were added.
+const CORRECTION_REASONS = [
+  'invoice_status',
+  'different_firm',
+  'different_core_record',
+  'different_invoice_number',
+  'no_submission',
+  'submission_in_progress',
+];
 
 const PINNED_OUTCOME_CODES = [
   'invoice.read.no_invoice',
@@ -96,11 +114,30 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.processing_failed',
   'ebilling.submission.file_scan_timeout', // added to the contract at f1ae28290e (task 092; Failed, re-attempt allowed)
   'ebilling.submission.source_changed', // task 094 (97c793670b; Failed, re-attempt allowed)
+  // 095c-4 (a4f5884e66): retried, then stored on the last attempt; re-attempt allowed
+  'ebilling.submission.core_record_changed',
+  'ebilling.submission.firm_changed',
+  'ebilling.submission.changed',
+  'ebilling.submission.row_version_missing',
+  'ebilling.submission.firm_name_unreadable', // 095e (EB-D-226): retried, then stored; nothing written; re-attempt allowed
   // task 094 step 3 (97c793670b): the saved .eml changed state before the commit
   'ebilling.submission.document_already_invoiced',
   'ebilling.submission.document_rejected',
   'ebilling.submission.document_core_record_mismatch',
   'ebilling.submission.document_not_found',
+  // ebilling task 191 (fdd3c79b7f): AI reading and line coding
+  'ai.invoice.read.not_configured',
+  'ai.invoice.disabled',
+  'ai.invoice.binding_missing',
+  'ai.invoice.completion_failed',
+  'ai.invoice.output_invalid',
+  // 097c (2026-10-30): the correction re-checked at commit
+  'ebilling.submission.correction_not_allowed.invoice_status',
+  'ebilling.submission.correction_not_allowed.different_firm',
+  'ebilling.submission.correction_not_allowed.different_core_record',
+  'ebilling.submission.correction_not_allowed.different_invoice_number',
+  'ebilling.submission.correction_not_allowed.submission_in_progress',
+  'ebilling.submission.correction_target_unavailable',
   'ebilling.submission.blocked',
   'ebilling.submission.returned',
 ];
@@ -174,6 +211,70 @@ describe('invoice submission messages — specifics', () => {
     ).toMatch(/Try again in 30 seconds\./);
   });
 
+  it('correction_not_allowed / invoice_status says the status in words; Superseded points to the newer invoice', () => {
+    const status = (invoiceStatus?: string) =>
+      refusal('ebilling.submission.correction_not_allowed', {
+        reason: 'invoice_status',
+        ...(invoiceStatus ? { invoiceStatus } : {}),
+      });
+    expect(status('SentToAp')).toBe("This invoice can't be corrected while it is Sent to AP. Nothing was submitted.");
+    expect(status('ReturnedToFirm')).toMatch(/while it is Returned to Firm\./);
+    expect(status('InReview')).toMatch(/while it is In Review\./);
+    expect(status('Superseded')).toBe(`${SUPERSEDED_INVOICE_MESSAGE} Nothing was submitted.`);
+    // must-not-fire: an absent or unknown status is not named
+    expect(status()).toMatch(/can't be corrected in its current state\./);
+    expect(status('Archived')).toMatch(/can't be corrected in its current state\./);
+    expect(status('Archived')).not.toMatch(/Archived/);
+    expect(describeUncorrectableStatus(null)).toBe("This invoice can't be corrected in its current state.");
+  });
+
+  it('the prefill (§10) says why an invoice cannot be corrected, without "Nothing was submitted"', () => {
+    const block = (reason: string | null, invoiceStatus: string | null = null) =>
+      describeCorrectionBlock({ reason, invoiceStatus });
+    expect(block('invoice_status', 'Paid')).toBe("This invoice can't be corrected while it is Paid.");
+    expect(block('invoice_status', 'Superseded')).toBe(SUPERSEDED_INVOICE_MESSAGE);
+    expect(block('no_submission')).toBe('This invoice has no submission in Spaarke to correct.');
+    expect(block('submission_in_progress')).toMatch(/still being processed\. Wait until it has finished/);
+    expect(block('something_new')).toBe("This invoice can't be corrected.");
+    for (const reason of ['invoice_status', 'no_submission', 'submission_in_progress', null]) {
+      expect(block(reason, 'Paid')).not.toMatch(/Nothing was submitted/);
+    }
+  });
+
+  it('correction_not_allowed / submission_in_progress says to wait and submit the correction again', () => {
+    expect(refusal('ebilling.submission.correction_not_allowed', { reason: 'submission_in_progress' })).toMatch(
+      /still being processed\. Nothing was submitted\. Wait until it has finished, then submit the correction again\.$/
+    );
+  });
+
+  it('must-not-fire: the retired not_available reason gets the plain fallback, not "not available yet"', () => {
+    const message = refusal('ebilling.submission.correction_not_allowed', { reason: 'not_available' });
+    expect(message).toBe(refusal('ebilling.submission.correction_not_allowed'));
+    expect(message).not.toMatch(/not available yet/);
+  });
+
+  it('the Correction 404 record_unavailable suggests trying again when the invoice opens in Spaarke', () => {
+    expect(refusal('sdap.access.deny.record_unavailable')).toMatch(
+      /Nothing was submitted\. If you can open this invoice in Spaarke, try again\.$/
+    );
+  });
+
+  it('a correction refused at commit (097c) says the correction was not processed', () => {
+    for (const code of [
+      'ebilling.submission.correction_not_allowed.invoice_status',
+      'ebilling.submission.correction_not_allowed.different_firm',
+      'ebilling.submission.correction_not_allowed.different_core_record',
+      'ebilling.submission.correction_not_allowed.different_invoice_number',
+      'ebilling.submission.correction_not_allowed.submission_in_progress',
+      'ebilling.submission.correction_target_unavailable',
+    ]) {
+      expect(describeInvoiceOutcome(code, {}, 'Failed')).toMatch(/the correction was not processed/);
+    }
+    expect(describeInvoiceOutcome('ebilling.submission.correction_not_allowed.submission_in_progress')).toMatch(
+      /Submit the correction again once it has finished\.$/
+    );
+  });
+
   it('marks_invalid / invoice_not_pdf names the file and says the invoice must be a PDF', () => {
     expect(refusal('ebilling.submission.marks_invalid', { reason: 'invoice_not_pdf', fileName: 'scan.docx' })).toMatch(
       /^"scan.docx" isn't a PDF. The invoice must be a PDF./
@@ -236,10 +337,22 @@ describe('invoice submission messages — task 094', () => {
     expect(PERMANENT_SUBMISSION_CODES.has('ebilling.submission.storage_not_configured')).toBe(false);
   });
 
-  it("document_core_record_mismatch (409) is true for step A's unfiled-but-restricted case: it names no record to use", () => {
+  it("document_core_record_mismatch (409) without filedUnder is true for step A's unfiled-but-restricted case: it names no record to use", () => {
     const message = refusal('ebilling.submission.document_core_record_mismatch');
     expect(message).toMatch(/can't be submitted to this record/);
     expect(message).not.toMatch(/is filed under|that record/i);
+  });
+
+  it('document_core_record_mismatch with filedUnder (ebilling task 192) names the record the email is filed under', () => {
+    const message = describeSubmissionRefusal({
+      kind: 'refused',
+      status: 409,
+      code: 'ebilling.submission.document_core_record_mismatch',
+      filedUnder: { name: 'PAT-897705' },
+    });
+    expect(message).toBe(
+      'This email is filed under PAT-897705, so its invoice can only be submitted to that record. Nothing was submitted.'
+    );
   });
 
   it('earlier_attempt_being_removed says to try again, with Retry-After when given', () => {
@@ -253,8 +366,48 @@ describe('invoice submission messages — task 094', () => {
     ).toMatch(/earlier attempt .* failed.*Nothing was submitted\. Try again in 20 seconds\.$/);
   });
 
+  it('task 191: reader_not_configured is a refusal (nothing saved, ask an administrator), neither retried nor upload-in-Spaarke', () => {
+    expect(refusal('ebilling.submission.reader_not_configured')).toBe(
+      "Invoice reading isn't set up in Spaarke yet. Nothing was submitted. Ask an administrator."
+    );
+    expect(isRetryableSubmissionRefusal(422, 'ebilling.submission.reader_not_configured')).toBe(false);
+    expect(PERMANENT_SUBMISSION_CODES.has('ebilling.submission.reader_not_configured')).toBe(false);
+  });
+
+  it('task 191: a configuration outcome asks an administrator; a retried AI failure says to submit again later', () => {
+    for (const code of ['ai.invoice.read.not_configured', 'ai.invoice.disabled', 'ai.invoice.binding_missing']) {
+      expect(describeInvoiceOutcome(code, {}, 'Failed')).toMatch(/Ask an administrator\.$/);
+    }
+    for (const code of ['ai.invoice.completion_failed', 'ai.invoice.output_invalid']) {
+      expect(describeInvoiceOutcome(code, {}, 'Failed')).toMatch(/Submit it again later\.$/);
+    }
+  });
+
   it('source_changed (Failed) says to submit again', () => {
     expect(describeInvoiceOutcome('ebilling.submission.source_changed', {}, 'Failed')).toMatch(/Submit it again\.$/);
+  });
+
+  it('095c-4: each transient Failed code says to submit again, not the generic sentence', () => {
+    for (const code of [
+      'ebilling.submission.core_record_changed',
+      'ebilling.submission.firm_changed',
+      'ebilling.submission.changed',
+      'ebilling.submission.row_version_missing',
+      'ebilling.submission.firm_name_unreadable', // 095e (EB-D-226)
+    ]) {
+      const sentence = describeInvoiceOutcome(code, {}, 'Failed');
+      expect(sentence).toMatch(/Submit it again\.$/);
+      expect(sentence).not.toBe(GENERIC_FAILED_OUTCOME_MESSAGE);
+    }
+  });
+
+  it('095e: firm_name_unreadable says the invoice was not processed and to submit again; a near-miss code stays generic', () => {
+    expect(describeInvoiceOutcome('ebilling.submission.firm_name_unreadable', {}, 'Failed')).toBe(
+      "Spaarke couldn't read the firm's name, so the invoice was not processed. Submit it again."
+    );
+    expect(describeInvoiceOutcome('ebilling.submission.firm_name_unreadable_x', {}, 'Failed')).toBe(
+      GENERIC_FAILED_OUTCOME_MESSAGE
+    );
   });
 
   it('must-fire: a refusal after step A says the email stays filed; must-not-fire: without the flag it does not', () => {
@@ -274,6 +427,58 @@ describe('invoice submission messages — task 094', () => {
     ).toMatch(/Try again in a moment\. The email itself was filed/);
     expect(describeSubmissionRefusal({ kind: 'refused', status: 409, code: 'x.new', filingKept: true })).toBe(
       `${GENERIC_SUBMISSION_MESSAGE} ${FILING_KEPT_MESSAGE}`
+    );
+  });
+});
+
+describe('the no-firm sentences (task 134, owner ruling 2026-11-13: never an invoice without a firm)', () => {
+  it('must-fire: the no-firm-linked and no-firm-correction sentences are the owner-approved wording, exactly', () => {
+    expect(NO_FIRM_LINKED_MESSAGE).toBe(
+      'No firm is linked to this record. Add a firm to the record in Spaarke, then submit.'
+    );
+    expect(CORRECTION_NO_FIRM_MESSAGE).toBe(
+      'This invoice has no firm. Set its firm in Spaarke, then submit the correction.'
+    );
+  });
+
+  it('must-not-fire: neither sentence promises a reviewer will add the firm (the old held-for-firm wording is gone)', () => {
+    for (const sentence of [NO_FIRM_LINKED_MESSAGE, CORRECTION_NO_FIRM_MESSAGE]) {
+      expect(sentence).not.toMatch(/held until a reviewer/i);
+    }
+  });
+
+  it('095e must-fire: firm_invalid is the owner-approved wording (a firm is required, or the firm is not active), exactly', () => {
+    expect(describeSubmissionRefusal({ kind: 'refused', status: 400, code: 'ebilling.submission.firm_invalid' })).toBe(
+      "Spaarke didn't accept the firm for this invoice. Choose an active firm linked to this record. Nothing was submitted."
+    );
+  });
+
+  it('095e must-not-fire: the old firm_invalid sentence is gone, and firm_not_linked keeps its own', () => {
+    expect(
+      describeSubmissionRefusal({ kind: 'refused', status: 400, code: 'ebilling.submission.firm_invalid' })
+    ).not.toMatch(/chosen firm isn't an active firm/);
+    expect(
+      describeSubmissionRefusal({ kind: 'refused', status: 403, code: 'ebilling.submission.firm_not_linked' })
+    ).toBe("The chosen firm isn't linked to this record. Nothing was submitted.");
+  });
+});
+
+describe('describeAcceptedOutcome — firm_missing (ebilling EB-D-185, §9)', () => {
+  it('must-fire: the firm_missing code is the contract sentence, exactly', () => {
+    expect(FIRM_MISSING_CODE).toBe('ebilling.submission.firm_missing');
+    expect(describeAcceptedOutcome(FIRM_MISSING_CODE)).toBe(
+      'Submitted without a firm. A reviewer will add the firm before approval.'
+    );
+  });
+
+  it('must-not-fire: any other code is still the held sentence, no code is none, replaced_by_correction is unchanged', () => {
+    expect(describeAcceptedOutcome('ebilling.held.duplicate_suspected')).toBe(HELD_FOR_REVIEW_MESSAGE);
+    expect(describeAcceptedOutcome('ebilling.submission.firm_missing_x')).toBe(HELD_FOR_REVIEW_MESSAGE);
+    expect(describeAcceptedOutcome(null)).toBeUndefined();
+    expect(describeAcceptedOutcome(undefined)).toBeUndefined();
+    expect(describeAcceptedOutcome(REPLACED_BY_CORRECTION_CODE)).toBe('This invoice was replaced by a correction.');
+    expect(describeAcceptedOutcome(REPLACED_BY_CORRECTION_CODE, 'INV-1.2')).toBe(
+      'This invoice was replaced by a correction (tracking INV-1.2).'
     );
   });
 });

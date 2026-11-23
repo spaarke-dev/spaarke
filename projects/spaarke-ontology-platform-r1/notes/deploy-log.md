@@ -1,5 +1,38 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-23 ~15:31–16:04Z — tasks 199 + 200 (lookup focus return) to dev (spaarkedev1), master `973d72b67e`
+
+- **Owner go:** "Wait for 200 - continue working on 200" (2026-11-23, answering "deploy 199's controls now or with 200's").
+- **Source:** detached worktree `C:\wtdep200` at `973d72b67e` (contains 199 `1e6ee676d7` and 200). Shared libs built in the pcf-deploy order; builds one at a time, caches cleared.
+- **Console:** `deploy-spaarke-ai.yml` succeeded for `973d72b67e` (14:55Z push); not touched by hand.
+- **No tenant-wide publish.** PCFs via `Import-SolutionScoped.ps1` (no `--publish-changes`); code pages published by `PublishXml` naming only those web resources. No BFF, data, schema, role or Azure change.
+- **PCFs** (`Invoke-PcfBuildProd.ps1` judged by output; fresh `out/` copied into Solution before `pack.ps1`; every dev old version was a master version, so nothing clobbered). All importjob progress 100; served `cc_…/bundle.js` SHA-256 equals the build:
+  - CommunicationActionsSolution 1.3.23 → **1.3.25** (`d2c1717ae1dd`); one transient DNS failure before import, version re-checked, retried.
+  - TrackingFieldTrioSolution 1.0.65 → **1.0.67** (`f61111983284`).
+  - SpaarkeSemanticSearch 1.1.90 → **1.1.92** (`27f118fb0135`).
+  - RecordHeaderPcf 1.1.12.0 → **1.1.13.0** (`afadcc8f81c3`).
+  - RegardingResolverSolution 1.6.4 → **1.6.5** (`6a0aeb09276a`).
+  - CommunicationConversationPanelSolution 1.18.5 → **1.18.6** (`f11e2f6e6180`).
+- **Code pages (13), D-126 clobber check passed for each** (no live user-facing string missing from the build, except DailyBriefing's "Critical today", removed on purpose by task 062 `94ab2967d4`). Read-back: API content and served `/WebResources/…` equal the build SHA-256 for all 13.
+  - `Deploy-WizardCodePages.ps1`: create matter, project, event, todo, work assignment, report card wizards; `sprk_summarizefileswizard`; `sprk_documentuploadwizard` (+ unchanged `sprk_wizard_commands`).
+  - PATCH by id + `PublishXml` of those ids: `sprk_smarttodo`, `sprk_emailpage`, `sprk_dailyupdate` (live copy dated 2026-10-10, so it also brings ~6 weeks of master changes the Console already runs), `sprk_communicationconversationpage.html`, `sprk_documentrelationshipviewer`.
+  - Not deployed: built but not carrying the changed modules (`sprk_createinvoicewizard`, `sprk_communicationspage.html`, `sprk_communicationreconciliation`, `sprk_findsimilar`, `sprk_recordfamily`, `sprk_eventdetailsidepane.html`, `sprk_speadmin`, `sprk_alldocuments`, `sprk_semanticsearch`); not on dev, not created (RuleReview, InvoiceReview, CommunicationPage).
+- **Bundle record:** chore PR #2995 commits the six rebuilt Solution `bundle.js` files (auto-merge, squash).
+- **Not fixed by this deploy:** the nine triggers outside `@spaarke/ui-components` (DI-163 #2985).
+- **Dev focus checks:** see `notes/task-185-notes.md` (main session, 2026-11-23).
+
+## 2026-11-07 — ACME upgraded to SpaarkeMaster 1.3.0.0 (owner go given directly in this session)
+
+- **Publish:** SpaarkeMaster 1.3.0.0 published from master `d53d67f604` (`publish-dataverse-solutions-manifest.yml`; dry run first, then publish). The store's `latest` is now 1.3.0.0. ebilling confirmed its pending field-security lock targets 1.3.0.1.
+- **Import:** customer-provisioning cannot act on a relayed go, so ontology ran it. `Import-SpaarkeMasterPackage.ps1 -WhatIf` planned a staged upgrade 1.2.3.1 → 1.3.0.0 (managed); the real run completed in ~49 min, and the read-back shows only SpaarkeMaster 1.3.0.0 managed. Components that 1.3.0.0 removed had no data on ACME (checked by customer-provisioning beforehand).
+- **Post-checks:** `Test-RolePrivilegeExpectations.ps1` against `spaarkemaster-1.3.0.0.json` passed for all 7 Spaarke roles. The second ontology writer field-security profile now exists, and the stamp's writer identity was added to it (read back). The service roles' holders are application users only. No role was added to the default team (#2618). `/healthz` returned 200.
+
+## 2026-11-06 — ACME: ontology writer identity provisioned (#2605); dev UAT test data for 160/161
+
+- **ACME (owner go given directly in this session; customer-provisioning could not apply it from theirs):** created the stamp's ontology writer identity, attached it to the BFF App Service (production and staging), set the writer app setting on both, and created its Dataverse application user in the customer business unit with the ontology service role and the writer field-security profile. Every step was read back; the role's holders are application users only. The BFF restarted; `/healthz` returned 200 afterwards.
+- **Pending on ACME:** the second writer profile does not exist until SpaarkeMaster 1.3.0.0 (upgrade awaiting the owner in customer-provisioning's session). Customer-provisioning's #2605 step adds it, and its bicep adopts the identity. Identifiers are in customer-provisioning's ACME run log, not here.
+- **Dev test data (UAT round 3, owner asked):** two `zz-` inbound communications classified as a fee or scope change, on MAT-34929-0040 (no budget) and REAL-2026-123456.01 (has a budget). The nightly evaluator (02:30Z) raises the "Fee or scope change, no budget revision" items; delete both rows after the owner's 160/161 checks.
+
 ## Task 111 - WizardShell consumer regression and deploy (2026-10-08)
 
 Environment: **spaarkedev1** (https://spaarkedev1.crm.dynamics.com) only. Owner approval D-71 (2026-10-08). BFF and other environments untouched.
@@ -500,3 +533,64 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - **Baseline on `e56a3a51d4` (2026-10-27..29):** worklist 1; decision-plan 0; `POST …/decision` averaged **28 WhoAmI (max 35), 179 Dataverse calls, 22.4 s** across 2 commits. 170 targets that commit path.
   - **Not exercised:** no decision commit since the deploy. A commit would act on the owner's open UAT items. The commit-side check (at most 2 WhoAmI per commit, plus the wall time) and the `BUD-` number on a new budget wait for the owner's next commit. Then query App Insights for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
 
+
+## 2026-11-10 — task 176 on dev: Console `26d135bc8f` and BFF `755987b385` (mcp-r1 spike carrying master)
+- **Master:** docs→master #2660 merged as `26d135bc8f`. It carries task 176 (#2655, D-216) and F-R3-1 (#2606). Field-mapping #2659 is NOT in it (master was at `c2fa55aa99`); uac 198 is not on master.
+- **Console:** `deploy-spaarke-ai.yml` succeeded at 14:41Z from `26d135bc8f` (`Spaarke.Communication.Components` reply mapping). The owner needs a hard reload.
+- **BFF:** the D-126 ancestor check against master FAILED. Live was `6fbb3a7642`, which is mcp-r1's `spike/spaarkeai-mcp-phase0`, not on master.
+  - The owner chose to preserve the spike, so mcp-r1 merged master into it as `755987b385` (clean; BFF 0 warnings; ArchTests 2114/2114). The owner gave the per-SHA go in uac-r2's session, and mcp-r1 deployed with /bff-deploy (4 critical files hash-verified).
+  - Ontology read-back: the DLL reads `1.0.0+755987b3851058381da0703b7e1f529e8dfe3215`; `26d135bc8f` is an ancestor of it; `/healthz` returns 200.
+  - The owner gave the 176 deploy go in the ontology session (2026-11-10).
+- **Smoke:** a live inquiry send needs the owner (UAT). After one Budget inquiry from Revise budget, verify by query: the communication carries `sprk_regardingservicerequest` + `sprk_regardingmatter` + `sprk_isinternalonly` = true; its thread is Private; an .eml Document is archived on the matter.
+
+## 2026-11-16 ~13:40–13:42Z — tasks 194 + 195: Email documents lookup and Summary on dev (master `04f5c943f9`)
+- **Owner go:** "Yes proceed" (2026-11-16, ontology session).
+- **Source:** detached worktree `C:\wtdep195` at master `04f5c943f9`, which contains 194 `e476e9b61b` and 195 `04f5c943f9`. Caches were cleared before building.
+  - Build order: `Spaarke.SdapClient` → `Spaarke.Auth` → `Spaarke.UI.Components`.
+  - Then each PCF with `build:prod`, judged by its output ("[build] Succeeded").
+  - Then the DRV code page: `rm -rf out; npm run build; build-webresource.ps1`.
+  - The builds ran one at a time.
+- **D-126 clobber check (before any write):**
+  - Live SpaarkeSemanticSearch was 1.1.86 and SpaarkeRelatedDocumentCount 1.21.6, both older than master (1.1.87 / 1.21.7).
+  - Live `sprk_documentrelationshipviewer` was last modified 2026-11-15 14:49Z, by the 185 deploy. Its user-facing strings are a subset of the master build's. The three that looked live-only ("(no summary available)", "Compose email", "Generating combined summary…") are in master source and in the build.
+- **Markers in the built bundles:**
+  - SemanticSearchControl: `yieldToFrameSidePane`, `summary-tldr`, `TL;DR`.
+  - DRV: `sidePaneFrameSignal`, `summary-tldr`, `TL;DR`.
+  - RelatedDocumentCount: `yieldToFrameSidePane` only. It does not import `DocumentEmailWizard`, so it carries 194 only.
+- **PCFs:** packed and imported with `Import-SolutionScoped.ps1` (no `--publish-changes`; scoped publish only).
+  - SpaarkeSemanticSearch 1.1.86 → **1.1.87**, importjob progress 100.
+  - SpaarkeRelatedDocumentCount 1.21.6 → **1.21.7**, importjob progress 100.
+  - **Read-back:** the served `cc_…/bundle.js` SHA-256 matches each build (`13a0a742d443`, `b84a19216b0c`).
+  - **Main-session check:** solution versions and modifiedon (13:40–13:42Z) confirmed by query.
+- **Code page:** `sprk_documentrelationshipviewer` was deployed by PATCH (base64) by id, then PublishXml naming only that web resource id.
+  - **Read-back:** the API content and the served `/WebResources/…` both match the build SHA-256 (`b0a8741ee9fc`).
+- **Bundle drift:** the SemanticSearchControl bundle committed by 194 differs from the deployed build. It is recorded to master in chore PR #2868. RelatedDocumentCount's committed bundle equals the deployed one apart from line endings.
+- **No tenant-wide publish was run.** The BFF and Console were not touched, and no other code page or PCF was deployed.
+  - The Console auto-deployed `04f5c943f9` from master separately (`deploy-spaarke-ai.yml`).
+  - 195's BFF part (template render) reaches dev only with uac-r2's next dev BFF build.
+- **ui-tests for 194 and 195:** owner checks on dev, hard reload first. Results: pending.
+
+## 2026-11-15 ~14:48–14:52Z — task 185: create-wizard lookup and composer set on dev (master `acc96e1927`)
+- **Owner go:** "Yes proceed" (2026-11-14, ontology session).
+- **Source:** detached worktree `C:\wtdep185` at master `acc96e1927`, which contains 178–184, 186–188 and 192. Caches were cleared, and every host was rebuilt from that tree (shared libs: `Spaarke.SdapClient` → `Spaarke.UI.Components`; `Spaarke.Communication.Components` installed for CommunicationActions).
+- **D-126 clobber check (before deploy):**
+  - Each live page was downloaded and its user-facing strings were compared with the master build. No live string was missing from the build, except the text of the retired old email step (removed by 182/183/184) and one dead "File upload skipped -- no SPE container configured" warning (removed by 184).
+  - Two pages had changed on 2026-11-14:
+    - `sprk_creatematterwizard` (13:17Z) was master at 182.
+    - `sprk_createinvoicewizard` (08:45Z) was ebilling, and its strings are all in master.
+  - `sprk_wizard_commands` was byte-identical. Each PCF on dev was one version behind master, and every one of those versions came from master.
+- **Console:** `deploy-spaarke-ai.yml` succeeded for `f7174f6fc1` (22:38Z 2026-11-14). `acc96e1927` (#2830) did not touch the Console paths.
+- **Code pages:**
+  - Deployed by `Deploy-WizardCodePages.ps1` (only built pages; PublishXml of those web resources only): `sprk_creatematterwizard`, `sprk_createprojectwizard`, `sprk_createeventwizard`, `sprk_createtodowizard`, `sprk_createworkassignmentwizard`, `sprk_createinvoicewizard`, `sprk_createreportcardwizard`, `sprk_summarizefileswizard`, `sprk_documentuploadwizard`, and `sprk_wizard_commands` (unchanged).
+  - Deployed by the same PATCH + PublishXml-by-id step: `sprk_smarttodo`, `sprk_speadmin` and `sprk_documentrelationshipviewer`.
+  - **Read-back:** all 13 served contents match the build SHA-256.
+- **PCFs:**
+  - Built with `build:prod` from master, packed, then imported with `Import-SolutionScoped.ps1` (no `--publish-changes`; scoped publish only). Versions: SpaarkeSemanticSearch **1.1.86**, CommunicationActionsSolution **1.3.22**, TrackingFieldTrioSolution **1.0.64**.
+  - **Read-back:** the solution versions are new, and the served `cc_…/bundle.js` SHA-256 matches each build (`eb20159bcd31`, `1a93a37e2b0b`, `f3f1698ab6ef`). `customcontrols.version` still reads the old value; pcf-deploy documents that as harmless.
+  - The master-committed bundles were older than master's own shared lib (they lacked `composeOnlyShowsFrom` and the 183 wording), so the rebuilt bundles are what was deployed. They are recorded back to master in a chore PR.
+- **No tenant-wide publish was run.**
+- **Not deployed (not on dev, so there was nothing to update):**
+  - CommunicationPage (`sprk_communicationpage`, task 188). The live `sprk_communicationspage.html` is a different page ("All Communications").
+  - RuleReview (`sprk_rulereviewpage.html`, task 187).
+  - Creating either page is not in task 185's scope.
+- **ui-tests 179–183:** owner checks on dev, hard reload first. Results: pending (see `notes/task-185-notes.md`).

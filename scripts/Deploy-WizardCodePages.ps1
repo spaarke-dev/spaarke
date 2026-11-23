@@ -50,6 +50,7 @@ $webResources = @(
     @{ Name = 'sprk_summarizefileswizard';           DisplayName = 'Summarize Files';                Type = 1; Path = 'src\solutions\SummarizeFilesWizard\dist\index.html' }
     @{ Name = 'sprk_findsimilar';                    DisplayName = 'Find Similar Documents';         Type = 1; Path = 'src\solutions\FindSimilarCodePage\dist\index.html' }
     @{ Name = 'sprk_playbooklibrary';                DisplayName = 'Playbook Library';               Type = 1; Path = 'src\solutions\PlaybookLibrary\dist\index.html' }
+    @{ Name = 'sprk_recordfamily';                   DisplayName = 'Record Family';                  Type = 1; Path = 'src\solutions\RecordFamily\dist\index.html' }
     # JS command handler
     @{ Name = 'sprk_wizard_commands';                DisplayName = 'Wizard Command Handlers';        Type = 3; Path = 'src\client\webresources\js\sprk_wizard_commands.js' }
     # Updated existing

@@ -58,7 +58,7 @@ group.MapPost("/enqueue", EnqueueAnalysis)
 - Scale out workers (not concurrency)
 - Idempotent processing (ADR-004)
 
-**See**: [AI Rate Limiting Pattern](../patterns/ai/rate-limiting.md)
+**See**: AI Rate Limiting Pattern
 
 ---
 

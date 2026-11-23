@@ -41,6 +41,7 @@ Multipart form (both POSTs): `file` (PDF), `firmInvoiceNumber` (required), `poNu
 4. Owner: `IRecordOwnershipResolver` ForParents(core record), RequestedBy = the systemuser (SPA workforce) or the caller oid (internal); refused -> 409
    (`ProblemDetailsHelper.RecordOwnerRefused`). Applied to the row here.
 5. Container: `RecordContainerResolver.ResolveForRecordAsync(core)`; Unresolved / FailClosed / empty -> 422 `storage_not_configured`.
+5b. (Task 191, 2026-10-31; step 5 is the 092 stage since task 092.) Invoice reader not set up (`ContentUnderstanding:Endpoint` empty) -> 422 `reader_not_configured`, before the stage and so before any write (`191-reader-preflight.md`).
 6. Upload `{client stem}-{submissionId:N}.pdf` (SanitizeFileName, `ConflictBehavior.Fail`).
 7. Document: SPA via `ExternalDataService.CreateDocumentAsync` (parent bind, team, creator contact), internal via `IDocumentDataverseService`; then type
    Invoice (100000001) and `application/pdf`.

@@ -379,6 +379,8 @@ The record matched is the invoice's own core record (not the rule set's record, 
 **Proposal:** a firm sees a record-scoped set's clauses **only on invoices whose direct chain contains that record**, and a FirmRecord set only when it is also the set's firm.
 
 - **`GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct)`** (`RuleSetService.cs:2013-2063`) gains the invoice's core record. Today it returns None for any scope other than ClientDefault or Firm (`:2052-2056`). That is fail-closed, but wrong once Record sets exist. The method calls **the same predicate the loader uses**, `RuleSetApplicability.AppliesTo(set, firmId, chain, homeBu)` (3.2). A clause is then shown to a firm exactly when the rule could have judged that invoice. The caller contract (`:2006-2012`) adds: "the invoice's core record, read server-side from the invoice". No caller exists yet, so changing the signature now costs nothing (task 083, before 130).
+
+> Superseded by task 083: `GetFirmClauseAsync(policyVersionId, invoiceId, ct)`, keyed to the invoice's snapshot (see 083-firm-clause-applicability.md).
 - **The `sprk_visibletofirms` flag** (D-79) still decides on top.
 
 **Readers that would break or need the change** (search of `src` on `b046154af`):

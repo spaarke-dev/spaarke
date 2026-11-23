@@ -29,13 +29,13 @@ public sealed class WorkforcePrincipalStrategyComposeTests
 
     private static AccessibleRecordSet Set(
         string entity, AccessibleRecordSetSources sources, bool capped, params (Guid Id, AccessRights Rights)[] rights) => new()
-    {
-        PrincipalKind = WorkforcePrincipalKind.ContactOnly,
-        EntityType = entity,
-        Rights = rights.ToDictionary(r => r.Id, r => r.Rights),
-        Sources = sources,
-        Capped = capped,
-    };
+        {
+            PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+            EntityType = entity,
+            Rights = rights.ToDictionary(r => r.Id, r => r.Rights),
+            Sources = sources,
+            Capped = capped,
+        };
 
     private sealed class CapturingLogger : ILogger<WorkforcePrincipalStrategy>
     {

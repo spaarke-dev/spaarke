@@ -43,6 +43,23 @@ export interface IAttachmentItem {
    * BFF call). Optional; treated as `false` (not uploaded) when absent.
    */
   uploaded?: boolean;
+  /**
+   * The attached document's `sprk_documenttype` choice value as the document profile set it, read in the SAME
+   * single `sprk_document` query as `uploaded` (ebilling-r1 task 118: no per-row query, no BFF call). Absent
+   * or null when the document has no type yet, or the read failed. See {@link isInvoiceDocumentType}.
+   */
+  documentType?: number | null;
+}
+
+/**
+ * `sprk_documenttype` choice value for Invoice (docs/data-model/field-mapping-reference.md). The flag the email UI
+ * shows as an "Invoice" badge: the document profile's AI classification, no new classifier (ebilling-r1 task 118).
+ */
+export const DOCUMENT_TYPE_INVOICE = 100000001;
+
+/** True when the profile typed the document as an Invoice. A badge is a hint only: any PDF can be submitted. */
+export function isInvoiceDocumentType(documentType: number | null | undefined): boolean {
+  return documentType === DOCUMENT_TYPE_INVOICE;
 }
 
 /**
@@ -68,4 +85,6 @@ export interface IDocumentRecord {
   sprk_documentid?: string;
   sprk_hasfile?: boolean | null;
   sprk_graphitemid?: string | null;
+  /** Document Type choice (Invoice = 100000001); set by the document profile. */
+  sprk_documenttype?: number | null;
 }

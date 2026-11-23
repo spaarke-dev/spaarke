@@ -26,9 +26,12 @@ Two patterns make the code portable across hosts:
 The add-in authenticates through **`@spaarke/auth`**, not a bespoke MSAL service:
 
 - `shared/services/AuthService.ts` is a **thin singleton wrapper** over `SpaarkeAuthProvider` + **`OfficeNaaStrategy`** (`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`). Per ADR-028, the add-in **MUST NOT** `new PublicClientApplication` / `createNestablePublicClientApplication` itself — all MSAL construction lives inside `OfficeNaaStrategy`.
-- **Two acquisition paths, auto-selected by host:**
-  - **NAA-capable hosts (Outlook/Word desktop + modern web)** → silent **Nested App Authentication** via the MSAL broker. Redirect URI is **portable**: `brk-multihub://${window.location.hostname}` (derived from the serving host, never hardcoded).
-  - **Office-on-the-web without NAA** → standard MSAL `PublicClientApplication` popup, redirecting to **`${origin}/auth-callback.html`** (`public/auth-callback.html`).
+- **Two acquisition paths, auto-selected by host** (since 2026-11-03):
+  - **Hosts where `Office.context.requirements.isSetSupported('NestedAppAuth','1.1')` is true** (Outlook on the web, new Outlook for Windows, classic Outlook and Word on Windows/Mac) → **Nested App Authentication** through the Office host's broker. Over the bridge the host supplies the broker redirect itself; the MSAL config carries only the https redirect below.
+  - **Everything else** (no NestedAppAuth 1.1, **Word on the web**, no Office host) → standard MSAL `PublicClientApplication` popup, redirecting to **`${origin}/auth-callback.html`** (`public/auth-callback.html`).
+  - **NAA chosen but unable to serve the app**: when MSAL finds no bridge it builds the standard client itself (same config, so the same https redirect). When the bridge is disabled, or Entra refuses the brokered request (an `AADSTS…` code: a registration without the broker redirect, a Conditional Access block), the strategy switches once to the standard popup client for the rest of the page. A cancel, a network drop or a missing account does not switch (they are answers or transient); the user can sign in again.
+  - **Sign-out under NAA** clears the add-in's MSAL session cache only: the Office host owns the account (MSAL's `logoutPopup`/`clearCache` are unsupported there), so the next sign-in may be silent.
+  - Before 2026-11-03 every `OfficeOnline` host (which includes new Outlook) was sent to the popup, and the NAA config carried `brk-multihub://<host>`, which a standard popup cannot use (AADSTS7000471). The popup carries the browser profile's login.microsoftonline.com cookies and per-account SSO headers, and can fail with HTTP 400 "Request Too Long" on a machine with several work accounts.
 - **Token cache** is in-memory only (Office task-pane lifecycle is transient), keyed on the JWT `exp` with a 5-minute freshness buffer. Callers use `authService.getAccessToken()` per request.
 
 ### Entra registration (per environment — REQUIRED)
@@ -38,9 +41,10 @@ Each environment's SWA host needs **both** redirect URIs registered on the Entra
 | Redirect URI | For |
 |---|---|
 | `brk-multihub://<swa-host>` | NAA broker (desktop + web) |
-| `https://<swa-host>/auth-callback.html` | Office-on-the-web popup fallback |
+| `brk-9199bf20-a13f-4107-85dc-02114787ef48://<swa-host>` | NAA broker scheme Office asks for on the web and new Outlook (dev: AADSTS700046 "must have scheme brk-9199bf20-…" on 2026-08-31 until it was added) |
+| `https://<swa-host>/auth-callback.html` | Standard popup (and the fallback from NAA) |
 
-A missing / mismatched `brk-multihub://<host>` → **AADSTS7000471** ("reply address scheme is reserved for brokered application requests"). Because the code derives the host from `window.location`, **no code change is needed per environment** — only the Entra registration. Full operator steps: [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3 (H3)](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
+A missing broker registration now shows as a bridge error (e.g. AADSTS700046) and the user lands on the popup fallback, so it degrades rather than locks out; register it anyway, or those users never get NAA. No code change is needed per environment, only the Entra registration. Full operator steps: [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3 (H3)](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
 
 > **Documented exception to [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md):** the add-ins consume `SpaarkeAuthProvider` + `OfficeNaaStrategy` **directly** rather than the `useAuth()` hook + `localStorage` used by PCFs / Code Pages — the Office host has no cross-tab `localStorage` analog and a transient pane lifecycle. This is now the `@spaarke/auth`-blessed Office strategy (not a bespoke service). Full `useAuth()` migration remains deferred.
 
@@ -210,7 +214,8 @@ npm run typecheck          # production code is clean (0 errors); 284 errors rem
 
 | Pitfall | Symptom | Resolution |
 |---|---|---|
-| `brk-multihub://<host>` not registered (SPA) | `AADSTS7000471` on web sign-in | Register `brk-multihub://<swa-host>` under the Entra app's **SPA** platform for that host |
+| A broker redirect not registered (SPA) | NAA bridge error (e.g. `AADSTS700046`) in the console, then the standard popup | Register `brk-multihub://<swa-host>` and `brk-9199bf20-a13f-4107-85dc-02114787ef48://<swa-host>` under the Entra app's **SPA** platform for that host |
+| HTTP 400 "Request Too Long" at login.microsoftonline.com | The popup path, on a machine with many work accounts or a stale sign-in | NAA avoids the popup (check the console for `[OfficeNaaStrategy] … NestedAppAuth1.1=true` and "initialized via NAA broker"); on the machine, remove unused work accounts |
 | `auth-callback.html` redirect not registered | Web popup never completes | Register `https://<swa-host>/auth-callback.html` (SPA) |
 | Assumed Share/Search/Recent tabs work | Empty results / no-op | They are **placeholders** in `App.tsx` — wire them to the BFF before relying on them |
 | Manifest version not bumped | Old add-in served after deploy | Bump the 4-part version + M365 re-register |

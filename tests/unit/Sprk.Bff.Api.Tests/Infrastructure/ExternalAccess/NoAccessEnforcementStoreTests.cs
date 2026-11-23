@@ -156,6 +156,10 @@ public class NoAccessEnforcementStoreTests
               "sprk_noaccessentryid": "{{entryId}}",
               "_sprk_subjectcontact_value": "{{contact}}",
               "_sprk_subjectcontact_value{{Formatted}}": "Pat Walled",
+              "_sprk_subjectorganization_value": null,
+              "_sprk_subjectsystemuser_value": null,
+              "_sprk_objectrecordtype_value": null,
+              "sprk_objectrecordid": null,
               "_sprk_objectorganization_value": "{{org}}",
               "_sprk_objectorganization_value{{Formatted}}": "Org Ltd",
               "statecode": 0,
@@ -180,9 +184,94 @@ public class NoAccessEnforcementStoreTests
     [Fact]
     public void AnEntryRow_ForAnotherId_IsNotTheEntry()
     {
-        using var doc = System.Text.Json.JsonDocument.Parse($$"""{ "sprk_noaccessentryid": "{{Guid.NewGuid()}}", "statecode": 0 }""");
+        using var doc = System.Text.Json.JsonDocument.Parse(CompleteEntryRow(Guid.NewGuid()));
 
         NoAccessEnforcementStore.EntryFrom(doc.RootElement, Guid.NewGuid()).Should().BeNull();
+    }
+
+    // ── Fix round 3e: a column the row does not carry is UNDETERMINED (it throws), an explicit null is "empty" ────────
+
+    /// <summary>An entry row carrying every required column as an explicit null, bar the state (active) and the id.</summary>
+    private static string CompleteEntryRow(Guid entryId, params string[] without)
+    {
+        var values = NoAccessEnforcementStore.EntryRequiredColumns.ToDictionary(c => c, _ => (object?)null);
+        values["sprk_noaccessentryid"] = entryId;
+        values["statecode"] = 0;
+        foreach (var column in without)
+            values.Remove(column);
+        return System.Text.Json.JsonSerializer.Serialize(values);
+    }
+
+    public static IEnumerable<object[]> EveryRequiredEntryColumn() =>
+        NoAccessEnforcementStore.EntryRequiredColumns.Select(c => new object[] { c });
+
+    [Theory]
+    [MemberData(nameof(EveryRequiredEntryColumn))]
+    public void AnEntryRow_WithoutARequiredColumn_IsUndetermined_ItThrows(string missing)
+    {
+        var entryId = Guid.NewGuid();
+        using var doc = System.Text.Json.JsonDocument.Parse(CompleteEntryRow(entryId, missing));
+
+        var act = () => NoAccessEnforcementStore.EntryFrom(doc.RootElement, entryId);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*{missing}*");
+    }
+
+    [Fact]
+    public void AnEntryRow_WithEveryRequiredColumn_AsExplicitNulls_IsTheEntry_WithNothingSet()
+    {
+        var entryId = Guid.NewGuid();
+        using var doc = System.Text.Json.JsonDocument.Parse(CompleteEntryRow(entryId));
+
+        var entry = NoAccessEnforcementStore.EntryFrom(doc.RootElement, entryId);
+
+        entry.Should().NotBeNull();
+        entry!.IsActive.Should().BeTrue();
+        entry.ModifiedBy.Should().BeNull();
+        entry.Row._sprk_subjectcontact_value.Should().BeNull();
+        entry.Row._sprk_objectorganization_value.Should().BeNull();
+    }
+
+    [Fact]
+    public void EveryRequiredEntryColumn_IsInTheEntrySelect()
+    {
+        NoAccessEnforcementStore.EntrySelect.Split(',').Should().Contain(NoAccessEnforcementStore.EntryRequiredColumns);
+    }
+
+    [Fact]
+    public void TheOwnerSelect_NamesBothOwnerColumns_AndTheOwnerReadAsksForIt()
+    {
+        NoAccessEnforcementStore.OwnerSelect.Split(',').Should().BeEquivalentTo(new[] { "_owningteam_value", "_owninguser_value" });
+        NoAccessEnforcementStore.OwnerRequiredColumns.Should().BeEquivalentTo(NoAccessEnforcementStore.OwnerSelect.Split(','));
+    }
+
+    [Theory]
+    [InlineData("""{"_owninguser_value":"11111111-1111-4111-8111-111111111111"}""")]
+    [InlineData("""{"_owningteam_value":null}""")]
+    [InlineData("""{"_owningteam_value":"22222222-2222-4222-8222-222222222222"}""")]
+    [InlineData("{}")]
+    public void AnOwnerRow_WithoutAnOwnerColumn_IsUndetermined_ItThrows(string row)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(row);
+
+        var act = () => NoAccessEnforcementStore.OwnerFrom(doc.RootElement);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*owner*");
+    }
+
+    [Fact]
+    public void AnOwnerRow_WithBothColumns_NamesTheTeam_ElseTheUser_ElseNobody()
+    {
+        var team = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        using var teamRow = System.Text.Json.JsonDocument.Parse($$"""{"_owningteam_value":"{{team}}","_owninguser_value":null}""");
+        using var userRow = System.Text.Json.JsonDocument.Parse($$"""{"_owningteam_value":null,"_owninguser_value":"{{user}}"}""");
+        using var noneRow = System.Text.Json.JsonDocument.Parse("""{"_owningteam_value":null,"_owninguser_value":null}""");
+
+        NoAccessEnforcementStore.OwnerFrom(teamRow.RootElement).Should().Be(Spaarke.Dataverse.DataversePrincipalRef.Team(team));
+        NoAccessEnforcementStore.OwnerFrom(userRow.RootElement).Should().Be(Spaarke.Dataverse.DataversePrincipalRef.User(user));
+        NoAccessEnforcementStore.OwnerFrom(noneRow.RootElement).Should().BeNull("an explicit null on both is an ownerless row, as before");
+        NoAccessEnforcementStore.OwnerFrom(default).Should().BeNull("no row returned, as before");
     }
 
     [Fact]

@@ -242,7 +242,7 @@ public class EventDateOnlyTests
     [InlineData("2026-10-20")]
     [InlineData("2026-10-20T00:00:00.000Z")] // what earlier SPA builds sent: toISOString() of the picked day's UTC midnight
     public void ExternalCreateEventBody_WritesTheDueDateAs_yyyyMMdd(string sent) =>
-        ExternalDataService.BuildEventCreatePayload(Guid.NewGuid(), new CreateExternalEventRequest { SprkName = "Kick-off", SprkDuedate = sent }, Guid.NewGuid())
+        ExternalDataService.BuildEventCreatePayload(ExternalDataService.TodoRootKind.Project, Guid.NewGuid(), new CreateExternalEventRequest { SprkName = "Kick-off", SprkDuedate = sent }, Guid.NewGuid())
             ["sprk_duedate"].Should().Be("2026-10-20", "Dataverse answers 400 to a timestamp for a Date Only column");
 
     // ── Schema of record ─────────────────────────────────────────────────────────────────────────────────────

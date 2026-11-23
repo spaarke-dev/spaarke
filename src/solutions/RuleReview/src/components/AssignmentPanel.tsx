@@ -7,7 +7,7 @@
 
 import * as React from 'react';
 import { Button, Dropdown, Field, Option, Switch, Text, makeStyles, tokens } from '@fluentui/react-components';
-import { LookupField, type ILookupItem } from '@spaarke/ui-components';
+import { DataverseLookupField, type ILookupItem } from '@spaarke/ui-components';
 import type { RuleSetScope, RuleSetSummary } from '../services/ruleSetApi';
 import type { FirmLookup } from '../services/firmLookup';
 
@@ -22,6 +22,9 @@ const useStyles = makeStyles({
   visibility: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS },
   muted: { color: tokens.colorNeutralForeground3 },
 });
+
+/** A firm is a `sprk_organization` (see `services/firmLookup.ts`). */
+const FIRM_TABLE = 'sprk_organization';
 
 const SCOPE_LABEL: Record<RuleSetScope, string> = { ClientDefault: 'Client default', Firm: 'A firm' };
 
@@ -74,12 +77,15 @@ export const AssignmentPanel: React.FC<AssignmentPanelProps> = ({
 
       {scope === 'Firm' && (
         <div className={s.lookup} data-testid="assign-firm">
-          <LookupField
+          {/* D-219 Q5: a firm (sprk_organization) is chosen in the Dataverse side pane; with no host navigation service the inline search stays. */}
+          <DataverseLookupField
             label="Firm"
             required
+            entityType={FIRM_TABLE}
             placeholder="Search firms (two letters or more)"
             value={firm}
             onChange={setFirm}
+            navigationService={firmLookup.navigationService}
             onSearch={q => firmLookup.search(q)}
             minSearchLength={2}
           />

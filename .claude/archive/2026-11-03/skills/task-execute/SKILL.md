@@ -1,0 +1,1308 @@
+---
+description: Execute a POML task file with proper context loading, ADR awareness, proactive checkpointing, and rigor-level decision tree — the load-bearing task-execution protocol for every project
+tags: [tasks, execution, context, knowledge, rigor-levels, protocol]
+techStack: [all]
+appliesTo: ["execute task", "run task", "start task", "work on task", "continue", "next task", "resume task", "pick up where I left off"]
+alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-07-16
+---
+
+# task-execute
+
+> **Category**: Project Lifecycle
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — `leave-alone-justified` on body length; **NOT SPLIT** per dereferencing-reliability concern; expanded `appliesTo` to include all 7 canonical trigger phrases)
+> **Exemplar rationale**: Task execution is per-task and per-project; no canonical snapshot holds. The 11-step protocol + Rigor decision tree IS the contract.
+> **Justified length** (1,084 lines): hub #1 with 1,234 inbound references (5× the next-highest). Heavy procedural body including Rigor decision tree (Step 0.5), 11 mandatory steps, handoff + recovery protocols, PCF/BFF/Deployment per-tech checklists, examples, and Failure Modes table. Splitting would have catastrophic dereferencing risk: an agent executing a task needs the full protocol visible, not gestured-at one click away. Phase 2b Wave 2d explicitly preserved this skill's procedural body inline.
+> **External API surface preserved** (anything callers depend on): 7 trigger phrases ("work on task X", "continue", "next task", "keep going", "resume task X", "pick up where I left off", "continue with task X"); FULL/STANDARD/MINIMAL Rigor Level vocabulary; Step numbers 0.3, 0.5, 8.5, 9.5, 9.7, 10.5, 10.6 (cited by other skills + root CLAUDE.md trigger map).
+
+---
+
+## Purpose
+
+Execute a single POML task file with **mandatory context loading** and **persistent state tracking**. This skill ensures Claude Code reads all required knowledge files, follows ADRs, applies skills before implementation, and maintains recoverable state across compaction.
+
+**Critical**: This skill prevents the common failure mode where Claude Code starts implementing without loading the knowledge files referenced in the task.
+
+**Context Persistence**: All progress is tracked in `current-task.md` so work can continue after compaction or new sessions.
+
+**Proactive Checkpointing**: Claude MUST checkpoint progress frequently using the `context-handoff` skill to ensure reliable recovery.
+
+---
+
+## Permission Mode: Auto-Accept (RECOMMENDED)
+
+**This skill implements code changes. Use Auto-Accept Mode for efficient execution.**
+
+```
+⏵⏵ AUTO-ACCEPT MODE RECOMMENDED
+
+Before starting task implementation:
+  1. Press Shift+Tab to cycle to Auto-Accept Mode
+  2. Look for indicator: "⏵⏵ accept edits on"
+  3. Auto-Accept allows Claude to make changes without confirmation prompts
+
+WHY: Task execution involves writing code, updating files, running commands.
+     Auto-Accept Mode streamlines implementation without interruption.
+
+QUALITY GATES: Step 9.5 runs code-review and adr-check after implementation.
+               These catch issues before task completion.
+
+WHEN TO USE PLAN MODE: If you want to analyze code before changes,
+                       press Shift+Tab twice for Plan Mode during exploration.
+```
+
+---
+
+## When to Use
+
+- User says "execute task 013" or "work on task 013"
+- User provides a task file path
+- Continuing work on a project task
+- Resuming after compaction or new session
+- **Always use this protocol** when working on any POML task
+
+---
+
+## Execution Protocol (MANDATORY STEPS)
+
+### Step 0.3: Parallel Execution Detection (NEW)
+
+**BEFORE executing tasks, check if parallel mode applies.**
+
+This step only runs when task-execute is invoked for **multiple tasks at once** (e.g., "work on Phase 2 tasks" or called from project-pipeline Step 5). For single-task invocation, skip to Step 0.5.
+
+```
+IF invoked for multiple tasks:
+  1. READ TASK-INDEX.md "Parallel Execution Groups" section
+  2. IDENTIFY current wave (group whose prerequisites are satisfied)
+  3. COUNT parallel-safe tasks in this wave
+
+  IF wave has >1 parallel-safe task:
+    → ENTER PARALLEL MODE:
+      a. Cap concurrency at 6 agents (API-overload guard; raise only with evidence — project-pipeline Step 5)
+      b. Spawn N sub-agents (one per task) using Agent tool
+         - ONE message with MULTIPLE Agent tool calls (critical — must be parallel, not sequential)
+         - Each agent runs task-execute for its own task
+         - Each agent gets its task POML file path + minimal context
+      c. Wait for ALL agents to complete (background: true, notified on complete)
+      d. Aggregate results (success/failure per task)
+      e. **MANDATORY BUILD VERIFICATION**:
+         - If any wave task modified `.cs` files: `dotnet build src/server/api/Sprk.Bff.Api/`
+         - If any wave task modified `.ts`/`.tsx`: **`npm run build:prod` for PCF, run through `scripts/Invoke-PcfBuildProd.ps1`** (NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1; and `pcf-scripts` exits 0 on a failed build, so judge the result from the output); `npm run build` for non-PCF packages without a `:prod` script
+         - If build fails: STOP. Report breakage. Do not start next wave.
+      f. Update TASK-INDEX.md statuses (🔲 → ✅ for success, 🔄 for retry)
+      g. Proceed to next wave
+
+  IF wave has any task marked `<parallel-safe>false</parallel-safe>`:
+    → Execute those tasks SEQUENTIALLY from main session
+    → Reason for sequential: check <parallel-reason> metadata
+    → Common reason: "touches .claude/ — main-session-only (permission boundary)"
+
+  IF the user or harness has reported that context is high, or a compaction notice has appeared:
+    → Checkpoint first (context-handoff skill)
+    → Then enter parallel mode (each sub-agent gets fresh context window)
+  (Claude cannot measure its own context usage — root CLAUDE.md §5 — so no step here keys on a percentage.)
+
+FAILURE ISOLATION:
+  - One agent failing does NOT abort the wave
+  - Collect all agent outcomes (success/failure/timeout)
+  - Report: "Wave X complete: {N} succeeded, {M} failed, {K} need retry"
+  - Mark failed tasks 🔄 (not ❌) — they may succeed on retry
+
+PERMISSION BOUNDARY REMINDER:
+  - Sub-agents CANNOT write to `.claude/` paths
+  - Tasks touching `.claude/` are auto-marked `parallel-safe: false` by task-create
+  - If an agent is accidentally dispatched to a `.claude/` task, it will fail with "Edit denied"
+  - This is EXPECTED behavior — main session picks up the task and runs sequentially
+  - See root CLAUDE.md "Sub-Agent Write Boundary" section
+
+ELSE (single task invocation):
+  → Skip to Step 0.5
+```
+
+---
+
+### Step 0.5: Determine Required Rigor Level (MANDATORY)
+
+> **Pre-step (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-060 per spec FR-C03)**: Before determining rigor level, perform the **Hot-Path Auto-Invoke check**:
+>
+> 1. Read the task POML's `<inputs>`, `<outputs>`, and `<tags>` sections.
+> 2. Cross-reference against the Hot-Path Watchlist in [`.claude/skills/conflict-check/SKILL.md`](../conflict-check/SKILL.md) (BFF, SpaarkeAi, ci-workflows, skill-directives, root-CLAUDE.md, BFF entry/DI).
+> 3. **If ANY watchlist trigger fires** (POML output/input file matches a watchlist glob, OR task tags include `bff-api`/`spaarke-ai`/`ci-workflows`/`skill-directive`/`root-claude`), invoke `/conflict-check` skill immediately. Read its output before proceeding to the rigor decision below.
+> 4. If `/conflict-check` reports a hard warn (file overlap with another active worktree), pause and escalate to user. Soft warns and silent passes proceed normally.
+> 5. **`projects/INDEX.md` maintenance (CLAUDE.md §17)**: if this task is the project's FIRST touch of a hot-path surface (BFF / SpaarkeAi / ci-workflows / skill-directives / root-CLAUDE) and the project's row in [`projects/INDEX.md`](../../../projects/INDEX.md) does not yet reflect that Y, update the row (main-session-only — `projects/INDEX.md` is outside `.claude/` but the registry is maintained atomically here + by project-pipeline Step 2, no cron).
+>
+> The Hot-Path Auto-Invoke check is binding for all tasks that touch the watchlist surfaces. The check itself takes seconds; the value is preventing concurrent edits on the same hot files.
+
+**BEFORE executing any task, determine rigor level.** FIRST read the POML's authored `<rigor>` field (canonical
+name; accept the deprecated `<rigor-hint>` as an alias) — it is `task-create` Step 3.5.5's considered hint. Then
+validate it against the decision tree below. Use the authored `<rigor>` unless the tree clearly warrants a HIGHER
+level (e.g. the POML says STANDARD but the task actually modifies `.cs`/`.ts`/`.tsx` or has `bff-api`/`auth` tags →
+override UP to FULL and say so). Never silently override DOWN. If the POML has no `<rigor>`, compute from the tree.
+
+```
+┌─ Task has ANY of these characteristics? ─────────────────┐
+│  - Tags include: bff-api, api, pcf, plugin, auth         │
+│  - Will modify code files (.cs, .ts, .tsx)               │
+│  - Has 6+ steps in task definition                       │
+│  - Resuming after compaction/new session                 │
+│  - Task description includes: "implement", "refactor"    │
+│  - Dependencies on 3+ other tasks                        │
+└───────────────────────────────────────────────────────────┘
+         │
+         ├─ YES → **RIGOR LEVEL: FULL** (all protocol steps mandatory)
+         │        Must report after EACH step completion
+         │
+         └─ NO → Check next tier
+                  │
+                  ┌─ Task has ANY of these? ────────────────┐
+                  │  - Tags include: testing, integration-test │
+                  │  - Will create new files                   │
+                  │  - Has constraints or ADRs listed          │
+                  │  - Phase 2.x or higher (integration phase) │
+                  └────────────────────────────────────────────┘
+                           │
+                           ├─ YES → **RIGOR LEVEL: STANDARD**
+                           │        Skip pattern loading, report major steps
+                           │
+                           └─ NO → **RIGOR LEVEL: MINIMAL**
+                                    Documentation/inventory tasks only
+```
+
+#### Rigor Level Protocol Requirements
+
+| Protocol Step | FULL | STANDARD | MINIMAL |
+|--------------|------|----------|---------|
+| Step 0: Context Recovery | ✅ Required | ✅ Required | ✅ Required |
+| Step 1: Load Task File | ✅ Required | ✅ Required | ✅ Required |
+| Step 2: Initialize current-task.md | ✅ Required | ✅ Required | ✅ Required |
+| Step 3: Context Budget Check | ✅ Required | ✅ Required | ✅ Required |
+| Step 4: Load Knowledge Files | ✅ All files | ✅ Explicit only | ⏭️ Skip |
+| Step 4a: Load Constraints by Tag | ✅ Required | ✅ Required | ⏭️ Skip |
+| Step 4b: Load Patterns by Tag | ✅ Required | ⏭️ Skip | ⏭️ Skip |
+| Step 5: Load ADR Constraints | ✅ Required | ✅ If listed | ⏭️ Skip |
+| Step 6: Apply Always-Apply Skills | ✅ Required | ⏭️ Optional | ⏭️ Skip |
+| Step 6.5: Load Script Context | ✅ Required | ✅ If deploy/test | ⏭️ Skip |
+| Step 7: Review CLAUDE.md Files | ✅ Required | ⏭️ Skip | ⏭️ Skip |
+| Step 8: Execute Steps | ✅ Track all | ✅ Track major | ✅ Execute |
+| Step 8.5: Checkpointing | ✅ Every 3 steps | ✅ After a deploy, before a risky step, or when context is reported high | ⏭️ Skip |
+| Step 9: Verify Acceptance | ✅ Required | ✅ Required | ✅ Required |
+| Step 9.5: Quality Gates | ✅ Required | ⏭️ Skip | ⏭️ Skip |
+| Step 10: Update Task Status | ✅ Required | ✅ Required | ✅ Required |
+| **Reporting Frequency** | After each step | After major steps | Start + end only |
+
+#### MANDATORY RIGOR LEVEL DECLARATION
+
+At task start, Claude Code MUST output:
+
+```
+🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
+📋 REASON: [Why this level was chosen based on decision tree]
+🔧 MODEL TIER: [sonnet | opus | fable] @ effort [low|medium|high|xhigh] (from POML <model-tier> + <effort>; defaults sonnet @ high)
+🧭 STEP MODE: [directional | prescriptive] (from POML <steps mode="…">)
+
+📖 PROTOCOL STEPS TO EXECUTE:
+  [List all steps that will be executed for this rigor level]
+
+Proceeding with Step 0...
+```
+
+This declaration is **non-negotiable** and makes shortcuts visible.
+
+#### Model Tier + Effort (added 2026-07-08 for Sonnet-5 execution)
+
+Execution defaults to **Sonnet 5**. Each POML carries a `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security tasks) AND an `<effort>` (`high` default; `xhigh` only for brownfield/root-cause or complex-but-fully-specified work — see task-create Step 3.5.5b). **Do not run every task at `xhigh`** — at `xhigh` Sonnet-5 cost approaches Opus; honor the task's declared `<effort>`.
+
+- **Parallel execution** (`project-pipeline` Step 5): the dispatcher spawns each task's subagent with `model = <model-tier>` and `effort = <effort>`, so both are automatic.
+- **Serial / main-session execution**: honor `<effort>` for the session (`/effort {level}` or the invocation's effort setting). If the **current session model is lower** than the task's `<model-tier>` (e.g. session on Sonnet 5 but task needs `opus`), STOP and surface: *"🔔 This task is flagged `<model-tier>` — switch the session model (/model) or run it as an Opus/Fable subagent before proceeding."* Do not silently execute a top-tier task on a lower model.
+- Because Sonnet 5 follows instructions literally, keep the FULL-rigor quality gates (code-review + adr-check at Step 9.5) **unconditional** — they are the safety net for subtle ADR slips a lower-tier model is likelier to miss.
+
+#### Step Mode (added 2026-07-08 for Sonnet-5 execution)
+
+Honor the POML `<steps mode="…">`:
+- **`directional`** (default): `<steps>` are guidance; the binding contract is `<goal>` + `<acceptance-criteria>` + `<constraints>`. You MAY adapt the sequence to the real codebase state — if step 3 is wrong for what you find, do the right thing and note the deviation. Do NOT robotically execute a step you can see is wrong.
+- **`prescriptive`**: the exact sequence is binding (migrations, deployments, anything irreversible). Follow it exactly; a needed deviation is an **escalation** (root CLAUDE.md §6), not a silent improvisation.
+
+If the POML carries an `<escalation><trigger>`, treat firing that trigger as a first-class outcome: STOP and escalate per CLAUDE.md §6 (and, inside a `/goal` wave loop, write `BLOCKED.md` — see Step 11 wave-loop notes). Sonnet 5's follow-through tendency means it will otherwise push toward *a* completion; the trigger is what makes stopping legitimate.
+
+#### Sonnet-5 execution hygiene (added 2026-07-08)
+
+Sonnet 5 self-verifies and reports progress natively. Do NOT pad execution with ritual: skip "double-check everything after every step" / "be exhaustive" self-talk and forced interim progress summaries — they burn effort without adding signal. **Keep** the structural verification that produces artifacts or gate decisions: Step 9 acceptance-criteria checks, Step 9.5 quality gates, and the test/build runs named in the task. The rule: keep verification that yields an artifact or a gate decision; drop verification that only yields reassurance.
+
+#### User Override
+
+User can override automatic detection:
+- **"Execute with FULL protocol"** → Forces all steps regardless of task type
+- **"Execute with MINIMAL protocol"** → Use carefully, only for documentation
+- **Default:** Auto-detect using decision tree above
+
+#### Audit Trail
+
+Rigor level and reason are logged in current-task.md:
+
+```markdown
+### Task XXX Details
+
+**Rigor Level:** FULL
+**Reason:** Task tags include 'bff-api' (code implementation)
+**Protocol Steps Executed:**
+- [x] Step 0.5: Determined rigor level
+- [x] Step 1: Load Task File
+- [x] Step 2: Initialize current-task.md
+[... etc]
+```
+
+---
+
+### Step 0: Context Recovery Check
+
+```
+SIZE GUARD (every start, before reading):
+  IF current-task.md > 20 KB:
+    → It is carrying history, not state. Do NOT load it whole.
+    → Read only its newest block, then clean it up per context-handoff
+      "State, not history" (archive verbatim to notes/handoff-history/,
+      move standing items to project CLAUDE.md, rewrite as current state)
+      BEFORE starting the task.
+
+REGISTRATION GUARD (every start; added 2026-10-15, owner direction):
+  IF projects/{project-name}/README.md has no `> **Portfolio**:` pointer block:
+    → The project is not registered on GitHub (Board #2). STOP before the task.
+    → Run project-pipeline Step 4.2 (register: /devops-project-register --epic <#E>,
+      project label, verify), commit the pointer block, then continue the task.
+    → Ask the operator only for the Epic, if design.md/spec.md does not name it.
+
+IF resuming work (not fresh start):
+  READ projects/{project-name}/current-task.md
+  READ the project CLAUDE.md standing-rule sections (if present): "Standing directives & gotchas",
+    or the template's "Binding rules", "Owner directives and standing decisions", "Gotchas"
+
+  IF current-task.md exists AND status == "in-progress":
+    → This is a continuation
+    → EXTRACT: completed_steps, files_modified, next_step
+    → SKIP to the step indicated in next_step
+    → REPORT: "Resuming task {id} from step {N}"
+
+  IF current-task.md shows different task:
+    → WARN user: "current-task.md shows task {X}, you requested task {Y}"
+    → ASK: "Switch to task {Y}? This will update current-task.md"
+```
+
+### Step 1: Load Task File
+
+```
+READ the task .poml file
+EXTRACT:
+  - <metadata><tags> for context focus
+  - <knowledge><files> for required reading
+  - <constraints> for rules to follow
+  - <steps> for execution sequence
+  - <metadata><title> for display
+  - <metadata><phase> for context
+```
+
+### Step 2: Initialize/Update current-task.md
+
+**This step ensures state persistence for context recovery.**
+
+```
+LOAD projects/{project-name}/current-task.md
+
+IF file doesn't exist:
+  CREATE from template: .claude/templates/current-task.template.md
+
+UPDATE current-task.md:
+  - Task ID: {extracted from filename}
+  - Task File: {relative path to .poml}
+  - Title: {from metadata}
+  - Phase: {from metadata}
+  - Status: "in-progress"
+  - Started: {current timestamp}
+  - Clear previous completed_steps (new task)
+  - Clear previous files_modified (new task)
+
+COMMIT mentally: This file is now the source of truth for recovery
+```
+
+### Step 3: Context Budget Check
+
+```
+Claude cannot measure its own context usage (root CLAUDE.md §5), so this check keys on events:
+
+IF the user or harness has reported that context is high, or a compaction notice has appeared:
+  → UPDATE current-task.md with full state (see "Handoff Protocol" below)
+  → REPORT: "Context reported high. State saved to current-task.md — ready for /compact."
+  → Continue after compaction from current-task.md (the SessionStart hook re-injects it)
+
+IF this task will load a large file set (many knowledge files, big logs, a wide diff):
+  → Checkpoint BEFORE loading it
+```
+
+### Step 4: Load Knowledge Files (MANDATORY)
+
+**This step is NOT optional. Do NOT skip to implementation.**
+
+```
+FOR each file in <knowledge><files>:
+  READ the file completely
+  EXTRACT key rules, patterns, constraints
+
+FOR each pattern in <knowledge><patterns>:
+  READ the referenced file
+  UNDERSTAND the pattern to follow
+```
+
+#### 4a. Load Constraints by Tag (MANDATORY)
+
+**Based on task tags, load the appropriate constraint files:**
+
+| Task Tags | Load Constraints File |
+|-----------|----------------------|
+| `bff-api`, `api`, `minimal-api`, `endpoints` | `.claude/constraints/api.md` |
+| `pcf`, `react`, `fluent-ui`, `frontend` | `.claude/constraints/pcf.md` |
+| `dataverse`, `plugin`, `solution` | `.claude/constraints/plugins.md` |
+| `auth`, `oauth`, `authorization` | `.claude/constraints/auth.md` |
+| `cache`, `redis`, `data` | `.claude/constraints/data.md` |
+| `ai`, `azure-openai`, `document-intelligence` | `.claude/constraints/ai.md` |
+| `worker`, `job`, `background` | `.claude/constraints/jobs.md` |
+| `testing`, `unit-test`, `integration-test` | `.claude/constraints/testing.md` |
+| `config`, `feature-flag` | `.claude/constraints/config.md` |
+| `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler`, `customer-provisioning` | `.claude/constraints/provisioning.md` |
+
+#### 4b. Load Patterns by Tag (RECOMMENDED)
+
+**Based on task tags, load relevant pattern files:**
+
+| Task Tags | Load Pattern Files |
+|-----------|-------------------|
+| `bff-api`, `api` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` |
+| `pcf`, `react` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` |
+| `auth`, `oauth` | `.claude/patterns/auth/spaarke-sso-binding.md` (canonical v2), `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` + ADR-028 + `docs/guides/auth-deployment-setup.md` |
+| `dataverse`, `plugin` | `.claude/patterns/dataverse/plugin-structure.md` |
+| `cache` | `.claude/patterns/caching/distributed-cache.md` |
+| `testing` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` |
+| `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler` | `.claude/patterns/provisioning/INDEX.md` (dispatches to 9 pattern files: manifest-driven-secret-catalog, handler-registration-completeness, progressive-fail-fast-recovery, operator-rbac-bootstrap, keyvault-reference-identity-invariant, resource-name-availability-precheck, openai-quota-region-composition, null-object-kill-switch-anti-pattern, bff-vs-provisioning-boundary) |
+
+#### 4c. Common Knowledge Files by Tag
+
+```
+ADDITIONAL MODULE-SPECIFIC FILES:
+  - pcf tags → READ src/client/pcf/CLAUDE.md
+  - pcf tags → READ docs/guides/PCF-DEPLOYMENT-GUIDE.md
+  - bff-api tags → READ src/server/api/Sprk.Bff.Api/CLAUDE.md
+  - dataverse tags → READ .claude/skills/dataverse-deploy/SKILL.md
+  - deploy tags → READ .claude/skills/dataverse-deploy/SKILL.md
+
+UPDATE current-task.md:
+  - Add "Knowledge Files Loaded" section with paths
+  - Add "Constraints Loaded" section with constraint file names
+  - Add "Patterns Loaded" section with pattern file names
+```
+
+### Step 5: Load ADR Constraints (Two-Tier)
+
+```
+FOR each <constraint source="ADR-XXX">:
+
+  TIER 1 (Default - Concise):
+    READ .claude/adr/ADR-XXX-*.md
+    - These are 100-150 line AI-optimized versions
+    - Contain MUST/MUST NOT rules
+    - Sufficient for most implementation tasks
+
+  TIER 2 (If Needed - Full Context):
+    IF constraint is unclear or need historical rationale:
+      READ docs/adr/ADR-XXX-*.md
+      - Full version with history, alternatives considered, consequences
+
+UPDATE current-task.md:
+  - Add "Applicable ADRs" section with ADR numbers and relevance
+```
+
+### Step 6: Apply Always-Apply Skills
+
+```
+LOAD .claude/skills/adr-aware/SKILL.md
+LOAD .claude/skills/spaarke-conventions/SKILL.md
+LOAD .claude/skills/script-aware/SKILL.md
+```
+
+### Step 6.5: Load Script Context (for deployment/testing tasks)
+
+```
+IF task tags include: deploy, test, validate, automation, setup
+  OR task steps mention: deployment, testing, validation, health check
+
+THEN:
+  READ scripts/README.md
+  IDENTIFY relevant scripts for this task
+  NOTE scripts to use instead of writing new automation
+
+COMMON SCRIPT MATCHES:
+  - PCF build → Invoke-PcfBuildProd.ps1 (build:prod + fails on a failed build); deploy via the pcf-deploy skill
+  - API testing → Test-SdapBffApi.ps1
+  - Health checks → test-sdap-api-health.js
+  - Custom page deploy → Deploy-CustomPage.ps1
+  - LegalWorkspace / Console deploy → Deploy-SpaarkeAi.ps1 (LegalWorkspace ships inside the Console bundle)
+  - Events page deploy → Deploy-EventsPage.ps1
+  - BFF API deploy → Deploy-BffApi.ps1
+  - Ribbon export → Export-EntityRibbon.ps1
+
+UPDATE current-task.md:
+  - Add "Available Scripts" section with matched scripts
+```
+
+### Step 7: Review Relevant CLAUDE.md Files
+
+```
+BASED on <context><relevant-files>:
+  IDENTIFY module paths (src/client/pcf/*, src/server/api/*, etc.)
+  FOR each module:
+    IF {module}/CLAUDE.md exists:
+      READ for module-specific conventions
+```
+
+### Step 8: Execute Task Steps (with Progress Tracking)
+
+#### Step 8.0: Multi-File Work Decomposition (RECOMMENDED)
+
+**Consider delegating** when the work splits into independent, substantial pieces. This is a judgment call, not a rule: coupled or small changes stay in the main session. Record the choice (delegate or not, and why) in one line in `current-task.md`.
+
+```
+BEFORE starting implementation steps, ANALYZE the work:
+
+IF task touches 4+ files in INDEPENDENT modules AND the per-module work is substantial:
+  1. DECOMPOSE into independent sub-tasks:
+     - Group files by module/component
+     - Identify which changes depend on others
+     - Create dependency graph
+
+  2. IDENTIFY parallel-safe work:
+     - Files in different modules → CAN parallelize
+     - Files with no shared interfaces → CAN parallelize
+     - Files where one imports from another → MUST serialize
+
+  3. DELEGATE to subagents:
+     - Use the **Agent tool** with subagent_type="implementer" (Sonnet/high), or pass `model` chosen per `.claude/constraints/agent-cost.md` — a launch with no model is refused by the `PreToolUse` hook
+     - Send ONE message with MULTIPLE Agent tool calls for parallel work
+     - Each subagent handles one module/component
+     - Provide each subagent with:
+       • Specific files to modify
+       • Relevant constraints from task POML
+       • Expected changes (from task steps)
+     - NOTE: subagents CANNOT write to `.claude/` (sub-agent write boundary, CLAUDE.md §3) — keep any
+       `.claude/`-touching work in the main session.
+
+  4. COORDINATE results:
+     - You are notified when each background Agent completes (no polling tool needed)
+     - Merge changes if needed
+     - Run integration checks after all subagents complete
+
+EXAMPLE - Task modifies 6 files:
+  Files: EndpointA.cs, EndpointB.cs, EndpointC.cs (API)
+         ComponentA.tsx, ComponentB.tsx (PCF)
+         SharedTypes.ts (shared)
+
+  Dependency analysis:
+    SharedTypes.ts → ComponentA.tsx, ComponentB.tsx (shared must complete first)
+    EndpointA.cs, EndpointB.cs, EndpointC.cs (all independent)
+
+  Execution strategy:
+    Phase 1 (serial): SharedTypes.ts
+    Phase 2 (parallel):
+      - Subagent 1: EndpointA.cs, EndpointB.cs, EndpointC.cs
+      - Subagent 2: ComponentA.tsx
+      - Subagent 3: ComponentB.tsx
+
+  Agent tool call (Phase 2):
+    Send ONE message with THREE Agent tool calls:
+    - Agent 1: "Implement API endpoints A, B, C"
+    - Agent 2: "Update ComponentA with new types"
+    - Agent 3: "Update ComponentB with new types"
+
+WHEN NOT to parallelize:
+  - Task has only 1-3 files (overhead not worth it)
+  - Files have tight coupling (shared state, imports)
+  - Sequential logic required (create then use)
+  - Context has been reported high (checkpoint first; subagents return results into this context)
+```
+
+```
+FOR each <step> in <steps>:
+
+  BEFORE starting step:
+    UPDATE current-task.md:
+      - Current Step: Step {N} - {description}
+      - Next Action: {what this step will do}
+
+  EXECUTE the step
+
+  IF step involves code changes:
+    APPLY patterns from <knowledge>
+    VERIFY against <constraints>
+
+    UPDATE current-task.md → Files Modified:
+      - Add each file touched with purpose
+
+  IF step involves PCF:
+    FOLLOW the pcf-deploy skill's version-bump table (every location it lists)
+
+  IF step involves deployment:
+    FOLLOW dataverse-deploy skill
+
+  IF decision made:
+    UPDATE current-task.md → Decisions Made:
+      - {timestamp}: {decision} — Reason: {why}
+
+  AFTER completing step:
+    UPDATE current-task.md → Completed Steps:
+      - [x] Step {N}: {description} ({timestamp})
+
+    UPDATE Next Step to Step {N+1}
+
+    ─────────────────────────────────────────────────────
+    CHECKPOINT CHECK (MANDATORY after EVERY step):
+    ─────────────────────────────────────────────────────
+    EVALUATE checkpoint conditions:
+
+    IF any of these are true → RUN context-handoff:
+      • Just completed step 3, 6, 9, etc. (every 3 steps)
+      • Total files modified this session ≥ 5
+      • Made a significant implementation decision
+      • About to start a large/complex step
+      • After a deployment or live change
+      • The user or harness reports context is high
+
+    IF checkpoint triggered:
+      → Invoke context-handoff skill
+      → Update Quick Recovery section in current-task.md
+      → Report: "✅ Checkpoint saved. Continuing..."
+      → Continue to next step
+
+    IF a compaction notice has appeared, or the user asks to compact:
+      → STOP after checkpoint
+      → Report: "State saved. Ready for /compact."
+```
+
+### Step 8.5: Proactive Checkpointing Rules (MANDATORY)
+
+**Claude MUST checkpoint frequently to ensure reliable recovery. These rules are NOT optional.**
+
+#### Automatic Checkpoint Triggers
+
+| Condition | Action | Rationale |
+|-----------|--------|-----------|
+| After every 3 completed steps | Run context-handoff | Regular checkpoints prevent data loss |
+| After modifying 5+ files | Run context-handoff | Significant work should be preserved |
+| After any deployment operation | Run context-handoff | Deployment state is critical |
+| Before starting a complex step | Run context-handoff | Preserve clean state before risky work |
+| User or harness reports context is high | Run context-handoff | Claude cannot see its own usage (root §5) |
+| Compaction notice, or user asks to compact | Run context-handoff, then stop for /compact | Save state before it is summarized |
+| After significant decision | Update Decisions section | Document rationale for recovery |
+
+#### Checkpoint Behavior
+
+```
+WHEN checkpointing (REWRITE the file, never prepend a new block; see context-handoff "State, not history"):
+
+1. UPDATE current-task.md Quick Recovery section:
+   | Field | Value |
+   |-------|-------|
+   | **Task** | {NNN} - {Title} |
+   | **Step** | {N} of {Total}: {Current step} |
+   | **Status** | in-progress |
+   | **Next Action** | {EXPLICIT next command or file to edit} |
+
+2. UPDATE "Files Modified This Session" (session-scoped)
+
+3. UPDATE "Critical Context" (1-3 sentences)
+
+4. REPORT briefly (don't interrupt flow):
+   "✅ Checkpoint saved. Continuing with step {N+1}..."
+
+5. CONTINUE working (don't wait for user)
+```
+
+#### Silent vs. Verbose Checkpoints
+
+| Checkpoint Type | When | User Notification |
+|-----------------|------|-------------------|
+| **Silent** | After steps 3, 6, 9... | Brief: "✅ Checkpoint." |
+| **Verbose** | Context reported high; after a deployment | Full report with state summary |
+| **Blocking** | Compaction notice, or user asks to compact | STOP and request /compact |
+
+#### Example Checkpoint Flow
+
+```
+[Completing step 3 of 8]
+
+Claude:
+  1. Update current-task.md Completed Steps
+  2. Check: Step 3 complete → checkpoint trigger
+  3. Run context-handoff (Quick Recovery update)
+  4. Report: "✅ Checkpoint saved. Continuing with step 4..."
+  5. Begin step 4
+
+[After step 6, which deployed to dev]
+
+Claude:
+  1. Update current-task.md Completed Steps
+  2. Check: Step 6 complete → checkpoint trigger
+  3. Check: a deployment happened → verbose checkpoint
+  4. Run context-handoff
+  5. Report:
+     "✅ Checkpoint saved.
+      Task: 013 - Add dark mode, Step 6 of 8 (deployed to dev)
+      Continuing with step 7..."
+  6. Begin step 7
+```
+
+### Step 9: Verify Acceptance Criteria
+
+```
+FOR each <criterion> in <acceptance-criteria>:
+  VERIFY the criterion is met
+  IF not met:
+    FIX before proceeding
+```
+
+### Step 9.5: Quality Gates (MANDATORY)
+
+**Purpose**: Run code review and ADR validation after implementation, before marking task complete.
+
+```
+AFTER all implementation steps and acceptance criteria verified:
+
+1. RUN code-review on files modified in this task:
+   → Get list from current-task.md "Files Modified" section
+   → Execute /code-review {file-list}
+
+   TRIAGE every finding (Critical, Warning and Suggestion alike) using
+   "Finding triage and review scope" below. Act on the class, not the severity label:
+     → FIX-NOW classes (F1-F4): fix in this task. When a defect is outside this
+       task's scope (pre-existing, another project's code, found in passing),
+       file it AND report it to the operator. Never drop a real defect.
+     → KNOWN-LIMIT classes (K1-K4): one line each in task notes + PR, no fix round
+     → A genuine product or policy choice: ask the user (batch the questions)
+
+   AFTER fixing: RE-RUN code-review on the FIX SCOPE: the fix diff plus the code that
+   directly calls or is called by the changed lines (not the whole task surface).
+   RE-RUN the affected test suites.
+   REPEAT until no F-class finding remains. There is no round cap on fixing;
+   the limits below are on review ceremony.
+
+2. RUN adr-check on modified files:
+   → Execute /adr-check {file-list}
+
+   IF ADR violations found:
+     → DO NOT default to silent fix-until-clean (this is the failure mode CLAUDE.md §6.5 was added to prevent)
+     → Apply CLAUDE.md §6.5 ADR Conflict Resolution Protocol:
+
+       Path C — Pivot to comply (default):
+         If the violation is a genuine mistake or there's a clean ADR-compliant
+         alternative → FIX and re-run adr-check.
+
+       Path A — Project-scoped exception:
+         If strict compliance produces a sub-optimal outcome AND the deviation
+         is narrow → ESCALATE to user with the protocol format from §6.5.
+         If approved: document in design.md/spec.md "ADR Tensions" section
+         + PR description; do NOT silently bypass.
+
+       Path B — ADR amendment:
+         If the ADR rule itself is no longer correct in general → ESCALATE
+         to user; if approved, ADR amendment becomes its own deliverable.
+
+     → Silent violation is forbidden. If unsure, escalate (path A or B) rather
+       than choosing path C reflexively.
+     → Once path is chosen and acted on, RE-RUN adr-check to verify the
+       documented state (clean, OR violation present + cited exception).
+
+3. VERIFY linting (if applicable):
+   → TypeScript/PCF: npm run lint
+   → C#: dotnet build --warnaserror
+
+   IF lint errors:
+     → FIX before proceeding
+     → RE-RUN lint to verify
+
+SKIP quality gates IF:
+  - Task is documentation-only (no code changes)
+  - Task is configuration-only (no logic changes)
+  - User explicitly requests skip (with documented reason)
+
+**BINDING OVERRIDE — Test-modifying tasks ALWAYS run quality gates** (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-060 per spec FR-B07):
+
+  - IF task modifies any file under `tests/**` OR task POML `<tags>` include `testing`, `test-reset`, `deletion`, `integration-test`:
+    → Quality gates (code-review + adr-check) are MANDATORY regardless of rigor level.
+    → The SKIP block above does NOT apply.
+    → Reason: prevents wiring-test antipatterns and KEEP-path violations per ADR-038 + spec FR-B07.
+    → This override is binding for ≥6 months from 2026-06-26 (cultural reset window).
+    → Path-check enforcement: any deletion under a KEEP path — `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**`, `tests/unit/domain/**`, `tests/Spaarke.ArchTests/**` (ADR-038 §2) — requires a same-PR replacement covering the same scenario (FR-B06), or — for an orphaned test whose subject was deleted — the evidence ADR-038 Amendment A3 lists, which code-review verifies in the diff.
+
+UPDATE current-task.md:
+  - Add "Quality Gates" section:
+    - Code Review: ✅ Passed (or issues found/fixed)
+    - ADR Check: ✅ Passed (or violations found/fixed)
+    - Lint: ✅ Passed (or N/A)
+```
+
+#### Finding triage and review scope (BINDING — added 2026-10-06, corrected by the owner 2026-10-06)
+
+**Why this exists.** `code-review` is coverage-first by design: it reports every finding, including low-confidence ones, and leaves filtering to this step. But this step never defined the filter. It said "fix critical issues → re-run code-review", and each re-run reviewed the whole surface again and surfaced new findings. Adversarial-verifier workflows followed the same pattern. In `unified-access-control-r2`, tasks reached fix round `-r6`, owner decision rounds passed 50, and the owner recorded the project at ~10× budget. The owner named the cause as "static-guard arms races and edge-case machinery … without real-world benefit". The classes below are the owner's own rule from that project (owner rounds 56 and 59, 2026-10-05), made repo-wide.
+
+**🔴 Owner correction (2026-10-06, BINDING).** The limits below cut CEREMONY: unnecessary review passes, re-reviews of untouched code, speculative findings and pseudo-fixes. They **never** limit FIXING. The first version of this section capped work at "2 fix rounds … never start round 3", which let a confirmed security defect wait on a round count. That reading is wrong and is withdrawn. Owner: *"we should never allow known broken code to not be fixed just because it takes more than 2 rounds."*
+
+**Every defect found is fixed or surfaced, whatever its origin (BINDING).** This holds whether the defect was caused directly or indirectly by the current work, or was only uncovered or found in the course of it (pre-existing code, another project's code, configuration, data, the environment):
+- **In this task's scope:** fix it in this task.
+- **Outside this task's scope:** surface it to the operator. File it (`/project-defer-issue-tracking`, a GitHub issue) **and** name it in the task's completion report, with the concrete failure scenario. The operator decides when and where it is fixed.
+- **Never** drop it silently, never leave it unreported because it is "not ours" or "pre-existing", and never reclassify it as a known limit to make it go away.
+
+**Classify every finding before acting:**
+
+| Class | Meaning | Action |
+|---|---|---|
+| **F1** | Runtime defect: security hole, fail-open, data loss, cross-customer exposure, broken real path | Fix (in scope) or file + report (out of scope) |
+| **F2** | Maintainability defect that compounds: duplicates an existing mechanism, a comment contradicting the code, important behaviour with no test | Fix (in scope) or file + report (out of scope) |
+| **F3** | Measurable performance problem | Fix (in scope) or file + report (out of scope) |
+| **F4** | Unmet acceptance criterion, or required/promised functionality missing | Fix. **Never trimmed**: robustness and completeness of required functionality is not "over-engineering" |
+| **K1** | Guard or static-analysis bypass reachable only by deliberately adversarial code in our own repo | Known limit: one line in notes + PR |
+| **K2** | Rare edge that already fails closed | Known limit |
+| **K3** | Seeding proof (mutation check) of a minor branch | Known limit |
+| **K4** | Low-confidence finding with no concrete failure scenario you can state | Known limit |
+
+A K class is for something that is **not a defect on a real path**. A confirmed defect with a stateable failure scenario on a real path is F-class, even if it is old or rare.
+
+**Over-engineering check (applies to every fix).** A new column, job, setting or abstraction needs a realistic failure behind it, and a fix is never bigger than the problem. Prefer reusing an existing component (CLAUDE.md §11). This check limits the SIZE of a fix, never whether a real defect gets fixed.
+
+**Review scope (this is what is limited):**
+1. **Review → fix → re-verify the fix scope → repeat until no F-class finding remains.** There is no round cap on fixing real defects.
+2. **Re-verification scope is the fix diff plus its direct callers and callees,** not the task's whole surface. Including callers and callees catches a fix that breaks adjacent code. Re-running the affected test suites remains mandatory. A fresh full review after every fix is what generated an endless supply of new findings.
+3. **Adversarial-verifier passes** (workflow scripts, verify-after-execute lanes) use the same classes. Allow **one** full verifier pass per task, or two for tasks tagged `auth`, `security` or `tenant-isolation`. Every later re-check is scoped to the fix diff (rule 2) and is not a new full pass. A further full pass is allowed when a fix changed the approach or entered a subsystem the scoped re-check would not cover — record the one-line reason in the task notes. This limit is on ceremony; it never stops a fix.
+4. **Escalate when fixes are not converging, not because of a count.** That means the same defect returns after a fix, a fix keeps exposing new F-class defects in the same area, or the right fix needs a decision only the owner can make (root §6). Escalate with the findings and a recommendation. Never stop fixing silently, and never ship the defect.
+5. **Flag diminishing returns proactively.** If a round produced only K-class findings, say so and stop. Don't continue rounds silently.
+6. **Fix the class, not the instance.** When a defect's cause is a repeatable pattern (a misused contract, a wrong field read, a missing guard, a copy-pasted shape), run one Grep for the pattern before closing the task and record the result in the task notes. Then: (a) fix the matches inside the task's own files; (b) list every other match by path for the operator — the Grep output is the list; do not open or verify each one; (c) name the guard that would catch it (type, lint rule or ArchTest — root §16) and build it only when the POML asks for it or an existing guard family makes it a few lines (then with must-fire/must-not-fire controls, and a ratchet baseline if old instances remain). Fixing outside the task's files, or building a new guard, is a scope change: ask (root §6), do not expand the task. *Why: issue #975 fixed 3 error responses with the wrong content type and missed 44 more; the dead `if (!res.ok)` branch after `authenticatedFetch` was found in ~30 files and was being written again the same week.*
+
+### Step 9.7: UI Testing (PCF/Frontend Tasks)
+
+**Purpose**: Run browser-based UI tests for PCF controls and frontend components after deployment.
+
+**Requires**: Claude Code started with `--chrome` flag
+
+```
+CHECK if UI testing applies:
+
+IF ALL conditions met:
+  - Task tags include: pcf, frontend, fluent-ui, e2e-test
+  - Claude Code has Chrome integration (/chrome shows "Connected")
+  - Deployment completed (dataverse-deploy or localhost running)
+  - Task has <ui-tests> section OR UI-related <acceptance-criteria>
+
+THEN:
+  PROMPT: "UI tests defined for this task. Run browser-based testing? [Y/n]"
+
+  IF user confirms:
+    1. LOAD ui-test skill
+    2. EXECUTE tests defined in task POML or acceptance criteria
+    3. VERIFY ADR-021 dark mode compliance (for PCF/Fluent UI)
+    4. CHECK console for runtime errors
+    5. CAPTURE screenshots/GIFs if requested
+    6. REPORT results
+
+  IF user declines:
+    → Document reason in current-task.md
+    → Continue to Step 10
+
+SKIP UI testing IF:
+  - Task is backend-only (no pcf/frontend tags)
+  - Claude Code not started with --chrome
+  - No deployed environment available
+  - User explicitly skips
+
+UPDATE current-task.md:
+  - Add "UI Testing" section:
+    - Status: ✅ Passed / ⚠️ Issues found / ⏭️ Skipped (reason)
+    - Tests run: {count}
+    - Issues: {list if any}
+```
+
+**Test Sources** (checked in order):
+
+1. **Task POML `<ui-tests>` section** - Explicit test definitions
+2. **Task POML `<acceptance-criteria>`** - UI-related criteria
+3. **Project CLAUDE.md** - Environment URLs, navigation paths
+4. **ADR-021** - Dark mode requirements (auto-applied for PCF/Fluent UI)
+
+**Example UI Test in Task POML**:
+```xml
+<ui-tests>
+  <test name="Component Renders">
+    <url>https://org.crm.dynamics.com/main.aspx?...</url>
+    <steps>
+      <step>Verify control is visible</step>
+      <step>Check console for errors</step>
+    </steps>
+  </test>
+  <test name="Dark Mode (ADR-021)">
+    <steps>
+      <step>Toggle dark mode</step>
+      <step>Verify colors adapt</step>
+    </steps>
+  </test>
+</ui-tests>
+```
+
+### Step 10: Update Task Status (Completion)
+
+```
+UPDATE task file <metadata><status> to "completed"
+ADD <notes> section with completion summary. End it with ONE rework line (format and use: scripts/ai-cost/README.md "Rework signal"),
+  exactly one of these three forms, with the placeholders filled in:
+    rework: none task 042
+    rework: fix-round-2 task 042
+    rework: escalated-to-opus task 042
+  none = the first attempt passed review and verification; fix-round-<N> = N rounds of fixes after review or a failed check;
+  escalated-to-<model> = the work was re-run on a higher tier. Put `task <NNN>` on the line (or keep NNN in the notes file name).
+  When launching agents for the task, put `task <NNN>` in the Agent `description` so the launch can be tied to this line.
+
+UPDATE TASK-INDEX.md with ✅ completed status
+
+VERIFY both writes landed (MANDATORY — added 2026-09-03 by unified-access-control-r2):
+  pwsh scripts/check-task-status-drift.ps1
+  → exit 0 = the POML status and the index marker agree
+  → exit 1 = one of the two writes was skipped; the output names the task and which side is behind
+  → FIX IT NOW, before Step 11. Do not proceed on a red check.
+```
+
+**Why this verification exists.** Completion is recorded in **two** places — the POML `<status>` and
+the `TASK-INDEX.md` marker — and nothing kept them in agreement. A 2026-09-03 audit of
+`unified-access-control-r2` found **17 disagreements across 92 tasks**: 14 tasks finished *and merged*
+whose POML still said `pending`, plus one finished task the index still showed as `🔄`. The index is
+updated as work proceeds; the POML status is a separate write, and it was skipped 14 times.
+
+**Both artifacts drift, in both directions** — in that audit the POML was stale 14 times and the index
+once. So when the check goes red, resolve it from **evidence** (a git completion commit touching
+`projects/<name>/`), not by assuming one artifact is authoritative.
+
+⚠️ The check gates **only the current project** (inferred from the `work/<name>` branch). Repo-wide
+drift is 82 disagreements across 151 projects, concentrated in archived work — gating on that total
+would be red on day one and waived on day two. `-All` gives a non-blocking repo-wide report instead.
+
+### Step 10.5: Script Library Maintenance
+
+```
+AFTER task completion, EVALUATE script library updates:
+
+IF task USED existing scripts:
+  VERIFY scripts still work as expected
+  IF script needed modifications:
+    UPDATE script file
+    UPDATE scripts/README.md (Last Used, any behavior changes)
+
+IF task CREATED reusable automation (commands used 3+ times):
+  EVALUATE: Should this become a script?
+
+  IF yes (repeatable, complex, multi-step):
+    1. CREATE new script following naming convention
+    2. ADD inline documentation (synopsis, parameters, examples)
+    3. ADD entry to scripts/README.md with:
+       - Purpose, Usage frequency, Lifecycle status
+       - Dependencies, When to use, Command example
+    4. Place in: scripts/ (general) or projects/{name}/scripts/ (project-specific)
+
+IF task DEPRECATED script functionality:
+  UPDATE scripts/README.md to mark as ⚠️ Deprecated
+  NOTE replacement approach
+```
+
+### Step 10.6: Conflict Sync Check (Parallel Sessions)
+
+**Purpose**: When running parallel Claude Code sessions, check for potential conflicts before committing.
+
+```
+IF running in a worktree (not main repo):
+
+  1. FETCH latest master
+     git fetch origin master
+
+  2. CHECK for master updates since branch started
+     git log HEAD..origin/master --oneline
+
+  3. IF master has new commits:
+     CHECK which files changed in master:
+       git diff --name-only HEAD origin/master
+
+     COMPARE with files modified in this task:
+       - Files in current-task.md "Files Modified" section
+
+     IF overlap detected:
+       ⚠️ WARN: "Master has changes to files you modified"
+       RECOMMEND: "Rebase before pushing to avoid conflicts"
+
+       SHOW conflict resolution commands:
+         git fetch origin master
+         git rebase origin/master
+         # Resolve any conflicts
+         git push --force-with-lease
+
+  4. IF no overlap OR user chooses to continue:
+     PROCEED with commit and push
+
+REASONING:
+  - Detecting conflicts early (end of task) is easier than at merge time
+  - Smaller rebases = fewer conflicts
+  - Keeps parallel sessions in sync
+```
+
+### Step 11: Transition to Next Task
+
+**Important**: `current-task.md` tracks only the ACTIVE task, not task history. When a task completes, it resets for the next task.
+
+```
+TRANSITION current-task.md:
+
+1. MOVE OUT anything worth keeping (do NOT leave it in current-task.md):
+   - A gotcha or standing directive that outlives this task → project CLAUDE.md
+     standing-directive / gotcha section ("Standing directives & gotchas", or the template's
+     "Owner directives and standing decisions" / "Gotchas")
+   - Decisions and rationale → the task's notes file / POML <notes>
+   - The narrative → the completion commit message
+
+2. RESET for next task:
+   - Clear "Completed Steps" section
+   - Clear "Files Modified" section
+   - Clear "Decisions Made" section
+   - Clear "Current Step" section
+
+3. DETERMINE next task:
+   - Check TASK-INDEX.md for next pending task (🔲 status)
+   - If dependencies: Find first task with all dependencies satisfied
+
+4. UPDATE current-task.md with next task:
+   IF next task found:
+     - Task ID: {next task number}
+     - Task File: tasks/{NNN}-{slug}.poml
+     - Title: {from next task metadata}
+     - Phase: {from next task metadata}
+     - Status: "not-started"
+     - Started: "—"
+     - Next Action: "Begin Step 1 of task {NNN}"
+
+   IF no more tasks (project complete):
+     - Task ID: "none"
+     - Status: "none"
+     - Next Action: "Project complete. Run /test-diet then /repo-cleanup"
+
+   **BINDING — Test Diet Gate at Project Close** (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-081 per spec FR-B09):
+
+   IF the just-completed task is a `090-wrapup-*` task AND `/test-diet` was NOT invoked during the task:
+     → 🚨 **HARD WARNING**: "Wrap-up task completed without running /test-diet. Spec FR-B09 requires test diet pass before project close. Run /test-diet now to reconcile build-vs-maintain tests per ADR-038 §7."
+     → If user proceeds without `/test-diet`: log warning in `current-task.md` Decisions section and continue, BUT the wrap-up PR description MUST include "test-diet: SKIPPED (rationale required)".
+     → Test diet output (`notes/test-diet-report.md`) is the binding artifact — reviewer judgment on each DELETE/MAINTAIN/AMBIGUOUS classification belongs in the wrap-up PR.
+
+   IF wrap-up task was completed AND `/test-diet` was invoked AND `notes/test-diet-report.md` exists:
+     → Confirm reconciliation: "✅ Test diet executed; report at notes/test-diet-report.md. {D} delete candidates / {B} ambiguous / {M} confirmed maintain."
+
+5. REPORT to user:
+   "✅ Task {completed_id} complete.
+
+    Next task: {next_id} - {next_title}
+    Ready to begin? [Y/N]"
+```
+
+**Why reset instead of accumulate?**
+- `current-task.md` is for **context recovery**, not task history
+- Task history is preserved in:
+  - `TASK-INDEX.md` (status of all tasks)
+  - Individual `.poml` files (status + notes sections)
+  - Git commits (what changed when)
+- Keeping it focused prevents file bloat and faster recovery
+- Measured cost of not doing this (2026-10-06): three active projects had 150 / 445 / 483 KB files, read at Step 0 and Step 2 of every task (~120k tokens at the top end) before any work began
+
+---
+
+## `/goal` Wave-Completion Loop (added 2026-07-08 for Sonnet-5 execution)
+
+`/goal` (Claude Code v2.1.139+) is an **optional per-wave** loop: the session keeps taking turns until a **transcript-only** evaluator (Haiku by default — reads the conversation, runs no commands/files) judges the wave's compiled condition met. It replaces the operator's per-task "continue" press. It is set by the operator (or project-pipeline Step 5) for waves that task-create Step 3.85 marked `goal-eligible: YES`. **It is not a per-task mechanism and never a quality gate.**
+
+**When it applies:** only for `goal-eligible` waves (machine-verifiable end-state, ≥3 well-specified tasks, low ambiguity, not security/deploy/irreversible). Non-eligible waves run task-by-task as normal — do not wrap them in `/goal`.
+
+**Prerequisites** (if unavailable, `/goal` reports why — fall back to manual per-task execution): workspace trust accepted; hooks not disabled (`disableAllHooks` unset, no `allowManagedHooksOnly` in managed settings); Claude Code v2.1.139+.
+
+**Mechanics:**
+- The operator runs `/goal "<goal-condition>"` (the compiled, by-reference, ≤4,000-char condition stored in TASK-INDEX.md) AFTER context loading, so knowledge/constraints are in the transcript before the loop begins.
+- Each task in the wave STILL runs its own task-execute with full context loading and **Step 9.5 gates unchanged**. The loop only removes the between-task human prompt.
+- Unattended runs pair `/goal` with auto-mode (`claude -p "/goal <condition>"` + tool auto-approval) — appropriate **only** when the wave's constraints and outputs are fully declared. Interactive is the default.
+
+**Three exit states:**
+1. **Condition met** → proceed to the normal completion flow. Goal achievement is *necessary but not sufficient*: the orchestrator's accept / patch / escalate / block decision + Step 9.5 remain the actual gate for marking tasks `complete`. **Do NOT auto-mark tasks complete because the goal cleared.**
+2. **`BLOCKED.md` written** (an `<escalation>` trigger fired, or a genuine blocker) → the wave's affected task moves to `blocked`; `BLOCKED.md` contents flow to the orchestrator per CLAUDE.md §6 / §6.5. Writing `BLOCKED.md` is the *correct* behavior inside a loop, not a failure. `BLOCKED.md` (under `projects/{name}/`) states: task id, blocking condition, what was attempted, what decision is needed.
+3. **Turn/time cap hit** → treated as an implicit block: write `BLOCKED.md` summarizing state + why the cap was reached, then the same escalation path applies.
+
+**Non-negotiable:** the Haiku evaluator's judgment is a stopping-condition check, not a verdict on quality. Do not weaken, skip, or reorder Step 9.5 on the grounds that the goal was achieved.
+
+---
+
+## Handoff Protocol (Pre-Compaction)
+
+When context usage is high or session ending, use the **context-handoff** skill:
+
+```
+INVOKE context-handoff skill (or run manually if needed):
+
+The skill will:
+1. Update Quick Recovery section with current state
+2. Update Files Modified This Session
+3. Update Critical Context (1-3 sentences)
+4. Verify checkpoint is complete
+5. Report readiness for /compact
+
+ALTERNATIVELY, manual update of current-task.md:
+
+1. Quick Recovery section:
+   - Task: {NNN} - {Title}
+   - Step: {N} of {Total}
+   - Status: in-progress
+   - Next Action: {EXPLICIT command or file}
+
+2. Files Modified This Session: Complete list with purposes
+
+3. Critical Context: 1-3 sentences of essential info
+
+4. Decisions Made: All implementation choices with rationale
+
+5. Handoff Notes:
+   - Key context not captured elsewhere
+   - Gotchas discovered
+   - Important warnings
+
+VERIFY: Quick Recovery section readable in < 30 seconds
+
+REPORT to user:
+  "✅ State saved to current-task.md
+   Ready for /compact or new session.
+   Say 'where was I?' or '/checkpoint' to resume."
+```
+
+### Trigger Phrases for Handoff
+
+| User Says | Action |
+|-----------|--------|
+| "Save my progress" | Run context-handoff |
+| "/context-handoff" | Run context-handoff |
+| "/checkpoint" | Run context-handoff (alias) |
+| "I need to compact" | Run context-handoff first |
+
+---
+
+## Context Recovery Protocol
+
+When resuming work (new session or post-compaction):
+
+```
+1. READ projects/{project-name}/current-task.md
+2. EXTRACT active task info
+3. LOAD the task .poml file
+4. LOAD knowledge files from task
+5. LOAD ADRs from constraints
+6. RESUME from "Current Step"
+
+REPORT:
+  "✅ Context recovered for {project-name}
+
+   Task: {task_id} - {title}
+   Completed: Steps 1-{N}
+   Resuming: Step {N+1} - {description}
+
+   Ready to continue. Proceed?"
+```
+
+---
+
+## PCF-Specific Checklist
+
+When task has `pcf`, `react`, or `fluent-ui` tags:
+
+- [ ] Read `src/client/pcf/CLAUDE.md`
+- [ ] Read `docs/guides/PCF-DEPLOYMENT-GUIDE.md`
+- [ ] Version bumped in every location the `pcf-deploy` skill's version table lists (ControlManifest.Input.xml, UI footer, Solution.xml, Solution ControlManifest.xml, pack.ps1)
+- [ ] Build succeeds via `scripts/Invoke-PcfBuildProd.ps1` (`npm run build:prod` — NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1 — and `pcf-scripts` exits 0 even when the build fails)
+- [ ] If deploying: solution import via the `pcf-deploy` skill (NEVER `pac pcf push`: it rebuilds in development mode)
+- [ ] current-task.md updated with files modified
+
+---
+
+## BFF API-Specific Checklist
+
+When task has `bff-api`, `api`, or `minimal-api` tags:
+
+- [ ] Read `src/server/api/Sprk.Bff.Api/CLAUDE.md`
+- [ ] Load `.claude/constraints/bff-extensions.md` and state the **Placement Justification** (CLAUDE.md §10) in the PR/notes
+- [ ] Follow ADR-001 Minimal API patterns
+- [ ] Follow ADR-008 endpoint filter patterns
+- [ ] Build succeeds: `dotnet build`
+- [ ] Tests pass: `dotnet test` (Spaarke.sln) **and** `dotnet test tests/Spaarke.ArchTests/` (not in the solution)
+- [ ] **Publish-size delta reported (CLAUDE.md §10)**: per `.claude/rules/bff-hygiene.md` item 4 — against a fresh master build, never a recorded baseline; thresholds and procedure there
+- [ ] No new HIGH CVE: `dotnet list package --vulnerable --include-transitive` (no upstream fix → `bff-hygiene.md` item 5 escalation)
+- [ ] current-task.md updated with files modified
+
+---
+
+## Deployment-Specific Checklist
+
+When task has `deploy` tag:
+
+- [ ] Read `.claude/skills/dataverse-deploy/SKILL.md`
+- [ ] Read `docs/guides/PCF-DEPLOYMENT-GUIDE.md`
+- [ ] Fresh build (delete bin/obj first)
+- [ ] Version numbers correct
+- [ ] PAC CLI authenticated
+- [ ] Deployment verified
+- [ ] current-task.md updated with deployment status
+
+---
+
+## Example Execution
+
+**User**: "Execute task 013"
+
+**Agent**:
+```
+1. CHECK current-task.md for recovery state
+2. READ tasks/013-update-aisummarypanel.poml
+3. UPDATE current-task.md: task 013, status: in-progress
+4. EXTRACT tags: pcf, react, fluent-ui, frontend
+5. LOAD KNOWLEDGE:
+   - READ src/client/pcf/CLAUDE.md
+   - READ docs/guides/PCF-DEPLOYMENT-GUIDE.md
+   - UPDATE current-task.md with knowledge files loaded
+6. LOAD CONSTRAINTS:
+   - ADR-006, ADR-021: PCF patterns
+   - UPDATE current-task.md with applicable ADRs
+7. LOAD ALWAYS-APPLY:
+   - adr-aware skill
+   - spaarke-conventions skill
+8. EXECUTE STEPS 1-8 from task:
+   - UPDATE current-task.md after each step
+   - Track files modified
+   - Log decisions made
+9. VERIFY acceptance criteria
+10. UPDATE task status to completed
+11. UPDATE current-task.md: status completed, set next task
+```
+
+---
+
+## Example Recovery
+
+**User**: "Where was I?" (after new session)
+
+**Agent**:
+```
+1. READ projects/ai-doc-summary/current-task.md
+2. FOUND: Task 013, status: in-progress, step 5 of 8 complete
+3. LOAD tasks/013-update-aisummarypanel.poml
+4. LOAD knowledge files per task
+5. REPORT:
+   "✅ Recovered context for ai-doc-summary
+
+   Task: 013 - Update AISummaryPanel component
+   Completed: Steps 1-5
+   Files modified: src/client/pcf/AISummaryPanel/...
+
+   Next: Step 6 - Add dark mode support
+
+   Ready to continue?"
+```
+
+---
+
+## Failure Modes to Avoid
+
+| Failure | Cause | Prevention |
+|---------|-------|------------|
+| Lost progress after compaction | Didn't update current-task.md | ALWAYS update after each step |
+| Stale PCF deployment | Didn't bump version | ALWAYS read PCF-DEPLOYMENT-GUIDE.md |
+| ADR violation | Didn't read ADRs | ALWAYS read ADRs in constraints |
+| Wrong patterns | Didn't read CLAUDE.md | ALWAYS read module CLAUDE.md |
+| Missing context | Skipped knowledge step | NEVER skip Step 4 |
+| Can't resume | current-task.md incomplete | Update ALL sections during work |
+
+---
+
+## Related Skills
+
+- **context-handoff**: Checkpoint state before compaction (invoked proactively)
+- **project-continue**: Restore state after compaction or new session
+- **task-create**: Creates the task files this skill executes
+- **adr-aware**: Proactive ADR loading (always-apply)
+- **script-aware**: Script library discovery and maintenance (always-apply)
+- **dataverse-deploy**: Deployment operations
+- **code-review**: Called in Step 9.5 Quality Gates (post-implementation)
+- **adr-check**: Called in Step 9.5 Quality Gates (architecture validation)
+- **ui-test**: Called in Step 9.7 for PCF/frontend browser testing (requires --chrome)
+- **repo-cleanup**: Called in project wrap-up task (Task 090)
+- **project-pipeline**: Initializes current-task.md for projects
+- **merge-to-master**: Prompted after completing final project task — merges branch work into master
+
+### Final Task Merge Prompt
+
+**After completing the last task in a project** (all tasks in TASK-INDEX.md are ✅), prompt the user:
+
+```
+✅ All project tasks complete!
+
+📋 Next steps:
+  1. Run `/repo-cleanup` to validate structure
+  2. Run `/merge-to-master` to merge this branch into master
+
+⚠️  Branch work is NOT on master until explicitly merged.
+    Pushing to origin (push-to-github) ≠ merging to master.
+
+Merge now? [y/n]
+```
+
+If user says yes, invoke the `merge-to-master` skill in Single Merge mode for the current branch.
+
+## Related
+
+- **[Context Recovery Protocol](../../../docs/procedures/context-recovery.md)**: Full recovery procedure
+- **Root [CLAUDE.md](../../../CLAUDE.md) §5 (Context Management & Checkpointing) + §6 (Human Escalation)**: the always-loaded execution + escalation rules (canonical; superseded the retired `.claude/protocols/AIP-00x` docs on 2026-07-08)
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Agent skipped Step 0.5 Rigor Level determination — executed wrong protocol depth | Trigger phrase fired but the rigor tree wasn't traversed | Step 0.5 is MANDATORY. The decision tree (Tags + line counts + context) selects FULL/STANDARD/MINIMAL. Output the chosen level at task start so it's visible. |
+| Agent skipped Step 4 (Load Constraints) — code violates an ADR | Step 4 elided "because the task seems simple" | NEVER skip Step 4 unless rigor level is MINIMAL. ADR constraints catch problems that tests don't — missing them is costly downstream. |
+| Agent didn't checkpoint after 3 steps — work lost after compaction | Proactive Checkpointing rule from root CLAUDE.md ignored | Checkpoint EVERY 3 steps via context-handoff skill. Background work between checkpoints is at-risk. After 5+ file modifications, checkpoint mandatory. |
+| Step 9.5 Quality Gates skipped — broken code merged | Operator pressure or "we'll catch it in CI" | Quality Gates (code-review + adr-check at Step 9.5) are NON-NEGOTIABLE for FULL rigor. CI catches mechanical issues; code-review catches judgment-layer issues CI can't. |
+| External callers (other skills, project CLAUDE.md trigger maps) silently break | Step number was renumbered during refinement | NEVER renumber Steps 0.3, 0.5, 8.5, 9.5, 9.7, 10.5, 10.6. These are external API. The audit-stamp block lists the preserved surface. |
+| Agent invoked task-execute but didn't load knowledge files | Knowledge file paths in task POML were wrong/stale | Verify `<knowledge><files>` resolve BEFORE step 1. If a path is broken, task-create generated a bad knowledge mapping — fix the POML, then re-invoke. |
+| Multiple parallel-safe tasks dispatched, but task-execute invoked sequentially | Operator missed the "single message with multiple Skill calls" pattern from root CLAUDE.md | Per root CLAUDE.md "Parallel Task Execution": independent tasks get ONE message with MULTIPLE Skill invocations. Sequential = wasted parallelism. |
+| Skill body went stale relative to root CLAUDE.md task-execution protocol | Hot-fix to root CLAUDE.md without updating skill body | Run `Find-SkillReferenceDrift.ps1` (Phase 4a) after any change to MANDATORY TASK EXECUTION PROTOCOL section in root CLAUDE.md. |
+
+---
+
+*This skill ensures Claude Code maintains recoverable state across all context boundaries.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 033 · FR-19)
+
+**At Step 9.6** (after Step 9.5 Quality Gates, before Step 10 status update): invoke `/devops-project-sync` to increment the `Tasks Completed` field on the Project Issue (each task completion = +1).
+
+**Conditional promotion prompt**: after sync, if `Tasks Completed == Task Count` (all POMLs complete), prompt:
+
+```
+✅ All tasks complete. Promote Project Status to "Completed candidate"? [Y/n]
+```
+
+On Y: set `Project Status = Completed` (does NOT auto-archive per F3; user runs `/devops-project-archive` explicitly when ready).
+
+Hook silent on per-task completion. Failure to increment degrades to ⚠️ warn; does NOT block task-execute Step 10.
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md), [`.claude/skills/devops-project-archive/SKILL.md`](../devops-project-archive/SKILL.md).

@@ -10,6 +10,7 @@ using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Tests.Services.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -99,6 +100,16 @@ public class SecureRecordIsolationCensusJobTests
             }
 
             _directory.Depth(OwnerRole, privilegeId, PrivilegeDepth.Basic);
+        }
+
+        // ebilling-r1 (NFR-05 depth list): the environment also has the hard-deny tables' Reads the codified set does not list
+        // (none since task 086 codified sprk_storedfile) — iterated FROM the list, held by no role here.
+        foreach (var (logicalName, privilegeName) in SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+                     .Where(e => SecureRecordOwnerRoleSet.Embedded.Tables.All(t => !string.Equals(t.PrivilegeName, e.PrivilegeName, StringComparison.OrdinalIgnoreCase))))
+        {
+            var privilegeId = Guid.NewGuid();
+            _directory.Privilege(privilegeId, privilegeName);
+            _codifiedChildPrivileges[logicalName] = privilegeId;
         }
 
         _directory.User(Admin, "Ralph Admin", RootBu, accessMode: 0, isDisabled: false, isApplication: false, SysAdminRole);
@@ -302,6 +313,33 @@ public class SecureRecordIsolationCensusJobTests
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(moved.ToString()));
     }
 
+    /// <summary>
+    /// ebilling-r1 (089a review F3): an NFR-05 depth-list privilege the environment lacks (<c>sprk_storedfile</c>) leaves that
+    /// table ungraded. Since task 086 every depth-list entry is codified, so the verdict reaches the job only where clause 5
+    /// cannot grade (089a review K6): a second owner role here. It is ONE Error line naming it beside clause 5's role-count
+    /// Error, never Critical (neither is an exposure), and the run reports <c>findings</c>, not <c>isolated</c>.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenADepthListPrivilegeDoesNotExistInTheEnvironment_LogsOneErrorNamingIt_NotCritical()
+    {
+        _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_storedfile"]);
+        var secondOwnerRole = Guid.Parse("00000000-0000-0000-0000-0000000003c2");
+        _directory.Role(secondOwnerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, secondOwnerRole);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse("a table whose isolation is unknown is not reported as isolated");
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error
+                                                 && e.Message.Contains(nameof(SecureBuVerdict.RestrictedContentPrivilegeNotResolved))
+                                                 && e.Message.Contains("prvReadsprk_StoredFile"));
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error
+                                                 && e.Message.Contains(nameof(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege))
+                                                 && e.Message.Contains("2 role(s)"));
+        _log.Entries.Where(e => e.Level == LogLevel.Error).Should().HaveCount(2);
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical, "an ungraded table is not an exposure");
+        _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=findings"));
+    }
+
     /// <summary>A missing GUARDED privilege still stops the run: clause 1 cannot be graded without it.</summary>
     [Fact]
     public async Task Run_WhenAGuardedPrivilegeDoesNotExistInTheEnvironment_ThrowsRatherThanGrading()
@@ -354,6 +392,407 @@ public class SecureRecordIsolationCensusJobTests
         json.RootElement.GetProperty("findings").EnumerateArray()
             .Select(f => (f.GetProperty("verdict").GetString(), f.GetProperty("message").GetString()))
             .Should().Equal(direct.Findings.Select(f => ((string?)f.Verdict, (string?)f.Message)));
+    }
+
+    // =====================================================================================================
+    // Task 191e (#2179 design 3.8 / 3.15): placement of flagged-external users
+    // =====================================================================================================
+
+    private static readonly Guid ExternalBu = Guid.Parse("00000000-0000-0000-0000-0000000001e0");
+    private static readonly Guid ExternalDefaultTeam = Guid.Parse("00000000-0000-0000-0000-0000000005e1");
+    private static readonly Guid ExternalRole = Guid.Parse("00000000-0000-0000-0000-0000000003e1");
+    private static readonly Guid PrivWriteUser = Guid.Parse("00000000-0000-0000-0000-0000000002e1");
+    private static readonly Guid Organization = Guid.Parse("00000000-0000-0000-0000-0000000006e1");
+
+    /// <summary>
+    /// The unit as task 191d's script makes it, its default team, THE role (Basic Read on matter), the organization row
+    /// (hierarchy security off), and one placed flagged user: in the unit, holding only THE role, a member of the default
+    /// team only. Returns that user.
+    /// </summary>
+    private Guid ProvisionExternalUnitWithAPlacedUser()
+    {
+        _directory.BusinessUnit(ExternalBu, ExternalCollaboratorPlacement.BusinessUnitName, RootBu);
+        _directory.Team(ExternalDefaultTeam, ExternalCollaboratorPlacement.BusinessUnitName, ExternalBu, isDefault: true, teamType: 0);
+        _directory.Role(ExternalRole, ExternalCollaboratorPlacement.RoleName, ExternalBu, ExternalRole);
+        _directory.Depth(ExternalRole, PrivMatter, PrivilegeDepth.Basic);
+        _directory.Privilege(PrivWriteUser, ExternalCollaboratorPlacement.WriteUserPrivilege);
+        _directory.Set("role", SysAdminRole, "roletemplateid",
+            new EntityReference("roletemplate", Sprk.Bff.Api.Infrastructure.ExternalAccess.SecuredColumnReadProof.SystemAdministratorRoleTemplateId));
+        _directory.Add(new Entity("organization", Organization)
+        {
+            ["organizationid"] = Organization,
+            ["ishierarchicalsecuritymodelenabled"] = false,
+            ["usepositionhierarchy"] = false,
+        });
+
+        return PlacedFlaggedUser();
+    }
+
+    private Guid PlacedFlaggedUser()
+    {
+        var user = Guid.NewGuid();
+        _directory.User(user, "Outside Counsel", ExternalBu, accessMode: 0, isDisabled: false, isApplication: false, ExternalRole);
+        _directory.Flag(user, true);
+        _directory.AddMember(ExternalDefaultTeam, user);
+        return user;
+    }
+
+    private IEnumerable<(LogLevel Level, string Message)> Placement(PlacementDriftKind kind) =>
+        _log.Entries.Where(e => e.Message.StartsWith($"[SECURE-CENSUS] Placement {kind}:", StringComparison.Ordinal));
+
+    [Fact]
+    public async Task Placement_OnACleanDirectory_HasNoFinding_AndTheRunStaysIsolated()
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical);
+        _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=isolated")
+                                                 && e.Message.Contains("placementStatus=clean")
+                                                 && e.Message.Contains("flaggedUsers=1"))
+            .Which.Level.Should().Be(LogLevel.Information);
+        using var json = System.Text.Json.JsonDocument.Parse(result.ResultJson!);
+        json.RootElement.GetProperty("placement").GetProperty("status").GetString().Should().Be("clean");
+    }
+
+    [Fact]
+    public async Task Placement_AFlaggedUserOutsideTheUnit_IsCritical()
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        var outside = Guid.NewGuid();
+        _directory.User(outside, "Flagged Partner", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false);
+        _directory.Flag(outside, true);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Flagged-user placement");
+        Placement(PlacementDriftKind.FlaggedUserOutsideExternalUnit).Should().ContainSingle()
+            .Which.Should().Match<(LogLevel Level, string Message)>(e => e.Level == LogLevel.Critical && e.Message.Contains(outside.ToString()));
+        _log.Entries.Should().NotContain(e => e.Message.Contains("Flagged Partner") || e.Message.Contains("@example.test"),
+            "a finding names the user by systemuser id only");
+
+        // Must-not-fire (second review F2): an ordinary flagged user keeps the "writes on moves it" text.
+        Placement(PlacementDriftKind.FlaggedUserOutsideExternalUnit).Single().Message
+            .Should().Contain($"{FlaggedUserPlacementJob.WritesEnabledConfigKey} on lets the placement job move it")
+            .And.NotContain("never moves this user");
+    }
+
+    /// <summary>
+    /// Second review F2 (must fire): a flagged user the job never moves (System Administrator directly or through a team,
+    /// the Administrative or a non-interactive access mode, an unreadable access mode) is still CRITICAL outside the unit,
+    /// but the finding says the job will not move it instead of promising that writes on will.
+    /// </summary>
+    [Theory]
+    [InlineData("admin-direct", "administrator")]
+    [InlineData("admin-team", "administrator")]
+    [InlineData("mode-1", "administrator")]
+    [InlineData("mode-5", "non-interactive")]
+    [InlineData("mode-unreadable", "unreadable")]
+    public async Task Placement_AFlaggedUserTheJobNeverMoves_IsCritical_AndSaysTheJobWillNotMoveIt(string shape, string why)
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        var user = Guid.NewGuid();
+        _directory.User(user, "Flagged Admin", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false,
+            shape == "admin-direct" ? new[] { SysAdminRole } : Array.Empty<Guid>());
+        _directory.Flag(user, true);
+        if (shape == "admin-team")
+        {
+            var adminTeam = Guid.NewGuid();
+            _directory.Team(adminTeam, "Administrators", SiblingBu, isDefault: false, teamType: 0);
+            _directory.AddTeamRole(adminTeam, SysAdminRole);
+            _directory.AddMember(adminTeam, user);
+        }
+
+        if (shape == "mode-1")
+            _directory.Set("systemuser", user, "accessmode", new OptionSetValue(1));
+        if (shape == "mode-5")
+            _directory.Set("systemuser", user, "accessmode", new OptionSetValue(5));
+        if (shape == "mode-unreadable")
+            _directory.Set("systemuser", user, "accessmode", null!);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.FlaggedUserOutsideExternalUnit).Should().ContainSingle()
+            .Which.Should().Match<(LogLevel Level, string Message)>(e =>
+                e.Level == LogLevel.Critical
+                && e.Message.Contains(user.ToString())
+                && e.Message.Contains($"never moves this user ({why})")
+                && e.Message.Contains("clear the sprk_isexternal flag or the role")
+                && !e.Message.Contains("lets the placement job move it"));
+    }
+
+    /// <summary>
+    /// Model 1 must-not-fire (project CLAUDE.md §3): a <c>#EXT#</c> guest whose flag is blank or false is a customer's
+    /// licensed core user. Wherever it sits and whatever it holds, it is not graded.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    public async Task Placement_AnExtGuestWhoseFlagIsBlankOrFalse_IsNeverAFinding(bool? flag)
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        var guest = Guid.NewGuid();
+        _directory.User(guest, "core#EXT#", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false, BasicUserSiblingCopy);
+        _directory.Flag(guest, flag);
+        _directory.AddMember(SiblingDefaultTeam, guest);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _log.Entries.Should().NotContain(e => e.Message.Contains(guest.ToString()));
+    }
+
+    [Fact]
+    public async Task Placement_ADisabledOrApplicationFlaggedUserOutsideTheUnit_IsNotGraded()
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        var disabled = Guid.NewGuid();
+        var app = Guid.NewGuid();
+        _directory.User(disabled, "Former Partner", SiblingBu, accessMode: 0, isDisabled: true, isApplication: false);
+        _directory.User(app, "# app", SiblingBu, accessMode: 4, isDisabled: false, isApplication: true);
+        _directory.Flag(disabled, true);
+        _directory.Flag(app, true);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Placement_ARoleAssignedFromAnotherUnit_IsCritical_AndSoIsItsDeepDepth()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        _directory.AssignRole(user, BasicUserSiblingCopy);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.RoleFromAnotherUnit).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString()).And.Contain(BasicUserSiblingCopy.ToString()).And.Contain(SiblingBu.ToString());
+        Placement(PlacementDriftKind.LineageDepthAboveBasic).Should().ContainSingle()
+            .Which.Message.Should().Contain("prvReadsprk_Matter=Deep");
+    }
+
+    [Fact]
+    public async Task Placement_AnotherRoleFromTheUnit_IsCritical()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        var basicUserExternalCopy = Guid.NewGuid();
+        _directory.Role(basicUserExternalCopy, "Spaarke Basic User", ExternalBu, BasicUserRootRole);
+        _directory.AssignRole(user, basicUserExternalCopy);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.UnexpectedRole).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString()).And.Contain(basicUserExternalCopy.ToString());
+        Placement(PlacementDriftKind.LineageDepthAboveBasic).Should().ContainSingle(
+            "the copy carries its root role's Deep depth, read through parentrootroleid");
+    }
+
+    [Fact]
+    public async Task Placement_TheExternalRoleWidenedAboveBasic_IsCritical()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        _directory.RemoveDepth(ExternalRole, PrivMatter);
+        _directory.Depth(ExternalRole, PrivMatter, PrivilegeDepth.Global);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.LineageDepthAboveBasic).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString()).And.Contain("prvReadsprk_Matter=Global");
+    }
+
+    [Fact]
+    public async Task Placement_WriteUser_IsCritical_AtAnyDepth()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        _directory.Depth(ExternalRole, PrivWriteUser, PrivilegeDepth.Basic);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.WriteUserPrivilege).Should().ContainSingle().Which.Message.Should().Contain(user.ToString());
+    }
+
+    [Fact]
+    public async Task Placement_ARoleOnTheUnitsDefaultTeam_IsCritical()
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        _directory.AddTeamRole(ExternalDefaultTeam, ExternalRole);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.UnexpectedRole).Should().ContainSingle()
+            .Which.Message.Should().Contain(ExternalDefaultTeam.ToString());
+    }
+
+    [Fact]
+    public async Task Placement_MembershipOfAnotherOwnerTeam_IsCritical_ButAnAccessTeamIsNot()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        var accessTeam = Guid.NewGuid();
+        _directory.Team(accessTeam, "Matter access team", SiblingBu, isDefault: false, teamType: 1);
+        _directory.AddMember(accessTeam, user);
+        _directory.AddMember(SiblingDefaultTeam, user);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.OtherOwnerTeamMembership).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString()).And.Contain(SiblingDefaultTeam.ToString());
+    }
+
+    [Fact]
+    public async Task Placement_ALineageRowOwnedByAFlaggedUserOrTheUnitsTeam_IsCritical()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        _directory.Add(new Entity("sprk_document", Guid.NewGuid()) { ["ownerid"] = new EntityReference("systemuser", user) });
+        _directory.Add(new Entity("sprk_matter", Guid.NewGuid()) { ["ownerid"] = new EntityReference("team", ExternalDefaultTeam) });
+        _directory.Add(new Entity("sprk_matter", Guid.NewGuid()) { ["ownerid"] = new EntityReference("team", SiblingDefaultTeam) });
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        var owned = Placement(PlacementDriftKind.LineageRowOwnedByFlaggedPrincipal).ToList();
+        owned.Should().HaveCount(2);
+        owned.Should().Contain(e => e.Message.Contains(user.ToString()) && e.Message.Contains("1 sprk_document row(s)"));
+        owned.Should().Contain(e => e.Message.Contains(ExternalDefaultTeam.ToString()) && e.Message.Contains("sprk_matter"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Placement_AFlaggedManager_IsCriticalOnlyWhenHierarchySecurityIsOn(bool hierarchyOn)
+    {
+        var manager = ProvisionExternalUnitWithAPlacedUser();
+        _directory.Set("organization", Organization, "ishierarchicalsecuritymodelenabled", hierarchyOn);
+        _directory.Set("systemuser", TestUser, "parentsystemuserid", new EntityReference("systemuser", manager));
+
+        var result = await RunAsync();
+
+        if (hierarchyOn)
+        {
+            result.Success.Should().BeFalse();
+            Placement(PlacementDriftKind.FlaggedManagerUnderHierarchySecurity).Should().ContainSingle()
+                .Which.Message.Should().Contain(manager.ToString()).And.Contain("manages 1 user(s)");
+        }
+        else
+        {
+            result.Success.Should().BeTrue(result.ErrorMessage);
+        }
+    }
+
+    [Fact]
+    public async Task Placement_AFlaggedUserHoldingAPosition_IsCritical_UnderThePositionModel()
+    {
+        var holder = ProvisionExternalUnitWithAPlacedUser();
+        var other = PlacedFlaggedUser();
+        _directory.Set("organization", Organization, "ishierarchicalsecuritymodelenabled", true);
+        _directory.Set("organization", Organization, "usepositionhierarchy", true);
+        var position = Guid.NewGuid();
+        _directory.Set("systemuser", holder, "positionid", new EntityReference("position", position));
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.FlaggedManagerUnderHierarchySecurity).Should().ContainSingle()
+            .Which.Message.Should().Contain(holder.ToString()).And.Contain(position.ToString()).And.Contain("position model");
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical && e.Message.Contains(other.ToString()),
+            "a flagged user without a position is not reported");
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("ambiguous")]
+    public async Task Placement_WithoutExactlyOneExternalRoleInTheUnit_IsOneRoleUnresolvedFinding(string shape)
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        if (shape == "missing")
+            _directory.Set("role", ExternalRole, "name", "Renamed Role");
+        else
+            _directory.Role(Guid.NewGuid(), ExternalCollaboratorPlacement.RoleName, ExternalBu, ExternalRole);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.RoleUnresolved).Should().ContainSingle()
+            .Which.Message.Should().Contain(shape == "missing" ? "has no role" : "more than one role");
+    }
+
+    /// <summary>
+    /// Review finding 1: a lineage table the environment does not have (no privilege of it returned; querying it throws, as
+    /// Dataverse does for an unknown entity) is listed as ungraded at Error, and placement is still graded. Throwing instead
+    /// would fail the whole census on every run in such an environment, the secure half included.
+    /// </summary>
+    [Fact]
+    public async Task Placement_ALineageTableTheEnvironmentLacks_IsListedAsUngraded_AndTheRestIsStillGraded()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_memo"]);
+        _directory.FailReadsOf("sprk_memo");
+        _directory.Add(new Entity("sprk_document", Guid.NewGuid()) { ["ownerid"] = new EntityReference("systemuser", user) });
+
+        var result = await RunAsync();
+
+        _log.Entries.Should().NotContain(e => e.Message.Contains("placement census could not be read"));
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains("PlacementTablesNotInEnvironment"))
+            .Which.Message.Should().Contain("sprk_memo");
+        Placement(PlacementDriftKind.LineageRowOwnedByFlaggedPrincipal).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString()).And.Contain("sprk_document");
+        using var json = System.Text.Json.JsonDocument.Parse(result.ResultJson!);
+        json.RootElement.GetProperty("placement").GetProperty("ungradedTables").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain("sprk_memo");
+    }
+
+    [Fact]
+    public async Task Placement_TwoUnitsOfTheName_IsCritical()
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        var second = Guid.NewGuid();
+        _directory.BusinessUnit(second, ExternalCollaboratorPlacement.BusinessUnitName, SiblingBu);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.UnitAmbiguous).Should().ContainSingle().Which.Message.Should().Contain(second.ToString());
+    }
+
+    [Fact]
+    public async Task Placement_BeforeTheUnitExists_IsInert_AWarningWithTheCount_NotAFinding()
+    {
+        var flagged = Guid.NewGuid();
+        _directory.User(flagged, "Flagged Partner", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false);
+        _directory.Flag(flagged, true);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue("inert placement is the documented pre-migration state, not drift");
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical);
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("PlacementInert")
+                                                 && e.Message.Contains("1 flagged-external user(s)"));
+    }
+
+    [Fact]
+    public async Task Placement_WhenItCannotBeRead_TheRunThrowsAfterItsHeartbeat_AndTheSecureFindingsAreStillLogged()
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        var moved = Guid.NewGuid();
+        _directory.User(moved, "Moved Attorney", SecureBu, accessMode: 0, isDisabled: false, isApplication: false);
+        _directory.FailReadsOf("organization");
+
+        var act = () => RunAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _log.Entries.Should().Contain(e => e.Message.Contains("heartbeat status=findings") && e.Message.Contains("placementStatus=error"));
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(moved.ToString()),
+            "a placement read failure never blinds the secure census");
     }
 
     // =====================================================================================================
@@ -487,6 +926,28 @@ public class SecureRecordIsolationCensusJobTests
             }
         }
 
+        /// <summary>Task 191e: sets (or, with null, removes) a user's stored <c>sprk_isexternal</c>.</summary>
+        public void Flag(Guid user, bool? value)
+        {
+            var row = Rows("systemuser").Single(r => r.Id == user);
+            if (value is null) row.Attributes.Remove(ExternalCollaboratorPlacement.IsExternalColumn);
+            else row[ExternalCollaboratorPlacement.IsExternalColumn] = value.Value;
+        }
+
+        /// <summary>Task 191e: sets one column of an existing row.</summary>
+        public void Set(string entity, Guid id, string column, object value) => Rows(entity).Single(r => r.Id == id)[column] = value;
+
+        /// <summary>Task 191e: assigns a role copy to a user directly.</summary>
+        public void AssignRole(Guid user, Guid role) =>
+            Rows("systemuserroles").Add(new Entity("systemuserroles", Guid.NewGuid()) { ["systemuserid"] = user, ["roleid"] = role });
+
+        /// <summary>Task 191e: gives a team a role copy.</summary>
+        public void AddTeamRole(Guid team, Guid role) =>
+            Rows("teamroles").Add(new Entity("teamroles", Guid.NewGuid()) { ["teamid"] = team, ["roleid"] = role });
+
+        /// <summary>Task 191e: adds any row (lineage rows, the organization).</summary>
+        public void Add(Entity row) => Rows(row.LogicalName).Add(row);
+
         public void AddMember(Guid team, Guid user) =>
             Rows("teammembership").Add(new Entity("teammembership", Guid.NewGuid())
             {
@@ -508,14 +969,14 @@ public class SecureRecordIsolationCensusJobTests
                 throw new InvalidOperationException($"Test: {entity} is not readable.");
             }
 
-            _pagesRequested[entity] = PagesRequested(entity) + 1;
+            // Pages of the UNFILTERED read only (the secure census's directory reads): task 191e's placement census also
+            // reads systemuser, filtered on the flag, and must not change what the paging test counts.
+            if (query.Criteria.Conditions.Count == 0)
+                _pagesRequested[entity] = PagesRequested(entity) + 1;
 
-            IEnumerable<Entity> rows = Rows(entity);
-            foreach (var condition in query.Criteria.Conditions.Where(c => c.Operator == ConditionOperator.In))
-            {
-                var allowed = condition.Values.ToHashSet();
-                rows = rows.Where(r => r.Attributes.TryGetValue(condition.AttributeName, out var v) && allowed.Contains(v));
-            }
+            // Every condition, evaluated as Dataverse does (task 191e: the placement reads use Equal, Null and In on lookups).
+            IEnumerable<Entity> rows = Rows(entity)
+                .Where(r => query.Criteria.Conditions.All(c => FakeConditions.Matches(r, c)));
 
             var all = rows.ToList();
             if (!_twoPages.Contains(entity) || all.Count < 2)

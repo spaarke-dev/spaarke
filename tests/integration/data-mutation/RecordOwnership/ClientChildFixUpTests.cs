@@ -324,6 +324,72 @@ public class ClientChildFixUpTests
         job.World.OwnerWrites.Should().NotContain(w => w.Id == todo);
     }
 
+    /// <summary>The record-type catalog row naming <c>sprk_project</c> (a Signal's core type).</summary>
+    private static readonly Guid ProjectType = Guid.Parse("c0e00000-0000-4000-8000-0000000147a1");
+
+    /// <summary>A Signal's core record pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>) naming <paramref name="project"/>.</summary>
+    private static void CorePair(SecureChildShareWorld world, Guid signal, Guid project)
+    {
+        world.Add("sprk_recordtype_ref", ProjectType, ("sprk_recordlogicalname", "sprk_project"));
+        world.Set("sprk_signal", signal, "sprk_corerecordtype", new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", ProjectType));
+        world.Set("sprk_signal", signal, "sprk_corerecordid", project.ToString("D"));
+    }
+
+    /// <summary>
+    /// The core record pair is a lineage parent (F3): a Signal written outside the product, about an event of an ORDINARY
+    /// project, whose core is a SECURE project, sits under that project only through its pair. The recent-changes listing
+    /// reads the pair with the row (<c>Table.LineageColumns</c>), so the pass places it under the project and isolates it.
+    /// </summary>
+    [Fact]
+    public async Task ARecentlyChangedSignal_UnderASecureProjectOnlyThroughItsCorePair_IsPlacedUnderIt()
+    {
+        var job = new JobHarness();
+        var (project, ordinaryProject, @event, signal) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        job.World.SecureRoot("sprk_project", project).OrdinaryRoot("sprk_project", ordinaryProject)
+            .OrdinaryChild("sprk_event", @event, ("sprk_regardingproject", "sprk_project", ordinaryProject))
+            .UserOwnedChild("sprk_signal", signal, ("sprk_regardingevent", "sprk_event", @event))
+            .Modified("sprk_signal", signal, MinutesAgo(2));
+        job.World.Set("sprk_signal", signal, "sprk_regardingrecordid", @event.ToString("D"));
+        CorePair(job.World, signal, project);
+
+        var report = await job.RunAsync(writesEnabled: "true");
+
+        report.GetProperty("recentChanges").GetProperty("roots").EnumerateArray().Select(r => r.GetString())
+            .Should().Equal(new[] { $"sprk_project:{project:D}" }, "the changed Signal's pair names the secure project");
+        job.World.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+    }
+
+    /// <summary>
+    /// F3, the carried read: a Signal whose core project was flagged secure but not yet isolated is undetermined and carried;
+    /// once the project is isolated, the next run reads the carried row again BY ID (it has not changed since, so it is not
+    /// listed) with its pair, and places it under the project.
+    /// </summary>
+    [Fact]
+    public async Task ACarriedSignal_ReadAgainById_IsPlacedUnderTheProjectItsCorePairNames()
+    {
+        var job = new JobHarness();
+        var (project, signal) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.FlaggedNotIsolatedRoot("sprk_project", project)
+            .UserOwnedChild("sprk_signal", signal)
+            .Modified("sprk_signal", signal, MinutesAgo(2));
+        CorePair(job.World, signal, project);
+
+        var first = await job.RunAsync(writesEnabled: "true");
+
+        first.GetProperty("recentChanges").GetProperty("undetermined").EnumerateArray().Select(u => u.GetString())
+            .Should().ContainSingle().Which.Should().Contain(signal.ToString("D"), "its core is marked secure but not isolated");
+        first.GetProperty("recentChanges").GetProperty("carriedRows").GetInt32().Should().Be(1);
+
+        job.World.SecureRoot("sprk_project", project); // its provisioning completed
+        var second = await job.RunAsync(writesEnabled: "true");
+
+        var recent = second.GetProperty("recentChanges");
+        recent.GetProperty("rowsChanged").GetInt32().Should().Be(0, "the Signal has not changed again: it is behind the watermark");
+        recent.GetProperty("retriedRows").GetInt32().Should().Be(1, "the carried row is read again by id");
+        recent.GetProperty("roots").EnumerateArray().Select(r => r.GetString())
+            .Should().Equal(new[] { $"sprk_project:{project:D}" }, "the carried read carries the pair too");
+    }
+
     /// <summary>
     /// A changed child whose re-own Dataverse refuses is reported: its record is incomplete, the row is listed Failed with
     /// its previous owner, and the run is not a success. It is never left user-owned without appearing in the report.

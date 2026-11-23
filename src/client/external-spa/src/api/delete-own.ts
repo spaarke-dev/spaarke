@@ -4,7 +4,7 @@
  *
  * TWO JOBS, BOTH CONVENIENCE (the server is the authority):
  *
- *  1. WHICH ROWS TO OFFER Delete ON. The external list reads (documents, to-dos, events) return the two task-030 creator
+ *  1. WHICH ROWS TO OFFER Delete ON. The external list reads (documents, events) return the two task-030 creator
  *     stamps on every row: `_sprk_createdbycontact_value` (a contact creator) and `_sprk_createdbyperson_value` (a
  *     systemuser creator). The server's own rule (`ExternalDataService.IsCreatedByCaller`) is mirrored here:
  *       - a contact principal matches `createdbycontact` = its contact id, and NEVER a person stamp;

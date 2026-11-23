@@ -556,6 +556,14 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
   then removes that share (children follow their root), so share a secure family at the ROOT. A child filed under two secure records gets only the people shared on
   BOTH, at the lower rights (the INTERSECTION, fail closed — owner decision, round 11 item 4). Any other share on a
   child is removed.
+- **A hard-deny child carries Read only** (GitHub #2560). On a row of a hard-deny table that is a secure child —
+  `sprk_policy` and `sprk_policyversion` — the mirrored share is the root's **Read only**, whatever the root share
+  carries (Collaborate or Full Access on the root still gives Read, and nothing else, on the rule and its versions); a
+  root share without Read gives nothing there. The reconcile narrows any wider share it finds on such a row to Read, or
+  removes it when it carries no Read, also when the row's roots cannot be read, the row is under no secure root, or its
+  filing cannot be read. Each such share is logged as `[SECURE-CHILD-SHARES] HardDenyRowShareWiderThanRead` (table, row
+  id and principal kind; never a name) and counted in the heartbeat as `hardDenyWiderThanRead`; `hardDenyUnchecked`
+  counts hard-deny rows whose own shares could not be read that run.
 - **The No Access list wins** (task 143). A user on the No Access list of ANY secure record a child is filed under is
   never given anything new on that child — no new share, no wider one — even when the child's other secure record does
   not wall them, and even while their share on the record itself is still there (the No Access enforcement has not run

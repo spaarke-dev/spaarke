@@ -2,7 +2,8 @@
 //
 // The real `App` runs, including the real `AuthGuard` -> `MsalAccountGate` (the post-sign-in restore effect that reads
 // `sessionStorage['spaarke.ext.returnTo']` and soft-navigates to it), the real `RecordDeepLink`, `RecordOpenerProvider`,
-// `RecordDetailModal` and `NotificationBell`. Stubbed: MSAL's `useMsal` (a signed-in account, nothing in progress), the route
+// `RecordTemplateModal` (R4 task 005) and `NotificationBell`. Stubbed: MSAL's `useMsal` (a signed-in account, nothing in
+// progress), the route
 // pages, and the network seam (`bffApiCall`, which answers the record read and the bell's feed). `AuthGuard` is NOT stubbed.
 //
 // What this proves: after sign-in the link opens the record EXACTLY ONCE (one id-filtered record read, one detail view),

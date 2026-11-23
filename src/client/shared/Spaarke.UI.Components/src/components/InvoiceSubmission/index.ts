@@ -24,5 +24,6 @@ export type {
   InvoiceSubmissionAccepted,
   InvoiceSubmissionStatusName,
   InvoiceSubmissionStatusView,
+  InvoiceSubmissionWarning,
   InvoiceSubmissionCallbacks,
 } from './types';

@@ -50,7 +50,7 @@ public class SecureRootInheritanceRestrictedTests : IClassFixture<ProvisionProje
 
     private SecureChildShareWorld World => _fixture.ChildWorld;
 
-    private static int Mirror => RecordShareLevels.ChildMirrorMask(
+    private static int Mirror => RecordShareLevels.InheritedRootMirrorMask(
         RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights));
 
     /// <summary>The systemuser row the inheritance's rule reads (SDK): an enabled person, the flag as given (null = blank).</summary>

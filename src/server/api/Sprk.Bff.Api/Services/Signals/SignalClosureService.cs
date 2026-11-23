@@ -61,7 +61,9 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
 /// writer and job are reused, not extended with admin-triggered callers. <i>Cost of doing nothing</i> — tasks 100 and 101
 /// cannot close Signals immediately, and an Off or superseded policy's Signals stay Open in the worklist.</para>
 /// <para>Not sealed (ebilling-r1 task 081): <see cref="SelectOpenSignalsOfPolicyAsync"/> and <see cref="ClosePolicySignalsRetiredAsync"/> are
-/// virtual so the Procedure retire tests can run the real selection and observe the close without a full Signal writer. No other member is
+/// virtual so the Procedure retire tests can run the real selection and observe the close without a full Signal writer; task 089e makes
+/// <see cref="SupersedeInPassAsync"/> and <see cref="SelectOpenSignalsOfPolicyOnSubjectsAsync"/> virtual for the same reason (the record-rule
+/// change selects and closes the base rule's findings through them). No other member is
 /// overridable and nothing in production derives from it (enforced by <c>SignalClosureServiceDerivationGuardTests</c>).</para>
 /// </remarks>
 public class SignalClosureService
@@ -120,10 +122,15 @@ public class SignalClosureService
     /// <paramref name="currentVersionId"/> and returns the list with each closed Signal shown as Resolved/Superseded, so the same
     /// pass's planner re-raises the subjects the current version still holds.
     /// </summary>
+    /// <remarks>ebilling-r1 task 089e (owner option (b), 2026-11-04): also the close a record-level rule change runs after its commit, over the
+    /// base rule's open Signals on that record's In Review invoices (chosen by <see cref="SelectOpenSignalsOfPolicyOnSubjectsAsync"/>), with
+    /// every one of them outside the base rule's scope now. That caller passes the record rule's version as <paramref name="currentVersionId"/>,
+    /// but with <paramref name="outsideScope"/> true for all it decides nothing, and the close records no successor version on the Signal (the
+    /// writer stores the resolution only). Virtual only so that caller's tests can observe the close without a full Signal writer.</remarks>
     /// <param name="outsideScope">Task 102b (fix round 1, uac-r2 F2): for a policy limited to one matter, the Signals outside that scope.
     /// An open one closes <c>Superseded</c> as well, whatever version it cites (the current one, when the scope changed without a
     /// publish, or none): the policy's scope supersedes it. Null for an unscoped policy (only the version rule applies).</param>
-    internal async Task<(IReadOnlyList<ExistingSignal> Existing, SignalClosureOutcome Outcome, IReadOnlySet<Guid> NotClosed)> SupersedeInPassAsync(
+    internal virtual async Task<(IReadOnlyList<ExistingSignal> Existing, SignalClosureOutcome Outcome, IReadOnlySet<Guid> NotClosed)> SupersedeInPassAsync(
         string policyCode, Guid currentVersionId, IReadOnlyList<ExistingSignal> existing, CancellationToken ct,
         Func<ExistingSignal, bool>? outsideScope = null)
     {
@@ -477,11 +484,46 @@ public class SignalClosureService
     /// passes true: those columns exist only where ebilling's Signal schema is deployed, while the sweep and the admin retire close run in
     /// every environment (ontology review F1, 2026-10-22). False: both subject ids come back null.</param>
     /// <exception cref="InvalidOperationException">The policy has more than <see cref="SignalEvaluator.MaxPages"/> pages of open Signals.</exception>
-    internal virtual async Task<IReadOnlyList<OpenPolicySignal>> SelectOpenSignalsOfPolicyAsync(
-        Guid policyId, bool withBillingSubject, CancellationToken ct)
-    {
-        var query = OpenSignalsOfPolicyQuery(policyId, withBillingSubject);
+    internal virtual Task<IReadOnlyList<OpenPolicySignal>> SelectOpenSignalsOfPolicyAsync(
+        Guid policyId, bool withBillingSubject, CancellationToken ct) =>
+        ReadOpenSignalsAsync(OpenSignalsOfPolicyQuery(policyId, withBillingSubject), policyId, ct);
 
+    /// <summary>
+    /// ebilling-r1 task 089e (pass-1 K4): THE selection (<see cref="OpenSignalsOfPolicyQuery"/>, with the billing subject), bounded to the
+    /// Signals whose invoice is one of <paramref name="invoiceIds"/> or whose invoice line is one of <paramref name="lineIds"/>. The rows are
+    /// exactly those of <see cref="SelectOpenSignalsOfPolicyAsync"/>(<paramref name="policyId"/>, <c>withBillingSubject: true</c>) that
+    /// regard one of those subjects, each once; nothing is read across the organisation. For a caller that already knows the subjects (a
+    /// record-level rule change's close of the base rule's findings on that record's invoices). No subject: no read, an empty list.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">One batch of subjects has more than <see cref="SignalEvaluator.MaxPages"/> pages of open Signals.</exception>
+    internal virtual async Task<IReadOnlyList<OpenPolicySignal>> SelectOpenSignalsOfPolicyOnSubjectsAsync(
+        Guid policyId, IReadOnlyCollection<Guid> invoiceIds, IReadOnlyCollection<Guid> lineIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(invoiceIds);
+        ArgumentNullException.ThrowIfNull(lineIds);
+        var signals = new Dictionary<Guid, OpenPolicySignal>();
+        foreach (var (column, ids) in new[] { (RegardingInvoiceColumn, invoiceIds), (RegardingInvoiceLineColumn, lineIds) })
+        {
+            foreach (var batch in ids.Where(id => id != Guid.Empty).Distinct().Select(id => (object)id).Chunk(MaxSubjectsPerQuery))
+            {
+                var query = OpenSignalsOfPolicyQuery(policyId, withBillingSubject: true);
+                query.Criteria.AddCondition(column, ConditionOperator.In, batch);
+                foreach (var signal in await ReadOpenSignalsAsync(query, policyId, ct).ConfigureAwait(false))
+                {
+                    signals.TryAdd(signal.Signal.Id, signal);
+                }
+            }
+        }
+
+        return signals.Values.ToList();
+    }
+
+    /// <summary>The subject ids per <c>In</c> condition of <see cref="SelectOpenSignalsOfPolicyOnSubjectsAsync"/>.</summary>
+    internal const int MaxSubjectsPerQuery = 500;
+
+    /// <summary>Reads every page of one open-Signal query (at most <see cref="SignalEvaluator.MaxPages"/>).</summary>
+    private async Task<IReadOnlyList<OpenPolicySignal>> ReadOpenSignalsAsync(QueryExpression query, Guid policyId, CancellationToken ct)
+    {
         var signals = new List<OpenPolicySignal>();
         for (var page = 1; ; page++)
         {

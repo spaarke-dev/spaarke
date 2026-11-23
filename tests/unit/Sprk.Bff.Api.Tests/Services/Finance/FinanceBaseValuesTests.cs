@@ -18,10 +18,9 @@ public class FinanceBaseValuesTests
     private static readonly Guid MatterA = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc988");
     private static readonly Guid MatterB = Guid.Parse("b68299c6-bafb-f011-8407-7c1e520aa4df");
 
-    /// <summary>Both grouped queries counted spend sends (D-130: the approved total, and the billed total where there is none), parsed.</summary>
-    private static IReadOnlyList<XElement> CountedSpendFetches(string parent) =>
-        FinanceBaseValues.SpendAmountPartsInReadOrder
-            .Select(part => XElement.Parse(FinanceBaseValues.BuildGroupedSpendFetchXml(parent, part, new[] { MatterA }))).ToList();
+    /// <summary>The counted row read every spend reader sends (task 165b-4: one shared reader).</summary>
+    private static QueryExpression CountedRowQuery(string parent) =>
+        FinanceBaseValues.InvoiceRowQuery(parent, FinanceBaseValues.CountedInvoiceStatuses, new[] { MatterA });
 
     [Fact]
     public void TheCountedInvoiceStatuses_AreTheThreeStatuscodeValues_ApprovedThroughPaid_AndNotInReview()
@@ -39,7 +38,7 @@ public class FinanceBaseValuesTests
     }
 
     [Theory]
-    [InlineData(InvoiceStatusCodes.InReview, false)]         // D-103: pending, not actual spend (both queries must leave it out)
+    [InlineData(InvoiceStatusCodes.InReview, false)]         // D-103: pending, not actual spend
     [InlineData(InvoiceStatusCodes.Approved, true)]
     [InlineData(InvoiceStatusCodes.SentToAp, true)]
     [InlineData(InvoiceStatusCodes.Paid, true)]              // Inactive (statecode 1) and still counted: the filter is statuscode
@@ -48,87 +47,30 @@ public class FinanceBaseValuesTests
     [InlineData(InvoiceStatusCodes.Cancelled, false)]
     public void AnInvoice_IsCountedAsSpend_ByItsStatuscodeAlone(int statusCode, bool counted)
     {
-        // The rollup's query and the evaluator's grouped query admit exactly the counted statuscodes, on statuscode only.
-        var rollup = FinanceRollupService.BuildInvoiceQuery(MatterA, "sprk_matter");
-        rollup.Criteria.Conditions.Should().NotContain(c => c.AttributeName == "statecode");
-        rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().Contains(statusCode)
+        // The shared counted row read admits exactly the counted statuscodes, on statuscode only.
+        var query = CountedRowQuery("sprk_matter");
+        query.Criteria.Conditions.Should().NotContain(c => c.AttributeName == "statecode");
+        query.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().Contains(statusCode)
             .Should().Be(counted);
-
-        foreach (var grouped in CountedSpendFetches("sprk_matter"))
-        {
-            var conditions = grouped.Descendants("condition").ToList();
-            conditions.Should().NotContain(c => (string)c.Attribute("attribute")! == "statecode");
-            conditions.Single(c => (string)c.Attribute("attribute")! == "statuscode").Elements("value").Select(v => int.Parse(v.Value))
-                .Contains(statusCode).Should().Be(counted);
-        }
     }
 
-    // D-103 (owner; = ontology D-166): In Review is pending, not actual spend. One test per sum path, named for what it proves, so
-    // putting InReview back into CountedInvoiceStatuses fails each path on its own (mutation check recorded in notes/015).
+    // D-103 (owner; = ontology D-166): In Review is pending, not actual spend. Putting InReview back into CountedInvoiceStatuses fails
+    // this test (mutation check recorded in notes/015); task 165b-4 made the row read the one path every reader uses.
     [Theory]
     [InlineData("sprk_matter")]
     [InlineData("sprk_project")]
-    public void TheRollupQuery_FinanceRollupService_DoesNotCountAnInReviewInvoice(string parent)
+    public void TheCountedRowRead_DoesNotCountAnInReviewInvoice_AndIsScopedByTheParentLookup(string parent)
     {
-        var rollup = FinanceRollupService.BuildInvoiceQuery(MatterA, FinanceBaseValues.ParentLookup(parent));
+        var query = CountedRowQuery(parent);
 
-        var admitted = rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().ToList();
+        query.EntityName.Should().Be("sprk_invoice");
+        var admitted = query.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().ToList();
         admitted.Should().NotContain(InvoiceStatusCodes.InReview);
         admitted.Should().BeEquivalentTo(new[] { InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid });
-    }
-
-    [Theory]
-    [InlineData("sprk_matter")]
-    [InlineData("sprk_project")]
-    public void TheGroupedSumQuery_FinanceBaseValues_DoesNotCountAnInReviewInvoice(string parent)
-    {
-        foreach (var grouped in CountedSpendFetches(parent))
-        {
-            var admitted = grouped.Descendants("condition").Single(c => (string)c.Attribute("attribute")! == "statuscode")
-                .Elements("value").Select(v => int.Parse(v.Value)).ToList();
-            admitted.Should().NotContain(InvoiceStatusCodes.InReview);
-            admitted.Should().BeEquivalentTo(new[] { InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid });
-        }
-    }
-
-    [Theory]
-    [InlineData("sprk_matter")]
-    [InlineData("sprk_project")]
-    public void TheRollupsInvoiceQuery_AndTheEvaluatorsGroupedQuery_AgreeOnLookupAndStatuses(string parent)
-    {
-        var rollup = FinanceRollupService.BuildInvoiceQuery(MatterA, FinanceBaseValues.ParentLookup(parent));
-        var statusCondition = rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode");
-        statusCondition.Operator.Should().Be(ConditionOperator.In);
-
-        rollup.Criteria.Conditions.Single(c => c.AttributeName == parent).Operator.Should().Be(ConditionOperator.Equal);
-        foreach (var grouped in CountedSpendFetches(parent))
-        {
-            var conditions = grouped.Element("entity")!.Element("filter")!.Elements("condition").ToList();
-            conditions.Single(c => (string)c.Attribute("attribute")! == "statuscode").Elements("value").Select(v => int.Parse(v.Value))
-                .Should().Equal(statusCondition.Values.Cast<int>());
-            conditions.Should().Contain(c => (string)c.Attribute("attribute")! == parent && (string)c.Attribute("operator")! == "in");
-        }
-    }
-
-    [Theory]
-    [InlineData(FinanceBaseValues.SpendAmountPart.ApprovedTotal, "sprk_approvedtotal", "not-null")]
-    [InlineData(FinanceBaseValues.SpendAmountPart.BilledWhereNoApprovedTotal, "sprk_totalamount", "null")]
-    public void TheGroupedInvoiceQuery_IsOneAggregateSumGroupedByTheParent_OverTheGivenParentsOnly_ForOneHalfOfTheAmountRule(
-        FinanceBaseValues.SpendAmountPart part, string summed, string approvedTotalOperator)
-    {
-        // D-130: an aggregate cannot coalesce per row, so the amount rule is two grouped sums: the approved total where there is one,
-        // the billed total where there is not. Each invoice is in exactly one half (not-null / null on the approved total).
-        var fetch = XElement.Parse(FinanceBaseValues.BuildGroupedSpendFetchXml("sprk_project", part, new[] { MatterA, MatterB }));
-
-        fetch.Attribute("aggregate")!.Value.Should().Be("true");
-        var entity = fetch.Element("entity")!;
-        entity.Attribute("name")!.Value.Should().Be("sprk_invoice");
-        entity.Elements("attribute").Select(a => (a.Attribute("name")!.Value, a.Attribute("aggregate")?.Value, a.Attribute("groupby")?.Value))
-            .Should().BeEquivalentTo(new (string, string?, string?)[] { (summed, "sum", null), ("sprk_project", null, "true") });
-        entity.Descendants("condition").Single(c => c.Attribute("attribute")!.Value == "sprk_project").Elements("value").Select(v => Guid.Parse(v.Value))
-            .Should().BeEquivalentTo(new[] { MatterA, MatterB });
-        entity.Descendants("condition").Single(c => c.Attribute("attribute")!.Value == "sprk_approvedtotal").Attribute("operator")!.Value
-            .Should().Be(approvedTotalOperator);
+        var scope = query.Criteria.Conditions.Single(c => c.AttributeName == parent);
+        scope.Operator.Should().Be(ConditionOperator.In);
+        scope.Values.Should().Equal(MatterA);
+        query.PageInfo.Count.Should().Be(5000, "a paged read: no aggregate row limit");
     }
 
     [Fact]

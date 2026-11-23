@@ -29,6 +29,7 @@ import {
 import { getProjectById, ODataProject } from '../api/web-api-client';
 import { ApiError } from '../types';
 import { AccessLevel } from '../types';
+import { ACCESS_LEVEL_LABELS } from '../components/record/recordAccess';
 import {
   PageContainer,
   NavigationBar,
@@ -36,7 +37,6 @@ import {
   ContactsOrganizations,
   DocumentLibrary,
   EventsCalendar,
-  SmartTodo,
   InviteUserDialog,
   IssuedGrantsList,
 } from '../components';
@@ -171,17 +171,9 @@ function getStatusColor(
   }
 }
 
+/** The Manage Access label of a level: the SPA's one label map (task 011, D-11). */
 function getAccessLevelLabel(value: number): string {
-  switch (value) {
-    case 100000000:
-      return 'View Only';
-    case 100000001:
-      return 'Collaborate';
-    case 100000002:
-      return 'Full Access';
-    default:
-      return 'Unknown';
-  }
+  return ACCESS_LEVEL_LABELS[value as AccessLevel] ?? 'Unknown';
 }
 
 function getAccessLevelColor(
@@ -256,7 +248,7 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
 };
 
 // ---------------------------------------------------------------------------
-// Calendar tab — EventsCalendar + SmartTodo
+// Calendar tab — EventsCalendar (external users work only with events; R4 task 009)
 // ---------------------------------------------------------------------------
 
 interface CalendarTabContentProps {
@@ -272,7 +264,6 @@ const CalendarTabContent: React.FC<CalendarTabContentProps> = ({ projectId, acce
   return (
     <div className={styles.calendarTab}>
       <EventsCalendar projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
-      <SmartTodo projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
     </div>
   );
 };
@@ -344,7 +335,7 @@ const ContactsTabContent: React.FC<ContactsTabContentProps> = ({ projectId, acce
  * │ OVERVIEW   CALENDAR   CONTACTS                               │
  * ├──────────────────────────────────────────────────────────────┤
  * │ Overview: Project Information (form) + Documents section     │
- * │ Calendar: EventsCalendar + SmartTodo                         │
+ * │ Calendar: EventsCalendar                                     │
  * │ Contacts: ContactsOrganizations + InviteUserDialog           │
  * └──────────────────────────────────────────────────────────────┘
  *

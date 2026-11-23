@@ -141,6 +141,14 @@ public static class AssignedAccessReason
     public const string AssignmentEnded = "assignment-ended";
 
     /// <summary>
+    /// Task 193 G4b: the assignment ended and its share is gone, but the grant paired with that share could not be confirmed
+    /// ended, so the row stays <see cref="AssignedAccessState.Shared"/> for the next pass to retry. The share's absence is
+    /// this rule's own doing, never an operator's removal: if the subject is assigned again before the retry, the rule shares
+    /// again instead of recording a decline (owner rule (b), 2026-10-28).
+    /// </summary>
+    public const string ShareEndedPairedGrantPending = "share-ended-paired-grant-pending";
+
+    /// <summary>
     /// Owner round 71 (2026-10-06): the row's record (project, matter or work assignment) was DELETED — its root lookup was
     /// emptied by the relationship's RemoveLink cascade and a read of the record its key names answered "not found". Written
     /// with <see cref="AssignedAccessState.Revoked"/> by <see cref="AssignedAccessReconciliationJob"/>; no access is changed
@@ -185,6 +193,14 @@ public static class AssignedAccessReason
     /// removal that then fails is recorded covered again.
     /// </summary>
     public const string CoveringShareEnded = "covering-share-ended";
+
+    /// <summary>
+    /// Task 193 G4a (A-F1): an inherited-share row whose share the secure-root inheritance REMOVED, but whose paired
+    /// workforce-app grant ("Add person") could not be confirmed ended. The row stays <see cref="AssignedAccessState.Shared"/>
+    /// (live) with this reason, so the next pass — or a repeated unshare — ends the grant, then the row. A KNOWN cause: the
+    /// share missing is never read as <see cref="RemovedOutOfBand"/>.
+    /// </summary>
+    public const string PairedGrantPending = "paired-grant-pending";
 
     /// <summary>
     /// Task 158 r1: the filed record itself was UNSECURED — every share on it is revoked by the unsecure, so what its parents
@@ -292,6 +308,14 @@ public sealed class AssignedAccessLedgerRow
 
     [JsonPropertyName("sprk_grantedexpiry")]
     public DateOnly? GrantedExpiry { get; set; }
+
+    /// <summary>
+    /// Task 049 fix round 3 (K2): when the row last changed. Selected only by the ledger root scans, which hand it to the
+    /// reconciliation job so a root whose ledger row changed recently ranks with the recently changed roots; <c>null</c>
+    /// on every other read.
+    /// </summary>
+    [JsonPropertyName("modifiedon")]
+    public DateTimeOffset? ModifiedOn { get; set; }
 
     /// <summary>
     /// Batch-4 integration (round 47 item 2): the row's version as it was read. This is <c>@odata.etag</c>, which the Web API
@@ -927,21 +951,42 @@ public class AssignedAccessStore
     // ── Reconciliation scans (the job) ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Roots of one type with ANY registry column set, newest change first. <c>Truncated</c> when more exist than one
-    /// scan reads. Exceptions propagate.
+    /// Roots of one type with ANY registry column set, newest change first (<c>$orderby=modifiedon desc</c>, so a capped
+    /// scan keeps the most recently changed roots — a new root among them — and drops the oldest). <c>Truncated</c> when
+    /// more exist than one scan reads. Exceptions propagate.
     /// </summary>
-    internal virtual async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanAssignedRootsAsync(
+    internal virtual Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanAssignedRootsAsync(
         ExternalGrantRootType rootType, IReadOnlyCollection<string> fields, CancellationToken ct)
+        => ScanAssignedRootsCoreAsync(rootType, fields, modifiedSince: null, ct);
+
+    /// <summary>
+    /// Task 049 (F2): roots of one type with ANY registry column set that changed at or after
+    /// <paramref name="modifiedSince"/>, newest first. The reconciliation job merges them into its candidates, so a root
+    /// created or edited within its window is a candidate whatever the full scan's bound kept — the backstop for a
+    /// create's queued grant that did not complete. <c>Truncated</c> when more exist than one scan reads. Exceptions
+    /// propagate.
+    /// </summary>
+    internal virtual Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRecentlyChangedAssignedRootsAsync(
+        ExternalGrantRootType rootType, IReadOnlyCollection<string> fields, DateTimeOffset modifiedSince, CancellationToken ct)
+        => ScanAssignedRootsCoreAsync(rootType, fields, modifiedSince, ct);
+
+    private async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanAssignedRootsCoreAsync(
+        ExternalGrantRootType rootType, IReadOnlyCollection<string> fields, DateTimeOffset? modifiedSince, CancellationToken ct)
     {
         if (fields.Count == 0)
             return (Array.Empty<AssignedRootRef>(), false);
 
         var idColumn = RootIdColumnFor(rootType);
-        var rows = await _dataverse.QueryAsync<JsonElement>(
+        var filter = "(" + string.Join(" or ", fields.Select(f => $"_{f}_value ne null")) + ")";
+        if (modifiedSince is { } since)
+            filter += string.Create(CultureInfo.InvariantCulture, $" and modifiedon ge {since.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}");
+
+        var rows = await _dataverse.QueryOrderedAsync<JsonElement>(
             ExternalGrantRoot.BindFor(rootType).EntitySet,
-            filter: "(" + string.Join(" or ", fields.Select(f => $"_{f}_value ne null")) + ")",
+            filter: filter,
             select: $"{idColumn},modifiedon",
             top: MaxScanRows + 1,
+            orderBy: "modifiedon desc",
             cancellationToken: ct).ConfigureAwait(false);
 
         var roots = rows
@@ -955,19 +1000,39 @@ public class AssignedAccessStore
 
     /// <summary>
     /// Task 114 (owner round 67 amendment 4(b)): roots of one type whose Access Permission is RESTRICTED, newest change
-    /// first — the candidates of <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.RestrictedExternalShareRemover"/> in the
+    /// first (<c>$orderby=modifiedon desc</c>, so a capped scan keeps the most recently changed roots and drops the
+    /// oldest) — the candidates of <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.RestrictedExternalShareRemover"/> in the
     /// job (a share made through the platform's Share dialog after the record became Restricted). <c>Truncated</c> when more
     /// exist than one scan reads. Exceptions propagate.
     /// </summary>
-    internal virtual async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsAsync(
+    internal virtual Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsAsync(
         ExternalGrantRootType rootType, CancellationToken ct)
+        => ScanRestrictedRootsCoreAsync(rootType, modifiedSince: null, ct);
+
+    /// <summary>
+    /// Task 049 (fix round 2): Restricted roots of one type that changed at or after <paramref name="modifiedSince"/>, newest
+    /// first. The reconciliation job merges them into its Restricted candidates, so a root changed within its window is a
+    /// candidate whatever the full scan's bound kept (the rule: every candidate is reached within N runs). <c>Truncated</c>
+    /// when more exist than one scan reads. Exceptions propagate.
+    /// </summary>
+    internal virtual Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRecentlyChangedRestrictedRootsAsync(
+        ExternalGrantRootType rootType, DateTimeOffset modifiedSince, CancellationToken ct)
+        => ScanRestrictedRootsCoreAsync(rootType, modifiedSince, ct);
+
+    private async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsCoreAsync(
+        ExternalGrantRootType rootType, DateTimeOffset? modifiedSince, CancellationToken ct)
     {
         var idColumn = RootIdColumnFor(rootType);
-        var rows = await _dataverse.QueryAsync<JsonElement>(
+        var filter = $"sprk_accesspermission eq {ExternalParticipationService.AccessPermissionRestricted}";
+        if (modifiedSince is { } since)
+            filter += string.Create(CultureInfo.InvariantCulture, $" and modifiedon ge {since.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}");
+
+        var rows = await _dataverse.QueryOrderedAsync<JsonElement>(
             ExternalGrantRoot.BindFor(rootType).EntitySet,
-            filter: $"sprk_accesspermission eq {ExternalParticipationService.AccessPermissionRestricted}",
+            filter: filter,
             select: $"{idColumn},modifiedon",
             top: MaxScanRows + 1,
+            orderBy: "modifiedon desc",
             cancellationToken: ct).ConfigureAwait(false);
 
         var roots = rows
@@ -981,7 +1046,8 @@ public class AssignedAccessStore
 
     /// <summary>
     /// Roots that hold a live ledger row (any state but Revoked) — so an assignment cleared OUTSIDE the product (grid
-    /// edit, import, flow) is still revisited. Exceptions propagate.
+    /// edit, import, flow) is still revisited. Rows are read newest change first (<c>$orderby=modifiedon desc</c>), so a
+    /// capped scan keeps the most recently changed rows. Exceptions propagate.
     /// </summary>
     /// <remarks>
     /// Task 158 r1: the inherited-share provenance rows (<see cref="InheritedSourcePrefix"/>) share this table but are not
@@ -991,22 +1057,44 @@ public class AssignedAccessStore
     /// (task 158 r1c-v1, verifier item 5: an in-memory copy of it was removed — it could never differ, so nothing pinned
     /// it); <c>AssignedAccessStoreODataTests</c> drives this method over an in-memory Web API that evaluates the filter.
     /// </remarks>
-    internal virtual async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
+    internal virtual Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
+        => ScanLedgerRootsCoreAsync(modifiedSince: null, ct);
+
+    /// <summary>
+    /// Task 049 (fix round 2): roots that hold a live ledger row changed at or after <paramref name="modifiedSince"/>, newest
+    /// first, with the same predicate as <see cref="ScanLedgerRootsAsync"/>. The reconciliation job merges them into its
+    /// candidates, so a root whose ledger row changed within its window is a candidate whatever the full scan's bound kept.
+    /// <c>Truncated</c> when more exist than one scan reads. Exceptions propagate.
+    /// </summary>
+    internal virtual Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRecentlyChangedLedgerRootsAsync(
+        DateTimeOffset modifiedSince, CancellationToken ct)
+        => ScanLedgerRootsCoreAsync(modifiedSince, ct);
+
+    private async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsCoreAsync(
+        DateTimeOffset? modifiedSince, CancellationToken ct)
     {
-        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+        var filter = $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked} and " +
+                     $"(sprk_sourcefield eq null or not startswith(sprk_sourcefield,'{InheritedSourcePrefix}'))";
+        if (modifiedSince is { } since)
+            filter += string.Create(CultureInfo.InvariantCulture, $" and modifiedon ge {since.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}");
+
+        var rows = await _dataverse.QueryOrderedAsync<AssignedAccessLedgerRow>(
             EntitySet,
-            filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked} and " +
-                    $"(sprk_sourcefield eq null or not startswith(sprk_sourcefield,'{InheritedSourcePrefix}'))",
-            select: "sprk_assignedaccessid,sprk_sourcefield,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value",
+            filter: filter,
+            select: "sprk_assignedaccessid,sprk_sourcefield,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,modifiedon",
             top: MaxScanRows + 1,
+            orderBy: "modifiedon desc",
             cancellationToken: ct).ConfigureAwait(false);
 
         var truncated = rows.Count > MaxScanRows;
+
+        // One entry per root, carrying the newest change among its live rows (the job ranks the root by it).
         var roots = rows.Take(MaxScanRows)
-            .Select(RootOf)
+            .Select(row => RootOf(row) is { } root ? root with { ModifiedOn = row.ModifiedOn } : (AssignedRootRef?)null)
             .Where(r => r is not null)
             .Select(r => r!.Value)
-            .Distinct()
+            .GroupBy(r => (r.RootType, r.RootId))
+            .Select(g => new AssignedRootRef(g.Key.RootType, g.Key.RootId, g.Max(r => r.ModifiedOn)))
             .ToList();
         return (roots, truncated);
     }
@@ -1016,17 +1104,24 @@ public class AssignedAccessStore
     /// what a deleted matter or work assignment leaves behind (their ledger relationships are RemoveLink; a project's is
     /// Cascade, so its rows are deleted with it). <see cref="ScanLedgerRootsAsync"/> drops such rows (they name no root to
     /// materialize), so without this they stay live forever and count toward its bound. Inherited-share rows are left out,
-    /// exactly as there. <c>Truncated</c> when more exist than one scan reads. Exceptions propagate.
+    /// exactly as there. Rows come in id order, after <paramref name="afterId"/> when one is given (a cursor kept by the caller).
+    /// <c>Truncated</c> when more exist than one scan reads. Exceptions propagate.
     /// </summary>
-    internal virtual async Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ScanRootlessLedgerRowsAsync(CancellationToken ct)
+    internal virtual async Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ScanRootlessLedgerRowsAsync(
+        Guid? afterId, CancellationToken ct)
     {
-        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+        // Fix round 3 (K4): paged by the row id, ascending, after the last id a previous run reached — so rows the job
+        // leaves live (a record that still exists, an unreadable one, an unparseable key) cannot fill the cap on every run
+        // and keep a deletable row behind them unreached.
+        var rows = await _dataverse.QueryOrderedAsync<AssignedAccessLedgerRow>(
             EntitySet,
             filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked} and " +
                     "_sprk_project_value eq null and _sprk_matter_value eq null and _sprk_workassignment_value eq null and " +
-                    $"(sprk_sourcefield eq null or not startswith(sprk_sourcefield,'{InheritedSourcePrefix}'))",
+                    $"(sprk_sourcefield eq null or not startswith(sprk_sourcefield,'{InheritedSourcePrefix}'))" +
+                    (afterId is { } after ? $" and sprk_assignedaccessid gt {after:D}" : string.Empty),
             select: LedgerSelect,
             top: MaxScanRows + 1,
+            orderBy: "sprk_assignedaccessid asc",
             cancellationToken: ct).ConfigureAwait(false);
 
         var live = rows.Where(r => r.Id != Guid.Empty).ToList();

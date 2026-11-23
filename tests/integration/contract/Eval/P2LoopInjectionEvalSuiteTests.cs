@@ -604,8 +604,7 @@ public class P2LoopInjectionEvalSuiteTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance,
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure()));
 
         var adapter = new ToolHandlerToAIFunctionAdapter(
             toolRow, handler,
@@ -1203,7 +1202,8 @@ public class P2LoopInjectionEvalSuiteTests
                 PlaybookId: null,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
+                Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())
+            { OwnerOid = TestSessionOwner.Oid };
             await sessionManager.UpdateSessionCacheAsync(session);
 
             var services = new ServiceCollection();

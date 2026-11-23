@@ -81,6 +81,10 @@ public class OfficeQuickCreateRefusalMapTests
         Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode, InternalError, ServerError);
         Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.TableUnsupportedCode, InternalError, ServerError);
 
+        // Task 022 fix round 3: a value copied from a secure source files the row — the service's code and words, 400.
+        Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.MappingSourceSecureFilingCode,
+            RecordCreationRefusal.MappingSourceSecureFilingCode, StatusCodes.Status400BadRequest);
+
         // OwnerUnresolved stays 403: the filed-under parent that cannot be told keeps its code, every other is OFFICE_022.
         Add(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined, RecordOwnerRefusal.ParentUndetermined, Forbidden);
         Add(RecordCreationRefusalKind.OwnerUnresolved, RecordCreationRefusal.OwnershipExceptionCode, OfficeErrorCodes.RecordOwnerUnresolved, Forbidden);
@@ -105,6 +109,11 @@ public class OfficeQuickCreateRefusalMapTests
         // Unavailable: a check or the owner decision faulted (the old core's faults reached the generic 500).
         Add(RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.CheckFailedCode, InternalError, ServerError);
         Add(RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.OwnerUnavailableCode, InternalError, ServerError);
+
+        // Task 017 Phase 2d-1 (owner decision 2a): step 10's I-1 refusals. Office creates roots, which carry no I-1 stamp, so
+        // neither reaches it today; if one did, it is the generic 500 (fail closed), as every other service-only code.
+        Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.StampUnderivableCode, InternalError, ServerError);
+        Add(RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.StampUnavailableCode, InternalError, ServerError);
 
         // Upstream: a caller's Dataverse failure.
         Add(RecordCreationRefusalKind.Upstream, RecordCreationRefusal.UpstreamCode, InternalError, ServerError);

@@ -362,7 +362,6 @@ Before submitting code:
 | File | Purpose | Gitignored? |
 |------|---------|-------------|
 | `Spaarke.sln` | .NET solution | No |
-| `Directory.Packages.props` | Central package management | No |
 | `Directory.Build.props` | Shared build properties | No |
 | `config/*.local.json` | Local secrets/config | Yes |
 | `.env` files | Environment variables | Yes |

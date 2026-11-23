@@ -4,6 +4,8 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -68,7 +70,7 @@ public sealed record DisallowHistoryContext(
     int InvoicesConsidered, int ReducedCount, decimal ReducedAmount, int DisallowedCount, decimal DisallowedAmount, IReadOnlyList<DisallowReason> TopReasons);
 
 /// <param name="Basis"><c>timekeeper</c> (a rate for this person) or <c>classification</c> (a rate for the person's LEDES classification).</param>
-/// <param name="Scope"><c>coreRecord</c> (a card scoped to this core record) or <c>firm</c> (the firm's general card).</param>
+/// <param name="Scope">The rank of the Procedure whose rate card this is, as <see cref="RateRankLabel"/> prints it (Level and Distance, e.g. <c>ManualOwn/d0</c>, <c>Firm/d0/firmSpecific</c>). Names no Procedure, record or id (085, 082b K1).</param>
 public sealed record ApprovedRateItem(
     DateOnly? EffectiveFrom, DateOnly? EffectiveTo, decimal ApprovedRate, decimal? RackRate, string Basis, string Scope);
 
@@ -272,13 +274,13 @@ public sealed class InvoiceContextService
     // Scope: the invoice's own firm and core record
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private sealed record InvoiceScope(Guid InvoiceId, Guid? FirmId, CoreRecordReference? Core, string? CoreProblemCode);
+    private sealed record InvoiceScope(Guid InvoiceId, Guid? FirmId, CoreRecordReference? Core, string? CoreProblemCode, DateOnly? InvoiceDate = null);
 
     private async Task<InvoiceScope?> ReadScopeAsync(Guid invoiceId, CancellationToken ct)
     {
         var query = new QueryExpression(InvoiceTotalsService.InvoiceEntity)
         {
-            ColumnSet = new ColumnSet(InvoiceFirm, InvoiceMatter, InvoiceProject, InvoiceWorkAssignment),
+            ColumnSet = new ColumnSet(InvoiceFirm, InvoiceMatter, InvoiceProject, InvoiceWorkAssignment, "sprk_invoicedate"),
             TopCount = 1,
             Criteria = new FilterExpression(LogicalOperator.And),
         };
@@ -309,11 +311,12 @@ public sealed class InvoiceContextService
 
         // FR-05: exactly one core record. Two set at once is not resolved by guessing which one counts.
         var firm = invoice.GetAttributeValue<EntityReference>(InvoiceFirm)?.Id;
+        var invoiceDate = ToDate(invoice.GetAttributeValue<DateTime?>("sprk_invoicedate"));
         return cores.Count switch
         {
-            1 => new InvoiceScope(invoiceId, firm, cores[0], null),
-            0 => new InvoiceScope(invoiceId, firm, null, CodeCoreUnresolved),
-            _ => new InvoiceScope(invoiceId, firm, null, CodeCoreAmbiguous),
+            1 => new InvoiceScope(invoiceId, firm, cores[0], null, invoiceDate),
+            0 => new InvoiceScope(invoiceId, firm, null, CodeCoreUnresolved, invoiceDate),
+            _ => new InvoiceScope(invoiceId, firm, null, CodeCoreAmbiguous, invoiceDate),
         };
     }
 
@@ -684,7 +687,8 @@ public sealed class InvoiceContextService
         {
             ColumnSet = new ColumnSet(
                 InvoiceTotalsService.LineInvoiceLookup, InvoiceTotalsService.LineStatus, InvoiceTotalsService.LineAmount,
-                InvoiceTotalsService.LineApprovedAmount, LineAdjustmentReason),
+                InvoiceTotalsService.LineApprovedAmount, LineAdjustmentReason,
+                InvoiceSubmissionPersister.LineExtractionConfidence), // with the invoice above: the reviewer-added rule reads both (164a re-check)
             Criteria = new FilterExpression(LogicalOperator.And),
             PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
         };
@@ -707,6 +711,12 @@ public sealed class InvoiceContextService
 
         foreach (var row in rows)
         {
+            // A line the reviewer added was never billed by the firm, so it is not the firm's own disallowance (164a re-check).
+            if (ExtractionProvenance.IsReviewerAdded(row))
+            {
+                continue;
+            }
+
             var billed = row.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value ?? 0m;
             switch ((InvoiceLineStatus?)row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value)
             {
@@ -805,9 +815,11 @@ public sealed class InvoiceContextService
         var roster = new Dictionary<Guid, (string? Name, int? Classification)>();
         var rateRows = new List<Entity>();
         var previousLines = new List<Entity>();
+        IReadOnlyDictionary<Guid, ProcedureRank> ranks = new Dictionary<Guid, ProcedureRank>();
         if (timekeeperIds.Count > 0)
         {
-            // The approved rates include cards scoped to the core record; those are the record's own data, so the caller needs Read on it.
+            // The approved rates are those of the Procedure Versions that apply to this core record (085). Which Procedures apply, and at what
+            // rank, is the record's own data, so the caller needs Read on it.
             switch (await coreAccess.Value)
             {
                 case CallerReadOutcome.Failed:
@@ -817,12 +829,12 @@ public sealed class InvoiceContextService
             }
 
             var rosterTask = ReadRosterAsync(timekeeperIds, ct);
-            var ratesTask = ReadApprovedRatesAsync(firmId, core, timekeeperIds, ct);
+            var ratesTask = ReadApprovedRatesAsync(firmId, core, RateDates(lines, scope), timekeeperIds, ct);
             var previousTask = ReadPreviousLinesAsync(siblings, timekeeperIds, ct);
             await Task.WhenAll(rosterTask, ratesTask, previousTask);
 
             roster = await rosterTask;
-            var (rates, ratesComplete) = await ratesTask;
+            ((var rates, var ratesComplete), ranks) = await ratesTask;
             if (!ratesComplete)
             {
                 return ContextSection<RateHistoryContext>.Unavailable(CodeRateTooLarge, "This firm's rate cards are too large to summarise its rate history.");
@@ -849,7 +861,7 @@ public sealed class InvoiceContextService
             entries.Add(new TimekeeperRateHistory(
                 id,
                 name,
-                ApprovedRatesFor(id, person.Classification, rateRows),
+                ApprovedRatesFor(id, person.Classification, rateRows, ranks),
                 BilledRates(onInvoice.Select(l => (l.Rate, l.Date))),
                 BilledRates(previousLines
                     .Where(r => r.GetAttributeValue<EntityReference>(LineResolvedTimekeeper)?.Id == id)
@@ -893,10 +905,38 @@ public sealed class InvoiceContextService
             r => (Name: r.GetAttributeValue<string?>("sprk_name"), Classification: r.GetAttributeValue<OptionSetValue>("sprk_classification")?.Value));
     }
 
-    private async Task<(List<Entity> Rows, bool Complete)> ReadApprovedRatesAsync(Guid firmId, CoreRecordReference core, IReadOnlyList<Guid> timekeeperIds, CancellationToken ct)
+    /// <summary>The work dates the approved rates are judged on: this invoice's distinct fee-line dates, else its own invoice date, else none.</summary>
+    private static IReadOnlyList<DateOnly> RateDates(IReadOnlyList<FeeLine> lines, InvoiceScope scope)
     {
-        // Task 046's query: active rates of the firm's Published cards, firm-wide cards plus cards scoped to this core record. All periods.
-        var query = InvoiceResolutionService.BuildRateQuery(firmId, core, AllPeriodsFrom, AllPeriodsTo);
+        var dates = lines.Where(l => l.Date is not null).Select(l => l.Date!.Value).Distinct().OrderBy(d => d).ToList();
+        return dates.Count > 0 ? dates : scope.InvoiceDate is { } invoiceDate ? [invoiceDate] : [];
+    }
+
+    private async Task<((List<Entity> Rows, bool Complete) Rates, IReadOnlyDictionary<Guid, ProcedureRank> Ranks)> ReadApprovedRatesAsync(
+        Guid firmId, CoreRecordReference core, IReadOnlyList<DateOnly> dates, IReadOnlyList<Guid> timekeeperIds, CancellationToken ct)
+    {
+        // 085 (model 7.1): the cards of the Procedure Versions that resolution chooses for this invoice's work dates. One resolver read, then
+        // RulesOn per distinct date in memory. A resolver fault propagates to the section's guard (the section is unavailable); there is no
+        // fallback to a firm-wide or core-record query. All periods of those cards are read, as before.
+        var ranks = new Dictionary<Guid, ProcedureRank>();
+        if (dates.Count > 0)
+        {
+            var procedures = await ProcedureResolver.ReadAsync(_entities, _logger, core, firmId, ct);
+            foreach (var date in dates)
+            {
+                foreach (var applied in procedures.RulesOn(date).Procedures)
+                {
+                    ranks[applied.ProcedureVersionId] = applied.Rank;
+                }
+            }
+        }
+
+        if (ranks.Count == 0)
+        {
+            return (([], true), ranks);
+        }
+
+        var query = InvoiceResolutionService.BuildRateQuery(firmId, ranks.Keys.ToList(), AllPeriodsFrom, AllPeriodsTo);
 
         // This invoice's timekeepers' own rates, plus every classification rate (no timekeeper) of those cards: which classification applies to
         // which person needs the roster, which is read in parallel with this, so the narrowing happens per person in ApprovedRatesFor.
@@ -905,7 +945,7 @@ public sealed class InvoiceContextService
         either.AddCondition("sprk_timekeeper", ConditionOperator.Null);
         query.Criteria.AddFilter(either);
 
-        return await ReadPagedAsync(query, ct);
+        return (await ReadPagedAsync(query, ct), ranks);
     }
 
     /// <summary>
@@ -948,7 +988,8 @@ public sealed class InvoiceContextService
             : ([], ContextSection<RateHistoryContext>.Unavailable(CodeRateTooLarge, "This firm's billing history is too large to summarise its rate history."));
     }
 
-    private static IReadOnlyList<ApprovedRateItem> ApprovedRatesFor(Guid timekeeperId, int? classification, IEnumerable<Entity> rateRows)
+    private static IReadOnlyList<ApprovedRateItem> ApprovedRatesFor(
+        Guid timekeeperId, int? classification, IEnumerable<Entity> rateRows, IReadOnlyDictionary<Guid, ProcedureRank> ranks)
     {
         var items = new List<(ApprovedRateItem Item, Guid RateId)>();
         foreach (var row in rateRows)
@@ -974,8 +1015,13 @@ public sealed class InvoiceContextService
                 continue;
             }
 
-            var coreScoped = new[] { "sprk_matter", "sprk_project", "sprk_workassignment" }
-                .Any(c => row.GetAttributeValue<AliasedValue>($"{InvoiceResolutionService.CardAlias}.{c}")?.Value is not null);
+            // The card's Procedure Version names its rank (the versions read are the ones resolution chose); a card of any other version is skipped.
+            var versionId = (row.GetAttributeValue<AliasedValue>(
+                $"{InvoiceResolutionService.CardAlias}.{InvoiceResolutionService.CardProcedureVersionColumn}")?.Value as EntityReference)?.Id;
+            if (versionId is not { } chosen || !ranks.TryGetValue(chosen, out var rank))
+            {
+                continue;
+            }
 
             items.Add((new ApprovedRateItem(
                 ToDate(row.GetAttributeValue<DateTime?>("sprk_effectivefrom")),
@@ -983,7 +1029,7 @@ public sealed class InvoiceContextService
                 approved,
                 row.GetAttributeValue<Money>("sprk_rackrate")?.Value,
                 basis,
-                coreScoped ? "coreRecord" : "firm"), row.Id));
+                RateRankLabel.Of(rank)), row.Id));
         }
 
         // Newest period first (open-ended from-dates last); the row id makes the order total.

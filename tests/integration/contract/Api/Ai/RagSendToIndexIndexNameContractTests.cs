@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
@@ -28,34 +29,24 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
-/// spaarkeai-word-add-in-r1 task 033 — the index-name defect fix for
-/// <c>POST /api/ai/rag/send-to-index</c>.
+/// The index routing of <c>POST /api/ai/rag/send-to-index</c> and <c>POST /api/ai/rag/index-file</c>, and the search route's
+/// allow-list. Since field-mapping-server-write-path-r1 task 041 (FR-40, #2502) the index follows the content type, never the
+/// record: a document's own index columns, its parent's and its business unit's are not read, and the caller's
+/// <c>searchIndexName</c> on index-file is ignored. Every file is written to, and stamped with,
+/// <see cref="ISearchIndexNameResolver.GetDefaultIndexName"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What was wrong.</b> <c>RagEndpoints.SendToIndex</c> resolved the AI Search index ONCE, before
-/// the per-document loop, via <c>searchIndexNameResolver.GetDefaultIndexName()</c> — the tenant
-/// default only. A document whose own <c>sprk_searchindexname</c> (or a parent/BU's "AI Search
-/// Index" lookup) named a DIFFERENT index was silently routed to the tenant default: not just the
-/// Dataverse tracking stamp was wrong, the file index REQUEST itself
-/// (<c>FileIndexRequest.SearchIndexName</c>, plumbed end-to-end by multi-container-multi-index-r1)
-/// never carried the per-record value at all — it was omitted from the request entirely.
-/// </para>
-/// <para>
-/// <b>The fix</b> (in-handler only, no new resolver, no signature change): per document, call the
-/// ALREADY-INJECTED <see cref="ISearchIndexNameResolver.ResolveAsync"/> — the same document → parent
-/// → parent's-BU chain <c>RagIndexingJobHandler</c> already uses — and fall back to
-/// <see cref="ISearchIndexNameResolver.GetDefaultIndexName"/> only when the chain resolves nothing.
+/// <b>History.</b> spaarkeai-word-add-in-r1 task 033 routed send-to-index per record (document → parent → business unit).
+/// Task 041 removed that chain; must-fire 3 below inverts the test that pinned it.
 /// </para>
 /// <para>
 /// <b>Module boundaries substituted</b> (ADR-038 "mock at module boundaries"; nothing here is
 /// <c>Mock&lt;HttpMessageHandler&gt;</c>, a DI-registration assertion, or a ctor null-check):
 /// <see cref="IDocumentDataverseService"/> (what Dataverse answers for the document row),
 /// <see cref="IFileIndexingService"/> (the OBO download + chunk + embed + write pipeline — an
-/// external module this endpoint layer does not own), and <see cref="IGenericEntityService"/> (what
-/// Dataverse answers for the resolver's own FetchXml lookups). <see cref="ISearchIndexNameResolver"/>
-/// itself is the REAL <c>SearchIndexNameResolver</c> — that is the class under test, one boundary in
-/// from the endpoint.
+/// external module this endpoint layer does not own), and <see cref="IGenericEntityService"/> (it would answer a catalog-link
+/// fetch; the tests prove none is issued). <see cref="ISearchIndexNameResolver"/> is the REAL <c>SearchIndexNameResolver</c>.
 /// </para>
 /// <para>
 /// <b>Local fixture</b> (project boundary rule): this file owns its own
@@ -88,9 +79,8 @@ public sealed class RagSendToIndexIndexNameContractTests : IClassFixture<RagSend
     };
 
     /// <summary>
-    /// Builds a single-row FetchXml result carrying the LEGACY text column
-    /// (<c>sprk_searchindexname</c>) so <c>SearchIndexNameResolver.ExtractIndexName</c> takes its
-    /// migration-safety fallback path — the resolver's step 1 (document-level) resolution.
+    /// Builds a single-row FetchXml result carrying the document's own text column (<c>sprk_searchindexname</c>) — what the
+    /// pre-041 resolver read first. Since task 041 nothing asks for it.
     /// </summary>
     private static EntityCollection DocumentLevelIndexNameRow(string indexName)
     {
@@ -101,20 +91,34 @@ public sealed class RagSendToIndexIndexNameContractTests : IClassFixture<RagSend
 
     private static EntityCollection NoRows() => new(new List<Entity>());
 
+    /// <summary>
+    /// The index a request handed to the indexing pipeline names, read from its serialized form so the check holds whatever
+    /// the request type carries (FR-40 removed the field; a request that names none reads as <c>null</c>).
+    /// </summary>
+    private static string? IndexNamedBy(FileIndexRequest request) =>
+        JsonSerializer.SerializeToElement(request).TryGetProperty("SearchIndexName", out var named)
+        && named.ValueKind == JsonValueKind.String
+            ? named.GetString()
+            : null;
+
+    /// <summary>
+    /// FR-40 must-fire 3 (inverts task 033's per-record routing): the document's own text column, its lookup, its parent and
+    /// the parent's business unit all name another index. Send-to-index reads none of them: no catalog-link fetch is issued,
+    /// the request reaching the pipeline names no index (the files index), and the stamp is the default.
+    /// </summary>
     [Fact]
-    public async Task WhenDocumentHasPerRecordSearchIndexName_TheWriteAndTheStampBothUseIt()
+    public async Task SendToIndex_WhenTheDocumentParentOrBusinessUnitNamesAnotherIndex_TheWriteAndTheStampAreTheDefault()
     {
-        // Arrange: the document's own sprk_searchindexname names a DIFFERENT index than the
-        // configured tenant default ("tenant-default-index", set by the fixture).
-        const string perRecordIndex = "matter-42-knowledge-index";
+        const string otherIndex = "matter-42-knowledge-index";
 
         _fixture.DataverseMock
             .Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(IndexableDocument());
+            .ReturnsAsync(IndexableDocument(searchIndexName: otherIndex));
 
+        // Every record and business-unit lookup the old resolver chain made would answer the other index.
         _fixture.EntityServiceMock
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentLevelIndexNameRow(perRecordIndex));
+            .ReturnsAsync(DocumentLevelIndexNameRow(otherIndex));
 
         FileIndexRequest? capturedIndexRequest = null;
         _fixture.FileIndexingMock
@@ -130,46 +134,30 @@ public sealed class RagSendToIndexIndexNameContractTests : IClassFixture<RagSend
 
         using var client = _fixture.CreateAuthenticatedClient();
 
-        // Act
         var response = await client.PostAsJsonAsync("/api/ai/rag/send-to-index", new SendToIndexRequest
         {
             DocumentIds = [DocumentId.ToString()],
             TenantId = RagSendToIndexFixture.TestTenantId,
         });
 
-        // Assert — the HTTP contract
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<SendToIndexResponse>();
-        body.Should().NotBeNull();
         body!.SuccessCount.Should().Be(1);
-        body.Results.Should().HaveCount(1);
-        body.Results[0].Success.Should().BeTrue();
-        body.Results[0].ChunksIndexed.Should().Be(4);
-        body.Results[0].IndexName.Should().Be(perRecordIndex,
-            "the response must report the index the file actually landed in, not the tenant default");
+        body.Results[0].IndexName.Should().Be(RagSendToIndexFixture.TenantDefaultIndexName,
+            "the index follows the content type (FR-40), never the record, its parent or its business unit");
 
-        // Assert — the ACTUAL WRITE was routed to the per-record index, not just the reported name.
-        // This is the defect: previously FileIndexRequest.SearchIndexName was never set at all, so
-        // IRagService fell through to the tenant default regardless of what this assertion checks
-        // on the response DTO above.
-        capturedIndexRequest.Should().NotBeNull();
-        capturedIndexRequest!.SearchIndexName.Should().Be(perRecordIndex,
-            "the file index request sent to the indexing pipeline must carry the per-record index name");
-        capturedIndexRequest.SearchIndexName.Should().NotBe(RagSendToIndexFixture.TenantDefaultIndexName,
-            "a per-record value must not be silently replaced by the tenant default");
-
-        // Assert — the Dataverse tracking stamp matches what was actually used.
-        capturedUpdateRequest.Should().NotBeNull();
-        capturedUpdateRequest!.SearchIndexName.Should().Be(perRecordIndex);
-        capturedUpdateRequest.SearchIndexed.Should().BeTrue();
+        IndexNamedBy(capturedIndexRequest!).Should().BeNull("the pipeline writes the files index: no index is named");
+        capturedUpdateRequest!.SearchIndexName.Should().Be(RagSendToIndexFixture.TenantDefaultIndexName,
+            "the stamp equals the index written");
+        _fixture.EntityServiceMock.Verify(
+            e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no record or business-unit index column is read on the indexing path");
     }
 
     [Fact]
     public async Task WhenDocumentHasNoPerRecordSearchIndexName_FallsBackToTheTenantDefault()
     {
-        // Arrange: nothing in the resolver chain (no document lookup row, no parent — this document
-        // has no MatterId/ProjectId/InvoiceId) resolves a value, so GetDefaultIndexName() must be the
-        // fallback used for BOTH the write and the stamp. Proves the fix did not remove the fallback.
+        // Arrange: no record names an index, so GetDefaultIndexName() is used for BOTH the write and the stamp.
         _fixture.DataverseMock
             .Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(IndexableDocument());
@@ -201,10 +189,92 @@ public sealed class RagSendToIndexIndexNameContractTests : IClassFixture<RagSend
         body!.Results[0].IndexName.Should().Be(RagSendToIndexFixture.TenantDefaultIndexName,
             "with no per-record value anywhere in the chain, the tenant default remains the fallback");
 
-        // The request sent to the pipeline carries null (not the tenant default explicitly) — it
-        // falls through to IRagService's own tenant-default chain, byte-for-byte backward compatible
-        // with every other caller of FileIndexRequest.
-        capturedIndexRequest!.SearchIndexName.Should().BeNullOrEmpty();
+        // The request sent to the pipeline names no index; IRagService's own tenant-default chain decides.
+        IndexNamedBy(capturedIndexRequest!).Should().BeNullOrEmpty();
+    }
+
+    // ── POST /api/ai/rag/index-file (FR-40 must-fire 1 and 2, must-not-fire 1) ───────────────────────────────────────
+
+    /// <summary>
+    /// FR-40: index-file ignores a body <c>searchIndexName</c> — allow-listed, not allow-listed or absent. The pipeline gets a
+    /// request naming no index (the files index), the stamp is the default, and a non-allow-listed value is 200, never 400
+    /// <c>INDEX_NOT_ALLOWED</c>. The pipeline double rejects a named non-allow-listed index as the real one does
+    /// (<see cref="IFileIndexingService"/>: INDEX_NOT_ALLOWED → 400), so the old pass-through would surface as 400 here.
+    /// </summary>
+    [Theory]
+    [InlineData("spaarke-invoices-index")]
+    [InlineData("not-an-allowed-index")]
+    [InlineData(null)]
+    public async Task IndexFile_ABodySearchIndexName_IsIgnored_TheWriteAndTheStampAreTheDefault(string? bodyIndex)
+    {
+        _fixture.DataverseMock
+            .Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(IndexableDocument());
+        _fixture.EntityServiceMock
+            .Setup(e => e.RetrieveAsync("sprk_document", DocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", DocumentId));
+
+        FileIndexRequest? capturedIndexRequest = null;
+        _fixture.FileIndexingMock
+            .Setup(f => f.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, HttpContext, CancellationToken>((req, _, _) =>
+            {
+                capturedIndexRequest = req;
+                if (IndexNamedBy(req) is { Length: > 0 } named && !RagSendToIndexFixture.AllowedIndexes.Contains(named))
+                {
+                    throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                        code: "INDEX_NOT_ALLOWED", title: "AI Search index not allowed", statusCode: 400);
+                }
+            })
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1), documentId: DocumentId.ToString()));
+
+        UpdateDocumentRequest? capturedUpdateRequest = null;
+        _fixture.DataverseMock
+            .Setup(d => d.UpdateDocumentAsync(DocumentId.ToString(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, UpdateDocumentRequest, CancellationToken>((_, req, _) => capturedUpdateRequest = req)
+            .Returns(Task.CompletedTask);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync("/api/ai/rag/index-file", new
+        {
+            driveId = "b!drive-id",
+            itemId = "item-id",
+            fileName = "Master Services Agreement.docx",
+            tenantId = RagSendToIndexFixture.TestTenantId,
+            documentId = DocumentId.ToString(),
+            searchIndexName = bodyIndex,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a body index is ignored, so it is never refused (FR-40)");
+        IndexNamedBy(capturedIndexRequest!).Should().BeNull("the files index is written whatever the body names");
+        capturedUpdateRequest!.SearchIndexName.Should().Be(RagSendToIndexFixture.TenantDefaultIndexName,
+            "the stamp equals the index written");
+    }
+
+    // ── POST /api/ai/rag/search: the allow-list still refuses a request-named index (AC10, UAC-r2) ──────────────────────
+
+    /// <summary>
+    /// Must-not-fire (UAC-r2, 2026-11-02): search-time selection is unchanged. A request-named index outside the allow-list is
+    /// refused 400 <c>INDEX_NOT_ALLOWED</c> on the search route by the REAL check: the real <c>RagService</c> and
+    /// <c>KnowledgeDeploymentService</c> over the configured <c>AiSearch:AllowedIndexes</c> (the catalog read fails on the
+    /// substituted entity service, so the provider falls back to the configured list, as it does in production on that fault).
+    /// </summary>
+    [Fact]
+    public async Task Search_ARequestNamedIndexOutsideTheAllowList_Is400IndexNotAllowed_ByTheRealAllowListCheck()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync("/api/ai/rag/search", new
+        {
+            query = "termination clause",
+            options = new { tenantId = RagSendToIndexFixture.TestTenantId, useVectorSearch = false, useSemanticRanking = false },
+            searchIndexName = "not-an-allowed-index",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("extensions").GetProperty("code").GetString().Should().Be("INDEX_NOT_ALLOWED");
     }
 
     [Fact]
@@ -237,6 +307,10 @@ public sealed class RagSendToIndexFixture : WebApplicationFactory<Program>
     public const string TestTenantId = "tenant-rag-send-to-index-033";
     public const string TenantDefaultIndexName = "tenant-default-index";
 
+    /// <summary>The configured allow-list (<c>AiSearch:AllowedIndexes</c>) the search route checks a request-named index against.</summary>
+    public static readonly IReadOnlySet<string> AllowedIndexes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { TenantDefaultIndexName, "spaarke-invoices-index" };
+
     public Mock<IDocumentDataverseService> DataverseMock { get; } = new(MockBehavior.Loose);
     public Mock<IFileIndexingService> FileIndexingMock { get; } = new(MockBehavior.Loose);
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new(MockBehavior.Loose);
@@ -248,8 +322,10 @@ public sealed class RagSendToIndexFixture : WebApplicationFactory<Program>
     /// file's subject is index-name resolution, not authorization — the authorization contract is
     /// pinned by <c>SendToIndexAuthorizationContractTests</c> — so the grant below is explicit and
     /// narrow rather than a blanket allow: only <c>DocumentId</c>, only the rights the route needs.
+    /// Task 041: <see cref="CallerAccessSeam"/> answers both seams, because index-file decides the document on the
+    /// Document path (<c>GetUserAccessAsync</c>) where send-to-index uses the Record path.
     /// </summary>
-    public ProgrammableRecordAccessSource Access { get; } = new();
+    public CallerAccessSeam Access { get; } = new();
 
     public void ResetBoundaries()
     {
@@ -322,6 +398,8 @@ public sealed class RagSendToIndexFixture : WebApplicationFactory<Program>
                 ["AgentService:ThreadCacheExpiryMinutes"] = "60",
                 // The tenant-default fallback this test file asserts against explicitly.
                 ["AiSearch:KnowledgeIndexName"] = TenantDefaultIndexName,
+                ["AiSearch:AllowedIndexes:0"] = TenantDefaultIndexName,
+                ["AiSearch:AllowedIndexes:1"] = "spaarke-invoices-index",
             };
             config.AddInMemoryCollection(dict);
         });
@@ -389,6 +467,15 @@ public sealed class RagSendToIndexFixture : WebApplicationFactory<Program>
             // Task 188 round 4d (#2200): send-to-index now applies THE external document narrowing; it is not under test
             // here (SendToIndexDocumentNarrowingTests), so the all-visible double (Option A, the full-host convention).
             Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
+
+            // Task 041 (AC10): the search route resolves the caller's privilege groups through Graph before it asks for a
+            // search client; that boundary answers "no groups" here. The allow-list check after it is the real one.
+            var privilegeGroups = new Mock<Sprk.Bff.Api.Services.Ai.Security.IPrivilegeGroupResolver>();
+            privilegeGroups
+                .Setup(p => p.ResolveGroupIdsAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Array.Empty<string>());
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.Security.IPrivilegeGroupResolver>();
+            services.AddSingleton(privilegeGroups.Object);
         });
     }
 

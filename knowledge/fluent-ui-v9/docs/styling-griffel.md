@@ -11,7 +11,7 @@ notes: |
 
 # Styling components (Griffel / `makeStyles`)
 
-> If you need to build a custom component architecture (not just style existing components), see [building-custom-controls.md](./building-custom-controls.md).
+> If you need to build a custom component architecture (not just style existing components), see [building-custom-controls.md](https://github.com/microsoft/fluentui/blob/master/apps/public-docsite-v9/src/Concepts/BuildingCustomControls.mdx).
 
 ## Getting started
 

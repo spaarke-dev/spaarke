@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191b" project="unified-access-control-r2">
+  <metadata>
+    <title>T191b: one ExternalVisibility predicate and a required ExternalMarker on every lineage table (#2179)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security and tenant isolation: the predicate decides what every flagged-external systemuser can see on every plane.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Composes four existing security rules into one decision with a taint closure; fail-closed reasoning over partial reads.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group A with 191d and 191f: no shared files. 191c, 191g and 191h depend on it.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, security, access-control, tenant-isolation, dataverse, testing</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the one predicate that decides whether a lineage row is externally visible to a flagged-external systemuser, and make every registry table declare its own external marker at compile time. Nothing grants or revokes yet; later tasks call this.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the UAC lineage registry, the D7 document narrowing (task 188) and the 065 communication rule.</role>
+  <goal>`ExternalVisibility.DecideAsync` exists in `Infrastructure/ExternalAccess`, reads app-only, decides a batch of rows as Visible / Hidden / Undecided, and every `SecureChildLineage.Table` carries a required `ExternalMarker`. `ExternalCallerCommunicationGuard`'s two table lists are derived from the registry.</goal>
+
+  <context>
+    <background>Design: `projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md` §3.3 (predicate and registry), §3.8 (fail closed), §3.9 (189 and 065), §3.10 (events and to-dos), §4.1 (owner decisions; Q3 taint closure decided in round 114).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs (Table record :58; Children :179-343)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalVisibility.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs (RefusedContentTables :83; DocumentDerivedTables :141)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDocumentNarrowing.cs (batched app-only decision, MaxHops :91, Truncated handling: copy this shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationOpenThreadGate.cs (ReadVisibleCommunicationIdsAsync :132: the 065 rule, reuse, never copy)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/EffectiveRootFlags.cs (RestrictedThroughFilingAsync :164)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalVisibilityTests.cs</file>
+      <file role="modify">tests/unit/domain/Access/SecureChildLineageTests.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="188" status="complete">ExternalDocumentNarrowing, the document branch of the predicate.</dependency>
+      <dependency task="189" status="complete">A document's stored max(own, inherited).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">No plugins. The predicate is BFF code over app-only reads.</constraint>
+    <constraint source="project">Fail closed: an unreadable flag, thread, chain, a cycle or a chain deeper than the bound is Undecided, and every caller treats Undecided as hidden.</constraint>
+    <constraint source="project">Compose, never copy: the 065 rule, the D7 document rule, EffectiveRootFlags and ebilling (a′) are called, not re-implemented. No second table-to-internal-only map anywhere in the BFF.</constraint>
+    <constraint source="project">Q4 (2026-11-11): Restricted is always hidden, effective through filing; a child's I-16 display copy is never trusted.</constraint>
+    <constraint source="project">Scope: no grant, revoke, share, role or setting change in this task; no DI registration unless the class needs injected readers (prefer an internal static like ExternalDocumentNarrowing).</constraint>
+    <constraint source="project">Logs carry ids and counts only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+      <file>projects/unified-access-control-r2/notes/task-188-d7-document-narrowing.md</file>
+    </files>
+    <patterns>
+      <pattern name="batched app-only narrowing" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDocumentNarrowing.cs">One batched read per hop, Truncated on depth or cycle, warn once per row.</pattern>
+      <pattern name="registry as the one map" location="src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs">A table record per child; the tests pin every codified table.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add a required `ExternalMarker` to `SecureChildLineage.Table`: None (inherited taint only), Predicate (an own-row rule), Never. Declare it on every entry: communication = 065; thread = Open; document = task 188 narrowing; invoice = ebilling (a′); communication-content tables = Never; legacy Procedure Library document = Never by its drive; everything else None.</step>
+    <step order="2">Write `ExternalVisibility.DecideAsync(rows)`: visible only when no linked root is Restricted (effective), the own marker passes, and no lineage parent through any registry lookup is hidden (taint closure, bounded like the lineage walk; document chain keeps 3 hops).</step>
+    <step order="3">Derive `RefusedContentTables` and `DocumentDerivedTables` from the registry; the AI handlers' results must stay identical (existing tests unchanged).</step>
+    <step order="4">Tests: one must-fire and one must-not-fire per marker kind and per taint path (to-do and event regarding an internal-only communication; a document 1 and 3 hops below one; a child of a Restricted root; a row with an unreadable parent). Perturbation-check each must-fire test.</step>
+    <step order="5">ArchTests: no class other than the registry maps a table to internal-only; every registry entry declares a marker.</step>
+    <step order="6">Build the BFF, run the targeted tests and the full ArchTests, and measure the publish-size delta against a fresh master build.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="8">Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If composing an existing rule would require changing its result for any current caller (task 188 surfaces, the AI handlers, the 036 read set), STOP and escalate per CLAUDE.md §6 rather than adapting.</trigger>
+    <trigger>If a registry table cannot be given a marker without an owner decision (a new internal-only class not in round 113 or §4.1), STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ExternalDocumentNarrowing, CommunicationOpenThreadGate, EffectiveRootFlags, ExternalCallerCommunicationGuard's two lists.</existing>
+    <extension>It composes them; it spans every registry table, so it cannot live in any one of them. The two lists fold into the registry.</extension>
+    <cost-of-doing-nothing>The share job, the secure mirror, the SPA lists and the AI tools would each re-derive "internal-only", and the copies drift (#2189).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalVisibility.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalVisibilityTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every `SecureChildLineage.Table` entry declares an `ExternalMarker`; omitting one does not compile.</criterion>
+    <criterion testable="true">Given a row under a Restricted root (own or through filing), the predicate answers Hidden; given the same row under a Standard or Limited root, Visible.</criterion>
+    <criterion testable="true">Given an internal-only communication, a Private-thread communication, or one whose flag is blank or unreadable, the communication and every document 1 to 3 hops below it answer Hidden; a document 4 hops below answers Undecided.</criterion>
+    <criterion testable="true">Given a to-do, event, memo, analysis, signal or decision record regarding a hidden communication or document, the predicate answers Hidden (taint closure).</criterion>
+    <criterion testable="true">Given an invoice whose Submit Invoice source is internal-only or Restricted, the invoice and its derived rows answer Hidden (ebilling (a′)).</criterion>
+    <criterion testable="true">Negative: a cycle, an over-deep chain or a failed parent read answers Undecided, never Visible.</criterion>
+    <criterion testable="true">Negative: an ordinary row with no hidden ancestor answers Visible (must-not-fire).</criterion>
+    <criterion testable="true">The AI handlers' refusal and derived-row results are unchanged (existing handler tests pass unchanged).</criterion>
+    <criterion testable="true">ArchTest: no second table-to-internal-only map exists in the BFF.</criterion>
+    <criterion testable="true">BFF builds with 0 errors; targeted tests and full ArchTests green; publish-size delta recorded.</criterion>
+    <criterion testable="true">Test scope: the marker kinds, the taint paths and the fail-closed cases above; no grant or share behaviour (later tasks).</criterion>
+  </acceptance-criteria>
+
+  <notes>No live step. The predicate's callers come in 191c (share job), 191g (Office), 191h (SPA lists, AI, retrieval).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

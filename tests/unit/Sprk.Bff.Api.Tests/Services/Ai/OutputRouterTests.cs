@@ -479,7 +479,8 @@ public class OutputRouterTests
         PlaybookId: null,
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
-        Messages: Array.Empty<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
+        Messages: Array.Empty<ChatMessage>())
+    { OwnerOid = TestSessionOwner.Oid };
 
     private static ChatSession BuildSessionWithHostContext() => BuildSession() with
     {

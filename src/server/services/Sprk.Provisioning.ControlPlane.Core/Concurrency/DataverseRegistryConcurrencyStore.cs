@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // DataverseRegistryConcurrencyStore.cs
 //
 // L2 CONTROL-PLANE production IRegistryConcurrencyStore impl (task 059).

@@ -44,9 +44,9 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <item><b>Decision Record</b>, AutoRejected only, after the Signals (D-122 moved it there). It resolves every open Signal on the invoice
 /// and its lines: the set is read once and stored in the findings JSON before the record, and each Signal in it is closed as Acted by the
 /// record after it (D-122, notes 13c).</item>
-/// <item><b>No indexing</b> (ebilling-r1 task 094): an invoice's PDF is its Stored File on every channel (an upload since task 092, a
-/// Submit Invoice copy since task 094), and the copy stays out of indexing, search and chat grounding (owner K, model 9.2); the
-/// document-keyed invoice index is not fed from a submission.</item>
+/// <item><b>Invoice index job</b> (ebilling-r1 task 152, FR-43): an accepted or blocked invoice is queued for the invoice index, built from its
+/// structured records. An automatic rejection is not. The invoice's PDF is its Stored File on every channel (tasks 092, 094) and stays
+/// out of indexing, search and chat grounding (owner K, model 9.2); this job never reads it.</item>
 /// <item><b>Notification</b>, once per submission (an idempotency marker).</item>
 /// <item><b>Terminal status</b>, last: derived from the STORED kind and root reason (<see cref="InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)"/>),
 /// written only while the submission is Processing and conditional on its row version (notes section 13a).</item>
@@ -59,12 +59,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     // ── Reason codes of this component (Retry / Refused) ──
     internal const string FindingsUnreadableCode = "ebilling.submission.findings_unreadable";
     internal const string InvoiceLinkMismatchCode = "ebilling.submission.invoice_link_mismatch";
-    internal const string SignalWriteSkippedCode = "ebilling.submission.signal_write_skipped";
-    internal const string SignalChangedCode = "ebilling.submission.signal_changed";
+    internal const string SignalWriteSkippedCode = SignalEpisodeLifecycle.SignalWriteSkippedCode;
+    internal const string SignalChangedCode = SignalEpisodeLifecycle.SignalChangedCode;
     internal const string SignalPlanMissingCode = "ebilling.submission.signal_plan_missing";
     internal const string NotProcessingCode = "ebilling.submission.not_processing";
     internal const string TerminalWriteConflictCode = "ebilling.submission.terminal_write_conflict";
     internal const string RowVersionMissingCode = "ebilling.submission.row_version_missing";
+    internal const string IndexEnqueueFailedCode = "ebilling.submission.index_enqueue_failed";
+
+    /// <summary>Task 097d: a read or a close of the superseded invoice's Signal close step failed; the redelivery resumes it.</summary>
+    internal const string SupersedeSignalsFailedCode = "ebilling.submission.supersede_signals_failed";
 
     /// <summary>The automatic rejection's action code (074's billing catalog).</summary>
     internal const string RejectActionCode = "reject-invoice";
@@ -87,6 +91,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceSubmissionPersister.SubmissionInvoice, "sprk_channel", "sprk_document",
         InvoiceSubmissionPersister.SubmissionCorrelationId, InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn,
         InvoiceSubmissionPersister.SubmissionAdminAttention, StoredSignalSetCheck.ProcessingStartColumn,
+        // Task 097d: a Correction names the earlier submission; the superseded invoice's Signals are closed from it.
+        InvoiceSubmissionService.ResubmissionOfColumn,
     ];
 
     /// <summary>
@@ -102,7 +108,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly IInvoiceTotalsService _totals;
     private readonly IEbillingNotificationSink _sink;
     private readonly ILogger<InvoiceSubmissionAfterSteps> _logger;
-    private readonly Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> _writeSignal;
+    private readonly SignalEpisodeLifecycle _lifecycle;
     private readonly Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> _supersedeSignal;
     private readonly Func<Guid, Guid, DateTime, string, CancellationToken, Task<SignalAutomatedCloseOutcome>> _closeActed;
     private readonly TimeProvider _time;
@@ -110,6 +116,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly Action<BillingDecision> _preflight;
     private readonly Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> _commitGate;
     private readonly Func<Guid, CancellationToken, Task<bool>> _refreshApprovers;
+    private readonly Func<Guid, string?, CancellationToken, Task> _enqueueIndex;
 
     public InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
@@ -120,6 +127,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         IEbillingNotificationSink sink,
         SubmissionCommitGate gate,
         EligibleApproverResolver approvers,
+        JobSubmissionService jobs,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
@@ -128,14 +136,34 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             sink,
             logger,
             (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
-            (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct),
+            SupersedeClose(signals),
             // An automated decision: no person, so no sprk_resolvedby (decidedByUserId null).
             (id, recordId, setReadAtUtc, policyCode, ct) => signals.CloseActedByDecisionAsync(id, recordId, setReadAtUtc, policyCode, decidedByUserId: null, ct),
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             commitGate: (gate ?? throw new ArgumentNullException(nameof(gate))).RunAsync,
-            refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync)
+            refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync,
+            enqueueIndex: EnqueueAcceptedIndex(jobs))
     {
+    }
+
+    /// <summary>
+    /// The one Superseded close of the after-steps (the option-a lifecycle's episode n+1, and task 097d's close of a superseded invoice's
+    /// Signals): <see cref="SignalWriter.CloseAsync"/> with <see cref="SignalWriter.ResolutionSuperseded"/>, a system resolution (no person, no
+    /// Decision Record), conditional on the row version.
+    /// </summary>
+    internal static Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> SupersedeClose(SignalWriter signals)
+    {
+        ArgumentNullException.ThrowIfNull(signals);
+        return (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct);
+    }
+
+    /// <summary>The acceptance's index job (task 152): change key <see cref="InvoiceIndexingJobHandler.AcceptedChange"/>, submitted through the real queue.</summary>
+    internal static Func<Guid, string?, CancellationToken, Task> EnqueueAcceptedIndex(JobSubmissionService jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        return (invoiceId, correlationId, ct) =>
+            jobs.SubmitJobAsync(InvoiceIndexingJobHandler.BuildJob(invoiceId, InvoiceIndexingJobHandler.AcceptedChange, correlationId), ct);
     }
 
     /// <summary>The seam the unit tests use: the ontology-owned writers and the recorder are concrete, so they are passed as their calls.</summary>
@@ -152,8 +180,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Action<BillingDecision> preflight,
         Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> commitGate,
         TimeProvider? time = null,
-        Func<Guid, CancellationToken, Task<bool>>? refreshApprovers = null)
+        Func<Guid, CancellationToken, Task<bool>>? refreshApprovers = null,
+        Func<Guid, string?, CancellationToken, Task>? enqueueIndex = null)
     {
+        // Task 152: the acceptance's index job. The unit-test seam defaults to "nothing to queue".
+        _enqueueIndex = enqueueIndex ?? ((_, _, _) => Task.CompletedTask);
         // Task 103: the eligible approvers at acceptance (D-78). The unit-test seam defaults to "nothing to resolve".
         _refreshApprovers = refreshApprovers ?? ((_, _) => Task.FromResult(false));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -161,7 +192,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _writeSignal = writeSignal ?? throw new ArgumentNullException(nameof(writeSignal));
+        _lifecycle = new SignalEpisodeLifecycle(entities, writeSignal, supersedeSignal, logger);
+        // Task 097d: the same Superseded close (SignalWriter.CloseAsync with ResolutionSuperseded), for the invoice a correction superseded.
         _supersedeSignal = supersedeSignal ?? throw new ArgumentNullException(nameof(supersedeSignal));
         _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
         _time = time ?? TimeProvider.System;
@@ -242,7 +274,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             _logger.LogWarning("Invoice submission {SubmissionId}: a resume was asked for, but it links no invoice; no after-commit step ran", submissionId);
             return new SubmissionAfterStepsResult
             {
-                Status = SubmissionAfterStepsStatus.Refused, SubmissionId = submissionId, ReasonCode = InvoiceLinkMismatchCode,
+                Status = SubmissionAfterStepsStatus.Refused,
+                SubmissionId = submissionId,
+                ReasonCode = InvoiceLinkMismatchCode,
             };
         }
 
@@ -254,7 +288,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         if (gate.Status != SubmissionCommitGateStatus.Passed)
         {
             return Stop(SubmissionAfterStepsStatus.Undone, submissionId, invoiceId, gate.ReasonCode ?? SubmissionReasonCodes.FileUnservable)
-                with { UndoHeld = gate.Status == SubmissionCommitGateStatus.UndoHeld };
+                with
+            { UndoHeld = gate.Status == SubmissionCommitGateStatus.UndoHeld };
         }
 
         // 016 again (idempotent; the persister's Resumed path re-runs it too). A fault is a totals Retry after the Signals and the record.
@@ -296,7 +331,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return done;
         }
 
-        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId)
+        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId
+            || !InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: it does not link invoice {InvoiceId}; no after-commit step ran", submissionId, invoiceId);
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, InvoiceLinkMismatchCode);
@@ -358,13 +394,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         var refusedSignals = new List<SignalWriteRefused>();
         foreach (var (request, fingerprint) in requests)
         {
-            // F1-3: a refusal the writer would repeat on every attempt (PermanentWriteRefusal, PermanentSkipCodes) is recorded and the run goes
+            // F1-3: a refusal the writer would repeat on every attempt (PermanentWriteRefusal, SignalEpisodeLifecycle.PermanentSkipCodes) is recorded and the run goes
             // on: one refused Signal never stops the others, the Decision Record or the terminal status. Any other exception (a Dataverse
             // read or write fault) still propagates, as before: the job retries, and every write here is idempotent.
             SignalStep step;
             try
             {
-                step = await WriteWithLifecycleAsync(request, fingerprint, submissionId, ct).ConfigureAwait(false);
+                step = await _lifecycle.WriteAsync(request, fingerprint, SignalLogContext.Submission, submissionId, ResolvedEpisodeRule.SkipWhenSameFingerprint, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested) && PermanentWriteRefusal(request, ex) is { } code)
             {
@@ -454,18 +490,42 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             }
         }
 
+        // ── 2b. Task 097d (model 9.1 "Existing invoice"): a correction's commit superseded the old invoice; its open Signals close Superseded.
+        //    Runs only after the commit gate passed (the first run's persister ran it; a resume ran it above), so never for an undone commit.
+        //    Every failure is a Retry before the terminal status; a resume re-reads the open set, so nothing is closed twice. ──
+        if (await CloseSupersededInvoiceSignalsAsync(submission, submissionId, invoiceId, ct).ConfigureAwait(false) is { } supersedeFailure)
+        {
+            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, supersedeFailure) with { SignalsWritten = written, DecisionRecordId = recordId };
+        }
+
         if (totalsRetryCode is not null)
         {
             // The totals failed after the commit: the Signals and the record are written; the redelivery re-runs the totals, then the rest.
             return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, totalsRetryCode)
-                with { SignalsWritten = written, DecisionRecordId = recordId };
+                with
+            { SignalsWritten = written, DecisionRecordId = recordId };
         }
 
-        // ── 3. No indexing (tasks 092, 094; model 9.2, owner K): the invoice's PDF is a Stored File on every channel and the document-keyed
-        //    invoice index takes no bytes from one; a Submit Invoice copy stays out of indexing, search and chat grounding. ──
+        // ── 3. Index the accepted invoice (task 152, FR-43, NFR-03): the invoice index is built from the invoice's structured records, never from
+        //    the PDF (tasks 092, 094: the PDF is a Stored File and stays out of indexing, search and chat grounding). An automatic rejection is
+        //    not indexed (a rejected submission is not in the invoice index); an accepted or blocked (In Review, held) invoice is. The key
+        //    carries the change ("accepted"), so a redelivery repeats one message and a later status move (014) is a different one. A fault
+        //    leaves the submission Processing so the redelivery enqueues again. ──
         if (stored.Kind != SubmissionEvaluationKind.AutoRejected)
         {
-            _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId}'s PDF is a Stored File; not indexed", submissionId, invoiceId);
+            try
+            {
+                await _enqueueIndex(invoiceId, correlationId ?? submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionCorrelationId), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the index job of invoice {InvoiceId} could not be queued ({Fault}); it stays Processing for a retry",
+                    submissionId, invoiceId, ex.GetType().Name);
+                return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, IndexEnqueueFailedCode)
+                    with
+                { SignalsWritten = written, DecisionRecordId = recordId };
+            }
         }
 
         // ── Task 103 (D-78): the eligible approvers at acceptance, best effort (the refresh job and GET re-resolve; approve resolves live) ──
@@ -700,8 +760,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         (await ReadOpenSignalSetWithSubjectsAsync(entities, time, invoiceId, logger, ct).ConfigureAwait(false)).Set;
 
     /// <summary><see cref="ReadOpenSignalSetAsync"/> with the distinct subjects (the invoice and the lines) its Signals are on, which a
-    /// human decision's caller must be able to Write (105, FR-51).</summary>
-    internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects)> ReadOpenSignalSetWithSubjectsAsync(
+    /// human decision's caller must be able to Write (105, FR-51). <c>Open</c> is each Signal with its own subject (task 114b: an Override
+    /// leaves open a Signal whose hold still stands, which needs the Signal's own subject).</summary>
+    internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects,
+        IReadOnlyList<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)> Open)> ReadOpenSignalSetWithSubjectsAsync(
         IGenericEntityService entities, TimeProvider time, Guid invoiceId, ILogger logger, CancellationToken ct)
     {
         var setReadAt = time.GetUtcNow().UtcDateTime;
@@ -717,7 +779,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         // Ordered by id so the record's hash is stable.
         return (
             new ResolvedSignalSet(setReadAt, open.Select(s => s.Signal).DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList()),
-            open.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList());
+            open.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList(),
+            open);
     }
 
     /// <summary>
@@ -912,6 +975,153 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         return failure;
     }
 
+    /// <summary>
+    /// Task 097d (model 9.1 "Existing invoice"; 097c "What 097d needs"): closes every Open or Acknowledged Signal on the invoice this
+    /// submission's correction superseded, and on its lines, as Superseded through the existing close (<see cref="SignalWriter.CloseAsync"/>
+    /// with <see cref="SignalWriter.ResolutionSuperseded"/>: no person, no Decision Record). Nothing to do, and done: a New submission (no
+    /// <c>sprk_resubmissionof</c>; 104's automatic link included); a target that no longer resolves or no longer exists; an old invoice that
+    /// is not Superseded; and one this submission's invoice does not supersede (its <c>sprk_supersedesinvoice</c> names another invoice or
+    /// none, e.g. an automatic rejection). The open set is read live (<see cref="ReadOpenSignalSetAsync"/>), then each Signal is re-read
+    /// before its close: one a person (or an earlier run) already closed, or one that no longer exists, is left as it is. A close answered
+    /// <see cref="SignalCloseOutcome.ChangedSinceRead"/> writes nothing and is a Retry, so the next delivery re-reads it. Every Signal is
+    /// attempted; any failure returns <see cref="SupersedeSignalsFailedCode"/> or <see cref="SignalChangedCode"/> (Retry), else null.
+    /// Logs carry ids, counts and codes only (ADR-015).
+    /// </summary>
+    private async Task<string?> CloseSupersededInvoiceSignalsAsync(Entity submission, Guid submissionId, Guid invoiceId, CancellationToken ct)
+    {
+        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionService.ResubmissionOfColumn)?.Id is not { } earlier || earlier == Guid.Empty)
+        {
+            return null;
+        }
+
+        ResolvedSignalSet set;
+        Guid oldId;
+        try
+        {
+            var target = await SubmissionSnapshot.ReadCorrectedInvoiceAsync(_entities, earlier, ct).ConfigureAwait(false);
+            if (target.CorrectedInvoiceId is not { } resolved)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: the invoice its correction replaced no longer resolves from submission {Earlier}; no Signal is closed",
+                    submissionId, earlier);
+                return null;
+            }
+
+            oldId = resolved;
+            Entity own;
+            try
+            {
+                own = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, invoiceId, [InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn], ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsRecordNotFound(ex))
+            {
+                // Task 097 second review (K4): this submission's own invoice is gone, so nothing it superseded is left to close; a Retry
+                // could never change that. Done, as for the old invoice below.
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId} no longer exists; no Signal is closed", submissionId, invoiceId);
+                return null;
+            }
+
+            if (own.GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn)?.Id != oldId)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId} does not supersede invoice {OldInvoiceId}; no Signal is closed",
+                    submissionId, invoiceId, oldId);
+                return null;
+            }
+
+            Entity old;
+            try
+            {
+                old = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, oldId, ["statuscode"], ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsRecordNotFound(ex))
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} no longer exists; no Signal is closed", submissionId, oldId);
+                return null;
+            }
+
+            var statusCode = old.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+            if (statusCode is not { } code || !InvoiceStatusCodes.TryFromStatusCode(code, out var status) || status != InvoiceLifecycleStatus.Superseded)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is not Superseded (statuscode {Status}); no Signal is closed",
+                    submissionId, oldId, statusCode);
+                return null;
+            }
+
+            set = await ReadOpenSignalSetAsync(_entities, _time, oldId, _logger, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the superseded invoice's Signals could not be read ({Fault}); it stays Processing for a retry",
+                submissionId, ex.GetType().Name);
+            return SupersedeSignalsFailedCode;
+        }
+
+        string? failure = null;
+        int closed = 0, left = 0;
+        var notClosed = new List<Guid>();
+        foreach (var signal in set.Signals)
+        {
+            try
+            {
+                Entity row;
+                try
+                {
+                    row = await _entities.RetrieveAsync(SignalEntity, signal.Id, ["sprk_signalstatus", RowVersionColumn], ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (IsRecordNotFound(ex))
+                {
+                    left++;
+                    continue;
+                }
+
+                if (row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
+                {
+                    left++;
+                    continue;
+                }
+
+                var rowVersion = row.RowVersion ?? (row.GetAttributeValue<long?>(RowVersionColumn) is { } v ? v.ToString(CultureInfo.InvariantCulture) : null);
+                if (string.IsNullOrWhiteSpace(rowVersion))
+                {
+                    _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} was read without a row version; not closed", submissionId, signal.Id);
+                    failure ??= SignalChangedCode;
+                    notClosed.Add(signal.Id);
+                    continue;
+                }
+
+                if (await _supersedeSignal(signal.Id, rowVersion, signal.PolicyCode, ct).ConfigureAwait(false) == SignalCloseOutcome.Closed)
+                {
+                    closed++;
+                }
+                else
+                {
+                    // ChangedSinceRead: nothing written. The next delivery re-reads it: closed by a person → left; still open → closed.
+                    failure ??= SignalChangedCode;
+                    notClosed.Add(signal.Id);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} (policy {PolicyCode}) on superseded invoice {OldInvoiceId} could not be closed ({Fault})",
+                    submissionId, signal.Id, signal.PolicyCode, oldId, ex.GetType().Name);
+                failure ??= SupersedeSignalsFailedCode;
+                notClosed.Add(signal.Id);
+            }
+        }
+
+        if (failure is not null)
+        {
+            // Bounded and visible (ontology-r1, 2026-10-30): every failing run, the final delivery included, names the submission and the Signals
+            // still open (ids only). On the final delivery the job dead-letters with this code and notes "Processing stopped" for the administrator.
+            _logger.LogWarning("Invoice submission {SubmissionId}: superseded invoice {OldInvoiceId}: Signals {SignalIds} not closed ({Code}); it stays Processing for a retry",
+                submissionId, oldId, string.Join(",", notClosed), failure);
+        }
+
+        _logger.LogInformation("Invoice submission {SubmissionId}: superseded invoice {OldInvoiceId}: {Closed} of {Count} open Signals closed Superseded, {Left} already closed or gone ({Code})",
+            submissionId, oldId, closed, set.Signals.Count, left, failure ?? "complete");
+        return failure;
+    }
+
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, string[] columns, CancellationToken ct)
     {
         try
@@ -989,9 +1199,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     // ── Signals ──
 
-    /// <summary>One Signal's step: written, a retryable <paramref name="FailureCode"/>, or a permanent <paramref name="RefusedCode"/> (F1-3).</summary>
-    private readonly record struct SignalStep(bool Wrote, string? FailureCode, string? RefusedCode = null);
-
     // ── F1-3: permanent Signal-write refusals ──
 
     /// <summary>The findings JSON member that records the Signals the writer refused permanently: <c>[{ policyCode, subject: { entity, id },
@@ -1000,25 +1207,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     /// <summary>One Signal the writer refused permanently: its policy, subject and the writer's code.</summary>
     internal sealed record SignalWriteRefused(string PolicyCode, string SubjectEntity, Guid SubjectId, string Code);
-
-    /// <summary>
-    /// The <see cref="SignalWriteResult.SkippedRefusalCode"/> values a redelivery cannot change (F1-3): the reconcile met a Signal whose core
-    /// record or no-core owner changed (<see cref="OntologyWriterFailureReason.CoreRecordChanged"/>, re-grouping is task 031's), and the
-    /// ownership resolver's refusals of the data or configuration it read (<see cref="RecordOwnerRefusal"/>). Not here, so retried:
-    /// <see cref="RecordOwnerRefusal.ParentUndetermined"/> (a derivation that FAILED, which a retry can pass) and any code not listed.
-    /// </summary>
-    internal static readonly IReadOnlySet<string> PermanentSkipCodes = new HashSet<string>(StringComparer.Ordinal)
-    {
-        OntologyWriterFailureReason.CoreRecordChanged,
-        RecordOwnerRefusal.ParentUnresolved,
-        RecordOwnerRefusal.SecureParentNotIsolated,
-        RecordOwnerRefusal.SecureOwnerTeamUnresolved,
-        RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
-        RecordOwnerRefusal.NoDefaultOwnerTeam,
-        RecordOwnerRefusal.ActingUserUnresolved,
-        RecordOwnerRefusal.NoOwnerSource,
-        RecordOwnerRefusal.RecordMissing,
-    };
 
     /// <summary>
     /// The code of a Signal-write exception the writer would throw again on every attempt (F1-3), or null for a retryable one:
@@ -1099,132 +1287,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         return json;
     }
 
-    /// <summary>
-    /// The option-a lifecycle (notes section 6) for one (policy, subject): the latest episode by the dedupe-key prefix, its status and its
-    /// stored reason-set fingerprint decide: none → episode 1; open + same → refresh it; open + different → Superseded, then episode n+1;
-    /// resolved + same → skip (a resume never re-raises what was resolved); resolved + different → episode n+1. A skipped write
-    /// (<see cref="SignalWriteResult.SkippedRefusalCode"/>) is permanent when its code is in <see cref="PermanentSkipCodes"/> (F1-3: recorded,
-    /// the run continues), otherwise a failure; an open Signal that changed while being superseded is a failure: retry.
-    /// </summary>
-    private async Task<SignalStep> WriteWithLifecycleAsync(SignalWriteRequest request, string fingerprint, Guid submissionId, CancellationToken ct)
-    {
-        var latest = await LatestEpisodeAsync(request, ct).ConfigureAwait(false);
-        var episode = 1;
-        if (latest is { } existing)
-        {
-            var same = string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal);
-            if (existing.IsResolved)
-            {
-                if (same)
-                {
-                    return new SignalStep(false, null);
-                }
-
-                episode = existing.Episode + 1;
-            }
-            else if (same)
-            {
-                episode = existing.Episode;
-            }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(existing.RowVersion))
-                {
-                    _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} was read without a row version; not superseded", submissionId, existing.Id);
-                    return new SignalStep(false, SignalChangedCode);
-                }
-
-                var closed = await _supersedeSignal(existing.Id, existing.RowVersion, request.PolicyCode, ct).ConfigureAwait(false);
-                if (closed != SignalCloseOutcome.Closed)
-                {
-                    return new SignalStep(false, SignalChangedCode);
-                }
-
-                episode = existing.Episode + 1;
-            }
-        }
-
-        var result = await _writeSignal(request with { Episode = episode }, ct).ConfigureAwait(false);
-        if (result.IsSkipped)
-        {
-            if (PermanentSkipCodes.Contains(result.SkippedRefusalCode!))
-            {
-                return new SignalStep(false, null, result.SkippedRefusalCode);
-            }
-
-            _logger.LogWarning("Invoice submission {SubmissionId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
-                submissionId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
-            return new SignalStep(false, SignalWriteSkippedCode);
-        }
-
-        return new SignalStep(true, null);
-    }
-
-    private sealed record ExistingEpisode(Guid Id, int Episode, bool IsResolved, string? Fingerprint, string? RowVersion);
-
-    private async Task<ExistingEpisode?> LatestEpisodeAsync(SignalWriteRequest request, CancellationToken ct)
-    {
-        var subjectId = request.SubjectId.ToString("D").ToLowerInvariant();
-        var prefix = SignalWriter.DedupeKeySubjectPrefix(request.PolicyCode, request.SubjectEntityLogicalName, subjectId);
-        var query = new QueryExpression(SignalEntity)
-        {
-            ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_evidencerefs", "versionnumber"),
-            NoLock = true,
-        };
-        query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith, prefix);
-        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-
-        ExistingEpisode? latest = null;
-        foreach (var row in rows.Entities)
-        {
-            if (!SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out var entity, out var id, out var episode)
-                || !string.Equals(code, request.PolicyCode, StringComparison.Ordinal)
-                || !string.Equals(entity, request.SubjectEntityLogicalName, StringComparison.Ordinal) || id != request.SubjectId)
-            {
-                continue;
-            }
-
-            if (latest is null || episode > latest.Episode)
-            {
-                latest = new ExistingEpisode(
-                    row.Id,
-                    episode,
-                    row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value == SignalWriter.SignalStatusResolved,
-                    FingerprintOf(row.GetAttributeValue<string>("sprk_evidencerefs")),
-                    row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null));
-            }
-        }
-
-        return latest;
-    }
-
-    /// <summary>The <see cref="BillingFindingSignalMapper.FingerprintEvidenceKind"/> line's <c>ref</c> in a stored <c>sprk_evidencerefs</c>; null when absent or unreadable.</summary>
-    internal static string? FingerprintOf(string? evidenceJson)
-    {
-        if (string.IsNullOrWhiteSpace(evidenceJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonNode.Parse(evidenceJson) is JsonArray lines
-                ? lines.OfType<JsonObject>()
-                    .Where(l => Text(l, "kind") == BillingFindingSignalMapper.FingerprintEvidenceKind)
-                    .Select(l => Text(l, "ref"))
-                    .FirstOrDefault()
-                : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
     // ── System Signals (D-123, D-125) ──
 
     /// <summary>
-    /// The system findings (D-91 mismatch, refused codes, firm-code mismatches, code set needs review, no code set, coding unavailable) as
+    /// The system findings (D-91 mismatch, refused codes, firm-code mismatches, code set needs review, no code set, coding unavailable, and
+    /// task 095c-3's firm missing) as
     /// Signal requests under <c>BILL-SYSTEM-SUBMISSION</c>: read app-only, once per run, and only when there is a system finding. Missing,
     /// ambiguous, disabled, of another rule type, or with no Active version in force on the received date: no system Signal, one Warning
     /// (the policy code only), and the findings stay in the findings JSON. Disabled is the administrator's choice (D-125) and stays a
@@ -1271,7 +1338,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// current version from its start, a superseded one inside its window) and is of the SubmissionIntegrity type. A version superseded
     /// after the received date (a re-seed) therefore still applies to that submission, as it does for the rule evaluation (K1, notes 13a).
     /// </summary>
-    internal async Task<(BillingRuleCandidate? Rule, string State)> ReadSystemPolicyAsync(DateOnly? receivedOn, CancellationToken ct)
+    internal Task<(BillingRuleCandidate? Rule, string State)> ReadSystemPolicyAsync(DateOnly? receivedOn, CancellationToken ct) =>
+        ReadSystemPolicyAsync(_entities, receivedOn, ct);
+
+    /// <inheritdoc cref="ReadSystemPolicyAsync(DateOnly?, CancellationToken)"/>
+    /// <remarks>Static (task 101 B2b-2) so the corrections re-evaluation reads the system policy the same way; 049's instance call is unchanged.</remarks>
+    internal static async Task<(BillingRuleCandidate? Rule, string State)> ReadSystemPolicyAsync(
+        IGenericEntityService entities, DateOnly? receivedOn, CancellationToken ct)
     {
         var query = new QueryExpression(BillingFactLoader.PolicyEntity)
         {
@@ -1282,7 +1355,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         RuleDomains.AddBillingFilter(query);
         query.Criteria.AddCondition("sprk_policycode", ConditionOperator.Equal, BillingRuleCatalogue.SystemPolicyCode);
 
-        var rows = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+        var rows = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
             .Where(r => RuleDomains.IsBillingRow(r)
                 && string.Equals(r.GetAttributeValue<string>("sprk_policycode")?.Trim(), BillingRuleCatalogue.SystemPolicyCode, StringComparison.Ordinal))
             .ToList();
@@ -1307,6 +1380,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return (null, "without_a_version_in_force");
         }
 
+        // all versions: the system policy belongs to no rule set (D-125), so it has no billing drafts and a redraft never deactivates its versions.
         var versionQuery = new QueryExpression(BillingFactLoader.VersionEntity)
         {
             ColumnSet = new ColumnSet("sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
@@ -1315,7 +1389,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         };
         versionQuery.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policy.Id);
         var currentId = policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id;
-        var versions = (await _entities.RetrieveMultipleAsync(versionQuery, ct).ConfigureAwait(false)).Entities
+        var versions = (await entities.RetrieveMultipleAsync(versionQuery, ct).ConfigureAwait(false)).Entities
             .Where(v => v.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policy.Id)
             .Select(v => new BillingRuleCandidate
             {
@@ -1408,6 +1482,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 ["sentence"] = RecordSentence(p),
             }).ToList(),
         };
+        if (stored.ProcedureSnapshot is { } basis)
+        {
+            // 082d (model 7.4, ontology O2): a bounded summary and the pointer to the submission's snapshot, never the basis. Only a row that stores
+            // a snapshot gets it, so a record rebuilt for a row stored before 082d keeps its facts, and its hash, unchanged.
+            facts[ProcedureSnapshot.DecisionRecordFact] = ProcedureSnapshot.DecisionRecordSummary(basis, submissionId);
+        }
+
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["submissionId"] = submissionId.ToString("D"),
@@ -1475,6 +1556,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// <summary>One stored billing finding (the fields the record needs).</summary>
     internal sealed record StoredFinding(string ReasonCode, Guid PolicyVersionId);
 
+    /// <summary>Task 114: one stored Procedure hold (082c-2), as its pipeline finding carries it: reader members only, never an id.
+    /// <paramref name="Code"/> is a gap or an unresolved reason; the gap carries the name, the first gapped work date and the kind, the
+    /// unresolved one its cause.</summary>
+    internal sealed record StoredProcedureHold(string Code, string? ProcedureName, string? WorkDate, string? GapKind, string? Cause);
+
     /// <summary>
     /// <c>sprk_findingsjson</c> (<see cref="InvoiceSubmissionPersister.BuildFindingsJson"/>) read back: the kind, the decision, the
     /// findings the record needs, the Signal plan, and the pipeline and coding findings the system Signals are mapped from.
@@ -1500,6 +1586,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         public IReadOnlyList<int> DecidingIndexes { get; init; } = [];
         public IReadOnlyDictionary<int, StoredFinding> Findings { get; init; } = new Dictionary<int, StoredFinding>();
         public IReadOnlyList<StoredPlanEntry> Plan { get; init; } = [];
+
+        /// <summary>082d: the stored Procedure basis (<see cref="global::Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Read(JsonObject)"/>);
+        /// null on a row stored before it, or a damaged one.</summary>
+        public StoredProcedureSnapshot? ProcedureSnapshot { get; init; }
+
         private JsonArray PipelineFindings { get; init; } = [];
         private JsonArray CodingFindings { get; init; } = [];
         private JsonObject? CodeSet { get; init; }
@@ -1508,9 +1599,37 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         /// <summary>True when any stored finding maps to a SubmissionIntegrity Signal.</summary>
         public bool HasSystemFindings =>
             PipelineFindings.OfType<JsonObject>().Any(p => Text(p, "reasonCode") is SubmissionReasonCodes.InvoiceNumberMismatch
-                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold)
+                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold or SubmissionReasonCodes.FirmMissing
+                or SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved)
             || CodingFindings.Count > 0
             || CodeSet?["needsReview"]?.GetValue<bool>() == true;
+
+        /// <summary>
+        /// Task 114: the stored Procedure holds (<see cref="SubmissionReasonCodes.ProcedureGap"/>, <see cref="SubmissionReasonCodes.ProceduresUnresolved"/>)
+        /// the pipeline findings name, in stored order: the reader members the 082c-2 writer stored (the Procedure's name, the first gapped work
+        /// date, the kind or the cause; never an id). A value that is not there reads as null. The Override release records them.
+        /// </summary>
+        internal IReadOnlyList<StoredProcedureHold> ProcedureHolds()
+        {
+            var holds = new List<StoredProcedureHold>();
+            foreach (var pipeline in PipelineFindings.OfType<JsonObject>())
+            {
+                if (Text(pipeline, "reasonCode") is not ({ } code and (SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved)))
+                {
+                    continue;
+                }
+
+                var values = pipeline["values"] as JsonObject;
+                holds.Add(new StoredProcedureHold(
+                    code,
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureNameValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureWorkDateValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureGapKindValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureCauseValue)));
+            }
+
+            return holds;
+        }
 
         /// <summary>The system findings under <paramref name="policy"/> (<see cref="BillingSystemFindings"/>). A value missing on one side of
         /// a comparison is not a finding and is left out.</summary>
@@ -1531,6 +1650,25 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                         break;
                     case SubmissionReasonCodes.CodingUnavailableHold:
                         findings.Add(BillingSystemFindings.CodingUnavailable(policy));
+                        break;
+                    case SubmissionReasonCodes.FirmMissing:
+                        // Task 095c-3 (ontology-r1 D-201): the invoice was submitted without a firm; held until a reviewer adds one.
+                        findings.Add(BillingSystemFindings.FirmMissing(policy));
+                        break;
+                    case SubmissionReasonCodes.ProcedureGap when pipeline["values"] is JsonObject gap
+                        && Text(gap, SubmissionReasonCodes.ProcedureNameValue) is { } procedureName && !string.IsNullOrWhiteSpace(procedureName)
+                        && DateOnly.TryParseExact(Text(gap, SubmissionReasonCodes.ProcedureWorkDateValue), "yyyy-MM-dd",
+                            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var workDate)
+                        && Enum.TryParse<ProcedureGapKind>(Text(gap, SubmissionReasonCodes.ProcedureGapKindValue), out var gapKind)
+                        && Enum.IsDefined(gapKind):
+                        // 082c-2 (brief C11; ontology-r1 D-205 item 6): joins the shared SubmissionIntegrity Signal of (policy, invoice).
+                        findings.Add(BillingSystemFindings.ProcedureGap(policy, procedureName, workDate, gapKind));
+                        break;
+                    case SubmissionReasonCodes.ProceduresUnresolved when pipeline["values"] is JsonObject unresolved
+                        && Text(unresolved, SubmissionReasonCodes.ProcedureCauseValue) is SubmissionReasonCodes.CauseChainUnreadable
+                            or SubmissionReasonCodes.CauseRowsInconsistent:
+                        // 082c-2 (brief C14, C15): the cause is one of the two closed codes; never a message.
+                        findings.Add(BillingSystemFindings.ProceduresUnresolved(policy, Text(unresolved, SubmissionReasonCodes.ProcedureCauseValue)!));
                         break;
                 }
             }
@@ -1620,6 +1758,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                     CodingFindings = root["codingFindings"] as JsonArray ?? [],
                     CodeSet = root["codeSet"] as JsonObject,
                     InvoiceNumberReadConfidence = root["invoiceNumberReadConfidence"]?.GetValue<decimal>(),
+                    ProcedureSnapshot = global::Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Read(root),
                     ResolvedSet = root[ResolvedSetMember] switch
                     {
                         null => null,
@@ -1634,7 +1773,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             }
         }
 
-        private static StoredPlanEntry ParsePlanEntry(JsonObject entry)
+        /// <summary>One stored <c>signalPlan[]</c> entry read back (task 101 B2b-2 raises a corrected group's entry with it).</summary>
+        internal static StoredPlanEntry ParsePlanEntry(JsonObject entry)
         {
             var facts = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var (name, value) in entry["facts"] as JsonObject ?? [])

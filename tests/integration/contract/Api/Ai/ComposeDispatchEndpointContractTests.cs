@@ -133,7 +133,8 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: Array.Empty<ChatSessionFile>()) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: Array.Empty<ChatSessionFile>())
+        { OwnerOid = TestSessionOwner.Oid };
 
         _fx.ConsumerRoutingMock
             .Setup(c => c.GetBindingByIdAsync(ComposeBindingId, It.IsAny<CancellationToken>()))
@@ -288,7 +289,8 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
                 new ChatSessionFile(
                     FileId: "file-empty", FileName: "empty.docx", ContentType: "application/pdf",
                     SizeBytes: 0, SearchDocumentIdsCsv: "doc-file-empty-1", UploadedAt: DateTimeOffset.UtcNow),
-            }) { OwnerOid = TestSessionOwner.Oid };
+            })
+        { OwnerOid = TestSessionOwner.Oid };
         _fx.TextSourceMock
             .Setup(t => t.FetchAsync(
                 It.IsAny<string>(), It.IsAny<string>(),
@@ -394,7 +396,8 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
                 new ChatSessionFile(
                     FileId: "file-sum", FileName: "sum.pdf", ContentType: "application/pdf",
                     SizeBytes: 1024, SearchDocumentIdsCsv: "doc-file-sum-1", UploadedAt: DateTimeOffset.UtcNow),
-            }) { OwnerOid = TestSessionOwner.Oid };
+            })
+        { OwnerOid = TestSessionOwner.Oid };
         // A genuine DocumentAnalysisResult-shaped payload (has `tldr` — the DAR signature).
         _fx.OpenAi.RawJsonToReturn =
             """{"tldr":["SUMMARIZE_WIRE_MARKER"],"summary":"A summarize summary.","keywords":"k","entities":{"organizations":[],"persons":[]}}""";
@@ -462,7 +465,8 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
                 new ChatSessionFile(
                     FileId: "file-nda", FileName: "nda-acme.pdf", ContentType: "application/pdf",
                     SizeBytes: 2048, SearchDocumentIdsCsv: "doc-file-nda-1", UploadedAt: DateTimeOffset.UtcNow),
-            }) { OwnerOid = TestSessionOwner.Oid };
+            })
+        { OwnerOid = TestSessionOwner.Oid };
 
         _fx.ConsumerRoutingMock
             .Setup(c => c.GetBindingByIdAsync(ComposeBindingId, It.IsAny<CancellationToken>()))

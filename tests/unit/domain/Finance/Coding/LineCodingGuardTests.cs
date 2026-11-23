@@ -47,14 +47,14 @@ public class LineCodingGuardTests
         string? expense = null,
         decimal confidence = 0.8m,
         IReadOnlyList<InvoiceLineObservation>? observations = null) => new()
-    {
-        LineKey = key,
-        TaskCode = task,
-        ActivityCode = activity,
-        ExpenseCode = expense,
-        Confidence = confidence,
-        Observations = observations ?? [],
-    };
+        {
+            LineKey = key,
+            TaskCode = task,
+            ActivityCode = activity,
+            ExpenseCode = expense,
+            Confidence = confidence,
+            Observations = observations ?? [],
+        };
 
     private static InvoiceLineObservation Observation(InvoiceLineObservationType type, string quote, decimal confidence = 0.7m) =>
         new() { Type = type, Confidence = confidence, QuotedText = quote };

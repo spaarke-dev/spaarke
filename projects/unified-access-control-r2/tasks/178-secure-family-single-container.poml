@@ -3,7 +3,7 @@
   <metadata>
     <title>One SPE container per secure family: inherited-secure records use the family root's container (adopting an existing secure container where one exists); un-securing moves the files to the business-unit container (owner round 88; closes #1506)</title>
     <phase>Session 28 — UAC (owner round 88, 2026-10-09)</phase>
-    <status>pending</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes container provisioning, upload routing and file relocation for secure records (security, data movement).</rigor-reason>
     <model-tier>opus</model-tier>

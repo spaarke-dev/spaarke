@@ -333,7 +333,8 @@ public class RefusalCapabilityToolTests
                 SessionId, TenantId, DocumentId: null, PlaybookId: null,
                 CreatedAt: DateTimeOffset.UtcNow, LastActivity: DateTimeOffset.UtcNow,
                 Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>(),
-                UploadedFiles: SessionFiles) { OwnerOid = TestSessionOwner.Oid };
+                UploadedFiles: SessionFiles)
+            { OwnerOid = TestSessionOwner.Oid };
 
             var sessionManager = new Mock<ChatSessionManager>(
                 Mock.Of<ITenantCache>(),

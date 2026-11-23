@@ -9,6 +9,9 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Xunit;
@@ -27,8 +30,8 @@ namespace Sprk.Bff.Api.Tests.Services.Jobs.Handlers;
 /// </remarks>
 public sealed class BillingRuleDraftRetryTests
 {
-    private const string Drive = "b!procedurelibrary";
-    private static readonly Guid DocId = Guid.NewGuid();
+
+
     private static readonly Guid Caller = Guid.NewGuid();
 
     private const string Q1 = "Time must be billed in tenth-hour increments.";
@@ -52,7 +55,10 @@ public sealed class BillingRuleDraftRetryTests
     private sealed class Rig
     {
         public readonly Harness H = new();
-        public readonly Guid SetId;
+        public readonly StoredFileRig Files = new();
+        public readonly Harness.Drafting D;
+        public Guid SetId => D.RuleSet;
+        public Guid VersionId => D.Version;
         public readonly Mock<IInvoiceAi> Ai = new();
         public IReadOnlyList<BillingRuleProposal> Reply = Array.Empty<BillingRuleProposal>();
         public int AiCalls;
@@ -60,19 +66,17 @@ public sealed class BillingRuleDraftRetryTests
 
         public Rig()
         {
-            SetId = H.RuleSet();
-            H.Row("sprk_ruleset", SetId)["sprk_sourcedocument"] = new EntityReference("sprk_document", DocId);
-            H.Documents.Setup(d => d.GetDocumentAsync(DocId.ToString(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DocumentEntity { Id = DocId.ToString(), Name = "ocg", GraphDriveId = Drive, GraphItemId = "item-1", FileName = "ocg.pdf" });
+            // Task 116: a Draft version of a Billing Procedure; its source file is in the real file store over its fakes.
+            D = H.DraftVersion();
+            Files.SeedFile(D.File, new StoredFileParent(StoredFileParentKind.ProcedureVersion, D.Version), new byte[] { 1 },
+                purpose: StoredFilePurpose.ProcedureSource);
 
-            var spe = new Mock<ISpeFileOperations>();
-            spe.Setup(s => s.DownloadFileAsync(Drive, "item-1", It.IsAny<CancellationToken>())).ReturnsAsync(() => new MemoryStream(new byte[] { 1 }));
             var text = new Mock<ITextExtractor>();
-            text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
+            text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "guidelines.pdf", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TextExtractionResult.Succeeded(DocumentText, TextExtractionMethod.Native));
             var gate = new Mock<IIdempotencyService>();
-            gate.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
-            gate.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            gate.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+            gate.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             Ai.Setup(a => a.DraftRulesAsync(It.IsAny<BillingRuleDraftRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() =>
                 {
@@ -80,12 +84,12 @@ public sealed class BillingRuleDraftRetryTests
                     return new BillingRuleDraftResult { Proposals = Reply.ToArray(), NotConverted = Array.Empty<BillingRuleNotConverted>() };
                 });
 
-            _handler = new BillingRuleDraftJobHandler(H.Service(), Ai.Object, spe.Object, text.Object, gate.Object, NullLogger<BillingRuleDraftJobHandler>.Instance);
+            _handler = new BillingRuleDraftJobHandler(H.Service(), Ai.Object, Files.Service, text.Object, gate.Object, NullLogger<BillingRuleDraftJobHandler>.Instance);
         }
 
         public Task<JobOutcome> Deliver(int delivery = 1)
         {
-            var job = BillingRuleDraftJobHandler.BuildJob(Guid.NewGuid(), SetId, Caller, "corr");
+            var job = BillingRuleDraftJobHandler.BuildJob(Guid.NewGuid(), VersionId, Caller, "corr");
             job.Attempt = 1;
             job.MaxAttempts = 3;
             job.DeliveryCount = delivery;
@@ -113,7 +117,7 @@ public sealed class BillingRuleDraftRetryTests
 
         first.Status.Should().Be(JobStatus.Failed);
         rig.Policies.Should().Be(2);
-        rig.H.Row("sprk_ruleset", rig.SetId).Contains("sprk_notconverted").Should().BeFalse("a run that died has no completion marker");
+        rig.H.Row(ProcedureEntity.VersionEntity, rig.VersionId).Contains(RuleSetService.VersionDraftedColumn).Should().BeFalse("a run that died has no completion marker");
 
         // The retry: the model is asked again and answers differently (other numbers for the same clauses).
         rig.H.FailCreateWhen = null;
@@ -125,7 +129,7 @@ public sealed class BillingRuleDraftRetryTests
         rig.Policies.Should().Be(3, "one set: the first run's two rules were cleared, not left beside the second run's three");
         rig.Bodies().Should().Contain(b => b!.Contains("\"maxHoursPerDay\":12")).And.Contain(b => b!.Contains("\"maxHoursPerDay\":9"))
             .And.NotContain(b => b!.Contains("\"maxHoursPerDay\":10"));
-        rig.H.Row("sprk_ruleset", rig.SetId).Contains("sprk_notconverted").Should().BeTrue();
+        rig.H.Row(ProcedureEntity.VersionEntity, rig.VersionId).Contains(RuleSetService.VersionDraftedColumn).Should().BeTrue();
         rig.AiCalls.Should().Be(2);
     }
 
@@ -148,7 +152,7 @@ public sealed class BillingRuleDraftRetryTests
         rig.Policies.Should().Be(3, "the edited rule, plus the other two clauses drafted again; the edited rule's clause is not drafted twice");
         rig.Bodies().Count(b => b!.Contains("DailyHoursCap") && b.Contains("\"maxHoursPerDay\":10")).Should().Be(1);
         rig.Bodies().Should().NotContain(b => b!.Contains("\"maxHoursPerDay\":12"));
-        var marker = rig.H.Row("sprk_ruleset", rig.SetId).GetAttributeValue<string>("sprk_notconverted");
+        var marker = rig.H.Row(ProcedureEntity.VersionEntity, rig.VersionId).GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn);
         marker.Should().Contain("covers this clause");
     }
 
@@ -194,7 +198,7 @@ public sealed class BillingRuleDraftRetryTests
         rig.AiCalls.Should().Be(callsBefore, "the model is not asked when the earlier drafts could not be cleared");
         rig.H.Writes.Where(w => w.Kind == Write.Create).Should().BeEmpty("nothing is drafted");
         rig.H.Rows["sprk_policy"].Select(p => p.Id).Should().BeEquivalentTo(rowsBefore);
-        rig.H.Row("sprk_ruleset", rig.SetId).Contains("sprk_notconverted").Should().BeFalse("no marker: the next delivery compensates again");
+        rig.H.Row(ProcedureEntity.VersionEntity, rig.VersionId).Contains(RuleSetService.VersionDraftedColumn).Should().BeFalse("no marker: the next delivery compensates again");
 
         // The fault clears; the next delivery compensates and drafts one set.
         rig.H.OnDelete = null;

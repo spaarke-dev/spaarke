@@ -249,6 +249,19 @@ internal sealed class ContactGrantorAuthorizationFilter : IEndpointFilter
                 "The access could not be revoked because it could not be read just now. Nothing was changed; try again."));
         }
 
+        // Fix round 3g: a row whose issuer column the read did not return is neither "theirs" nor "somebody else's", so it is
+        // not the uniform 404 below (that would tell the caller there is nothing of theirs to revoke). It takes the same retry
+        // answer as a row that could not be read: nothing was revoked, try again.
+        if (row is { IssuerRead: false })
+        {
+            logger.LogError(
+                "[CONTACT-GRANT] Revoke by contact {ContactId}: access record {AccessRecordId} did not carry the issuer column. " +
+                "Nothing was revoked.", principal.ContactId, accessRecordId);
+            return (null, null, Problem(httpContext, StatusCodes.Status503ServiceUnavailable, "Access not revoked",
+                RevokeFailedReasonCode,
+                "The access could not be revoked because it could not be read just now. Nothing was changed; try again."));
+        }
+
         // An absent row and a row somebody else issued are ONE answer — the route is not an access-record oracle.
         if (row is null || row.GrantedByContactId != principal.ContactId)
         {

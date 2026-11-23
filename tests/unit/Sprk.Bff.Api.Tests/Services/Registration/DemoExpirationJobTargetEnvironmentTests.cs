@@ -184,8 +184,12 @@ public class DemoExpirationJobTargetEnvironmentTests
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var deactivated = new DataverseEnvironmentRecord
         {
-            Id = TargetEnvironmentId, Name = Target.Name, DataverseUrl = TargetDataverse, IsActive = false,
-            TeamName = Target.TeamName, SpeContainerId = Target.SpeContainerId,
+            Id = TargetEnvironmentId,
+            Name = Target.Name,
+            DataverseUrl = TargetDataverse,
+            IsActive = false,
+            TeamName = Target.TeamName,
+            SpeContainerId = Target.SpeContainerId,
         };
         var registry = Registry(byId: _ => deactivated, active: []);
 
@@ -225,8 +229,11 @@ public class DemoExpirationJobTargetEnvironmentTests
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var noUrl = new DataverseEnvironmentRecord
         {
-            Id = TargetEnvironmentId, Name = Target.Name, IsActive = true,
-            TeamName = Target.TeamName, SpeContainerId = Target.SpeContainerId,
+            Id = TargetEnvironmentId,
+            Name = Target.Name,
+            IsActive = true,
+            TeamName = Target.TeamName,
+            SpeContainerId = Target.SpeContainerId,
         };
         var registry = Registry(byId: _ => noUrl, active: []);
 

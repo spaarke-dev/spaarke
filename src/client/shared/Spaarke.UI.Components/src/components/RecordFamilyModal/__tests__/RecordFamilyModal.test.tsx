@@ -133,7 +133,7 @@ const renderModal = (props: RecordFamilyModalProps, theme = webLightTheme) =>
     </FluentProvider>
   );
 
-/** The cells of the table row whose name cell reads `name` (checkbox cell first). */
+/** The cells of the table row whose name cell reads `name` (a checkbox cell comes first only when the host passes `onAction`). */
 function cellsOfRow(name: string): string[] {
   const row = screen.getByText(name).closest('tr') as HTMLElement;
   return within(row)
@@ -167,21 +167,21 @@ describe('RecordFamilyModal (FR-32)', () => {
       // Two work assignments share ONE group.
       expect(screen.getAllByText(/Level 2\b.*Work Assignment/)).toHaveLength(1);
 
-      // cells: [select, name, record number, record type, status, modified on]
+      // cells (no handler, so no select cell): [name, record number, record type, status, modified on]
       const project = cellsOfRow('Diligence Project');
-      expect(project[1]).toBe('Diligence ProjectThis record'); // the opened record carries a badge
-      expect(project[2]).toBe(''); // no record number -> blank, not "null" / "—" / "N/A"
-      expect(project[3]).toBe('Due Diligence');
-      expect(project[4]).toBe('Open');
-      expect(project[5]).toContain('2026');
+      expect(project[0]).toBe('Diligence ProjectThis record'); // the opened record carries a badge
+      expect(project[1]).toBe(''); // no record number -> blank, not "null" / "—" / "N/A"
+      expect(project[2]).toBe('Due Diligence');
+      expect(project[3]).toBe('Open');
+      expect(project[4]).toContain('2026');
 
       const matter = cellsOfRow('Acme Acquisition');
-      expect(matter[2]).toBe('MAT-0001');
+      expect(matter[1]).toBe('MAT-0001');
 
       // A member with a null record type and null modifiedOn is blank in both cells.
       const memo = cellsOfRow('Draft memo');
-      expect(memo[3]).toBe('');
-      expect(memo[5]).toBe('');
+      expect(memo[2]).toBe('');
+      expect(memo[4]).toBe('');
     });
 
     it('does not fetch while closed', () => {
@@ -309,11 +309,9 @@ describe('RecordFamilyModal (FR-32)', () => {
       expect(onAction.mock.calls[0][1]).toHaveLength(2);
     });
 
-    it('renders the actions disabled with the tooltip when no handler is supplied, even with rows selected', async () => {
+    it('renders the actions disabled with the tooltip when no handler is supplied', async () => {
       renderModal(makeProps(() => ok(response())));
       await screen.findByText('Diligence Project');
-
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Review contracts' }));
 
       const push = screen.getByRole('button', { name: 'Push field updates' });
       const assign = screen.getByRole('button', { name: 'Update Assigned To' });
@@ -322,6 +320,91 @@ describe('RecordFamilyModal (FR-32)', () => {
 
       fireEvent.focus(push);
       expect((await screen.findAllByText('Available after the push update')).length).toBeGreaterThan(0);
+    });
+  });
+
+  // #2513: selection exists to feed an action. The read-only Family tool (074) passes no handler, so it has none.
+  describe('selection only where an action can use it', () => {
+    it('shows no checkboxes, no select column and no selected count without a handler', async () => {
+      renderModal(makeProps(() => ok(response())));
+      await screen.findByText('Diligence Project');
+
+      expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+      expect(screen.queryByRole('columnheader', { name: 'Select' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+ selected/)).not.toBeInTheDocument();
+      expect(screen.queryByText('Selected')).not.toBeInTheDocument();
+      // Group rows span the five columns that remain.
+      const groupCell = screen.getByText(/Level 0\b.*Matter/).closest('td') as HTMLElement;
+      expect(groupCell).toHaveAttribute('colspan', '5');
+    });
+
+    it('keeps a checkbox per row, the selected count and the Selected detail when a handler is supplied', async () => {
+      renderModal(makeProps(() => ok(response()), { onAction: jest.fn() }));
+      await screen.findByText('Diligence Project');
+
+      expect(screen.getAllByRole('checkbox')).toHaveLength(4);
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+      expect(screen.getByText('Selected')).toBeInTheDocument();
+      const groupCell = screen.getByText(/Level 0\b.*Matter/).closest('td') as HTMLElement;
+      expect(groupCell).toHaveAttribute('colspan', '6');
+    });
+  });
+
+  // #2513: the Details pane describes the highlighted row, and says so; it never mixes it up with the selection.
+  describe('details pane', () => {
+    it('labels the highlighted record, starting on the opened record, and follows the row the person clicks', async () => {
+      renderModal(makeProps(() => ok(response()), { onAction: jest.fn() }));
+      await screen.findByText('Diligence Project');
+      const meta = screen.getByTestId('preview-meta');
+
+      expect(within(meta).getByText('Focused record').nextSibling).toHaveTextContent(
+        'Diligence Project · Project, level 1'
+      );
+      // The old unlabeled rows are gone: they read as if they described the selection.
+      expect(within(meta).queryByText('Table')).not.toBeInTheDocument();
+      expect(within(meta).queryByText('Level')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Acme Acquisition' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Review contracts' }));
+      expect(within(meta).getByText('Selected').nextSibling).toHaveTextContent('2');
+      // Ticking does not move the focus.
+      expect(within(meta).getByText('Focused record').nextSibling).toHaveTextContent(
+        'Diligence Project · Project, level 1'
+      );
+
+      fireEvent.click(screen.getByText('Review contracts'));
+      expect(within(meta).getByText('Focused record').nextSibling).toHaveTextContent(
+        'Review contracts · Work Assignment, level 2'
+      );
+    });
+  });
+
+  describe('This record badge', () => {
+    it('cannot shrink or wrap, so a long name truncates alone (it never sits over the name)', async () => {
+      const long = member({
+        id: PROJECT,
+        table: 'sprk_project',
+        depth: 1,
+        parentId: MATTER,
+        name: 'A project with a very long name that will not fit in the name column of the family table',
+      });
+      renderModal(makeProps(() => ok(response({ members: [M_MATTER, long] }))));
+      await screen.findByText(long.name as string);
+
+      const badge = screen.getByText('This record');
+      const badgeStyle = window.getComputedStyle(badge);
+      expect(badgeStyle.flexShrink).toBe('0');
+      expect(badgeStyle.whiteSpace).toBe('nowrap');
+
+      const name = screen.getByText(long.name as string);
+      const nameStyle = window.getComputedStyle(name);
+      expect(nameStyle.overflow).toBe('hidden');
+      expect(nameStyle.textOverflow).toBe('ellipsis');
+      expect(['0', '0px']).toContain(nameStyle.minWidth);
+      const cell = name.parentElement as HTMLElement;
+      expect(window.getComputedStyle(cell).flexWrap).toBe('nowrap');
+      // The full name stays reachable when it is cut.
+      expect(name).toHaveAttribute('title', long.name as string);
     });
   });
 
@@ -389,6 +472,108 @@ describe('RecordFamilyModal (FR-32)', () => {
       await screen.findByText('Q3');
       expect(screen.getByText(/Level 2\b.*KPI Assessment/)).toBeInTheDocument();
       expect(screen.getByText(/Level 2\b.*Widget Part/)).toBeInTheDocument();
+    });
+  });
+
+  describe('embedded mode (task 075: the RecordFamily code page, already inside a platform dialog)', () => {
+    it('renders no dialog surface and no title, only the toolbar, the table and a footer', async () => {
+      renderModal(makeProps(() => ok(response()), { embedded: true }));
+      await screen.findByText('Diligence Project');
+
+      // No Fluent Dialog (that would be a modal inside the platform modal), hence no backdrop.
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      // No own title / header chrome: the platform dialog owns them.
+      expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+      expect(screen.queryByText('Family')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /maximi[sz]e|restore/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /next|previous/i })).not.toBeInTheDocument();
+      // What it does render: the toolbar (actions), the table and the footer.
+      expect(screen.getByRole('toolbar', { name: 'Family actions' })).toBeInTheDocument();
+      expect(screen.getByRole('table', { name: 'Family members' })).toBeInTheDocument();
+      expect(screen.getByTestId('record-family-embedded')).toBeInTheDocument();
+      expect(screen.getByText('4 records shown')).toBeInTheDocument();
+      // The root is a named landmark (aria-label alone on a plain div gives no accessible name).
+      expect(screen.getByRole('region', { name: 'Family' })).toBe(screen.getByTestId('record-family-embedded'));
+    });
+
+    it('Escape calls onClose once (the iframe swallows the key before the platform dialog sees it)', async () => {
+      const props = makeProps(() => ok(response()), { embedded: true });
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      fireEvent.keyDown(screen.getByRole('region', { name: 'Family' }), { key: 'Escape' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('Escape from an inner control reaches onClose, but not when that control already handled it', async () => {
+      // The checkbox exists only where an action can use the selection (#2513), so the host passes `onAction`.
+      const props = makeProps(() => ok(response()), { embedded: true, onAction: jest.fn() });
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      const checkbox = screen.getByRole('checkbox', { name: 'Select Diligence Project' });
+      fireEvent.keyDown(checkbox, { key: 'Escape' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+
+      // An inner control that handled Escape (e.g. closing its own popover) marks the event defaultPrevented.
+      checkbox.addEventListener('keydown', e => e.preventDefault());
+      fireEvent.keyDown(checkbox, { key: 'Escape' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+      // Other keys never close.
+      fireEvent.keyDown(checkbox, { key: 'Enter' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('Close calls onClose once', async () => {
+      const props = makeProps(() => ok(response()), { embedded: true });
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('still offers Close (and the fixed message) when the family cannot be loaded', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const props = makeProps(() => problem(404), { embedded: true });
+      renderModal(props);
+
+      await screen.findByText('The family could not be loaded. Close this window and try again.');
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
+    });
+
+    it('renders nothing and fetches nothing while closed', () => {
+      const props = makeProps(() => ok(response()), { embedded: true, open: false });
+      renderModal(props);
+      expect(screen.queryByTestId('record-family-embedded')).not.toBeInTheDocument();
+      expect(props.fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('runs the same actions on exactly the ticked rows', async () => {
+      const onAction = jest.fn();
+      renderModal(makeProps(() => ok(response()), { embedded: true, onAction }));
+      await screen.findByText('Diligence Project');
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Diligence Project' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
+      expect(onAction).toHaveBeenCalledWith('push', [{ table: 'sprk_project', id: PROJECT }]);
+    });
+  });
+
+  describe('not embedded (the default, used by the TrackingFieldTrio PCF) is unchanged', () => {
+    it('is still a dialog with its own title, maximize and Close, and no embedded root', async () => {
+      const props = makeProps(() => ok(response()));
+      renderModal(props);
+      await screen.findByText('Diligence Project');
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByText('Family')).toBeInTheDocument();
+      expect(screen.queryByTestId('record-family-embedded')).not.toBeInTheDocument();
+      expect(screen.queryByText('4 records shown')).not.toBeInTheDocument();
+      // The header meta column still reads the counts.
+      expect(screen.getByText('Records shown')).toBeInTheDocument();
     });
   });
 

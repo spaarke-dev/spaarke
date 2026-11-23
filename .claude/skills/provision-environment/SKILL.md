@@ -111,7 +111,7 @@ Assertions:
 
 #### 0c. L2 API reachability + Operator role
 
-> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model2` / `customer-owned-model2` since task 225b). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
+> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model2` / `customer-owned-model2` since task 225b). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
 
 ```powershell
 # Acquire token — env is one of {dev, demo, prod}
@@ -273,7 +273,7 @@ If any FAIL: report the failure + resolution instructions + HARD STOP.
 
 ### Step 0.5: External Prerequisites Iteration (per `scripts/provisioning-prereqs/prereqs.yaml`) — HARD STOP on any failure
 
-Added by `customer-provisioning-orchestration-r1` task 203c per punch-list row A02. Reads the codified [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) manifest and iterates every prereq whose scope is checkable at operator invocation time (`once_per_tenant`, `once_per_subscription`, and — when `-Environment` is known from arg or batch intake — `once_per_env`). Customer-scoped prereqs (`once_per_customer`) defer to Step 2 preflight (server-side L2 H0 handler). This step iterates the manifest DYNAMICALLY — new prereqs added by future task 202 amendments are picked up automatically without a SKILL.md edit.
+Added by `customer-provisioning-orchestration-r1` task 203c per punch-list row A02. Reads the codified [`scripts/provisioning-prereqs/prereqs.yaml`](../../../scripts/provisioning-prereqs/prereqs.yaml) manifest and iterates every prereq whose scope is checkable at operator invocation time (`once_per_tenant`, `once_per_subscription`, and — when `-Environment` is known from arg or batch intake — `once_per_env`). Customer-scoped prereqs (`once_per_customer`) defer to Step 2 preflight (server-side L2 H0 handler). This step iterates the manifest DYNAMICALLY — new prereqs added by future task 202 amendments are picked up automatically without a SKILL.md edit.
 
 #### 0.5a. YAML parser + environment fail-fast
 
@@ -285,7 +285,7 @@ if (-not (Get-Module -ListAvailable -Name powershell-yaml)) {
 Import-Module powershell-yaml
 ```
 
-If the module is unavailable AND cannot be installed (offline / restricted-network operator), the operator MUST invoke each prereq check manually per [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) and pass `-SkipStep0_5` (or `"skipExternalPrereqs": true` in batch intake) to acknowledge the risk. Silent skip is FORBIDDEN.
+If the module is unavailable AND cannot be installed (offline / restricted-network operator), the operator MUST invoke each prereq check manually per [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../../docs/guides/PROVISIONING-PREREQUISITES.md) and pass `-SkipStep0_5` (or `"skipExternalPrereqs": true` in batch intake) to acknowledge the risk. Silent skip is FORBIDDEN.
 
 **COMP-14 environment fail-fast (SESSION 16)** — Step 0.5b's substitution chain and its `$scopesToCheck += 'once_per_env'` branch both require a non-empty `$env`. When `$env` is null/empty, Step 0.5b silently degrades: `once_per_env` prereqs are skipped (invisible to the operator) and every `{env}` token substitutes to the empty string, producing malformed recipes that either fail with cryptic `az` parse errors OR — worse — false-PASS because the resulting name matches nothing.
 
@@ -540,7 +540,7 @@ Write-Host "  [ALL PASS] SPE topology verified — proceeding to Step 0.5d repor
 
 #### 0.5d. Report + HARD STOP
 
-Present results as a checklist. Any `Passed = $false` triggers HARD STOP with the id + name + recipe output (or exception message) + `consequence_of_absence` + `remediation` link pointing INTO [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) at the fragment matching the prereq id.
+Present results as a checklist. Any `Passed = $false` triggers HARD STOP with the id + name + recipe output (or exception message) + `consequence_of_absence` + `remediation` link pointing INTO [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../../docs/guides/PROVISIONING-PREREQUISITES.md) at the fragment matching the prereq id.
 
 ```
 EXTERNAL PREREQUISITES (from scripts/provisioning-prereqs/prereqs.yaml)
@@ -565,7 +565,7 @@ Collect the 4 inputs the L2 REST API requires. If the operator passed `{customer
 
 #### 1.0 Batch mode (`--batch <path.json>`) — added by task 203c per punch-list row A03
 
-For automated / non-interactive invocations. Consumes a JSON intake file validated against [`scripts/provisioning-prereqs/intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) (JSON Schema Draft 2020-12), pre-fills every field in 1a-1f, and skips all interactive prompts.
+For automated / non-interactive invocations. Consumes a JSON intake file validated against [`scripts/provisioning-prereqs/intake.schema.json`](../../../scripts/provisioning-prereqs/intake.schema.json) (JSON Schema Draft 2020-12), pre-fills every field in 1a-1f, and skips all interactive prompts.
 
 ```powershell
 # Skill invoked with --batch flag: $BatchIntakeFile is the JSON path
@@ -659,7 +659,7 @@ if ($BatchIntakeFile) {
 
 **Semantics**: when `-BatchIntakeFile` is passed, sub-steps 1a-1e and 1e-bis are non-interactive (values already assigned from the validated JSON; a missing or invalid value is a HARD STOP — the schema refuses it, and 1e-bis re-checks it in case a fallback validator skipped a conditional rule). Sub-step 1f (environmentId auto-create via Dataverse MCP / `pac data create`) still runs when `intake.environmentId` was omitted or null. The `--batch` path also honors `intake.skipExternalPrereqs` as a batch-native `-SkipStep0_5` equivalent (see Step 0.5c) — recorded in Step 7 lessons-learned.md when set.
 
-Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) `examples` block for full-fidelity sample):
+Sample intake (see [`intake.schema.json`](../../../scripts/provisioning-prereqs/intake.schema.json) `examples` block for full-fidelity sample):
 
 ```json
 {
@@ -2088,12 +2088,12 @@ $bffAppRegId        = $isv.bffAppRegId                 # H3 output — the custo
 $azureSubId         = $run.parameters.nonSecret.subscriptionId
 $deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
 $cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
-# sprk_solutionversion — ImportedSolutionSet (T218b): "SpaarkeMaster {version} ({managed|unmanaged})" from H6's
-# importedSolutions SpaarkeMaster entry ($null when absent or versionless).
+# sprk_solutionversion — ImportedSolutionSet (T218b; owner 2026-11-10): "SpaarkeMaster {Managed|Unmanaged} {version}"
+# from H6's importedSolutions SpaarkeMaster entry ($null when absent or versionless).
 $deployedSolutionVer = $null
 $pkg = @($isv.importedSolutions) | Where-Object { $_ -and "$($_.solutionUniqueName)".Trim() -ieq 'SpaarkeMaster' } | Select-Object -First 1
 if ($pkg -and -not [string]::IsNullOrWhiteSpace("$($pkg.version)")) {
-  $deployedSolutionVer = "SpaarkeMaster $("$($pkg.version)".Trim()) ($(if ($pkg.isManaged) { 'managed' } else { 'unmanaged' }))"
+  $deployedSolutionVer = "SpaarkeMaster $(if ($pkg.isManaged) { 'Managed' } else { 'Unmanaged' }) $("$($pkg.version)".Trim())"
 }
 
 # Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
@@ -2156,7 +2156,7 @@ if (-not $script:RegistryStale) {
   $fields = @{
     sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
     sprk_bffversion               = $deployedBffVersion  # run.interStepState.bffBuildId (H9)
-    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {version} ({type})" from run.interStepState.importedSolutions (H6, T218b)
+    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {Managed|Unmanaged} {version}" from run.interStepState.importedSolutions (H6, T218b)
     sprk_azuresubscriptionid      = $azureSubId
     sprk_resourcegroupname        = $rgName
     sprk_appservicename           = $appServiceName

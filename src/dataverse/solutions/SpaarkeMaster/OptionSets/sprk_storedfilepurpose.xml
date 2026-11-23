@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_storedfilepurpose" localizedName="Stored File Purpose" description="What a Stored File is for: a Procedure Version's source document, an invoice PDF, an invoice supporting file or an export file (ebilling-r1 task 088, model 4.1)." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.2.3.1</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Stored File Purpose" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="What a Stored File is for: a Procedure Version's source document, an invoice PDF, an invoice supporting file or an export file (ebilling-r1 task 088, model 4.1)." languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Procedure source" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Invoice PDF" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Invoice supporting file" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000003" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Export file" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

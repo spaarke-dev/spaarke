@@ -63,7 +63,7 @@ interface CachedValue {
  * WHY THIS EXISTS: The Dataverse env var sprk_BffApiBaseUrl stores the URL as
  * "https://host/api", but all client-side endpoint paths include /api themselves
  * (e.g., `${baseUrl}/api/ai/search`). Without stripping, URLs double up to
- * /api/api/... (404). This matches @spaarke/auth's normalizeUrl() convention.
+ * /api/api/... (404). This matches @spaarke/auth's normalizeBffBaseUrl() convention.
  *
  * This is the SINGLE normalization point for all PCF controls. Individual
  * service constructors should NOT need their own normalization.

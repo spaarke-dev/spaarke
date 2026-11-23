@@ -1,4 +1,6 @@
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Resolution;
@@ -58,12 +60,21 @@ public sealed record SubmissionSnapshot
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.SequenceColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn,
         TrackingNumberAllocator.FirmColumn, "sprk_channel", "sprk_document", "sprk_processingstatus", "sprk_invoice",
         "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment", "createdon",
+        // ebilling-r1 task 097b: a Correction's target (ResubmissionOfSubmissionId).
+        InvoiceSubmissionService.ResubmissionOfColumn,
     ];
 
     public required Guid SubmissionId { get; init; }
 
-    /// <summary><c>sprk_vendororg</c>.</summary>
-    public required Guid FirmId { get; init; }
+    /// <summary>
+    /// <c>sprk_vendororg</c>; null when the submission has no firm (task 095c-3: only an Internal submission, which the from-email route takes
+    /// without one). A no-firm submission runs no firm-scoped step (<see cref="InvoiceSubmissionProcessor"/>) and is held
+    /// <see cref="SubmissionReasonCodes.FirmMissing"/>. Never <see cref="Guid.Empty"/>: <see cref="Read"/> fails that.
+    /// </summary>
+    public required Guid? FirmId { get; init; }
+
+    /// <summary>True when the submission has no firm (task 095c-3).</summary>
+    public bool HasNoFirm => FirmId is null;
 
     /// <summary>The one <c>sprk_regarding{core}</c> lookup (FR-05).</summary>
     public required InvoiceCoreRecord CoreRecord { get; init; }
@@ -95,6 +106,12 @@ public sealed record SubmissionSnapshot
     /// <summary>True when the PDF is the upload staged in the Finance file store (no document; task 092).</summary>
     public bool IsUpload => FileSource == SubmissionFileSource.Upload;
 
+    /// <summary>
+    /// ebilling-r1 task 097b (EB-D-179 item 1): <c>sprk_resubmissionof</c>, the earlier submission a Correction replaces; null for a New
+    /// submission. The replaced invoice is resolved from it by <see cref="ReadCorrectedInvoiceAsync"/>, never assumed.
+    /// </summary>
+    public Guid? ResubmissionOfSubmissionId { get; init; }
+
     /// <summary><c>createdon</c> in UTC.</summary>
     public required DateTime CreatedOnUtc { get; init; }
 
@@ -102,8 +119,9 @@ public sealed record SubmissionSnapshot
     public DateOnly ReceivedOn => DateOnly.FromDateTime(CreatedOnUtc);
 
     /// <summary>
-    /// Reads a submission row. Fails closed: a missing tracking number, <c>createdon</c>, firm, core record (or more than one), typed
-    /// firm invoice number or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default.
+    /// Reads a submission row. Fails closed: a missing tracking number, <c>createdon</c>, core record (or more than one), typed firm invoice
+    /// number or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default. A missing firm is a
+    /// failure too, except on an Internal submission (task 095c-3), whose snapshot then has <see cref="FirmId"/> null.
     /// </summary>
     /// <remarks>ebilling-r1 task 092: no document is an upload (its PDF is in the file store). Task 094 (a deliberate change of 092's rule,
     /// recorded in notes/094-submit-invoice.md): an INTERNAL submission that names a document is a Submit Invoice source submission,
@@ -128,7 +146,25 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.ReceivedOnMissing);
         }
 
-        if (view.FirmId is not { } firmId || firmId == Guid.Empty)
+        // Task 095c-3 (owner 2026-11-03): an Internal submission may have no firm (the from-email route takes one without it); it is processed
+        // and held FirmMissing, never matched to a firm. The empty id is never "no firm", and an SPA submission always carries the caller's
+        // firm, so either is still a failure (fail closed).
+        var channel = row.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value;
+        Guid? firmId;
+        if (view.FirmId is { } firm)
+        {
+            if (firm == Guid.Empty)
+            {
+                return (null, SubmissionReasonCodes.FirmMissing);
+            }
+
+            firmId = firm;
+        }
+        else if (channel == (int)InvoiceSubmissionChannel.Internal)
+        {
+            firmId = null;
+        }
+        else
         {
             return (null, SubmissionReasonCodes.FirmMissing);
         }
@@ -143,7 +179,6 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.FirmInvoiceNumberMissing);
         }
 
-        var channel = row.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value;
         if (channel is not ((int)InvoiceSubmissionChannel.Spa or (int)InvoiceSubmissionChannel.Internal))
         {
             return (null, SubmissionReasonCodes.ChannelUnsupported);
@@ -175,9 +210,76 @@ public sealed record SubmissionSnapshot
             FirmInvoiceNumber = view.FirmInvoiceNumber!,
             DocumentId = documentId,
             FileSource = documentId is null ? SubmissionFileSource.Upload : SubmissionFileSource.SourceDocument,
+            ResubmissionOfSubmissionId = view.ResubmissionOfId,
             CreatedOnUtc = createdOn.Kind == DateTimeKind.Local ? createdOn.ToUniversalTime() : DateTime.SpecifyKind(createdOn, DateTimeKind.Utc),
         }, null);
     }
+
+    /// <summary>
+    /// ebilling-r1 task 097b: the invoice this submission corrects, resolved from <see cref="ResubmissionOfSubmissionId"/>: that submission's
+    /// <c>sprk_invoice</c>, accepted only when it is <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> of that submission (the invoice
+    /// the job created from it; the intake guard records nothing else). For task 097c's persister, which closes the old invoice.
+    /// </summary>
+    /// <returns><see cref="CorrectedInvoiceRead.None"/> for a New submission; <see cref="CorrectedInvoiceRead.Resolved"/> with both ids; or
+    /// <see cref="CorrectedInvoiceRead.Unresolved"/> (fail closed) when the earlier submission is gone, names no invoice or names another one.
+    /// A read fault propagates (the caller's retry).</returns>
+    public Task<CorrectedInvoiceRead> ReadCorrectedInvoiceAsync(IGenericEntityService entities, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        return ResubmissionOfSubmissionId is { } earlier
+            ? ReadCorrectedInvoiceAsync(entities, earlier, ct)
+            : Task.FromResult(CorrectedInvoiceRead.None);
+    }
+
+    /// <summary>
+    /// The same resolution from the stored <c>sprk_resubmissionof</c> alone (<paramref name="earlier"/>), for a reader that has the submission
+    /// row but no snapshot: task 097c's undo (<see cref="SubmissionCommitGate.CompensateAsync"/>), which may run on a later delivery.
+    /// </summary>
+    internal static async Task<CorrectedInvoiceRead> ReadCorrectedInvoiceAsync(IGenericEntityService entities, Guid earlier, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        Entity row;
+        try
+        {
+            row = await entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, earlier, [InvoiceSubmissionService.InvoiceColumn], ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            return CorrectedInvoiceRead.Unresolved(earlier);
+        }
+
+        var invoice = row?.GetAttributeValue<EntityReference>(InvoiceSubmissionService.InvoiceColumn)?.Id;
+        return invoice is { } id && InvoiceBlockedHold.IsOwnSubmission(id, earlier)
+            ? CorrectedInvoiceRead.Resolved(earlier, id)
+            : CorrectedInvoiceRead.Unresolved(earlier);
+    }
+
+    private static bool IsRecordNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+/// <summary>
+/// ebilling-r1 task 097b: what <see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync"/> found. <see cref="IsCorrection"/> false: a New
+/// submission. Otherwise <see cref="CorrectedInvoiceId"/> is set only when the target resolved (fail closed when it did not).
+/// </summary>
+public sealed record CorrectedInvoiceRead(bool IsCorrection, Guid? ResubmissionOfSubmissionId, Guid? CorrectedInvoiceId)
+{
+    public static CorrectedInvoiceRead None { get; } = new(false, null, null);
+
+    public static CorrectedInvoiceRead Resolved(Guid resubmissionOf, Guid invoiceId) => new(true, resubmissionOf, invoiceId);
+
+    public static CorrectedInvoiceRead Unresolved(Guid resubmissionOf) => new(true, resubmissionOf, null);
 }
 
 /// <summary>
@@ -261,7 +363,8 @@ public sealed record SubmissionEvaluationOutcome
     /// (<see cref="SubmissionEvaluationKind.AutoRejected"/>), <see cref="SubmissionReasonCodes.Blocked"/>
     /// (<see cref="SubmissionEvaluationKind.Blocked"/>), the coding code (<see cref="SubmissionEvaluationKind.AcceptedUncoded"/>:
     /// <see cref="SubmissionReasonCodes.CodingNoCodeSetHold"/> or <see cref="SubmissionReasonCodes.CodingUnavailableHold"/>, D-130 b),
-    /// or null (<see cref="SubmissionEvaluationKind.Accepted"/>).
+    /// or null (<see cref="SubmissionEvaluationKind.Accepted"/>). Task 095c-3: a submission with no firm is Accepted or AcceptedUncoded with
+    /// <see cref="SubmissionReasonCodes.FirmMissing"/> (the hold that decides approval wins over a coding code, which stays a pipeline finding).
     /// </summary>
     public string? ReasonCode { get; init; }
 
@@ -291,14 +394,38 @@ public sealed record SubmissionEvaluationOutcome
     /// <see cref="SubmissionEvaluationKind.AcceptedUncoded"/> outcome, or an AutoRejected / Blocked one carrying a coding hold finding.</summary>
     public InvoiceCodingResult? Coding { get; init; }
 
-    /// <summary>Step 4 input: exactly what was judged (for the findings JSON and part C's re-evaluation check).</summary>
+    /// <summary>Step 4 input: exactly what was judged (for the findings JSON and part C's re-evaluation check). Null when the submission has
+    /// no firm (task 095c-3: the billing rules are not run, see <see cref="RulesSkippedForNoFirm"/>).</summary>
     public BillingEvaluationRequest? EvaluationRequest { get; init; }
 
-    /// <summary>Step 4: the billing findings (072).</summary>
+    /// <summary>Step 4: the billing findings (072). Null when the submission has no firm (<see cref="RulesSkippedForNoFirm"/>).</summary>
     public BillingEvaluationResult? Evaluation { get; init; }
 
-    /// <summary>Step 5: the decision (073); <see cref="SubmissionDecision.DecidingFindings"/> are the findings that rejected.</summary>
+    /// <summary>Step 5: the decision (073); <see cref="SubmissionDecision.DecidingFindings"/> are the findings that rejected. Null when the
+    /// submission has no firm (<see cref="RulesSkippedForNoFirm"/>): nothing was judged, so nothing can reject.</summary>
     public SubmissionDecision? Decision { get; init; }
+
+    /// <summary>
+    /// Task 095c-3: true when the submission has no firm, so steps 4 and 5 did not run. No billing rule was checked on any line, and the
+    /// persister flags every line <c>rules.not_checked</c> (EB-D-175: a check that did not run is not Clean); a partial run is never made,
+    /// because it would mark the firm-scoped rules and Duplicate as checked.
+    /// </summary>
+    public bool RulesSkippedForNoFirm => Submission is { HasNoFirm: true };
+
+    /// <summary>
+    /// 082c-2 (brief C14): true when the Procedures could not be resolved on the final delivery (the
+    /// <see cref="SubmissionReasonCodes.ProceduresUnresolved"/> pipeline finding), so no billing rule ran: there is no evaluation and no decision,
+    /// and the persister flags every line <c>rules.not_checked</c> with that code as its cause.
+    /// </summary>
+    public bool RulesSkippedForUnresolvedProcedures =>
+        PipelineFindings.Any(p => p.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved);
+
+    /// <summary>082c-2 (brief C11): true when the evaluation found a Procedure gap (the outcome holds the invoice).</summary>
+    public bool HasProcedureGap => Evaluation is { Gaps.Count: > 0 };
+
+    /// <summary>082c-2 (brief C11): the lines dated in a Procedure gap: none of that Procedure's rules ran on them.</summary>
+    public IReadOnlySet<int> ProcedureGapLines =>
+        (Evaluation?.Gaps ?? []).SelectMany(g => g.LineIndexes).ToHashSet();
 
     /// <summary>
     /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 2): the copies the job staged from the submission's source before the commit
@@ -307,6 +434,21 @@ public sealed record SubmissionEvaluationOutcome
     /// the job after the evaluation (the processor never stages).
     /// </summary>
     public IReadOnlyList<StagedSourceCopy> StagedFiles { get; init; } = [];
+
+    /// <summary>
+    /// Task 095f (EB-D-225): a from-email Correction's note, read by the job from its payload (the submission row has no column for it). The
+    /// persister writes it on the NEW invoice in the same create (<see cref="InvoiceCorrectionNote.Column"/>), and only when the submission
+    /// names the one it replaces. Null for everything else.
+    /// </summary>
+    public string? CorrectionNote { get; init; }
+
+    /// <summary>
+    /// EB-D-226 (task 095e): the name of the firm record (<c>sprk_organization</c>) the submission names, read once by the persister before
+    /// any write and carried here so the invoice's <c>sprk_name</c>, its stored <c>invoiceName</c> and the Signals' subject name all use it
+    /// (<see cref="InvoiceSubmissionPersister.InvoiceNameFor"/>). Null when the submission has no firm (the AI issuer name is then used), or
+    /// on a path that did not read it (the preflight, which only checks the rejection's shape).
+    /// </summary>
+    public string? FirmRecordName { get; init; }
 
     internal static SubmissionEvaluationOutcome Failed(Guid submissionId, string reasonCode, SubmissionSnapshot? submission = null,
         ExtractedInvoice? read = null) =>

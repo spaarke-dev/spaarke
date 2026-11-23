@@ -970,6 +970,7 @@ public class PolicyVersionValidatorTests
             {
                 return reasons.ToArray();
             }
-        });
+        }
+        );
     }
 }

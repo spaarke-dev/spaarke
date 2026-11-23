@@ -154,47 +154,47 @@ public sealed class WorkerDataverseCredentialFactory
             switch (kind)
             {
                 case CredentialKind.ManagedIdentityFederated:
-                {
-                    var miClientId = ResolveManagedIdentityClientId();
-                    var credential = CreateManagedIdentityFederatedCredential(tenantId, clientId);
-
-                    _logger.LogInformation(
-                        "L2 Worker Dataverse credential for {ClientId}: {Kind} (UAMI {UamiClientId}); " +
-                        "section {Section}; chain {Chain}.",
-                        clientId, kind, miClientId ?? "(system-assigned)", sectionName,
-                        string.Join(" > ", chain));
-                    return new SelectedWorkerCredential(kind, miClientId, credential);
-                }
-
-                case CredentialKind.ClientSecret:
-                {
-                    if (string.IsNullOrWhiteSpace(clientSecret))
                     {
-                        // "Not configured" — the ordinary secret-free shape.
-                        // NEVER treated as an error here (empty is the signal,
-                        // §9.1) — but if nothing else is configured either,
-                        // the exhausted-chain throw below fails closed.
-                        _logger.LogWarning(
-                            "L2 Worker Dataverse credential {Kind} is not configured for section {Section} " +
-                            "(empty secret slot); falling through to the next configured credential.",
-                            kind, sectionName);
-                        skipped.Add($"{kind} (not configured — empty secret slot)");
-                        continue;
+                        var miClientId = ResolveManagedIdentityClientId();
+                        var credential = CreateManagedIdentityFederatedCredential(tenantId, clientId);
+
+                        _logger.LogInformation(
+                            "L2 Worker Dataverse credential for {ClientId}: {Kind} (UAMI {UamiClientId}); " +
+                            "section {Section}; chain {Chain}.",
+                            clientId, kind, miClientId ?? "(system-assigned)", sectionName,
+                            string.Join(" > ", chain));
+                        return new SelectedWorkerCredential(kind, miClientId, credential);
                     }
 
-                    _logger.LogInformation(
-                        "L2 Worker Dataverse credential for {ClientId}: {Kind} (transitional — prong-3 " +
-                        "unmigrated environment per the §6.5 resolution record); section {Section}.",
-                        clientId, kind, sectionName);
-                    return new SelectedWorkerCredential(
-                        kind, null, new ClientSecretCredential(tenantId, clientId, clientSecret));
-                }
+                case CredentialKind.ClientSecret:
+                    {
+                        if (string.IsNullOrWhiteSpace(clientSecret))
+                        {
+                            // "Not configured" — the ordinary secret-free shape.
+                            // NEVER treated as an error here (empty is the signal,
+                            // §9.1) — but if nothing else is configured either,
+                            // the exhausted-chain throw below fails closed.
+                            _logger.LogWarning(
+                                "L2 Worker Dataverse credential {Kind} is not configured for section {Section} " +
+                                "(empty secret slot); falling through to the next configured credential.",
+                                kind, sectionName);
+                            skipped.Add($"{kind} (not configured — empty secret slot)");
+                            continue;
+                        }
+
+                        _logger.LogInformation(
+                            "L2 Worker Dataverse credential for {ClientId}: {Kind} (transitional — prong-3 " +
+                            "unmigrated environment per the §6.5 resolution record); section {Section}.",
+                            clientId, kind, sectionName);
+                        return new SelectedWorkerCredential(
+                            kind, null, new ClientSecretCredential(tenantId, clientId, clientSecret));
+                    }
 
                 default:
-                {
-                    skipped.Add($"{kind} (unsupported kind)");
-                    continue;
-                }
+                    {
+                        skipped.Add($"{kind} (unsupported kind)");
+                        continue;
+                    }
             }
         }
 

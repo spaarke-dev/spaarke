@@ -42,8 +42,10 @@ secure.
 | `scripts/Deploy-SecureChildNewCommands.ps1` | Dry run (reads only: a live inventory of every ownership-child subgrid on every active main form — FAIL on one not served; platform drift of the copied command; quick-create turned on; missing helper libraries; with `-ExportDir`, an export that lacks a live ribbon customisation of its tables) / `-Apply` (writes nothing on any failure) / `-Verify`. |
 
 Served tables: `sprk_todo`, `sprk_event`, `sprk_invoice`, `sprk_reportcard`, `sprk_document`, `sprk_communication`,
-`sprk_budget`, `sprk_kpiassessment`, `sprk_billingevent`. `sprk_analysis` is already covered (AnalysisRibbons hides its
-platform "+ New" outright; "New Analysis" opens the BFF-backed wizard). `SecureChildNewCommandAgreementTests` (ArchTests)
+`sprk_budget`, `sprk_kpiassessment`. `sprk_analysis` is already covered (AnalysisRibbons hides its
+platform "+ New" outright; "New Analysis" opens the BFF-backed wizard). `sprk_billingevent` (an invoice line) is not served:
+ebilling-r1 task 096b (EB-D-201) hides its platform "+ New", "New", and "Save & New" outright in the SpaarkeMaster
+`sprk_BillingEvent` RibbonDiff, because lines are created only by submission and Add line. `SecureChildNewCommandAgreementTests` (ArchTests)
 keeps the script, the merge script and the deploy script on one table list, every ownership-child subgrid of the live
 inventory covered, the party hosts exactly the identity tables, the create-then-open tables on the BFF route and stamped
 with the creator person, and the "+ Add KPI" guard in place.

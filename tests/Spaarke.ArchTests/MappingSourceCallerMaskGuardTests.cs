@@ -10,8 +10,8 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// #2188 (field-mapping-server-write-path-r1 DI-004, UAC-r2 condition 4) — every source entity handed to the field-mapping
-/// rule engine (<c>CreateTimeFieldMapping.Apply</c> / <c>ApplyFillOnly</c>) has first been masked to what the CALLER can read
-/// by <c>MappingSourceCallerMask</c>.
+/// rule engine (<c>CreateTimeFieldMapping.Apply</c> / <c>ApplyFillOnly</c> / <c>ApplyCopyOverwrite</c>) has first been masked to what
+/// the CALLER can read by <c>MappingSourceCallerMask</c>, or is named in <see cref="UnmaskedCallExemptions"/> with its reason.
 /// </summary>
 /// <remarks>
 /// <para><b>Why a guard.</b> The mapping source is read app-only, and an app-only read ignores field-level security. The
@@ -20,7 +20,7 @@ namespace Spaarke.ArchTests;
 /// record-creation service's mapping step among them, when it merges — must reuse the mask, and this makes that a red build
 /// rather than a review comment.</para>
 ///
-/// <para><b>The rule.</b> At each call of <c>CreateTimeFieldMapping.Apply</c> / <c>ApplyFillOnly</c> under <c>src/server/**</c> —
+/// <para><b>The rule.</b> At each call of <c>CreateTimeFieldMapping.Apply</c> / <c>ApplyFillOnly</c> / <c>ApplyCopyOverwrite</c> under <c>src/server/**</c> —
 /// qualified, fully qualified, through a <c>using X = …CreateTimeFieldMapping</c> alias or a <c>using static</c> import, with or
 /// without a verbatim <c>@</c> — the <c>source</c> argument (third positional, or named <c>source:</c>) is either the literal
 /// <c>null</c> / <c>default</c> (nothing read, nothing copied), or a plain local name. For a local name the rule is an
@@ -75,27 +75,33 @@ public class MappingSourceCallerMaskGuardTests
             ["src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs|RecordCreationService.RepairMappingAsync"] = (1,
                 "Repair runs as the system principal with no caller to mask against (owner decision 2026-10-21, option 1; UAC-r2 " +
                 "concurs). Secure sources are never mapped into a row that isn't isolated (Repair source gate, fail closed). " +
-                "Field-secured source columns will be skipped by Repair using the app-only metadata reader from task 033 (TODO " +
-                "task 033), failing closed when metadata is unavailable; no production caller until then " +
-                "(RecordRepairReachabilityTests; 052 hard-blocked on 033); the document access and D7 link columns are refused through " +
-                "RefuseAppOnlyWrite. Repair has no production caller until task 052, which is hard-blocked on 033 " +
-                "(RecordRepairReachabilityTests)."),
+                "Field-secured source columns are neither read for mapping nor handed to the engine: Repair reads the source " +
+                "table's column metadata app-only (IGenericEntityService.GetColumnMetadataAsync, task 052a) and copies only the " +
+                "columns it states are not secured; metadata that cannot be read, or does not say, maps nothing " +
+                "(record_repair.mapping_source_metadata_unavailable). The document access and D7 link columns are refused through " +
+                "RefuseAppOnlyWrite. Repair has no production caller until task 052's scheduled pass (RecordRepairReachabilityTests)."),
+            ["src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs|FieldMappingEndpoints.ApplyMappingRule"] = (1,
+                "The field-mapping push (field-mapping-server-write-path-r1 task 040) reads its source AS THE CALLER through the " +
+                "impersonated query (RetrieveSourceRecordValuesAsCallerAsync), so Dataverse has already applied the caller's " +
+                "field-level security to every value that reaches the engine; there is no app-only read to mask. The entry is " +
+                "ApplyCopyOverwrite, which is internal to the BFF and is called here only. The call may be made from this one member."),
         };
 
     /// <summary>
     /// The engine's simple type name, and the method names the scan treats as engine calls: its guarded entry point
-    /// (<c>ApplyFillOnly</c>), and <c>Apply</c> — deleted with the Office creation core (task 018c), still scanned so a
-    /// restored overwrite entry point cannot take an unmasked source unseen.
+    /// (<c>ApplyFillOnly</c>), the push's Copy entry (<c>ApplyCopyOverwrite</c>, task 040), and <c>Apply</c> — deleted with the
+    /// Office creation core (task 018c), still scanned so a restored overwrite entry point cannot take an unmasked source unseen.
     /// </summary>
     private const string EngineType = "CreateTimeFieldMapping";
 
-    private static readonly string[] EngineMethods = ["Apply", "ApplyFillOnly"];
+    private static readonly string[] EngineMethods = ["Apply", "ApplyFillOnly", "ApplyCopyOverwrite"];
 
     /// <summary>
-    /// The engine call sites in the tree today (the unified record-creation service's step 3 and its Repair mode; the Office
-    /// quick-create's own mapping step was deleted with the Office creation core, task 018c); the scan must see at least these.
+    /// The engine call sites in the tree today (the unified record-creation service's step 3 and its Repair mode, and the
+    /// field-mapping push's rule step; the Office quick-create's own mapping step was deleted with the Office creation core,
+    /// task 018c); the scan must see at least these.
     /// </summary>
-    private const int KnownCallSites = 2;
+    private const int KnownCallSites = 3;
 
     [Fact(DisplayName = "#2188: every source handed to the field-mapping engine was masked to the caller's view first")]
     public void EverySourceHandedToTheMappingEngine_PassedThroughTheCallerMask()
@@ -329,7 +335,7 @@ public class MappingSourceCallerMaskGuardTests
     /// point would take a source the scan never looks at. Reflection, not text, so a rename or a formatting trick cannot hide it.
     /// Not covered: properties and fields holding a source, a method's return type, nested types, and calls made by reflection.
     /// </summary>
-    [Fact(DisplayName = "#2188: CreateTimeFieldMapping's only non-private method that can take a source is ApplyFillOnly")]
+    [Fact(DisplayName = "#2188: CreateTimeFieldMapping's only non-private methods that can take a source are ApplyFillOnly and the internal ApplyCopyOverwrite")]
     public void TheEngine_OffersNoOtherPathThatTakesASourceEntity()
     {
         var engine = typeof(Program).Assembly.GetType("Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping");
@@ -351,9 +357,13 @@ public class MappingSourceCallerMaskGuardTests
 
         Assert.Contains(nonPrivate, m => m.Name == "ApplyFillOnly");
 
+        // Task 040: the push's Copy entry. Internal (never public), scanned as an engine call, and its one call site is exempted above.
+        var copyEntry = Assert.Single(nonPrivate, m => m.Name == "ApplyCopyOverwrite");
+        Assert.False(copyEntry.IsPublic, "ApplyCopyOverwrite is the push's entry and stays internal to the BFF assembly.");
+
         // Task 018c: Apply (the overwrite entry point) is gone; were it restored, it is one more way in and is reported here.
         var others = nonPrivate
-            .Where(m => m.Name is not "ApplyFillOnly")
+            .Where(m => m.Name is not ("ApplyFillOnly" or "ApplyCopyOverwrite"))
             .Where(m => m.GetParameters().Any(p =>
                 p.ParameterType.IsGenericParameter
                 || carriers.Any(c => c.IsAssignableFrom(p.ParameterType) || p.ParameterType.IsAssignableFrom(c))))
@@ -363,13 +373,20 @@ public class MappingSourceCallerMaskGuardTests
             .ToArray();
 
         Assert.True(others.Length == 0,
-            "CreateTimeFieldMapping offers a way in besides ApplyFillOnly that can take a source: " + string.Join(", ", others));
+            "CreateTimeFieldMapping offers a way in besides ApplyFillOnly and ApplyCopyOverwrite that can take a source: " + string.Join(", ", others));
     }
 
     // ── controls ──────────────────────────────────────────────────────────────────────────────────────────────────
 
     public static TheoryData<string, string> Bypasses() => new()
     {
+        {
+            "the push's Copy entry given an unmasked read",
+            """
+            var source = await _entities.RetrieveAsync(table, id, columns, ct);
+            CreateTimeFieldMapping.ApplyCopyOverwrite(rules, target, source, protectedAttributes, warnings, _logger);
+            """
+        },
         {
             "the app read passed straight in",
             """

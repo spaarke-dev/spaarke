@@ -725,18 +725,42 @@ public class ContactBindingDecisionTests
 
     // ── Invite ───────────────────────────────────────────────────────────────────────────────────────
 
-    [Theory]
-    [InlineData(IdentityPlaneMarker.Workforce)]
-    [InlineData(IdentityPlaneMarker.WorkforceHome)] // r3 047: a home-registered employee is never re-invited as a partner
-    public void Invite_AWorkforceBoundContact_IsRefused(IdentityPlaneMarker plane)
+    /// <summary>MUST FIRE: a Spaarke-tenant workforce contact is refused as an identity collision and flagged, as before.</summary>
+    [Fact]
+    public void Invite_AWorkforceBoundContact_IsRefused_AsACollision_AndFlagged()
     {
         var decision = ContactBindingDecision.DecideInvite(
-            ContactLookup.Of(Bound(ContactA, Other, plane)));
+            ContactLookup.Of(Bound(ContactA, Other, IdentityPlaneMarker.Workforce)));
 
         decision.Action.Should().Be(InviteContactAction.Refuse);
         decision.ReasonCode.Should().Be(ContactBindingDecision.InviteWorkforceBoundContact);
+        decision.Reason.Should().Be(IdentityCollisionReason.InviteMatchesWorkforceContact);
         decision.FlagContactIds.Should().Equal(ContactA);
     }
+
+    /// <summary>
+    /// r3 047: a home-registered employee is never re-invited as a partner, but it is not a collision: the refusal has its
+    /// own code, no collision reason and nothing to flag (staff use Grant access).
+    /// </summary>
+    [Fact]
+    public void Invite_AWorkforceHomeBoundContact_IsRefused_AsNotACollision_NothingFlagged()
+    {
+        var decision = ContactBindingDecision.DecideInvite(
+            ContactLookup.Of(Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome)));
+
+        decision.Action.Should().Be(InviteContactAction.Refuse);
+        decision.ContactId.Should().Be(ContactA);
+        decision.ReasonCode.Should().Be(ContactBindingDecision.InviteWorkforceHomeContact);
+        decision.Reason.Should().BeNull();
+        decision.FlagContactIds.Should().BeNullOrEmpty();
+    }
+
+    /// <summary>Ordering: a WorkforceHome contact an administrator removed is still the removal refusal.</summary>
+    [Fact]
+    public void Invite_ARemovedWorkforceHomeBoundContact_IsStillTheRemovalRefusal()
+        => ContactBindingDecision.DecideInvite(ContactLookup.Of(
+                Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome) with { RemovedOn = Now }))
+            .ReasonCode.Should().Be(ContactBindingDecision.InviteContactRemovedAdminReinstate);
 
     [Fact]
     public void Invite_ACiamBoundContact_StaysIdempotent()
@@ -886,6 +910,25 @@ public class ContactBindingDecisionTests
         Holds(invite, Bound(ContactA, Other, IdentityPlaneMarker.External))
             .Should().BeFalse("resolved: the operator gave the contact to the external identity");
         Holds(invite, Unbound(ContactA)).Should().BeFalse("resolved: neither an employee's binding nor an internal link");
+    }
+
+    /// <summary>
+    /// An invite no longer flags a WorkforceHome contact (not a collision), so a flag an earlier build wrote on one clears;
+    /// the Workforce plane and an internal user's link still hold it (MUST NOT FIRE controls).
+    /// </summary>
+    [Fact]
+    public void CollisionStillHolds_AnInviteRefusal_ClearsForAWorkforceHomeContact_ButHoldsForWorkforce_OrALink()
+    {
+        var invite = new CollisionParty(null, IdentityPlaneMarker.External,
+            IdentityCollisionReason.InviteMatchesWorkforceContact, Now);
+
+        Holds(invite, Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome))
+            .Should().BeFalse("a home-registered employee is not a collision; the old flag clears");
+        Holds(invite, Bound(ContactA, Other, IdentityPlaneMarker.Workforce))
+            .Should().BeTrue("a Spaarke-tenant employee's contact is still a collision");
+        Holds(invite, Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome),
+                refs: ReferenceLookup.Of(new SystemUserReference(Guid.NewGuid(), Other, ContactA)))
+            .Should().BeTrue("an internal user still links the contact");
     }
 
     [Fact]

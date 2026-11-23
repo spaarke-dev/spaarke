@@ -444,7 +444,8 @@ public class ResourcefulnessEvalSuiteTests
         PlaybookId: null,
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
-        Messages: new List<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
+        Messages: new List<ChatMessage>())
+    { OwnerOid = TestSessionOwner.Oid };
 
     private static SessionOutput RecordOutput(string recordId) => new()
     {

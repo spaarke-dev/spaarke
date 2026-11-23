@@ -115,8 +115,8 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
         CurrentChunks().Select(c => c.Content).Should().Equal(new[] { "B-a", "B-b", "B-c" },
             "the previous version's chunks 3 and 4 are gone — no orphans, no duplicates");
         CurrentChunks().Should().OnlyContain(c => c.ChunkCount == 3);
-        _pipeline.Index.ChunksFor(DefaultIndex, Item).Should().BeEmpty(
-            "the version is written to, and trimmed in, the index this document routes to");
+        _pipeline.Index.ChunksFor(RoutedIndex, Item).Should().BeEmpty(
+            "the version is written to, and trimmed in, the files index (task 041: the index follows the content type)");
     }
 
     [Fact]
@@ -214,9 +214,9 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
         _pipeline.Index.TrimCalls.Should().Be(2,
             "task 048: the trim now runs once per non-version index job (first save + Email save) " +
             "instead of never running — but each call has nothing to remove");
-        _pipeline.Index.ChunksFor(RoutedIndex, Item).Should().HaveCount(5,
+        _pipeline.Index.ChunksFor(DefaultIndex, Item).Should().HaveCount(5,
             "the first save's own 5 chunks must all survive its own no-op trim");
-        _pipeline.Index.ChunksFor(RoutedIndex, emailItem).Should().HaveCount(2,
+        _pipeline.Index.ChunksFor(DefaultIndex, emailItem).Should().HaveCount(2,
             "the Email save's own 2 chunks must all survive its own no-op trim");
     }
 
@@ -264,7 +264,8 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
         return jobs;
     }
 
-    private IReadOnlyList<KnowledgeDocument> CurrentChunks() => _pipeline.Index.ChunksFor(RoutedIndex, Item);
+    private IReadOnlyList<KnowledgeDocument> CurrentChunks() => _pipeline.Index.ChunksFor(DefaultIndex, Item);
+
 
     private static SaveRequest DocumentSave() => new()
     {
@@ -341,7 +342,7 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
                 _jobSubmission.Object,
                 Mock.Of<IDocumentDataverseService>(),
                 TestDocumentIndexParentResolver.Over(),
-                Options.Create(new AnalysisOptions { SharedIndexName = DefaultIndex }),
+                Mock.Of<ISearchIndexNameResolver>(r => r.GetDefaultIndexName() == DefaultIndex),
                 Options.Create(new PostUploadIndexingOptions()),
                 NullLogger<PostUploadIndexingEnqueuer>.Instance));
             _provider = services.BuildServiceProvider();
@@ -375,10 +376,9 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
                         .Select((part, i) => new TextChunk { Content = part, Index = i, StartPosition = 0, EndPosition = part.Length })
                         .ToList());
 
-            // The document routes to a per-record index — the case the tenant-default-only delete could not reach.
+            // Task 041 (FR-40): the index follows the content type, so the document lands in the files index whatever its
+            // record or unit names (RoutedIndex is the per-record index nothing writes any more).
             var resolver = new Mock<ISearchIndexNameResolver>();
-            resolver.Setup(r => r.ResolveAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(RoutedIndex);
             resolver.Setup(r => r.GetDefaultIndexName()).Returns(DefaultIndex);
 
             _indexHandler = new RagIndexingJobHandler(

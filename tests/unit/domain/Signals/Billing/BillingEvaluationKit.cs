@@ -59,6 +59,7 @@ internal static class BillingEvaluationKit
             PolicyVersionId = Id($"version:{code}:{number}"),
             RuleSetId = Id("ruleset:" + scope),
             Scope = scope,
+            Rank = BillingFactLoader.LegacyRank(scope),
             RuleType = ((int)type).ToString(CultureInfo.InvariantCulture),
             RuleBody = body ?? Bodies[type],
             MessageTemplate = template,
@@ -75,9 +76,13 @@ internal static class BillingEvaluationKit
     internal static BillingLoadedFacts Loaded(params BillingRuleCandidate[] rules) => new()
     {
         Rules = rules,
+        Procedures = NoProcedures(),
         InvoiceSecureRoots = Ordinary,
         ReliabilityThreshold = Threshold,
     };
+
+    /// <summary>082c: a resolution that read nothing (no Procedure applies, no gap): the legacy rules alone judge.</summary>
+    internal static ProcedureResolution NoProcedures() => new(new ProcedureRows(FirmId, [], [], [], [], [], [], []));
 
     internal static BillingEvaluationRequest Request(params BillingLineFacts[] lines) => new()
     {

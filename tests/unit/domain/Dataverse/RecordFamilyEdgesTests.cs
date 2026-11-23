@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
@@ -141,9 +143,74 @@ public class RecordFamilyEdgesTests
     [InlineData("sprk_matter", "sprk_matternumber")]
     [InlineData("sprk_project", "sprk_projectnumber")]
     [InlineData("sprk_workassignment", "sprk_workassignmentnumber")]
+    [InlineData("sprk_servicerequest", "sprk_servicerequestnumber")]
+    [InlineData("sprk_analysis", "sprk_analysis_number")]
+    [InlineData("sprk_budget", "sprk_budgetnumber")]
+    [InlineData("sprk_decisionrecord", "sprk_decisionnumber")]
+    [InlineData("sprk_document", "sprk_document_number")]
+    [InlineData("sprk_event", "sprk_eventnumber")]
+    [InlineData("sprk_invoice", "sprk_invoicenumber")]
+    [InlineData("sprk_reportcard", "sprk_reportcardnumber")]
+    [InlineData("sprk_signal", "sprk_signalnumber")]
+    // Solution source: these tables have no record-number column (Entity.xml), so they show nothing (#2513).
+    [InlineData("sprk_communication", null)]
+    [InlineData("sprk_communicationthread", null)]
+    [InlineData("sprk_memo", null)]
+    [InlineData("sprk_agreement", null)]
     [InlineData("sprk_todo", null)]
     public void RecordNumberColumnOf_KnownTables_ReturnsTheirNumberColumnOrNull(string table, string? expected)
     {
         RecordFamilyEdges.RecordNumberColumnOf(table).Should().Be(expected);
+    }
+
+    // #2513: the number columns are checked against the solution source, so a table that has a record number cannot be left
+    // out of the family view, and a mapped column cannot name a column the table does not have.
+    [Fact]
+    public void RecordNumberColumnOf_EveryFamilyTable_AgreesWithItsEntityXml()
+    {
+        var entities = Path.Combine(RepoRoot(), "src", "dataverse", "solutions", "SpaarkeMaster", "Entities");
+        var tables = RecordFamilyEdges.All
+            .SelectMany(e => new[] { e.ChildTable, e.ParentTable })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.Ordinal)
+            .ToList();
+
+        var problems = new System.Collections.Generic.List<string>();
+        foreach (var table in tables)
+        {
+            var folder = Directory.EnumerateDirectories(entities).FirstOrDefault(d =>
+                string.Equals(Path.GetFileName(d), table, StringComparison.OrdinalIgnoreCase));
+            if (folder is null)
+            {
+                problems.Add($"{table}: no Entity.xml folder");
+                continue;
+            }
+
+            var attributes = XDocument.Load(Path.Combine(folder, "Entity.xml")).Descendants("attribute")
+                .Select(a => (Name: (string?)a.Element("Name") ?? "", Auto: (string?)a.Element("AutoNumberFormat") ?? ""))
+                .ToList();
+            var mapped = RecordFamilyEdges.RecordNumberColumnOf(table);
+
+            if (mapped is not null && !attributes.Any(a => a.Name.Equals(mapped, StringComparison.OrdinalIgnoreCase)))
+                problems.Add($"{table}: maps {mapped}, which Entity.xml does not have");
+            foreach (var auto in attributes.Where(a => a.Auto.Length > 0 && !a.Name.Equals(mapped, StringComparison.OrdinalIgnoreCase)))
+                problems.Add($"{table}: {auto.Name} is an autonumber column that is not its record number column");
+        }
+
+        problems.Should().BeEmpty("every family table with a record-number column returns it, and no table maps a missing column");
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            var git = Path.Combine(dir, ".git");
+            if (Directory.Exists(git) || File.Exists(git))
+                return dir;
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+
+        throw new InvalidOperationException("Repository root not found above " + AppContext.BaseDirectory);
     }
 }

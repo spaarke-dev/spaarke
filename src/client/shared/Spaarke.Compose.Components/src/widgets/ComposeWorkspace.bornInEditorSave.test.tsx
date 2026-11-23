@@ -98,6 +98,7 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 jest.mock('@spaarke/ui-components', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
   // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
   // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
   // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
@@ -107,6 +108,8 @@ jest.mock('@spaarke/ui-components', () => ({
   // FR-14 (task 051) — ComposeWorkspace mounts <SendEmailDialog/> unconditionally (controlled via its
   // own `open` prop, mirroring ComposeConflictDialog); a no-op stub keeps this mock complete.
   SendEmailDialog: () => null,
+  // Task 188: ComposeWorkspace builds the memo-email composer handlers from this factory.
+  createXrmEmailComposeHandlers: () => ({}),
   // spaarke-modal-system task 040 — ComposeConflictDialog is re-based onto the shared
   // `SprkModal` shell (imported from `@spaarke/ui-components`) instead of a raw Fluent
   // `Dialog`, and is ALSO mounted unconditionally (controlled via its own `open` prop,
@@ -147,9 +150,6 @@ jest.mock('@spaarke/ui-components', () => ({
         </button>
       </div>
     ) : null,
-}));
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
 }));
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),

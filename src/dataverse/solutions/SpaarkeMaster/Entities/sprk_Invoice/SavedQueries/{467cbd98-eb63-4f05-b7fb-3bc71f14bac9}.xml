@@ -1,0 +1,52 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{467cbd98-eb63-4f05-b7fb-3bc71f14bac9}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_invoiceid">
+          <cell name="sprk_vendororg" width="180" />
+          <cell name="sprk_regardingrecordname" width="200" />
+          <cell name="sprk_invoicenumber" width="140" />
+          <cell name="sprk_trackingnumber" width="140" />
+          <cell name="sprk_invoicedate" width="110" />
+          <cell name="sprk_approvedtotal" width="130" />
+          <cell name="sprk_currency" width="80" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_invoice">
+          <attribute name="sprk_invoiceid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_vendororg" />
+          <attribute name="sprk_regardingrecordname" />
+          <attribute name="sprk_invoicenumber" />
+          <attribute name="sprk_trackingnumber" />
+          <attribute name="sprk_invoicedate" />
+          <attribute name="sprk_approvedtotal" />
+          <attribute name="sprk_currency" />
+          <order attribute="sprk_invoicedate" descending="false" />
+          <filter type="and">
+            <condition attribute="statuscode" operator="eq" value="659490000" />
+            <condition attribute="sprk_billingexport" operator="null" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.2.4.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Approved – ready for export" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Approved invoices not yet in an AP export batch (FR-41; EB-D-181). Select them and choose Export to AP; the server checks every invoice again and refuses any it cannot export." languagecode="1033" />
+    </Descriptions>
+  </savedquery>
+</savedqueries>

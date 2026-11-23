@@ -249,6 +249,13 @@ When creating a new skill:
 □ 7. VERIFY tags use standard vocabulary
    Reference: .claude/skills/INDEX.md → Standard Tag Vocabulary
    Reference: .claude/TAGGING-EXAMPLES.md
+
+□ 8. CHECK size and structure (new skill, or any change that grows one)
+   Standard: .claude/skills/_template/SKILL.md items 7–10 — cap 500 lines; over it, a
+   `length-justification:` key + "Read this file in full" line + `## Contents` map; conditional
+   branches in references/ behind an "If <condition>, read …" directive; reference files over
+   100 lines open with `## Contents`; never renumber a step another file cites.
+   Run: python scripts/quality/check-skill-length.py   (CI Tier 2 runs it too)
 ```
 
 ### Checklist F: Update Root CLAUDE.md

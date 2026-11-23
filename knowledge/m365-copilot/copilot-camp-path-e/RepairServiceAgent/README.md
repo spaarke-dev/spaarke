@@ -13,12 +13,12 @@ With the declarative agent, you can build a custom version of Copilot that can b
 > - [Microsoft 365 Agents Toolkit Visual Studio Code Extension](https://aka.ms/teams-toolkit) version 5.0.0 and higher or [Microsoft 365 Agents Toolkit CLI](https://aka.ms/teamsfx-toolkit-cli)
 > - [Microsoft 365 Copilot license](https://learn.microsoft.com/microsoft-365-copilot/extensibility/prerequisites#prerequisites)
 
-![image](./assets/image.png)
+*(image not included in this snapshot: image)*
 
 1. First, select the Microsoft 365 Agents Toolkit icon on the left in the VS Code toolbar.
 2. In the Account section, sign in with your [Microsoft 365 account](https://docs.microsoft.com/microsoftteams/platform/toolkit/accounts) if you haven't already.
 3. Run `npm install` to install dependencies before working with TypeSpec files.
-4. Update the [`main.tsp`](./main.tsp) to configure your agent and its plugins. This is the default entry point for TypeSpec files. 
+4. Update the [`main.tsp`](./src/agent/main.tsp) to configure your agent and its plugins. This is the default entry point for TypeSpec files. 
 5. Select `Preview Local in Copilot (Edge)` or `Preview Local in Copilot (Chrome)` from the launch configuration dropdown.
 6. Select your declarative agent from the `Copilot` app.
 7. Ask a question to your declarative agent and it should respond based on the instructions provided.

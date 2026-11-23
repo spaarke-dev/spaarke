@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Documents;
@@ -65,13 +66,21 @@ public static class OfficeModule
         services.AddScoped<ContentDedupDetector>();
 
         // field-mapping-server-write-path-r1 task 013: the ONE server create pipeline (FR-06), merging the Office creation
-        // core and OwnedChildWrite.CreateAsync; task 018 re-pointed the Office quick-create (OfficeService's adapter) to it,
-        // and 018c deleted the Office core and its registration. Concrete (ADR-010: one implementation, no seam), SCOPED because
+        // core and the owned create (OwnedChildWrite's create half); task 018 re-pointed the Office quick-create (OfficeService's
+        // adapter) to it, and 018c deleted the Office core and its registration; task 017 re-pointed the route and the chat,
+        // email.draft and budget-inquiry creates and deleted the owned create. Concrete (ADR-010: one implementation, no seam), SCOPED because
         // SecureChildShareSynchronizer is (ExternalAccessModule; the caller's client arrives as an argument) and UNCONDITIONAL:
         // every dependency (IRecordOwnershipResolver, IFieldMappingDataverseService, IGenericEntityService,
         // SecureRootFilingGate, CoreAncestorRestamper, SecureChildShareSynchronizer, IMembershipEventPublisher) is
         // registered unconditionally — no §10 F.1 asymmetry. §11 answers: notes/task-013-notes.md.
         services.AddScoped<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>();
+
+        // field-mapping-server-write-path-r1 task 052b (FR-25): the scheduled repair pass, Repair mode's first production caller.
+        // ADR-036 A1 / ADR-052: registered only here, on the in-process Spaarke.Scheduling host; it resolves the scoped service above
+        // per run. Registered enabled but OFF until RecordRepair:Pass:GoLive is set (it then reads and writes nothing). §11 answers and
+        // placement: the job's remarks and notes/task-052b-notes.md.
+        services.AddScheduledJob<Sprk.Bff.Api.Services.RecordCreation.RecordRepairPassJob>(
+            Sprk.Bff.Api.Services.RecordCreation.RecordRepairPassJob.DefaultCronSchedule);
 
         // spaarkeai-word-add-in-r1 task 121 (owner 2026-10-09, "file it if unfiled"): an email save that reconciles to an
         // existing, unfiled communication files it to the save's record through the association engine's existing-row

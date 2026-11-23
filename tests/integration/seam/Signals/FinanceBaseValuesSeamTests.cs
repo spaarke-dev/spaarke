@@ -1,29 +1,33 @@
 using FluentAssertions;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.Signals;
 
 /// <summary>
-/// Real-Dataverse seam for the grouped aggregate the Signal evaluator sends (<see cref="FinanceBaseValues.BuildGroupedSpendFetchXml"/>,
-/// read back by <see cref="FinanceBaseValues.ReadGroupedSums"/>; task 025b, owner decision D-122). The unit tests build the
-/// FetchXML and feed the reader hand-made rows; only Dataverse can say that this query is accepted, that the alias and group-by
-/// columns come back in the shape the reader expects, and that the counted-status filter selects real <c>statuscode</c> values
-/// (ebilling-r1 task 015, owner decision D-103: Approved, Sent to AP and Paid, Paid being Inactive; In Review is not counted).
+/// Real-Dataverse seam for the spend reads the Signal evaluator, the rollup and the tool send (<see cref="FinanceBaseValues.ReadAsync"/>,
+/// <see cref="FinanceBaseValues.ReadCountedInvoicesAsync"/>, <see cref="FinanceBaseValues.ReadPendingSpendAsync"/>; task 025b, owner decision
+/// D-122; task 165b-4 replaced the grouped spend aggregates with one paged row read filtered by the approve Decision Record and the hold). The
+/// unit tests feed the readers an in-memory world; only Dataverse can say that these queries are accepted, that the counted-status filter
+/// selects real <c>statuscode</c> values (ebilling-r1 task 015, owner decision D-103: Approved, Sent to AP and Paid, Paid being Inactive; In
+/// Review is not counted) and that the budget aggregate comes back in the shape the reader expects.
 /// </summary>
 /// <remarks>
 /// <para>Opt-in exactly like <see cref="SignalWriterSeamTests"/> (same fixture: <c>AzureCliCredential</c>): unless
-/// <see cref="SignalPredicateTests.UrlEnvVar"/> is set every test returns at once. The query is sent with the OPERATOR client, the
-/// unimpersonated connection that stands in for the BFF's app-only sysadmin seam, which is what the evaluator reads through.</para>
+/// <see cref="SignalPredicateTests.UrlEnvVar"/> is set every test returns at once. The queries are sent with the OPERATOR client, the
+/// unimpersonated connection that stands in for the BFF's app-only sysadmin seam, which is what the readers read through.</para>
 /// <para><b>Test rows.</b> The test creates its own matter, project, invoices and budgets, all named with the <c>zz-025b-</c>
 /// prefix (it does not depend on any dev data), and removes them in <c>finally</c> and again in <see cref="DisposeAsync"/>
 /// (children first). Afterwards <c>sprk_matter.sprk_mattername</c>, <c>sprk_project.sprk_projectname</c>,
-/// <c>sprk_invoice.sprk_name</c> and <c>sprk_budget.sprk_name</c> beginning <c>zz-025b-</c> must return 0 rows.</para>
+/// <c>sprk_invoice.sprk_name</c> and <c>sprk_budget.sprk_name</c> beginning <c>zz-025b-</c> must return 0 rows. It creates no Decision
+/// Record (the ledger is append-only), so none of its invoices has an approve record and none counts as spend: that is the 165b-4 rule.</para>
 /// </remarks>
 [Trait("status", "new")]
 [Trait("Category", "Live")]
@@ -39,7 +43,7 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
     public FinanceBaseValuesSeamTests(SignalWriterSeamTests.LiveDataverse dv) => _dv = dv;
 
     [Fact]
-    public async Task GroupedSum_OnRealRows_CountsOnlyTheCountedStatuscodes_SumsBudgets_AndKeepsMatterAndProjectApart()
+    public async Task RowReads_OnRealRows_SelectOnlyTheCountedStatuscodes_CountNothingWithoutAnApproveRecord_SumBudgets_AndKeepMatterAndProjectApart()
     {
         if (!_dv.IsLive) return;
 
@@ -55,9 +59,10 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
 
         try
         {
-            // Matter (D-103): Approved 120 + Sent to AP 60 + Paid (Inactive) 20 count; In Review 300 is pending, not counted; Rejected 9000, Returned to Firm
-            // 8000 and Cancelled 5000 (all Inactive) do not.
-            await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 300m, InvoiceLifecycleStatus.InReview);
+            // Matter (D-103): Approved 120 + Sent to AP 60 + Paid (Inactive) 20 are in the counted statuses; In Review 300 is pending;
+            // Rejected 9000, Returned to Firm 8000 and Cancelled 5000 (all Inactive) are in neither. The In Review invoice is created as its
+            // own submission's invoice (InvoiceIdFor) with that submission linked and its findings naming it, Accepted: not held.
+            await PendingInvoiceWithItsOwnSubmissionAsync(run, "sprk_matter", matter, MatterTypeRef, 300m);
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 120m, InvoiceLifecycleStatus.Approved);
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 60m, InvoiceLifecycleStatus.SentToAp);
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 20m, InvoiceLifecycleStatus.Paid);
@@ -71,25 +76,38 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
             await InvoiceAsync(run, "sprk_project", project, ProjectTypeRef, 70m, InvoiceLifecycleStatus.Approved);
             await BudgetAsync(run, "sprk_project", project, 400m);
 
-            var entities = new Mock<IGenericEntityService>();
-            entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
-                .Returns((FetchExpression fetch, CancellationToken _) => op.RetrieveMultipleAsync(fetch, CancellationToken.None));
+            var entities = new SignalWriterSeamTests.SysadminAdapter(op);
+            var writerId = ((WhoAmIResponse)await op.ExecuteAsync(new WhoAmIRequest())).UserId;
+            Func<CancellationToken, Task<Guid>> writer = _ => Task.FromResult(writerId);
 
+            // The counted row read (read 1, the snapshot) selects exactly the counted statuscodes on the real rows.
+            var counted = (await op.RetrieveMultipleAsync(FinanceBaseValues.InvoiceRowQuery(
+                FinanceBaseValues.MatterEntity, FinanceBaseValues.CountedInvoiceStatuses, [matter, emptyMatter, project]))).Entities;
+            counted.Select(FinanceBaseValues.SpendAmount).Should().BeEquivalentTo(new[] { 120m, 60m, 20m },
+                "Approved, Sent to AP and Paid are selected; In Review, Rejected, Returned to Firm and Cancelled are not");
+            var pendingRows = (await op.RetrieveMultipleAsync(FinanceBaseValues.InvoiceRowQuery(
+                FinanceBaseValues.MatterEntity, FinanceBaseValues.PendingInvoiceStatuses, [matter]))).Entities;
+            pendingRows.Select(FinanceBaseValues.SpendAmount).Should().Equal(300m);
+
+            // No approve record exists for any of them, so none is counted spend (165b-4); budgets still sum.
+            (await FinanceBaseValues.ReadCountedInvoicesAsync(entities, FinanceBaseValues.MatterEntity, [matter], writer, CancellationToken.None))
+                .Should().BeEmpty("an invoice in a counted status with no approve Decision Record from the writer is not counted");
             var matters = await FinanceBaseValues.ReadAsync(
-                entities.Object, FinanceBaseValues.MatterEntity, new[] { matter, emptyMatter, project }, needSpend: true, needBudget: true, CancellationToken.None);
-            matters[matter].Should().Be((200m, 1500m),
-                "120 + 60 + 20 counted (In Review, Rejected, Returned to Firm and Cancelled are not); budgets 1000 + 500");
+                entities, FinanceBaseValues.MatterEntity, new[] { matter, emptyMatter, project }, needSpend: true, needBudget: true, writer, CancellationToken.None);
+            matters[matter].Should().Be((0m, 1500m), "no approve record, so no counted spend; budgets 1000 + 500");
             matters[emptyMatter].Should().Be((0m, 0m), "a matter with no rows has a sum of nothing");
             matters[project].Should().Be((0m, 0m), "a project id is not a matter id: the query groups on the matter lookup");
 
             var projects = await FinanceBaseValues.ReadAsync(
-                entities.Object, FinanceBaseValues.ProjectEntity, new[] { project, matter }, needSpend: true, needBudget: true, CancellationToken.None);
-            projects[project].Should().Be((70m, 400m));
-            projects[matter].Should().Be((0m, 0m), "the matter's invoices are not the project's");
+                entities, FinanceBaseValues.ProjectEntity, new[] { project, matter }, needSpend: true, needBudget: true, writer, CancellationToken.None);
+            projects[project].Should().Be((0m, 400m));
+            projects[matter].Should().Be((0m, 0m), "the matter's budgets are not the project's");
 
-            var spendOnly = await FinanceBaseValues.ReadAsync(
-                entities.Object, FinanceBaseValues.MatterEntity, new[] { matter }, needSpend: true, needBudget: false, CancellationToken.None);
-            spendOnly[matter].Should().Be((200m, 0m), "budget was not asked for, so its query is not sent");
+            // Pending: the In Review invoice has its own linked submission, Accepted, so it is not held and counts as pending. (An In Review
+            // invoice with no linked own submission is held, EB-D-201, and would leave pending.)
+            var pending = await FinanceBaseValues.ReadPendingSpendAsync(entities, FinanceBaseValues.MatterEntity, [matter, project], CancellationToken.None);
+            pending[matter].Should().Be(300m);
+            pending[project].Should().Be(0m);
         }
         finally
         {
@@ -98,34 +116,46 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
     }
 
     /// <summary>
-    /// READ-ONLY (049, ontology-r1 review K1; D-130): Dataverse accepts the counted spend parts and both Pending Spend (D-104) query shapes, the aggregate FetchXML
-    /// (<see cref="FinanceBaseValues.BuildGroupedPendingSpendFetchXml"/>, with <c>entityname</c> on a root condition inside an
-    /// aggregate) and the rollup's QueryExpression (<see cref="FinanceRollupService.BuildPendingInvoiceQuery"/>), and the reader
-    /// reads the result. It creates nothing: the ids belong to no row, so each query must run and return no rows (0, never a throw).
-    /// The anti-join semantics are pinned by the unit tests; this proves only that the shapes are accepted.
+    /// READ-ONLY (049, ontology-r1 review K1; D-130; task 165b-4): Dataverse accepts every query shape the spend readers send - the counted
+    /// and pending row reads, the parent-scoped approve-record match (portions and records, each with an inner link to the invoice), the
+    /// hold's batched submission read and the budget aggregate - and the readers read the result. It creates nothing: the ids belong to
+    /// no row, so each query must run and return no rows (0, never a throw). The semantics are pinned by the unit tests; this proves only
+    /// that the shapes are accepted.
     /// </summary>
     [Fact]
-    public async Task PendingSpendQueries_AreAcceptedByDataverse_ReadOnly()
+    public async Task SpendQueries_AreAcceptedByDataverse_ReadOnly()
     {
         if (!_dv.IsLive) return;
 
         var op = _dv.OperatorClient;
         var nobody = Guid.NewGuid();
-        var entities = new Mock<IGenericEntityService>();
-        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
-            .Returns((FetchExpression fetch, CancellationToken _) => op.RetrieveMultipleAsync(fetch, CancellationToken.None));
+        var entities = new SignalWriterSeamTests.SysadminAdapter(op);
+        var writer = ((WhoAmIResponse)await op.ExecuteAsync(new WhoAmIRequest())).UserId;
+        Func<CancellationToken, Task<Guid>> writerId = _ => Task.FromResult(writer);
 
         foreach (var parent in new[] { FinanceBaseValues.MatterEntity, FinanceBaseValues.ProjectEntity })
         {
-            var pending = await FinanceBaseValues.ReadPendingSpendAsync(entities.Object, parent, new[] { nobody }, CancellationToken.None);
-            pending[nobody].Should().Be(0m, $"the grouped pending query on {parent} is accepted and an id with no invoices sums to 0");
+            var pending = await FinanceBaseValues.ReadPendingSpendAsync(entities, parent, new[] { nobody }, CancellationToken.None);
+            pending[nobody].Should().Be(0m, $"the pending row read and the hold batch on {parent} are accepted and an id with no invoices sums to 0");
 
-            // D-130: counted spend is two grouped parts (approved total where set, billed where not), null / not-null on a Money column.
-            var counted = await FinanceBaseValues.ReadAsync(entities.Object, parent, new[] { nobody }, needSpend: true, needBudget: true, CancellationToken.None);
-            counted[nobody].Should().Be((0m, 0m), $"the counted spend parts and the budget query on {parent} are accepted");
+            var counted = await FinanceBaseValues.ReadAsync(entities, parent, new[] { nobody }, needSpend: true, needBudget: true, writerId, CancellationToken.None);
+            counted[nobody].Should().Be((0m, 0m), $"the counted row read and the budget query on {parent} are accepted");
 
-            var rows = await op.RetrieveMultipleAsync(FinanceRollupService.BuildPendingInvoiceQuery(nobody, parent));
-            rows.Entities.Should().BeEmpty($"the rollup's pending query on {parent} is accepted");
+            // The snapshot is empty for an unknown parent, so the readers skip reads 2 and 3 (and read 3 is skipped whenever no portion is
+            // found); send both parent-scoped queries directly so Dataverse sees each shape.
+            var portions = await op.RetrieveMultipleAsync(InvoiceApproveRecord.ParentPortionQuery(parent, [nobody], FinanceBaseValues.CountedInvoiceStatuses));
+            portions.Entities.Should().BeEmpty($"the parent-scoped portion read on {parent} is accepted");
+            var records = await op.RetrieveMultipleAsync(InvoiceApproveRecord.ParentRecordQuery(writer, parent, [nobody], FinanceBaseValues.CountedInvoiceStatuses));
+            records.Entities.Should().BeEmpty($"the parent-scoped approve-record read on {parent} is accepted");
+
+            // An invoice with no submission at all is held as unlinked (EB-D-201): the batch read is accepted and that is the one verdict.
+            var invoice = Guid.NewGuid();
+            var verdicts = await InvoiceBlockedHold.CheckBatchAsync(entities, parent, [nobody], FinanceBaseValues.PendingInvoiceStatuses,
+                [invoice], CancellationToken.None);
+            var verdict = verdicts.Should().ContainSingle($"the hold's batched submission read on {parent} is accepted").Subject;
+            verdict.Key.Should().Be(invoice);
+            verdict.Value.Held.Should().BeTrue();
+            verdict.Value.ReasonCode.Should().Be(InvoiceBlockedHold.HeldOwnSubmissionUnlinked);
         }
     }
 
@@ -153,6 +183,35 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
         }
     }
 
+    /// <summary>
+    /// Creates an In Review invoice the way the submission operation does (EB-D-201): its id derives from its own submission's
+    /// (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), and that submission is linked to it, Accepted, with findings naming it. Such an
+    /// invoice is not held, so it counts as pending. The submission is named with the prefix so the sweep removes it (before the invoice).
+    /// </summary>
+    private async Task PendingInvoiceWithItsOwnSubmissionAsync(string run, string parentEntity, Guid parentId, Guid typeRef, decimal amount)
+    {
+        var submissionId = Guid.NewGuid();
+        var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+        await _dv.OperatorClient.CreateAsync(new Entity("sprk_invoice", invoiceId)
+        {
+            ["sprk_name"] = $"{Prefix}{run}-invoice",
+            ["sprk_totalamount"] = new Money(amount),
+            ["sprk_extractionstatus"] = new OptionSetValue(100000000),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
+            [parentEntity] = new EntityReference(parentEntity, parentId),
+        });
+        await _dv.OperatorClient.CreateAsync(new Entity(FinanceBaseValues.SubmissionEntity, submissionId)
+        {
+            ["sprk_name"] = $"{Prefix}{run}-submission",
+            [TrackingNumberAllocator.TrackingNumberColumn] = $"{Prefix}{run}.1",
+            [TrackingNumberAllocator.ScopeColumn] = TrackingNumberAllocator.ScopeOf(Guid.NewGuid()),
+            [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] =
+                $$"""{"{{InvoiceBlockedHold.KindMember}}":"Accepted","{{InvoiceBlockedHold.InvoiceIdMember}}":"{{invoiceId:D}}"}""",
+            [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", invoiceId),
+        });
+    }
+
     private async Task BudgetAsync(string run, string parentEntity, Guid parentId, decimal total) =>
         await _dv.OperatorClient.CreateAsync(new Entity("sprk_budget")
         {
@@ -171,7 +230,7 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
     {
         foreach (var (entity, nameColumn) in new[]
         {
-            ("sprk_invoice", "sprk_name"), ("sprk_budget", "sprk_name"), ("sprk_matter", "sprk_mattername"), ("sprk_project", "sprk_projectname"),
+            (FinanceBaseValues.SubmissionEntity, "sprk_name"), ("sprk_invoice", "sprk_name"), ("sprk_budget", "sprk_name"), ("sprk_matter", "sprk_mattername"), ("sprk_project", "sprk_projectname"),
         })
         {
             try

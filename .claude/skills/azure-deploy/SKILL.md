@@ -5,13 +5,13 @@ techStack: [azure, bicep, key-vault, azure-cli]
 appliesTo: ["infrastructure/**", "deploy to azure", "deploy infrastructure", "bicep deploy", "key vault", "azure resource"]
 alwaysApply: false
 exemplar: infrastructure/bicep/stacks/ai-foundry-stack.bicep
-last-reviewed: 2026-05-17
+last-reviewed: 2026-11-03
 ---
 
 # Azure Deploy
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-17
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2c — refactored: removed stale BFF deploy section [defer to `bff-deploy`]; extracted Office Add-ins to new `office-addins-deploy` skill; fixed 2 broken workflow filename references; renumbered Key Vault from Type 4 to Type 2 since only Infrastructure + Key Vault remain in scope)
 > **Exemplar rationale**: `infrastructure/bicep/stacks/ai-foundry-stack.bicep` is a comprehensive Bicep stack demonstrating module composition, parameter passing, and Key Vault wiring.
 
@@ -26,7 +26,7 @@ last-reviewed: 2026-05-17
 | BFF API to App Service | `Deploy-BffApi.ps1` + hash-verify | `bff-deploy` skill (the canonical authority — incident-grounded with May 2026 silent-failure hardening) |
 | Office Add-ins to SWA | SWA CLI + `Deploy-OfficeAddins.ps1` | `office-addins-deploy` skill |
 | Dataverse / PCF / solutions | PAC CLI | `dataverse-deploy`, `pcf-deploy` skills |
-| Power Pages Code Site | PAC CLI + Vite build | `power-page-deploy` skill |
+| External SPA to Static Web Apps | Vite build + `Azure/static-web-apps-deploy` | `.github/workflows/deploy-external-spa.yml` (manual `workflow_dispatch`) |
 
 **For Dataverse deployments (PCF, solutions, web resources)**: Use the `dataverse-deploy` skill instead.
 
@@ -107,6 +107,18 @@ az account show --query "{Name:name, Id:id}" -o table
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Prerequisites: tools installed, access confirmed, `az login` and subscription verified
+- [ ] Deployment Type 1: Deploy Infrastructure (Bicep)
+- [ ] Deployment Type 1: Verify Deployment (resources match Expected Resources)
+- [ ] Deployment Type 2: Store Secrets in Key Vault (only if secrets are in scope)
+- [ ] Verification Procedures: API health check, Azure resource and AI services checks
+```
+
 ## Deployment Type 1: Azure Infrastructure (Bicep)
 
 ### When to Use
@@ -144,6 +156,8 @@ az resource list `
   --resource-group spe-infrastructure-westus2 `
   --output table
 ```
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ### Expected Resources (AI Foundry Stack)
 
@@ -381,7 +395,7 @@ Both scripts support `-SkipBuild` flag to deploy existing builds faster.
 - **BFF API deploys** → `bff-deploy` skill (canonical authority; includes May 2026 silent-failure hardening with hash-verify + auto-recover)
 - **Office Add-ins / SWA deploys** → `office-addins-deploy` skill (extracted from this skill 2026-05-17)
 - **Dataverse PCF / solutions** → `dataverse-deploy` / `pcf-deploy` skills
-- **Power Pages Code Sites** → `power-page-deploy` skill
+- **External SPA** (`src/client/external-spa/`) → `.github/workflows/deploy-external-spa.yml` (Azure Static Web Apps). The Power Pages deploy is retired.
 
 ---
 

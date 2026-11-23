@@ -194,10 +194,21 @@ internal sealed class ExternalPersonRemovalService
         }
         else
         {
-            var written = markOnlyIfUnchanged is { } read
-                ? await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, read.ETag, _time.GetUtcNow(), ct)
-                    .ConfigureAwait(false)
-                : await _identityStore.WriteRemovedMarkerAsync(contactId, _time.GetUtcNow(), ct).ConfigureAwait(false);
+            StoreWriteResult written;
+            try
+            {
+                written = markOnlyIfUnchanged is { } read
+                    ? await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, read.ETag, _time.GetUtcNow(), ct)
+                        .ConfigureAwait(false)
+                    : await _identityStore.WriteRemovedMarkerAsync(contactId, _time.GetUtcNow(), ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's
+                // status — and when the write threw, since it may still have landed.
+                _participations.ForgetRequestAccessReads();
+            }
+
             if (written.Status == StoreWriteStatus.PreconditionFailed && markOnlyIfUnchanged is not null)
             {
                 _logger.LogInformation(
@@ -309,8 +320,19 @@ internal sealed class ExternalPersonRemovalService
 
         // Removed, or a marker whose read is not proven: the administrator asked to reinstate, so the clear is sent either way,
         // but only on the row version read above (never If-Match: *).
-        var written = await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, contact.ETag, null, ct)
-            .ConfigureAwait(false);
+        StoreWriteResult written;
+        try
+        {
+            written = await _identityStore.WriteRemovedMarkerIfUnchangedAsync(contactId, contact.ETag, null, ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            // #2845: the request forgets the removed marker it may have read (RequestAccessMemo), whatever the write's status
+            // — and when the write threw, since it may still have landed.
+            _participations.ForgetRequestAccessReads();
+        }
+
         if (written.Status == StoreWriteStatus.PreconditionFailed)
         {
             _logger.LogWarning(
@@ -431,6 +453,18 @@ internal sealed class ExternalPersonRemovalService
         {
             if (row.Id == Guid.Empty)
             {
+                notCompleted.Add(row.Id);
+                continue;
+            }
+
+            if (!row.KeyLookupsRead)
+            {
+                // Fix round 3g: a row that did not carry a root, contact or organization column is not "a row naming no record":
+                // which record it names is unknown, so its container permission cannot be cleaned up and it must not be
+                // deactivated by id as if there were nothing to clean. Not completed, so the removal is retried.
+                _logger.LogError(
+                    "[EXT-REMOVE-PERSON] Access record {AccessRecordId} of contact {ContactId} did not carry every root, contact " +
+                    "and organization column; its grant cannot be derived and it is left for the retry.", row.Id, contactId);
                 notCompleted.Add(row.Id);
                 continue;
             }

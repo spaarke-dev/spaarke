@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022c" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Restricted mapping source rule for Repair and the field-mapping push (#2738, DI-027)</title>
+    <phase>3 W3 Wizards (follow-up to 022b)</phase>
+    <gate>022b merged into the work branch (88ef973e52). UAC-r2 reviews the diff before merge.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what Repair and the push may write (.cs, bff-api); access-rule adjacent; modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-closed reasoning on two existing write paths that already carry the secure copy gate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService (Repair and Mapping partials), which 022b just changed.</parallel-reason>
+    <deps>022b</deps>
+    <tags>bff-api, security, field-mapping, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Rule (UAC-r2 2026-11-08; Q5 on 022b, 2026-11-12): values mapped from a source whose `sprk_accesspermission` is Restricted, or whose value cannot be read, are written only into a row that is Restricted. 022b applies it to the create. 022c applies the SAME predicate to the two other mapping writers: Repair mode (`RecordCreationService.Repair.cs`) and the field-mapping push (`FieldMappingPushSourceGate`). Both already apply the secure copy gate (`MappingSourceCopyGate.DecideAsync`); the Restricted rule sits beside it, on the same reads.</prompt>
+  <role>SPAARKE platform developer, BFF write path. Security fails closed. Follow ADRs strictly.</role>
+  <goal>Neither Repair nor a push writes a value mapped from a Restricted (or unreadable) source into a row that is not Restricted, and neither reads anything more than it needs to tell.</goal>
+
+  <context>
+    <background>
+022b's pieces, reused as they are (do not fork them):
+- `RecordCreationService.MappingSourceAccessColumns(sourceTable)` and `MappingSourceAccessOf(sourceTable, read)` (Mapping.cs ~596-625): the source's answer is NoColumn, NotRestricted, Restricted or Unreadable. No read is Unreadable.
+- `InheritedAccessPermission.SourceCarriesColumn`, `.Column`, `.Restricted` (ParentLineage.cs ~531-547). `AccessPermissionTablesGuardTests` holds the table set equal to the solution.
+- The create's predicate: `EnforceMappingSourceRestrictedAsync` (Mapping.cs ~636-673).
+
+Repair (Repair.cs ~339-375): one app-only source read (`sourceColumns` = copyable + `SourceGateColumns`), then `SourceMayBeCopiedAsync` (~658-701), and a skip reported as `RecordRepairReason.MappingSourceSecure`. Repair never writes `sprk_accesspermission` (`ColumnsRepairNeverMaps`), so the row's own STORED value is its answer.
+
+Push (FieldMappingPushSourceGate.cs): the source is read once per push (`ReadSourceAsync`, ~239). A source that is not secure returns early at ~185-187, BEFORE any child is read; a secure source reads each child's owner and filing (~193). The answer per child is a reason code, with fixed text from `MessageFor`.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingPushSourceGate.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs (022b's predicate)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (how the push uses the gate's codes, apply and preview)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/task-022b-notes.md</file>
+      <file role="test">tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs</file>
+      <file role="test">tests/unit/domain/Dataverse/FieldMapping/FieldMappingPushSourceGateTests.cs</file>
+      <file role="test">tests/integration/contract/Api/FieldMappings/FieldMappingPushFamilyContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-022c origin/work/field-mapping-server-write-path-r1`. Then confirm this POML exists on the branch.</constraint>
+    <constraint source="one predicate">The source's answer comes from `MappingSourceAccessOf`. The row's answer is Restricted only when its stored `sprk_accesspermission` reads as the Restricted option. A table without the column, an absent or null value, a value of another type, or an unknown option is NOT Restricted. Put the row's answer in ONE place that both writers call; do not re-derive it.</constraint>
+    <constraint source="reads">Repair: add `MappingSourceAccessColumns(source)` to the existing one source read. Read the row's `sprk_accesspermission` only where its table carries the column and the row read does not already hold it. Push: add the column to `ReadSourceAsync`'s one read. Read a child's `sprk_accesspermission` in its existing per-child read, and only when the source is Restricted or Unreadable. A source that is NoColumn or NotRestricted reads no child for this rule, so the early return for a source that is not secure stays.</constraint>
+    <constraint source="Repair answer">Source Restricted or Unreadable, and the row not Restricted: map nothing for this row (the same whole-mapping skip as a secure source), with a NEW reason `record_repair.mapping_source_restricted` and a log line by id. §11 answers for the new constant.</constraint>
+    <constraint source="push answer">Source Restricted or Unreadable, and the child not Restricted: nothing is written to it. A Restricted source gives a NEW code `field_mapping.push.restricted_source_not_restricted`, with fixed text that names no record. An Unreadable source gives the existing `UndeterminedReasonCode`. A Restricted or Unreadable source never changes a child's filing (the same rule as a secure source, UAC-r2 (a)), so such a child is not written either: use the existing `RefileNotAllowedReasonCode` and its text. The preview and the apply both get the answer through the existing path.</constraint>
+    <constraint source="fail closed">A fault, a source that does not come back, or a child that does not come back means nothing is written, as today. Cancellation is rethrown.</constraint>
+    <constraint source="no other change">The secure copy gate's verdicts and codes are unchanged. Its texts are unchanged except, on the main session's instruction (fix round 1), the refile and undetermined TEXTS, reworded to hold for both kinds of source (secure and Restricted); their codes are unchanged. Fix round 2 (unified-access-control-r2 ruling, 2026-11-12): the access columns (`RecordCreationService.AccessColumnsNeverMapped`) are never a push's target, skipped with the new code `field_mapping.push.access_column_not_mapped`. Create (022b) is unchanged. Do not edit `SecureRootInheritance.cs` or UAC-r2's files (`DirectThreadAccessService.cs`, `DirectMessageParticipantShares.cs`, `SecureChildShareReconciliationJob.cs`, `SecureChildReconciler.cs`).</constraint>
+    <constraint source="public repo">Commit messages, code comments, test names and notes state the rules only, never a hole.</constraint>
+    <constraint source="ADR-038 / §10 / §11">New tests go under KEEP paths only (`tests/integration/**`, `tests/unit/domain/**`); grandfathered files may be edited. Never run Sprk.Bff.Api.Tests unfiltered; add `&amp;FullyQualifiedName!~Api.Office.`. The publish delta is the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; read 022b's predicate and notes.</step>
+    <step order="1">The shared row answer: is a stored row Restricted?</step>
+    <step order="2">Repair: the extra source column, the row's value, the skip and the new reason.</step>
+    <step order="3">Push: the extra source column, the per-child check for a Restricted or Unreadable source, the filing rule and the new code.</step>
+    <step order="4">Tests (AC1-AC5), each run once with the rule switched off to show it fails. Then build (0 warnings), ArchTests, filtered suites, `dotnet format whitespace --verify-no-changes` on touched files, and `notes/task-022c-notes.md` (rules, §11, evidence, known limits). Commit on `task/fm-022c`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (Repair must fire): a Restricted source into a row that is Standard, Limited, has no value, or whose table has no column maps nothing, and reports `record_repair.mapping_source_restricted`. An Unreadable source (an unknown option, or a value of another type) does the same.</criterion>
+    <criterion testable="true">AC2 (Repair must not fire): a Restricted source into a Restricted row maps. A Standard or Limited source, or a source table without the column, maps unchanged, and the row's access value is not read for it.</criterion>
+    <criterion testable="true">AC3 (push must fire): from a Restricted source, a child that is not Restricted gets `field_mapping.push.restricted_source_not_restricted` and nothing is written. From an Unreadable source it gets `UndeterminedReasonCode`. From either, a child whose pushed values change its filing gets `RefileNotAllowedReasonCode`. The preview reports the same codes as the apply.</criterion>
+    <criterion testable="true">AC4 (push must not fire): from a Restricted source, a Restricted child with no filing change is written. A source that is not secure and NotRestricted or NoColumn reads no child (pinned by a read count) and writes as today.</criterion>
+    <criterion testable="true">AC5 (fail closed): a fault reading a child, or a child that does not come back, while the source is Restricted means nothing is written to it (`UndeterminedReasonCode`). Every existing Repair and push test passes unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-12 from UAC-r2's Q5 on 022b (#2738, DI-027).
+Completed 2026-11-12: merged to the work branch at 74556c46df (`task/fm-022c` c16fd78e03, base 93242e9a39).
+- Restricted source rule on Repair and the push. Access columns are never mapping targets (UAC-r2 ruling): skipped at push with `field_mapping.push.access_column_not_mapped`, payload scrub, and an ArchTest over the seeded rules. The client knows the new push code; the refile and undetermined texts are true for both kinds of source.
+- Reviews: one Opus adversarial pass (no leak, F3 fixed) and a Sonnet re-check of round 2 (no F; K1/K2 fixed). UAC-r2 PASS of 87d9074c3d, then the round-3 additions.
+- Gates at the merge: build 0 warnings; ArchTests 2534; affected classes 2458/0; publish +885 B (40.07 MB, 191 = 191 files); no vulnerable packages.
+- Known limits: `notes/task-022c-notes.md`.
+rework: fix-round-3 task 022c</notes>
+</task>

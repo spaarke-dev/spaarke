@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{a20517ef-dd2a-4461-822b-f80c1d735e69}</WebResourceId>
+  <Name>sprk_/scripts/apexport_ribbon.js</Name>
+  <DisplayName>AP export and Mark Paid commands</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.2.4.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_scriptsapexport_ribbonjsA20517EF-DD2A-4461-822B-F80C1D735E69</FileName>
+</WebResource>

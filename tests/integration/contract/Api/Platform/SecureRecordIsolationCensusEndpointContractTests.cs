@@ -181,7 +181,9 @@ public sealed class SecureRecordIsolationCensusEndpointContractTests : IClassFix
             "roleprivileges" => privileges
                 .Select(p => new Entity("roleprivileges", Guid.NewGuid())
                 {
-                    ["roleid"] = sysAdmin, ["privilegeid"] = p.Id, ["privilegedepthmask"] = (int)PrivilegeDepth.Global,
+                    ["roleid"] = sysAdmin,
+                    ["privilegeid"] = p.Id,
+                    ["privilegedepthmask"] = (int)PrivilegeDepth.Global,
                 })
                 .ToList(),
             "role" => new List<Entity>

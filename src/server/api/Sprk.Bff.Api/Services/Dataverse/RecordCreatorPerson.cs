@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// <para><b>Who writes it.</b> Only the BFF: every BFF create path of the three tables stamps it — the app-only paths
 /// in the create payload itself (Office quick-create: the Office caller; the deleted <c>POST /api/v1/work-assignments</c>
 /// stamped its caller, resolved by WhoAmI, so rows it created carry the column too), and the chat create (<c>dataverse.create_record</c>), which task 146 moved to
-/// create-as-the-app (owner round 7 item 3), in that create's payload too (<c>OwnedChildWrite.CreateAsync</c>; task 133's
+/// create-as-the-app (owner round 7 item 3), in that create's payload too (today <c>RecordCreationService</c>'s step 11,
+/// which replaced the owned create in task 017; task 133's
 /// interim app-only follow-up update was removed at the batch 4 integration, so there is one stamp). It is field-secured
 /// (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>): every user can READ it (the reader profile sits on every
 /// business unit's default team), only the BFF application user(s) can create or update it — so a client create cannot
@@ -120,8 +121,14 @@ public static class RecordCreatorPerson
         // ebilling-r1 task 090 (UAC answer to 081 Q5): every table the BFF creates app-only for a person records that person. A rule set
         // is created app-only for the calling admin (RuleSetService's upload, ProcedureService's Procedure create: owner.ApplyTo), and a
         // Procedure assignment will be (no BFF writer creates one yet). 080 created both columns UNSECURED; the script empty-checks,
-        // secures and publishes them like 081's four (SpaarkeMaster).
+        // secures and publishes them like 081's four (SpaarkeMaster). Task 089a (model 5.2): both are codified Secure Record Owner
+        // children now (a record-scoped rule set and an assignment are filed under their core record), so they left
+        // StampedOutsideCodifiedChildren; sprk_procedure and sprk_procedureversion stay outside.
         "sprk_ruleset", "sprk_procedureassignment",
+        // ebilling-r1 task 086 (procedure model 5.2, K6): StoredFileService creates every Stored File app-only and records the person who
+        // asked (none for a contact uploader or a job). 088 created the column UNSECURED in SpaarkeMaster; the script empty-checks,
+        // secures and verifies it, never creates it.
+        "sprk_storedfile",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

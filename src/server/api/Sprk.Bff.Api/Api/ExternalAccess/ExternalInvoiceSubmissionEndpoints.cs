@@ -3,6 +3,8 @@
 // POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions  submit a PDF invoice (202)
 // GET  /api/v1/external/invoice-submissions/{id}                                      one submission's status
 // GET  /api/v1/external/invoice-submissions                                           the caller's firms' submissions (051 resume / flag probe)
+// GET  /api/v1/external/invoices/{id}/files                                           an invoice's firm-visible files (task 093)
+// GET  /api/v1/external/invoices/{id}/files/{fileId}/content                          one of those files' bytes (task 093)
 //
 // Mounted UNDER the shared /api/v1/external group (ExternalAccessEndpoints), so every route inherits the ExternalCollaboration
 // policy and the group-level CallerPrincipalAuthorizationFilter. Each route then carries ExternalInvoiceSubmissionAuthorizationFilter
@@ -13,9 +15,13 @@
 // The write itself is InvoiceSubmissionService — the same operation the internal route calls (D-24).
 
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -62,7 +68,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapGet("/invoice-submissions/{id:guid}", GetAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.ReadOne)
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissionsWithInvoice)
             .RequireEbillingEnabled()
             .WithName("GetExternalInvoiceSubmission")
             .WithSummary("Read one of the caller's firm's invoice submissions")
@@ -73,7 +79,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapGet("/invoice-submissions", ListAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.List)
-            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissionsWithInvoice)
             .RequireEbillingEnabled()
             .WithName("ListExternalInvoiceSubmissions")
             .WithSummary("List the caller's firms' invoice submissions on records the caller can read, newest first")
@@ -95,7 +101,94 @@ public static class ExternalInvoiceSubmissionEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // ebilling-r1 task 093: the firm file routes. ONE gate (ExternalInvoiceSubmissionAccess.InvoiceFiles) decides the invoice and its
+        // visible files for both routes; the content route serves only a file of that set. No upload route, no versions route.
+        externalGroup.MapGet("/invoices/{id:guid}/files", ListInvoiceFilesAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.InvoiceFiles)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceFiles)
+            .RequireEbillingEnabled()
+            .WithName("ListExternalInvoiceFiles")
+            .WithSummary("List the firm-visible files of an invoice the caller can see")
+            .WithDescription(
+                "The invoice's own firm-uploaded Invoice PDF, with scanStatus Clean, NotScanned or Checking (a file whose malware scan has " +
+                "no verdict yet). 404 for an unknown invoice and for one the caller may not see (never an empty list); 503 when any read faults. " +
+                "403 (workforce_baseline_privilege_missing or workforce_baseline_unavailable) from the workforce role ceiling, before any record is read.")
+            .Produces<ExternalCollectionResponse<ExternalInvoiceFileItem>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        externalGroup.MapGet("/invoices/{id:guid}/files/{fileId:guid}/content", GetInvoiceFileContentAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.InvoiceFiles)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceFiles)
+            .RequireEbillingEnabled()
+            .WithName("GetExternalInvoiceFileContent")
+            .WithSummary("Download a firm-visible file of an invoice the caller can see")
+            .WithDescription(
+                "Streams a file the list shows as Clean or NotScanned; 409 file_scan_pending while it is Checking; 404 for any other file " +
+                "and for an invoice the caller may not see; 503 when any read faults. 403 (workforce_baseline_privilege_missing or " +
+                "workforce_baseline_unavailable) from the workforce role ceiling, before any record is read.")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         return externalGroup;
+    }
+
+    // ── Invoice files (task 093) ──
+
+    /// <summary>The visible file set the gate decided for THIS route's invoice; <c>null</c> when the handler runs without it.</summary>
+    private static ExternalInvoiceFileSet? InvoiceFiles(HttpContext http, Guid invoiceId) =>
+        Scope(http) is { InvoiceFiles: { } set } && set.InvoiceId == invoiceId ? set : null;
+
+    private static IResult ListInvoiceFilesAsync(Guid id, HttpContext http)
+    {
+        // A handler reached without the gate's decision refuses with the uniform 404 (fail closed, never an empty list).
+        if (InvoiceFiles(http, id) is not { } set)
+        {
+            return ProblemDetailsHelper.UniformRecordNotFound(http);
+        }
+
+        return TypedResults.Ok(new ExternalCollectionResponse<ExternalInvoiceFileItem>
+        {
+            Value = set.Files.Select(f => new ExternalInvoiceFileItem(
+                    f.Row.FileId,
+                    f.Row.Name ?? string.Empty,
+                    f.Row.ContentType,
+                    f.Row.SizeBytes,
+                    f.Row.CreatedOn is { } created ? DateTime.SpecifyKind(created, DateTimeKind.Utc) : null,
+                    f.ScanStatus))
+                .ToList(),
+        });
+    }
+
+    private static async Task<IResult> GetInvoiceFileContentAsync(
+        Guid id, Guid fileId, HttpContext http, [Microsoft.AspNetCore.Mvc.FromServices] StoredFileService service, ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        // Only a file of the gate's set: anything else (another invoice's, a supporting file, a malicious one, an unknown id) is the same 404.
+        if (InvoiceFiles(http, id) is not { } set
+            || Scope(http) is not { } scope
+            || set.Files.FirstOrDefault(f => f.Row.FileId == fileId) is not { } file)
+        {
+            return ProblemDetailsHelper.UniformRecordNotFound(http);
+        }
+
+        if (file.Servable is not { } servable)
+        {
+            return StoredFileAccessFilter.ScanPending(http);
+        }
+
+        var principal = scope.Principal;
+        var auditCaller = principal.SystemUserId is { } systemUserId
+            ? (StoredFileAudit.CallerSystemUser, systemUserId, StoredFileAudit.RouteFirm)
+            : (StoredFileAudit.CallerContact, principal.ContactId, StoredFileAudit.RouteFirm);
+        return await StoredFileEndpoints.StreamServableAsync(
+            http, servable, service, logger, StoredFileEndpoints.SafeContentType(servable.ContentType), downloadName: null, ct, auditCaller);
     }
 
     private static ExternalInvoiceSubmissionScope? Scope(HttpContext http) =>
@@ -130,11 +223,48 @@ public static class ExternalInvoiceSubmissionEndpoints
             CorrelationId = http.TraceIdentifier,
         }, ct);
 
-        return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier);
+        // ebilling-r1 082c-3 (uac-r2 conditions, brief section 7): the advisory billing-terms pre-check runs only AFTER the submission's own
+        // authorization passed and the submission was received, for the record and firm the filter decided (never a request field), and fails quiet.
+        var warning = outcome.Kind == InvoiceSubmissionOutcomeKind.Received
+            ? await service.PrecheckHoldWarningAsync(core, firmId, ct)
+            : null;
+        return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier, warning);
     }
 
-    private static IResult GetAsync(HttpContext http) =>
-        Scope(http) is { Submission: { } view } ? Results.Ok(ExternalView(view)) : NoScope();
+    private static async Task<IResult> GetAsync(
+        HttpContext http, InvoiceSubmissionService service,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger, CancellationToken ct)
+    {
+        if (Scope(http) is not { Submission: { } view } scope)
+        {
+            return NoScope();
+        }
+
+        // Task 097f (EB-D-180): the replaced-by-correction note, named only when the caller may see the correcting submission as they see this one.
+        var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(scope, hideSubmissions, logger, hideInvoices), ct);
+        return Results.Ok(ExternalView(shown[0]));
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 097f: which correcting submissions the external caller may be told, by the SAME rule that lets them see a submission
+    /// at all (the single read's filter and the list): its firm is one of the caller's, they can read its core record, and the (a') decision
+    /// (<see cref="VisibleSubmissionsAsync"/>, the one seam) keeps it. A decision that cannot be made names none (the caller treats the fault
+    /// as "not named"; <see cref="InvoiceSubmissionService.WithReplacementNoteAsync"/> logs it).
+    /// </summary>
+    private static ReplacementReadGate ReplacementGate(
+        ExternalInvoiceSubmissionScope scope, ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger logger,
+        ExternalInvoiceHiding? hideInvoices) =>
+        async (replacements, ct) =>
+        {
+            var inScope = replacements
+                .Where(r => r is { FirmId: { } firmId, CoreRecord: { } core }
+                    && scope.FirmIds.Contains(firmId)
+                    && scope.Principal.RightsOn(core.GrantRootType, core.RecordId).HasFlag(AccessRights.Read))
+                .ToList();
+            var visible = await VisibleSubmissionsAsync(scope.Principal, inScope, hideSubmissions, logger, ct, hideInvoices);
+            return visible.Select(v => v.SubmissionId).ToHashSet();
+        };
 
     /// <summary>
     /// ebilling-r1 task 098 review round 4b: the view an external caller is answered with. The submission's document link is read
@@ -240,7 +370,8 @@ public static class ExternalInvoiceSubmissionEndpoints
 
     private static async Task<IResult> ListAsync(
         HttpContext http, InvoiceSubmissionService service,
-        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions, ILogger<Program> logger,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceSubmissionHiding? hideSubmissions,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices, ILogger<Program> logger,
         CancellationToken ct)
     {
         if (Scope(http) is not { } scope)
@@ -257,8 +388,10 @@ public static class ExternalInvoiceSubmissionEndpoints
                 principal.GetAccessibleProjectIds().ToList(),
                 principal.AccessibleWorkAssignmentIds,
                 ct);
-            var visible = await VisibleSubmissionsAsync(principal, views, hideSubmissions, logger, ct);
-            return Results.Ok(visible.Select(ExternalView).ToList());
+            var visible = await VisibleSubmissionsAsync(principal, views, hideSubmissions, logger, ct, hideInvoices);
+            // Task 097f (EB-D-180): the replaced-by-correction note on each visible Accepted submission whose invoice is Superseded.
+            var shown = await service.WithReplacementNoteAsync(visible, ReplacementGate(scope, hideSubmissions, logger, hideInvoices), ct);
+            return Results.Ok(shown.Select(ExternalView).ToList());
         }
         catch (SdapProblemException ex)
         {
@@ -274,10 +407,16 @@ public static class ExternalInvoiceSubmissionEndpoints
     /// marked. No seam withholds every asked submission (fail closed; logged at Error, a registration defect). A failed read
     /// THROWS <see cref="InvoiceSubmissionService.ReadUnavailable"/> (EB-D-169: the routes answer a retryable 503, never 200
     /// <c>[]</c> and never the not-found 404); it never shows a row.
+    /// <para>ebilling-r1 task 130-0 fix round 1 (uac-r2 parity condition): a submission also follows its invoice, as on the assistant
+    /// plane. The invoices of the kept submissions are put to the caller-aware invoice seam (<paramref name="hideInvoices"/>,
+    /// <see cref="ExternalInvoiceHiding"/>: a partner sees only invoices of its own firms) in ONE call, and a submission whose invoice
+    /// is not visible is withheld. A submission with no invoice is unaffected. No seam withholds every submission with an invoice
+    /// (fail closed); a faulted decision THROWS <see cref="InvoiceSubmissionService.ReadUnavailable"/>, as above (the single read
+    /// reaches it only after its record check).</para>
     /// </summary>
     internal static async Task<IReadOnlyList<InvoiceSubmissionView>> VisibleSubmissionsAsync(
         CallerPrincipal principal, IReadOnlyList<InvoiceSubmissionView> views, ExternalInvoiceSubmissionHiding? hideSubmissions,
-        ILogger logger, CancellationToken ct)
+        ILogger logger, CancellationToken ct, ExternalInvoiceHiding? hideInvoices = null)
     {
         if (views.Count == 0)
             return views;
@@ -291,7 +430,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
 
         var decision = await hideSubmissions(principal, views, ct).ConfigureAwait(false);
-        if (decision.Faulted)
+        if (decision.AnyFaulted)
         {
             // EB-D-169: the decision could not be read. A retryable 503 for the whole page; no row is shown.
             throw InvoiceSubmissionService.ReadUnavailable();
@@ -305,7 +444,35 @@ public static class ExternalInvoiceSubmissionEndpoints
                 views.Count - kept.Count, views.Count, decision.HiddenSummary());
         }
 
-        return kept;
+        // Task 130-0 fix round 1: a submission also follows its invoice. Inline here, so this stays the ONE decision function of
+        // both reads (ExternalInvoiceVisibilityGuardTests.TheSubmissionListAndRead_CallOneDecisionFunction).
+        var invoices = kept.Select(v => v.InvoiceId).OfType<Guid>().Where(id => id != Guid.Empty).Distinct().ToList();
+        if (invoices.Count == 0)
+            return kept;
+        if (hideInvoices is null)
+        {
+            logger.LogError(
+                "[EBILLING-SUBMIT] The invoice decision (ExternalInvoiceHiding) is not registered: every submission with an invoice is withheld "
+                + "(fail closed).");
+            return kept.Where(v => v.InvoiceId is not { } id || id == Guid.Empty).ToList();
+        }
+
+        var invoiceDecision = await hideInvoices(principal, invoices, ct).ConfigureAwait(false);
+        if (invoiceDecision.AnyFaulted) // task 130-0 fix round 3b: a whole-read fault or any invoice's own failed decision
+        {
+            // As the submission decision above: a retryable 503 for the whole page; no row is shown.
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+
+        var followed = kept.Where(v => v.InvoiceId is not { } id || id == Guid.Empty || invoiceDecision.IsVisible(id)).ToList();
+        if (followed.Count < kept.Count)
+        {
+            logger.LogInformation(
+                "[EBILLING-SUBMIT] {Withheld} of {Count} submission(s) withheld: their invoice is not visible to the caller ({Reasons}).",
+                kept.Count - followed.Count, kept.Count, invoiceDecision.HiddenSummary());
+        }
+
+        return followed;
     }
 }
 

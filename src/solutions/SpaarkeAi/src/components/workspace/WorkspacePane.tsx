@@ -34,6 +34,7 @@ import {
   PaneHeader,
   createXrmDataService,
   createXrmNavigationService,
+  createXrmEmailComposeHandlers,
   searchUsersAndContacts,
   ANALYSIS_REGARDING_TARGETS,
   resolveAnalysisFilePreview,
@@ -447,6 +448,11 @@ export function WorkspacePane(): React.JSX.Element {
   const analysisWizardSearchUsers = React.useCallback(
     (query: string) => searchUsersAndContacts(analysisWizardDataService, query),
     [analysisWizardDataService]
+  );
+  // Send Email step composer handlers (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const analysisWizardEmailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [authenticatedFetch, bffBaseUrl]
   );
 
   // SPE container resolver for the Analysis wizard's file upload (UAT #7 fix,
@@ -2164,6 +2170,7 @@ export function WorkspacePane(): React.JSX.Element {
               navigationService: analysisWizardNavigationService,
               searchUsers: analysisWizardSearchUsers,
               searchAssignees: analysisWizardSearchUsers,
+              emailComposeHandlers: analysisWizardEmailComposeHandlers,
               resolveSpeContainerId: resolveAnalysisSpeContainerId,
               authenticatedFetch,
               bffBaseUrl,
@@ -2669,6 +2676,7 @@ export function WorkspacePane(): React.JSX.Element {
               navigationService: analysisWizardNavigationService,
               searchUsers: analysisWizardSearchUsers,
               searchAssignees: analysisWizardSearchUsers,
+              emailComposeHandlers: analysisWizardEmailComposeHandlers,
               resolveSpeContainerId: resolveAnalysisSpeContainerId,
               authenticatedFetch,
               bffBaseUrl,

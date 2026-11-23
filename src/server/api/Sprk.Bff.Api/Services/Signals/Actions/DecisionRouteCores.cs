@@ -77,12 +77,9 @@ public class DecisionRouteCores
         var result = await ChildRecordEndpoints.CreateAsync(
             table, payload,
             sp.GetRequiredService<IDataverseUserClient>(),
-            sp.GetRequiredService<IRecordOwnershipResolver>(),
-            sp.GetRequiredService<IFieldMappingDataverseService>(),
-            sp.GetRequiredService<CoreAncestorRestamper>(),
-            sp.GetRequiredService<SecureChildShareSynchronizer>(),
-            sp.GetRequiredService<SecureRootFilingGate>(),
-            sp.GetRequiredService<IServiceScopeFactory>(),
+            // Field-mapping-server-write-path-r1 task 017: the handler takes the ONE server create (its old collaborators
+            // moved into it); this call changed only its arguments.
+            sp.GetRequiredService<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>(),
             http,
             sp.GetRequiredService<ILogger<Program>>(),
             ct).ConfigureAwait(false);
@@ -103,9 +100,10 @@ public class DecisionRouteCores
             http,
             sp.GetRequiredService<ILogger<Program>>(),
             ct,
-            // ebilling-r1 D-96 (#2081 follow-up): the app-only reader an invoice's lines are counted with, as the re-file route
-            // (ChildRecordEndpoints.RefileAsync) and the chat update tool pass it. Without it every invoice core-lookup move on
-            // this path fails closed as invoice_family_read_failed, even when no line is left behind.
+            // ebilling-r1 D-96 (#2081 follow-up): the app-only reader the invoice-family guard reads the stored row and its lines
+            // with, as the re-file route (ChildRecordEndpoints.RefileAsync) and the chat update tool pass it. Without it a guarded
+            // update on this path fails closed as invoice_family_read_failed. (An invoice's core record is never moved through the
+            // BFF whatever the reader: EB-D-231 rule 1 refuses it.)
             appOnlyEntities: sp.GetRequiredService<IGenericEntityService>()).ConfigureAwait(false);
         return await ReadAsync(result, http).ConfigureAwait(false);
     }

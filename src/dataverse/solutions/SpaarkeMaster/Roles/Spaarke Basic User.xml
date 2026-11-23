@@ -53,14 +53,6 @@
     <RolePrivilege name="prvAppendSLA" level="Basic" />
     <RolePrivilege name="prvAppendSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvAppendSocialProfile" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvAppendsprk_analysis" level="Deep" />
-    <RolePrivilege name="prvAppendsprk_Communication" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_CommunicationThread" level="Basic" />
     <RolePrivilege name="prvAppendSyncError" level="Basic" />
     <RolePrivilege name="prvAppendToAccount" level="Basic" />
     <RolePrivilege name="prvAppendToActionCard" level="Global" />
@@ -108,37 +100,6 @@
     <RolePrivilege name="prvAppendToSLA" level="Basic" />
     <RolePrivilege name="prvAppendToSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvAppendToSocialProfile" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_AccountType_Ref" level="Global" />
-    <RolePrivilege name="prvAppendTosprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_AgreementType" level="Global" />
-    <RolePrivilege name="prvAppendTosprk_analysis" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_billingexport" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_Communication" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_Document" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_DocumentType" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_documenttype_ref" level="Global" />
-    <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_externalidentifier" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_invoiceapproval" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_invoicecorrection" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_invoicesubmission" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_Matter" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_Memo" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_NavItem" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_Organization" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_OrganizationType_Ref" level="Global" />
-    <RolePrivilege name="prvAppendTosprk_Project" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_RecordType_Ref" level="Global" />
-    <RolePrivilege name="prvAppendTosprk_Report" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_ReportCard" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_Todo" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_WorkAssignment" level="Deep" />
     <RolePrivilege name="prvAppendToSyncError" level="Basic" />
     <RolePrivilege name="prvAppendToTraceLog" level="Global" />
     <RolePrivilege name="prvAppendToTransactionCurrency" level="Global" />
@@ -182,14 +143,6 @@
     <RolePrivilege name="prvAssignSLA" level="Basic" />
     <RolePrivilege name="prvAssignSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvAssignSocialProfile" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_analysis" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Communication" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationThread" level="Basic" />
     <RolePrivilege name="prvAssignSyncError" level="Basic" />
     <RolePrivilege name="prvAssignUserEntityInstanceData" level="Basic" />
     <RolePrivilege name="prvAssignUserForm" level="Basic" />
@@ -235,14 +188,6 @@
     <RolePrivilege name="prvCreateSharePointDocument" level="Basic" />
     <RolePrivilege name="prvCreateSharePointDocumentLocation" level="Basic" />
     <RolePrivilege name="prvCreateSocialProfile" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvCreatesprk_analysis" level="Deep" />
-    <RolePrivilege name="prvCreatesprk_Communication" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_CommunicationThread" level="Basic" />
     <RolePrivilege name="prvCreateSyncError" level="Basic" />
     <RolePrivilege name="prvCreateTraceLog" level="Global" />
     <RolePrivilege name="prvCreatetrait" level="Basic" />
@@ -283,14 +228,6 @@
     <RolePrivilege name="prvDeletePostFollow" level="Basic" />
     <RolePrivilege name="prvDeleteReport" level="Basic" />
     <RolePrivilege name="prvDeleteSocialProfile" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvDeletesprk_analysis" level="Deep" />
-    <RolePrivilege name="prvDeletesprk_Communication" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_CommunicationThread" level="Basic" />
     <RolePrivilege name="prvDeleteSyncError" level="Basic" />
     <RolePrivilege name="prvDeleteTranslationProcess" level="Global" />
     <RolePrivilege name="prvDeleteUserApplicationMetadata" level="Basic" />
@@ -588,15 +525,6 @@
     <RolePrivilege name="prvShareSLA" level="Basic" />
     <RolePrivilege name="prvShareSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvShareSocialProfile" level="Basic" />
-    <RolePrivilege name="prvSharesprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvSharesprk_analysis" level="Deep" />
-    <RolePrivilege name="prvSharesprk_Communication" level="Basic" />
-    <RolePrivilege name="prvSharesprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvSharesprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvSharesprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvSharesprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvSharesprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvSharesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvShareSyncError" level="Basic" />
     <RolePrivilege name="prvShareUserEntityInstanceData" level="Basic" />
     <RolePrivilege name="prvShareUserEntityUISettings" level="Basic" />
@@ -648,14 +576,6 @@
     <RolePrivilege name="prvWriteSharePointDocument" level="Basic" />
     <RolePrivilege name="prvWriteSharePointDocumentLocation" level="Basic" />
     <RolePrivilege name="prvWriteSocialProfile" level="Basic" />
-    <RolePrivilege name="prvWritesprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvWritesprk_analysis" level="Deep" />
-    <RolePrivilege name="prvWritesprk_Communication" level="Basic" />
-    <RolePrivilege name="prvWritesprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvWritesprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvWritesprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvWritesprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvWritesprk_CommunicationThread" level="Basic" />
     <RolePrivilege name="prvWriteSyncError" level="Basic" />
     <RolePrivilege name="prvWritetrait" level="Basic" />
     <RolePrivilege name="prvWriteTranslationProcess" level="Global" />

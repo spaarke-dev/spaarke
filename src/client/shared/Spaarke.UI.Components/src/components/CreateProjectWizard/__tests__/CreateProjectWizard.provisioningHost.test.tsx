@@ -124,24 +124,23 @@ describe('CreateProjectWizard — routes a provisioning failure to the right des
     await userEvent.click(screen.getByRole('button', { name: 'Try securing again' }));
 
     await waitFor(() => expect(screen.getByText(/now secured, with its own document container/)).toBeInTheDocument());
-    // Task 142: the wizard also syncs the project's Assigned-To access once provisioning has run; the provisioning
-    // calls themselves are still exactly two — the first attempt and the retry, on the SAME project.
+    // The provisioning calls are exactly two — the first attempt and the retry, on the SAME project.
     const provisionCalls = authFetch.mock.calls.filter(([url]) => String(url).includes('/provision-project'));
     expect(provisionCalls).toHaveLength(2);
     expect(JSON.parse(provisionCalls[1][1].body).projectId).toBe(PROJECT_ID);
   });
 
-  it('syncs a SECURE project’s Assigned-To access only AFTER provisioning ran (task 142, owner A3 = prompt)', async () => {
+  // Task 022 (was task 142's "sync only AFTER provisioning"): the wizard makes no client Assigned-To sync. The server's
+  // secure-from-creation create runs the Assigned * pass on the already-secure record (so owner A3's "suggest, not grant"
+  // rule sees the flag), and the reconciliation job runs it when the create could not finish the securing.
+  it('makes no client Assigned-To sync for a SECURE project, before or after provisioning', async () => {
     const authFetch = jest.fn().mockResolvedValue(ok);
 
     await finishWithProvisioningFailure(authFetch);
 
     const urls = authFetch.mock.calls.map(([url]) => String(url));
-    const provisionAt = urls.findIndex(u => u.includes('/provision-project'));
-    const syncAt = urls.findIndex(u => u.includes('/assigned-access/sync'));
-    expect(provisionAt).toBeGreaterThanOrEqual(0);
-    expect(syncAt).toBeGreaterThan(provisionAt);
-    expect(JSON.parse(authFetch.mock.calls[syncAt][1].body)).toEqual({ recordType: 'project', recordId: PROJECT_ID });
+    expect(urls.some(u => u.includes('/provision-project'))).toBe(true);
+    expect(urls.filter(u => u.includes('/assigned-access/sync'))).toEqual([]);
   });
 
   it('shows a non-retryable failure as its warning, with no action and no retry advice', async () => {

@@ -1,4 +1,3 @@
-using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -615,6 +614,14 @@ public static class DocumentUrlIdentityResolution
     /// cause is read off the inner chain: the ObjectDoesNotExist fault code (locale-independent, see
     /// <see cref="RecordContainerResolver.IsRecordNotFound"/>), or the message that client throws itself when the
     /// retrieve returns no entity. That message is our own literal, not a localized Dataverse string.
+    ///
+    /// <para>The alternate-key miss code <c>0x80060891</c> is a DIFFERENT code from <c>0x80040217
+    /// ObjectDoesNotExist</c>, which Dataverse returns only for a by-id retrieve. It is matched by
+    /// <see cref="DataverseServiceClientImpl.IsAlternateKeyNoMatch"/> (exact code, never a range: <c>0x80060892</c>
+    /// is one integer away and means duplicate / not-Active key, which MUST keep answering 503 — NFR-07). Task 042
+    /// UAT (2026-09-18): without it, every genuinely-new Word document answered 503 ("Couldn't check this
+    /// document"); measured read-only on dev, <c>GET sprk_documents(sprk_graphitemid='&lt;absent&gt;')</c> →
+    /// <c>404 0x80060891</c>. The check moved to the shared classifier for #2292 with no change in behaviour.</para>
     /// </summary>
     private static bool IsAlternateKeyNotFound(Exception ex)
     {
@@ -623,7 +630,7 @@ public static class DocumentUrlIdentityResolution
             if (RecordContainerResolver.IsRecordNotFound(current))
                 return true;
 
-            if (IsAlternateKeyRecordDoesNotExist(current))
+            if (DataverseServiceClientImpl.IsAlternateKeyNoMatch(current))
                 return true;
 
             if (current.Message.Contains("not found with provided alternate key values", StringComparison.Ordinal))
@@ -632,38 +639,6 @@ public static class DocumentUrlIdentityResolution
 
         return false;
     }
-
-    /// <summary>
-    /// Dataverse <c>0x80060891</c> — an <b>alternate-key</b> retrieve matched no row. This is a DIFFERENT code
-    /// from <c>0x80040217 ObjectDoesNotExist</c>, which <see cref="RecordContainerResolver.IsRecordNotFound"/>
-    /// matches and which Dataverse returns only for a <b>by-id</b> retrieve.
-    ///
-    /// <para><b>Why this exists (task 042 UAT, 2026-09-18).</b> Without it, an absent row on the
-    /// <c>sprk_graphitemid_uk</c> lookup — i.e. the ordinary "this document is new" case — fell through
-    /// <see cref="IsAlternateKeyNotFound"/> into the indeterminate branch and answered 503. Every genuinely-new
-    /// Word document then showed "Couldn't check this document — the service is unavailable" and the pane could
-    /// only offer save-as-new-anyway. It failed SAFE (no duplicate rows), but it is this type's three-answers
-    /// contract inverted: the contract exists so INDETERMINATE is never read as NEW, and this read NEW as
-    /// INDETERMINATE. The pre-existing predicate was written against the by-id code and reused here, and its
-    /// message fallback matches only <c>DataverseServiceClientImpl</c>'s OWN literal ("not found with provided
-    /// alternate key values", thrown when the retrieve returns no entity) — never Dataverse's wording.</para>
-    ///
-    /// <para><b>Measured, not inferred.</b> Read-only against dev:
-    /// <c>GET sprk_documents(sprk_graphitemid='&lt;absent&gt;')</c> → <c>404 {"code":"0x80060891","message":"A
-    /// record with the specified key values does not exist in sprk_document entity"}</c>, byte-identical to the
-    /// fault captured in App Insights from the failing save; the by-id form returns <c>0x80040217</c>.</para>
-    ///
-    /// <para><b>Exact match, never a range.</b> <c>0x80060892</c> is one integer away and means duplicate /
-    /// not-Active key — genuinely indeterminate, and it MUST keep answering 503 (NFR-07: no duplicate-tolerant
-    /// fallback). A range or prefix match here would turn a real key-health outage into "this document is new",
-    /// which is precisely the duplicate-row failure FR-01 exists to prevent. Typed on
-    /// <see cref="OrganizationServiceFault.ErrorCode"/> rather than message text because Dataverse fault
-    /// messages are localized. Mirrors the established idiom in
-    /// <c>DataverseServiceClientImpl.IsAlternateKeyDuplicate</c>.</para>
-    /// </summary>
-    private static bool IsAlternateKeyRecordDoesNotExist(Exception ex)
-        => ex is FaultException<OrganizationServiceFault> fault
-           && fault.Detail?.ErrorCode == unchecked((int)0x80060891);
 
     /// <summary>
     /// The one 503 the email-identity route gives when the answer cannot be determined — Dataverse not answering the

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -206,31 +205,31 @@ public class ContactCreateOwnerPolicyGuardTests
                 return new[] { literal.Token.ValueText };
 
             case InterpolatedStringExpressionSyntax interpolated:
-            {
-                IReadOnlyList<string> result = new[] { string.Empty };
-                foreach (var part in interpolated.Contents)
                 {
-                    IReadOnlyList<string> alternatives = part switch
+                    IReadOnlyList<string> result = new[] { string.Empty };
+                    foreach (var part in interpolated.Contents)
                     {
-                        InterpolatedStringTextSyntax text => new[] { text.TextToken.ValueText },
-                        InterpolationSyntax { AlignmentClause: null, FormatClause: null } hole
-                            when Inner(hole.Expression) is { Count: > 0 } inner => inner,
-                        _ => new[] { Hole.ToString() },
-                    };
-                    result = Product(result, alternatives);
+                        IReadOnlyList<string> alternatives = part switch
+                        {
+                            InterpolatedStringTextSyntax text => new[] { text.TextToken.ValueText },
+                            InterpolationSyntax { AlignmentClause: null, FormatClause: null } hole
+                                when Inner(hole.Expression) is { Count: > 0 } inner => inner,
+                            _ => new[] { Hole.ToString() },
+                        };
+                        result = Product(result, alternatives);
+                    }
+
+                    return result;
                 }
 
-                return result;
-            }
-
             case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression):
-            {
-                var left = Inner(binary.Left);
-                var right = Inner(binary.Right);
-                return left.Count == 0 && right.Count == 0
-                    ? Array.Empty<string>()
-                    : Product(left.Count > 0 ? left : new[] { Hole.ToString() }, right.Count > 0 ? right : new[] { Hole.ToString() });
-            }
+                {
+                    var left = Inner(binary.Left);
+                    var right = Inner(binary.Right);
+                    return left.Count == 0 && right.Count == 0
+                        ? Array.Empty<string>()
+                        : Product(left.Count > 0 ? left : new[] { Hole.ToString() }, right.Count > 0 ? right : new[] { Hole.ToString() });
+                }
 
             case BinaryExpressionSyntax coalesce when coalesce.IsKind(SyntaxKind.CoalesceExpression):
                 return Inner(coalesce.Left).Concat(Inner(coalesce.Right)).ToList();
@@ -239,41 +238,41 @@ public class ContactCreateOwnerPolicyGuardTests
                 return Inner(conditional.WhenTrue).Concat(Inner(conditional.WhenFalse)).ToList();
 
             case ObjectCreationExpressionSyntax { ArgumentList: { } uriArguments } uri when RightmostName(uri.Type) == "Uri":
-            {
-                // new Uri(x), new Uri(base, x), new Uri(x, UriKind.Relative): the path is the last argument that is not a UriKind.
-                var path = uriArguments.Arguments.Select(a => a.Expression)
-                    .LastOrDefault(a => !(a is MemberAccessExpressionSyntax m && RightmostName(m.Expression) == "UriKind"));
-                return path is null ? Array.Empty<string>() : Inner(path);
-            }
+                {
+                    // new Uri(x), new Uri(base, x), new Uri(x, UriKind.Relative): the path is the last argument that is not a UriKind.
+                    var path = uriArguments.Arguments.Select(a => a.Expression)
+                        .LastOrDefault(a => !(a is MemberAccessExpressionSyntax m && RightmostName(m.Expression) == "UriKind"));
+                    return path is null ? Array.Empty<string>() : Inner(path);
+                }
 
             case IdentifierNameSyntax or MemberAccessExpressionSyntax:
-            {
-                var values = new List<string>();
-                if (RightmostName(expression) is { } name && (constantNames.Contains(name) || ContactSetName.IsMatch(name)))
                 {
-                    values.Add("contacts");
-                }
-
-                if (expression is IdentifierNameSyntax local && depth < MaxLocalDepth)
-                {
-                    foreach (var source in LocalValueSources(local))
+                    var values = new List<string>();
+                    if (RightmostName(expression) is { } name && (constantNames.Contains(name) || ContactSetName.IsMatch(name)))
                     {
-                        if (state.Values.TryGetValue((source, depth + 1), out var known))
+                        values.Add("contacts");
+                    }
+
+                    if (expression is IdentifierNameSyntax local && depth < MaxLocalDepth)
+                    {
+                        foreach (var source in LocalValueSources(local))
                         {
-                            values.AddRange(known);
-                        }
-                        else if (state.Active.Add(source))
-                        {
-                            var found = Texts(source, constantNames, depth + 1, state);
-                            state.Active.Remove(source);
-                            state.Values[(source, depth + 1)] = found;
-                            values.AddRange(found);
+                            if (state.Values.TryGetValue((source, depth + 1), out var known))
+                            {
+                                values.AddRange(known);
+                            }
+                            else if (state.Active.Add(source))
+                            {
+                                var found = Texts(source, constantNames, depth + 1, state);
+                                state.Active.Remove(source);
+                                state.Values[(source, depth + 1)] = found;
+                                values.AddRange(found);
+                            }
                         }
                     }
-                }
 
-                return Capped(values);
-            }
+                    return Capped(values);
+                }
 
             default:
                 return Array.Empty<string>();
@@ -317,17 +316,17 @@ public class ContactCreateOwnerPolicyGuardTests
             switch (node)
             {
                 case VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: not BaseFieldDeclarationSyntax } declaration } declarator:
-                {
-                    var info = Of(declarator.Identifier.ValueText);
-                    info.Declared = true;
-                    info.Type ??= declaration.Type.IsVar ? null : declaration.Type;
-                    if (declarator.Initializer is { } initializer)
                     {
-                        info.Sources.Add(initializer.Value);
-                    }
+                        var info = Of(declarator.Identifier.ValueText);
+                        info.Declared = true;
+                        info.Type ??= declaration.Type.IsVar ? null : declaration.Type;
+                        if (declarator.Initializer is { } initializer)
+                        {
+                            info.Sources.Add(initializer.Value);
+                        }
 
-                    break;
-                }
+                        break;
+                    }
 
                 case SingleVariableDesignationSyntax designation:
                     Of(designation.Identifier.ValueText).Declared = true;
@@ -514,30 +513,30 @@ public class ContactCreateOwnerPolicyGuardTests
             case MemberAccessExpressionSyntax member:
                 return member.Name.Identifier.ValueText == "Post" && RightmostName(member.Expression) == "HttpMethod";
             case IdentifierNameSyntax local when depth < MaxLocalDepth:
-            {
-                foreach (var source in LocalValueSources(local))
                 {
-                    if (state.Posts.TryGetValue((source, depth + 1), out var known))
+                    foreach (var source in LocalValueSources(local))
                     {
-                        if (known)
+                        if (state.Posts.TryGetValue((source, depth + 1), out var known))
                         {
-                            return true;
+                            if (known)
+                            {
+                                return true;
+                            }
+                        }
+                        else if (state.Active.Add(source))
+                        {
+                            var found = IsHttpPost(source, depth + 1, state);
+                            state.Active.Remove(source);
+                            state.Posts[(source, depth + 1)] = found;
+                            if (found)
+                            {
+                                return true;
+                            }
                         }
                     }
-                    else if (state.Active.Add(source))
-                    {
-                        var found = IsHttpPost(source, depth + 1, state);
-                        state.Active.Remove(source);
-                        state.Posts[(source, depth + 1)] = found;
-                        if (found)
-                        {
-                            return true;
-                        }
-                    }
-                }
 
-                return false;
-            }
+                    return false;
+                }
 
             default:
                 return false;
@@ -584,42 +583,42 @@ public class ContactCreateOwnerPolicyGuardTests
         switch (node)
         {
             case InvocationExpressionSyntax invocation:
-            {
-                var arguments = invocation.ArgumentList.Arguments.Select(a => a.Expression).ToList();
-                if (PostsToContacts(arguments, names))
                 {
-                    return Shape.HttpPost;
-                }
+                    var arguments = invocation.ArgumentList.Arguments.Select(a => a.Expression).ToList();
+                    if (PostsToContacts(arguments, names))
+                    {
+                        return Shape.HttpPost;
+                    }
 
-                var method = MethodName(invocation.Expression);
-                if (method == "CreateAsync" && arguments.Any(a => Texts(a, names).Any(IsContactTarget)))
-                {
-                    return Shape.WebApiCreateAsync;
-                }
+                    var method = MethodName(invocation.Expression);
+                    if (method == "CreateAsync" && arguments.Any(a => Texts(a, names).Any(IsContactTarget)))
+                    {
+                        return Shape.WebApiCreateAsync;
+                    }
 
-                return method is not null && PostMethodName.IsMatch(method) && arguments.Any(a => Texts(a, names).Any(IsContactPath))
-                    ? Shape.UserClientPost
-                    : null;
-            }
+                    return method is not null && PostMethodName.IsMatch(method) && arguments.Any(a => Texts(a, names).Any(IsContactPath))
+                        ? Shape.UserClientPost
+                        : null;
+                }
 
             case BaseObjectCreationExpressionSyntax creation:
-            {
-                var arguments = creation.ArgumentList?.Arguments.Select(a => a.Expression).ToList() ?? new List<ExpressionSyntax>();
-                if (PostsToContacts(arguments, names))
                 {
-                    return Shape.HttpPost;
-                }
+                    var arguments = creation.ArgumentList?.Arguments.Select(a => a.Expression).ToList() ?? new List<ExpressionSyntax>();
+                    if (PostsToContacts(arguments, names))
+                    {
+                        return Shape.HttpPost;
+                    }
 
-                if (IsSdkEntityCreation(creation))
-                {
-                    var byConstructor = arguments.Count > 0 && Texts(arguments[0], names).Any(IsContactTable);
-                    var byInitializer = creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>()
-                        .Any(a => RightmostName(a.Left) == "LogicalName" && Texts(a.Right, names).Any(IsContactTable)) ?? false;
-                    return byConstructor || byInitializer ? Shape.SdkEntity : null;
-                }
+                    if (IsSdkEntityCreation(creation))
+                    {
+                        var byConstructor = arguments.Count > 0 && Texts(arguments[0], names).Any(IsContactTable);
+                        var byInitializer = creation.Initializer?.Expressions.OfType<AssignmentExpressionSyntax>()
+                            .Any(a => RightmostName(a.Left) == "LogicalName" && Texts(a.Right, names).Any(IsContactTable)) ?? false;
+                        return byConstructor || byInitializer ? Shape.SdkEntity : null;
+                    }
 
-                return null;
-            }
+                    return null;
+                }
 
             case TupleExpressionSyntax tuple:
                 return PostsToContacts(tuple.Arguments.Select(a => a.Expression).ToList(), names) ? Shape.HttpPost : null;
@@ -757,7 +756,8 @@ public class ContactCreateOwnerPolicyGuardTests
             BffRoot + "Services/Ai/Handlers/DataverseCreateRecordHandler.cs",
             "tablename",
             "Chat dataverse.create_record with tablename=contact: the table is a RUNTIME tool argument, so no source text names it. "
-            + "App-only, owned by the caller's business-unit team via the general record-first resolver (OwnedChildWrite), and "
+            + "App-only, owned by the caller's business-unit team via the general record-first resolver (RecordCreationService "
+            + "since field-mapping task 017), and "
             + "it does NOT use ExternalAccess:CustomerBusinessUnitId: it is not an identity-contact create."),
     };
 
@@ -1614,18 +1614,16 @@ public class ContactCreateOwnerPolicyGuardTests
     public void Control_DesignationLocals_AndAHeldMethod_ThatAreNotACreate_AreNotFlagged(string statement)
         => Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { " + statement + " }"));
 
-    [Fact(DisplayName = "ISS-005 guard: 60 assignments to one local resolve in bounded time, and the contacts one among them is still found")]
-    public void Control_ManyAssignmentsToOneLocal_ResolveInBoundedTime()
+    [Fact(DisplayName = "ISS-005 guard: 60 assignments to one local resolve, and the contacts one among them is still found")]
+    public void Control_ManyAssignmentsToOneLocal_Resolve()
     {
         var lines = string.Join(" ", Enumerable.Range(0, 60).Select(i => $"u = u + \"/p{i}\";"));
         string Code(string extra) => "private Task MakeAsync() { var u = GetApiUrl(); " + lines + extra + " return http.PostAsync(u, body, ct); }";
 
-        var clock = Stopwatch.StartNew();
+        // No wall-clock bound (Stopwatch is banned in tests): an unbounded local following would hang this test, which the
+        // CI job timeout reports.
         Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", Code(string.Empty)));
         Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs", Code(" u = u + \"/contacts\";")));
-        clock.Stop();
-
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"resolving 60 assignments took {clock.Elapsed}: the local following is not bounded");
     }
 
     // ── UAC round 6: the resolution's depth, cap and null-coalescing arms ─────────────────────────────

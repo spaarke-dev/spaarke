@@ -4,7 +4,7 @@
 
 A declarative agent for Microsoft 365 Copilot that helps users manage and organize their SharePoint sites and OneDrive content. The agent leverages OneDrive and SharePoint access, Microsoft Learn MCP integration for official documentation, and GraphicArt for visual diagrams to provide document search, organization guidance, and best practices for content management.
 
-![Data Manager in action](./assets/example_response.png)
+*(image not included in this snapshot: Data Manager in action)*
 
 ## Contributors
 

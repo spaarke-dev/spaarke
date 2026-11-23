@@ -193,7 +193,9 @@ public class CommunicationIntegrationTests
         return new CommunicationService(
             CommunicationChannelTestFactory.CreateDispatcher(graphFactoryMock.Object),
             senderValidator,
-            communicationDataverseMock?.Object ?? Mock.Of<ICommunicationDataverseService>(),
+            // Issue #2033: a send as user needs the caller's enabled systemuser; by default every caller resolves to one.
+            communicationDataverseMock?.Object ?? Mock.Of<ICommunicationDataverseService>(c =>
+                c.QuerySystemUserByAzureAdOidAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()) == Task.FromResult<Guid?>(Guid.NewGuid())),
             resolvedEntityService,
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not tested here

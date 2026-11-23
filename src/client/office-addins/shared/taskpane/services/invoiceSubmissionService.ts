@@ -9,7 +9,11 @@
  * - §2 `POST /api/finance/invoice-submissions/from-email` — {@link submitInvoiceFromEmail};
  * - §3 `GET statusUrl` until the status is final — {@link pollSubmission};
  * - §8 `GET /api/finance/core-records/{entityType}/{entityId}/firms` — {@link loadInvoiceFirms};
- * - §5, §6 and §9 codes → user text in `utils/invoiceSubmissionMessages.ts`.
+ * - §11 `GET /api/finance/invoice-submissions?internetMessageId=` — {@link loadPreviousSubmission} (ebilling 095a);
+ * - §5, §6 and §9 codes → user text in `utils/invoiceSubmissionMessages.ts`;
+ * - ebilling 095g (`projects/ebilling-r1/notes/095g-assign-firm.md`, "Contract for word-add-in-r1 (as built)"):
+ *   `GET /api/finance/firms` — {@link listLawFirms}; `POST /api/finance/core-records/{entityType}/{entityId}/firms` —
+ *   {@link addFirmToRecord} (the add alone; the pane never removes a firm).
  *
  * The request's `email` is EXACTLY `/office/save`'s: built by the ribbon Quick Save's `buildEmailSaveRequest` (only its
  * `email` is taken — the contract refuses a nested SaveRequest) over the pane's own `captureEmailContent`. No second
@@ -24,13 +28,17 @@
 import type { IHostAdapter } from '@shared/adapters';
 import type { AttachmentInfo } from '@shared/adapters/types';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from '../utils/errorMessages';
 import {
   describeInvoiceOutcome,
   describeSubmissionRefusal,
   EMAIL_UNIDENTIFIABLE_CODE,
   FILING_KEPT_DETAIL,
-  HELD_FOR_REVIEW_MESSAGE,
+  describeAcceptedOutcome,
+  describeFirmAssignRefusal,
+  FIRM_ASSIGN_GENERIC_MESSAGE,
+  FIRM_LIST_GENERIC_MESSAGE,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
   type InvoiceMessageContext,
@@ -45,13 +53,23 @@ import {
   type SkippedAttachment,
 } from './emailContentCapture';
 import { buildEmailSaveRequest, type OfficeSaveRequestBody, type QuickSaveEmailContext } from './quickSaveHelpers';
-import type {
-  InvoiceFirmOption,
-  InvoiceSubmissionInput,
-  InvoiceSubmissionMark,
-  InvoiceSubmissionTarget,
-  InvoiceSubmitHandler,
-  InvoiceWireMark,
+import {
+  INVOICE_CORE_RECORD_TYPES,
+  type AddFirmOutcome,
+  type InvoiceCoreRecordType,
+  type InvoiceCorrectionPrefill,
+  type InvoiceFiledUnder,
+  type InvoiceFirmOption,
+  type LawFirmPage,
+  type ListLawFirmsArgs,
+  type InvoicePreviousSubmission,
+  type InvoiceSubmissionInput,
+  type FollowPreviousSubmission,
+  type LoadPreviousSubmission,
+  type InvoiceSubmissionMark,
+  type InvoiceSubmissionTarget,
+  type InvoiceSubmitHandler,
+  type InvoiceWireMark,
 } from './invoiceSubmissionSeam';
 
 /** The BFF base URL and token getter every call needs. */
@@ -83,11 +101,14 @@ export interface InvoiceFromEmailRequestBody {
   targetEntity: InvoiceSubmissionTarget;
   email: OfficeSaveRequestBody['email'];
   marks: InvoiceWireMarkEntry[];
+  /** Always a firm id: the pane never sends an invoice without one (the server refuses it). */
   firmId: string;
   firmInvoiceNumber: string;
   poNumber: string | null;
   mode: 'New' | 'Correction';
   invoiceId: string | null;
+  /** 095f: the trimmed note of a Correction. The property is absent on a New invoice (the server refuses it there). */
+  correctionNote?: string;
 }
 
 /** The §3 202 body. */
@@ -107,6 +128,20 @@ export interface InvoiceRefusalExtras {
   invoiceStatus?: string;
   /** §6 "After step A" (task 094): the email was filed under the record before the refusal, and stays filed. */
   filingKept?: true;
+  /** §6 (ebilling task 192): on 409 `document_core_record_mismatch`, the readable record the email is filed under. */
+  filedUnder?: InvoiceFiledUnder;
+}
+
+/** A well-formed `filedUnder` (a core record type, an id and a name), or undefined: anything else is ignored. */
+function readFiledUnder(value: unknown): InvoiceFiledUnder | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  const entityType = stringOrUndefined(v.entityType);
+  const entityId = stringOrUndefined(v.entityId);
+  const name = stringOrUndefined(v.name);
+  if (!entityType || !entityId || !name) return undefined;
+  if (!(INVOICE_CORE_RECORD_TYPES as string[]).includes(entityType)) return undefined;
+  return { entityType: entityType as InvoiceCoreRecordType, entityId, name };
 }
 
 /**
@@ -146,7 +181,13 @@ const FINAL_STATUSES: ReadonlySet<string> = new Set<InvoiceFinalStatus>(['Accept
 
 /** What {@link pollSubmission} ends with. */
 export type InvoicePollResult =
-  | { kind: 'final'; status: InvoiceFinalStatus; outcomeReasonCode: string | null }
+  | {
+      kind: 'final';
+      status: InvoiceFinalStatus;
+      outcomeReasonCode: string | null;
+      /** §9 (ebilling 097f): the correcting submission's tracking number, when the server names it. */
+      replacedByTrackingNumber?: string;
+    }
   /** The cap was reached while the submission was still Received / Processing (or unreadable for a moment). */
   | { kind: 'pending'; status: string | undefined }
   /** The status cannot be read at all (404, or a refusal that will not change). */
@@ -333,6 +374,9 @@ export function buildInvoiceFromEmailBody(
     poNumber: input.poNumber,
     mode: input.mode,
     invoiceId: input.mode === 'Correction' ? input.invoiceId : null,
+    ...(input.mode === 'Correction' && input.correctionNote !== undefined
+      ? { correctionNote: input.correctionNote }
+      : {}),
   };
 }
 
@@ -468,6 +512,7 @@ async function postFromEmail(
   const fileName = stringOrUndefined(json?.fileName);
   const mark = stringOrUndefined(json?.mark);
   const invoiceStatus = stringOrUndefined(json?.invoiceStatus);
+  const filedUnder = readFiledUnder(json?.filedUnder);
   return {
     kind: 'refused',
     status: response.status,
@@ -477,6 +522,7 @@ async function postFromEmail(
     ...(fileName ? { fileName } : {}),
     ...(mark ? { mark } : {}),
     ...(invoiceStatus ? { invoiceStatus } : {}),
+    ...(filedUnder ? { filedUnder } : {}),
     ...filingKept,
   };
 }
@@ -534,10 +580,16 @@ export async function pollSubmission(
     const status = stringOrUndefined(json?.status);
     lastStatus = status ?? lastStatus;
     if (status && FINAL_STATUSES.has(status)) {
+      const replacedBy = json?.replacedBy;
+      const replacedByTrackingNumber =
+        replacedBy && typeof replacedBy === 'object'
+          ? stringOrUndefined((replacedBy as Record<string, unknown>).trackingNumber)
+          : undefined;
       return {
         kind: 'final',
         status: status as InvoiceFinalStatus,
         outcomeReasonCode: stringOrUndefined(json?.outcomeReasonCode) ?? null,
+        ...(replacedByTrackingNumber ? { replacedByTrackingNumber } : {}),
       };
     }
   }
@@ -588,6 +640,365 @@ export async function loadInvoiceFirms(
     .map(row => ({ firmId: row.firmId, name: row.name }));
 }
 
+/** Firm rows (`{ firmId, name }`) read tolerantly: a row without a string id and name is dropped. */
+function readFirmRows(value: unknown): InvoiceFirmOption[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (row): row is { firmId: string; name: string } =>
+        !!row && typeof row.firmId === 'string' && typeof row.name === 'string'
+    )
+    .map(row => ({ firmId: row.firmId, name: row.name }));
+}
+
+/** ebilling 095g: the page size the law-firm list asks for (the route allows 1-50), and the search bound. */
+export const LAW_FIRM_PAGE_SIZE = 25;
+export const LAW_FIRM_SEARCH_MAX = 100;
+export const LAW_FIRMS_ROUTE = '/api/finance/firms';
+
+/**
+ * The search as it goes on the wire: trimmed, at most {@link LAW_FIRM_SEARCH_MAX} CODE POINTS (the server's bound is on
+ * characters; cutting UTF-16 units could split a surrogate pair, and `encodeURIComponent` throws a URIError on a lone
+ * surrogate), and with any lone surrogate dropped, so encoding it can never throw.
+ */
+function boundedSearch(raw: string): string {
+  const wellFormed = Array.from(raw.trim()).filter(ch => {
+    const unit = ch.charCodeAt(0);
+    return ch.length === 2 || unit < 0xd800 || unit > 0xdfff;
+  });
+  return wellFormed.slice(0, LAW_FIRM_SEARCH_MAX).join('').trim();
+}
+
+/**
+ * One page of the active law firms a record can be given (ebilling 095g `GET /api/finance/firms`, internal callers
+ * only). `search` is trimmed and at most 100 characters (code points), and left out when blank. The page is read tolerantly: rows
+ * without an id and name are dropped, `hasMore` is true only when the server says `true`. Any failure THROWS with the
+ * pane's sentence for the code (never the server's `detail`); a 503 is never an empty list.
+ */
+export async function listLawFirms(
+  args: ListLawFirmsArgs,
+  config: InvoiceServiceConfig,
+  signal?: AbortSignal
+): Promise<LawFirmPage> {
+  const page = args.page ?? 1;
+  let response: Response;
+  try {
+    // Built inside the try: nothing here may throw out of this function as anything but its own sentence.
+    const search = boundedSearch(args.search ?? '');
+    const query = [
+      ...(search ? [`search=${encodeURIComponent(search)}`] : []),
+      `page=${page}`,
+      `pageSize=${args.pageSize ?? LAW_FIRM_PAGE_SIZE}`,
+    ].join('&');
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}${LAW_FIRMS_ROUTE}?${query}`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' }, ...(signal ? { signal } : {}) },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new Error("Couldn't reach Spaarke to list the law firms. Check your connection and try again.");
+  }
+  const json = await readJson(response);
+  if (!response.ok) {
+    throw new Error(
+      describeFirmAssignRefusal({ status: response.status, code: problemCode(response.status, json) }, 'list')
+    );
+  }
+  if (!json || !Array.isArray(json.items)) throw new Error(FIRM_LIST_GENERIC_MESSAGE);
+  return {
+    items: readFirmRows(json.items),
+    page: typeof json.page === 'number' ? json.page : page,
+    hasMore: json.hasMore === true,
+  };
+}
+
+/**
+ * Adds one firm to a core record (ebilling 095g `POST /api/finance/core-records/{entityType}/{entityId}/firms`). The
+ * body is exactly `{ "add": "<guid>" }`: the pane NEVER sends `remove` or `confirmRevoke`, so it can never take a firm,
+ * or a firm's access, away. Both ids are canonicalized (ADR-044); an id that cleans to nothing is refused here and
+ * nothing is sent.
+ *
+ * The 200 is read tolerantly (`changed`, `firms` — null when the server could not read the list back —, `access.state`,
+ * `recordActive`, `notice`), and `changed: false` (the firm was already there) is a success too. A refusal is keyed on
+ * `errorCode ?? reasonCode` ONLY, never on `detail`. No answer at all is a refusal whose sentence says the firm may not
+ * have been added: sending the same request again is safe (a repeat changes nothing).
+ */
+export async function addFirmToRecord(
+  target: InvoiceSubmissionTarget,
+  firmId: string,
+  config: InvoiceServiceConfig
+): Promise<AddFirmOutcome> {
+  const add = cleanGuid(firmId);
+  const recordId = cleanGuid(target.entityId);
+  if (!add || !recordId) return { kind: 'refused', status: 0, code: undefined, message: FIRM_ASSIGN_GENERIC_MESSAGE };
+
+  let response: Response;
+  try {
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}/api/finance/core-records/${encodeURIComponent(target.entityType)}/${encodeURIComponent(
+        recordId
+      )}/firms`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ add }) },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch {
+    return {
+      kind: 'refused',
+      status: 0,
+      code: undefined,
+      message: "Couldn't reach Spaarke, so the firm may not have been added. Check your connection and try again.",
+    };
+  }
+
+  const json = await readJson(response);
+  if (!response.ok) {
+    const code = problemCode(response.status, json);
+    return {
+      kind: 'refused',
+      status: response.status,
+      code,
+      message: describeFirmAssignRefusal({ status: response.status, code }),
+    };
+  }
+  const access = json?.access && typeof json.access === 'object' ? (json.access as Record<string, unknown>) : null;
+  const notice = stringOrUndefined(json?.notice)?.trim();
+  return {
+    kind: 'added',
+    // A 200 without the field is a write that happened: only an explicit `false` says it was a repeat.
+    changed: json?.changed !== false,
+    firms: Array.isArray(json?.firms) ? readFirmRows(json.firms) : null,
+    accessState: access?.state === 'pending' ? 'pending' : 'applied',
+    recordActive: json?.recordActive !== false,
+    notice: notice ? notice : null,
+  };
+}
+
+const UNREADABLE_PREFILL_MESSAGE = "Spaarke's answer about this invoice couldn't be read. Try again.";
+
+/** A §10 body, or undefined when any field the contract makes required is missing or of the wrong type. */
+function readCorrectionPrefill(json: unknown): InvoiceCorrectionPrefill | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const body = json as Record<string, unknown>;
+  // `firm` is null (a no-firm invoice, EB-D-185) or absent: no firm. A present object must carry a valid id and name.
+  const hasFirm = body.firm !== null && body.firm !== undefined;
+  if (hasFirm && typeof body.firm !== 'object') return undefined;
+  const firm = hasFirm ? (body.firm as Record<string, unknown>) : undefined;
+  const firmId = stringOrUndefined(firm?.id);
+  const firmName = stringOrUndefined(firm?.name);
+  const coreRecord = readFiledUnder(body.coreRecord);
+  const invoiceId = stringOrUndefined(body.invoiceId);
+  const firmInvoiceNumber = stringOrUndefined(body.firmInvoiceNumber);
+  if (hasFirm && (!firmId || firmName === undefined)) return undefined;
+  if (!invoiceId || !coreRecord || firmInvoiceNumber === undefined) return undefined;
+  if (typeof body.canCorrect !== 'boolean') return undefined;
+  const replaced =
+    body.replacedBy && typeof body.replacedBy === 'object' ? (body.replacedBy as Record<string, unknown>) : undefined;
+  const replacedId = stringOrUndefined(replaced?.invoiceId);
+  const replacedName = stringOrUndefined(replaced?.name);
+  return {
+    invoiceId,
+    firm: hasFirm && firmId && firmName !== undefined ? { id: firmId, name: firmName } : null,
+    coreRecord,
+    invoiceStatus: stringOrUndefined(body.invoiceStatus) ?? null,
+    trackingNumber: stringOrUndefined(body.trackingNumber) ?? null,
+    firmInvoiceNumber,
+    canCorrect: body.canCorrect,
+    reason: stringOrUndefined(body.reason) ?? null,
+    replacedBy: replacedId && replacedName ? { invoiceId: replacedId, name: replacedName } : null,
+  };
+}
+
+/**
+ * The correction prefill of an invoice (§10, ebilling 097e). Any failure THROWS with a sentence for the user: the
+ * uniform 404 (no Write on the invoice, not found, or a faulted rights read), 503 `ebilling.disabled`, any other 503,
+ * no answer, or a body that can't be read.
+ */
+export async function loadCorrectionPrefill(
+  invoiceId: string,
+  config: InvoiceServiceConfig
+): Promise<InvoiceCorrectionPrefill> {
+  let response: Response;
+  try {
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}/api/finance/invoices/${encodeURIComponent(cleanGuid(invoiceId))}/correction-prefill`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch {
+    throw new Error("Couldn't reach Spaarke to read this invoice. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("This invoice isn't available to you: it may not exist, or you can't change it.");
+    }
+    if (response.status === 503) {
+      const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (problemCode(503, json) === 'ebilling.disabled')
+        throw new Error('Invoice submission is turned off in Spaarke.');
+      throw new Error("Spaarke couldn't read this invoice right now. Try again in a moment.");
+    }
+    throw new Error((await describeFetchFailure(response)).message);
+  }
+  const prefill = readCorrectionPrefill(await response.json().catch(() => null));
+  if (!prefill) throw new Error(UNREADABLE_PREFILL_MESSAGE);
+  return prefill;
+}
+
+export const SUBMISSIONS_BY_EMAIL_ROUTE = '/api/finance/invoice-submissions';
+
+const PREVIOUS_STATUSES: ReadonlySet<string> = new Set<InvoicePreviousSubmission['status']>([
+  'Received',
+  'Processing',
+  'Accepted',
+  'Rejected',
+  'Failed',
+]);
+
+const PREVIOUS_UNREADABLE_MESSAGE =
+  "Spaarke's answer about this email's earlier invoice submission couldn't be read. Try again.";
+
+/** The sentence for a final status, from its outcome code (the same words the view shows after a submit); else null. */
+function previousSubmissionMessage(
+  status: InvoicePreviousSubmission['status'],
+  outcomeReasonCode: string | null,
+  replacedByTrackingNumber: string | undefined
+): string | null {
+  if (status === 'Accepted') return describeAcceptedOutcome(outcomeReasonCode, replacedByTrackingNumber) ?? null;
+  if (status === 'Rejected' || status === 'Failed') return describeInvoiceOutcome(outcomeReasonCode, {}, status);
+  return null;
+}
+
+function replacedByTracking(json: Record<string, unknown>): string | undefined {
+  const replacedBy = json.replacedBy;
+  return replacedBy && typeof replacedBy === 'object'
+    ? stringOrUndefined((replacedBy as Record<string, unknown>).trackingNumber)
+    : undefined;
+}
+
+/** A §11 200 body, or undefined when it has no submission id or a status this build does not know. */
+function readPreviousSubmission(json: Record<string, unknown> | null): InvoicePreviousSubmission | undefined {
+  if (!json) return undefined;
+  const submissionId = stringOrUndefined(json.submissionId);
+  const status = stringOrUndefined(json.status);
+  if (!submissionId || !status || !PREVIOUS_STATUSES.has(status)) return undefined;
+  const typedStatus = status as InvoicePreviousSubmission['status'];
+  const by =
+    json.submittedBy && typeof json.submittedBy === 'object' ? (json.submittedBy as Record<string, unknown>) : null;
+  const submittedBy = stringOrUndefined(by?.name)?.trim() || null;
+  // `firmName` (§11, 095e) is a top-level string next to `firmId`; null when the attempt has no firm or the firm has no
+  // name. It is read tolerantly: an absent, null, non-string or blank value adds nothing, and never makes the body
+  // unreadable.
+  const firmName = stringOrUndefined(json.firmName)?.trim() || null;
+  return {
+    submissionId,
+    statusUrl: `${SUBMISSIONS_BY_EMAIL_ROUTE}/${encodeURIComponent(cleanGuid(submissionId))}`,
+    trackingNumber: stringOrUndefined(json.trackingNumber) || null,
+    status: typedStatus,
+    message: previousSubmissionMessage(
+      typedStatus,
+      stringOrUndefined(json.outcomeReasonCode) ?? null,
+      replacedByTracking(json)
+    ),
+    invoiceId: stringOrUndefined(json.invoiceId) || null,
+    submittedOn: stringOrUndefined(json.submittedOn) || null,
+    submittedBy,
+    isCorrection: json.isCorrection === true,
+    ...(firmName ? { firmName } : {}),
+  };
+}
+
+/**
+ * The email's latest invoice submission the caller can read (§11, ebilling 095a), or null when there is none to show:
+ * the uniform 404 (none, not readable, or a refused check), and 503 `ebilling.disabled` (Submit says that itself). Any
+ * other failure THROWS with a sentence: the route never says "not submitted" when it could not decide, and nor does this.
+ */
+export async function loadPreviousSubmission(
+  internetMessageId: string,
+  config: InvoiceServiceConfig,
+  signal?: AbortSignal
+): Promise<InvoicePreviousSubmission | null> {
+  let response: Response;
+  try {
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}${SUBMISSIONS_BY_EMAIL_ROUTE}?internetMessageId=${encodeURIComponent(internetMessageId)}`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' }, ...(signal ? { signal } : {}) },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch {
+    throw new Error(
+      "Couldn't reach Spaarke to check whether this email's invoice was already submitted. Check your connection and try again."
+    );
+  }
+  const json = await readJson(response);
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    if (response.status === 503 && problemCode(503, json) === 'ebilling.disabled') return null;
+    throw new Error(
+      "Spaarke couldn't check whether this email's invoice was already submitted. Try again in a moment."
+    );
+  }
+  const previous = readPreviousSubmission(json);
+  if (!previous) throw new Error(PREVIOUS_UNREADABLE_MESSAGE);
+  return previous;
+}
+
+/**
+ * The view's {@link LoadPreviousSubmission} over the host adapter: the open email's RFC Message-ID (capability-gated, as
+ * the suggested-record lookup reads it; never a hostType check). No Message-ID (a draft, or a host without the lookup)
+ * means there is nothing to look up.
+ */
+export function createPreviousSubmissionLoader(deps: {
+  config: InvoiceServiceConfig;
+  adapter: IHostAdapter;
+}): LoadPreviousSubmission {
+  return async signal => {
+    const { adapter } = deps;
+    if (!adapter.getCapabilities().canResolveEmailIdentity || !adapter.getEmailIdentityKeys) return null;
+    let internetMessageId: string | undefined;
+    try {
+      internetMessageId = (await adapter.getEmailIdentityKeys())?.internetMessageId;
+    } catch (err) {
+      console.warn('[invoiceSubmissionService] No Message-ID; no earlier submission is looked up.', err);
+      return null;
+    }
+    if (!internetMessageId) return null;
+    return loadPreviousSubmission(internetMessageId, deps.config, signal);
+  };
+}
+
+/**
+ * The view's {@link FollowPreviousSubmission}: follows the status URL (§3) as a submit does. A final status updates the
+ * submission and its sentence; a status not known in time, or one that can't be read, leaves it as it was.
+ */
+export function createPreviousSubmissionFollower(deps: {
+  config: InvoiceServiceConfig;
+  poll?: Omit<Parameters<typeof pollSubmission>[1], 'config'>;
+}): FollowPreviousSubmission {
+  return async (submission, signal) => {
+    const polled = await pollSubmission(submission.statusUrl, {
+      config: deps.config,
+      ...deps.poll,
+      ...(signal ? { signal } : {}),
+    });
+    if (polled.kind === 'aborted') return null;
+    if (polled.kind !== 'final') return submission;
+    return {
+      ...submission,
+      status: polled.status,
+      message: previousSubmissionMessage(polled.status, polled.outcomeReasonCode, polled.replacedByTrackingNumber),
+    };
+  };
+}
+
 /** The text context for messages: the file the user marked Invoice, from the client's own marks. */
 function messageContext(input: InvoiceSubmissionInput): InvoiceMessageContext {
   const invoiceFile = input.marks.find(m => m.mark === 'Invoice')?.fileName;
@@ -622,7 +1033,7 @@ export function createInvoiceSubmitHandler(deps: {
       const message = describeSubmissionRefusal(result, ctx);
       return result.code !== undefined && PERMANENT_SUBMISSION_CODES.has(result.code)
         ? { kind: 'permanent', message, ...skipped }
-        : { kind: 'refused', message, ...skipped };
+        : { kind: 'refused', message, ...(result.filedUnder ? { filedUnder: result.filedUnder } : {}), ...skipped };
     }
 
     const { trackingNumber, statusUrl } = result.accepted;
@@ -636,13 +1047,10 @@ export function createInvoiceSubmitHandler(deps: {
 
     if (polled.kind === 'final') {
       if (polled.status === 'Accepted') {
-        // An Accepted invoice with a code is HELD (§9): never the catalog's Failed / Rejected sentences.
-        return {
-          kind: 'success',
-          ...tracking,
-          ...(polled.outcomeReasonCode ? { message: HELD_FOR_REVIEW_MESSAGE } : {}),
-          ...skipped,
-        };
+        // An Accepted invoice with a code is HELD (§9), except one replaced by a correction (097f): never the catalog's
+        // Failed / Rejected sentences.
+        const message = describeAcceptedOutcome(polled.outcomeReasonCode, polled.replacedByTrackingNumber);
+        return { kind: 'success', ...tracking, ...(message ? { message } : {}), ...skipped };
       }
       // Rejected or Failed AFTER the 202: the submission exists (it has a tracking number), so it is not "not submitted".
       return {

@@ -125,7 +125,7 @@ public sealed class AssignTaskNotifierTests
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl }).Build();
             var customer = new CustomerIdentity(Options.Create(new CustomerOptions { Id = CustomerKey }), config, NullLogger<CustomerIdentity>.Instance);
 
-            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, null!, null!, null!, null!, null!, GateLog) { CallBase = true };
+            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.None) /* task 193: ContactUserRepresentation needs it */, null!, null!, null!, null!, GateLog) { CallBase = true };
             Gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Returns((string entity, Guid id, Guid user, CancellationToken _) =>
                 {
@@ -402,6 +402,28 @@ public sealed class AssignTaskNotifierTests
 
     // ── Must fire: an onboarded external assignee with a grant (D-199) ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// uac-r2 task 193 (master merge): the gate reads who the contact represents through ContactUserRepresentation. A user with
+    /// NO link who carries the contact's bound oid, where the binder does not resolve that oid to this contact alone (two
+    /// contacts carry it), is not confirmed as the contact's user — and the contact is not external either: nobody is emailed.
+    /// </summary>
+    [Fact]
+    public async Task AContactWhoseOidAnUnlinkedUserCarries_Unconfirmed_IsNeitherInternalNorExternal_MustNotFire()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        h.Links.UsersByOid.GetOrAdd(PortalOid, _ => new List<AssignedLinkCandidate>())
+            .Add(new AssignedLinkCandidate(LinkedUser, null, PortalOid, false, 0, null, false));
+        h.Identities.Setup(i => i.FindContactsByOidAsync(PortalOid, It.IsAny<CancellationToken>())).ReturnsAsync(ContactLookup.Of(
+            new ContactBindingRow(Contact, 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address),
+            new ContactBindingRow(Guid.NewGuid(), 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address)));
+
+        (await h.Gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_matter", Matter), TaskId, AssignerOid, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.NoAccess));
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.NoAccessWarning);
+        h.NothingWasSent();
+    }
+
     [Fact]
     public async Task OnboardedExternal_WithAGrant_GetsThePortalLink_NoModelDrivenLink_NoRecordName_NoBell_AndTheAssignerByDisplayNameOnly()
     {
@@ -583,6 +605,102 @@ public sealed class AssignTaskNotifierTests
 
         (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed, "a refusal is final");
         h.SystemSends.Should().BeEmpty();
+    }
+
+    // ── r3 task 079 (#2491): a WorkforceHome assignee AS THE REAL STORE READS IT ─────────────────────────────────────────
+    //
+    // The harness's GetContactAsync row is the real store's shape: ContactSelect carries no sprk_externaltenantid (by design),
+    // so the row has no tenant. The stored home directory comes only from the home-tenant read, in its own query.
+
+    private static readonly Guid HomeTenant = Guid.Parse("c1680079-0000-4000-8000-0000000000e1");
+    private static readonly Guid HomeOid = Guid.Parse("c1680079-0000-4000-8000-0000000000e2");
+    private static readonly Guid LicensedUser = Guid.Parse("c1680079-0000-4000-8000-0000000000e3");
+
+    /// <summary>The contact as an onboarded WorkforceHome party with a grant; its row carries no tenant (the real store's shape).</summary>
+    private static void MakeHome(Harness h, HomeTenantLookup? tenant = null, HomeLinkLookup? link = null)
+    {
+        h.MakeExternal();
+        h.ContactOid = HomeOid;
+        h.ContactPlane = (int)IdentityPlaneMarker.WorkforceHome;
+        h.Identities.Setup(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tenant ?? HomeTenantLookup.FromStored(HomeTenant.ToString("D")));
+        h.Identities.Setup(i => i.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(link ?? HomeLinkLookup.Of());
+    }
+
+    [Fact]
+    public async Task AWorkforceHomeAssignee_AsTheRealStoreReadsIt_NotLinked_WithAGrant_GetsOneEmail()
+    {
+        var h = new Harness();
+        MakeHome(h);
+
+        (await h.NotifyAsync()).Should().BeEmpty();
+
+        h.SystemSends.Should().ContainSingle().Which.Request.To.Should().Equal(Address);
+        h.UserSends.Should().BeEmpty();
+        h.Identities.Verify(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>()), Times.Once);
+        h.Identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, It.IsAny<CancellationToken>()), Times.Once,
+            "the stored-link read is asked with the STORED tenant (the row has none) and the bound oid");
+        h.GateQuestions.Should().Equal($"grants {Contact} sprk_matter {Matter}", $"portal {Contact} {TaskId}");
+    }
+
+    [Fact]
+    public async Task AWorkforceHomeAssignee_AsTheRealStoreReadsIt_WhoseHomePairALicensedUserCarries_IsUnverified_MustNotFire()
+    {
+        var h = new Harness();
+        MakeHome(h, link: HomeLinkLookup.Of(new HomeLinkRow(LicensedUser, false, HomeTenant.ToString("D"), HomeOid.ToString("D"))));
+
+        (await h.Gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_matter", Matter), TaskId, AssignerOid, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.Unverified));
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.UnverifiedWarning);
+
+        h.NothingWasSent();
+        h.GateQuestions.Should().BeEmpty("the sign-in is the licensed user's, so the contact's grants are never asked about");
+    }
+
+    public static TheoryData<string, HomeTenantLookup?, bool> UnreadableTenants => new()
+    {
+        { "the stored tenant reads empty (null, masked or unparsable)", HomeTenantLookup.FromStored(null), false },
+        { "the stored tenant is not a GUID", HomeTenantLookup.FromStored("not-a-guid"), false },
+        { "the tenant read failed", HomeTenantLookup.Failed, false },
+        { "the tenant column is not provisioned", HomeTenantLookup.ColumnMissing, false },
+        { "the tenant read throws", null, true },
+    };
+
+    [Theory]
+    [MemberData(nameof(UnreadableTenants))]
+    public async Task AWorkforceHomeAssignee_WhoseStoredTenantCannotBeRead_IsUnverified_NeverNotLinked_MustNotFire(
+        string because, HomeTenantLookup? tenant, bool throws)
+    {
+        var h = new Harness();
+        MakeHome(h, tenant);
+        if (throws)
+        {
+            h.Identities.Setup(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new HttpRequestException("tenant read down"));
+        }
+
+        (await h.Gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_matter", Matter), TaskId, AssignerOid, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.Unverified), because);
+        (await h.NotifyAsync()).Should().Equal(new[] { AssignTaskRecipient.UnverifiedWarning }, because);
+
+        h.NothingWasSent();
+        h.GateQuestions.Should().BeEmpty(because);
+        h.Identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never, "no stored-link read without a stored tenant");
+    }
+
+    [Fact]
+    public async Task ACiamAssignee_IsDecidedAsToday_WithoutTheHomeReads()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+
+        (await h.NotifyAsync()).Should().BeEmpty();
+
+        h.SystemSends.Should().ContainSingle();
+        h.Identities.Verify(i => i.ReadHomeTenantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.Identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

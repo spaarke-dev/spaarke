@@ -91,7 +91,8 @@
     <criterion testable="true">Shared library and LegalWorkspace builds and tests pass; code-review and adr-check on the diff have no open F-class finding.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-28 (rest). Out of scope and only filed: #2098 push performance; prvAssign removal.</notes>
+  <notes>Spec FR-28 (rest). Out of scope and only filed: #2098 push performance; prvAssign removal.
+Added 2026-11-04 (task 031 fix round): `BuildCreateEventPayload` (and its helper and the `CreateEventRequest` fields only it uses) has no production caller after 031 deleted the three `CreateEventAsync` definitions; five unit-test files still call it. Re-point those tests at `EventEndpoints.BuildCreatePayload`, then delete it. `ExternalDataService.CreateEventAsync` is external-access-r3's inventory exception: leave it.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

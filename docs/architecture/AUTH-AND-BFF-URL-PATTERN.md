@@ -69,12 +69,12 @@ import { resolveRuntimeConfig } from '@spaarke/auth';
 
 const config = await resolveRuntimeConfig();
 // config.bffBaseUrl = "https://spe-api-dev-67e2xz.azurewebsites.net"  (HOST ONLY)
-// normalizeUrl() strips trailing slashes and /api suffix
+// normalizeBffBaseUrl() strips trailing slashes and /api suffix
 ```
 
-**How `normalizeUrl()` works** (in `@spaarke/auth/src/resolveRuntimeConfig.ts`):
+**How `normalizeBffBaseUrl()` works** (exported from `@spaarke/auth`, defined in `src/bffClientConfig.ts`; `resolveRuntimeConfig.ts` calls it):
 ```typescript
-function normalizeUrl(raw: string): string {
+export function normalizeBffBaseUrl(raw: string): string {
   return raw
     .trim()
     .replace(/\/+$/, '')      // strip trailing slashes
@@ -181,7 +181,7 @@ const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.a
 
 ## Token Acquisition (Spaarke Auth v2 — ADR-028)
 
-`SpaarkeAuthProvider.getAccessToken()` uses a simplified two-layer model. Canonical references: [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md), [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
+`SpaarkeAuthProvider.getAccessToken()` uses a simplified two-layer model. Canonical references: [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
 
 | Layer | Speed | Behavior |
 |-------|-------|----------|
@@ -248,7 +248,7 @@ await authenticatedFetch('/ai/chat/sessions');
 
 **Important**: `sprk_BffApiBaseUrl` is stored WITH `/api` for historical reasons. All code MUST strip it before use.
 
-> ⚠️ **Cross-environment consistency**: The `sprk_BffApiBaseUrl` env var must use the **same** format across all envs (dev, demo, prod). `normalizeUrl()` in `@spaarke/auth` strips a trailing `/api` if present, so the value is functionally equivalent whether stored as `https://host.azurewebsites.net` or `https://host.azurewebsites.net/api`. **However**: PCF controls and Code Pages deployed to multiple environments must all behave the same — inconsistent formats cause confusing operator handoffs. **Recommendation**: store host-only (no `/api`) for clarity. Phase 5 of the `sdap-bff-api-remediation-fix` project ([EXECUTION-LOG.md](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) §Task 060 step 9) aligned demo with dev's `/api`-suffixed value to match the operator-visible setting, even though runtime behavior is identical.
+> ⚠️ **Cross-environment consistency**: The `sprk_BffApiBaseUrl` env var must use the **same** format across all envs (dev, demo, prod). `normalizeBffBaseUrl()` in `@spaarke/auth` strips a trailing `/api` if present, so the value is functionally equivalent whether stored as `https://host.azurewebsites.net` or `https://host.azurewebsites.net/api`. **However**: PCF controls and Code Pages deployed to multiple environments must all behave the same — inconsistent formats cause confusing operator handoffs. **Recommendation**: store host-only (no `/api`) for clarity. Phase 5 of the `sdap-bff-api-remediation-fix` project ([EXECUTION-LOG.md](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) §Task 060 step 9) aligned demo with dev's `/api`-suffixed value to match the operator-visible setting, even though runtime behavior is identical.
 
 ---
 
@@ -306,7 +306,7 @@ All locations verified — no double `/api` vulnerabilities:
 
 | Module | Files Checked | Status |
 |--------|--------------|--------|
-| `@spaarke/auth` (shared lib) | 8 | SAFE — `normalizeUrl()` strips `/api` |
+| `@spaarke/auth` (shared lib) | 8 | SAFE — `normalizeBffBaseUrl()` strips `/api` |
 | Code Pages (5 apps) | 15+ | SAFE — use `resolveRuntimeConfig()` |
 | PCF Controls (6 controls) | 12+ | SAFE — defensive normalization in constructors |
 | Solutions/Wizards (6 wizards) | 8+ | SAFE — use `resolveRuntimeConfig()` |

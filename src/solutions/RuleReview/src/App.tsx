@@ -1,5 +1,6 @@
 /**
- * Rule Review page shell (ebilling-r1 task 077, FR-28): the rule set list, "New rule set", and the review of one rule set.
+ * Rule Review page shell (ebilling-r1 task 077, FR-28): the rule set list and the review of one rule set. Rule sets are not created
+ * here (116): a rule set comes with its Procedure.
  *
  * No router (ADR-026): the open rule set is state. Access is decided by the server (D-76, admin-only): the page does not guess.
  * The billing-admin 403 (reasonCode `sdap.access.deny.insufficient_privilege`) turns the page read-only (write controls hidden, a notice
@@ -9,7 +10,6 @@
 
 import * as React from 'react';
 import { Button, Spinner, makeStyles, tokens } from '@fluentui/react-components';
-import { NewRuleSetModal, type NewRuleSetValues } from './components/NewRuleSetModal';
 import { NoticeBar, PageNotice, failureNotice, type Notice } from './components/Notices';
 import { RuleSetDetailView } from './components/RuleSetDetailView';
 import { RuleSetListView } from './components/RuleSetListView';
@@ -49,9 +49,6 @@ export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
   const [ruleSets, setRuleSets] = React.useState<RuleSetSummary[] | null>(null);
   const [listNotice, setListNotice] = React.useState<Notice | null>(null);
   const [openId, setOpenId] = React.useState<string | null>(null);
-  const [newOpen, setNewOpen] = React.useState(false);
-  const [creating, setCreating] = React.useState(false);
-  const [createNotice, setCreateNotice] = React.useState<Notice | null>(null);
   const firmNames = useFirmNames(firmLookup, (ruleSets ?? []).map(r => r.firmId));
 
   /** Every failure of every call comes through here: the billing-admin 403 is read-only, a disabled flag is its own notice. */
@@ -81,25 +78,6 @@ export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
   }, [loadList]);
 
   const canWrite = access !== 'readOnly';
-
-  const create = async (values: NewRuleSetValues): Promise<void> => {
-    setCreating(true);
-    setCreateNotice(null);
-    const result = await api.create({
-      name: values.name, sourceKind: values.sourceKind, scope: values.scope, firmId: values.firmId,
-      file: values.file, fileName: values.file.name,
-    });
-    setCreating(false);
-    if (result.ok) {
-      setNewOpen(false);
-      void loadList();
-      setOpenId(result.value.ruleSetId); // straight to the review, where "Draft rules" starts the drafting
-    } else {
-      onFailure(result.failure);
-      setCreateNotice(failureNotice(result.failure, 'The rule set was not created'));
-      if (isBillingAdminRefusal(result.failure) || isEbillingDisabled(result.failure)) setNewOpen(false);
-    }
-  };
 
   if (disabled) {
     return (
@@ -168,26 +146,12 @@ export const App: React.FC<AppProps> = ({ api, firmLookup }) => {
             <RuleSetListView
               ruleSets={ruleSets}
               firmNames={firmNames}
-              canWrite={canWrite}
               onOpen={setOpenId}
-              onNew={() => {
-                setCreateNotice(null);
-                setNewOpen(true);
-              }}
               onRefresh={() => void loadList()}
             />
           </>
         )}
       </div>
-
-      <NewRuleSetModal
-        open={newOpen}
-        busy={creating}
-        firmLookup={firmLookup}
-        notice={createNotice}
-        onClose={() => !creating && setNewOpen(false)}
-        onCreate={values => void create(values)}
-      />
     </div>
   );
 };

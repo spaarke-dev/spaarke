@@ -39,7 +39,7 @@
     <title>{Task Title}</title>
     <phase>{N} {Phase Name}</phase>
     <gate>startable | blocked | {dep-condition}</gate>       <!-- readiness -->
-    <status>not-started</status>                              <!-- not-started | in-progress | completed | blocked | deferred -->
+    <status>not-started</status>                              <!-- vocabulary: task-create Step 5 status table -->
     <rigor>FULL | STANDARD | MINIMAL</rigor>                  <!-- Step 3.5.5 (author hint; task-execute may override) -->
     <rigor-reason>{trigger from the Step 3.5.5 decision tree}</rigor-reason>
     <model-tier>sonnet | opus | fable</model-tier>           <!-- Step 3.5.5b; sonnet default -->
@@ -83,7 +83,7 @@
                                     prescriptive: exact sequence binds (migrations/deploys/irreversible) — Step 3.5.5c -->
     <step order="0" name="Context + rigor declaration">{...}</step>
     <step order="1">{concrete action}</step>
-    <step order="N-1">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="N-1">Update TASK-INDEX.md: set this task's status cell to `✅ [done]` (the bracketed token is mandatory — task-create Step 5).</step>
     <step order="N">Document any deviation in projects/{project-name}/notes/.</step>
   </steps>
 

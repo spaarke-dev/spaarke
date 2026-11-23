@@ -23,6 +23,18 @@
  * exactly the (table, id) pairs the person ticked, and the server re-checks everything. Until the
  * push preview ships (task 040) a host passes no `onAction`, and both actions render disabled with
  * the tooltip "Available after the push update".
+ *
+ * Selection (#2513): checkboxes, the "N selected" count and the "Selected" detail exist only when the host passes
+ * `onAction` — selection is how rows reach an action, so a read-only host (the Family tool, task 074) shows none. The
+ * Details pane's "Focused record" row always describes the highlighted row (where the header navigator is), not the selection.
+ *
+ * Embedded mode (`embedded`, task 075 fix round 1): for a host that is ALREADY a modal window - the
+ * `RecordFamily` code page opened by the ribbon through `Xrm.Navigation.navigateTo`. The platform
+ * dialog owns the title bar and the ×, so a second Fluent `Dialog` inside it would be a modal in a
+ * modal with a double header (ADR-050). Embedded renders no envelope at all - no title, backdrop,
+ * maximize or header navigator - only the toolbar, the table and a footer with Close, filling its host
+ * the way `WizardShell` does. Everything inside (load, errors, selection, actions) is the same code.
+ * Not embedded (the default) is unchanged: the `BrowseModal` used by the TrackingFieldTrio PCF.
  */
 
 import * as React from 'react';
@@ -31,6 +43,7 @@ import {
   Button,
   Checkbox,
   makeStyles,
+  mergeClasses,
   MessageBar,
   MessageBarBody,
   Spinner,
@@ -81,6 +94,12 @@ export interface RecordFamilyModalProps {
   title?: string;
   /** The `--sprk-ui-scale` factor, forwarded to the shell. */
   uiScale?: number;
+  /**
+   * Render without any modal envelope (no title, backdrop, maximize or header navigator): the toolbar,
+   * the table and a footer with Close, filling the host. For a host that is already a dialog window.
+   * Default false (the `BrowseModal`).
+   */
+  embedded?: boolean;
 }
 
 const ACTIONS: ReadonlyArray<{ action: RecordFamilyAction; label: string }> = [
@@ -237,19 +256,58 @@ const useStyles = makeStyles({
   },
   nameCell: {
     display: 'flex',
+    flexWrap: 'nowrap',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
     minWidth: 0,
+    width: '100%',
   },
+  // The name takes the room the badge leaves and truncates alone (#2513): the name may shrink, the badge may not.
   nameText: {
+    flexShrink: 1,
+    minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  thisRecordBadge: {
+    flexShrink: 0,
     whiteSpace: 'nowrap',
   },
   footer: {
     display: 'flex',
     justifyContent: 'center',
     padding: tokens.spacingVerticalS,
+  },
+  // Embedded mode: fills its host (the platform dialog's iframe), like WizardShell's embeddedRoot.
+  embeddedRoot: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
+    // Focusable only so the root can receive Escape (see the embedded branch); no focus ring on the container.
+    outlineStyle: 'none',
+  },
+  embeddedBody: {
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  embeddedFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
+    borderTop: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  embeddedCount: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
   center: {
     display: 'flex',
@@ -292,6 +350,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
   onAction,
   title = 'Family',
   uiScale,
+  embedded = false,
 }) => {
   const styles = useStyles();
 
@@ -306,6 +365,12 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
   fetchRef.current = authenticatedFetch;
   // The number of the latest load. An older load's answer (another record, closed, unmounted) is dropped.
   const loadSeq = React.useRef(0);
+  // Embedded only: the root, focused on open so Escape works without a click first.
+  const embeddedRootRef = React.useRef<HTMLDivElement>(null);
+  const embeddedOpen = embedded && open;
+  React.useEffect(() => {
+    if (embeddedOpen) embeddedRootRef.current?.focus();
+  }, [embeddedOpen]);
 
   React.useEffect(() => {
     const seq = ++loadSeq.current;
@@ -403,17 +468,25 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
   };
 
   const selectedCount = ordered.filter(m => selected.has(familyKey(m))).length;
+  // Selection exists only to hand rows to an action (design §12.3 E). A host that passes no `onAction` (the read-only Family
+  // tool, task 074) has nothing to hand them to: no checkboxes and no selected count (#2513). Task 075 passes `onAction`.
+  const selectable = onAction !== undefined;
+  const columnCount = selectable ? 6 : 5;
   const disabledReason = !onAction ? NO_HANDLER_TOOLTIP : selectedCount === 0 ? NO_SELECTION_TOOLTIP : null;
 
   const metadata: PreviewModalMetadataItem[] =
     state.kind === 'ready'
       ? [
           { label: 'Records shown', value: String(ordered.length) },
-          { label: 'Selected', value: String(selectedCount) },
+          ...(selectable ? [{ label: 'Selected', value: String(selectedCount) }] : []),
+          // The rows below describe the ONE record the header navigator is on (the highlighted row), never the
+          // selection, so each label says so (#2513).
           ...(activeMember
             ? [
-                { label: 'Table', value: tableLabel(activeMember.table) },
-                { label: 'Level', value: String(activeMember.depth) },
+                {
+                  label: 'Focused record',
+                  value: `${activeMember.name ? `${activeMember.name} · ` : ''}${tableLabel(activeMember.table)}, level ${activeMember.depth}`,
+                },
               ]
             : []),
         ]
@@ -445,7 +518,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
               onClick={() => runAction(a.action)}
             />
           ))}
-          <span className={styles.toolbarCount}>{selectedCount} selected</span>
+          {selectable && <span className={styles.toolbarCount}>{selectedCount} selected</span>}
         </div>
         {state.truncated && (
           <MessageBar intent="info" className={styles.notice}>
@@ -456,7 +529,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
           <Table size="small" aria-label="Family members">
             <TableHeader>
               <TableRow>
-                <TableHeaderCell className={styles.selectCell} aria-label="Select" />
+                {selectable && <TableHeaderCell className={styles.selectCell} aria-label="Select" />}
                 <TableHeaderCell>Name</TableHeaderCell>
                 <TableHeaderCell>Record number</TableHeaderCell>
                 <TableHeaderCell>Record type</TableHeaderCell>
@@ -468,7 +541,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
               {groups.map(g => (
                 <React.Fragment key={g.key}>
                   <TableRow className={styles.groupRow}>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={columnCount}>
                       <span className={styles.groupLabel}>{`Level ${g.depth} · ${tableLabel(g.table)}`}</span>
                     </TableCell>
                   </TableRow>
@@ -482,19 +555,23 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
                         aria-current={isCurrent ? 'true' : undefined}
                         onClick={() => setCurrentKey(key)}
                       >
-                        <TableCell className={styles.selectCell}>
-                          <Checkbox
-                            aria-label={`Select ${m.name ?? 'record'}`}
-                            checked={selected.has(key)}
-                            onChange={(_e, data) => toggle(key, data.checked === true)}
-                            onClick={e => e.stopPropagation()}
-                          />
-                        </TableCell>
+                        {selectable && (
+                          <TableCell className={styles.selectCell}>
+                            <Checkbox
+                              aria-label={`Select ${m.name ?? 'record'}`}
+                              checked={selected.has(key)}
+                              onChange={(_e, data) => toggle(key, data.checked === true)}
+                              onClick={e => e.stopPropagation()}
+                            />
+                          </TableCell>
+                        )}
                         <TableCell>
                           <div className={styles.nameCell}>
-                            <span className={styles.nameText}>{m.name ?? ''}</span>
+                            <span className={styles.nameText} title={m.name ?? undefined}>
+                              {m.name ?? ''}
+                            </span>
                             {key === anchorKey && (
-                              <Badge appearance="tint" size="small">
+                              <Badge appearance="tint" size="small" className={styles.thisRecordBadge}>
                                 This record
                               </Badge>
                             )}
@@ -529,6 +606,38 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
       </>
     );
   };
+
+  // Embedded: no envelope. Nothing renders while closed (and nothing is fetched, see the load effect).
+  if (embedded) {
+    if (!open) return null;
+    return (
+      <div
+        ref={embeddedRootRef}
+        className={styles.embeddedRoot}
+        role="region"
+        aria-label={title}
+        tabIndex={-1}
+        data-testid="record-family-embedded"
+        onKeyDown={e => {
+          // The iframe swallows the key before the platform dialog sees it. An inner control that already
+          // handled Escape (e.g. a closing popover) marks it defaultPrevented; leave that one alone.
+          if (e.key === 'Escape' && !e.defaultPrevented) onClose();
+        }}
+      >
+        <div className={mergeClasses(styles.body, styles.embeddedBody)} data-testid="record-family-body">
+          {renderBody()}
+        </div>
+        <div className={styles.embeddedFooter}>
+          <span className={styles.embeddedCount}>
+            {state.kind === 'ready' ? `${ordered.length} records shown` : ''}
+          </span>
+          <Button appearance="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <BrowseModal

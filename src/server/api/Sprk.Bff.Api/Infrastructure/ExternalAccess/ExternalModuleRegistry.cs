@@ -389,15 +389,8 @@ public sealed class ExternalModuleDescriptor
 
         foreach (var attribute in EffectiveDimensions.Select(d => d.Attribute))
         {
-            var rootType = attribute.ToLowerInvariant() switch
-            {
-                "sprk_project" => (ExternalGrantRootType?)ExternalGrantRootType.Project,
-                "sprk_matter" => ExternalGrantRootType.Matter,
-                "sprk_workassignment" => ExternalGrantRootType.WorkAssignment,
-                _ => null,
-            };
-            if (rootType is not null)
-                links.Add((rootType.Value, LinkValue(row, attribute)));
+            if (RootTypeOfScopeAttribute(attribute) is { } rootType)
+                links.Add((rootType, LinkValue(row, attribute)));
         }
 
         return links.ToArray();
@@ -409,6 +402,20 @@ public sealed class ExternalModuleDescriptor
             return TryGetAttributeId(row, attribute, out var id) ? id.ToString() : "unreadable";
         }
     }
+
+    /// <summary>
+    /// The root a scope-dimension attribute names, when <see cref="RootLinks"/> types it (a typed root column of the module's table:
+    /// <c>sprk_project</c>, <c>sprk_matter</c>, <c>sprk_workassignment</c>, and an invoice's <c>sprk_regardingworkassignment</c>, D-28);
+    /// <c>null</c> for an attribute that is not a root lookup. The registry refuses a secure-roots module whose root dimension this
+    /// leaves untyped (<c>ExternalModuleRegistry.ValidateRootDimensionsAreTyped</c>).
+    /// </summary>
+    internal static ExternalGrantRootType? RootTypeOfScopeAttribute(string attribute) => attribute.ToLowerInvariant() switch
+    {
+        "sprk_project" => ExternalGrantRootType.Project,
+        "sprk_matter" => ExternalGrantRootType.Matter,
+        "sprk_workassignment" or "sprk_regardingworkassignment" => ExternalGrantRootType.WorkAssignment,
+        _ => null,
+    };
 
     /// <summary>
     /// Confirms a projected fetch row's primary entity matches <see cref="RecordEntity"/> using the
@@ -523,10 +530,21 @@ public sealed class ExternalModuleRegistry
         {
             throw new ArgumentException("Module RecordEntity is required.", nameof(descriptor));
         }
+        // ebilling-r1 task 130-0b F3b: a descendant of an invoice-linked row (an analysis output, an event log, a file version ...) is
+        // decided through the rows it hangs from, which the module fetch does not read. A module on one would show another firm's
+        // invoice work, so it is refused here (fail-fast at startup) until the fetch decides it.
+        if (InvoiceLinks.IsDescendantOnly(descriptor.RecordEntity))
+        {
+            throw new ArgumentException(
+                $"Module '{descriptor.Name}' reads '{descriptor.RecordEntity}', a descendant of invoice-linked rows: the module fetch " +
+                "cannot decide it by its invoices (InvoiceLinks.Descendants).", nameof(descriptor));
+        }
+
         // Validate the scope model resolves (either ScopeDimensions or the single-attribute shorthand) —
         // EffectiveDimensions throws a descriptive InvalidOperationException if neither is configured.
         var dimensions = descriptor.EffectiveDimensions;
         ValidateReadableColumns(descriptor, dimensions);
+        ValidateRootDimensionsAreTyped(descriptor);
         ValidateSavedQueryIds(descriptor);
         if (!_byName.TryAdd(descriptor.Name, descriptor))
         {
@@ -543,6 +561,55 @@ public sealed class ExternalModuleRegistry
         foreach (var savedQueryId in descriptor.SavedQueryIds)
         {
             _bySavedQueryId.Add(savedQueryId, descriptor); // ValidateSavedQueryIds proved it is not taken
+        }
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 3: a module with the secure-roots rule (<see cref="ExternalModuleDescriptor.RequireReadOnSecureRoots"/>) is
+    /// refused at registration when a root lookup it scopes by, or declares as an extra root lookup, is not typed by
+    /// <see cref="ExternalModuleDescriptor.RootLinks"/>. A root lookup is a column the lineage map
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureChildLineage"/>) files the module's table under a root table (project, matter,
+    /// work assignment). An untyped one drops out of the rule's input, and a row filed to a secure root through it would be listed.
+    /// Probed by what <see cref="ExternalModuleDescriptor.RootLinks"/> returns, not by a second list.
+    /// </summary>
+    private static void ValidateRootDimensionsAreTyped(ExternalModuleDescriptor descriptor)
+    {
+        if (!descriptor.RequireReadOnSecureRoots)
+            return;
+
+        // Fix round 3b: a secure-roots module on a table the lineage map does not know has no root lookups to check, and the rule
+        // cannot be applied to it at all (ChildRowRoots.Of refuses such a table, ExternalMultiRootRule.cs LineageChild). That is
+        // refused here, at registration, rather than on the first row read.
+        if (!Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(descriptor.RecordEntity, out var lineage))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' requires Read on secure roots, but '{descriptor.RecordEntity}' is not a child table " +
+                "of the lineage map (SecureChildLineage), so the rule has no root lookups to apply to its rows.");
+        }
+
+        var probe = Guid.NewGuid();
+        var attributes = descriptor.EffectiveDimensions.Select(d => d.Attribute)
+            .Concat(descriptor.AdditionalRootLookups.Select(l => l.Attribute))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in attributes)
+        {
+            if (!lineage.Lookups.TryGetValue(attribute, out var target)
+                || !Sprk.Bff.Api.Services.Access.SecureChildLineage.Roots.Contains(target))
+            {
+                continue; // not a root lookup of this table
+            }
+
+            var root = Enum.GetValues<ExternalGrantRootType>().Single(
+                type => string.Equals(ExternalGrantRoot.LogicalNameFor(type), target, StringComparison.OrdinalIgnoreCase));
+            var typed = descriptor.RootLinks(new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { [attribute] = probe })
+                .Any(link => link.Root == root && link.LookupValue == probe.ToString());
+            if (!typed)
+            {
+                throw new InvalidOperationException(
+                    $"External module '{descriptor.Name}' scopes by or declares the root lookup '{attribute}' ({target}), but " +
+                    "ExternalModuleDescriptor.RootLinks does not type it, so the secure-roots rule would not see it. " +
+                    "Map it in RootTypeOfScopeAttribute or declare it in AdditionalRootLookups.");
+            }
         }
     }
 
