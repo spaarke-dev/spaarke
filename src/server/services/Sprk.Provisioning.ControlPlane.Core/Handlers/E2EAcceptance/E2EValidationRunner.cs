@@ -15,7 +15,9 @@
 //                               validates. The BFF calls each Azure service of its stamp with ITS OWN managed identity
 //                               and reports one result per service; each service is one check, passed only when
 //                               "proved". The openai-chat result is the ADR-028 E-2 measurement on the stamp's
-//                               kind: OpenAI account (logged as such).
+//                               kind: OpenAI account (logged as such). An attempt with no verdict is repeated with
+//                               growing waits for up to KeylessProofRetryWindow (ISS-034: after H9's swap the stamp's
+//                               S1 plan stays saturated for tens of minutes); a failure is never retried.
 //   5. secure-isolation-census  POST {bffApiUrl}/api/platform/secure-record-isolation-census (task 260, ISS-014) — a
 //                               separate method (RunSecureIsolationCensusAsync) with its own typed outcome, so H13 can
 //                               quarantine on it under its own codes. Same identity, token audience, https rule, retry
@@ -95,6 +97,12 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
 
     /// <summary>Delay before the single transient-fault retry of the keyless-proof call. Internal so tests can zero it.</summary>
     internal TimeSpan TransientRetryDelay { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>The clock the keyless-proof retry window is measured on. Internal so tests can drive it.</summary>
+    internal Func<DateTimeOffset> UtcNow { get; set; } = TimeProvider.System.GetUtcNow;
+
+    /// <summary>The wait between keyless-proof attempts. Internal so tests can replace it with a clock advance.</summary>
+    internal Func<TimeSpan, CancellationToken, Task> WaitAsync { get; set; } = Task.Delay;
 
     /// <summary>URL scheme allow-list — only http(s), parity with the sibling probes.</summary>
     private static readonly HashSet<string> AllowedSchemes = new(StringComparer.OrdinalIgnoreCase)
@@ -255,10 +263,67 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Calls the customer BFF's keyless proof as the L2 Worker identity and records one check per service. See the
-    /// file header for the fail-closed rule.
+    /// Runs the keyless proof, repeating it while an attempt reaches no verdict and
+    /// <see cref="H13AcceptanceOptions.KeylessProofRetryWindow"/> allows another wait (ISS-034: a BFF saturated after its
+    /// slot swap answers nothing for tens of minutes). An attempt with any failure, or with every check decided, is the
+    /// result; the waits start at <see cref="H13AcceptanceOptions.KeylessProofRetryInitialDelay"/> and double up to
+    /// <see cref="H13AcceptanceOptions.KeylessProofRetryMaxDelay"/>. No wait is started that would end past the window.
     /// </summary>
     private async Task RunKeylessProofAsync(
+        HttpClient httpClient, Uri bffBaseUri, E2EValidationRequest request,
+        List<string> passed, List<string> failed, List<string> inconclusive, List<string> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var started = UtcNow();
+        var delay = _options.KeylessProofRetryInitialDelay;
+        for (var attempt = 1; ; attempt++)
+        {
+            var attemptPassed = new List<string>();
+            var attemptFailed = new List<string>();
+            var attemptInconclusive = new List<string>();
+            var attemptDiagnostics = new List<string>();
+            await RunKeylessProofOnceAsync(
+                httpClient, bffBaseUri, request,
+                attemptPassed, attemptFailed, attemptInconclusive, attemptDiagnostics, cancellationToken).ConfigureAwait(false);
+
+            var elapsed = UtcNow() - started;
+            var decided = attemptFailed.Count > 0 || attemptInconclusive.Count == 0;
+            if (decided || elapsed + delay > _options.KeylessProofRetryWindow)
+            {
+                passed.AddRange(attemptPassed);
+                failed.AddRange(attemptFailed);
+                inconclusive.AddRange(attemptInconclusive);
+                if (!decided && attempt > 1)
+                {
+                    diagnostics.Add(
+                        $"{CheckKeylessProof}: no verdict after {attempt} attempts over {elapsed:hh\\:mm\\:ss} " +
+                        $"(KeylessProofRetryWindow {_options.KeylessProofRetryWindow}); the last attempt reported:");
+                }
+                diagnostics.AddRange(attemptDiagnostics);
+                if (decided && attempt > 1)
+                {
+                    _logger.LogInformation(
+                        "H13 keyless proof reached a verdict on attempt {Attempt} after {Elapsed}: customerId={CustomerId} runId={RunId}",
+                        attempt, elapsed, request.CustomerId, request.RunId);
+                }
+                return;
+            }
+
+            _logger.LogWarning(
+                "H13 keyless proof attempt {Attempt} reached no verdict ({Diagnostic}); waiting {Delay} before the next " +
+                "attempt (elapsed {Elapsed} of {Window}): customerId={CustomerId} runId={RunId}",
+                attempt, string.Join(" | ", attemptDiagnostics), delay, elapsed, _options.KeylessProofRetryWindow,
+                request.CustomerId, request.RunId);
+            await WaitAsync(delay, cancellationToken).ConfigureAwait(false);
+            delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, _options.KeylessProofRetryMaxDelay.Ticks));
+        }
+    }
+
+    /// <summary>
+    /// Calls the customer BFF's keyless proof once as the L2 Worker identity and records one check per service. See the
+    /// file header for the fail-closed rule.
+    /// </summary>
+    private async Task RunKeylessProofOnceAsync(
         HttpClient httpClient, Uri bffBaseUri, E2EValidationRequest request,
         List<string> passed, List<string> failed, List<string> inconclusive, List<string> diagnostics,
         CancellationToken cancellationToken)

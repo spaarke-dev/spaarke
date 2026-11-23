@@ -10,6 +10,7 @@
 
 using FluentAssertions;
 using Sprk.Provisioning.ControlPlane.Dispatch;
+using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Xunit;
 
@@ -29,5 +30,18 @@ public sealed class DispatcherOptionsBudgetTests
 
         dispatcher.MaxHandlerDuration.Should().BeGreaterThanOrEqualTo(h6WorstCase + TimeSpan.FromMinutes(5),
             "the lock must outlive H6's longest legitimate run, or a redelivery starts a second import");
+    }
+
+    [Fact]
+    public void MaxHandlerDuration_LeavesH13HalfItsLockAfterTheKeylessProofRetry()
+    {
+        // ISS-034: H13 repeats the keyless proof for up to KeylessProofRetryWindow, then runs its trap, invariant, cost,
+        // census and mailbox checks. The retry and its last attempt (two calls: the inner transient retry) may use at most
+        // half of the lock.
+        var dispatcher = new DispatcherOptions();
+        var h13 = new H13AcceptanceOptions();
+
+        (h13.KeylessProofRetryWindow + (2 * h13.KeylessProofTimeout)).Should().BeLessThanOrEqualTo(dispatcher.MaxHandlerDuration / 2,
+            "the rest of H13 must still fit inside the Service Bus lock after the keyless-proof retry");
     }
 }
