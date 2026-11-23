@@ -237,3 +237,9 @@ A count of zero closes K1 (the transitional part-flip limit). Any hit is filed, 
 **Process note.** One adversarial reviewer ran the whole ArchTests suite once, against the project rule; all 2722 passed. A guard the fix-round filters did not select (`WriterOnlyTablesDeleteGuardTests`) failed on `d12b115f7a` and was fixed in `5bb6965b77` (§11). On the merged work branch (`72c416e948`), the builds have 0 errors. The ArchTests filter `Finance|StoredFile|Writer|Delete|RouteAuthorization|Ownership|Submission|ExternalFileStore|InvoicePdf` passed 369, failed 0. The unit filter `InvoiceFileUpload|StoredFile|InvoiceFilesList|SubmissionCommitGate|InvoiceSubmissionPersister|FinanceAuthorizationFilter|FinanceUniformNotFoundForRecord` passed 721, failed 0.
 
 rework: fix-round-2 task 123
+
+**Deploy check result (2026-11-23).** uac-r2 deployed BFF `a48398746d`, which carries #2992 and 123, to dev at about 18:43Z. Its 30-minute gate ended at about 19:13Z. The read-only check ran at 19:14:00Z: GETs only, Consistency: Strong, against spaarkedev1.
+- Dev has 13 Stored File rows on invoices, across 13 invoices. All 13 are Invoice PDF, and all are Servable.
+- **Count: 0.** No invoice has a Servable Invoice PDF together with a non-PDF Not-yet-servable row. This holds both broadly (any such row) and narrowly (a row created within 10 minutes of the PDF, so from the same commit).
+- A pre-gate baseline at about 18:45Z also gave 0.
+- The count went to uac-r2 by message. **K1, the transitional part-flip limit, is closed** on this evidence. Dev has no supporting-file uploads yet, so the check is vacuous until one happens; it re-runs as part of 163 UAT.
