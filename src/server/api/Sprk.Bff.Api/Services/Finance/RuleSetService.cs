@@ -2930,6 +2930,149 @@ public class RuleSetService
         return (rows, policies.MoreRecords);
     }
 
+    /// <summary>
+    /// What one O-17 retire pass did (task 117). <see cref="Selected"/>: sets that matched; <see cref="Retired"/>: sets this pass retired;
+    /// <see cref="Skipped"/>: sets that no longer matched when re-read; <see cref="Faulted"/>: sets left Active by a fault (the next pass
+    /// retries them); <see cref="PoliciesSwitchedOff"/>: the policies this pass switched Off. <see cref="ReadFailed"/>: a page could not be read
+    /// (the pass stopped there); <see cref="MoreRemain"/>: the page cap was reached before the selection ended.
+    /// </summary>
+    internal sealed record UnlinkedRecordSetRetireResult(
+        int Selected, int Retired, int Skipped, int Faulted, int PoliciesSwitchedOff, bool ReadFailed, bool MoreRemain);
+
+    /// <summary>
+    /// Task 117 (model 5.2 / 12, O-17, D-146 amended, I-P5): retires the record-scoped Billing rule sets whose core record is gone. Selected,
+    /// in id order, <paramref name="pageSize"/> rows a page and at most <paramref name="maxPages"/> pages: Billing domain, a record scope
+    /// (Record or Firm record) with no Procedure and EVERY core-record lookup null (<see cref="RecordRuleSet.IsUnlinked"/>), not Retired, and
+    /// last modified before <paramref name="modifiedBefore"/> (the age floor: a row whose lookup a create or a wizard has not written yet is
+    /// never taken). Each row read is re-checked in memory too.
+    /// <para>With <paramref name="apply"/> false nothing is written and only <see cref="UnlinkedRecordSetRetireResult.Selected"/> is counted.
+    /// Otherwise each set is RE-READ just before its write and every condition is checked again (a set that no longer matches is skipped).
+    /// Then each of its live Billing policies that is not already Off gets <c>sprk_enabled</c> = No, and only after every one of them the set
+    /// gets statecode Inactive and statuscode Retired. A policy write that faults leaves the set Active (counted, logged, the pass goes on; the
+    /// next pass retries it), so a Retired set never has a rule left on. Policy versions are never written; nothing is deleted, re-owned or
+    /// re-linked (owner, creator person and every lookup stay). D-170's nightly sweep closes the Off policies' open Signals, as for any Off
+    /// policy. A pass over the same state again writes nothing (a Retired set is no longer selected).</para>
+    /// </summary>
+    internal async Task<UnlinkedRecordSetRetireResult> RetireUnlinkedRecordSetsAsync(
+        bool apply, DateTime modifiedBefore, int pageSize, int maxPages, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPages, 1);
+        const string ModifiedOn = "modifiedon";
+        const string IdColumn = RuleSetEntity + "id";
+        var columns = new[] { "statuscode", "statecode", ModifiedOn, RuleDomains.PolicyDomainColumn }.Concat(RecordRuleSet.UnlinkedColumns).ToArray();
+
+        // Every condition, on a row as read (fail closed: a row without its modifiedon or its domain never matches).
+        bool Matches(Entity set) =>
+            RuleDomains.IsBillingRow(set)
+            && RecordRuleSet.IsUnlinked(set)
+            && set.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetRetired
+            && set.GetAttributeValue<DateTime?>(ModifiedOn) is { } modified && modified < modifiedBefore;
+
+        QueryExpression Selection(int? top)
+        {
+            var query = new QueryExpression(RuleSetEntity) { ColumnSet = new ColumnSet(columns), TopCount = top };
+            RuleDomains.AddBillingFilter(query);
+            RecordRuleSet.AddUnlinkedFilter(query);
+            query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, RuleSetRetired);
+            query.Criteria.AddCondition(ModifiedOn, ConditionOperator.LessThan, modifiedBefore);
+            return query;
+        }
+
+        int selected = 0, retired = 0, skipped = 0, faulted = 0, switchedOff = 0;
+        var readFailed = false;
+        var moreRemain = true;
+        Guid? after = null;
+        for (var page = 0; page < maxPages; page++)
+        {
+            var query = Selection(pageSize);
+            if (after is { } cursor)
+            {
+                query.Criteria.AddCondition(IdColumn, ConditionOperator.GreaterThan, cursor);
+            }
+
+            query.Orders.Add(new OrderExpression(IdColumn, OrderType.Ascending));
+            IReadOnlyList<Entity> rows;
+            try
+            {
+                rows = (await _entities.RetrieveMultipleAsync(query, ct)).Entities;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                readFailed = true;
+                _logger.LogError(ex, "Task 117: the unlinked record-scoped rule sets after {After} could not be read; the pass stops here", after);
+                break;
+            }
+
+            foreach (var row in rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                after = row.Id;
+                if (!Matches(row))
+                {
+                    continue;
+                }
+
+                selected++;
+                if (!apply)
+                {
+                    _logger.LogInformation("Task 117 (report only): rule set {RuleSetId} is record-scoped with no record and would be retired", row.Id);
+                    continue;
+                }
+
+                try
+                {
+                    // Re-read just before the write, and check every condition again: a set re-linked, retired or changed since is skipped.
+                    var reread = Selection(top: null);
+                    reread.Criteria.AddCondition(IdColumn, ConditionOperator.Equal, row.Id);
+                    var fresh = (await _entities.RetrieveMultipleAsync(reread, ct)).Entities.FirstOrDefault(r => r.Id == row.Id);
+                    if (fresh is null || !Matches(fresh))
+                    {
+                        skipped++;
+                        _logger.LogInformation("Task 117: rule set {RuleSetId} no longer matches when re-read; skipped", row.Id);
+                        continue;
+                    }
+
+                    var (policies, truncated) = await LoadPoliciesAsync(row.Id, ct);
+                    if (truncated)
+                    {
+                        faulted++;
+                        _logger.LogError("Task 117: rule set {RuleSetId} has more rules than can be read in one pass; it stays Active", row.Id);
+                        continue;
+                    }
+
+                    foreach (var policy in policies.Where(p => p.Enabled != false))
+                    {
+                        await _entities.UpdateAsync(PolicyEntity, policy.Id, new Dictionary<string, object> { ["sprk_enabled"] = false }, ct);
+                        switchedOff++;
+                    }
+
+                    await _entities.UpdateAsync(RuleSetEntity, row.Id, new Dictionary<string, object>
+                    {
+                        ["statecode"] = new OptionSetValue(StateInactive),
+                        ["statuscode"] = new OptionSetValue(RuleSetRetired),
+                    }, ct);
+                    retired++;
+                    _logger.LogInformation("Task 117: rule set {RuleSetId} had no record; its {PolicyCount} rules are Off and it is Retired", row.Id, policies.Count);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    // One set's fault never stops the pass. A set whose policy write faulted is NOT retired, so the next pass selects it again.
+                    faulted++;
+                    _logger.LogError(ex, "Task 117: rule set {RuleSetId} could not be retired; it stays Active and the next pass retries it", row.Id);
+                }
+            }
+
+            if (rows.Count < pageSize)
+            {
+                moreRemain = false;
+                break;
+            }
+        }
+
+        return new UnlinkedRecordSetRetireResult(selected, retired, skipped, faulted, switchedOff, readFailed, readFailed || moreRemain);
+    }
+
     /// <summary>What a copy-forward creates (task 081): the creates, in order, and how many rules they copy.</summary>
     internal sealed record CopyForwardPlan(IReadOnlyList<OrganizationRequest> Creates, int Copied, bool Truncated, IReadOnlyList<RuleSetError> Errors);
 
