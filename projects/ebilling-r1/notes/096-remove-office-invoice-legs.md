@@ -74,5 +74,21 @@ Updated because they asserted removed behaviour:
 - `FeatureRolePrivilegeGuardTests` evidence rows are checked for file existence only, so their line numbers can drift.
 - The D3 role privilege `prvCreatesprk_Invoice` is still held by Core User and Office Add In User; the role change stays deferred per the 096b notes.
 - `MembershipOptions.TargetingOnlyColumns` rationale for `sprk_assignedto1` now has no Office writer (comment updated only).
-- Not verified: whether an `IdempotencyFilter` cached answer for an invoice save made before this release can replay within its key lifetime. Not investigated.
+- Idempotency replay: settled by the review, see K2 (a) below.
 - `Enum.TryParse` accepts an undefined numeric value such as `"7"` for quick-create (pre-existing).
+
+## Adversarial review (Opus, one pass, of 5fd8013fa8..f9bc1465c7)
+
+No path lets an invoice save or an invoice quick-create through. The review tried several spellings of the type, body versus route, filter order, the shared filters, the picker and search, and the census, and found no collateral breakage. The requirements trace is met.
+
+**F2, fixed in the main session.** The save's OFFICE_002 detail still said "Valid values are: Matter, Project, Invoice, Account, Contact". A caller sending `sprk_project` would be told to try Invoice, and would then get OFFICE_023.
+- The save types are now one list, `OfficeEndpoints.SaveTargetEntityTypes`. The validation and the OFFICE_002 detail both read it.
+- New test: `OfficeProblemDetailsTests.SaveInvalidAssociationType_Detail_ListsExactlyTheSaveTargetTypes_AndNeverInvoice`.
+- The OFFICE_003 texts (K4) are produced by no production code and are left as they are.
+
+Known limits:
+- **K2 (a), idempotency replay.** The idempotency filter runs before the refusal filters. A 202 save or 201 quick-create cached before the deploy is answered from cache for an identical request for up to 24 h (`IdempotencyFilter.cs:108`). A replay only reads the cache: no job row, upload or Dataverse write. A 400 is never cached. The add-in stopped sending these requests on 2026-11-21.
+- **K2 (b), a job queued before the deploy.** If the job is processed or retried after the deploy, it still files to the invoice through `DocumentAssociationMap` (`UploadFinalizationWorker.cs:663`, `:1200`). That is correct under the contract that accepted it; refusing in the worker would strand an upload that was already accepted.
+- **K3.** The handler repeats (`OfficeEndpoints.cs` save and quick-create) cannot be reached over HTTP, because the filters answer first. They share the same predicate and parse, so they cannot drift.
+- **K4.** The retirement test was renamed to `OfficeSave_ToAnInvoiceTarget_IsRefusedWithOffice023`. "Never queued" is proven by `OfficeInvoiceTargetRefusalContractTests`, whose record of touched boundaries is empty.
+- **K1.** The retirement source scan matches literal shapes only. A create through a constant or a variable would slip past, but only if someone writes it deliberately.

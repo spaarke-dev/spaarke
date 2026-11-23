@@ -33,6 +33,13 @@ namespace Sprk.Bff.Api.Api.Office;
 public static class OfficeEndpoints
 {
     /// <summary>
+    /// The target types an Office save accepts (lower case; the compare is case-insensitive). The ONE list: the save validation and the
+    /// OFFICE_002 detail both read it, so the error never names a type the save refuses (ebilling-r1 task 096 review F2: it still
+    /// listed Invoice and Account).
+    /// </summary>
+    internal static readonly string[] SaveTargetEntityTypes = ["matter", "project", "workassignment", "event", "todo", "contact"];
+
+    /// <summary>
     /// Maps all Office-related endpoints to the application.
     /// </summary>
     /// <param name="app">The endpoint route builder.</param>
@@ -454,17 +461,13 @@ public static class OfficeEndpoints
                 return ProblemDetailsHelper.OfficeInvoiceTargetRetired(correlationId);
             }
 
-            var validEntityTypes = new[]
-            {
-                "matter", "project", "workassignment", "event", "todo", "contact"
-            };
-            if (!validEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
+            if (!SaveTargetEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
             {
                 logger.LogWarning(
                     "Save request has invalid association type {EntityType}, correlation {CorrelationId}",
                     request.TargetEntity.EntityType,
                     correlationId);
-                return ProblemDetailsHelper.OfficeInvalidAssociationType(correlationId);
+                return ProblemDetailsHelper.OfficeInvalidAssociationType(SaveTargetEntityTypes, correlationId);
             }
 
             // Validate association entity ID is not empty

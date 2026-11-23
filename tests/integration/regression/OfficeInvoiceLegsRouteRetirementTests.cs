@@ -49,7 +49,7 @@ public class OfficeInvoiceLegsRouteRetirementTests
     }
 
     [Fact]
-    public async Task OfficeSave_ToAnInvoiceTarget_IsRefused_AndTheJobIsNeverQueued()
+    public async Task OfficeSave_ToAnInvoiceTarget_IsRefusedWithOffice023()
     {
         using var factory = new OfficeTestWebAppFactory();
 

@@ -618,12 +618,12 @@ public static partial class ProblemDetailsHelper
     /// <summary>
     /// OFFICE_002: Invalid association type.
     /// </summary>
-    public static IResult OfficeInvalidAssociationType(string? correlationId = null)
+    public static IResult OfficeInvalidAssociationType(IReadOnlyCollection<string> validTypes, string? correlationId = null)
     {
         return OfficeValidationError(
             "OFFICE_002",
             "Invalid Association Type",
-            "The specified association type is not recognized. Valid values are: Matter, Project, Invoice, Account, Contact.",
+            $"The specified association type is not recognized. Valid values are: {string.Join(", ", validTypes)}.",
             correlationId);
     }
 
