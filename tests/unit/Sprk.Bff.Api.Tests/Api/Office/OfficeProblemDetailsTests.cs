@@ -74,6 +74,26 @@ public class OfficeProblemDetailsTests
         doc.RootElement.GetProperty("detail").GetString().Should().Contain("InvalidEntity");
     }
 
+    /// <summary>
+    /// ebilling-r1 task 096 review F2: the save route's OFFICE_002 detail lists exactly the types the save accepts (one list,
+    /// <c>OfficeEndpoints.SaveTargetEntityTypes</c>), so it never offers Invoice (refused with OFFICE_023) or Account.
+    /// </summary>
+    [Fact]
+    public async Task SaveInvalidAssociationType_Detail_ListsExactlyTheSaveTargetTypes_AndNeverInvoice()
+    {
+        var result = Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.OfficeInvalidAssociationType(
+            Sprk.Bff.Api.Api.Office.OfficeEndpoints.SaveTargetEntityTypes, _correlationId);
+        var (status, json) = await ExecuteResultAsync(result);
+
+        status.Should().Be(400);
+        using var doc = ParseJson(json);
+        doc.RootElement.GetProperty("errorCode").GetString().Should().Be("OFFICE_002");
+        var detail = doc.RootElement.GetProperty("detail").GetString()!;
+        detail.Should().EndWith("Valid values are: matter, project, workassignment, event, todo, contact.");
+        detail.Should().NotContainEquivalentOf("invoice").And.NotContainEquivalentOf("account");
+        Sprk.Bff.Api.Api.Office.OfficeEndpoints.SaveTargetEntityTypes.Should().NotContain(["invoice", "sprk_invoice", "account"]);
+    }
+
     [Fact]
     public async Task AssociationRequired_Returns400_WithOFFICE_003()
     {

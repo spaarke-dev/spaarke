@@ -119,9 +119,12 @@ public class OfficeSearchService
             lookupIndexByTarget[i] = -1;
             var (entityType, recordId) = targets[i];
 
-            // The save refuses both of these before any rights question (400 OFFICE_002 / an empty target id),
-            // so they are not fileable whatever the caller holds.
-            if (recordId == Guid.Empty || !EntityAccessFilter.TryResolveEntitySet(entityType, out var entitySet))
+            // The save refuses all of these before any rights question (400 OFFICE_002 / an empty target id /
+            // 400 OFFICE_023 for an invoice, ebilling-r1 task 096), so they are not fileable whatever the caller
+            // holds. An invoice stays searchable; it is just never offered as a place to file.
+            if (recordId == Guid.Empty
+                || EntityAccessFilter.IsRetiredInvoiceTarget(entityType)
+                || !EntityAccessFilter.TryResolveEntitySet(entityType, out var entitySet))
             {
                 verdicts[i] = false;
                 continue;

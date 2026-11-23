@@ -185,51 +185,9 @@ public class OfficeQuickCreateFieldsContractTests
         created.Single().Contains("sprk_projecttype_ref").Should().BeFalse();
     }
 
-    // ── Invoice ─────────────────────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task Post_Invoice_WithEveryField_WritesNameDescriptionAndAssignedTo1()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        ArrangeContactRights(factory, ChosenContact, AccessRights.Read);
-        var created = CaptureCreate(factory, numberEntity: null, numberAttribute: null, number: null);
-
-        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/quickcreate/invoice", new
-        {
-            name = "INV-2026-0100",
-            description = "Outside counsel, September",
-            assignedToContactId = ChosenContact,
-        });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var invoice = created.Single();
-        invoice.LogicalName.Should().Be("sprk_invoice");
-        invoice.GetAttributeValue<string>("sprk_name").Should().Be("INV-2026-0100");
-        invoice.GetAttributeValue<string>("sprk_description").Should().Be("Outside counsel, September");
-        invoice.GetAttributeValue<EntityReference>("sprk_assignedto1").Should().BeEquivalentTo(new EntityReference("contact", ChosenContact));
-        invoice.Contains("sprk_assignedtointernal").Should().BeFalse("sprk_invoice has no such column");
-    }
-
-    [Fact]
-    public async Task Post_Invoice_WithoutAnAssignee_IsLeftUnassigned_TheInvoiceHasNoServerDefault()
-    {
-        using var factory = new OfficeQuickCreateTestWebAppFactory();
-        ArrangeResolvedCaller(factory);
-        using var host = WithMakersContact(factory, MakersContact);
-        var created = CaptureCreate(factory, numberEntity: null, numberAttribute: null, number: null);
-
-        var response = await host.CreateClient().PostAsJsonAsync(
-            "/api/office/quickcreate/invoice", new QuickCreateRequest { Name = "INV-2026-0101" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        created.Single().Contains("sprk_assignedto1").Should().BeFalse("an invoice's stated default is no assignee");
-        created.Single().Contains("sprk_description").Should().BeFalse("a blank description is not written");
-    }
-
     // ── The assignee gate: Read on the contact, one body for every refusal ──────────────────────────────
 
-    public static TheoryData<string> AssigneeTypes => new() { "matter", "project", "invoice" };
+    public static TheoryData<string> AssigneeTypes => new() { "matter", "project" };
 
     [Theory]
     [MemberData(nameof(AssigneeTypes))]
