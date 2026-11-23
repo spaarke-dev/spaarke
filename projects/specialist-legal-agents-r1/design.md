@@ -178,7 +178,11 @@ The autonomy ladder is triage only → prepare (default) → auto-send (GREEN, s
 
 **What exists today is function-shaped.** The tenant's Plugins page shows the following:
 - Chat tab: the agents *Spaarke NDA Review* and *Spaarke Legal Hold Review* (Agent Builder, built from accelerator recipes), plus *Spaarke AI* and the Copilot Studio agent *Spaarke Dataverse MCP*.
-- Also on the Chat tab, *Spaarke Legal Review*. It is **not from the accelerator package** (its build generates recipes for NDA Review and Legal Hold Review only), so it is probably an earlier owner-built agent. Confirm with the owner before treating it as a function.
+- Also on the Chat tab, *Spaarke Legal Review*. **Corrected 2026-11-23 by accelerator-r1 (replaces C3):**
+  - It **is** from the accelerator's work: the owner built it in Copilot Studio on 2026-11-09 for the accelerator's declarative-agent spike (route A; accelerator `notes/poc-e2e/results.md` "Spike DA-1" and `da-spike-script.md`).
+  - It is the single front door over **both** the NDA and legal hold playbooks, so it is a **two-function agent**, not a function.
+  - The accelerator's package build does not generate it, and its instruction version is unconfirmed.
+  - It is an early, never-measured instance of the persona-agent shape that G5 tests.
 - Cowork tab: the skills `nda-review`, `accelerator-setup` and `legal-hold-review`, plus the *Spaarke MCP* and *Spaarke MCP spike* connectors.
 
 Each of those agents is one task. That was the right shape for a proof of value, but it does not scale: one agent per function becomes dozens of near-identical entries in the `@` picker, each needing its own profile.
@@ -434,6 +438,7 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 - *Measure:* mixed prompts plus out-of-scope controls, in Chat.
 - *Pass:* at least 95% correct routing, and no function invoked for the controls (threshold to confirm in the Phase 0 spec).
 - *If it fails:* the front door falls back to one agent per function, with the persona kept server-side as profile only.
+- *Prior art:* *Spaarke Legal Review*, the accelerator's two-function agent (NDA and legal hold; §3.9), already has this shape but was never measured. Use it as G5's baseline: run the G5 prompt set against it first. Confirm its instruction version first. Any re-upload or copy needs an inventory row (§10, copilot-platform-coordination R4).
 - This decides D-A12's delivery shape, not the go/no-go.
 
 **G6 — Coexistence with Microsoft's legal plugins (§3.10).** With Legal for Cowork on, run the persona agent and Spaarke skills together. **G6 subsumes the accelerator's T-P2** (agreed 2026-11-23; T-P2 has not been run). Start from its prompt set (accelerator `notes/component-protocol.md`, row T-P2: NDA → Spaarke, MSA → Microsoft, redline summary → Microsoft; 5 prompts × 2 configurations), extend it, and send the results to the accelerator. T-14 (admin deployment) stays with the accelerator as its I-1.

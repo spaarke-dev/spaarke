@@ -24,7 +24,7 @@
 
 ## Open owner decisions
 - D-A11: NDA ownership. accelerator-r1 proposed a split by tier (it owns the T0/T1 NDA agent content; this program owns the area agent). Claude proposed a **split by layer**: the NDA function content has one owner (the accelerator until its R1 closes, then this program), each project owns its own surface wrappers, and one Spaarke NDA agent per tenant. **The owner chose "Discuss first"; not decided.**
-- D-A12 framing (function vs persona; one agent per practice area); D-A13 Microsoft-first; D-A16 one roadmap; Q7 owner of the Microsoft catalogue snapshot; D-A7 server-side profile and gates (decided at G1); "Spaarke Legal Review" agent: what it is (C3).
+- D-A12 framing (function vs persona; one agent per practice area); D-A13 Microsoft-first; D-A16 one roadmap; Q7 owner of the Microsoft catalogue snapshot; D-A7 server-side profile and gates (decided at G1). (Resolved 2026-11-23: "Spaarke Legal Review" is the accelerator's owner-built two-function agent from the DA spike, NDA plus legal hold, and the G5 baseline. Design §3.9 and §8.)
 - Ontology-r1 must confirm the "Policy versions" term (Q2).
 
 ## Next action
