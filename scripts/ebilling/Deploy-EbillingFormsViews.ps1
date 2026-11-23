@@ -175,7 +175,7 @@ $Spec = [ordered]@{
     sprk_invoice           = @{
         Form = 'Section'; FormName = 'Invoice main form'
         Sections = @(@{ Name = 'ebilling'; Label = 'eBilling'
-                Cols = 'sprk_matter', 'sprk_project', 'sprk_regardingworkassignment', 'sprk_supersedesinvoice', 'sprk_billingperiodstart', 'sprk_billingperiodend', 'sprk_invoiceduedate', 'sprk_currency', 'sprk_extractionstatus', 'sprk_confidence', 'sprk_billingapproverrole', 'sprk_billingexport',
+                Cols = 'sprk_matter', 'sprk_project', 'sprk_regardingworkassignment', 'sprk_supersedesinvoice', 'sprk_billingperiodstart', 'sprk_billingperiodend', 'sprk_invoiceduedate', 'sprk_currency', 'sprk_confidence', 'sprk_billingapproverrole', 'sprk_billingexport',
                 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal'
                 ReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal' })
         # IInvoiceTotalsService is the one owner of the five totals (I-1): disabled, never editable on a form.

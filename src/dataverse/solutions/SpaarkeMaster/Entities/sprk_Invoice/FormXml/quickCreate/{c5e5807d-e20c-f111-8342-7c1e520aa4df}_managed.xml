@@ -12,7 +12,7 @@
             <label description="New Tab" languagecode="1033" />
           </labels>
           <columns>
-            <column width="34%">
+            <column width="50%">
               <sections>
                 <section id="0C655D4E-C6E3-424E-9AF5-71E72D30D12E" name="tab_1_column_1_section_overview" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{9de21650-dc1a-4c19-adc7-5e73b02d1fa8}">
                   <labels>
@@ -63,7 +63,7 @@
                 </section>
               </sections>
             </column>
-            <column width="33%">
+            <column width="50%">
               <sections>
                 <section id="02DECBA0-3AE2-484D-A19F-C5353AF4F4F2" name="tab_1_column_2_section_1" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{8438bfdc-ed7d-48da-81b7-9da8b6c1a2b1}">
                   <labels>
@@ -83,33 +83,6 @@
                           <label description="Invoice Date" languagecode="1033" />
                         </labels>
                         <control id="sprk_invoicedate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_invoicedate" disabled="false" />
-                      </cell>
-                    </row>
-                  </rows>
-                </section>
-              </sections>
-            </column>
-            <column width="33%">
-              <sections>
-                <section id="46FD66EA-B686-41D9-AAE0-C565BD78EC1F" name="tab_1_column_3_section_1" columns="1" showlabel="true" showbar="false" IsUserDefined="0" labelwidth="130" labelid="{63e5ccb3-dbd2-4aa9-9cdc-917950ea407f}">
-                  <labels>
-                    <label description="JSON FILE" languagecode="1033" />
-                  </labels>
-                  <rows>
-                    <row>
-                      <cell id="{09e7e214-f47f-4a4a-9ba2-31aa10d238ec}" locklevel="0" colspan="1" rowspan="1" labelid="{1524173e-31fe-4f8d-8b2e-99b26e65348b}">
-                        <labels>
-                          <label description="Extraction Status" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_extractionstatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_extractionstatus" disabled="false" />
-                      </cell>
-                    </row>
-                    <row>
-                      <cell id="{8fb473a7-fe19-425e-815f-e3bea81b7df2}" locklevel="0" colspan="1" rowspan="1" labelid="{6905a6b5-a0f2-488a-b0c4-189eec50fa21}">
-                        <labels>
-                          <label description="Extracted JSON" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_extractedjson" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_extractedjson" disabled="false" />
                       </cell>
                     </row>
                   </rows>
