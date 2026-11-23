@@ -209,7 +209,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         if (await Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.RefuseUpdateAsync(
                 _genericEntityService, entityLogicalName, recordId, fields.Keys, _logger, ct).ConfigureAwait(false) is { } privateRefusal)
         {
-            throw new RecordOwnerUnresolvedException(entityLogicalName, privateRefusal);
+            throw Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.UpdateRefused(entityLogicalName, privateRefusal);
         }
 
         // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a

@@ -388,7 +388,7 @@ internal sealed class UpdateRecordActionCore
                     privateScope.ServiceProvider.GetService<IGenericEntityService>(), input.EntityLogicalName, input.RecordId,
                     updatePayload.Keys, _logger, cancellationToken).ConfigureAwait(false) is { } privateRefusal)
             {
-                throw new RecordOwnerUnresolvedException(input.EntityLogicalName, privateRefusal);
+                throw Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.UpdateRefused(input.EntityLogicalName, privateRefusal);
             }
         }
 

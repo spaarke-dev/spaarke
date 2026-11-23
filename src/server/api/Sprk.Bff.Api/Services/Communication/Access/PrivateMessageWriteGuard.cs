@@ -72,6 +72,17 @@ internal static class PrivateMessageWriteGuard
     }
 
     /// <summary>
+    /// What a generic update writer throws for <paramref name="refusal"/> (the writers' existing contract): its code, and a message
+    /// that names an update of an existing row and the guard's reason, safe to surface. Never the owner wording of a create.
+    /// </summary>
+    internal static RecordOwnerUnresolvedException UpdateRefused(string table, RecordOwnerResolution refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        var code = refusal.RefusalCode ?? CheckUnavailable;
+        return new RecordOwnerUnresolvedException(table, code, $"The {table} was not updated: {refusal.Reason} ({code}).");
+    }
+
+    /// <summary>
     /// The pre-write check: <c>null</c> when the update may be written; otherwise the refusal (<see cref="RecordOwnerResolution.IsRefused"/>),
     /// and nothing may be written. An update that does not <see cref="Triggers"/> reads nothing. Otherwise the reference columns that
     /// exist in metadata (<see cref="PrivateContextColumns.PresentColumnsAsync"/>, cached) are read through

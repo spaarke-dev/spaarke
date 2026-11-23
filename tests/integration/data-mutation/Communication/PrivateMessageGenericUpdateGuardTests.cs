@@ -139,8 +139,10 @@ public class PrivateMessageGenericUpdateGuardTests
 
         var act = () => HandlerUpdate(Change(change));
 
-        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
-            .Which.RefusalCode.Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        var refused = (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        refused.RefusalCode.Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        refused.Message.Should().Contain("was not updated").And.Contain("private message")
+            .And.NotContain("a new", "an update of an existing row is never worded as a create");
         Written.Should().BeFalse();
         _guardReads.Should().Be(1);
         _reparents.Should().BeEmpty("refused before either path");
@@ -207,8 +209,10 @@ public class PrivateMessageGenericUpdateGuardTests
 
         var act = () => CoreUpdate(Change(change));
 
-        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
-            .Which.RefusalCode.Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        var refused = (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        refused.RefusalCode.Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        refused.Message.Should().Contain("was not updated").And.Contain("private message")
+            .And.NotContain("a new", "an update of an existing row is never worded as a create");
         Written.Should().BeFalse();
         _guardReads.Should().Be(1);
         _reparents.Should().BeEmpty("refused before either path");
@@ -320,6 +324,7 @@ public class PrivateMessageGenericUpdateGuardTests
         errors.Should().ContainSingle().Which.Should().Match<PushFieldMappingsError>(e =>
             e.RecordId == Row && e.ReasonCode == RecordOwnerRefusal.PrivateMessageNotFileable
             && e.Error.Contains(RecordOwnerRefusal.PrivateMessageNotFileable));
+        errors[0].Error.Should().Contain("is a private message, which is never filed").And.NotContain("re-filed");
         Written.Should().BeFalse();
         _guardReads.Should().Be(1);
     }
@@ -395,6 +400,8 @@ public class PrivateMessageGenericUpdateGuardTests
 
         (updated, failed).Should().Be((0, 1));
         errors.Should().ContainSingle().Which.ReasonCode.Should().Be(PrivateMessageWriteGuard.CheckUnavailable);
+        errors[0].Error.Should().Contain("could not be checked now").And.Contain(PrivateMessageWriteGuard.CheckUnavailable)
+            .And.NotContain("re-filed");
         Written.Should().BeFalse();
     }
 }

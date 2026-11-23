@@ -1587,7 +1587,7 @@ public static class FieldMappingEndpoints
                         errors.Add(new PushFieldMappingsError
                         {
                             RecordId = childRecordId,
-                            Error = RefileRefusedMessage(privateRefusal.RefusalCode),
+                            Error = PrivateMessageRefusedMessage(privateRefusal.RefusalCode),
                             ReasonCode = privateRefusal.RefusalCode,
                         });
                         continue;
@@ -1839,6 +1839,15 @@ public static class FieldMappingEndpoints
     /// </summary>
     internal static string RefileRefusedMessage(string? refusalCode) =>
         $"Not written: this record could not be re-filed, so nothing was written for it ({refusalCode}).";
+
+    /// <summary>
+    /// fm task 056: the text of a child the private-message guard refused — a fixed sentence per outcome and the STABLE code (the
+    /// guard's reason is logged, never returned): a private message is never filed (409), or the check could not be made now (503).
+    /// </summary>
+    internal static string PrivateMessageRefusedMessage(string? refusalCode) =>
+        refusalCode == Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.CheckUnavailable
+            ? $"Not written: whether this record is a private message could not be checked now, so nothing was written for it; try again ({refusalCode})."
+            : $"Not written: this record is a private message, which is never filed, so nothing was written for it ({refusalCode}).";
 
     /// <summary>Logs a refused re-file's reason with a correlation id; the response carries the code only.</summary>
     private static void LogRefileRefusal(
