@@ -3187,6 +3187,13 @@ public partial class SignalReevaluationJobTests
         /// bound without seeding thousands of rows. Null: the query's own <c>PageInfo.Count</c>.</summary>
         public int? PageSizeCap { get; set; }
 
+        /// <summary>#2982: the most rows a read of <c>sprk_policy</c> with no <c>PageInfo</c> and no <c>TopCount</c> returns: Dataverse answers one page
+        /// (5,000) and does not say so. A test lowers it to reach "past one page" without seeding thousands of rows.</summary>
+        public int UnpagedReadCap { get; set; } = 5000;
+
+        /// <summary>#2982: a store that ignores the id cursor of a <c>sprk_policy</c> read, so every page repeats the first (the read must stop, not loop).</summary>
+        public bool IgnorePolicyCursor { get; set; }
+
         /// <summary>Task 102b fix round 4 (K c): each paged read answered, as (table, page number).</summary>
         public List<(string Table, int Page)> PagedReads { get; } = new();
 
@@ -3303,8 +3310,17 @@ public partial class SignalReevaluationJobTests
                     break;
                 case "sprk_policy":
                     // Fix round 4 (K c): a paged read (the existence read) is answered page by page, as Dataverse answers it.
+                    // #2982: an id-cursor read (sprk_policyid greater than the last id read, ordered by id, TopCount rows) is answered as
+                    // Dataverse answers it, and a read with neither a page nor a TopCount gets one page only (UnpagedReadCap, Dataverse's 5,000).
                     result = Paged(query, _policies.Where(p => query.Criteria.Conditions.All(c =>
-                                 c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))));
+                                 (c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))
+                                 || (c.Operator == ConditionOperator.GreaterThan && c.AttributeName == "sprk_policyid" && (IgnorePolicyCursor || p.Id.CompareTo((Guid)c.Values[0]) > 0)))));
+                    if (query.PageInfo is not { Count: > 0 })
+                    {
+                        var onePage = result.Entities.Take(query.TopCount ?? UnpagedReadCap).ToList();
+                        result = new EntityCollection(onePage);
+                    }
+
                     break;
                 // Task 102b fix round 3: the deleted-policy sweep's read (sprk_policy is null, Open or Acknowledged), as Dataverse answers it.
                 // Fix round 4: and the redaction's read of the codes (sprk_policy is null, ANY status: no status condition); both paged.
