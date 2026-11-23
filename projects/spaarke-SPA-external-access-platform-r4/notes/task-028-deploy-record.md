@@ -121,3 +121,40 @@ So the Information field SHOULD show "The client is reviewing this invoice." It 
 Likely cause: the record and the Invoices-section rows come from the module fetch seam. `FetchService.ProjectEntity` passes SDK values through as objects, so `statuscode` arrives as the serialised `OptionSetValue`, about `{"value":1,...}`. The status label still shows because `formatDetailValue` uses `@formattedValues`. But `reviewDetail.ts` `wholeNumberOf` accepts only a number or a digit string, so the gate always answers blank. The task 020 tests used a bare `statuscode: 1`, so they never saw the live shape.
 
 The same gate feeds all four render points: the grid cell, the section line, the header line and Information. So a real review detail value would be hidden everywhere too. The BFF-side gate (`ExternalInvoiceReviewDetail.IsInReview`) does handle `OptionSetValue`, so the server is right; the SPA is not.
+
+### Round 2: owner (writer, then the View-only partner), BFF `a48398746d` + SPA `9d08576e63`, 20:34Z to 20:43:33Z
+
+**Owner result: all checks pass.**
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Review detail on INV-123456.7: the "The client is reviewing this invoice." line in Information and the header | ✅ |
+| 2 | Home Invoices grid "Review detail" column | ✅ |
+| 3 | Record Documents grid: drag resize, and the width and sort survive a sort, window resize, selection or filter | ✅ |
+| 4 | Home Invoices grid drag resize | ✅ |
+| 5 | Documents upload / download / delete, PDF preview | ✅ |
+| 6 | View-only partner: no create or Delete actions; "Your access" shows View Only; nothing offered is refused | ✅ |
+
+**Server side** (uac-r2 readout, window 20:34–20:45Z, telemetry present to 20:43:20Z): **PASS**.
+
+- External: 9 requests, all 200. There were no 4xx or 5xx responses, no exceptions and no `DV_FETCHXML_COLUMN_NOT_PERMITTED`.
+- Latency, p50 / max in ms:
+
+  | Route | p50 | max | Note |
+  |---|---|---|---|
+  | metadata | 570 | 615 | |
+  | fetch | 610 | 1144 | |
+  | `matters/{id}/events` | — | 1227 | single request |
+  | `me` | — | 762 | single request |
+  | record | — | 623 | single request |
+  | ebilling outcome | — | 1442 | single request |
+
+- Error-level logs: only IDX40001 (#3003, pre-existing; no request failed).
+- No notifications call ran in this window, so #2845 isn't measured here.
+
+**Still open, filed:**
+- D-31 #3008: narrow header minimums ("Ty…"/"D…").
+- D-32 #3009: the empty band above the Documents grid header.
+- D-33 #3010: the FetchService comment drift.
+
+**Task 028 complete** 2026-11-23.
