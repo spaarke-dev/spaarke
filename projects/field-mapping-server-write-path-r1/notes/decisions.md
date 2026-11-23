@@ -1162,3 +1162,13 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
 - **Q3 (recipient cannot read the record), owner:** the send is refused with "Recipient does not have required record access".
   - The text covers every recipient-side cause: no Read, the No Access wall, and external on Restricted. It never says which cause applied.
   - The "Send as a direct message instead" offer is optional. It is built only if it is a small addition in 056b.
+
+## 2026-11-22 — A private message always stays 1:1 and is never filed (owner, in fm's session; supersedes 056a Q5)
+
+- **Owner decision:** "let's just solve the 1:1 which is it always stays 1:1 - no filing".
+- **The rule.** A private message (a Direct message with a record reference) is never filed and never moved to another thread. Its audience is its two participants for its whole life. Its record reference stays as written at create and only decides where the two participants see it.
+- **Supersedes** 056a Q5 ("filing later is explicit and confirmed"). The clear-on-file change in the re-file core is dropped.
+- **Why.** Filing makes a message a record message, readable by everyone who reads the record, and the reference would go with it. Field security on the reference columns governs writes only, so keeping the audience to the pair is what keeps the reference private.
+- **Owner of the rule.** One refusal in the re-file core, so it holds for every writer: the filing route, the AI update tools, push, Office reconcile, thread moves and inbound association. Placement and authorship are agreed with UAC-r2 before code.
+- **A participant who wants the record's team to see something** sends an ordinary message on the record.
+- **Follow-up, not built here:** invite-only conversations, where participants may add named people who each pass the record-access check. The conversation then widens only by invitation, never by filing. Filed for `messages-enhancements-r1`.
