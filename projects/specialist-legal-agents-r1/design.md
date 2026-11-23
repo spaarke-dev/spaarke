@@ -421,7 +421,10 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 - *Expected, given T7:* (c) wins. In that case the declarative agent is a thin router and renderer, and "follows the profile" becomes "routes to the profile-driven tool".
 
 **G2 — One package: declarative agent + connector + skills.** Extends T2/T14 (connectors + skills) and T10 (a skill naming a connector tool).
-- *Pass:* one app package installs a declarative agent whose action is our connector, plus at least one `SKILL.md`, and both work in Chat. The Cowork side is a skill + connector (Cowork cannot call agents).
+- *Pass:* one app package installs a declarative agent whose action is our connector, plus at least one `SKILL.md`, and both work in Chat.
+- *Depends on G8:*
+  - If an agent can use the tenant connector, the package carries the agent and skills only, with no connector of its own (copilot-platform-coordination R1/R2).
+  - If it cannot, every persona agent needs its own registration of the MCP URL. That breaks R1 and must go to the owner before Phase 1. The Cowork side is a skill + connector (Cowork cannot call agents).
 - *Also record:* several agents in one package, and whether a practice plugin can depend on the core plugin. Both are informational and decide packaging, not go/no-go.
 
 **G3 — Profile resolution from the caller's identity on the first tool call.**
@@ -446,6 +449,22 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 - *Also check* that an exported attorney playbook is honoured by Microsoft's `review-contract` and by Word's Run Review.
 - *Pass:* no Spaarke function captures a Microsoft-owned task, and no Microsoft skill captures a Spaarke-owned one, across the shared prompt set.
 - This decides whether personas compose Microsoft functions directly or only recommend them (D-A13).
+
+**G8 — Can a declarative agent use the tenant connector, or only its own actions?** This is copilot-platform-coordination **S-3** (its `notes/copilot-structure.md` §4), adopted 2026-11-23. Learn says an agent's MCP actions are private to that agent. It does not say whether an agent can use a federated tenant connector ("Spaarke MCP").
+- *Setup:*
+  - Build one test agent in Agent Builder, and the same agent packaged.
+  - Add "Spaarke MCP" as a source, with **no MCP action of its own**.
+  - Ask it to call `spike_echo`, then one read tool.
+  - Run it in Chat, plus Word and Teams where it is offered.
+- *Record:*
+  - whether the tool runs, and under which identity (App Insights `tools/list` and `tools/call` against the one registration);
+  - whether the widget renders.
+- *Decides:*
+  - G2's package shape;
+  - whether persona agents (and "Spaarke AI") can obey R1 (one registration per MCP URL);
+  - together with S-2 (= mcp-r1 T10), whether rule R2 (packages carry skills and agents only) holds.
+- *Run early:* it is cheap, and G2 waits on it.
+- *Before the test agent is created:* send its inventory row (owner project, removal plan, removal date) to copilot-platform-coordination (R4, §10).
 
 **Code inventory follow-ups (no spike; Phase 0 desk work):**
 - **I-1 Tool surface:** which surface the profile governs (MCP catalog vs `IAnalysisToolHandler` vs `IAiToolHandler`), and whether the chat Confirmation Gate (`SideEffectGateAIFunction`) also applies on the MCP path.
@@ -479,7 +498,7 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 | **agent-framework-fit-assessment-r1** (COMPLETE, `docs/assessments/agent-framework-fit-assessment-2026-06-03.md`) | Supervision protocol "on Microsoft Agent Framework"; the BFF removed `Microsoft.Agents.AI` (#1027) | Any re-adoption (Phase 4) cites that assessment and passes BFF hygiene §10 (publish-size delta, CVE) |
 | **unified-access-control-r2** (Issue #808, in progress) | **Entra Agent ID** for background agents and any ADR-028 change; ethical walls and scope trimming (L2); per-user knowledge trimming (I-4) | Auth ADR amendments go through its owners. Ethical walls build on its access model, not a parallel one |
 | spaarke-ai-architecture-redesign-r1 / r2 (r1 COMPLETE) | One confirmation gate, Binding capability model, ADR-039 | The profile feeds the existing gate and catalogs. No second gate or dispatch path |
-| **copilot-platform-coordination** (Issue #3006, Epic #421, branch `work/copilot-platform-coordination`, session "copilot-platform-coordination"; set up 2026-11-23) | **The single register of Copilot tenant artifacts:** `notes/tenant-inventory.md`, `notes/copilot-registration-rules.md` (DRAFT), `notes/coordination-map.md`. Its inventory lists the existing NDA agents D2–D4 as **REPLACE, pending D-A11** | We follow its rules (peer coordination, not owner approval):<br>**R1.** One tenant registration per MCP URL, so our persona-agent packages carry **no second connector**. This matches the duplicate-registration double-fire in §7.<br>**R2.** Packages carry skills and agents only (provisional until mcp-r1 T10).<br>**R3.** Names follow `spaarke-{area}-{capability}`.<br>**R4.** Every new tenant artifact, **Phase 0 G1–G7 test agents included**, gets an inventory row (owner project, removal plan) **before upload**. We send the row to that session first.<br>**R5.** Throwaway artifacts get a removal date.<br>This program has no tenant artifacts yet. |
+| **copilot-platform-coordination** (Issue #3006, Epic #421, branch `work/copilot-platform-coordination`, session "copilot-platform-coordination"; set up 2026-11-23) | **The single register of Copilot tenant artifacts:** `notes/tenant-inventory.md`, `notes/copilot-registration-rules.md` (DRAFT), `notes/coordination-map.md`. Its inventory lists the existing NDA agents D2–D4 as **REPLACE, pending D-A11** | We follow its rules (peer coordination, not owner approval):<br>**R1.** One tenant registration per MCP URL, so our persona-agent packages carry **no second connector**. This matches the duplicate-registration double-fire in §7.<br>**R2.** Packages carry skills and agents only. This is **open** until S-2 (= mcp-r1 T10) and S-3 (= our **G8**) are run.<br>**R3.** Names follow `spaarke-{area}-{capability}`.<br>**R4.** Every new tenant artifact, **Phase 0 G1–G7 test agents included**, gets an inventory row (owner project, removal plan) **before upload**. We send the row to that session first.<br>**R5.** Throwaway artifacts get a removal date.<br>This program has no tenant artifacts yet. |
 
 ### 10.1 Alignment with spaarke-legal-ai-accelerator-r1 (gate A0, before Phase 0)
 
