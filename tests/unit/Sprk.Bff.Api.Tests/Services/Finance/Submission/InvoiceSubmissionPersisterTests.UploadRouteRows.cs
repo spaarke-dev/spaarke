@@ -96,6 +96,56 @@ public partial class InvoiceSubmissionPersisterTests
             r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value == (int)StoredFileStatus.Servable, "nothing withdrawn");
     }
 
+    [Fact(DisplayName = "123 fix round 1 (gate read cap, must not fire): more than 51 rows under the invoice with the Servable PDF PAST the capped read - the resume answers Passed from the PDF's own read and touches nothing")]
+    public async Task Gate_ServablePdf_PastTheCappedRead_PassesAndTouchesNothing()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.FileStatus.Should().Be(StoredFileStatus.Servable);
+
+        // Route-added rows whose ids sort BEFORE the PDF's, more than the gate's capped read (MaxFiles + 1) takes; half are Not yet servable.
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId);
+        for (var i = 1; i <= SubmissionCommitGate.MaxFiles + 5; i++)
+        {
+            store.Files.SeedFile(new Guid($"00000000-0000-4000-8000-{i:D12}"), parent, SupportingFileBytes,
+                i % 2 == 0 ? StoredFileStatus.Servable : StoredFileStatus.NotYetServable, StoredFilePurpose.InvoiceSupportingFile, contentType: "text/csv");
+        }
+
+        // Dataverse's own answer to a capped, filtered read: the id-ordered first rows only. Precondition: the PDF is past the cap.
+        store.Files.Dataverse.ApplyQueryFilters = true;
+        store.Files.Dataverse.Rows.Keys.OrderBy(k => k).Take(SubmissionCommitGate.MaxFiles + 1).Should().NotContain(FileId);
+        var statuses = store.Files.Dataverse.Rows.ToDictionary(r => r.Key, r => r.Value.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value);
+        var calls = store.Files.Dataverse.Calls.Count;
+
+        var again = await store.Gate!.RunAsync(InvoiceSubmissionPersisterTests.Submission, CancellationToken.None);
+
+        again.Should().Be(SubmissionCommitGateResult.Passed);
+        store.Files.Dataverse.Calls.Skip(calls).Should().OnlyContain(c => c.StartsWith("query ", StringComparison.Ordinal), "reads only; no flip, no withdraw");
+        store.Files.Dataverse.Rows.ToDictionary(r => r.Key, r => r.Value.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value)
+            .Should().Equal(statuses, "no status changed");
+        store.Deletes.Should().BeEmpty("a valid submission is never undone over rows added after its gate passed");
+        store.UndoTransactions.Should().BeEmpty();
+        store.InvoiceExists.Should().BeTrue();
+        store.Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().NotBe((int)InvoiceSubmissionStatus.Failed);
+    }
+
+    [Fact(DisplayName = "123 fix round 1 (gate read cap): a fault of the Invoice PDF read throws (the job retries); nothing is undone")]
+    public async Task Gate_PdfReadFault_Throws_NothingUndone()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.Files.Dataverse.QueryFault = new TimeoutException("Dataverse slow");
+
+        await FluentActions.Invoking(() => store.Gate!.RunAsync(InvoiceSubmissionPersisterTests.Submission, CancellationToken.None))
+            .Should().ThrowAsync<TimeoutException>();
+
+        store.Deletes.Should().BeEmpty();
+        store.InvoiceExists.Should().BeTrue();
+        store.FileStatus.Should().Be(StoredFileStatus.Servable);
+    }
+
     [Fact(DisplayName = "123 F1-a (the kept rule, must not fire): the PDF not yet Servable but another file Servable (an earlier run stopped part-way) - step 5 is skipped and the PDF is flipped")]
     public async Task Gate_PartialFlip_SkipsTheReRun_AndFlipsThePdf()
     {

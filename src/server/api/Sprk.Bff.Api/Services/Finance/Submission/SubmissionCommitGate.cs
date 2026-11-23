@@ -161,17 +161,21 @@ public class SubmissionCommitGate
     public virtual async Task<SubmissionCommitGateResult> RunAsync(Guid submissionId, CancellationToken ct)
     {
         var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
-        var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
 
         // ── Task 123 fix round 1 (F1-a): the Invoice PDF is flipped LAST (below), so a Servable PDF means every file of the commit was
         // flipped and this gate passed in an earlier run. Any other row under the invoice was added after that pass (the internal upload
-        // route, POST /api/finance/invoices/{invoiceId}/files): it is never counted, flipped, re-checked or undone here ──
-        var pdfs = files.Where(f => f.Purpose == StoredFilePurpose.InvoicePdf).ToList();
+        // route, POST /api/finance/invoices/{invoiceId}/files): it is never counted, flipped, re-checked or undone here. The PDF rows are
+        // read on their own (purpose-filtered), BEFORE the capped read of every row, so added rows can never push them out of the read.
+        // A fault throws, as the file read below does: the job retries ──
+        var pdfs = (await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct, StoredFilePurpose.InvoicePdf).ConfigureAwait(false))
+            .Where(f => f.Purpose == StoredFilePurpose.InvoicePdf)
+            .ToList();
         if (pdfs.Count > 0 && pdfs.All(f => f.Status == StoredFileStatus.Servable))
         {
             return SubmissionCommitGateResult.Passed;
         }
 
+        var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
         if (files.Count is 0 or > MaxFiles)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: invoice {InvoiceId} has {Count} files, none or too many; undoing the commit",

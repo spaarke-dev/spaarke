@@ -924,11 +924,19 @@ public sealed class StoredFileService
     /// <summary>
     /// ebilling-r1 task 094: every Stored File row whose parent is the invoice <paramref name="invoiceId"/>, as the store's rules read them
     /// (whatever their channel: an upload, a Submit Invoice copy or a from-email part). At most <paramref name="max"/>; a fault throws.
+    /// With <paramref name="purpose"/>, only the rows of that purpose, filtered server-side (task 123 fix round 1: the commit gate reads the
+    /// invoice's Invoice PDF rows apart from the capped read of every row, so other rows can never crowd them out of it).
     /// </summary>
-    internal async Task<IReadOnlyList<StoredFileRow>> ReadRowsForInvoiceAsync(Guid invoiceId, int max, CancellationToken ct)
+    internal async Task<IReadOnlyList<StoredFileRow>> ReadRowsForInvoiceAsync(
+        Guid invoiceId, int max, CancellationToken ct, StoredFilePurpose? purpose = null)
     {
         var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = max };
         query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        if (purpose is { } only)
+        {
+            query.Criteria.AddCondition(StoredFileSchema.Purpose, ConditionOperator.Equal, (int)only);
+        }
+
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
     }

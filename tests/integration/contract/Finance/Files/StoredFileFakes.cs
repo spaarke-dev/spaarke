@@ -488,6 +488,31 @@ internal sealed class StoredFileDataverse
             : Task.FromException(new InvalidOperationException($"Failed to delete {table} record {id}: Does Not Exist", NotFound()));
     }
 
+    /// <summary>
+    /// Task 123 fix round 1: when set, a <c>sprk_storedfile</c> query applies its Equal and Null conditions and its <c>TopCount</c> to the
+    /// id-ordered rows, as Dataverse would (a capped read then returns only the first rows). Off by default: other tests rely on every row
+    /// coming back so they can prove the callers' own per-row re-checks.
+    /// </summary>
+    public bool ApplyQueryFilters { get; set; }
+
+    private static bool Matches(Entity row, ConditionExpression condition)
+    {
+        row.Attributes.TryGetValue(condition.AttributeName, out var value);
+        var actual = value switch
+        {
+            OptionSetValue option => option.Value,
+            EntityReference reference => reference.Id,
+            _ => value,
+        };
+
+        return condition.Operator switch
+        {
+            ConditionOperator.Equal when condition.Values.Count == 1 => Equals(actual, condition.Values[0]),
+            ConditionOperator.Null => actual is null,
+            _ => true,
+        };
+    }
+
     /// <summary>Parent ids a set query does not return (no privilege depth) while a read by id still finds them.</summary>
     public HashSet<Guid> HiddenFromQueries { get; } = [];
 
@@ -519,6 +544,15 @@ internal sealed class StoredFileDataverse
             }
 
             var ordered = Rows.Values.OrderBy(r => r.Id).ToList();
+            if (ApplyQueryFilters)
+            {
+                ordered = ordered.Where(r => q.Criteria.Conditions.All(c => Matches(r, c))).ToList();
+                if (q.TopCount is int top && top > 0)
+                {
+                    ordered = ordered.Take(top).ToList();
+                }
+            }
+
             var slice = ordered.Skip((page - 1) * size).Take(size).ToList();
             return Task.FromResult(new EntityCollection(slice)
             {
