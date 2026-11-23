@@ -31,6 +31,7 @@ import { TODO_REGARDING_TARGETS } from '../AssociateToStep/types';
 
 import { CreateTodoStep } from './CreateTodoStep';
 import { TodoService } from './todoService';
+import { broadcastTodoCreated } from './todoWizardHostSupport';
 import { EMPTY_TODO_FORM } from './formTypes';
 import type { ICreateTodoFormState, IInitialRegarding } from './formTypes';
 
@@ -259,9 +260,9 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
 
         // ── Create sprk_todo (ADR-024: applyResolverFields runs inside TodoService when
         //    a regarding triple is supplied; skipped wizard means context.association is null)
-        // authenticatedFetch/bffBaseUrl also wire the Field Mapping Framework engine
-        // (task 021 / FR-12) — TodoService calls it after applyResolverFields, before
-        // createRecord, when a regarding parent is present.
+        // Task 024 (FR-16): TodoService posts the create to the BFF child-records route with
+        // authenticatedFetch/bffBaseUrl (never Xrm.WebApi) and names the regarding parent as the
+        // mapping source; the server does the field mapping, not the client.
         const todoService = new TodoService(dataService, authenticatedFetch, bffBaseUrl);
         // ISS-027 / task 119: thread the wizard's attached files through so TodoService can
         // upload them to SPE and create the linked sprk_document rows AFTER the to do exists.
@@ -273,7 +274,10 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
 
         const todoId = result.todoId!;
         const todoName = result.todoName!;
-        // Seed with any warnings TodoService already accumulated (field-mapping engine,
+        // R4 task 100 (W-2): tell the LegalWorkspace To Do widget to refetch. The create no longer goes through
+        // dataService.createRecord (task 024), so the host's withTodoCreatedBroadcast wrapper does not see it.
+        broadcastTodoCreated(todoId);
+        // Seed with any warnings TodoService already accumulated (the server's create warnings,
         // and — as of task 119 — file upload / document-record-link warnings). Previously
         // dropped here, which is how a failed upload could reach this panel silently.
         const warnings: string[] = [...(result.warnings ?? [])];
@@ -330,10 +334,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   );
 
   // Adapt IDataService to the webApi shape that CreateRecordWizard expects
-  const webApiAdapter = React.useMemo(
-    () => createWebApiFromDataService(dataService),
-    [dataService]
-  );
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   return (
     <CreateRecordWizard
