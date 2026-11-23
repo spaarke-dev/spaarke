@@ -3,7 +3,8 @@
  *
  * A trimmed copy of the shape the review surface needs — mirrors
  * `code-pages/CommunicationPage/src/types/communication.ts` (the prototype
- * design source), narrowed to what the PCF reads from the control context.
+ * design source, archived 2026-11-22 at `docs/archive/code-pages/CommunicationPage/`),
+ * narrowed to what the PCF reads from the control context.
  */
 
 /**

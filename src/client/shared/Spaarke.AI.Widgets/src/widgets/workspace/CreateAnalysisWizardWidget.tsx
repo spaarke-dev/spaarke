@@ -115,6 +115,7 @@ import {
   applyResolverFields,
   cleanGuid,
   createTodoRegardingChild,
+  createWebApiFromDataService,
   discoverNavProps,
   isComposedEmailReady,
   resolveAnalysisFilePreview,
@@ -390,22 +391,6 @@ interface AgreementTypeRow {
   isFallback: boolean;
 }
 
-/** Adapt IDataService to the webApi shape CreateRecordWizard/PolymorphicResolverService expect. */
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -491,7 +476,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   const workTypeValue = data?.workTypeValue ?? SprkAnalysisWorkType.AgreementAnalysis; // Agreement Review
   const workTypeLabel = data?.workTypeLabel ?? 'Agreement Review';
 
-  const webApiAdapter = useMemo(() => (dataService ? buildWebApiAdapter(dataService) : null), [dataService]);
+  const webApiAdapter = useMemo(() => (dataService ? createWebApiFromDataService(dataService) : null), [dataService]);
   const searchUsers = data?.searchUsers ?? EMPTY_SEARCH;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- same guarded read as every `data?.` above: a registry mount can pass no widget data at runtime
   const emailComposeHandlers = data?.emailComposeHandlers;

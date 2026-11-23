@@ -43,9 +43,9 @@
  * wrapper's own file and any use of `<ExternalDataGrid>` here other than as a JSX tag.
  */
 import * as React from 'react';
-import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-components';
-import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components/utils/themeStorage';
+import { makeStyles } from '@fluentui/react-components';
 import { gridDataverseClient } from '../services/gridDataverseClient';
+import { useAmbientTheme } from './useAmbientTheme';
 import { ExternalDataGrid } from './ExternalDataGrid';
 import { getRecordDetailEntity } from '../components/detail/RecordDetailFields';
 import { RecordTemplateModal } from '../components/record/RecordTemplateModal';
@@ -84,15 +84,14 @@ interface DetailTarget {
  */
 export type GridHostCommands = React.ComponentProps<typeof ExternalDataGrid>['hostCommands'];
 
+/**
+ * The shared grid's per-host overrides (custom cell renderers keyed by column), read off the wrapper's props like
+ * {@link GridHostCommands}. R4 task 020: the Invoices grid passes a `sprk_reviewdetail` renderer through it.
+ */
+export type GridOverrides = React.ComponentProps<typeof ExternalDataGrid>['overrides'];
+
 /** The props of a grid widget body: the registry's `WidgetBodyProps` plus the optional host commands. */
 export type GridWidgetBodyProps = WidgetBodyProps & { hostCommands?: GridHostCommands };
-
-/** Resolves + live-tracks the ambient light/dark/Teams theme (same source as the app shell). */
-function useAmbientTheme(): Theme {
-  const [theme, setTheme] = React.useState<Theme>(() => resolveCodePageTheme() ?? webLightTheme);
-  React.useEffect(() => setupCodePageThemeListener(next => setTheme(next ?? webLightTheme)), []);
-  return theme;
-}
 
 /**
  * Builds a widget-body component bound to one `sprk_gridconfiguration` record id. The returned
@@ -100,8 +99,14 @@ function useAmbientTheme(): Theme {
  * OWN header from `sprk_configjson.display.title`) — matches `WidgetBodyComponent`'s contract so it
  * plugs into `widgetRegistry.ts`'s `lazyLoader` unchanged. The one extra, optional prop is `hostCommands`: commands
  * the host widget adds to the grid's toolbar (see {@link GridHostCommands}); the registry never passes it.
+ *
+ * The optional second argument is the grid's `overrides` (task 020, {@link GridOverrides}): a fixed value per widget,
+ * handed to the grid as is. Omitted (every widget but Invoices), the grid gets none, exactly as before.
  */
-export function createGridWidgetBody(configId: string): React.ComponentType<GridWidgetBodyProps> {
+export function createGridWidgetBody(
+  configId: string,
+  overrides?: GridOverrides
+): React.ComponentType<GridWidgetBodyProps> {
   const GridWidgetBody: React.FC<GridWidgetBodyProps> = ({ hostCommands }) => {
     const s = useStyles();
     const theme = useAmbientTheme();
@@ -157,6 +162,7 @@ export function createGridWidgetBody(configId: string): React.ComponentType<Grid
           onRecordsLoaded={handleRecordsLoaded}
           onRecordOpen={handleRecordOpen}
           hostCommands={hostCommands}
+          overrides={overrides}
         />
         {detail && (
           <RecordTemplateModal

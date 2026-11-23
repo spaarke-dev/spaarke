@@ -1,0 +1,49 @@
+{
+  "_definition": "1.0",
+  "kind": "datagrid",
+  "id": "286be8b4-f96f-4d5a-b1d5-82fd83ca9693",
+  "name": "External record documents",
+  "entity": "sprk_document",
+  "description": "The Documents list on every record in the external SPA record template (spaarke-SPA-external-access-platform-r4 tasks 023b/023c). sprk_configjson is the configJson member below, exactly as the shared DataGrid reads it. The SPA gives the grid its rows from the record route through the grid's rowSource, so the FetchXML is not executed by the SPA; it is kept valid for any other host. sprk_summary is NOT on the documents module's ReadableColumns, so it is a layout cell only (its values come from the host's rows) and is never a FetchXML attribute. Export to Excel is off: it would re-run the FetchXML through the module path and drop AI Summary.",
+  "configJson": {
+    "_version": "1.0",
+    "source": {
+      "type": "inline",
+      "fetchXml": "<fetch><entity name='sprk_document'><attribute name='sprk_documentid' /><attribute name='sprk_documentname' /><attribute name='sprk_documenttype' /><attribute name='createdon' /><attribute name='sprk_project' /><attribute name='sprk_matter' /><attribute name='sprk_workassignment' /><order attribute='createdon' descending='true' /></entity></fetch>",
+      "layoutXml": "<grid name=\"result\" object=\"1\" jump=\"sprk_documentname\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_documentid\"><cell name=\"sprk_documentname\" width=\"300\" /><cell name=\"sprk_documenttype\" width=\"150\" /><cell name=\"createdon\" width=\"140\" /><cell name=\"sprk_summary\" width=\"360\" /></row></grid>"
+    },
+    "display": {
+      "title": "Documents",
+      "emptyStateMessage": "No documents on this record yet.",
+      "truncateWithTooltip": true
+    },
+    "rowOpen": {
+      "type": "formDialog"
+    },
+    "commandBar": {
+      "showDefaultCommands": {
+        "newRecord": false,
+        "refresh": false,
+        "exportExcel": false,
+        "delete": false,
+        "editColumns": false,
+        "editFilters": false
+      }
+    },
+    "columns": {
+      "sprk_documentname": { "label": "Name", "width": 300 },
+      "sprk_documenttype": { "label": "Type", "width": 150, "renderer": "badge" },
+      "createdon": { "label": "Date Added", "width": 140, "renderer": "date" },
+      "sprk_summary": { "label": "AI Summary", "width": 360 },
+      "sprk_project": { "hidden": true },
+      "sprk_matter": { "hidden": true },
+      "sprk_workassignment": { "hidden": true }
+    },
+    "behavior": {
+      "selectionMode": "none",
+      "pageSize": 50,
+      "enableSorting": true,
+      "enableColumnResize": true
+    }
+  }
+}

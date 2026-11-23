@@ -38,6 +38,7 @@ import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
+import { discoverNavProps } from '../../services/PolymorphicResolverService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
@@ -51,6 +52,8 @@ import type { AssociationResult } from '../AssociateToStep/types';
 import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
 import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
+import { searchContactsAsLookup, searchUsersAsLookup } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -94,29 +97,10 @@ async function associateProjectWithAccount(
   projectId: string,
   accountId: string
 ): Promise<void> {
-  // Attempt to discover the nav-prop for the account relationship.
-  // Fall back to a known column name if metadata is unavailable.
-  let navPropBind = `sprk_Account@odata.bind`;
-  try {
-    const orgUrl = window.location.origin;
-    const resp = await fetch(
-      `${orgUrl}/api/data/v9.0/EntityDefinitions(LogicalName='sprk_project')/ManyToOneRelationships` +
-        `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`,
-      { credentials: 'include' }
-    );
-    if (resp.ok) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json = (await resp.json()) as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rels: Array<any> = json.value ?? [];
-      const accountRel = rels.find((r: { ReferencedEntity: string }) => r.ReferencedEntity === 'account');
-      if (accountRel?.ReferencingEntityNavigationPropertyName) {
-        navPropBind = `${accountRel.ReferencingEntityNavigationPropertyName}@odata.bind`;
-      }
-    }
-  } catch {
-    // Use fallback column name
-  }
+  // The nav-prop of the project's account lookup, from the shared discovery (#2909: one query and one cache per
+  // entity for the page). It never throws; when metadata is unavailable it returns [] and the known column name stands.
+  const accountRel = (await discoverNavProps('sprk_project')).find(e => e.referencedEntity === 'account');
+  const navPropBind = `${accountRel?.navPropName || 'sprk_Account'}@odata.bind`;
 
   await dataService.updateRecord('sprk_project', projectId, {
     [navPropBind]: `/accounts(${accountId})`,
@@ -127,33 +111,7 @@ async function associateProjectWithAccount(
 // Search helper functions (use IDataService instead of IWebApi)
 // ---------------------------------------------------------------------------
 
-async function searchContactsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safeFilter}')` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('contact', options);
-  return result.entities.map(e => ({
-    id: e['contactid'] as string,
-    name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
-  }));
-}
-
-async function searchUsersAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('systemuser', options);
-  return result.entities.map(e => ({
-    id: e['systemuserid'] as string,
-    name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
-  }));
-}
+// Contact and user search: the shared services/userLookup implementations (#2866).
 
 async function searchMatterTypesAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
   if (!query || query.trim().length < 1) return [];
@@ -306,25 +264,6 @@ function handoffFileToUploaded(file: File): IUploadedFile | null {
     sizeBytes: file.size,
     fileType,
     file,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Adapter: build a webApi-shaped object from IDataService for CreateRecordWizard
-// ---------------------------------------------------------------------------
-
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
   };
 }
 
@@ -485,7 +424,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   );
 
   // ── WebApi adapter for CreateRecordWizard ─────────────────────────────
-  const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // ── Wizard config ───────────────────────────────────────────────────────
   const config: ICreateRecordWizardConfig = React.useMemo(

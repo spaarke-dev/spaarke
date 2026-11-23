@@ -13,7 +13,7 @@ child table this change:
 - **hides** the platform "+ New" (one extra enable rule, `nativeNewAllowed`), and
 - **shows** "New &lt;thing&gt;" (`newChildAvailable`, the exact complement), which opens the product's BFF-backed create
   surface filed under the host: the To Do / Event / Invoice / Report Card wizards (`entityType`, `entityId`, `recordName`),
-  the Document Upload wizard, the Communication page in compose mode, or — for a budget, a KPI assessment or a billing
+  the Document Upload wizard, the email composer (`sprk_emailpage`, "New Email", Related to the host), or — for a budget, a KPI assessment or a billing
   event, which have no wizard — `POST /api/v1/child-records/{table}` followed by opening the new row.
 
 **Fail closed**: the platform "+ New" is allowed only when the host is

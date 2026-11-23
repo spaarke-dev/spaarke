@@ -121,7 +121,11 @@ export interface RelatedCandidate extends EntitySearchResult {
  * (unified-access-control-r2 — `sprk_document` has no account lookup), so an Account prediction could
  * only produce a ribbon quick-save refused with 400 OFFICE_002. Unmapped, it now gets the same "no
  * prediction → open the pane" path as any other type the add-in cannot file to. The Save picker never
- * offered Account cards (its chips are Matter/Project/Invoice), so the pane is unchanged.
+ * offered Account cards (its chips are Matter/Project), so the pane is unchanged.
+ *
+ * `sprk_invoice` stays mapped so readers keep the type, but since task 133 slice C Save does not file to an invoice:
+ * the Save picker's chips are Matter/Project (cards are filtered by chip), and `fetchEnginePreSelection` returns no
+ * prediction for an Invoice, so the ribbon Quick Save saves unfiled.
  */
 export const LOGICAL_TO_ENTITY_TYPE: Readonly<Record<string, EntityType>> = {
   sprk_matter: 'Matter',
@@ -282,6 +286,10 @@ export async function fetchEnginePreSelection(
   // `predicted.canFile === false` tells the ribbon quick-save NOT to auto-file (task 084).
   const predicted = candidateToEntity(predictedCandidate, filingAccess);
   if (!predicted) return null;
+  // Task 133 slice C: Save no longer files to an invoice (an invoice is created and fed only by a submission). The
+  // ribbon Quick Save files to this prediction without showing the pane, so an Invoice prediction is no prediction:
+  // Quick Save saves unfiled, and the user files it from the pane. Invoice stays in LOGICAL_TO_ENTITY_TYPE for readers.
+  if (predicted.entityType === 'Invoice') return null;
 
   const alternates = model.candidates
     .filter(c => !(c.entity === predictedCandidate.entity && c.targetId === predictedCandidate.targetId))

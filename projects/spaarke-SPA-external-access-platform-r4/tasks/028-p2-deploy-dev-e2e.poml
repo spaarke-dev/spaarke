@@ -125,7 +125,7 @@
     <criterion testable="true">Each live change has an owner approval and a rollback recorded before it ran; no BFF deploy was made or requested by this task.</criterion>
   </acceptance-criteria>
 
-  <notes>NFR-06. Rollback targets: previous SPA commit (from the last deploy record) and the saved raw configjson for 3ff4102c.</notes>
+  <notes>NFR-06. Rollback targets: previous SPA commit (from the last deploy record) and the saved raw configjson for 3ff4102c. Deploy precondition from task 020 (wave 4 review, 2026-11-20): the P2 SPA build itself reads `sprk_reviewdetail` in the Invoice record read and the Matter/Project/WA Invoices section, so ANY environment it is deployed to must already run a BFF with ebilling's 082c-2 allow-list entry, or every invoice read answers 400 DV_FETCHXML_COLUMN_NOT_PERMITTED (dev: live in BFF 5ae2804884). Task 022 renders PDFs inline from a blob URL in an unsandboxed iframe (a sandbox blocks the PDF viewer); check PDF and image preview in Edge, Chrome and Teams, and note for uac-r2 that the content route's "force download" stance is overridden client-side by owner decision FR-14.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

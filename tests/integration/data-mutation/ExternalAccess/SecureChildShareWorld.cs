@@ -289,6 +289,12 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>
+    /// #2750: answers a PAGED query at most this many rows a page (the next page continues after them), so a listing reaches
+    /// its page ceiling with a few rows instead of a hundred thousand. Null: the page size the query asks for.
+    /// </summary>
+    public int? MaxRowsPerPage { get; set; }
+
     /// <summary>Task 175: every access-record (<c>sprk_accessinheritance</c>) write, in order.</summary>
     public List<(string Table, Guid Id, string Text)> AccessRecordWrites { get; } = new();
 
@@ -903,9 +909,10 @@ internal sealed class SecureChildShareWorld
         var more = false;
         if (query.PageInfo is { Count: > 0 } page)
         {
-            var skip = (Math.Max(page.PageNumber, 1) - 1) * page.Count;
-            more = matched.Count > skip + page.Count || _endlessTables.Contains(query.EntityName);
-            matched = matched.Skip(skip).Take(page.Count).ToList();
+            var count = MaxRowsPerPage is { } most ? Math.Min(most, page.Count) : page.Count;
+            var skip = (Math.Max(page.PageNumber, 1) - 1) * count;
+            more = matched.Count > skip + count || _endlessTables.Contains(query.EntityName);
+            matched = matched.Skip(skip).Take(count).ToList();
         }
 
         var projected = matched.Select(r => Project(r, query.ColumnSet)).ToList();

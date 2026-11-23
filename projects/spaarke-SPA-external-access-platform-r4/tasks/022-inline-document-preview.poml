@@ -4,7 +4,7 @@
     <title>Inline PDF/image preview on the Document record (FR-14)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 018</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx code; new preview component on the Document record</rigor-reason>
     <model-tier>sonnet</model-tier>

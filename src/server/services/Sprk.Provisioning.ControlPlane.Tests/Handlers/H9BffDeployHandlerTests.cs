@@ -522,6 +522,50 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.SlotSwapInfraFault);
     }
 
+    // ---------- ISS-033: the swap outlives the wait ----------
+
+    [Fact]
+    public async Task AC14b_SlotSwapTimesOut_FailsRetryable_WithSlotSwapTimeout_AndDoesNotClaimTheSlotsUnchanged()
+    {
+        // ACME 2026-11-22: the swap took ~11 min, H9 stopped waiting, and the old message promised "Source + target
+        // slots UNCHANGED" while Azure was still swapping. Production then served the new build.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-14b");
+        var swapper = FakeSlotSwapper.Throws(new TimeoutException("ARM App Service slot-swap invocation timed out after 00:30:00."), thenSuccess: false);
+        var seams = FreshGreenSeams(overrideSwapper: swapper);
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.RetryableWithCleanup,
+            "a retry is safe: its slot guard waits for the swap still in flight before it redeploys");
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.SlotSwapTimeout);
+        failure.Diagnostic.Should().Contain("may still be swapping").And.NotContain("UNCHANGED");
+        seams.Probe.CallCount.Should().Be(1, "only the staging probe ran — no post-swap smoke test or rollback after a timeout");
+    }
+
+    [Fact]
+    public async Task AC20e_SlotGuardReportsSwapStillInFlight_FailsQuarantine_NoDeploy()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-20e");
+        var guard = FakeSlotGuard.SwapInProgress("ARM still refuses slot 'staging' … prepared for swap");
+        var seams = FreshGreenSeams();
+        var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
+            slotGuard: guard);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired,
+            "a swap stuck past the ceiling needs an operator to complete or cancel it — a retry hits the same refusal");
+        failure.RejectionCode.Should().Be(BffDeployRejectionCodes.SlotSwapInProgress);
+        failure.Diagnostic.Should().Contain("prepared for swap");
+        seams.Kudu.CallCount.Should().Be(0, "nothing is deployed to a slot ARM refuses");
+        seams.Swapper.CallCount.Should().Be(0);
+    }
+
     // ---------- AC-15a smoke test failure + rollback success (completeness proof) ----------
 
     [Fact]
@@ -1075,6 +1119,9 @@ public sealed class H9BffDeployHandlerTests : IDisposable
             => new(new SlotStickyAppSettingResult.Failure(diagnostic), null);
 
         public static FakeSlotGuard Throws(Exception ex) => new(null, ex);
+
+        public static FakeSlotGuard SwapInProgress(string diagnostic)
+            => new(new SlotStickyAppSettingResult.SlotSwapInProgress(diagnostic), null);
 
         public Task<SlotStickyAppSettingResult> EnsureAsync(SlotStickyAppSettingRequest request, CancellationToken ct)
         {

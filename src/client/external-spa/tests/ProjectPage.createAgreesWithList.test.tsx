@@ -39,6 +39,9 @@ vi.mock('../src/api/web-api-client', async () => {
   };
 });
 
+// The record Documents list is the shared grid (R4 task 023c): it reads its configuration through this seam.
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
+
 // `/me`: a partner (no `writeAccessPerRecord`) with a level on this project. useAccessLevel runs for real.
 let level: 'ViewOnly' | 'Collaborate' | 'FullAccess' = 'Collaborate';
 vi.mock('../src/hooks/useExternalContext', () => ({
@@ -105,7 +108,8 @@ async function overview(answer: ListAnswer): Promise<void> {
   renderProject();
   await screen.findByRole('tab', { name: /Overview/ });
   if (answer === 'pending') {
-    await screen.findByText('Loading documents...');
+    // The grid has loaded its configuration and asked for the list, which never answers.
+    await waitFor(() => expect(bffApiCall).toHaveBeenCalledWith('/api/v1/external/projects/p-d9/documents'));
   } else if (answer === 'failed') {
     await screen.findByText(/Failed to load documents/);
   } else {

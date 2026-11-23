@@ -327,7 +327,7 @@ LegalWorkspace uses the package component through an 89-line shim. That leaves t
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on merge of the `work/def-008-grid-new-email-message` PR. On the owner's spec, the communications grid offers "New Email", which opens the composer "Related to" the host, and "New Message", which opens the form's Messages modal, and no longer the OOB form. The secure-ribbon command became "New Email". CommunicationPage was moved to `docs/archive/code-pages/`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-18 |
 | **Source** | DEF-003 execution (#2803, PR #2906): the "delete only if nothing imports or deploys it" check |
@@ -362,7 +362,7 @@ It is also not deployed on DEV, so the command has no page to open there. Its `p
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on merge of the `work/def-009-nav-prop-copies` PR (three copies folded in; the ribbon script stays a recorded copy) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-18 |
 | **Source** | DEF-003/DEF-004 execution (#2803, #2804): the brief limited the de-duplication to the Pattern D packages |
@@ -385,6 +385,34 @@ The companion PR folds three private copies of the ManyToOne nav-prop metadata q
 **Estimated effort**: half a day
 **Blockers**: the companion de-duplication PR merges first
 **Related**: DEF-003, DEF-004
+
+---
+
+### DEF-010 — LegalWorkspace `CreateMatter/matterService.ts` carries a dead `MatterService` class
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-20 |
+| **Source** | Adversarial review of the DEF-009 change (#2909, branch `work/def-009-nav-prop-copies`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2931 |
+
+**Description**
+
+`src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts` holds a `MatterService` class (matter create, file upload, follow-on actions) that nothing instantiates. The file's only importer is `FilePreview/FilePreviewDialog.tsx`, for `searchUsersAsLookup`; the live matter wizard is `Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts`. The DEF-009 change folded this file's nav-prop copy into the shared `discoverNavProps`, but the code never runs. The dead class is a third copy of the matter create path: a matter-create fix (payload shape, nav-prop binding, upload) can land in the wrong file, and duplication sweeps keep counting it.
+
+**Entry-points**
+
+- `src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts` (class `MatterService`, `_discoverNavProps`, `_resolveNavProp`)
+- `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx:18` (the only importer)
+- `cd src/solutions/LegalWorkspace && npm run typecheck && npx vite build`
+
+**Suggested fix**: delete the class and the helpers only it uses; keep the exported `search*AsLookup` functions (or point `FilePreviewDialog` at the shared ones). Check `formTypes.ts` / `wizardTypes.ts` for other importers first.
+
+**Estimated effort**: 1–2 hours
+**Blockers**: #2909 merges first
+**Related**: DEF-009, ADR-012
 
 ---
 
@@ -505,6 +533,42 @@ The BFF URL normalizer is `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.
 **Estimated effort**: 30 minutes
 **Blockers**: none
 **Related**: ISS-006 (same review)
+
+---
+
+### ISS-008 — Communications grid and email page glue for New Email / New Message has no tests
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-22 |
+| **Source** | Code review of #2938 (DEF-008 / #2908), finding 4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2948 |
+
+**Description**
+
+#2908 added "+ New Email" and "+ New Message" to the communications grid page, and a "Related to" prefill to the email composer page. The shared `@spaarke/ui-components` code (`conversationPanelLaunch`, `normalizeRecordRef`, `parseComposeRegarding`) and the PCF hook (`useConversationPanelOpenRequest`) have tests. The page-level glue does not, because neither solution has a test runner.
+
+The page code has branches that no test covers. Examples:
+- the form id must equal the scoped id;
+- "New Message" is offered only on a record form;
+- the three outcomes of the record-scoping parser;
+- the composer reading the `compose`/`regarding*` parameters from the URL or the `data` envelope.
+
+A regression in any of these ships green. "New Email" would open with no "Related to", or "New Message" would show its "did not respond" alert where it should open. Only a hand check on DEV would catch it.
+
+**Entry-points**
+
+- `src/solutions/sprk_communicationspage/src/main.tsx`: `parseRegardingEnvelope` (85), `resolveHostRecord` (163), `newEmail` (180), `newMessage` (200), `HOST_COMMANDS` (218)
+- `src/solutions/EmailPage/src/main.tsx:181`, where `parseComposeRegarding` reads the top-level or `data` parameters
+- Neither solution's `package.json` has a `test` script. `src/solutions/ApExport` and `src/solutions/AllDocuments` do and can be copied.
+
+**Suggested fix**: move the page logic into small modules without changing behaviour. Add a Jest or Vitest setup copied from a solution that has one. Write tests that fail when each branch above is broken.
+
+**Estimated effort**: half a day to one day
+**Blockers**: none
+**Related**: DEF-008 (#2908), PR #2938, PR #2947
 
 ---
 ## Closed

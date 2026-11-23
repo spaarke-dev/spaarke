@@ -258,6 +258,64 @@ public sealed class ArmSlotStickyAppSettingWriterTests
             .And.NotContain("Production");
     }
 
+    // ---------- ISS-033: a swap in flight on the site ----------
+
+    [Fact]
+    public async Task EnsureAsync_SlotPreparedForSwap_WaitsForTheSwap_ThenWrites()
+    {
+        // ACME 2026-11-22: H9's retry wrote to staging while the first attempt's swap was still warming up, got
+        // 409 "prepared for swap" and failed the run. The swap finished a minute later on its own.
+        var arm = new FakeAppServiceArm(
+            stickyAppSettingNames: new[] { GuardName },
+            stickyConnectionStringNames: Array.Empty<string>(),
+            productionSettings: new Dictionary<string, string> { ["Redis__Enabled"] = "true" },
+            slotSettings: new Dictionary<string, string>(),
+            conflictSettingsWrites: 2);
+
+        var result = await NewWriter(arm, FastSwapWait(TimeSpan.FromMinutes(1))).EnsureAsync(NewRequest(), CancellationToken.None);
+
+        result.Should().Be(new SlotStickyAppSettingResult.Success(StickyNameAdded: false, SettingWritten: true));
+        arm.ConflictCount.Should().Be(2, "both refusals were waited out");
+        arm.Writes.Should().ContainSingle("the write lands once the swap has finished");
+    }
+
+    [Fact]
+    public async Task EnsureAsync_SwapStillInFlightAfterTheCeiling_ReturnsSlotSwapInProgress_WithoutWriting()
+    {
+        var arm = new FakeAppServiceArm(
+            stickyAppSettingNames: new[] { GuardName },
+            stickyConnectionStringNames: Array.Empty<string>(),
+            productionSettings: new Dictionary<string, string> { ["Redis__Enabled"] = "true" },
+            slotSettings: new Dictionary<string, string>(),
+            conflictSettingsWrites: int.MaxValue);
+
+        var result = await NewWriter(arm, FastSwapWait(TimeSpan.FromMilliseconds(60))).EnsureAsync(NewRequest(), CancellationToken.None);
+
+        var inProgress = result.Should().BeOfType<SlotStickyAppSettingResult.SlotSwapInProgress>().Subject;
+        inProgress.Diagnostic.Should().Contain("prepared for swap").And.Contain(SlotName);
+        arm.ConflictCount.Should().BeGreaterThan(1, "the guard kept retrying until the ceiling");
+        arm.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EnsureAsync_OtherConflict_IsAFailure_AndIsNotWaitedOn()
+    {
+        // Negative control: only the "prepared for swap" refusal is a swap in flight.
+        var arm = new FakeAppServiceArm(
+            stickyAppSettingNames: new[] { GuardName },
+            stickyConnectionStringNames: Array.Empty<string>(),
+            productionSettings: new Dictionary<string, string> { ["Redis__Enabled"] = "true" },
+            slotSettings: new Dictionary<string, string>(),
+            conflictSettingsWrites: int.MaxValue,
+            conflictMessage: "Another operation is in progress on the site.");
+
+        var result = await NewWriter(arm, FastSwapWait(TimeSpan.FromMinutes(1))).EnsureAsync(NewRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<SlotStickyAppSettingResult.Failure>()
+            .Which.Diagnostic.Should().Contain("409");
+        arm.ConflictCount.Should().Be(1, "a conflict that is not a swap in flight fails at once");
+    }
+
     // ---------- helpers ----------
 
     private static SlotStickyAppSettingRequest NewRequest() => new(
@@ -268,10 +326,21 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         SettingName: GuardName,
         SettingValue: GuardValue);
 
-    private static ArmSlotStickyAppSettingWriter NewWriter(FakeAppServiceArm arm) => new(
+    private static ArmSlotStickyAppSettingWriter NewWriter(FakeAppServiceArm arm, BffDeployOptions? options = null) => new(
         ArmSdkTestFakes.NewArmClient(ArmSdkTestFakes.NewHandler(arm.Respond)),
-        Options.Create(new BffDeployOptions()),
+        Options.Create(options ?? new BffDeployOptions()),
         NullLogger<ArmSlotStickyAppSettingWriter>.Instance);
+
+    /// <summary>ARM's live 409 text while a swap is in flight on the site (sprk-acme-prod-api, 2026-11-22).</summary>
+    private const string PreparedForSwapMessage =
+        "The slot cannot be changed because its configuration settings have been prepared for swap. See " +
+        "https://learn.microsoft.com/en-us/azure/app-service/deploy-staging-slots?tabs=portal#troubleshoot-swaps for more information.";
+
+    private static BffDeployOptions FastSwapWait(TimeSpan ceiling) => new()
+    {
+        SlotSwapTimeout = ceiling,
+        SlotSwapInProgressPollInterval = TimeSpan.FromMilliseconds(5),
+    };
 
     private static List<string?> StringArray(JsonElement properties, string name)
         => properties.GetProperty(name).EnumerateArray().Select(e => e.GetString()).ToList();
@@ -290,6 +359,11 @@ public sealed class ArmSlotStickyAppSettingWriterTests
         private readonly bool _rejectSettingsWrite;
         private readonly bool _rejectNamesWrite;
         private readonly bool _liveNewSiteShape;
+        private readonly int _conflictSettingsWrites;
+        private readonly string _conflictMessage;
+
+        /// <summary>How many slot-settings PUTs were answered 409 (ISS-033).</summary>
+        public int ConflictCount { get; private set; }
 
         public FakeAppServiceArm(
             string[]? stickyAppSettingNames,
@@ -298,8 +372,12 @@ public sealed class ArmSlotStickyAppSettingWriterTests
             Dictionary<string, string> slotSettings,
             bool rejectSettingsWrite = false,
             bool rejectNamesWrite = false,
-            bool liveNewSiteShape = false)
+            bool liveNewSiteShape = false,
+            int conflictSettingsWrites = 0,
+            string conflictMessage = PreparedForSwapMessage)
         {
+            _conflictSettingsWrites = conflictSettingsWrites;
+            _conflictMessage = conflictMessage;
             _stickyAppSettingNames = stickyAppSettingNames;
             _stickyConnectionStringNames = stickyConnectionStringNames;
             _productionSettings = productionSettings;
@@ -398,6 +476,12 @@ public sealed class ArmSlotStickyAppSettingWriterTests
             if (path.EndsWith($"/slots/{SlotName}/config/appsettings", StringComparison.OrdinalIgnoreCase)
                 && request.Method == HttpMethod.Put)
             {
+                if (ConflictCount < _conflictSettingsWrites)
+                {
+                    ConflictCount++;
+                    return ArmSdkTestFakes.JsonResponse(HttpStatusCode.Conflict,
+                        ArmSdkTestFakes.ArmErrorBody("Conflict", _conflictMessage));
+                }
                 if (_rejectSettingsWrite)
                 {
                     return ArmSdkTestFakes.JsonResponse(HttpStatusCode.Forbidden, ArmSdkTestFakes.ArmErrorBody(

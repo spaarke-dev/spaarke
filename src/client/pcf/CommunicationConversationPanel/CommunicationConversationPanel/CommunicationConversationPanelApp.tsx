@@ -24,6 +24,7 @@ import { resolveRegardingContext } from './hostContext';
 import { buildPreviewModel } from './previewModel';
 import { ConversationPreview } from './ConversationPreview';
 import { ConversationModal } from './ConversationModal';
+import { useConversationPanelOpenRequest } from './useConversationPanelOpenRequest';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 const POLL_INTERVAL_MS = 5000;
@@ -195,6 +196,27 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
       setModalOpen(true);
     }
   }, [authReady, regardingContext]);
+
+  // #2908: the communications grid on the same form asks for this modal ("+ New Message"). Taken only when the modal
+  // can open (see useConversationPanelOpenRequest); a request taken while auth loads opens it once auth is ready.
+  const openRequestHost = React.useMemo(
+    () => (hostEntityName && hostRecordId ? { entityType: hostEntityName, id: hostRecordId } : undefined),
+    [hostEntityName, hostRecordId]
+  );
+  const reportOpenRequestFailed = React.useCallback((reason: string) => {
+    // The nearest frame that can open an alert (the typed XrmContext does not declare openAlertDialog).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = getXrm((x: any) => typeof x.Navigation?.openAlertDialog === 'function');
+    void xrm?.Navigation?.openAlertDialog?.({ title: 'Messages', text: `Messages could not be opened. ${reason}` });
+  }, []);
+  useConversationPanelOpenRequest({
+    host: openRequestHost,
+    canOpen: !!regardingContext && !authError,
+    ready: authReady && !!regardingContext,
+    failure: authError,
+    onOpen: openModalDefault,
+    onFailed: reportOpenRequestFailed,
+  });
 
   // Session-local "New" affordance (UAT §A3): there is no persisted per-user
   // last-seen watermark for threads (documented KNOWN LIMITATION in

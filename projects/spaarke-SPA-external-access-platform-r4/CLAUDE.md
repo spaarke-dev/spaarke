@@ -110,6 +110,7 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
 - **Never deploy the dev BFF directly.** Request it through uac-r2; the owner gives the go per exact SHA.
 - **Owner approval and a stated rollback before every live change** (SPA deploy, Teams package, Dataverse data fix, log-level setting).
 - **Live reads are read-only, and the commands are shown to the owner first** (tasks 030, 046).
+- **An SPA deploy ships the SHA the owner approved.** `deploy-external-spa.yml` builds master HEAD, so if master has moved past the agreed SHA, tell the owner and uac-r2 the new SHA and what it adds BEFORE running it (2026-11-19: `2963d1565b` went out in place of `fe51619cfc` and was only reported afterwards).
 - The SPA's BFF host is baked in at Vite build time. After any BFF host change, rebuild and redeploy the SPA.
 - BFF builds run from the net10 tree. Verify `/healthz` after any deploy.
 

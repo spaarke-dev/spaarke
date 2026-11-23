@@ -44,6 +44,10 @@ export { createXrmDataService } from './xrmDataServiceAdapter';
 export { createXrmUploadService } from './xrmUploadServiceAdapter';
 export { createXrmNavigationService } from './xrmNavigationServiceAdapter';
 
+// IDataService → webApi shape (CreateRecordWizard, EntityCreationService), #2866
+export { createWebApiFromDataService } from './dataServiceWebApiAdapter';
+export type { IDataServiceWebApi } from './dataServiceWebApiAdapter';
+
 // BFF API adapters (Power Pages SPA context)
 export { createBffDataService } from './bffDataServiceAdapter';
 export type { AuthenticatedFetch } from './bffDataServiceAdapter';

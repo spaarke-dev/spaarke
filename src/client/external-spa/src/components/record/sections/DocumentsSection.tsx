@@ -3,7 +3,9 @@
  *
  * The shared `DocumentLibrary` on the record's task 031 route (`/api/v1/external/{root}/{id}/documents`): list, download,
  * version history, upload (gated by `uploadOverride` below) and delete-own (the creator stamp against `/me`). Download
- * needs only Read, which opening the record already required. The props, the requests and the texts are R3's.
+ * needs only Read, which opening the record already required. The props, the requests and the texts are R3's. Since R4
+ * task 023c the list itself is the shared grid (`RECORD_DOCUMENTS_GRID`), with Download / Version history / Delete as its
+ * row actions.
  *
  * Refresh (or Try again) remounts the library, which re-reads the list.
  *
@@ -19,8 +21,10 @@
  *
  * OPEN (task 013, owner 2026-11-14). In the record template a document's name opens that document's record in a child modal
  * over this record (`useChildRecordOpener`; `RecordDocumentList.onOpenDocument`); it names no section to re-read, since a document record cannot
- * change this list and a re-read would remount the library and lose the grid's sort. Inside a child record there is no opener,
- * so names stay plain text (one child level only); the Project page never passes it.
+ * change this list and a re-read would remount the library and lose the grid's sort. Inside a child record there is no
+ * opener (one child level only; no child template lists a Documents section, so this does not arise), and a name's click
+ * would do nothing: the shared grid always draws the name as a link. The Project page, outside any template, opens the
+ * document through the shell's opener (`useOpenRecord`) instead.
  */
 import * as React from 'react';
 import type { CallerIdentity } from '../../../api/delete-own';
@@ -63,7 +67,7 @@ export interface RecordDocumentListProps {
   /** Report an upload in flight, so the record modal holds. */
   onBusyChange?: (busy: boolean) => void;
   /** Open a document's record over the shown record (the Documents section only; see OPEN above). */
-  onOpenDocument?: (documentId: string, trigger: HTMLElement) => void;
+  onOpenDocument?: (documentId: string, trigger: HTMLElement | null) => void;
 }
 
 /** The R3 documents block: `DocumentLibrary` with R3's props, under R3's test id. Used by the Documents section. */
@@ -108,7 +112,7 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
   const openDocument = React.useMemo(
     () =>
       openChild
-        ? (documentId: string, trigger: HTMLElement): void => openChild('sprk_document', documentId, trigger)
+        ? (documentId: string, trigger: HTMLElement | null): void => openChild('sprk_document', documentId, trigger)
         : undefined,
     [openChild]
   );
