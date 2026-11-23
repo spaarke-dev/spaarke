@@ -26,7 +26,8 @@ export type RecordSectionId =
   | 'files'
   | 'preview'
   | 'messages'
-  | 'tasksEvents';
+  | 'tasksEvents'
+  | 'outcome';
 
 /** Heading of each section. */
 export const RECORD_SECTION_LABELS: Readonly<Record<RecordSectionId, string>> = {
@@ -37,6 +38,7 @@ export const RECORD_SECTION_LABELS: Readonly<Record<RecordSectionId, string>> = 
   preview: 'Preview',
   messages: 'Messages',
   tasksEvents: 'Events',
+  outcome: 'Outcome',
 };
 
 /**
@@ -71,7 +73,13 @@ export interface RecordTemplateTab {
 }
 
 /** One header fact: a read field shown value-over-label beside the record name. */
-export type RecordHeaderFact = Pick<DetailFieldDef, 'attribute' | 'label' | 'kind'>;
+export type RecordHeaderFact = Pick<DetailFieldDef, 'attribute' | 'label' | 'kind'> & {
+  /**
+   * Task 020 (FR-11). A line under the fact's value, from the read row; `null` = no line. The rule (a gate on another column)
+   * lives with the function the config names, never in the header.
+   */
+  secondary?: (record: DetailRecord) => string | null;
+};
 
 export interface RecordTemplateConfig {
   /** Dataverse logical name; the key of the entity's `RECORD_DETAIL_ENTITIES` entry (its read). */

@@ -25,6 +25,8 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const { bffApiCall } = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
 
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
+
 vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
   return { ...actual, bffApiCall, getExternalUserContext: () => bffApiCall('/api/v1/external/me') };
@@ -356,6 +358,23 @@ describe.each(['matter', 'wa'] as const)('%s: the toolbar follows each list canC
       expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.');
       expect(within(dialog).queryByTestId('record-template-access')).toBeNull();
       expect(within(dialog).queryByText(/Collaborate/)).toBeNull();
+      // Task 024: the must-not-fire pair of "empty states point at the section action" - with nothing offered, no empty
+      // state names an action or points at one.
+      for (const [section, heading] of [
+        ['documents', 'No Documents'],
+        ['messages', 'No messages yet'],
+        ['tasksEvents', 'No events yet'],
+      ] as const) {
+        const region = (
+          await within(within(dialog).getByTestId(`record-section-${section}`)).findByText(heading)
+        ).closest('[role="status"]');
+        const text = region?.textContent ?? '';
+        expect({ section, empty: text.length > 0 }).toEqual({ section, empty: true });
+        expect({ section, namesAction: /\bupload\b|\babove\b|\bbelow\b|new message|add event/i.test(text) }).toEqual({
+          section,
+          namesAction: false,
+        });
+      }
     },
     SLOW
   );
@@ -512,18 +531,21 @@ describe('fail closed: no answer = not offered, nothing said', () => {
 
 describe('empty states point at the section action (task 009)', () => {
   it(
-    'a matter whose lists may create and are empty: Documents, Messages and Events each say "above", never toolbar or to-do',
+    'a matter whose lists may create and are empty: Documents, Messages and Events say "above"; none mentions toolbar or to-do',
     async () => {
       installNet('matter', { ...all(may()), me: meOf({ writeAccessPerRecord: true }) });
       const dialog = await openRecord('matter');
       await waitFor(() => expect(actionsOf(dialog)).toEqual(ALL_CREATE));
 
-      const sectionText = async (section: RecordSectionId, text: RegExp): Promise<string> =>
-        (await within(within(dialog).getByTestId(`record-section-${section}`)).findByText(text)).textContent ?? '';
+      // Task 024: each empty list is the shared EmptyState (heading + hint); its whole text is the status region's.
+      const sectionText = async (section: RecordSectionId, heading: string): Promise<string> =>
+        (await within(within(dialog).getByTestId(`record-section-${section}`)).findByText(heading)).closest(
+          '[role="status"]'
+        )?.textContent ?? '';
       const texts = {
-        documents: await sectionText('documents', /^No documents have been uploaded/),
-        messages: await sectionText('messages', /^No messages yet/),
-        tasksEvents: await sectionText('tasksEvents', /^No events have been added/),
+        documents: await sectionText('documents', 'No Documents'),
+        messages: await sectionText('messages', 'No messages yet'),
+        tasksEvents: await sectionText('tasksEvents', 'No events yet'),
       };
       for (const [section, text] of Object.entries(texts)) {
         expect({ section, says: /\babove\b/.test(text) }).toEqual({ section, says: true });
@@ -633,7 +655,7 @@ describe('project: "Your access" is the /me level; a create needs the level and 
 
       await waitFor(() => expect(actionsOf(dialog)).toEqual(['refresh', 'copyLink', 'newMessage']));
       // Every list has answered: the documents empty state and the event row.
-      await within(dialog).findByText(/No documents have been uploaded/);
+      await within(dialog).findByText('No Documents');
       await within(dialog).findByText('Hearing');
       expect(actionsOf(dialog)).toEqual(['refresh', 'copyLink', 'newMessage']);
       for (const name of [/^upload/i, /^add to-do/i, /^add event/i, /^create event/i, /^add task/i]) {

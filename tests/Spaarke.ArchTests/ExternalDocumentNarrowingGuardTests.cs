@@ -765,11 +765,11 @@ public class ExternalDocumentNarrowingGuardTests
 
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches);
+    internal sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches, IReadOnlyDictionary<string, HashSet<string>> Calls);
 
     private static ScanResult Scan(IEnumerable<Type> types) => Scan(types, IsNarrowing, SurfacePrimitive);
 
-    private static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
+    internal static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
     {
         var surfaces = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var calls = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -806,7 +806,7 @@ public class ExternalDocumentNarrowingGuardTests
             }
         }
 
-        return new ScanResult(surfaces, reaches);
+        return new ScanResult(surfaces, reaches, calls);
     }
 
     /// <summary>
@@ -827,7 +827,7 @@ public class ExternalDocumentNarrowingGuardTests
 
     private static readonly Regex CompilerPrefix = new(@"^<+([^<>]+)>", RegexOptions.Compiled);
 
-    private static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
+    internal static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
 
     private static bool IsNarrowing(MethodBase method) =>
         method.DeclaringType is { } declaring
@@ -1434,6 +1434,10 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::WriteDirectTeamOwnerAsync"] =
             "fm 054 piece 3a: writes only ownerid (a typed reference to the resolved Direct message owner team), built in this " +
             "member, conditioned on the row version; never a link value.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::ClearPrivateFilingAsync"] =
+            "fm 056: writes only clears (DBNull) of a private sprk_communication's filing columns (DirectMessageOwnerStep." +
+            "PrivateFilingColumns), built in this member, conditioned on the row version; never a document, a link value or an " +
+            "Access Permission.",
         ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer::ReownAsync"] =
             "uac-r2 task 191c: writes only ownerid (the team a flagged owner's row's own I-6 question gives), conditioned on the " +
             "row version read with the owner check; never a link column.",
@@ -1461,8 +1465,6 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Jobs.Handlers.AttachmentClassificationJobHandler::WriteClassificationToDataverseAsync"] =
             "Writes literal keys only: sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson, " +
             "sprk_mattersuggestionjson, sprk_mattersuggestedref, sprk_invoicereviewstatus.",
-        ["Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceExtractionJobHandler::UpdateInvoiceExtractionStatusAsync"] =
-            "Writes the literal key sprk_extractionstatus only.",
     };
 
     /// <summary>

@@ -42,46 +42,51 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
   resolveCodePageTheme: () => null,
   setupCodePageThemeListener: () => () => undefined,
 }));
-vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
+// The Documents list's grid (task 023c) is the REAL grid over a stub client serving its committed configuration; the stand-in
+// below is every other (widget) grid.
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
 
 // The shared grid: reports its rows through `onRecordsLoaded` and opens one through `onRecordOpen` when its primary-name
 // button is clicked — the two callbacks the real grid fires (DataGrid.tsx).
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
+  const { documentsGridOr } = await import('./documentsGridHarness');
   return {
-    ExternalDataGrid: (props: {
-      configId: string;
-      onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
-      onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
-    }) => {
-      const spec = gridSpecs[props.configId];
-      const { onRecordsLoaded } = props;
-      R.useEffect(() => {
-        onRecordsLoaded?.(spec.rows);
-      }, [onRecordsLoaded, spec.rows]);
-      return R.createElement(
-        'ul',
-        { 'data-testid': 'fake-grid' },
-        spec.rows.map(row =>
-          R.createElement(
-            'li',
-            { key: String(row[spec.idAttribute]) },
+    ExternalDataGrid: await documentsGridOr(
+      (props: {
+        configId: string;
+        onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+        onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
+      }) => {
+        const spec = gridSpecs[props.configId];
+        const { onRecordsLoaded } = props;
+        R.useEffect(() => {
+          onRecordsLoaded?.(spec.rows);
+        }, [onRecordsLoaded, spec.rows]);
+        return R.createElement(
+          'ul',
+          { 'data-testid': 'fake-grid' },
+          spec.rows.map(row =>
             R.createElement(
-              'button',
-              {
-                onClick: () =>
-                  props.onRecordOpen?.(String(row[spec.idAttribute]), row, {
-                    configId: props.configId,
-                    entityName: spec.entityName,
-                    selectedIds: [],
-                  }),
-              },
-              String(row[spec.nameAttribute])
+              'li',
+              { key: String(row[spec.idAttribute]) },
+              R.createElement(
+                'button',
+                {
+                  onClick: () =>
+                    props.onRecordOpen?.(String(row[spec.idAttribute]), row, {
+                      configId: props.configId,
+                      entityName: spec.entityName,
+                      selectedIds: [],
+                    }),
+                },
+                String(row[spec.nameAttribute])
+              )
             )
           )
-        )
-      );
-    },
+        );
+      }
+    ),
   };
 });
 
@@ -245,6 +250,11 @@ interface Mocks {
   /** Rows the invoices rollup (still the module fetch) returns, keyed by `${parentAttribute}:${parentId}`. */
   invoices: Record<string, Array<Record<string, unknown>>>;
   events: Array<Record<string, unknown>>;
+  /**
+   * The caller's firms on `/me` (ebilling-r1 134, spa-r4 F1). Absent: a caller with no firms, who is not asked for an invoice's
+   * Outcome (the section is not in the invoice's layout for such a caller).
+   */
+  firms?: Array<{ firmId: string; name: string }>;
 }
 
 let mocks: Mocks;
@@ -268,7 +278,14 @@ function detailReadOf(body: { entityName: string; fetchXml: string }): { c: Case
  * and the record's documents (the task 031 routes). `undefined` = not one of them.
  */
 function sideReads(path: string): unknown {
-  if (path === '/api/v1/external/me') return { contactId: guid(7), email: 'me@example.test', projects: [] };
+  if (path === '/api/v1/external/me') {
+    return {
+      contactId: guid(7),
+      email: 'me@example.test',
+      projects: [],
+      ...(mocks.firms ? { firms: mocks.firms } : {}),
+    };
+  }
   if (/^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/[^/]+\/documents$/.test(path)) {
     return { value: [] };
   }
@@ -383,6 +400,7 @@ describe.each(CASES)('$label grid', c => {
     // Messages section into the New message dialog that its section header opens. So the record modal holds no input at all (a
     // stray input anywhere fails), and for an entity with a thread the dialog the section header opens holds exactly one
     // textbox - a textarea - which is not inside the Messages section (it is its own child dialog).
+    // The Documents grid (task 023c) is configured with selectionMode: none, so it draws no selection checkboxes either.
     const inputs = Array.from(dialog.querySelectorAll('input, textarea, select, [role="textbox"]'));
     expect(inputs).toHaveLength(0);
     expect(dialog.querySelectorAll('input[type="file"]')).toHaveLength(0);
@@ -904,7 +922,11 @@ describe('sections', () => {
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByText('Only one');
-    expect(within(dialog).getByTestId('truncated-list-notice').textContent).toContain('This list is incomplete');
+    // The shared grid's own notice (task 023c) replaces the SPA's: singular noun for one row, and it is the only notice.
+    expect(within(dialog).getByTestId('datagrid-truncated-notice').textContent).toContain(
+      'This list is incomplete: only 1 document could be shown'
+    );
+    expect(within(dialog).queryByTestId('truncated-list-notice')).toBeNull();
   });
 
   it('says a rollup failed instead of showing an empty list', async () => {
@@ -1067,7 +1089,7 @@ describe('FR-01 template sections', () => {
     sprk_project: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
     sprk_matter: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
     sprk_workassignment: { left: ['information', 'documents'], right: ['messages', 'tasksEvents'] },
-    sprk_invoice: { left: ['information', 'files'], right: ['messages'] },
+    sprk_invoice: { left: ['information', 'outcome', 'files'], right: ['messages'] },
     sprk_servicerequest: { left: ['information', 'documents'], right: ['messages'] },
     sprk_document: { left: ['information', 'preview'], right: [] },
   };
@@ -1080,13 +1102,16 @@ describe('FR-01 template sections', () => {
   it.each(CASES.map(c => [c.entityName, c] as const))(
     '%s: the FR-01 left and right sections, in order',
     async (_e, c) => {
+      // The invoice's Outcome section is shown to a firm member only (spa-r4 F1), so this caller is one.
+      if (c.entityName === 'sprk_invoice') mocks.firms = [{ firmId: guid(500), name: 'Firm A' }];
       renderWidget(c.Body);
       fireEvent.click(gridRow(c, 1));
       const dialog = await screen.findByRole('dialog');
       const left = await within(dialog).findByTestId('record-template-left');
       const want = LAYOUT[c.entityName];
 
-      expect(sectionIds(left)).toEqual(want.left);
+      // `/me` arrives after the record, so the Outcome section appears once the caller context is in.
+      await waitFor(() => expect(sectionIds(left)).toEqual(want.left));
       if (want.right.length === 0) {
         // Document: no right column at all; the left one is full width.
         expect(within(dialog).queryByTestId('record-template-right')).toBeNull();
@@ -1101,6 +1126,19 @@ describe('FR-01 template sections', () => {
       }
     }
   );
+
+  it('sprk_invoice: a caller with no firm (a workforce user, a client-side collaborator) gets no Outcome section and no outcome call', async () => {
+    const c = caseOf('sprk_invoice');
+    mocks.firms = [];
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+    const left = await within(dialog).findByTestId('record-template-left');
+    // Wait for the reads this opening makes (`/me` among them), then assert the absence.
+    await waitFor(() => expect(bffApiCall.mock.calls.some(call => call[0] === '/api/v1/external/me')).toBe(true));
+    await waitFor(() => expect(sectionIds(left)).toEqual(['information', 'files']));
+    expect(bffApiCall.mock.calls.some(call => String(call[0]).endsWith('/outcome'))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

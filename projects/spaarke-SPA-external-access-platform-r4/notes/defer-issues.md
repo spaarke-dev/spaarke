@@ -17,6 +17,7 @@ marker with the issue number.
 | D-9 | 2026-11-11, task 006 review (F1, pre-existing, owner question) | ProjectPage offers creates the project list refused (workforce ceiling → 403) | Defect (user-visible) — **resolved in R4** (owner folded it in, 2026-11-11) | #2716 (closed) |
 | D-10 | 2026-11-11, task 006 | No server answer for the to-do PATCH right; status toggle hidden in the record view | Feature gap (BFF) | #2717 |
 | D-11 | 2026-11-11, task 006 review pass 2 (F2, out of scope) | Access-level label switch duplicated in five places | Maintainability | #2718 |
+| D-23 | 2026-11-20, wave 4 review (F2, out of task 022's scope) | Document preview and download each carry their own parent-order loop | Maintainability — fold into task 023 | #2928 |
 
 ## D-1 — External event create does not write the ADR-024 resolver fields
 
@@ -331,3 +332,68 @@ This under-lists, which fails closed.
 **Status.** Closed, not a defect (2026-11-17, ontology-r1; checked against the source). The Signals executors write through the child-records core, which runs `DataverseWriteItemMapper.MapWebApiPayloadAsync`; it matches each `@odata.bind` key to metadata case-insensitively (~305-333) and sends the metadata navigation name. The external create (D-21) posts directly without that mapper, which is why only it failed.
 
 **Where.** `Services/Signals/Actions/DecisionActionExecutors.cs` ~1509 (lowercase keys, mapped before the write).
+
+## D-23 — Document preview and download each carry their own parent-order loop (#2928)
+
+**Where.** `readDocumentFromParents` in `src/client/external-spa/src/components/record/sections/DocumentPreview.tsx` (task 022) mirrors `downloadDocumentFromParents` in `src/client/external-spa/src/components/DocumentLibrary.tsx`.
+
+**Why it matters.** A change to the parent rule in one copy only makes Preview and Download disagree on which parent serves the file.
+
+**Fix.** Task 023 hoists one `readFromParents(parents, read)` helper used by both (task 022 could not edit `DocumentLibrary.tsx`). **Done in task 023c** (2026-11-22): `readFromParents` in `DocumentLibrary.tsx`, used by `downloadDocumentFromParents` and `DocumentPreview`; the 023c PR closes #2928.
+
+## D-24 — Shared DataGrid: a failed FetchXML page load shows an empty list (#2939)
+
+**Where.** `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx`: `useLazyLoad`'s `error` is never read (~:1149), so a failed row page renders "No records". Found by the task 023a implementer, 2026-11-22.
+
+**Why it matters.** Every grid on the FetchXML path (34 consumers) tells a user whose load failed that there are no records, with no retry prompt.
+
+**Fix.** Reuse task 023a's row-error banner for the FetchXML path, with a must-fire / must-not-fire test pair. It was kept out of 023a because it changes visible behaviour for every existing grid. Status: Open.
+
+## D-25 — Move the record Invoices section, Events list and invoice Files onto the shared grid seams (#2960)
+
+**What.** R4 task 023c put the external record Documents list on the shared DataGrid through the new host seams (rowSource, rowActions, truncateWithTooltip, rowNoun; task 023a). The record Invoices section, the Events list and the invoice Files list still use hand-rolled Fluent tables, so they lack column resize and ellipsis + tooltip, and each keeps its own width rules.
+
+**Why it matters.** Long names and summaries in those lists stay truncated with no way to read them, and columns overlap at narrow widths, the same faults #2490 fixed for Documents.
+
+**Fix.** One grid configuration per list (like config/external-record-documents.gridconfiguration.json plus its apply script and BFF id admission), rows from the existing record routes as rowSource, actions as rowActions. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2960 (board Type=Idea).
+
+## D-26 — Shared grid row actions do not name their row for screen readers (#2961)
+
+**What.** The shared DataGrid row-actions column (RowActionsCell.tsx, R4 task 023a) labels each button with the static action label. In the external Documents list every row has "Download", "Version history" and "Delete" buttons with the same accessible name. Before task 023c they were "Download <document name>".
+
+**Why it matters.** A screen-reader user moving by buttons, or reading the buttons list, hears N identical "Download, button" entries and cannot tell which document each acts on.
+
+**Fix.** Let DataGridRowAction take an optional ariaLabel(record) function (the tooltip keeps the short label); the Documents list passes "Download <name>". Additive, with a must-fire / must-not-fire test. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2961 (board Type=Bug).
+
+## D-27 — External Documents: Delete is offered to a workforce user whose role cannot delete documents (#2962)
+
+**What.** The external Documents list shows Delete on the caller's own rows when the list grants write (canCreate). For a workforce caller the server also applies the workforce role ceiling per privilege (WorkforceRoleCeilingGate), so a role with Create but not Delete on sprk_document gets a Delete that the server refuses.
+
+**Why it matters.** An offered action answers 403, which breaks the R4 rule that no action the UI offers may answer 403 (FR-07).
+
+**Fix.** The documents list answers a ceiling-aware canDelete beside canCreate; the SPA shows Delete only when it is true. Needs UAC review (uac-r2). Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2962 (board Type=Bug).
+
+## D-28 — The external record Documents grid configuration is not applied by the release or provisioning path (#2963)
+
+**What.** Since R4 task 023c the external record Documents list needs grid configuration 286be8b4-f96f-4d5a-b1d5-82fd83ca9693 in Dataverse. It is applied by scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1, which nothing runs automatically. Deploy-Release.ps1 already runs Apply-WorklistGridConfiguration.ps1 for the worklist grid, but not this one.
+
+**Why it matters.** In any environment where the row was not applied by hand (a newly provisioned customer), every record's Documents section shows a load error and no Upload.
+
+**Fix.** Add the apply + -Verify -RequireRow step to Deploy-Release.ps1 next to the worklist one, and to the customer provisioning run. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2963 (board Type=Bug).
+
+## D-29 — external-spa test suite: eight sign-in and Teams test files time out in a full run (#2964)
+
+**What.** In a full vitest run of src/client/external-spa, tests in invite-code, workforce-auth, workforce-home-auth, no-mock-identity, teams-home-auth, teams-real-msal, InvoiceSubmitPage and DocumentUploadPage.externalUpload intermittently fail after about 86 s. The same eight files pass 452/452 when run on their own. Seen twice on 2026-11-22 (R4 task 023c); not established whether it predates 023c. No CI workflow runs this suite (deploy-external-spa.yml only builds).
+
+**Why it matters.** A full local run is red for reasons unrelated to the change under test, so a real failure in those files can be dismissed as the known flake, and nothing in CI catches it.
+
+**Fix.** Find the slow shared setup (likely dynamic MSAL/app imports under worker contention): raise those files' timeout or isolate them (poolOptions / sequence), then add the suite to a CI job. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2964 (board Type=Bug).
+
+
+## D-30 — External SPA: move the remaining hand-rolled empty states onto the shared EmptyState (#2975)
+
+**What.** R4 task 024 (FR-17) moved the record lists (Documents, Events, Messages, Invoices, version history) onto the shared EmptyState from @spaarke/ui-components. Empty states outside FR-17's named files are still hand-rolled: OutsideCounselDashboard.tsx defines its own local EmptyState component (a copy of the shared one), and ContactsOrganizations.tsx, IssuedGrantsList.tsx, shell/NotificationBell.tsx, shell/QuickStartPane.tsx, shell/WidgetLibraryModal.tsx and shell/PortalWorkspaceShell.tsx each draw their own.
+
+**Why it matters.** The same "no items" state looks different from page to page in the external SPA, and some of these do not announce the state to assistive tech (no role="status"), so a screen-reader user is not told a list is empty. The local copy in OutsideCounselDashboard.tsx duplicates a shared component and drifts from it.
+
+**Fix.** Replace each with EmptyState (size compact for lists and panels), keeping wording and any action-conditional hint; delete the local copy and its emptyState* styles. Keep loading, error and truncated states as they are. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2975 (board Type=Idea).

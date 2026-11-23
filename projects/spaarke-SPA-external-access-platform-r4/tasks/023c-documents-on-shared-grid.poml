@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023c" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Documents list on the shared DataGrid for every record type + D-23 hoist (FR-15, FR-16, #2490, #2928)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>after 023a is in the branch; 023b's configuration must be live before the 028 deploy</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Multi-file rework of DocumentLibrary.tsx (.tsx) used by the record template and ProjectPage</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by the design; brownfield depth</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>DocumentLibrary.tsx and the Document record are shared with 021, 022 and 024</parallel-reason>
+    <deps>023a, 023b</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Render the record and project-page Documents list through ExternalDataGrid with the new grid configuration, the record route as the row source and Download / Version history / Delete as row actions, for projects, matters, work assignments and service requests; hoist one readFromParents helper for download and preview.</prompt>
+  <role>SPAARKE platform developer. Fluent UI v9.</role>
+  <goal>The Documents list on every record type renders on the shared grid with no overlap at 1000px, resizable columns, ellipsis + tooltip, and every existing action and access rule intact.</goal>
+
+  <context>
+    <background>Design `notes/task-023-design.md` §3.2 (binding). Rows: the existing record route list (`getRecordDocuments` / `listDocuments(root, id)`), which carries `sprk_summary`, `hasFile`, `truncated`, `canCreate` and all server checks, passed as `rowSource` (one page, `hasMore: false`, `truncated` forwarded). Configuration: `286be8b4-f96f-4d5a-b1d5-82fd83ca9693` (023b; constant in one place). Actions: Download + Version history `isVisible = hasFile !== false`; Delete `isCreatedByCaller` + delete right; existing handlers/dialogs (`DeleteOwnConfirm`, `DeleteFailureNotice`, download error bar). Upload stays on the section (`listCreateRightOf`, unchanged texts). Row name opens the Document record (task 013) via `onRecordOpen`. D-23 #2928: one `readFromParents(parents, read)` used by `downloadDocumentFromParents` (DocumentLibrary.tsx ~:423-439) and `readDocumentFromParents` (record/sections/DocumentPreview.tsx). Prior task 023 POML holds the full list of tests to update.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/DocumentsSection.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/DocumentPreview.tsx</file>
+      <file role="modify">src/client/external-spa/src/pages/ProjectPage.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DocumentLibrary.hasFile.test.tsx, DocumentLibrary.uploadFailures.test.tsx, DetailDocumentsDelete.test.tsx, PerRecordWriteAccess.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/ExternalDataGrid.tsx (do not edit)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ExternalSpaGridViewSelectorGuardTests">Shared-grid mounts are JSX `&lt;ExternalDataGrid&gt;`; `ExternalDataGrid.tsx` unchanged; no direct DataGrid import.</constraint>
+    <constraint source="FR-06/FR-07/FR-16">Hide, don't disable; no offered action answers 403; Upload by `listCreateRightOf`; Delete only on the caller's own rows.</constraint>
+    <constraint source="FR-15">Only an explicit `hasFile === false` hides Download, Version history and Preview.</constraint>
+    <constraint source="project">No BFF or shared-DataGrid change in this task; no live Dataverse write.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/notes/task-023-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/tasks/023-documents-hasfile-datagrid.poml</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-051-infinite-scroll-lists.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load knowledge; declare rigor.</step>
+    <step order="1">D-23: hoist `readFromParents`; both callers use it; tests stay green.</step>
+    <step order="2">Mount the list through ExternalDataGrid with rowSource / rowActions / onRecordAction / onRecordOpen; remove the Fluent table and the D-12 width classes.</step>
+    <step order="3">Update the tests; add no-overlap at 1000px and ellipsis + tooltip on a long name; service-request root covered.</step>
+    <step order="4">SPA tests, SPA build, `ExternalSpaGridViewSelectorGuardTests`.</step>
+    <step order="5">Close #2928; notes, POML status, TASK-INDEX, drift check; file the follow-on adoption (Invoices section, Events, invoice Files) as a DEF + issue.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/DocumentLibrary.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-023-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Projects, matters, work assignments and service requests list their documents through ExternalDataGrid with the new configuration, rows from the record route.</criterion>
+    <criterion testable="true">At 1000px no columns overlap; resize works; a long name and summary ellipsise with a tooltip.</criterion>
+    <criterion testable="true">A writer can upload, download and delete their own row; a View-only caller sees no Upload and no Delete; no offered action answers 403.</criterion>
+    <criterion testable="true">`hasFile === false` rows have no Download / Version history; the Document record has no Download / Preview; an absent flag keeps today's behaviour.</criterion>
+    <criterion testable="true">Upload error texts and the truncated notice behave as before; ProjectPage works.</criterion>
+    <criterion testable="true">One `readFromParents` serves download and preview; #2928 closed.</criterion>
+    <criterion testable="true">SPA build and all SPA tests pass; ExternalSpaGridViewSelectorGuardTests passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Split from task 023 by owner decision 2026-11-22. Completed 2026-11-22: see notes/task-023-notes.md "Task 023c". Shared-grid deviation (selection cell, config-error text) flagged for owner sign-off in the PR. Filed D-25..D-29 (#2960-#2964). rework: fix-round-1 task 023c</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

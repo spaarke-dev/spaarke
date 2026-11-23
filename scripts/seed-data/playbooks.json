@@ -266,7 +266,7 @@
             "outputVariable": "calculation"
           }
         ],
-        "notes": "OutputOrchestrator applies outputMapping after tools complete"
+        "notes": "RETIRED (ebilling-r1 050b): OutputOrchestratorService, which applied outputMapping after tools completed, was deleted with the legacy extraction path; this outputMapping is no longer applied"
       },
       "outputMapping": {
         "updates": [
@@ -310,7 +310,7 @@
         "MVP implementation uses simplified architecture - no BillingEvents or SpendSnapshots",
         "Invoice data stored as JSON on invoice record (sprk_extractedjson)",
         "Matter totals denormalized and stored on matter record",
-        "OutputMapping processed by OutputOrchestratorService - enables BA configuration without code deployment",
+        "OutputMapping was processed by OutputOrchestratorService (deleted by ebilling-r1 050b; nothing applies this mapping now)",
         "Matter updates use optimistic concurrency to prevent lost updates from concurrent invoices",
         "Variable resolution: context.* (job payload), extraction.* (TL-009 output), calculation.* (TL-011 output)",
         "Supports 3 UI scenarios: Matter Overview metrics, Invoice tab list, Invoice tab metrics",

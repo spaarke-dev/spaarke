@@ -4,7 +4,7 @@
     <title>Private messages in a record's thread: readable by the sender and the named recipient only (design with UAC-r2, then build)</title>
     <phase>6b W6b Direct and private messaging (owner 2026-11-20)</phase>
     <gate>Part 056a (design note) is reviewed and approved by unified-access-control-r2, and the owner's answers to its questions are recorded in notes/decisions.md, before any code (056b). Live checks run only with the owner's go in fm's session.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>A new access rule on communication rows inside record threads; ownership and sharing; security fails closed (.cs, .tsx, bff-api, security).</rigor-reason>
     <model-tier>opus</model-tier>

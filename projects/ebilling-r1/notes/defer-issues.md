@@ -560,7 +560,7 @@ A scheduled sweep (ADR-036 `IScheduledJob`) of `.eml` documents with `sprk_restr
 
 | Field | Value |
 |---|---|
-| **Status** | Open - handed off; **partly superseded by task 092** (output-files half; see Update below) |
+| **Status** | **Resolved 2026-11-22 (task 124, EB-D-163)** - no per-customer SPE container is needed; the main session closes #1967 |
 | **Urgency** | before eBilling is enabled on any customer stamp (blocks FR-16 outside dev) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 028 |
@@ -572,11 +572,13 @@ A scheduled sweep (ADR-036 `IScheduledJob`) of `.eml` documents with `sprk_restr
 
 **Update (task 092, 2026-10-27)**: the E-Billing Output Files half is **superseded** by task 091's storage hand-off (Finance file store, `Finance__FileStore__*`): 092 retired `Finance:EbillingOutputContainerId` from the BFF, so customer environments need neither that container nor its setting, and no manifest entry should be added for it. The Procedure Library half stays open: `Finance:ProcedureLibraryContainerId` is still read by `RuleSetService.cs:406` (CreateAsync upload), `RuleSetService.cs:655` (draft source) and `RateCardImportService.cs:158` (workbook), and retires only when those move to Procedure Version Stored Files (no task owns that yet; escalated in `notes/092-submission-on-files.md` §6). Comment on #1967.
 
+**Resolution (task 124, 2026-11-22; EB-D-163)**: 092 retired the output key, 124 retires this one (`notes/124-retire-procedure-library-key.md`). Task 116 moved the three readers to Procedure Version Stored Files, so no code reads the key or names a Procedure Library container. eBilling needs no SPE container on a customer stamp: every eBilling file is a Stored File in the Finance file store that task 091 provisions (`Finance__FileStore__*`). No `per_env_settings` manifest entry is to be added for either container. A setting of either name left on an App Service binds to nothing and the BFF starts normally (tested). The main session closes #1967 and tells customer-provisioning-orchestration-r1; nothing was done on GitHub from this task.
+
 ### DEF-014 — The document-pointer check refuses app-only reads of `sprk_document` rows whose file is in an eBilling container
 
 | Field | Value |
 |---|---|
-| **Status** | Open - decide in task 075 / 078 (first consumers) |
+| **Status** | **Resolved 2026-11-22 (task 124)** - the eBilling SPE containers no longer exist; see Resolution below |
 | **Urgency** | before 075 / 078 create Procedure Library documents; also 133 / 150 |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 028 (CIAM trace) |
@@ -590,11 +592,13 @@ A scheduled sweep (ADR-036 `IScheduledJob`) of `.eml` documents with `sprk_restr
 
 **Warning for option 1**: the pointer check is the ONLY thing that keeps CIAM callers from the Procedure Library's bytes today. If the derivation starts serving the eBilling containers, the external download routes would serve them too. Option 1 therefore needs an explicit refusal of the eBilling containers on the `/api/v1/external` routes in the same change, and `ProcedureLibraryExternalDownloadTests` must stay green.
 
+**Resolution (task 124, 2026-11-22)**: the premise is gone. There is no eBilling SPE container: Procedure sources are Stored Files (116) and the output files are Stored Files (092), so no `sprk_document` row of the eBilling kind exists and nothing needs an internal read of one. Option 1 was the #2151 declared-unfiled-home mechanism in `RecordContainerResolver`; task 124 removed it with its only key (`notes/124-retire-procedure-library-key.md`, "#2151 declared unfiled home - retired"). The Procedure sources that are drafted and indexed are read from the file store by `BillingRuleDraftJobHandler` and the rule-set pipeline, not through the document-pointer check. The deny proof that task note named survives under its general name (`ExternalDownloadUnderivedContainerDenyTests`, restored in review fix round 1) and stays green. The general rule it pins, that the pointer check serves only a container a record derives, is unchanged.
+
 ### DEF-015 — External document lists still show the name and summary of a Procedure Library row filed under a firm-readable record
 
 | Field | Value |
 |---|---|
-| **Status** | Open - design discussion with the owner (2026-10-15) |
+| **Status** | **Narrowed 2026-11-22 (task 124)** - the eBilling-specific exposure is gone; the general limit stays recorded in the two deny tests; see Resolution below |
 | **Urgency** | before 075 / 078 create Procedure Library `sprk_document` rows linked to matters or projects |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 028 (adversarial review pass 1) |
@@ -607,6 +611,8 @@ A scheduled sweep (ADR-036 `IScheduledJob`) of `.eml` documents with `sprk_restr
 **Options**: (1) the eBilling consumers (075 / 078) never link Procedure Library rows to a matter or project (a convention, with a test in those tasks); (2) the external list and fetch routes exclude rows whose `sprk_graphdriveid` is a configured eBilling container (a change to shared external-access code owned by SPA-external-access-platform-r3 / unified-access-control-r2).
 
 **Owner (2026-10-15)**: needs more discussion. Procedure files need not be `sprk_document` rows at all: a dedicated Procedures table with its own SPE file association, or Documents that cannot be linked to matters / projects. Today every environment writes to one container, so the container is never checked; eBilling introduces the first internal-only containers. Until decided, no task creates Procedure Library `sprk_document` rows linked to a core record (constraint on 075 / 078). The independent 028 review adds a second exposure route: the external module-data documents grid (`ExternalAccessModule.cs:397-421`), which cannot filter on `sprk_graphdriveid`.
+
+**Resolution / narrowing (task 124, 2026-11-22)**: the eBilling part is closed by evidence. Procedure files are no longer `sprk_document` rows: 116's census (dev, 2026-11-10) found 0 `sprk_sourcedocument` rows on `sprk_ruleset` and `sprk_ratecard`, the writers (`RuleSetService`, `RateCardImportService`) create Stored Files with purpose Procedure source and a Procedure Version parent, and dev holds 0 `sprk_document` rows in the former Procedure Library container (`notes/124-retire-procedure-library-key.md` section 3). A Procedure Stored File is refused to an external caller by the firm file gate (`ExternalInvoiceFileRoutesTests`, `IsFirmFile` single-defect cases, the route census guard's call-closure check). What remains is the general fact the two deny tests still cite, in their assertion messages: the module-data route can return `sprk_documentname` for a document filed under a firm-readable record. That is how any document filed under a record the firm can read behaves, and with no internal-only container left it concerns no eBilling content. No eBilling task waits on it; the owner may close it or hand it to unified-access-control-r2.
 
 ### ISS-010 — Generic child-record create route bypasses the FR-05 invoice-family core-record guard
 
@@ -874,7 +880,7 @@ The deployment name misdescribes its model and the model retires 2027-04-14. eBi
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved 2026-11-22: task 050b deleted the legacy extraction path, so there is nothing left to run (#1918 closed) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 001 (baseline; escalation trigger 1) |
@@ -904,7 +910,7 @@ None before 044: the path is replaced by Content Understanding + Actions (D-52) 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved 2026-11-22: task 050b deleted the legacy extraction path and its output mapping (#1919 closed) |
 | **Urgency** | next-round (superseded by 050 deletion) |
 | **Filed** | 2026-10-15 |
 | **Source** | ebilling-r1 task 001 (baseline) |
@@ -1557,6 +1563,8 @@ Each restamps afterwards, but none refuses any of these:
 
 **UAC context (2026-10-20, also on #2132)**: the UAC delete design D1 keeps RemoveLink deliberately. D6 removes `prvDelete` on the core tables from Core User and replaces the model-driven app's Delete with the BFF flow. After UAC delete task 1 ships, only admins and holders of the named delete role can delete a core record outside the BFF. That narrows the defect but does not close it: a D-120 preview check or a sweep is still worth having, and (b) remains the structural fix.
 
+**Columns retired by task 193 (branch task/ebilling-193)** (not closed: the live dev run and the other environments follow).
+
 ---
 
 ### DEF-028 — Rate-card import does not check AppendTo on the scoped core record
@@ -1572,6 +1580,8 @@ Each restamps afterwards, but none refuses any of these:
 **Description**: `RateCardImportService.cs:173` checks only that the scoped matter, project or work assignment exists. It does not check that the caller holds AppendTo on it. The rule-set scope work (081) requires AppendTo on the core record for a record-scoped set.
 
 **Suggested fix**: before any write, probe AppendTo on the core record as the caller. A caller without it gets a 403 and nothing is written. Add a must-fire and a must-not-fire test.
+
+Moot once task 193's columns are gone on every environment; close then.
 
 ---
 
@@ -2207,7 +2217,7 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (task iss032 merged into work 0ec908c554; closes when on master) |
+| **Status** | Done (task iss032; on master in #2904, merge commit fe51619cfc, 2026-11-18) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | 095f-2ui round-1 re-check (Opus; found in passing; pre-existing) |
@@ -2245,7 +2255,7 @@ In a multi-line call whose earlier lines were recorded, the remaining lines take
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (EB-D-244; iss034a and iss034b merged into work, d5934d6d51; closes when on master) |
+| **Status** | Done (EB-D-244; iss034a–d; on master in #2904, merge commit fe51619cfc, 2026-11-18) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | iss031 review (Opus): made reachable by the ISS-031 guard |
@@ -2356,7 +2366,7 @@ Write side of ISS-038 (see uac-r2 thread). Record sets should be keyed (record, 
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (merged into work; applied to dev 2026-11-17, Verify PASS; release pending) |
+| **Status** | In Progress (on master in #2904, fe51619cfc; applied to dev 2026-11-17, Verify PASS; closes when SpaarkeMaster 1.3.2.0 is released and imported) |
 | **Urgency** | now |
 | **Filed** | 2026-11-17 |
 | **Source** | ISS-038 review; uac-r2 thread |
@@ -2377,3 +2387,112 @@ Every firm-visibility reader trusts `sprk_ruleset.sprk_visibletofirms`, so only 
 **Estimated effort**: half a day
 **Blockers**: none
 **Related**: ISS-038 (#2896)
+
+### ISS-041 — Stranded reject/return finished after a page reload sends no firm notice
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-20 |
+| **Source** | Adversarial review of task 132ui (finding 2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2930 |
+
+**Description**
+
+A reject or return carrying the reviewer-confirmed notice can stop part way: a 503 `decision_incomplete`, or no answer. 132ui makes the "Finish decision…" banner repeat carry the notice from the page's in-memory lock. After a page reload the lock is gone, so the banner repeats only reason and note. The server answers `Decided` and enqueues without the notice (`InvoiceRejectReturnEndpoints.cs:121` uses the repeat's body), and the firm silently gets no email although the reviewer confirmed one.
+
+**Entry-points**
+
+- `src/solutions/InvoiceReview/src/components/decision/DecideInvoiceAction.tsx` (IncompleteDecisionBanner)
+- `src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceRejectReturnEndpoints.cs:121`
+- `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceRejectReturnService.cs` (`CompleteOrNoOpAsync`)
+
+**Suggested fix**: one of two options.
+- (a) Client-only: the banner's finish form for a reject or return offers the Notify fields (draft route plus the 132ui NotifyStep).
+- (b) Server: the first attempt stores the screened notice, and the finishing repeat uses it. This also covers a repeat from another tab.
+
+**Estimated effort**: half a day for (a)
+**Blockers**: none
+**Related**: task 132ui, EB-D-258, #2930. Not a security issue.
+
+---
+
+### ISS-042 — Firm rejection findings show raw valuesRead keys (e.g. line.rate)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-20 |
+| **Source** | Adversarial review of task 134 (found in passing, server side) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2933 |
+
+**Description**
+
+A rejected submission's firm outcome (130c) carries each rejecting finding's `valuesRead` as `{ name, value }`, and `name` is the raw internal key the rule read (for example `line.rate`, `FirmOutcomeScopeTests.cs:1365`). The SPA (134) shows the list as received, so a firm reads "line.rate: 650" instead of "Rate: 650". The data is firm-safe; the defect is presentation only.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/FirmRejectionFindings.cs` (`ValueRead`, the parse at about line 288)
+- `src/server/api/Sprk.Bff.Api/Services/Finance/FirmFindingsProjection.cs` (`FirmOutcomeValueRead`)
+- `src/client/external-spa/src/components/ebilling/InvoiceOutcomeReport.tsx` (where the list is rendered)
+
+**Suggested fix**: the projection maps each known key to a firm label from a closed table in code. An unknown key falls back to a generic label (or the entry is dropped), as `FirmRejectionReasonText` does. The client is not changed.
+
+**Estimated effort**: half a day
+**Blockers**: none
+**Related**: tasks 130c and 134, #2933. Not a security issue.
+
+### ISS-043 — Multipart upload routes answer a malformed body with 500 instead of 400
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | Task 123 adversarial review, pass B (found in passing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2978 |
+
+**Description**
+
+Three existing multipart routes catch only `InvalidDataException` and `BadHttpRequestException` around `ReadFormAsync`. A malformed multipart body makes `ReadFormAsync` throw `System.IO.IOException`. The three inputs are a body with no closing boundary, truncated part headers, and a non-multipart body with a multipart content type. The exception reaches the global handler. The client gets 500 `server_error`, logged at Error, instead of the route's 400. Task 123's new upload route handles it (fix round 1).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionHttp.cs:60`
+- `src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureEndpoints.cs:543`
+- `src/server/api/Sprk.Bff.Api/Api/Finance/RateCardImportEndpoints.cs:385`
+
+**Suggested fix**: add `IOException` to each route's 400 mapping, keeping the pass-through for a cancelled request. Add one regression test per route with a body that has no closing boundary.
+
+**Estimated effort**: 1–2 hours
+**Blockers**: none
+**Related**: task 123 (`notes/123-invoice-supporting-file-upload.md`)
+
+---
+
+### ISS-044 — D-170 Signal close reads not-in-force policies without paging (stops past 5,000)
+
+| Field | Value |
+|---|---|
+| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-162; label swapped by them 2026-11-23) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | Task 117 adversarial review, pass A (found in passing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2982 |
+
+**Description**
+
+`SignalClosureService.ReadPoliciesNotInForceAsync` reads the Off and the Inactive policies with one `RetrieveMultipleAsync` each, with no paging and no `MoreRecords` check; `IGenericEntityService` does not page either. Once more than 5,000 policies are not in force, the rest never have their open Signals closed (D-170), silently. Task 117's sweep switches record rules Off on every core-record delete, so the count grows.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Signals/SignalClosureService.cs:200-216`
+- `src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs` (`ClosePoliciesNotInForceAsync`)
+
+**Suggested fix**: page with the id cursor (as `SecureChildReconciliationJob.cs:1384`) and report a truncated read; consider limiting to policies that still have open Signals.
+
+**Estimated effort**: half a day.
+**Blockers**: none; ontology-r1 owns `Services/Signals/**`.
+**Related**: D-170; task 117.

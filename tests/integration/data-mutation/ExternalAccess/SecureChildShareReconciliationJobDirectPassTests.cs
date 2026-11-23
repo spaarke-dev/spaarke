@@ -812,20 +812,25 @@ public class SecureChildShareReconciliationJobDirectPassTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ACappedListingThatDoesNotMovePastTheWindowStart_StepsTheWatermarkOneTickPastIt_AndWarns()
+    public async Task ExecuteAsync_ACappedListingThatDoesNotMovePastTheWindowStart_KeepsTheWatermarkThere_AndListsOnPastItsLastRow()
     {
+        // #2745 replaced the one-tick step past the instant (which left the rows past the cap to the sweep) with a key set.
         var windowStart = T0 - Job.DirectInitialLookback;
-        DirectMessages(Job.MaxDirectListedPerTable, _ => windowStart.UtcDateTime);
+        DirectMessages(Job.MaxDirectListedPerTable + 1, _ => windowStart.UtcDateTime);
         var job = NewJob();
-        var context = RunContext();
 
-        var first = await job.ExecuteAsync(context, CancellationToken.None);
+        var first = await RunAsync(job);
         _time.Advance(TimeSpan.FromMinutes(2));
         var second = await RunAsync(job);
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var third = await RunAsync(job);
 
         Bool(first, "listingCapped").Should().BeTrue();
-        Since(second).Should().Be(windowStart.UtcDateTime.AddTicks(1), "listing again from the same instant would return the same rows");
-        _log.Single(LogLevel.Warning, "[DIRECT-SHARES]", ("RunId", context.RunId), ("Since", windowStart));
+        Since(second).Should().Be(windowStart.UtcDateTime, "the watermark stays at the instant, keyed by the last row listed");
+        Int(second, "listed").Should().Be(1, "only the row past the cap is listed: the first 500 are not listed again");
+        Bool(second, "listingCapped").Should().BeFalse();
+        Since(third).Should().Be((T0 + TimeSpan.FromMinutes(2) - Job.DirectOverlap).UtcDateTime, "an uncapped run moves the watermark");
+        _log.Matching(LogLevel.Warning, "[DIRECT-SHARES]").Should().NotContain(e => e.Properties.ContainsKey("Since"));
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════

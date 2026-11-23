@@ -67,6 +67,8 @@ export function mapThreadMessageDtoToTimelineMessage(dto: IThreadMessageDto): Ti
     // server permitted — no client-side access inference.
     isInternalOnly: dto.isInternalOnly ?? false,
     isPrivate: dto.isPrivate ?? false,
+    // fm task 056 — the server resolved this as the viewer (null = no reference, or a record the viewer cannot read).
+    privateContext: dto.privateContext ?? null,
     attachments: dto.attachments.map(a => ({
       id: a.communicationAttachmentId,
       documentId: a.documentId ?? undefined,

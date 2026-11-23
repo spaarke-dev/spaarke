@@ -312,14 +312,22 @@ public class CommunicationWorkspaceReadSeamTests
         // shared 2-rule filter, the caller resolver, a logger) PLUS the #675/ISS-006 ISystemUserIdentityResolver —
         // the sanctioned per-caller internal/external source that replaced the hardcoded IsInternalUser:true — PLUS the
         // optional IAppOnlyCommunicationQuery (spaarke-SPA-external-access-platform-r3 task 033: the external-plane read,
-        // used only by ReadRegardingAppOnlyAsync after the external endpoint gates the record; 6 total).
+        // used only by ReadRegardingAppOnlyAsync after the external endpoint gates the record) PLUS the optional
+        // IGenericEntityService and IDataverseRecordShareService (field-mapping-server-write-path-r1 task 055: the
+        // Messages list's 1:1 shape check, DirectMessageRecipient.ReadStrictPairShapeAsync, reviewed by
+        // unified-access-control-r2; it only narrows the impersonated list and never widens a read; 8 total).
         // The banned-seam guard above is the durable protection against a resurrected union path; the identity
-        // resolver and the app-only external seam are the ONLY sanctioned additions.
-        readServiceParamTypeNames.Should().HaveCount(6);
+        // resolver, the app-only external seam and the two task-055 shape-check collaborators are the ONLY
+        // sanctioned additions.
+        readServiceParamTypeNames.Should().HaveCount(8);
         readServiceParamTypeNames.Should().Contain("IAppOnlyCommunicationQuery",
-            "task 033 adds the external-plane app-only seam; it is the only other sanctioned addition");
+            "task 033 adds the external-plane app-only seam");
         readServiceParamTypeNames.Should().Contain("ISystemUserIdentityResolver",
             "the #675 fix injects the authoritative per-caller internal/external resolver (not a membership/grant union)");
+        readServiceParamTypeNames.Should().Contain("IGenericEntityService",
+            "task 055 reads the Direct pair's stamped participants to narrow the Messages list to 1:1 pairs (narrows only)");
+        readServiceParamTypeNames.Should().Contain("IDataverseRecordShareService",
+            "task 055 reads the Direct thread's shares to narrow the Messages list to 1:1 pairs (narrows only)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════

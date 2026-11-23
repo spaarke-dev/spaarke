@@ -92,6 +92,7 @@ import { Link, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-co
 import { Link24Regular } from '@fluentui/react-icons';
 
 import { getXrm } from '../../../utils/xrmContext';
+import { closestDialogOrSelf, useFocusReturn } from '../../../utils/focusReturn';
 // The `Xrm.Utility.lookupObjects` call lives in ONE place library-wide (see the
 // G-14 comment there). This renderer and the inline `components/LookupField`
 // escalation path both go through it, so the `this`-binding discipline cannot
@@ -319,6 +320,15 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
   // guard, not something the render output ever needs to reflect.
   const openingRef = React.useRef(false);
 
+  // Focus return (task 200): the platform lookup pane leaves focus on <body> or on the link behind the dialog, so once
+  // the picker settles (pick, cancel or failure) focus goes back to the field's editable value, found after the
+  // re-render (an empty field and a filled one render different elements).
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => rootRef.current,
+    getRegion: () => closestDialogOrSelf(rootRef.current),
+  });
+
   // ── FR-15/FR-15a: open the OOB Xrm.Utility.lookupObjects picker ──────────
   const openPicker = React.useCallback(async (): Promise<void> => {
     if (!editable || openingRef.current) {
@@ -350,8 +360,9 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
       });
     } finally {
       openingRef.current = false;
+      returnFocus(() => rootRef.current?.querySelector<HTMLElement>('[role="button"]'));
     }
-  }, [editable, targets, onSave, label, hasTargets, disabled]);
+  }, [editable, targets, onSave, label, hasTargets, disabled, returnFocus]);
 
   // ── Read-only mode (unchanged): click navigates via Xrm.Navigation ───────
   const handleNavigateClick = React.useCallback(
@@ -429,6 +440,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
 
   return (
     <div
+      ref={rootRef}
       className={styles.root}
       style={gridColumnStyle}
       data-field-type="lookup"

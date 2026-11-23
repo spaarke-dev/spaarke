@@ -283,6 +283,70 @@ Describe 'Find-LeakyDependencies (T218c F12 guard)' {
     }
 }
 
+Describe 'Find-MissingWebResourceReferences (a form or ribbon pointing at a web resource the package lacks)' {
+    function New-PackageSource([string]$Name) {
+        $root = Join-Path $TestDrive $Name
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $root 'WebResources/sprk_/scripts'), (Join-Path $root 'Entities/sprk_Invoice/FormXml/main'), (Join-Path $root 'Entities/sprk_Matter'), (Join-Path $root 'AppModuleSiteMaps/sprk_app')
+        '<WebResource><Name>sprk_/scripts/bff_auth.js</Name></WebResource>' | Set-Content (Join-Path $root 'WebResources/sprk_/scripts/bff_auth.js.data.xml')
+        '<WebResource><Name>sprk_InvoiceFiles</Name></WebResource>' | Set-Content (Join-Path $root 'WebResources/sprk_invoicefiles.data.xml')
+        # Web resource CONTENT that names a missing resource is text, not a reference.
+        '// Library: $webresource:sprk_/scripts/gone.js <Url>sprk_gone</Url>' | Set-Content (Join-Path $root 'WebResources/sprk_/scripts/bff_auth.js')
+        return $root
+    }
+
+    It 'passes when every form, ribbon and sitemap reference is packaged (names compared case-insensitively)' {
+        $root = New-PackageSource 'clean'
+        '<form><control><parameters><Url>sprk_invoicefiles</Url></parameters></control><Library name="sprk_/scripts/bff_auth.js" /></form>' |
+            Set-Content (Join-Path $root 'Entities/sprk_Invoice/FormXml/main/form.xml')
+        '<RibbonDiffXml><JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" /><Url>https://example.com</Url><Url>msdyn_other</Url></RibbonDiffXml>' |
+            Set-Content (Join-Path $root 'Entities/sprk_Matter/RibbonDiff.xml')
+        @(Find-MissingWebResourceReferences -SourceFolder $root).Count | Should Be 0
+    }
+
+    It 'reports a form web resource control whose resource is not packaged (the 1.3.2.0 sprk_invoicefiles case)' {
+        $root = New-PackageSource 'form'
+        Remove-Item (Join-Path $root 'WebResources/sprk_invoicefiles.data.xml')
+        '<form><control classid="{9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}"><parameters><Url>sprk_invoicefiles</Url></parameters></control></form>' |
+            Set-Content (Join-Path $root 'Entities/sprk_Invoice/FormXml/main/form.xml')
+        $found = @(Find-MissingWebResourceReferences -SourceFolder $root)
+        $found.Count | Should Be 1
+        $found[0] | Should Match 'sprk_invoicefiles'
+        $found[0] | Should Match 'Entities/sprk_Invoice/FormXml/main/form.xml'
+    }
+
+    It 'reports a ribbon $webresource:, a form library and a sitemap URL that are not packaged, once per name' {
+        $root = New-PackageSource 'many'
+        '<RibbonDiffXml><JavaScriptFunction Library="$webresource:sprk_/scripts/gone.js" /><Image16by16>$webresource:sprk_gone16.svg</Image16by16></RibbonDiffXml>' |
+            Set-Content (Join-Path $root 'Entities/sprk_Matter/RibbonDiff.xml')
+        '<form><Library name="sprk_/scripts/gone.js" /></form>' | Set-Content (Join-Path $root 'Entities/sprk_Invoice/FormXml/main/form.xml')
+        '<SiteMap><SubArea Url="/WebResources/sprk_gonepage.html?data=x" /></SiteMap>' | Set-Content (Join-Path $root 'AppModuleSiteMaps/sprk_app/AppModuleSiteMap.xml')
+        $found = @(Find-MissingWebResourceReferences -SourceFolder $root)
+        $found.Count | Should Be 3
+        $gone = @($found | Where-Object { $_ -match '^web resource sprk_/scripts/gone\.js is referenced but not packaged <- ' })
+        $gone.Count | Should Be 1
+        $gone[0] | Should Match '<- (Entities/sprk_Matter/RibbonDiff\.xml|Entities/sprk_Invoice/FormXml/main/form\.xml), (Entities/sprk_Matter/RibbonDiff\.xml|Entities/sprk_Invoice/FormXml/main/form\.xml)$'
+        $gone[0] | Should Match 'RibbonDiff\.xml'
+        $gone[0] | Should Match 'form\.xml'
+        ($found -join "`n") | Should Match 'sprk_gone16.svg'
+        ($found -join "`n") | Should Match 'sprk_gonepage.html is referenced'
+    }
+
+    It 'reads a source folder given by an 8.3 short path the same way (web resource content still excluded)' {
+        $root = New-PackageSource 'short'
+        Remove-Item (Join-Path $root 'WebResources/sprk_invoicefiles.data.xml')
+        '<form><parameters><Url>sprk_invoicefiles</Url></parameters></form>' | Set-Content (Join-Path $root 'Entities/sprk_Invoice/FormXml/main/form.xml')
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        $short = $fso.GetFolder((Get-Item -LiteralPath $root).FullName).ShortPath
+        $found = @(Find-MissingWebResourceReferences -SourceFolder $short)
+        $found.Count | Should Be 1
+        $found[0] | Should Be 'web resource sprk_invoicefiles is referenced but not packaged <- Entities/sprk_Invoice/FormXml/main/form.xml'
+    }
+
+    It 'passes the committed SpaarkeMaster source' {
+        @(Find-MissingWebResourceReferences -SourceFolder (Join-Path $repoRoot 'src/dataverse/solutions/SpaarkeMaster')).Count | Should Be 0
+    }
+}
+
 Describe 'Get-NextPackageVersion (T218e)' {
     It 'bumps each part as four parts (the inline bump produced 1.0.0.1.0)' {
         Get-NextPackageVersion -Current '1.0.0.0' -Kind Build | Should Be '1.0.1.0'

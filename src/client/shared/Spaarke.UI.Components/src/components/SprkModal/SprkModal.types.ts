@@ -74,7 +74,11 @@ export interface SprkModalProps {
    * When the pane cannot be layered above it, the surface moves left so its
    * right edge clears the pane instead. The modal reads as sitting behind the lookup
    * instead of disappearing (owner test feedback 2026-10-07, Manage Access).
-   * Used together with `nonBlocking`. Ignored when `hidden` is `true`. Default `false`.
+   * While yielding, a BLOCKING modal (no `nonBlocking`, `dismiss: 'alert'` included) renders as Fluent `non-modal`:
+   * its full-window backdrop and focus trap are dropped so nothing of the modal sits over the pane (task 198), and
+   * it blocks again, backdrop and all, when the flag clears; the body and surface are not remounted. `nonBlocking`
+   * is therefore optional here (a host that is nonBlocking anyway is unaffected). Ignored when `hidden` is `true`.
+   * Default `false`.
    */
   yieldToSidePane?: boolean;
   /** The `--sprk-ui-scale` factor for sizing (default 1). */

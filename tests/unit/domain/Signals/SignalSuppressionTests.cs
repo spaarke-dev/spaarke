@@ -1854,6 +1854,9 @@ public partial class SignalSuppressionTests
                     FailReads ? throw new InvalidOperationException("dataverse is down") : Signals.Single(x => x.Id == id));
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => Run(q));
+            // fm task 056: the walk asks which private-message reference columns sprk_communication has; this environment has none.
+            entities.Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, ColumnMetadata>());
             // The record-type catalog a Signal's core record pair names, as Dataverse answers it (the lineage walk reads a pair's type
             // through it): each type's table, and a missing row for any other type.
             entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))

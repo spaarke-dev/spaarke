@@ -199,6 +199,18 @@ public enum FinanceDenial
     /// <see cref="UniformNotFound"/> or <see cref="Forbidden"/>, where a fault is denied as before.
     /// </summary>
     UniformNotFoundFailClosed,
+
+    /// <summary>
+    /// <see cref="Forbidden"/>'s 403 with its <c>reasonCode</c> for exactly two reasons, a step-0 refusal (<c>internal_callers_only</c>)
+    /// and a system failure (<c>system_failure</c>: a step-0 fault, a check that threw, a record-rights answer Dataverse did not complete
+    /// (<see cref="AccessSnapshot.Faulted"/>) whose rights do not hold the operation); the uniform 404 for EVERY other denial (the caller
+    /// holds no such rights on the record, it does not exist, no resolvable id, a table privilege, any reason added later). Task 123 fix
+    /// round 1 inverted it to this allow-list of 403s, so a new deny reason can never expose itself. For a route whose wire contract tells
+    /// "no such record" (404, do not retry) apart from "could not decide" (403 <c>system_failure</c>, retry): the internal supporting-file
+    /// upload <c>POST /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 123, <c>projects/ebilling-r1/notes/123-upload-contract.md</c>),
+    /// the only route that uses it. Opt-in: every other route keeps its mode.
+    /// </summary>
+    UniformNotFoundForRecord,
 }
 
 /// <summary>The answer of <see cref="FinanceAuthorizationFilter.EvaluateCheckForCallerAsync"/> for one check (ebilling-r1 task 084g).</summary>
@@ -760,7 +772,9 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                         // ebilling-r1 task 095g (design 3e): in the fail-closed mode an answer Dataverse did not complete, and that does not
                         // hold the operation's rights, is the route's 503, never the uniform 404. Every other mode refuses it exactly as before
                         // (a degraded answer that holds the rights was Allowed above, in every mode).
-                        FinanceCheckVerdict.Faulted when _denial == FinanceDenial.UniformNotFoundFailClosed => SystemFailureReasonCode,
+                        // Task 123: the record-only uniform-404 mode answers it as the 403 system failure (a retry), never as "no such record".
+                        FinanceCheckVerdict.Faulted when _denial is FinanceDenial.UniformNotFoundFailClosed or FinanceDenial.UniformNotFoundForRecord
+                            => SystemFailureReasonCode,
                         _ => InsufficientRightsReasonCode,
                     };
                 }
@@ -777,6 +791,12 @@ public class FinanceAuthorizationFilter : IEndpointFilter
         // Only a genuine denial is the no-match 404; any system failure is the route's 503 (see FinanceDenial.UniformNotFoundFailClosed).
         FinanceDenial.UniformNotFoundFailClosed => reasonCode == SystemFailureReasonCode
             ? InvoiceSubmissionHttp.ReadFault(InvoiceSubmissionService.ReadUnavailable())
+            : UniformRecordNotFound(httpContext),
+
+        // Task 123 (fix round 1, inverted): only a step-0 refusal and a system failure keep their 403 reasonCode; every other denial,
+        // a reason added later included, is the uniform 404, so no new reason can ever expose itself on this route.
+        FinanceDenial.UniformNotFoundForRecord => reasonCode is InternalCallersOnlyReasonCode or SystemFailureReasonCode
+            ? ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier)
             : UniformRecordNotFound(httpContext),
 
         _ => ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier),

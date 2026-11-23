@@ -76,6 +76,8 @@ interface Script {
   me: () => Response;
   /** GET .../invoice-submissions/firm-records?firmId= (D-106): the caller's readable records the firm is linked to. */
   firmRecords: (firmId: string) => Response;
+  /** GET /api/v1/external/ebilling/submissions/{id}/outcome (ebilling-r1 task 134): the report of a Rejected submission. */
+  outcome: () => Response;
 }
 
 const FIRM_ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
@@ -109,6 +111,27 @@ const statusView = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** The submission outcome a Rejected submission reads (`FirmOutcome`, camelCase, enums as names). */
+const REJECTED_OUTCOME = {
+  kind: 'SubmissionRejected',
+  trackingNumber: 'TRK-0001',
+  statusLabel: 'Rejected',
+  billedTotal: null,
+  approvedTotal: null,
+  degraded: false,
+  items: [
+    {
+      decision: 'RejectionFinding',
+      reason: null,
+      firmReasons: ['The billed rate is above the approved rate.'],
+      citations: [],
+      lineNumber: 4,
+      valuesRead: [{ name: 'Rate', value: '540' }],
+      reasonCode: 'approved_rate.above_approved',
+    },
+  ],
+};
+
 const ACCEPTED_202 = () =>
   json(202, {
     submissionId: SUBMISSION_ID,
@@ -126,6 +149,7 @@ beforeEach(() => {
     me: meWith([FIRM_ALPHA]),
     // Every firm is linked to the matter and the project unless a test says otherwise.
     firmRecords: firmId => linkedTo(firmId, [MATTER_ID], [PROJECT_ID]),
+    outcome: () => json(200, REJECTED_OUTCOME),
   };
   localStorage.clear();
   sessionStorage.clear();
@@ -156,6 +180,9 @@ beforeEach(() => {
       const p = new URL(url).pathname;
       if (method === 'GET' && p === '/api/v1/external/invoice-submissions') return script.probe();
       if (method === 'GET' && p === '/api/v1/external/me') return script.me();
+      if (method === 'GET' && p === `/api/v1/external/ebilling/submissions/${SUBMISSION_ID}/outcome`) {
+        return script.outcome();
+      }
       if (method === 'GET' && p === '/api/v1/external/invoice-submissions/firm-records') {
         return script.firmRecords(new URL(url).searchParams.get('firmId') ?? '');
       }
@@ -311,7 +338,7 @@ describe('InvoiceSubmitPage — submit', () => {
   );
 
   it(
-    'a Rejected result shows the reason code and the report placeholder',
+    'a Rejected result shows the reason code and the outcome report, not the placeholder (task 134)',
     async () => {
       script.status = [() => json(200, statusView({ status: 'Rejected', outcomeReasonCode: 'duplicate_invoice' }))];
       const { InvoiceSubmitPage } = await load();
@@ -320,7 +347,16 @@ describe('InvoiceSubmitPage — submit', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
 
       expect(await screen.findByText(/Reason: duplicate_invoice/, {}, SLOW)).toBeTruthy();
-      expect(screen.getByTestId('invoice-report-placeholder')).toBeTruthy();
+      const report = await screen.findByTestId('invoice-outcome-report', {}, SLOW);
+      expect(report.getAttribute('data-kind')).toBe('SubmissionRejected');
+      // The shared `renderSubmissionReport` (also used by the record's modal wizard) draws the wrapper.
+      expect(screen.getByTestId('submission-outcome-report').contains(report)).toBe(true);
+      expect(screen.getByText('Line 4')).toBeTruthy();
+      expect(screen.getByText('The billed rate is above the approved rate.')).toBeTruthy();
+      expect(screen.queryByTestId('invoice-report-placeholder')).toBeNull();
+      expect(calls.some(c => c.url.endsWith(`/api/v1/external/ebilling/submissions/${SUBMISSION_ID}/outcome`))).toBe(
+        true
+      );
     },
     SLOW
   );
@@ -918,6 +954,29 @@ describe('InvoiceSubmitPage — resume (FR-18)', () => {
       expect(submitCalls()).toHaveLength(0);
       expect(calls.some(c => c.url.endsWith(`/api/v1/external/invoice-submissions/${SUBMISSION_ID}`))).toBe(true);
       expect(calls.some(c => c.url.includes('/projects'))).toBe(false);
+    },
+    SLOW
+  );
+
+  it(
+    'a Rejected submission on the resume screen shows the same outcome report (task 134), and nothing of it when eBilling is off',
+    async () => {
+      script.status = [() => json(200, statusView({ status: 'Rejected', outcomeReasonCode: 'po_mismatch' }))];
+      const { InvoiceSubmitPage } = await load();
+      const first = renderPage(InvoiceSubmitPage, `/invoices/submit?submissionId=${SUBMISSION_ID}`);
+      expect((await screen.findByTestId('invoice-outcome-report', {}, SLOW)).getAttribute('data-kind')).toBe(
+        'SubmissionRejected'
+      );
+      expect(screen.queryByTestId('invoice-report-placeholder')).toBeNull();
+      first.unmount();
+
+      // The kill switch: the report is hidden entirely (no placeholder either: the host handed the slot).
+      script.outcome = () => problem(503, undefined, 'ebilling.disabled');
+      renderPage(InvoiceSubmitPage, `/invoices/submit?submissionId=${SUBMISSION_ID}`);
+      expect(await screen.findByText(/Reason: po_mismatch/, {}, SLOW)).toBeTruthy();
+      await waitFor(() => expect(calls.filter(c => c.url.endsWith('/outcome')).length).toBeGreaterThanOrEqual(2));
+      expect(screen.queryByTestId('invoice-outcome-report')).toBeNull();
+      expect(screen.queryByTestId('submission-outcome-report')).toBeNull();
     },
     SLOW
   );

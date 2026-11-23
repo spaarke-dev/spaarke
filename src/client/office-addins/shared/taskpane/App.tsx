@@ -1030,7 +1030,6 @@ export const App: React.FC<AppProps> = ({
                 Project: 'sprk_project',
                 Account: 'account',
                 Contact: 'contact',
-                Invoice: 'invoice',
               };
               const logicalName = entityMap[entityType] || entityType.toLowerCase();
               // Open quick create form in Dataverse

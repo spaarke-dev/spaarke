@@ -118,6 +118,11 @@ export interface TimelineMessage {
   isInternalOnly?: boolean;
   /** `sprk_isprivate` (FR-21) marker — display only; never a gate. Undefined on rows predating task 043 → `false`. */
   isPrivate?: boolean;
+  /**
+   * The record this message is privately about (fm task 056), resolved by the server as the viewer; null/undefined when
+   * there is none or the viewer cannot read it. Drives the "About {name}" chip on the bubble.
+   */
+  privateContext?: { entityType: string; id: string; name: string } | null;
   attachments: TimelineAttachment[];
 }
 

@@ -49,7 +49,8 @@ namespace Sprk.Bff.Api.Services.Access;
 /// change first; the rest re-open the catch-up (below) and are counted in <c>recentChanges.rootsChangedOverflow</c>
 /// (#1943). The watermark is the run's start time, taken before the secure records are listed, minus
 /// <see cref="RecentChangesOverlap"/>. It lives in this singleton, per instance, like the cursor. It moves only past a
-/// listing that completed. A changed row the walk cannot place (under a record flagged secure but not isolated, or under a
+/// listing that completed; a listing that reached the page bound is capped there, oldest change first, and the watermark
+/// moves only to the cap (#2750), so a held window that grew past the bound drains instead of failing every run. A changed row the walk cannot place (under a record flagged secure but not isolated, or under a
 /// missing ancestor) is listed in <c>recentChanges.undetermined</c>, and the run is not a success.</para>
 /// <para><b>Standing schedule (task 147, round 28 item 2, decided 2026-10-04).</b> Every 2 minutes, writes on for the
 /// recent-changes pass, in every environment where task 148 is deployed: the interval is the window in which a child
@@ -86,8 +87,8 @@ namespace Sprk.Bff.Api.Services.Access;
 /// failed and undecidable rows carried (an undecidable one fails the run). A checked-out document is listed apart
 /// (<c>checkedOut</c>) and left. A re-file never widens: a row still owned by the Secure Record owner team keeps its file in the
 /// secure container while its filing points elsewhere (<c>heldIsolated</c>, released only by an F3 act); an unfiled
-/// document stays in a declared home container (#2151), and one whose file is in no business unit's container and no
-/// declared home is reported (<c>unfiledHomeUnknown</c>) and left. A document the backstop settled or held this run is not
+/// document whose file is in no business unit's container is reported (<c>unfiledHomeUnknown</c>) and left (the declared-home
+/// container of #2151 was removed by ebilling-r1 task 124 with the Procedure Library key). A document the backstop settled or held this run is not
 /// relocated twice. Reported in <c>ResultJson.refileRelocations</c>; a failed or still-owing move makes the run
 /// unsuccessful. Until the pass reaches it, a re-filed document is refused under the strict rule (about two minutes plus
 /// the run). Known limit: its window is per instance and the catch-up does not walk documents, so a move a previous
@@ -559,8 +560,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             // watermark either: the first run with writes on then still sees the changes the report-only runs listed, back
             // to the FIRST run's window start, which that run stored (#2735, owner option A). A record whose pass was
             // incomplete is carried (below).
+            // #2750: a listing capped at the page bound moves it only to the cap, so the rest is listed next run.
             if (recent.Failure is null && recentWrites && !recent.PendingOverflow)
-                _recentChangesWatermark = startedAt - RecentChangesOverlap;
+                _recentChangesWatermark = WatermarkAfter(startedAt - RecentChangesOverlap, recent.CappedAt);
 
             // Task 147 r1c: the catch-up advances only in a run that wrote (a report-only run corrected nothing). Past the
             // last secure record this instance has walked them all once; from then on the watermark alone decides.
@@ -731,6 +733,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     // #1943 (review F1): those past the per-run cap, left to the re-opened catch-up (catchUp.complete false).
                     rootsChangedOverflow,
                     undetermined = recent.Undetermined.Take(50).ToArray(),
+                    // #2750: the listing reached the page bound; it covered the changes up to this instant, and the window
+                    // moves only to it (the next run continues from there). Null: the listing was complete.
+                    cappedAt = recent.CappedAt,
                     failure = recent.Failure,
                     // Task 147 r1: what earlier runs left unfinished and this run looked at again — records whose pass was
                     // incomplete, and changed rows that could not be placed — and what is carried to the next run.
@@ -761,6 +766,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 {
                     mode = ordinary.Writes ? ModeWrite : ModeReportOnly,
                     since = ordinary.Since.UtcDateTime,
+                    // #2750: the window moved only to this instant (a listing capped at the page bound, or a full carry).
+                    cappedAt = ordinary.CappedAt,
+                    // #2750: the window did not advance (the carry is full of roots no listing reaches again).
+                    windowHeld = ordinary.WindowHeld,
                     rootsListed = ordinary.RootsListed,
                     rootsInRun = ordinary.RootsInRun,
                     rootsOverflow = ordinary.RootsOverflow,
@@ -786,7 +795,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     handOffsPending = ordinary.HandOffsPending,
                     deferredRoots = ordinary.DeferredRoots.Take(50).ToArray(),
                     // F4-a: the per-instance catch-up sweep over every ordinary root (once in each mode).
-                    sweep = new { ran = ordinary.SweepRan, roots = ordinary.SweepRoots, complete = ordinary.SweepComplete },
+                    sweep = new
+                    {
+                        ran = ordinary.SweepRan,
+                        roots = ordinary.SweepRoots,
+                        complete = ordinary.SweepComplete,
+                        // #2750: started over because the carry could not hold every root no listing reaches again.
+                        reopened = ordinary.SweepReopened,
+                    },
                     changesTotal = ordinary.ChangesTotal,
                     changesListed = ordinary.Changes.Count,
                     changes = ordinary.Changes,
@@ -826,6 +842,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 {
                     mode = refile.Mode,
                     since = refile.Since?.UtcDateTime,
+                    // #2750: the window's listing reached the page bound at this instant; when it drains, the watermark
+                    // moves only to it. Null: the listing was complete.
+                    cappedAt = refile.CappedAt,
                     listed = refile.Listed,
                     listedUnderChangedRecords = refile.ListedUnderChangedRecords,
                     retriedRows = refile.RetriedRows,
@@ -884,6 +903,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         // F3: rows left for the next run because this one reached the write cap (its window was kept).
                         deferred = apRun.Deferred,
                         writeCapReached = apRun.WriteCapReached,
+                        // #2750: the changed-row listing reached the page bound at this instant (null: complete).
+                        cappedAt = apRun.CappedAt,
                         problems = apRun.Problems,
                         changes = apRun.Changes.Select(c => new { table = c.Table, id = c.Id, from = c.From, to = c.To }).ToArray(),
                         carriedRows = accessPermission.CarriedRows,
@@ -996,13 +1017,31 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         public int HandOffsPending { get; set; }
         public int ChangesTotal { get; set; }
         public List<object> Changes { get; } = new();
-        public string? Failure { get; init; }
+        public string? Failure { get; set; }
 
         /// <summary>F4-a: whether the catch-up sweep ran this run, how many roots its window held, and whether it has now
         /// covered every ordinary root once in this mode.</summary>
         public bool SweepRan { get; init; }
         public int SweepRoots { get; init; }
         public bool SweepComplete { get; set; }
+
+        /// <summary>
+        /// #2750: the window moved only to this instant — its listing reached the page bound, or (writing) more roots than the
+        /// carry holds were left — so the roots changed from it are listed again next run. Null: not capped.
+        /// </summary>
+        public DateTime? CappedAt { get; set; }
+
+        /// <summary>
+        /// #2750: more roots that no listing reaches again had to be carried than the carry holds; the catch-up sweep started
+        /// over to reach the ones left out.
+        /// </summary>
+        public bool SweepReopened { get; set; }
+
+        /// <summary>
+        /// #2750: the window did not advance this run — the carry is full of roots no listing reaches again (they are walked
+        /// first next run). A failure only when the run was not throttled.
+        /// </summary>
+        public bool WindowHeld { get; set; }
 
         /// <summary>Only a WRITING pass fails the run: a listing that failed, or a root left incomplete (not merely capped).</summary>
         public bool FailsTheRun => Writes && (Failure is not null || IncompleteRoots.Count > 0);
@@ -1029,14 +1068,21 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <see cref="InitialRecentChangesLookback"/> from its own start until a writing run has stored the watermark, and reads
     /// that held watermark after (without moving it). With writes on, a
     /// root left incomplete, stopped by the write cap, or past the root cap is carried and looked at first next run (at most
-    /// <see cref="MaxCarriedRows"/>; beyond that the watermark stays). Per instance, like every window of this job: a restart
+    /// <see cref="OrdinaryCarryCap"/>; #2750: the roots no listing reaches again are carried first and never left out for a
+    /// listed root — past the cap the catch-up sweep starts over — and the window moves to the first listed root left out, as a
+    /// key set (modifiedon, table, id), so it is listed again and roots sharing one instant still advance; a run that cannot
+    /// advance at all is reported — windowHeld — and fails unless it was only throttled). A swept root the write cap stops
+    /// holds the sweep cursor rather than being carried. A listing that
+    /// reached the page bound is capped there, oldest change first, and the watermark moves only to the cap (#2750). Per instance, like every window of this job: a restart
     /// looks back <see cref="InitialRecentChangesLookback"/>.</para>
     /// <para><b>Catch-up sweep (F4-a).</b> Until this instance has walked every ordinary root once in the current mode, each
     /// run also walks the next <see cref="MaxRootsPerRunConfigKey"/> roots after a per-instance cursor (table, then id), so a
     /// reassignment older than the window (made before this pass existed, or carried by an instance that restarted) is found.
     /// A switch of <see cref="OrdinaryMovesWritesEnabledConfigKey"/> starts it over: a report-only cover never stands in for a
-    /// writing one. A root of the window that the write cap stops is carried; a carry past <see cref="MaxCarriedRows"/> holds
-    /// the cursor where it is.</para>
+    /// writing one. A root of the window left incomplete is carried; one that the write cap, the time slice or a full hand-off
+    /// carry stops holds the cursor just before it; a carry past <see cref="OrdinaryCarryCap"/> holds the cursor where it is.
+    /// #2750: when roots no listing reaches again are left out of a full carry, the sweep starts over (at once if it was
+    /// complete, otherwise when it reaches its end).</para>
     /// <para><b>Files (F1-a).</b> With writes on, every document of a root's walk that may move
     /// (<see cref="SecureChildReconcileReport.OrdinaryHandOffDocumentIds"/>: any owner, never one held in isolation or answered
     /// Secure) is handed to the re-file pass as a carried row, so it is examined and moved this run or later under the
@@ -1058,6 +1104,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             : DefaultMaxOrdinaryMovesPerRun;
 
         DateTimeOffset since;
+        (DateTime At, string Table, Guid Id)? resumeFrom;
         List<(string Table, Guid Id)> carried;
         bool sweepRuns;
         (string Table, Guid Id) sweepAfter;
@@ -1066,13 +1113,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         lock (_cursorGate)
         {
             // #2735: a WRITING run stored the first window in ExecuteAsync, before anything could fail, so one that holds the
-            // watermark (a failed listing, a carry past MaxCarriedRows, a run that never got here) leaves the next run listing
+            // watermark (a failed listing, a run that never got here) leaves the next run listing
             // from there. A report-only run does not store it (pending owner sign-off; not covered by option A): this pass is
             // report-only by default and only a writing run moves its watermark, so a start a report-only run stored would
             // never move and its window would grow without bound. Until a writing run has stored the watermark, a report-only
             // run looks back from its own start; after that it reads the held watermark (and does not move it). A switch to
             // writes starts the catch-up sweep over (F4-a), which walks every ordinary root.
             since = _ordinaryMovesWatermark ?? startedAt - InitialRecentChangesLookback;
+            // #2750: the key set the watermark was moved to past a full carry (valid only at that instant).
+            resumeFrom = _ordinaryMovesResumeAt is { } held && held.At == since.UtcDateTime ? held : null;
             runNumber = ++_ordinaryRunNumber;
 
             // 194b R4-3 (B4): least-recently-attempted first (a root never stamped — carried by an earlier instance's state,
@@ -1090,6 +1139,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 _ordinarySweepWrites = writes;
                 _ordinarySweepCursor = null;
                 _ordinarySweepComplete = false;
+                _ordinaryResweepPending = false;
             }
 
             sweepRuns = !_ordinarySweepComplete;
@@ -1097,10 +1147,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         }
 
         List<(string Table, Guid Id, DateTime ModifiedOn)> changed;
+        DateTime? listingCappedAt;
         (List<(string Table, Guid Id)> Rows, bool ReachedEnd) sweep = (new(), false);
         try
         {
-            changed = await ListChangedOrdinaryRootsAsync(dataverse, since, ct).ConfigureAwait(false);
+            (changed, listingCappedAt) = await ListChangedOrdinaryRootsAsync(dataverse, since, ct).ConfigureAwait(false);
             if (sweepRuns)
                 sweep = await OrdinarySweepWindowAsync(dataverse, sweepAfter, rootCap, ct).ConfigureAwait(false);
         }
@@ -1113,6 +1164,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 Failure = "the reassigned ordinary records could not be listed",
                 CarriedRoots = carried.Count,
             };
+        }
+
+        // #2750: past a full carry the window resumes at a key set — the roots of its instant before it were walked or are
+        // carried, so they are not listed again.
+        if (resumeFrom is { } resume)
+        {
+            changed = changed
+                .Where(c => OrdinaryKeyComparer.Instance.Compare((AsUtc(c.ModifiedOn), c.Table, c.Id), resume) >= 0)
+                .ToList();
         }
 
         // 194b R4-3 (B4): a report-only run resumes after the root the previous one reached, then wraps around.
@@ -1158,8 +1218,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             var key = $"{table}:{id:D}";
             if (writes && remaining == 0)
             {
-                // The write cap is spent: the rest are carried unread (each is walked again first next run).
-                carry.Add((table, id));
+                // The write cap is spent: the rest are carried unread (each is walked again first next run). #2750: a swept
+                // root is not carried but holds the sweep cursor, as the time slice does, so a full carry never drops it.
+                if (swept)
+                    firstDeferredSweep ??= (table, id);
+                else
+                    carry.Add((table, id));
                 run.CapReached = true;
                 anyListedNotReached |= !swept;
                 continue;
@@ -1272,14 +1336,89 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         lock (_cursorGate)
         {
             // Only a run that WROTE moves the window and keeps a carry (a report-only run corrected nothing — the secure
-            // pass's rule). Past MaxCarriedRows the watermark stays, so the whole window is listed again.
+            // pass's rule). #2750: a listing capped at the page bound moves the window only to the cap. Past the carry cap:
+            // (1) the roots this run did NOT list (carried from earlier runs, or swept and left incomplete) go first and are
+            //     never left out for a listed root — nothing would list them again. If they alone exceed the cap, the ones
+            //     left out are reached by the catch-up sweep, which is started over (reported, logged);
+            // (2) the listed roots fill the rest, oldest change first, and the window moves to the first one left out as a
+            //     key set (modifiedon, table, id): the next run lists from its instant and skips only the roots before it,
+            //     each of which was walked or is carried. So roots sharing one instant past the carry still advance.
+            // Holding the whole window instead would never drain once more roots changed than the carry holds — and a window
+            // past the page bound always has that many.
+            run.CappedAt = listingCappedAt;
             if (writes)
             {
                 var toCarry = carry.Concat(overflow).Distinct().ToList();
+                var unlisted = toCarry.Where(r => !changedAt.ContainsKey(r)).ToList();
+                var listedToCarry = toCarry.Where(changedAt.ContainsKey)
+                    .Select(r => (At: AsUtc(changedAt[r]), r.Table, r.Id))
+                    .OrderBy(k => k, OrdinaryKeyComparer.Instance)
+                    .ToList();
                 _pendingOrdinaryRoots.Clear();
-                _pendingOrdinaryRoots.UnionWith(toCarry.Take(MaxCarriedRows));
-                if (toCarry.Count <= MaxCarriedRows)
-                    _ordinaryMovesWatermark = startedAt - RecentChangesOverlap;
+                _pendingOrdinaryRoots.UnionWith(
+                    unlisted.Concat(listedToCarry.Select(k => (k.Table, k.Id))).Take(OrdinaryCarryCap));
+
+                if (unlisted.Count > OrdinaryCarryCap)
+                {
+                    // Started over at once when complete; otherwise when the current sweep reaches its end (the roots left
+                    // out may be behind its cursor), so a backlog that stays past the cap does not reset its progress every run.
+                    if (_ordinarySweepComplete)
+                    {
+                        _ordinarySweepComplete = false;
+                        _ordinarySweepCursor = null;
+                    }
+                    else
+                    {
+                        _ordinaryResweepPending = true;
+                    }
+
+                    run.SweepReopened = true;
+                    _logger.LogWarning(
+                        "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId}: {Unlisted} roots to carry that no listing reaches " +
+                        "again exceed the carry of {Cap}; the {Left} left out are reached by the catch-up sweep, which starts over " +
+                        "(now if it was complete, otherwise when it reaches its end).",
+                        runId, unlisted.Count, OrdinaryCarryCap, unlisted.Count - OrdinaryCarryCap);
+                }
+
+                var leftOut = listedToCarry.Skip(Math.Max(0, OrdinaryCarryCap - unlisted.Count)).ToList();
+                (DateTime At, string Table, Guid Id)? resumeAt = null;
+                if (leftOut.Count > 0 && (listingCappedAt is not { } listingCap || leftOut[0].At < listingCap))
+                {
+                    resumeAt = leftOut[0];
+                    run.CappedAt = leftOut[0].At;
+                }
+
+                var watermark = WatermarkAfter(startedAt - RecentChangesOverlap, run.CappedAt);
+                _ordinaryMovesWatermark = watermark;
+                _ordinaryMovesResumeAt = resumeAt is { } r && r.At == watermark.UtcDateTime ? resumeAt : null;
+
+                // The roots left out start at the first root this run listed: the next run lists exactly the same roots,
+                // so the window did not advance (the carry is full of roots no listing reaches again). Never a silent
+                // success: reported (windowHeld) and logged. A run that was only throttled — the write cap, the time slice,
+                // a full hand-off carry — is not a failure (its carried roots are walked first next run); one that was not
+                // throttled fails (a root left incomplete already fails it).
+                var firstListed = changed.Count == 0
+                    ? ((DateTime At, string Table, Guid Id)?)null
+                    : changed.Select(c => (At: AsUtc(c.ModifiedOn), c.Table, c.Id)).Min(OrdinaryKeyComparer.Instance);
+                if (leftOut.Count > 0 && firstListed is { } first0 && OrdinaryKeyComparer.Instance.Compare(leftOut[0], first0) == 0)
+                {
+                    run.WindowHeld = true;
+                    var throttled = run.CapReached || run.TimeSliceReached || run.DeferredRoots.Count > 0;
+                    if (!throttled)
+                        run.Failure = "the carry is full of roots that no listing reaches again, so the window cannot advance this run";
+                    _logger.LogWarning(
+                        "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId}: the window since {Since:o} did not advance — all " +
+                        "{Cap} carried roots are roots no listing reaches again; they are walked first in the next runs " +
+                        "(throttled={Throttled}).",
+                        runId, since, OrdinaryCarryCap, throttled);
+                }
+            }
+
+            if (run.CappedAt is { } ordinaryCap)
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-RECONCILE] ordinary-moves run={RunId}: more ordinary records changed since {Since:o} than " +
+                    "one listing reads or the carry holds; the window continues from {CappedAt:o}.", runId, since, ordinaryCap);
             }
 
             // 194b R4-3 (B4): stamp the walked roots last, and a root first carried now just before them; keep only the
@@ -1301,10 +1440,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
             run.ReportCursor = _ordinaryReportCursor is { } cursor ? $"{cursor.Table}:{cursor.Id:D}" : null;
 
-            // F4-a: the sweep moves past its window (a root of it the write cap stopped, or left incomplete, is carried
-            // above). Report-only it moves too: one report of every root, then it stops until the mode changes. A carry past
-            // MaxCarriedRows holds it where it is.
-            if (sweepRuns && (!writes || carry.Concat(overflow).Distinct().Count() <= MaxCarriedRows))
+            // F4-a: the sweep moves past its window (a root of it left incomplete is carried above; one the write cap, the
+            // time slice or a full hand-off carry stopped holds the cursor just before it, below). Report-only it moves too:
+            // one report of every root, then it stops until the mode changes. A carry past OrdinaryCarryCap holds it where
+            // it is.
+            if (sweepRuns && (!writes || carry.Concat(overflow).Distinct().Count() <= OrdinaryCarryCap))
             {
                 // F1-a: a swept root whose documents did not all fit holds the cursor just before it (the carry is full:
                 // the sweep does not advance past roots it could not hand off).
@@ -1313,6 +1453,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 {
                     if (held > 0)
                         _ordinarySweepCursor = sweep.Rows[held - 1];
+                }
+                else if (sweep.ReachedEnd && _ordinaryResweepPending)
+                {
+                    _ordinaryResweepPending = false; // #2750: roots were left out behind the cursor: start again
+                    _ordinarySweepCursor = null;
                 }
                 else if (sweep.ReachedEnd)
                 {
@@ -1398,23 +1543,26 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// UAC task 194: the ordinary projects, matters and work assignments (<c>sprk_issecure</c> = false), and (F4-b) the
     /// service requests, modified at or after <paramref name="since"/>. A fault propagates (the caller reports it).
     /// </summary>
-    private static async Task<List<(string Table, Guid Id, DateTime ModifiedOn)>> ListChangedOrdinaryRootsAsync(
-        IGenericEntityService dataverse, DateTimeOffset since, CancellationToken ct)
+    private static async Task<(List<(string Table, Guid Id, DateTime ModifiedOn)> Roots, DateTime? CappedAt)>
+        ListChangedOrdinaryRootsAsync(IGenericEntityService dataverse, DateTimeOffset since, CancellationToken ct)
     {
         var roots = new List<(string, Guid, DateTime)>();
+        DateTime? cappedAt = null;
         foreach (var table in OrdinaryRootTables)
         {
+            // #2750: past the page bound the table's listing is capped, oldest change first (the caller holds the window there).
             var query = new QueryExpression(table) { ColumnSet = new ColumnSet(table + "id", ModifiedOnColumn), NoLock = true };
-            query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
             OnlyOrdinary(query, table);
-            foreach (var row in await ReadAllAsync(dataverse, query, ct).ConfigureAwait(false))
+            var (rows, tableCappedAt) = await ReadChangedSinceAsync(dataverse, query, since, ct).ConfigureAwait(false);
+            cappedAt = Earliest(cappedAt, tableCappedAt);
+            foreach (var row in rows)
             {
                 if (row.Id != Guid.Empty)
                     roots.Add((table, row.Id, row.GetAttributeValue<DateTime?>(ModifiedOnColumn) ?? DateTime.MinValue));
             }
         }
 
-        return roots;
+        return (roots, cappedAt);
     }
 
     /// <summary>What the inherited Access Permission pass did in one run (task 173); <see cref="Run"/> null when it did not run.</summary>
@@ -1424,7 +1572,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <summary>
     /// Task 173 — runs <see cref="ChildAccessPermissionReconciler"/> over the window since this instance's own Access
     /// Permission watermark, the rows it carried, and (until this instance has covered every row of the four tables once)
-    /// a capped sweep window. The watermark moves only past a pass that listed completely, in a run that wrote; undecided
+    /// a capped sweep window. The watermark moves only past a pass that listed completely, in a run that wrote — or, when the
+    /// changed-row listing reached the page bound, only to the instant it was capped at (#2750); undecided
     /// and failed rows are carried (at most <see cref="MaxCarriedRows"/>; beyond that the watermark stays). Never throws
     /// (cancellation aside). Past <see cref="MaxAccessPermissionWritesPerRunConfigKey"/> writes the window is kept (the
     /// watermark and the sweep cursor stay) so the next run continues. <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"/>
@@ -1491,8 +1640,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             // 198 pass 2 (F2): the reconciler keeps the carry within the cap and counts the undecided or failed rows past it
             // (CarryOverflow); those hold the watermark, as before. Rows the Restricted bar leaves never hold it (§7.3).
             var overflow = run.CarryOverflow > 0 || run.Carry.Count > AccessPermissionCarryCap;
+            // #2750: a listing capped at the page bound moves it only to the cap, so the rest is listed next run.
             if (run.Failure is null && writes && !overflow && !run.WriteCapReached)
-                _accessPermissionWatermark = startedAt - RecentChangesOverlap;
+                _accessPermissionWatermark = WatermarkAfter(startedAt - RecentChangesOverlap, run.CappedAt);
 
             _accessPermissionPending.Clear();
             _accessPermissionPending.UnionWith(run.Carry.Take(AccessPermissionCarryCap));
@@ -1533,6 +1683,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
 
             (carriedRows, sweepComplete) = (_accessPermissionPending.Count, _accessPermissionSweepComplete);
+        }
+
+        if (run.CappedAt is { } accessCap)
+        {
+            _logger.LogWarning(
+                "[CHILD-ACCESS-PERMISSION] run={RunId}: more rows changed since {Since:o} than one listing reads; this run " +
+                "covers those changed up to {CappedAt:o} and the window continues from there.", runId, since, accessCap);
         }
 
         _logger.Log(
@@ -1710,6 +1867,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     internal sealed record RefileRelocationRun(string Mode)
     {
         public DateTimeOffset? Since { get; init; }
+
+        /// <summary>#2750: the earliest instant this window's listings were capped at (the watermark moves no further).</summary>
+        public DateTime? CappedAt { get; init; }
+
         public int Listed { get; init; }
 
         /// <summary>A3: documents listed because the matter, project or work assignment they are filed under changed.</summary>
@@ -1812,7 +1973,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <see cref="RefileTimeSlice"/> after the pass started, and makes at most <see cref="MaxRelocationsPerRunConfigKey"/>
     /// relocator calls (the backstop's setting, its own budget). Where it stops, the cursor holds its place and the
     /// watermark is held until the window drains; then the watermark moves to the start of the run that began the window
-    /// (B2), so a row modified while the window was walked is listed again. The carried rows are examined after the window:
+    /// (B2), so a row modified while the window was walked is listed again — or, when a listing of the window reached the page
+    /// bound (capped, oldest change first: #2750), only to the earliest cap, so the documents past it are the next window
+    /// (no catch-up walks documents, so none may be skipped). The carried rows are examined after the window:
     /// a failed move (an unreadable owner, a held lock, a copy fault) and an undecidable derivation, which fails the run and
     /// is dropped after <see cref="MaxUndecidableRuns"/> consecutive runs (B6). At most <see cref="MaxCarriedRows"/>; beyond
     /// that the watermark stays. A cancelled pass keeps its cursor and carry. Its own watermark, moved only in a run that
@@ -1847,6 +2010,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         List<Guid> carried;
         Guid? after;
         DateTimeOffset windowStartedAt;
+        DateTime? windowCappedAt;
         Dictionary<Guid, int> undecidableRuns;
         lock (_cursorGate)
         {
@@ -1859,6 +2023,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             // B2: the window a cursor walks started with the run that found no cursor; the watermark moves to THAT start
             // when the window drains, so a row modified while the window was being walked is listed again.
             windowStartedAt = after is null ? startedAt : _refileWindowStartedAt ?? startedAt;
+            // #2750: likewise the earliest instant any listing of this window was capped at (null: none was).
+            windowCappedAt = after is null ? null : _refileWindowCappedAt;
             undecidableRuns = new Dictionary<Guid, int>(_refileUndecidableRuns);
         }
 
@@ -1867,19 +2033,26 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         int listed, underChangedRecords;
         try
         {
+            // #2750: past the page bound the listing is capped, oldest change first. The window is what was listed; when it
+            // drains the watermark moves no further than the earliest cap of the window's runs, so the documents past it —
+            // and any that entered a later run's capped listing behind the cursor — are listed again. Nothing else walks
+            // documents, so none may be skipped.
             var query = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("sprk_graphdriveid"), NoLock = true };
-            query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
             query.Criteria.AddCondition("sprk_graphdriveid", ConditionOperator.NotNull);
             candidates = new Dictionary<Guid, string>();
-            foreach (var row in await ReadAllAsync(dataverse, query, ct).ConfigureAwait(false))
+            var (documents, documentsCappedAt) = await ReadChangedSinceAsync(dataverse, query, since, ct).ConfigureAwait(false);
+            foreach (var row in documents)
                 AddCandidate(candidates, row);
             listed = candidates.Count;
 
             // A3 (the #1943 pattern): a matter, project or work assignment changed in the window can change what the
             // documents filed under it derive to without touching their own modifiedon — they are in the window too.
-            foreach (var row in await ListDocumentsUnderChangedRecordsAsync(dataverse, since, ct).ConfigureAwait(false))
+            var (underChanged, recordsCappedAt) = await ListDocumentsUnderChangedRecordsAsync(dataverse, since, ct)
+                .ConfigureAwait(false);
+            foreach (var row in underChanged)
                 AddCandidate(candidates, row);
             underChangedRecords = candidates.Count - listed;
+            windowCappedAt = Earliest(windowCappedAt, Earliest(documentsCappedAt, recordsCappedAt));
             window = candidates.Keys.ToHashSet();
 
             // The rows earlier runs carried, read again by id whatever their modifiedon; a row gone, or without a file, drops out.
@@ -1914,9 +2087,18 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var carriedOrder = candidates.Keys.Where(id => carriedSet.Contains(id) && !ahead.Contains(id)).OrderBy(id => id).ToList();
         var pendingCarried = carriedOrder.ToHashSet();
 
+        if (windowCappedAt is { } refileCap)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] refile run={RunId}: more documents changed since {Since:o} than one listing reads; " +
+                "this window covers those changed up to {CappedAt:o}, and the next window continues from there.",
+                runId, since, refileCap);
+        }
+
         var run = new RefileRelocationRun(mode)
         {
             Since = since,
+            CappedAt = windowCappedAt,
             Listed = listed,
             ListedUnderChangedRecords = underChangedRecords,
             RetriedRows = candidates.Count - window.Count,
@@ -2123,8 +2305,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // Under _cursorGate.
         void SaveRefileState(bool windowDone, bool moveWatermark)
         {
+            // #2750: a window whose listing was capped moves it only to the earliest cap, so the rest is listed next window.
             if (moveWatermark)
-                _refileWatermark = windowStartedAt - RecentChangesOverlap;
+                _refileWatermark = WatermarkAfter(windowStartedAt - RecentChangesOverlap, windowCappedAt);
             // F1-a: a hand-off this pass did not reach stays a hand-off (never truncated); one it reached is dropped (a
             // failure is in `carry`, like any carried row's); one without a file, or not read back, has nothing to move.
             _ordinaryHandOffs.IntersectWith(pendingCarried);
@@ -2132,6 +2315,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             _refilePending.UnionWith(carry.Concat(pendingCarried.Where(id => !_ordinaryHandOffs.Contains(id))).Take(MaxCarriedRows));
             _refileCursor = windowDone ? null : cursor;
             _refileWindowStartedAt = windowDone ? null : windowStartedAt;
+            _refileWindowCappedAt = windowDone ? null : windowCappedAt;
             _refileUndecidableRuns.Clear();
             foreach (var (id, runs) in undecidableNow)
                 _refileUndecidableRuns[id] = runs;
@@ -2200,16 +2384,18 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// whose OWN <c>modifiedon</c> is at or after <paramref name="since"/>. A record re-filed or made secure by a direct
     /// write changes no document row, yet what its documents derive to can change.
     /// </summary>
-    private static async Task<List<Entity>> ListDocumentsUnderChangedRecordsAsync(
+    private static async Task<(List<Entity> Rows, DateTime? CappedAt)> ListDocumentsUnderChangedRecordsAsync(
         IGenericEntityService dataverse, DateTimeOffset since, CancellationToken ct)
     {
         var rows = new List<Entity>();
+        DateTime? cappedAt = null;
         foreach (var (table, lookup) in RefileParentRecords)
         {
+            // #2750: the changed records' listing is capped like the documents' (the caller holds the window at the cap).
             var changed = new QueryExpression(table) { ColumnSet = new ColumnSet($"{table}id"), NoLock = true };
-            changed.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
-            var ids = (await ReadAllAsync(dataverse, changed, ct).ConfigureAwait(false))
-                .Select(e => e.Id).Where(id => id != Guid.Empty).Distinct().ToList();
+            var (records, tableCappedAt) = await ReadChangedSinceAsync(dataverse, changed, since, ct).ConfigureAwait(false);
+            cappedAt = Earliest(cappedAt, tableCappedAt);
+            var ids = records.Select(e => e.Id).Where(id => id != Guid.Empty).Distinct().ToList();
             foreach (var chunk in ids.Chunk(InConditionChunk))
             {
                 var documents = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("sprk_graphdriveid"), NoLock = true };
@@ -2219,7 +2405,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
         }
 
-        return rows;
+        return (rows, cappedAt);
     }
 
     private static async Task<HashSet<Guid>> ListDocumentsAsync(
@@ -2230,6 +2416,69 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         return (await ReadAllAsync(dataverse, query, ct).ConfigureAwait(false)).Select(e => e.Id).Where(id => id != Guid.Empty)
             .ToHashSet();
     }
+
+    /// <summary>
+    /// #2750 — THE capped window listing of every pass of this job (and of <see cref="ChildAccessPermissionReconciler"/>): the
+    /// rows of <paramref name="query"/> modified at or after <paramref name="since"/>, read page by page in (<c>modifiedon</c>,
+    /// id) order, oldest change first. Past the page bound (<see cref="MaxPages"/> pages of <see cref="PageSize"/>) it stops
+    /// instead of throwing and returns the <c>modifiedon</c> of the last row read as <c>CappedAt</c>: every row changed before
+    /// that instant was read. A pass moves its watermark no further than <c>CappedAt</c> (<see cref="WatermarkAfter"/>), and the
+    /// window is inclusive, so the rows sharing that instant are listed again and none is skipped. A held window that grew past
+    /// the page bound therefore drains, a bound's worth of rows a run, instead of failing every run until a restart.
+    /// </summary>
+    /// <remarks>Capped AT the window start (more rows sharing that one instant than the page bound holds) no watermark could
+    /// move: it throws, as every listing past the page bound did before. A read fault propagates.</remarks>
+    internal static async Task<(List<Entity> Rows, DateTime? CappedAt)> ReadChangedSinceAsync(
+        IGenericEntityService dataverse, QueryExpression query, DateTimeOffset since, CancellationToken ct)
+    {
+        query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
+        if (!query.ColumnSet.AllColumns && !query.ColumnSet.Columns.Contains(ModifiedOnColumn))
+            query.ColumnSet.AddColumn(ModifiedOnColumn);
+        query.Orders.Clear();
+        query.AddOrder(ModifiedOnColumn, OrderType.Ascending);
+        query.AddOrder(query.EntityName + "id", OrderType.Ascending);
+        query.PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 };
+
+        var rows = new List<Entity>();
+        for (var page = 1; ; page++)
+        {
+            var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            rows.AddRange(result.Entities);
+            if (!result.MoreRecords)
+                return (rows, null);
+            if (page >= MaxPages)
+                break;
+            query.PageInfo.PageNumber++;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
+
+        var cappedAt = rows.Count > 0 && rows[^1].GetAttributeValue<DateTime?>(ModifiedOnColumn) is { } last
+            ? AsUtc(last)
+            : (DateTime?)null;
+        if (cappedAt is not { } at || at <= since.UtcDateTime)
+        {
+            throw new InvalidOperationException(
+                $"{query.EntityName} has more rows changed at {since.UtcDateTime:o} than {MaxPages} pages of {PageSize} hold; " +
+                "the window cannot move past them.");
+        }
+
+        return (rows, at);
+    }
+
+    /// <summary>#2750: the earlier of two capped instants (null: not capped).</summary>
+    internal static DateTime? Earliest(DateTime? a, DateTime? b) =>
+        a is { } x && b is { } y ? (x <= y ? x : y) : a ?? b;
+
+    /// <summary>
+    /// #2750: where a pass that may move its watermark moves it: to <paramref name="uncapped"/> (its run's start less the
+    /// overlap), or to the instant its listing was capped at when that is earlier, so the rows past the cap are listed next run.
+    /// </summary>
+    internal static DateTimeOffset WatermarkAfter(DateTimeOffset uncapped, DateTime? cappedAt) =>
+        cappedAt is { } at && at < uncapped.UtcDateTime ? new DateTimeOffset(AsUtc(at), TimeSpan.Zero) : uncapped;
+
+    // Dataverse answers modifiedon in UTC; a local value is converted, an unspecified one read as UTC.
+    private static DateTime AsUtc(DateTime value) =>
+        value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     private static async Task<IReadOnlyList<Entity>> ReadAllAsync(
         IGenericEntityService dataverse, QueryExpression query, CancellationToken ct)
@@ -2261,6 +2510,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         /// <summary>More undetermined rows than <see cref="MaxCarriedRows"/>: the watermark must not move.</summary>
         public bool PendingOverflow => UndeterminedRows.Count > MaxCarriedRows;
+
+        /// <summary>#2750: the listing was capped at this instant (see <see cref="ReadChangedSinceAsync"/>); null: complete.</summary>
+        public DateTime? CappedAt { get; init; }
     }
 
     private static RecentChanges FailedRecentChanges(string failure) =>
@@ -2277,8 +2529,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <para><b>Every child table, not only the client writers' tables.</b> A row written outside the product can belong
     /// to any table the lineage map knows: agreements, budgets, spend signals and so on. Each query is one filtered,
     /// paged read, so the cost is one query per table per run.</para>
-    /// <para>Past the page ceiling, the listing fails rather than reconcile part of a window, and the watermark stays where
-    /// it was.</para>
+    /// <para>#2750: past the page ceiling a table's listing is capped, oldest change first (<see cref="ReadChangedSinceAsync"/>):
+    /// every row read is reconciled, and the watermark moves no further than the cap, so the rest is listed next run.</para>
     /// </remarks>
     private async Task<RecentChanges> FindRecentlyChangedRootsAsync(
         IGenericEntityService dataverse, SecureChildShareSynchronizer synchronizer, DateTimeOffset since,
@@ -2296,31 +2548,28 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             // Each changed row comes back with its lineage columns (its lookups and, on a Signal or Decision Record, its core
             // record pair) and owner, so the upward walk starts from it with no second read of the row.
             var changed = new List<Entity>();
+            DateTime? cappedAt = null;
             foreach (var table in SecureChildLineage.Children.Values.OrderBy(t => t.LogicalName, StringComparer.Ordinal))
             {
                 var query = new QueryExpression(table.LogicalName)
                 {
                     ColumnSet = new ColumnSet(table.LineageColumns.Append("owningteam").Append("owninguser").ToArray()),
                     NoLock = true,
-                    PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 },
                 };
-                query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
 
-                for (var page = 1; ; page++)
-                {
-                    if (page > MaxPages)
-                        throw new InvalidOperationException(
-                            $"{table.LogicalName} still had changed rows to list after {MaxPages} pages; the window is not " +
-                            "reconciled in part.");
+                // #2750: past the page bound the table's listing is capped (oldest change first); the watermark moves no
+                // further than the earliest cap, so the rest is listed next run.
+                var (rows, tableCappedAt) = await ReadChangedSinceAsync(dataverse, query, since, ct).ConfigureAwait(false);
+                changed.AddRange(rows.Where(e => e.GetAttributeValue<EntityReference>("owningteam")?.Id != secureTeamId));
+                cappedAt = Earliest(cappedAt, tableCappedAt);
+            }
 
-                    var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-                    changed.AddRange(result.Entities
-                        .Where(e => e.GetAttributeValue<EntityReference>("owningteam")?.Id != secureTeamId));
-                    if (!result.MoreRecords)
-                        break;
-                    query.PageInfo.PageNumber++;
-                    query.PageInfo.PagingCookie = result.PagingCookie;
-                }
+            if (cappedAt is { } capped)
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-RECONCILE] recent-changes: more related records changed since {Since:o} than one listing " +
+                    "reads; this run reconciles those changed up to {CappedAt:o} and the next run continues from there.",
+                    since, capped);
             }
 
             var rowsChanged = changed.Count;
@@ -2346,7 +2595,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
 
             if (changed.Count == 0)
-                return new RecentChanges(rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null) { RetriedRows = retried };
+            {
+                return new RecentChanges(rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null)
+                { RetriedRows = retried, CappedAt = cappedAt };
+            }
 
             var above = await synchronizer.SecureRootsAboveAsync(changed, ct).ConfigureAwait(false);
             return above.Status switch
@@ -2355,10 +2607,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 {
                     UndeterminedRows = above.UndeterminedRowRefs,
                     RetriedRows = retried,
+                    CappedAt = cappedAt,
                 },
                 SecureChildShareSyncStatus.NotApplicable => new RecentChanges(
                     rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null)
-                { RetriedRows = retried },
+                { RetriedRows = retried, CappedAt = cappedAt },
                 // Failed (an ambiguous Secure team) or anything else: nothing is decided, and the window stays.
                 _ => FailedRecentChanges(above.Detail ?? "the records above the changed related records could not be determined"),
             };
@@ -2447,10 +2700,6 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 .ThenBy(r => r.Id)
                 .Select(r => (r.Table, r.Id))
                 .ToList();
-
-        // Dataverse answers modifiedon in UTC; a local value is converted, an unspecified one read as UTC.
-        private static DateTime AsUtc(DateTime value) =>
-            value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : DateTime.SpecifyKind(value, DateTimeKind.Utc);
     }
 
     /// <summary>The sweep order: table (ordinal), then id — the order <see cref="ListSecureRootsAsync"/> returns.</summary>
@@ -2481,6 +2730,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private DateTimeOffset? _refileWindowStartedAt;
     private readonly Dictionary<Guid, int> _refileUndecidableRuns = new();
 
+    // #2750: the earliest instant a listing of the window the cursor walks was capped at (null: none was capped).
+    private DateTime? _refileWindowCappedAt;
+
     // #2159 B5: the terminal documents already reported (by either pass) and the backstop's consecutive unreadable-ledger
     // runs, per instance. A document leaves the reported set when an outcome for it is no longer terminal.
     private readonly HashSet<Guid> _terminalReported = new();
@@ -2503,6 +2755,25 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // UAC task 194: the ordinary-parent-move pass's own window and carried roots (the same per-instance, in-singleton
     // reasoning; its own watermark, so it never holds the secure pass's window, #1378).
     private DateTimeOffset? _ordinaryMovesWatermark;
+
+    // #2750: past a full carry, the key set (modifiedon, table, id) of the first listed root left out; the next run lists from
+    // its instant (the watermark) and skips the roots of that instant before it. Null: the watermark alone decides.
+    private (DateTime At, string Table, Guid Id)? _ordinaryMovesResumeAt;
+
+    /// <summary>#2750: the ordinary pass's key order — change time, then table (ordinal), then id (the listing's order).</summary>
+    private sealed class OrdinaryKeyComparer : IComparer<(DateTime At, string Table, Guid Id)>
+    {
+        public static readonly OrdinaryKeyComparer Instance = new();
+
+        public int Compare((DateTime At, string Table, Guid Id) x, (DateTime At, string Table, Guid Id) y)
+        {
+            var byAt = x.At.CompareTo(y.At);
+            if (byAt != 0)
+                return byAt;
+            var byTable = string.CompareOrdinal(x.Table, y.Table);
+            return byTable != 0 ? byTable : x.Id.CompareTo(y.Id);
+        }
+    }
     private readonly HashSet<(string Table, Guid Id)> _pendingOrdinaryRoots = new();
 
     // UAC task 194b R4-3 (B4): when each carried root was last attempted, so carried roots run least-recently-attempted
@@ -2530,6 +2801,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private bool _ordinarySweepComplete;
     private bool? _ordinarySweepWrites;
 
+    // #2750: roots that no listing reaches again were left out of a full carry while the sweep was under way (some may be
+    // behind its cursor): the sweep starts again when it reaches its end (the _accessPermissionResweepPending pattern).
+    private bool _ordinaryResweepPending;
+
     /// <summary>
     /// Task 147 r1: the most unplaced rows the job carries between runs. Beyond it the watermark does not move, so the whole
     /// window is listed again: nothing is dropped, it is only re-listed more broadly.
@@ -2555,6 +2830,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <see cref="MaxCarriedRows"/>; settable only so tests can reach the cap with a few rows.
     /// </summary>
     internal int AccessPermissionCarryCap { get; init; } = MaxCarriedRows;
+
+    /// <summary>
+    /// #2750: the most roots the ordinary-parent-move pass carries between runs. Production: <see cref="MaxCarriedRows"/>;
+    /// settable only so tests can reach the cap with a few roots (the <see cref="AccessPermissionCarryCap"/> precedent).
+    /// </summary>
+    internal int OrdinaryCarryCap { get; init; } = MaxCarriedRows;
 
     // uac-r2 task 198 pass 2 (F2): a run lost a row (neither handled nor carried) that the current sweep may already be past:
     // the sweep starts again when it reaches its end.

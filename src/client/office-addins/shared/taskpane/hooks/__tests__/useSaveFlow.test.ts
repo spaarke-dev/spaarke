@@ -147,6 +147,26 @@ describe('useSaveFlow', () => {
       // isValid stays true — see the "starts with idle flow state" test above for why (task 071).
       expect(result.current.isValid).toBe(true);
     });
+
+    it('task 133 slice C: an Invoice is never selected or remembered; the current selection stays', () => {
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
+      act(() => {
+        result.current.setSelectedEntity(mockEntity);
+      });
+      const before = mockSessionStorage['spaarke-last-association'];
+
+      act(() => {
+        result.current.setSelectedEntity({
+          id: 'inv-1',
+          entityType: 'Invoice',
+          logicalName: 'sprk_invoice',
+          name: 'INV-0042',
+        });
+      });
+
+      expect(result.current.selectedEntity).toEqual(mockEntity);
+      expect(mockSessionStorage['spaarke-last-association']).toBe(before);
+    });
   });
 
   describe('Attachment Selection', () => {

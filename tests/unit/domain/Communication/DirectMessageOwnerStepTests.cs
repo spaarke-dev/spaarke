@@ -279,6 +279,23 @@ public partial class DirectMessageOwnerStepTests
     }
 
     [Fact]
+    public async Task APrivateMessage_CarryingOnlyAContextReference_HasNoOwnershipParent_AndMovesToTheDirectTeam()
+    {
+        // fm task 056: the context reference cites a record; it never files the message under it.
+        var row = DirectMessage();
+        row[PrivateContextColumns.Matter] = new EntityReference("sprk_matter", Guid.NewGuid());
+        Store(row);
+
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row).Should().BeEmpty();
+        DirectMessageOwnerStep.WhyFiledUnderARecord(row).Should().BeNull();
+
+        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam);
+        _log.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task AnchoredJoin_GrantsOnly_AndNeverAsksTheLookup()
     {
         // A Direct-typed thread filed to a (secure) record joins as Anchored.

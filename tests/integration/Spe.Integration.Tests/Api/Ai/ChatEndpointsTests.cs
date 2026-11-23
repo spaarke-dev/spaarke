@@ -816,7 +816,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 new Azure.AzureKeyCredential("test-api-key")));
 
             // IOpenAiClient is conditionally registered (DocumentIntelligence:Enabled=true only),
-            // but FinanceModule services (InvoiceAnalysisService, InvoiceSearchService, etc.) always
+            // but FinanceModule services (InvoiceSearchService, etc.) always
             // depend on it. Register a stub to prevent InvalidOperationException during scope activation.
             services.RemoveAll<Sprk.Bff.Api.Services.Ai.IOpenAiClient>();
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IOpenAiClient>(Moq.MockBehavior.Loose).Object);

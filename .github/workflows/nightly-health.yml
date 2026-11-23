@@ -2,7 +2,7 @@ name: nightly-health
 
 # Nightly health checks for the Spaarke repo. Runs on master, reports to a
 # tracking issue. Catches problems that the per-PR SDAP CI doesn't surface:
-#   - flake-hunt:    runs unit tests 3x (3 parallel runs, each split in 4 shards);
+#   - flake-hunt:    runs unit tests 3x (3 parallel runs, each split in 5 shards);
 #                    flags tests that didn't pass all 3 runs (intermittent failures
 #                    = flakes)
 #   - bundle-size:   builds key client artifacts; flags >10% size regressions
@@ -83,14 +83,19 @@ jobs:
   # LFS pointer fixtures; see below). So the job was cancelled at its cap every night (13 of the last
   # 30 nightly runs) and the analysis step never ran: a flake hunt that never
   # reports. Now each of the 3 runs is its own matrix leg, and each leg is further
-  # split into the same 4 namespace shards `ci-tier2-advisory.yml` uses for the PR
-  # run, so every leg has its own cap and a leg takes a few minutes less than a
-  # quarter of the suite. `flake-hunt` (below) downloads every TRX and runs the
-  # unchanged analysis.
+  # split into the same namespace shards `ci-tier2-advisory.yml` uses for the PR
+  # run, so every leg has its own cap. `flake-hunt` (below) downloads every TRX and
+  # runs the unchanged analysis.
   #
   # KEEP THE SHARD FILTERS IN SYNC with `full-unit-tests-shard` in
   # ci-tier2-advisory.yml and with `coverage-shard` below: `rest` is the complement
-  # of the other three, so a test in a new namespace always runs somewhere.
+  # of the named shards, so a test in a new namespace always runs somewhere.
+  #
+  # 2026-11-22 (quality-alert #2934 / #2067): the PR run split `api-ai-finance-external`
+  # out of `api-seam` on 2026-11-11, but these two matrices were not updated. api-seam
+  # here grew to ~10,500 tests (~29 min in run 44991863888) and hit the 30-min flake
+  # cap / 45-min coverage cap from 2026-11-19 on. Mirrored the five-shard split; in that
+  # run's TRX the three moved namespaces were ~41% of api-seam's test time.
   #
   # `lfs: true`: tests/fixtures/compose-corpus/*.docx are Git-LFS pointers
   # (.gitattributes). Without the smudge ~1,084 Compose seam tests failed on every
@@ -108,14 +113,16 @@ jobs:
       fail-fast: false
       matrix:
         run: [1, 2, 3]
-        shard: [api-office, api-insights-integration, api-seam, rest]
+        shard: [api-office, api-insights-integration, api-ai-finance-external, api-seam, rest]
         include:
           - shard: api-office
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
           - shard: api-insights-integration
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-ai-finance-external
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Finance.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: api-seam
-            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Ai.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Finance.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: rest
             filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
@@ -193,7 +200,7 @@ jobs:
           set -euo pipefail
           mkdir -p flake-runs
 
-          # Parse the TRX files (3 runs x 4 shards); identify tests that PASSED in some
+          # Parse the TRX files (3 runs x 5 shards); identify tests that PASSED in some
           # runs and FAILED in others. The shards of one run are merged into that run.
           python3 <<'PY'
           import xml.etree.ElementTree as ET
@@ -204,7 +211,7 @@ jobs:
           from pathlib import Path
 
           EXPECTED_RUNS = 3
-          EXPECTED_SHARDS = 4
+          EXPECTED_SHARDS = 5  # KEEP IN SYNC with flake-hunt-run's shard list
 
           runs = {}
           shards_seen = defaultdict(set)
@@ -584,7 +591,7 @@ jobs:
   # SHARDED (2026-10-13). One `dotnet test --collect` over the whole solution ran
   # past its 30-minute cap every night (cancelled at 27+ min in the test step), so
   # the coverage number was never produced. The Sprk.Bff.Api.Tests suite is now split
-  # into the same 4 namespace shards as flake-hunt-run / ci-tier2-advisory.yml, and the
+  # into the same namespace shards as flake-hunt-run / ci-tier2-advisory.yml, and the
   # other test projects of Spaarke.sln run in a fifth shard. `coverage-observation`
   # merges every shard's Cobertura files (per source line, a line is covered when ANY
   # shard hit it) and reports the single number it always reported.
@@ -599,14 +606,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [api-office, api-insights-integration, api-seam, rest, other-projects]
+        shard: [api-office, api-insights-integration, api-ai-finance-external, api-seam, rest, other-projects]
         include:
           - shard: api-office
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
           - shard: api-insights-integration
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-ai-finance-external
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Finance.|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: api-seam
-            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Ai.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Finance.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.ExternalAccess.'
           - shard: rest
             filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
@@ -636,7 +645,7 @@ jobs:
           mkdir -p coverage-results
           if [ "$SHARD" = "other-projects" ]; then
             # Every test project of Spaarke.sln that lives under tests\ except the big
-            # one (which the four shards above cover), so a new project added there is
+            # one (which the named shards above cover), so a new project added there is
             # picked up without editing this workflow. NOT covered: a test project outside
             # tests\ (today src/server/services/Sprk.Provisioning.ControlPlane.Tests);
             # widen the grep below if its coverage should be counted.
@@ -1327,7 +1336,10 @@ jobs:
   # Observation only: jscpd runs with exitCode 0 and continue-on-error, and the
   # decide step always succeeds, so duplication never fails this workflow.
   # No baseline file: a cluster is NEW when either of its files landed on master in
-  # the last 7 days (`git log --since=7.days --first-parent -m`). It alerts only when a new cluster is at or above the
+  # the last 7 days (`git log --since=7.days --first-parent -m`). Reviewed pairs listed in
+  # .github/duplication-accepted.txt (each with its tracking issue or ADR) are skipped; a
+  # malformed line or a failed self-test of that filter reports failing (#2866).
+  # It alerts only when a new cluster is at or above the
   # floor (>= MIN_TOKENS tokens AND >= MIN_LINES lines) and its two files sit in
   # different top-level areas. Area = first 4 path segments under src/client/ and
   # src/server/ (src/client/pcf/MatterHeader, src/server/api/Sprk.Bff.Api), else the
@@ -1366,6 +1378,7 @@ jobs:
         env:
           REPORT: jscpd-report/jscpd-report.json
           INDEX: .claude/patterns/CAPABILITY-INDEX.md
+          ACCEPTED: .github/duplication-accepted.txt
           MIN_TOKENS: "100"
           MIN_LINES: "10"
           MAX_LISTED: "15"
@@ -1401,6 +1414,50 @@ jobs:
               END { if (!found) { if (dirhit!="") print dirhit; else if (foldhit!="") print foldhit } }' "$INDEX" 2>/dev/null | head -n 1
           }
 
+          # Accepted pairs (#2866): `$ACCEPTED` lists reviewed cross-area pairs as
+          # "<path A> | <path B> | <#issue or ADR-NNN> | <reason>". parse_accepted LIST KEYS BAD
+          # writes each valid entry as an order-free key "a<TAB>b" to KEYS and each malformed
+          # line to BAD, so a typo is reported instead of silently matching nothing.
+          parse_accepted() {
+            : > "$2"; : > "$3"
+            awk -v keys="$2" -v bad="$3" '
+              /^[[:space:]]*(#|$)/ { next }
+              {
+                n = split($0, f, / \| /)
+                for (i = 1; i <= n; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", f[i])
+                if (n != 4 || f[1] == "" || f[2] == "" || f[1] == f[2] || f[3] !~ /^(#[0-9]+|ADR-[0-9]+)$/ || f[4] == "") {
+                  print FNR ": " $0 > bad; next
+                }
+                print ((f[1] < f[2]) ? f[1] "\t" f[2] : f[2] "\t" f[1]) > keys
+              }' "$1"
+          }
+
+          # drop_accepted KEYS PAIRS HIT KEPT: pairs whose two files form an accepted key
+          # (in either order) go to HIT, the rest to KEPT. FILENAME, not NR==FNR, so an
+          # empty KEYS file does not swallow PAIRS.
+          drop_accepted() {
+            : > "$3"
+            awk -F'\t' -v hit="$3" '
+              FILENAME == ARGV[1] { k[$1 "\t" $2] = 1; next }
+              { key = ($1 < $4) ? $1 "\t" $4 : $4 "\t" $1; if (key in k) print > hit; else print }' "$1" "$2" > "$4"
+          }
+
+          # Must-fire / must-not-fire controls for the two functions above, on synthetic data:
+          # a listed pair (padded with spaces) is dropped in reversed order, an unlisted pair is
+          # kept, an entry with no record or the same file twice is reported as malformed, and
+          # an empty list keeps every pair (the NR==FNR hazard).
+          selftest_accepted() {
+            local d="$tmp/selftest"; mkdir -p "$d"
+            printf '%s\n' '# comment' '' '  x/a.ts | x/b.ts  | #1 | why  ' 'x/c.ts | x/d.ts | no-record | why' 'x/e.ts | x/e.ts | ADR-1 | same file' > "$d/list"
+            parse_accepted "$d/list" "$d/keys" "$d/bad"
+            printf '%s\n' $'x/b.ts\t1\t9\tx/a.ts\t1\t9\t100\t10' $'x/a.ts\t1\t9\tx/c.ts\t1\t9\t100\t10' > "$d/pairs"
+            drop_accepted "$d/keys" "$d/pairs" "$d/hit" "$d/kept"
+            : > "$d/none"; drop_accepted "$d/none" "$d/pairs" "$d/hit0" "$d/kept0"
+            [ "$(wc -l < "$d/keys")" -eq 1 ] && [ "$(wc -l < "$d/bad")" -eq 2 ] \
+              && [ "$(cut -f1,4 "$d/hit")" = $'x/b.ts\tx/a.ts' ] && [ "$(cut -f1,4 "$d/kept")" = $'x/a.ts\tx/c.ts' ] \
+              && [ "$(wc -l < "$d/kept0")" -eq 2 ] && [ ! -s "$d/hit0" ]
+          }
+
           # --first-parent -m: list what LANDED on master this week, with each merge
           # commit diffed against its first parent. Without it, a branch whose own
           # commits are older than 7 days and lands by merge commit is invisible.
@@ -1433,16 +1490,47 @@ jobs:
               fi
             done < "$tmp/floor.tsv"
 
-            awk -F'\t' 'NR==FNR { c[$0]=1; next } ($1 in c) || ($4 in c)'    "$tmp/changed.txt" "$tmp/cross.tsv" > "$tmp/new.tsv"
-            awk -F'\t' 'NR==FNR { c[$0]=1; next } !(($1 in c) || ($4 in c))' "$tmp/changed.txt" "$tmp/cross.tsv" > "$tmp/old.tsv"
+            # Skip reviewed pairs listed in $ACCEPTED. A broken filter or a malformed list
+            # makes the sweep fail rather than pass quietly.
+            : > "$tmp/accepted.keys"; : > "$tmp/accepted.bad"
+            if ! selftest_accepted; then
+              status=failing
+              summary+="- The accepted-pairs filter failed its must-fire / must-not-fire self-test, so \`${ACCEPTED}\` was not applied. Fix \`parse_accepted\` / \`drop_accepted\` in this step."$'\n'
+            elif [ -f "$ACCEPTED" ]; then
+              parse_accepted "$ACCEPTED" "$tmp/accepted.keys" "$tmp/accepted.bad"
+              if [ -s "$tmp/accepted.bad" ]; then
+                status=failing
+                summary+="- \`${ACCEPTED}\` has $(wc -l < "$tmp/accepted.bad") malformed line(s); those lines were skipped and the other entries applied, so the pairs they meant to accept may be listed below. Each entry needs \`<path A> | <path B> | <#issue or ADR-NNN> | <reason>\` with two different paths:"$'\n'
+                while IFS= read -r l; do summary+="  - line ${l}"$'\n'; done < <(head -n 5 "$tmp/accepted.bad")
+              fi
+            fi
+            drop_accepted "$tmp/accepted.keys" "$tmp/cross.tsv" "$tmp/accepted-hit.tsv" "$tmp/kept.tsv"
+            # Entries that matched no pair at or above the floor: the duplication is gone (or
+            # below the floor), so the line can be deleted. Logged, not alerted.
+            awk -F'\t' 'FILENAME == ARGV[1] { h[($1 < $4) ? $1 "\t" $4 : $4 "\t" $1] = 1; next } !($0 in h)' \
+              "$tmp/accepted-hit.tsv" "$tmp/accepted.keys" > "$tmp/accepted.stale"
+
+            awk -F'\t' 'FILENAME == ARGV[1] { c[$0]=1; next } ($1 in c) || ($4 in c)'    "$tmp/changed.txt" "$tmp/kept.tsv" > "$tmp/new.tsv"
+            awk -F'\t' 'FILENAME == ARGV[1] { c[$0]=1; next } !(($1 in c) || ($4 in c))' "$tmp/changed.txt" "$tmp/kept.tsv" > "$tmp/old.tsv"
 
             n_floor="$(wc -l < "$tmp/floor.tsv")"; n_cross="$(wc -l < "$tmp/cross.tsv")"
+            n_acc="$(wc -l < "$tmp/accepted-hit.tsv")"; n_stale="$(wc -l < "$tmp/accepted.stale")"
             n_new="$(wc -l < "$tmp/new.tsv")"; n_old="$(wc -l < "$tmp/old.tsv")"
             echo "Duplicates in report (jscpd defaults): ${total}"
             echo "At or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines): ${n_floor}"
             echo "  ... of those, across different top-level areas: ${n_cross}"
+            echo "  ... ACCEPTED (clusters whose file pair is listed in ${ACCEPTED}; skipped): ${n_acc}"
             echo "  ... NEW (a file changed in the last 7 days; these alert): ${n_new}"
             echo "  ... OLD (both files unchanged for > 7 days; these do NOT alert): ${n_old}"
+            if [ "$n_acc" -gt 0 ]; then
+              # An entry covers every cluster between its two files, so list what it skipped.
+              echo "Skipped accepted clusters (an entry covers every cluster between its two files):"
+              awk -F'\t' '{ print "  " $1 ":" $2 "-" $3 "  <->  " $4 ":" $5 "-" $6 "  (" $7 " tokens, " $8 " lines)" }' "$tmp/accepted-hit.tsv"
+            fi
+            if [ "$n_stale" -gt 0 ]; then
+              echo "Accepted entries that matched no pair at or above the floor (delete them from ${ACCEPTED}):"
+              sed 's/\t/  <->  /; s/^/  /' "$tmp/accepted.stale"
+            fi
             if [ "$n_old" -gt 0 ]; then
               echo "First old cross-area clusters (logged only, not alerted):"
               head -n 10 "$tmp/old.tsv" | awk -F'\t' '{ print "  " $1 ":" $2 "-" $3 "  <->  " $4 ":" $5 "-" $6 "  (" $7 " tokens, " $8 " lines)" }'
@@ -1450,7 +1538,7 @@ jobs:
 
             if [ "$n_new" -gt 0 ]; then
               status=failing
-              summary="${n_new} new cross-area duplicate cluster(s) at or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines) touched a file changed in the last 7 days:"$'\n\n'
+              summary+="${n_new} new cross-area duplicate cluster(s) at or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines) touched a file changed in the last 7 days:"$'\n\n'
               i=0
               while IFS=$'\t' read -r a as ae b bs be tok lin; do
                 i=$((i+1))
@@ -1462,9 +1550,9 @@ jobs:
               if [ "$n_new" -gt "$MAX_LISTED" ]; then
                 summary+="- ... and $((n_new - MAX_LISTED)) more in the \`jscpd-report\` artifact."$'\n'
               fi
-              summary+=$'\n'"Extend the indexed component (\`.claude/patterns/CAPABILITY-INDEX.md\`) instead of keeping two copies, or record why both stay. This alert closes itself on the first weekly run with no new cluster. Full report: the \`jscpd-report\` artifact on the run linked above."$'\n'
+              summary+=$'\n'"Extend the indexed component (\`.claude/patterns/CAPABILITY-INDEX.md\`) instead of keeping two copies. When both copies must stay, add the pair to \`${ACCEPTED}\` with the issue or ADR that records why. This alert closes itself on the first weekly run with no new cluster. Full report: the \`jscpd-report\` artifact on the run linked above."$'\n'
             elif [ "$status" = "ok" ]; then
-              summary="No new cross-area duplication this week (floor >= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines). ${n_old} older cross-area cluster(s) above the floor, all in files unchanged for more than 7 days; ${total} duplicates at jscpd defaults in the \`jscpd-report\` artifact."
+              summary="No new cross-area duplication this week (floor >= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines). ${n_old} older cross-area cluster(s) above the floor, all in files unchanged for more than 7 days; ${n_acc} accepted pair(s) skipped (\`${ACCEPTED}\`); ${total} duplicates at jscpd defaults in the \`jscpd-report\` artifact."
             fi
           fi
 

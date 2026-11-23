@@ -8,7 +8,7 @@
  * |------------------|----------------------------------|--------------------------|------------------------------------------|-----------------------------------------------------------|
  * | Matter, Project  | Information, Documents, Invoices | Messages, Events         | Refresh, Copy link                       | Documents: Upload; Invoices: Submit invoice; Messages: New message; Events: Add event |
  * | Work assignment  | Information, Documents           | Messages, Events         | Refresh, Submit invoice, Copy link       | Documents: Upload; Messages: New message; Events: Add event |
- * | Invoice          | Information, Files               | Messages                 | Refresh, Copy link                       | Messages: New message (Files is read-only)                |
+ * | Invoice          | Information, Outcome, Files      | Messages                 | Refresh, Copy link                       | Messages: New message (Files is read-only)                |
  * | Service request  | Information, Documents           | Messages                 | Refresh, Copy link, Delete request       | Documents: Upload; Messages: New message                  |
  * | Document         | Information, Preview             | —                        | Refresh, Download, Copy link             | —                                                         |
  * | Event (task 015) | Information                      | —                        | Refresh, Edit, Change status, Copy link, Delete | —                                                  |
@@ -24,6 +24,7 @@
  * Tabs are off for every type (owner 2026-11-08).
  */
 import { EMPTY_VALUE, formatDetailValue, type DetailRecord } from '../detail/RecordDetailFields';
+import { reviewDetailSecondaryLine } from './reviewDetail';
 import type { RecordTemplateConfig, RecordToolbarActionId } from './recordTemplate.types';
 
 /**
@@ -90,11 +91,12 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     titleNumberAttribute: 'sprk_invoicenumber',
     nameAttribute: 'sprk_name',
     headerFacts: [
-      { attribute: 'statuscode', label: 'Status' },
+      // R4 task 020 (FR-11): the status fact's secondary line is the Review detail, only while the invoice is In Review.
+      { attribute: 'statuscode', label: 'Status', secondary: reviewDetailSecondaryLine },
       { attribute: 'sprk_totalamount', label: 'Total amount', kind: 'money' },
       { attribute: 'sprk_invoicedate', label: 'Invoice date', kind: 'date' },
     ],
-    left: ['information', 'files'],
+    left: ['information', 'outcome', 'files'],
     right: ['messages'],
     toolbar: ['refresh', 'copyLink'],
     sectionActions: { messages: ['newMessage'] },

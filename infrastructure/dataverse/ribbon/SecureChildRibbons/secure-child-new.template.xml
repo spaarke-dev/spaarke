@@ -114,7 +114,7 @@
       <Titles><Title description="New {{label}}" languagecode="1033" /></Titles>
     </LocLabel>
     <LocLabel Id="sprk.SecureChild.{{entity}}.New.ToolTipDescription">
-      <Titles><Title description="Add a {{label}} to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" /></Titles>
+      <Titles><Title description="{{tooltip}}" languagecode="1033" /></Titles>
     </LocLabel>
   </LocLabels>
 </SecureChildRibbon>

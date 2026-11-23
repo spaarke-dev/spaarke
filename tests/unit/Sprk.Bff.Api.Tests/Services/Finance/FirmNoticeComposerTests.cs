@@ -729,7 +729,10 @@ public sealed class FirmNoticeComposerTests
         // The notice takes only the fields of 130's allow-list DTO (model 7.4, R3, task 083). If a member is added to one of these types, this
         // test fails until the member is reviewed here: no override reason, Procedure name or id, rule-set name, document link or reviewer
         // identity may become something a notice could show.
-        Names<FirmOutcome>().Should().BeEquivalentTo("Kind", "TrackingNumber", "StatusLabel", "BilledTotal", "ApprovedTotal", "Items", "Degraded", "NotShownCount");
+        // 130g: NoticeProse (the prose of the notice a reviewer confirmed, shown to a firm on the outcome route) is reviewed and is NOT consumed by the
+        // notice: no composer path reads it, and FirmOutcomeNoticeProseTests.TheComposer_NeverEchoesTheStoredProse proves a new notice never carries it.
+        Names<FirmOutcome>().Should().BeEquivalentTo(
+            "Kind", "TrackingNumber", "StatusLabel", "BilledTotal", "ApprovedTotal", "Items", "Degraded", "NotShownCount", "NoticeProse");
         Names<FirmOutcomeItem>().Should().BeEquivalentTo(
             "Decision", "LineId", "Line", "Adjustment", "Reason", "FirmReasons", "Citations", "LineNumber", "ValuesRead", "ReasonCode");
         Names<FirmOutcomeLine>().Should().BeEquivalentTo("Date", "TimekeeperAsBilled", "DescriptionExcerpt", "BilledAmount", "ApprovedAmount");

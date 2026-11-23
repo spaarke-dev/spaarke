@@ -464,7 +464,18 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                     continue; // a direct link, an ambiguous or an inconsistent row: nothing here is a copy to repair
                 }
 
-                if (!roots.TryGetValue((intermediate, intermediateId), out var root))
+                CoreAncestorResult? root;
+                if (!orphan && CoreAncestorResolver.IsPrivateMessage(childTable, row))
+                {
+                    // fm task 056: a private message holds no core ancestor. Filed under an intermediate outside the BFF, its copy
+                    // is planned against no root, so a held stamp is cleared and none is set; once the two-minute share job clears
+                    // that filing, the orphan path above clears a copy left behind, as for any row filed under nothing.
+                    _logger.LogWarning(
+                        "{Prefix} {Entity} {Id} is a private message filed under {Source} {SourceId}: it is never filed, so it is not "
+                        + "stamped and any stamp it holds is cleared.", LogPrefix, childTable, row.Id, intermediate, intermediateId);
+                    root = new CoreAncestorResult(CoreAncestorStatus.NoAncestor, [], null);
+                }
+                else if (!roots.TryGetValue((intermediate, intermediateId), out root))
                 {
                     // Read-only (GitHub #2002, #2049): the root is only compared with the children's copies; nothing is written against the intermediate.
                     root = await _coreAncestors.ResolveStampsAsync(intermediate, intermediateId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);

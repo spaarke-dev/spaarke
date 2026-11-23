@@ -49,7 +49,7 @@ namespace Sprk.Bff.Api.Tests.Auth.Finance;
 /// <see cref="FirmOutcomeAuthorizationFilter"/> and watched the another-firm tests here fail (task notes). Every refusal is asserted to read
 /// NOTHING through the projection, and every refusal body is the same, so the status says nothing about why.
 /// </remarks>
-public sealed class FirmOutcomeScopeTests : IAsyncLifetime
+public sealed partial class FirmOutcomeScopeTests : IAsyncLifetime
 {
     private static readonly Guid FirmA = Guid.Parse("13000000-0000-4000-8000-0000000000a1");
     private static readonly Guid FirmB = Guid.Parse("13000000-0000-4000-8000-0000000000b1");

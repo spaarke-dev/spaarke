@@ -27,6 +27,9 @@
 //       default layout.
 //   T8  Source grep defense-in-depth — the production file contains no
 //       "ProcessStartInfo" (acceptance criterion #1).
+//   T9  Every standalone scripts/seed-*-workspace-layout.ps1 layout is also in
+//       system-layouts.json with the same section (ISS-037), plus must-fire and
+//       must-not-fire controls for the comparison.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -188,6 +191,77 @@ public sealed class DataverseWebApiWorkspaceLayoutSeederTests
         dailyBriefing.IsDefault.Should().BeTrue();
         dailyBriefing.LayoutTemplateId.Should().Be("single-column");
         dailyBriefing.SectionId.Should().Be("daily-briefing");
+    }
+
+    // ---------- T9 standalone seed scripts vs the provisioning list (ISS-037) ----------
+    //
+    // A system workspace seeded only by a standalone scripts/seed-*-workspace-layout.ps1 exists on
+    // spaarkedev1 and never on a customer stamp: H12b seeds system-layouts.json and nothing else.
+    // Worklist, Decision Records and Reconciliation drifted that way until 2026-11-23 (ACME had 12 of 16).
+
+    [Fact]
+    public void EveryStandaloneLayoutSeedScript_IsListedInSystemLayouts_WithTheSameSection()
+    {
+        var scripts = Directory.GetFiles(Path.Combine(RepoRoot(), "scripts"), "seed-*-workspace-layout.ps1");
+        scripts.Should().NotBeEmpty("the guard must see the standalone seed scripts, or it proves nothing");
+
+        var scriptLayouts = scripts.Select(p => ParseSeedScript(Path.GetFileName(p), File.ReadAllText(p))).ToList();
+
+        MissingFromSystemLayouts(scriptLayouts, DataverseWebApiWorkspaceLayoutSeeder.ReadEmbeddedLayouts())
+            .Should().BeEmpty("H12b seeds only scripts/system-layouts.json; add each script's layout there");
+    }
+
+    [Fact]
+    public void MissingFromSystemLayouts_ReportsAScriptLayoutThatIsNotListed()
+    {
+        // Must-fire control: a script layout absent from the list, and one listed under another section.
+        var text = "$name = 'Not A Listed Workspace'\n$sectionsJson = @{ rows = @( @{ id = 'row-1'; sections = @('nowhere') } ) }";
+        var listed = new[] { new DataverseWebApiWorkspaceLayoutSeeder.LayoutSeedItem("Worklist", "worklist", "single-column", 13, false) };
+
+        var missing = MissingFromSystemLayouts(
+            new[] { ParseSeedScript("seed-x-workspace-layout.ps1", text), ("seed-y.ps1", "Worklist", "other-section") },
+            listed);
+
+        missing.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void MissingFromSystemLayouts_AcceptsAListedLayoutWithTheSameSection()
+    {
+        // Must-not-fire control.
+        var listed = new[] { new DataverseWebApiWorkspaceLayoutSeeder.LayoutSeedItem("Worklist", "worklist", "single-column", 13, false) };
+
+        MissingFromSystemLayouts(new[] { ("seed-worklist.ps1", "Worklist", "worklist") }, listed).Should().BeEmpty();
+    }
+
+    private static (string Script, string Name, string Section) ParseSeedScript(string fileName, string text)
+    {
+        var name = System.Text.RegularExpressions.Regex.Match(text, @"^\s*\$name\s*=\s*'([^']+)'", System.Text.RegularExpressions.RegexOptions.Multiline);
+        var section = System.Text.RegularExpressions.Regex.Match(text, @"id\s*=\s*'row-1'[^}]*sections\s*=\s*@\('([^']+)'\)");
+        name.Success.Should().BeTrue($"{fileName} must declare its layout as $name = '...'");
+        section.Success.Should().BeTrue($"{fileName} must mount its section in row-1");
+        return (fileName, name.Groups[1].Value, section.Groups[1].Value);
+    }
+
+    private static List<string> MissingFromSystemLayouts(
+        IEnumerable<(string Script, string Name, string Section)> scriptLayouts,
+        IReadOnlyList<DataverseWebApiWorkspaceLayoutSeeder.LayoutSeedItem> listed)
+        => scriptLayouts
+            .Where(s => !listed.Any(l => l.Name == s.Name && l.SectionId == s.Section))
+            .Select(s => $"{s.Script}: '{s.Name}' (section '{s.Section}')")
+            .ToList();
+
+    private static string RepoRoot()
+    {
+        // A worktree's .git is a FILE; a regular checkout's is a directory (parity with ArmTemplateInspectorTests).
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var gitMarker = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(gitMarker) || File.Exists(gitMarker)) return dir.FullName;
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException($"Could not locate the repo root walking up from '{AppContext.BaseDirectory}'.");
     }
 
     // ---------- T8 grep-collision defense ----------

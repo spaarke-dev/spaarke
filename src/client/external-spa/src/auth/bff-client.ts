@@ -238,11 +238,76 @@ export async function bffApiCall<T>(
  *
  * @param path    Root-relative API path on the active backend
  * @param options Standard RequestInit options
+ * @param limits  OPTIONAL (R4 task 022, FR-14). With `maxBytes`, a body over the cap is never kept: a `Content-Length` over
+ *                it aborts the request before the body is read; with no such header the streamed bytes are counted and the
+ *                request is aborted once the total passes the cap (a runtime without a readable body falls back to
+ *                discarding by `blob.size`). Either way the call rejects with {@link BlobTooLargeError}. Absent, the call is
+ *                exactly what it was (every existing caller).
  * @returns The response body as a Blob.
  */
-export async function bffApiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
-  const response = await authorizedFetch(path, options);
+export async function bffApiBlob(path: string, options: RequestInit = {}, limits?: BlobLimits): Promise<Blob> {
+  if (!limits) return readBlobBody(await authorizedFetch(path, options));
 
+  // The request is aborted here when the declared size is over the cap; a caller's own `signal` aborts it too.
+  const controller = new AbortController();
+  const callerSignal = options.signal;
+  const abortWithCaller = (): void => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortWithCaller();
+  else callerSignal?.addEventListener('abort', abortWithCaller, { once: true });
+  try {
+    const response = await authorizedFetch(path, { ...options, signal: controller.signal });
+    if (response.ok) {
+      const declared = response.headers?.get('Content-Length');
+      if (declared != null && declared.trim() !== '' && Number(declared) > limits.maxBytes) {
+        controller.abort();
+        throw new BlobTooLargeError(limits.maxBytes);
+      }
+    }
+    // No (or a wrong) Content-Length. The content route streams a non-seekable SPE stream, so it answers chunked with no
+    // length: count the bytes as they arrive and abort as soon as the cap is passed, so an oversize file is never pulled
+    // in whole (review finding, task 022).
+    if (response.ok && response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      const chunks: BlobPart[] = [];
+      let total = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > limits.maxBytes) {
+          controller.abort();
+          await reader.cancel().catch(() => undefined);
+          throw new BlobTooLargeError(limits.maxBytes);
+        }
+        chunks.push(value);
+      }
+      return new Blob(chunks);
+    }
+    const blob = await readBlobBody(response);
+    // No readable stream (an older runtime): the bytes are dropped, never handed on.
+    if (blob.size > limits.maxBytes) throw new BlobTooLargeError(limits.maxBytes);
+    return blob;
+  } finally {
+    callerSignal?.removeEventListener('abort', abortWithCaller);
+  }
+}
+
+/** The limit {@link bffApiBlob} enforces when a caller passes one. */
+export interface BlobLimits {
+  /** Largest body, in bytes, the caller will keep. */
+  maxBytes: number;
+}
+
+/** A body over {@link BlobLimits.maxBytes}: the bytes were aborted or discarded, never returned. */
+export class BlobTooLargeError extends Error {
+  constructor(public readonly maxBytes: number) {
+    super(`The response body is larger than ${maxBytes} bytes.`);
+    this.name = 'BlobTooLargeError';
+  }
+}
+
+/** Shared by both {@link bffApiBlob} paths: a non-2xx answer throws the same `ApiError` as ever; otherwise the body. */
+async function readBlobBody(response: Response): Promise<Blob> {
   if (!response.ok) {
     let message: string;
     try {

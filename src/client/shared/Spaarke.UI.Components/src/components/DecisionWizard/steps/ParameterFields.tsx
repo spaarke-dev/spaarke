@@ -31,6 +31,7 @@ import {
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
+import { closestDialogOrSelf, useFocusReturn } from '../../../utils/focusReturn';
 import {
   dateOrderMessage,
   fieldLabel,
@@ -107,6 +108,13 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
       mounted.current = false;
     };
   }, []);
+  // Focus return (task 200): the platform lookup pane leaves focus on <body> or on the link behind the dialog, so once
+  // it settles (pick, cancel or failure) focus goes back to the field's input, found after the re-render.
+  const paneFieldRef = React.useRef<HTMLDivElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => paneFieldRef.current,
+    getRegion: () => closestDialogOrSelf(paneFieldRef.current),
+  });
   const openPane = React.useCallback(async () => {
     if (!openLookup || !paneEntity || picking.current) return;
     picking.current = true;
@@ -121,8 +129,9 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
     } finally {
       picking.current = false;
       if (mounted.current) setPaneOpen(false);
+      returnFocus(() => paneFieldRef.current?.querySelector<HTMLElement>('input'));
     }
-  }, [openLookup, paneEntity, kind, parameter.code, update, scope]);
+  }, [openLookup, paneEntity, kind, parameter.code, update, scope, returnFocus]);
 
   // D-18: one candidate is pre-selected as a starting value; several are left for the user to pick.
   const preselected = React.useRef(false);
@@ -154,7 +163,7 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
 
   if (usePane) {
     return (
-      <div data-testid={`field-${parameter.code}`}>
+      <div data-testid={`field-${parameter.code}`} ref={paneFieldRef}>
         <Field label={parameter.label} required={parameter.required} hint={parameter.hint ?? undefined}>
           <Input
             readOnly

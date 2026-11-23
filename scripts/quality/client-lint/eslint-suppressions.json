@@ -661,7 +661,7 @@
       "count": 3
     },
     "no-restricted-syntax": {
-      "count": 2
+      "count": 1
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/handoffSeedMapping.ts": {
@@ -1358,14 +1358,6 @@
       "count": 2
     }
   },
-  "src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 4
-    },
-    "no-restricted-syntax": {
-      "count": 2
-    }
-  },
   "src/solutions/LegalWorkspace/src/components/FilePreview/filePreviewService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 3
@@ -1425,11 +1417,6 @@
   "src/solutions/LegalWorkspace/src/hooks/useInvoicesList.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    }
-  },
-  "src/solutions/LegalWorkspace/src/hooks/useKanbanColumns.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
     }
   },
   "src/solutions/LegalWorkspace/src/hooks/useMattersList.ts": {

@@ -159,31 +159,12 @@ function ConvertTo-StartOfDayUtc($Value) {
     return [datetime]::ParseExact(([string]$Value).Substring(0, 10), 'yyyy-MM-dd', [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]'AssumeUniversal,AdjustToUniversal')
 }
 
-# The operator's best Read depth on the table: 'Global' (organization) is the only depth that shows the operator can read EVERY version.
-# $null when it cannot be read. The script reads as the operator, and a row outside the operator's depth is not returned, not masked, so a
-# count taken at a lower depth would be silently short.
-function Get-OperatorReadDepth {
-    $who = Invoke-Dv -Path 'WhoAmI'
-    $priv = Invoke-Dv -Path "privileges?`$select=privilegeid&`$filter=name eq 'prvRead$Table'"
-    $privilegeId = @($priv.value)[0].privilegeid
-    if (-not $privilegeId) { return $null }
-    $held = Invoke-Dv -Path "systemusers($($who.UserId))/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()"
-    $rank = @{ Basic = 1; Local = 2; Deep = 3; Global = 4 }
-    $best = $null
-    foreach ($p in @($held.RolePrivileges)) {
-        if (([string]$p.PrivilegeId).ToLowerInvariant() -ne ([string]$privilegeId).ToLowerInvariant()) { continue }
-        $depth = [string]$p.Depth
-        if ($rank.ContainsKey($depth) -and (-not $best -or $rank[$depth] -gt $rank[$best])) { $best = $depth }
-    }
-    return $best
-}
-
-# $null when the operator is shown to read every version; otherwise the reason it cannot be confirmed (exit 1).
+# The operator must be shown to read EVERY version (organization-depth Read on the table): the script reads as the operator, and a row outside
+# the operator's depth is not returned, not masked, so a count taken at a lower depth would be silently short. The check is the shared
+# Get-ReadAllRowsGap of EbillingSchema.psm1 (one copy, also used by the task 193 and 116 delete scripts); this script keeps its own wording:
+# "cannot confirm every version was read". $null when the operator is shown to read every version; otherwise the reason (exit 1).
 function Get-ReadabilityGap {
-    try { $depth = Get-OperatorReadDepth } catch { return "cannot confirm every version was read: the operator's Read privilege on $Table could not be checked ($($_.Exception.Message))" }
-    if ($depth -eq 'Global') { return $null }
-    $shown = if ($depth) { $depth } else { 'none found' }
-    return "cannot confirm every version was read: the operator's Read depth on $Table is '$shown', not organization (Global). Run as an operator whose role reads the whole table (for example System Administrator); a count taken at a lower depth would be short."
+    return Get-ReadAllRowsGap $Table 'every version was read'
 }
 
 # The rows read, per status (the operator's check that the counts are the table's).

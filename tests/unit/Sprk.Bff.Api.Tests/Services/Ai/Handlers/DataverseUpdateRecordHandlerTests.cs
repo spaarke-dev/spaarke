@@ -31,7 +31,9 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
 
     private DataverseUpdateRecordHandler CreateHandler() =>
         new(_dataverse.Object, _world.AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+            // fm task 056: the app-only reader the re-file core asks the private-message guard with (no private message here).
+            appOnlyEntities: Sprk.Bff.Api.Tests.DataMutation.Communication.PrivateMessageGuardFixtures.NoPrivateMessage());
 
     private static AnalysisTool BuildUpdateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseUpdateRecordHandler), name: "SYS-Dataverse Update Record");

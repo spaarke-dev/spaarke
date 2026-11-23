@@ -20,7 +20,6 @@ vi.mock('../src/auth/bff-client', async () => {
 });
 
 import { getDocuments } from '../src/api/web-api-client';
-import { DocumentLibrary } from '../src/components/DocumentLibrary';
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { ContactsOrganizations } from '../src/components/ContactsOrganizations';
 
@@ -38,8 +37,9 @@ function answerEveryList(truncated: boolean): void {
   });
 }
 
+// The documents list is not here: since R4 task 023c it is the shared grid, whose own incomplete-list notice is covered in
+// DocumentLibrary.sharedGrid.test.tsx. The views below keep the SPA's TruncatedListNotice.
 const views: Array<[string, () => React.ReactElement, number]> = [
-  ['documents', () => <DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />, 1],
   ['events', () => <EventsCalendar projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} />, 1],
   // Contacts and organisations: one notice per list.
   ['contacts and organisations', () => <ContactsOrganizations projectId={PROJECT} />, 2],

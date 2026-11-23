@@ -731,6 +731,13 @@ public static class CommunicationModule
         // Direct team for a Direct message filed under nothing) and the 1:1 pre-send check. Concrete singleton (ADR-010: one
         // implementation, no seam needed); CommunicationService and MessagingIngestor take it as an optional dependency.
         services.AddSingleton<DirectMessageOwnerStep>();
+        // field-mapping-server-write-path-r1 task 056b — the private-message gate: the record checks of both participants before a
+        // private message is sent, and the one writer of its record reference. Section 11: (1) existing — the probe, the No Access
+        // guard and the effective-flag read it calls; (2) extension — it only orders those questions, so it cannot live in one of
+        // them; (3) without it a Direct message cannot name a record without becoming a record message. Scoped like
+        // SecureShareNoAccessGuard, which it takes (AddExternalAccess registers it unconditionally); the singleton
+        // CommunicationService resolves it from the request's services.
+        services.AddScoped<PrivateMessageSendGate>();
         // task 041/043 — explicit participant/grant reader. Task 041 registered the ADR-032 Null-Object default
         // (no explicit grants); task 043 replaces it with the REAL Direct-topology reader (owner ∪ POA share).
         // For a Direct thread it returns the two participants; for any non-Direct thread it returns EMPTY, so

@@ -247,6 +247,48 @@ describe('useEmailComposeActions — FR-10 thread-preserving bodyOverride (BINDI
   });
 });
 
+describe('useEmailComposeActions — New "Related to" seed (#2908)', () => {
+  const MATTER = { entityType: 'sprk_matter', id: '55555555-5555-4555-8555-555555555555', name: 'Acme v. Beta' };
+
+  it('openComposer("compose", undefined, { regarding }) hands the record to the composer as regarding', async () => {
+    const { result } = renderHook(() => useEmailComposeActions(makeDeps()));
+
+    act(() => result.current.openComposer('compose', undefined, { regarding: MATTER }));
+
+    await waitFor(() => expect(result.current.composerDialog.props.open).toBe(true));
+    expect(result.current.composerDialog.props.mode).toBe('compose');
+    expect(result.current.composerDialog.props.regarding).toEqual(MATTER);
+  });
+
+  it('the composer shows the record as a "Related to" chip', async () => {
+    const { result } = renderHook(() => useEmailComposeActions(makeDeps()));
+    act(() => result.current.openComposer('compose', undefined, { regarding: MATTER }));
+
+    render(<FluentProvider theme={webLightTheme}>{result.current.composerDialog}</FluentProvider>);
+
+    // The chip text carries the table label too, so match the name inside it (as SendEmailDialog.threadRecord does).
+    expect(await screen.findByText(/Acme v\. Beta/)).toBeInTheDocument();
+  });
+
+  it('control: plain New carries no regarding', async () => {
+    const { result } = renderHook(() => useEmailComposeActions(makeDeps()));
+    act(() => result.current.actions.onNew?.());
+
+    await waitFor(() => expect(result.current.composerDialog.props.open).toBe(true));
+    expect(result.current.composerDialog.props.regarding).toBeUndefined();
+  });
+
+  it('a reply ignores a regarding option (its associations come from the source email)', async () => {
+    const dataService = makeDataService(MULTI_RECIPIENT_RECORD);
+    const { result } = renderHook(() => useEmailComposeActions(makeDeps({ dataService })));
+
+    act(() => result.current.openComposer('reply', 'comm-1', { regarding: MATTER }));
+
+    await waitFor(() => expect(result.current.composerDialog.props.open).toBe(true));
+    expect(result.current.composerDialog.props.regarding).toBeUndefined();
+  });
+});
+
 describe('useEmailComposeActions — NEGATIVE: no forked composer', () => {
   it.each(['onReply', 'onReplyAll', 'onForward'] as const)(
     '%s mounts the CANONICAL SendEmailDialog (element identity), never a second composer',

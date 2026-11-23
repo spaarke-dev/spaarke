@@ -186,6 +186,13 @@ export interface CommandBarProps {
    */
   onCreateNew?: () => void;
   /**
+   * Built-in actions this HOST does not offer, whatever the configuration says. Each one is removed from the bar
+   * (configured or auto-added). Use it when a host supplies its own replacement through `hostCommands`, e.g. the
+   * communications grid hides `create-form` (the OOB form) and adds "New Email" and "New Message" (#2908). The ids
+   * stay reserved: a host command still cannot take a built-in id. Absent or empty: no change.
+   */
+  hiddenBuiltInCommands?: ReadonlyArray<CommandBarAction>;
+  /**
    * Number of items rendered as inline subtle buttons before the overflow `…` menu.
    * Defaults to 2 to match Power Apps OOB (Refresh + Delete inline; rest in overflow).
    * Set to 0 to push EVERYTHING into the overflow menu.
@@ -313,9 +320,12 @@ type EffectiveItem = CommandBarItem & { hostCommand?: DataGridHostCommand };
 
 function buildEffectiveItems(
   config: CommandBarConfig,
-  hostCommands?: ReadonlyArray<DataGridHostCommand>
+  hostCommands?: ReadonlyArray<DataGridHostCommand>,
+  hiddenBuiltInCommands?: ReadonlyArray<CommandBarAction>
 ): EffectiveItem[] {
-  const configured = buildConfiguredItems(config);
+  // Only built-in actions can be hidden; a configured `custom` item is never removed by this list.
+  const hidden = new Set<string>((hiddenBuiltInCommands ?? []).filter(a => ALL_DEFAULT_ACTIONS.includes(a)));
+  const configured = buildConfiguredItems(config).filter(it => !hidden.has(it.action));
   if (!hostCommands || hostCommands.length === 0) return configured;
 
   // Host commands first, de-duplicated by id (first wins). A host id that collides with a configured item or any
@@ -399,6 +409,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
     theme = webLightTheme,
     onCommandInvoke,
     onCreateNew,
+    hiddenBuiltInCommands,
     inlineLimit = DEFAULT_INLINE_LIMIT,
     className,
   } = props;
@@ -410,7 +421,10 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
   const [isDeleting, setIsDeleting] = React.useState<boolean>(false);
 
   // ── Build effective item list (defaults + configjson + showDefaultCommands) ─
-  const effectiveItems = React.useMemo(() => buildEffectiveItems(config, hostCommands), [config, hostCommands]);
+  const effectiveItems = React.useMemo(
+    () => buildEffectiveItems(config, hostCommands, hiddenBuiltInCommands),
+    [config, hostCommands, hiddenBuiltInCommands]
+  );
 
   // ── Partition: first inlineLimit go inline, rest go in the overflow menu ─
   // Clamp the limit so 0 / negative / too-large all behave intuitively.

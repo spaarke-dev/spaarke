@@ -1,10 +1,20 @@
 import * as React from 'react';
-import { Dialog, DialogSurface, Button, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  Dialog,
+  DialogSurface,
+  Button,
+  Tooltip,
+  makeStyles,
+  mergeClasses,
+  tokens,
+  useFluent,
+} from '@fluentui/react-components';
 import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
 import { ModalWindowControls } from '../ModalWindowControls/ModalWindowControls';
 import { ModalScrollArea } from './ModalScrollArea';
 import { getSurfaceStyle, SIZE_SPEC, type SprkModalSize, type SprkModalLayout } from './sizes';
 import { useSidePaneLayering } from './sidePaneLayering';
+import { scheduleFocusReturn } from '../../utils/focusReturn';
 import type { SprkModalProps } from './SprkModal.types';
 
 export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProps } from './SprkModal.types';
@@ -167,11 +177,85 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // (aria-labelledby) — we render a custom header, not Fluent's DialogTitle,
   // so the auto-wiring DialogTitle provides must be supplied here explicitly.
   const [titleId] = React.useState(() => `sprk-modal-title-${++sprkModalTitleIdCounter}`);
-  const surfaceRef = React.useRef<HTMLDivElement>(null);
+  const surfaceRef = React.useRef<HTMLDivElement | null>(null);
+  // The last surface element this modal rendered. `surfaceRef` is null by the time the close effect runs (the surface
+  // unmounts in the same commit), and "focus is inside the closing surface" needs the element. A callback ref keeps both.
+  const lastSurfaceRef = React.useRef<HTMLDivElement | null>(null);
+  const setSurfaceRef = React.useCallback((node: HTMLDivElement | null) => {
+    surfaceRef.current = node;
+    if (node) lastSurfaceRef.current = node;
+  }, []);
+
+  // Task 202: a SprkModal that goes open -> closed returns keyboard focus to the element that had it when the modal
+  // opened. Fluent's Dialog only restores to a `DialogTrigger`; hosts open a SprkModal from state, so nothing did.
+  const { targetDocument } = useFluent();
+  const openerRef = React.useRef<HTMLElement | null>(null);
+  const wasOpenRef = React.useRef(false);
+  const cancelRestoreRef = React.useRef<(() => void) | null>(null);
+
+  // CAPTURE, in render. The element that has focus on the render that flips `open` to true is the one the click (or key
+  // press) that opened us left it on. Reading it here, not in an effect, is what puts it before anything in this commit
+  // moves focus: the content mounts in the same commit as this component (the portal does not defer it), so a child's
+  // layout effect or an `autoFocus` input has already focused itself by the time a layout effect of ours runs, and
+  // Fluent's `useFocusFirstElement` (a passive effect) comes after both. The read has no side effect; it is committed to
+  // `openerRef` by the layout effect below. Pinned by focusRestore.test.tsx ("captures the opener before ...").
+  const openerCandidateRef = React.useRef<HTMLElement | null>(null);
+  if (open && !wasOpenRef.current) {
+    const doc = targetDocument ?? document;
+    const focused = doc.activeElement as HTMLElement | null;
+    openerCandidateRef.current = focused && focused !== doc.body && focused !== doc.documentElement ? focused : null;
+  }
+  // RESTORE. Only on a real open -> closed transition (`open` false, or this component unmounting while open):
+  // `hidden` and `yieldToSidePane` keep `open` true and never reach it (task 198).
+  const restoreFocusToOpener = React.useCallback(() => {
+    const opener = openerRef.current;
+    const surface = lastSurfaceRef.current;
+    openerRef.current = null;
+    wasOpenRef.current = false;
+    if (!opener) return;
+    const doc = opener.ownerDocument;
+    cancelRestoreRef.current?.();
+    cancelRestoreRef.current = scheduleFocusReturn({
+      doc,
+      // Evaluated at each attempt (the opener may re-render); not while it is disabled, detached or inert.
+      target: () => (opener.isConnected && !opener.closest('[inert]') ? opener : null),
+      // Focus is "lost" only on body/nothing, on a node inside this closing surface, or on a removed node. Anywhere else
+      // (another dialog the host focused on purpose, the parent wizard) is kept, so a host that moved focus wins.
+      isKept: active =>
+        !!active &&
+        active !== doc.body &&
+        active !== doc.documentElement &&
+        active.isConnected &&
+        !(surface && surface.contains(active)),
+    });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (open) {
+      cancelRestoreRef.current?.(); // reopened before a pending restore ran
+      cancelRestoreRef.current = null;
+      if (!wasOpenRef.current) {
+        wasOpenRef.current = true;
+        openerRef.current = openerCandidateRef.current;
+      }
+    } else if (wasOpenRef.current) {
+      restoreFocusToOpener();
+    }
+  }, [open, restoreFocusToOpener]);
+  React.useLayoutEffect(
+    () => () => {
+      if (wasOpenRef.current) restoreFocusToOpener();
+    },
+    [restoreFocusToOpener]
+  );
 
   // While yielding to a side pane the surface is `inert`: Tab and Enter cannot reach Save / Cancel / × behind the
   // lookup (pointer-events alone blocks only the mouse). Set as a DOM attribute — React 16/17 do not know `inert`.
   const surfaceInert = yieldToSidePane && !hidden;
+  // ORDER MATTERS (task 198): keep this a `useEffect` in this (parent) component. Fluent's Dialog re-runs its
+  // focus-first-element effect when `modalType` changes; as a child effect it runs BEFORE this one, so when yielding
+  // ends the surface is still `inert` and that focus() is a no-op. Removing `inert` first (e.g. a useLayoutEffect)
+  // would pull focus into this modal, under the host's wizard. Pinned by sidePaneLayering.test.tsx.
   React.useEffect(() => {
     const el = surfaceRef.current;
     if (!el) return;
@@ -191,7 +275,13 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // `alert` is intentionally blocking; otherwise `nonBlocking` maps to Fluent's
   // `non-modal` (no backdrop, no focus trap) so a page-level lookup pane opened
   // over the modal stays interactive (see `nonBlocking` prop doc).
-  const modalType = dismiss === 'alert' ? 'alert' : nonBlocking ? 'non-modal' : 'modal';
+  // While yielding to a side pane EVERY modal is `non-modal`, alert included (task 198): the `modal` Dialog's
+  // full-window `.fui-DialogSurface__backdrop` is not covered by the surface's `pointer-events: none`, and (z-index
+  // of the PCF portal) it sits above the platform's lookup pane when the pane could not be layered over the modal
+  // ('dock' / 'pending'), eating every click in it. Only `modalType` changes: the Dialog, its surface and the body
+  // stay mounted (the backdrop is a sibling of the surface in the same portal), and the blocking behaviour returns
+  // when the flag clears.
+  const modalType = surfaceInert ? 'non-modal' : dismiss === 'alert' ? 'alert' : nonBlocking ? 'non-modal' : 'modal';
   const hasFooter = Boolean(footer || footerStart);
 
   // Browse guard (`nav.onBeforeNavigate`): without one, navigate synchronously; with one, navigate only
@@ -213,12 +303,9 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       reportGuardFailure(err);
       return;
     }
-    void Promise.resolve(verdict).then(
-      allowed => {
-        if (allowed) nav.onNavigate(dir);
-      },
-      reportGuardFailure
-    );
+    void Promise.resolve(verdict).then(allowed => {
+      if (allowed) nav.onNavigate(dir);
+    }, reportGuardFailure);
   };
 
   return (
@@ -232,7 +319,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       }}
     >
       <DialogSurface
-        ref={surfaceRef}
+        ref={setSurfaceRef}
         className={mergeClasses(styles.surface, effectiveSize === 'full' && styles.surfaceFull)}
         // `hidden` keeps the surface mounted (state preserved) but out of the way
         // of a page-level native lookup pane; `yieldToSidePane` keeps it visible

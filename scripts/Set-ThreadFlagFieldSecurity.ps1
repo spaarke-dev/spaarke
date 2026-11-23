@@ -1,14 +1,16 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Locks the five columns that decide who may read a message with field-level security, so ONLY the BFF writes them while
-    EVERY user still reads their true values (field-mapping-server-write-path-r1 task 054b):
+    Locks the eight columns that decide who may read a message (or, for the private-context references, where its two
+    participants see it) with field-level security, so ONLY the BFF writes them while EVERY user still reads their true
+    values (field-mapping-server-write-path-r1 tasks 054b and 056b):
       sprk_communicationthread : sprk_threadtype, sprk_isdefaultthread
-      sprk_communication       : sprk_sentby, sprk_directrecipient, sprk_communicationthread
+      sprk_communication       : sprk_sentby, sprk_directrecipient, sprk_communicationthread,
+                                 sprk_privatecontextmatter, sprk_privatecontextproject, sprk_privatecontextworkassignment
     Dry run by default; -Apply writes; -Verify checks (exit 0 = pass, 1 = a gap).
 
 .DESCRIPTION
-    The BFF already refuses all five on every generic write path, for every identity
+    The BFF already refuses all eight on every generic write path, for every identity
     (InheritedAccessPermission.BffOwnedCommunicationColumns; CommunicationBffOwnedColumnRefusalTests reads THIS script's
     target lines and keeps them equal to that set). This script closes the paths outside the BFF: a user's own Dataverse
     write (a form, the Web API, an import, a flow running as the user).
@@ -21,9 +23,10 @@
     thread would read as unset.
 
     PRECONDITIONS (checked in every mode; -Apply refuses unless all pass):
-      (p0) each of the five columns exists. Checked first, before any other read or any write; a missing column stops the
+      (p0) each of the eight columns exists. Checked first, before any other read or any write; a missing column stops the
            run in EVERY mode with exit 1 and nothing written. sprk_directrecipient is added by
-           scripts/Set-DirectRecipientSchema.ps1 -Apply (run it first); the other four come with the SpaarkeMaster import;
+           scripts/Set-DirectRecipientSchema.ps1 -Apply and the three sprk_privatecontext* references by
+           scripts/Set-PrivateContextSchema.ps1 -Apply (run them first); the other four come with the SpaarkeMaster import;
       (p1) both profiles exist and are in -SolutionUniqueName;
       (p2) the reader profile is on EVERY business unit's default team;
       (p3) the writer profile's members are exactly the -BffApplicationIds application users (no human, no team);
@@ -51,6 +54,9 @@
 
     LIVE ORDER: dev BFF deployed from master -> THIS SCRIPT (-Apply, then -Verify) -> Direct setup (UAC-r2: the
     DirectMessage:* settings) -> 054c Stamp -> piece 3 -> 054c Move.
+    PRIVATE-CONTEXT COLUMNS (task 056b): an environment whose -Verify passed before 056 reports (p0) FAIL for the three
+    sprk_privatecontext* columns until scripts/Set-PrivateContextSchema.ps1 -Apply has run there. Live order for 056:
+    Set-PrivateContextSchema.ps1 (-Apply, then -Verify) -> THIS SCRIPT (-Apply, then -Verify) -> the BFF build that writes them.
 
     A NEW ENVIRONMENT (not a customer stamp): run this script after the SpaarkeMaster import,
     scripts/Set-DirectRecipientSchema.ps1 -Apply and scripts/Set-RecordCreatorPersonSchema.ps1 -Apply: dry run, then -Apply,
@@ -71,7 +77,8 @@
       (m1) As a non-administrator, PATCH a communication's sprk_sentby, sprk_directrecipient or sprk_communicationthread
            through the Web API: refused (field security). Repeat on a message the user can write through a record team.
       (m2) As a non-administrator, PATCH a thread's sprk_threadtype or sprk_isdefaultthread: refused.
-      (m3) As a non-administrator, read a Direct message and its thread: the five columns show their true values, not empty.
+      (m3) As a non-administrator, read a Direct message and its thread: the five Direct-message columns show their true
+           values, not empty; on a private message the referenced record's lookup shows too.
       (m4) The BFF still creates a per-user master thread and a Direct thread (send a Direct message; open the Assistant's
            master thread), and files the message into it (the thread lookup and both participants are set).
 
@@ -128,9 +135,9 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 # ── Constants (the target lines are read by CommunicationBffOwnedColumnRefusalTests; keep one target per line) ─────
 $Targets = @(
     @{ Table = 'sprk_communicationthread'; Columns = @('sprk_threadtype', 'sprk_isdefaultthread') }
-    @{ Table = 'sprk_communication'; Columns = @('sprk_sentby', 'sprk_directrecipient', 'sprk_communicationthread') }
+    @{ Table = 'sprk_communication'; Columns = @('sprk_sentby', 'sprk_directrecipient', 'sprk_communicationthread', 'sprk_privatecontextmatter', 'sprk_privatecontextproject', 'sprk_privatecontextworkassignment') }
 )
-$Lookups = @('sprk_sentby', 'sprk_directrecipient', 'sprk_communicationthread')
+$Lookups = @('sprk_sentby', 'sprk_directrecipient', 'sprk_communicationthread', 'sprk_privatecontextmatter', 'sprk_privatecontextproject', 'sprk_privatecontextworkassignment')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 $MainFormType = 2
@@ -196,7 +203,9 @@ foreach ($target in $Targets) {
     foreach ($col in $target.Columns) {
         if ($present -contains $col) { Report 'OK' "(p0) $($target.Table).$col exists" }
         else {
-            $remedy = if ($col -eq 'sprk_directrecipient') { 'run scripts/Set-DirectRecipientSchema.ps1 -Apply first' } else { 'import SpaarkeMaster first' }
+            $remedy = if ($col -eq 'sprk_directrecipient') { 'run scripts/Set-DirectRecipientSchema.ps1 -Apply first' }
+            elseif ($col -like 'sprk_privatecontext*') { 'run scripts/Set-PrivateContextSchema.ps1 -Apply first' }
+            else { 'import SpaarkeMaster first' }
             Report 'FAIL' "(p0) $($target.Table).$col does not exist in this environment; $remedy"
             $missingColumns.Add("$($target.Table).$col")
         }
@@ -207,7 +216,13 @@ if ($missingColumns.Count -gt 0) {
     if ($missingColumns -contains 'sprk_communication.sprk_directrecipient') {
         Write-Host '  Run scripts/Set-DirectRecipientSchema.ps1 -Apply on this environment, then re-run this script.' -ForegroundColor Red
     }
-    if ($Verify -or $Apply) {
+    if (@($missingColumns | Where-Object { $_ -like 'sprk_communication.sprk_privatecontext*' }).Count -gt 0) {
+        Write-Host '  Run scripts/Set-PrivateContextSchema.ps1 -Apply on this environment, then re-run this script.' -ForegroundColor Red
+    }
+    # The DirectMessage:* binding rule is 054b's: it applies while a 054b column is missing. An environment missing only the
+    # fm task 056 private-context columns may already run Direct messages; it is told only to run the 056 schema script.
+    $missingBefore056 = @($missingColumns | Where-Object { $_ -notlike 'sprk_communication.sprk_privatecontext*' })
+    if (($Verify -or $Apply) -and $missingBefore056.Count -gt 0) {
         Write-Host "PRECONDITION NOT MET: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName UNSET on $EnvironmentUrl (fm task 054b binding rule)." -ForegroundColor Red
     }
     exit 1
@@ -522,7 +537,7 @@ if ($Apply) {
 
 if ($Verify -or $Apply) {
     if ($gaps.Count -eq 0) {
-        Write-Host "`nPASS: the five columns are locked, every business unit's default team reads them, and only the BFF (and System Administrator) can write them." -ForegroundColor Green
+        Write-Host "`nPASS: the eight columns are locked, every business unit's default team reads them, and only the BFF (and System Administrator) can write them." -ForegroundColor Green
         Write-Host "PRECONDITION MET: DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName may now be set on $EnvironmentUrl (fm task 054b binding rule)." -ForegroundColor Green
         exit 0
     }

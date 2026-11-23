@@ -55,7 +55,7 @@ public interface IFieldMappingDataverseService
     /// <remarks>
     /// <para><b>Why a separate method (unified-access-control-r2 task 130).</b> A Web API PATCH without
     /// <c>If-Match</c> UPSERTS: if the id does not exist, Dataverse creates a row with it. That default is
-    /// load-bearing elsewhere — <c>InvoiceReviewService</c> creates its invoice by PATCHing a fresh GUID — so
+    /// load-bearing elsewhere (callers that create a row by PATCHing a fresh GUID; <c>InvoiceReviewService</c> did until ebilling-r1 050a) — so
     /// it cannot be changed on <see cref="UpdateRecordFieldsAsync"/>. The recalculate routes must not create:
     /// a matter or project deleted between the authorization check and the rollup write would otherwise come
     /// back as an empty row carrying only derived rollup fields.</para>

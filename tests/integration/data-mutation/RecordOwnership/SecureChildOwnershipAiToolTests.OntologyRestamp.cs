@@ -241,7 +241,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 "sprk_communication", OntologyCommunication,
                 Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter:D})" }),
                 _user, _world.Resolver(), restamper, Children(), HttpContextOfCaller(), NullLogger<Program>.Instance,
-                CancellationToken.None, filingOnly: true);
+                CancellationToken.None, filingOnly: true, appOnlyEntities: GuardReaderOverTheWorld());
             Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
             return result;
         }
@@ -253,7 +253,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 _user, new CoreAncestorAfterWriteRestamp(restamper),
                 NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance, _world.Resolver(),
                 Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>())
+                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+                appOnlyEntities: GuardReaderOverTheWorld())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {

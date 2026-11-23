@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceRollup;
 /// <see cref="DataverseWebApiService.UpdateExistingRecordFieldsAsync"/> SENDS — the <c>If-Match: *</c>
 /// precondition — and that a refused precondition surfaces as <see cref="KeyNotFoundException"/> (which the
 /// recalculate endpoints render as their uniform 404), and that <see cref="DataverseWebApiService.UpdateRecordFieldsAsync"/>
-/// is unchanged for every other caller (<c>InvoiceReviewService</c> creates its invoice through that upsert).</para>
+/// is unchanged for every other caller (the upsert that <c>InvoiceReviewService</c> relied on to create its invoice, until ebilling-r1 050a).</para>
 /// <para>A recording handler captures each request: a hand-written test double, not <c>Mock&lt;HttpMessageHandler&gt;</c>
 /// (ADR-038), asserting on what was sent.</para>
 /// </remarks>
@@ -121,7 +121,7 @@ public class RecalculateWriteNoCreateTests
     [Fact]
     public async Task UpdateRecordFieldsAsync_IsUnchanged_StillSendsNoIfMatch()
     {
-        // InvoiceReviewService creates its sprk_invoice by PATCHing a fresh GUID, which only works because this
+        // InvoiceReviewService created its sprk_invoice by PATCHing a fresh GUID (until ebilling-r1 050a), which only worked because this
         // method upserts. The no-create guarantee is scoped to the two recalculate writes, not applied globally.
         var handler = new RecordingHandler(PatchReturns(HttpStatusCode.NoContent));
         var sut = new OfflineService(handler);

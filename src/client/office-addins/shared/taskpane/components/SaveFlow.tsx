@@ -33,6 +33,8 @@ import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveMod
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
 import { useRelatedRecord, type RelatedRecordOutcome, type RelatedRecordView } from '../hooks/useRelatedRecord';
 import {
+  SAVE_TARGET_TYPES,
+  isSaveTargetType,
   useSaveFlow,
   type SaveFlowContext,
   type SaveTarget,
@@ -1076,6 +1078,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const handleFileTargetSelect = useCallback(
     (entity: EntitySearchResult | null) => {
       if (entity?.canFile === false) return; // same backstop as handleEntitySelect (task 084)
+      if (entity && !isSaveTargetType(entity.entityType)) return; // task 133 slice C: never an invoice
       setFileTarget(entity);
       setFilingError(null);
       if (entity) {
@@ -1096,8 +1099,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       entityType: fileTarget.entityType,
       recordId: fileTarget.id,
       recordName: fileTarget.name,
-      // `displayInfo` is the record's number for a Matter/Project; an Invoice's is not a number.
-      recordNumber: fileTarget.entityType === 'Invoice' ? null : (fileTarget.displayInfo ?? null),
+      // `displayInfo` is the record's number (a filing target is a Matter or Project: SAVE_TARGET_TYPES).
+      recordNumber: fileTarget.displayInfo ?? null,
     });
     setFiling(false);
     if (outcome.ok) {
@@ -1435,6 +1438,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       // Task 084: a record the caller cannot file to is never selected, whatever path asked for it. The
       // picker already offers no way to select one; this is the pane-level backstop.
       if (entity?.canFile === false) return;
+      // Task 133 slice C: Save files to Matter/Project only. The hook ignores any other type; returning here as well
+      // keeps the screen reader from announcing a selection that did not happen.
+      if (entity && !isSaveTargetType(entity.entityType)) return;
       setSelectedEntity(entity);
       if (entity) {
         announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
@@ -1546,7 +1552,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           record: {
             id: `demo-new-${Date.now()}`,
             entityType: type,
-            logicalName: type === 'Matter' ? 'sprk_matter' : type === 'Project' ? 'sprk_project' : 'sprk_invoice',
+            logicalName: type === 'Project' ? 'sprk_project' : 'sprk_matter',
             name,
             displayInfo: 'New',
           },
@@ -2058,8 +2064,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               candidatesLoading={candidatesLoading}
               onSearch={relatedSearch}
               onCreateRecord={createRelatedRecord}
-              // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
-              allowedTypes={['Matter', 'Project', 'Invoice']}
+              // Matter and Project only (Account/Contact removed — UI feedback 2026-09-02; Invoice left Save and
+              // "+ New" in task 133 slice C — an invoice comes only from the Invoice tab's submission).
+              allowedTypes={[...SAVE_TARGET_TYPES]}
               defaultType="Matter"
               createForm={createFormData}
               {...(onSearchContacts ? { onSearchContacts } : {})}
@@ -2281,7 +2288,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           candidatesLoading={candidatesLoading}
           onSearch={relatedSearch}
           onCreateRecord={createRelatedRecord}
-          allowedTypes={['Matter', 'Project', 'Invoice']}
+          allowedTypes={[...SAVE_TARGET_TYPES]}
           defaultType="Matter"
           createForm={createFormData}
           {...(onSearchContacts ? { onSearchContacts } : {})}

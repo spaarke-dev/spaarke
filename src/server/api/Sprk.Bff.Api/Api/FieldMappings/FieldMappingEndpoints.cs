@@ -1155,6 +1155,8 @@ public static class FieldMappingEndpoints
     /// <see cref="DocumentOwnershipParentColumn"/> (<c>sprk_analysis</c> has three: <c>sprk_documentid</c>,
     /// <c>sprk_outputfileid</c>, <c>sprk_regardingdocument</c>). Every other source, and a target that defines no such column,
     /// keeps the 409. <c>Matches</c> stays the number of lookups found, so the 409's wording is unchanged.</para>
+    /// <para>fm task 056: lookups that cite (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsCitation"/>) are
+    /// left out before counting; they never file a row, so they never name its parent. <c>Matches</c> counts the rest.</para>
     /// </remarks>
     internal static (string? Attribute, int Matches) ResolveParentLookup(
         IEnumerable<Dictionary<string, System.Text.Json.JsonElement>> relationships,
@@ -1171,6 +1173,9 @@ public static class FieldMappingEndpoints
                 : null)
             .Where(a => !string.IsNullOrWhiteSpace(a) && IsLogicalName(a!))
             .Select(a => a!)
+            // A citation names a record without filing the row under it, so it is never the parent lookup (fm task 056: a
+            // private message's context reference is one, beside the typed regarding lookup to the same table).
+            .Where(a => !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsCitation(targetEntity, a))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -1568,6 +1573,26 @@ public static class FieldMappingEndpoints
                             updatePayload)
                         : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
                     var mayRefile = Sprk.Bff.Api.Services.Dataverse.RecordReparent.MayRefile(targetEntity, parentChanges);
+
+                    // fm task 056 (owner 2026-11-22, Q5): a private message is never filed or moved to another thread. A push that
+                    // sets only a typed regarding that is no ownership parent is a plain write the re-file below never sees, so the
+                    // rule is asked here, on the columns this child's write sends, for both paths, after the bind check above and
+                    // before anything is written (app-only read; a fault, or no app-only reader, refuses). A refused child is not
+                    // written; the push goes on to the next child.
+                    if (await Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.RefuseUpdateAsync(
+                            appOnlyEntities, targetEntity, childRecordId, updatePayload.Keys, logger, ct) is { } privateRefusal)
+                    {
+                        LogRefileRefusal(logger, "private-message check", targetEntity, childRecordId, privateRefusal);
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = PrivateMessageRefusedMessage(privateRefusal.RefusalCode),
+                            ReasonCode = privateRefusal.RefusalCode,
+                        });
+                        continue;
+                    }
+
                     using var refileScope = mayRefile ? scopes?.CreateScope() : null;
                     var children = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
                     var ownership = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
@@ -1814,6 +1839,15 @@ public static class FieldMappingEndpoints
     /// </summary>
     internal static string RefileRefusedMessage(string? refusalCode) =>
         $"Not written: this record could not be re-filed, so nothing was written for it ({refusalCode}).";
+
+    /// <summary>
+    /// fm task 056: the text of a child the private-message guard refused — a fixed sentence per outcome and the STABLE code (the
+    /// guard's reason is logged, never returned): a private message is never filed (409), or the check could not be made now (503).
+    /// </summary>
+    internal static string PrivateMessageRefusedMessage(string? refusalCode) =>
+        refusalCode == Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.CheckUnavailable
+            ? $"Not written: whether this record is a private message could not be checked now, so nothing was written for it; try again ({refusalCode})."
+            : $"Not written: this record is a private message, which is never filed, so nothing was written for it ({refusalCode}).";
 
     /// <summary>Logs a refused re-file's reason with a correlation id; the response carries the code only.</summary>
     private static void LogRefileRefusal(
