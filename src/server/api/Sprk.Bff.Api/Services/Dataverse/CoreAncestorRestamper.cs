@@ -302,6 +302,16 @@ public sealed class CoreAncestorRestamper
         Dictionary<string, object>? fields;
         switch (decision.Kind)
         {
+            case StampSourceKind.Source when CoreAncestorResolver.IsPrivateMessage(entity, row):
+                // fm task 056: a private message holds no core ancestor, so its copy is planned against no root: a held copy is
+                // cleared, nothing is ever set. Its source is a filing made outside the BFF; the two-minute share job clears it.
+                _logger.LogWarning(
+                    "{Prefix} {Entity} {Id} is a private message filed under {Source} {SourceId}: it is never filed, so it is not "
+                    + "stamped and any stamp it holds is cleared.", LogPrefix, entity, childId, decision.Source!.Intermediate,
+                    decision.Source.Id);
+                fields = PlanStamp(row, CoreAncestorResolver.CarriableRootTypes(decision.Source.Intermediate), [], host);
+                break;
+
             case StampSourceKind.Source:
                 var root = await _coreAncestors
                     .ResolveStampsAsync(decision.Source!.Intermediate, decision.Source.Id, ct)
@@ -445,7 +455,9 @@ public sealed class CoreAncestorRestamper
                         continue;
                     }
 
-                    var fields = PlanStamp(child, carriable, root.Stamps, host);
+                    // fm task 056: a private message holds no core ancestor: planned against no root, so a held copy is cleared.
+                    var fields = PlanStamp(
+                        child, carriable, CoreAncestorResolver.IsPrivateMessage(childTable, child) ? [] : root.Stamps, host);
                     if (fields is null)
                     {
                         continue; // already equal to the root
@@ -557,6 +569,12 @@ public sealed class CoreAncestorRestamper
         }
 
         var host = await _coreAncestors.ProbeColumnsAsync(entity, ct).ConfigureAwait(false);
+        if (CoreAncestorResolver.IsPrivateMessage(entity, row))
+        {
+            // fm task 056: a private message holds no core ancestor: planned against no root, so nothing is ever set.
+            return PlanStamp(row, CoreAncestorResolver.CarriableRootTypes(decision.Source!.Intermediate), [], host);
+        }
+
         var root = await _coreAncestors
             .ResolveStampsAsync(decision.Source!.Intermediate, decision.Source.Id, ct)
             .ConfigureAwait(false);
@@ -809,6 +827,8 @@ public sealed class CoreAncestorRestamper
         }
 
         columns.AddRange(CoreAncestorResolver.PartyRegardingColumnNames(childTable));
+        // fm task 056: the private-message reference columns, so a private message is seen (CoreAncestorResolver.IsPrivateMessage).
+        columns.AddRange(Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.PresentColumnsOf(childTable, host));
         return columns.Where(host.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
