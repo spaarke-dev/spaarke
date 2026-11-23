@@ -10,7 +10,7 @@
 
 ## Quick recovery
 
-- **Active task:** none. Next build candidate: 117 (FULL opus, p-safe false; gate = 089 merged, 080 live on dev, uac-r2 agrees the delete lists before merge). 096 and 121 stay gated.
+- **Active task: 117** (FULL, opus @ high; started 2026-11-23). Build agent on `task/ebilling-117` from b8e6e686c0. uac-r2 CONFIRMED the five delete-list points and added: an age floor (modifiedon margin), the assignment-delete cascade direction check, the Restrict check (§15) and rate-card evidence (dev still has the three RemoveLink core lookups; 085 stopped reading them). Scope also deletes orphan assignment rows (uac-r2 design §14). Next: review (2 Opus passes, tenant isolation), then uac-r2 review of branch + SHA before merge. 096 and 121 stay gated.
 - **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
 - `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
 - **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
