@@ -4,7 +4,7 @@
     <title>The nightly D-170 close reads every not-in-force policy (paged) and reports a truncated read, instead of silently stopping at 5,000 (DI-162)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF Signals services (.cs) on a nightly job path.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -53,4 +53,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree; PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-23: PR #3011 merged to master (33d7c6a6ad) after an independent Opus review (PASS) and a main-session re-check of the fix round. The nightly D-170 close and the enabled-policies read both page Policies by id cursor (shared ReadPolicyPagesAsync); a truncated or failed read is logged and counted as a PolicyFailure, so the job fails loudly (D-78) instead of silently stopping at 5,000. D-61, D-120 and D-170 semantics unchanged. Publish delta +2,610 B. The only red CI check was the known office-scope 20-minute cap (DI-49 #1718). Issue #2982 closed by the merge; ebilling-r1 (ISS-044) told the SHA. Follow-up DI-164 #3014 (one Signal query per not-in-force policy). Notes: notes/task-204-notes.md on the task branch.</completion>
 </task>

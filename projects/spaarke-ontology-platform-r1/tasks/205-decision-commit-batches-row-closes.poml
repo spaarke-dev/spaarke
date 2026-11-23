@@ -4,7 +4,7 @@
     <title>A row decision closes its items in batches: one Signal read per page, one access check per subject record, one matter read per commit, bounded-parallel closes (DI-146)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the core decision commit write path (.cs) in BFF Signals; concurrency and per-item safety outcomes.</rigor-reason>
     <model-tier>opus</model-tier>
