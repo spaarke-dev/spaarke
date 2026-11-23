@@ -10,6 +10,28 @@
 
 ## Open (in priority order)
 
+### ISS-038 — Handler upgrade mode (`provisionedOn`) is unusable
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before any upgrade must run H2a's drift check or H0's compatibility check (today every upgrade runs in fresh mode, as ACME's did) |
+| **Filed** | 2026-11-23 |
+| **Source** | Adversarial review of the ISS-031 fix (#3017) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3018 |
+
+**Description**
+
+`provisionedOn` switches H0/H2a/H4/H4b to upgrade mode. H0 then requires `currentBffVersion`, `currentSolutionVersion`,
+`targetBffVersion` and `targetSolutionVersion` (else Resumable `upgrade-compat-missing-versions`, and intake cannot change
+after creation); the skill sends none. Even with them, `version-compat-matrix.json` has one cell (`1.0.0-net10|S2026.08`)
+while H13 records an H9 build id and `"<UniqueName> Managed x.y.z"`, so every real pair is Red. H2a's drift check counts
+every what-if Modify/Deploy/Unsupported as drift and has never run on a real stamp, so it would likely quarantine.
+
+**Fix**: one version vocabulary for H13 / matrix / H0 inputs and a populated matrix; the skill derives current + target
+versions; a what-if dry run against ACME to decide which change kinds are drift. Until then #3017 acknowledges an existing
+stamp with `upgradeOfProvisionedOn` and never sends `provisionedOn`.
+
 ### ISS-037 — H12b never seeded the Worklist, Decision Records, Reconciliation and Compose workspaces
 
 | Field | Value |
@@ -36,7 +58,7 @@ Reconciliation were seeded on dev by standalone `scripts/seed-*-workspace-layout
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | PR #3012 open (2026-11-23): schema `buildId` + parity test + skill Step 1.0/4.0 send it; awaiting CI + owner merge |
 | **Urgency** | before the next upgrade run that must not move the BFF |
 | **Filed** | 2026-11-23 |
 | **Source** | ACME upgrade run `3b6f7b65` (2026-11-20): `buildId = 2026.10.16-2` was added to the POST outside the schema-valid intake — a recorded deviation |
@@ -59,7 +81,7 @@ intake step; add a test that every catalog key has a schema property or is liste
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | PR #3013 open (2026-11-23): `RecordFailureGate` tags markers, `MarkPhaseSucceeded` clears them, H13 records its own success; awaiting CI + owner merge |
 | **Urgency** | before any tooling reads `gateStates` (fleet view, provisioning web UI) |
 | **Filed** | 2026-11-23 |
 | **Source** | ACME upgrade run `3b6f7b65` ended `Completed` with five `Pending` gates and H13 in `failedHandlers` |
@@ -200,7 +222,7 @@ Raise the default `ImportTimeout` to at least 120 min. On a timeout, record the 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | PR #3017 open (2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. Merge after #3012 (add the key to its allow-list); awaiting CI + owner merge |
 | **Urgency** | now (every upgrade of an existing stamp) |
 | **Filed** | 2026-11-20 |
 | **Source** | ACME upgrade to SpaarkeMaster 1.3.2.0: the first `POST /api/runs` returned 400 `registry-setup-status-not-in-progress` |
@@ -234,7 +256,7 @@ on the server.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | PR #3015 open (2026-11-23): an unavailable name that exists in the stamp RG passes as OWNED (H2a rule); awaiting CI + owner merge |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-20 |
 | **Source** | ACME upgrade prechecks (skill Step 1e-ter), 2026-11-20 |
