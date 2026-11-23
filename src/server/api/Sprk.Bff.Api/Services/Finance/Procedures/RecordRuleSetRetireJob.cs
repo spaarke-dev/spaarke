@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Configuration;
 
 namespace Sprk.Bff.Api.Services.Finance.Procedures;
 
@@ -17,6 +19,9 @@ namespace Sprk.Bff.Api.Services.Finance.Procedures;
 /// <para><b>Report only by default.</b> The job writes only when <see cref="ApplyKey"/> is <c>true</c> (App Service setting
 /// <c>RecordRuleSetRetireSweep__Apply</c>; absent or unparseable = report only), as <c>CommunicationThreadFilingSweepJob</c>. A report-only run
 /// counts what it would do and writes nothing. Task 079 switches it on with the owner's OK.</para>
+/// <para><b>The eBilling kill switch</b> (ADR-018: the same flag in endpoints and background work), read by the job itself first, as
+/// <c>EligibleApproverRefreshJob</c> does: with <c>Ebilling:Enabled</c> false the run reads and writes nothing, whatever <see cref="ApplyKey"/>
+/// says, and writes its heartbeat with <c>skippedReason=ebilling-disabled</c> and a successful result (the host alone sets <c>Skipped</c>).</para>
 /// <para><b>Never</b>: a delete of anything but an orphan assignment row; an Assign, an owner or creator-person write, or a lookup write; a policy
 /// version write; a set with a Procedure, a ClientDefault or Firm set, a set or row with any core lookup; any request against
 /// <c>sprk_procedure</c>, <c>sprk_procedureversion</c>, <c>sprk_storedfile</c>, <c>sprk_ratecard</c>, <c>sprk_ratecardrate</c>, documents or
@@ -61,6 +66,9 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
     internal const int DefaultMaxPages = 10;
     internal const int DefaultMinAgeMinutes = 15;
 
+    /// <summary>The heartbeat's skip reason when <c>Ebilling:Enabled</c> is false (as <c>EligibleApproverRefreshJob</c>).</summary>
+    internal const string SkippedEbillingDisabled = "ebilling-disabled";
+
     internal const string StatusOk = "ok";
     internal const string StatusPartial = "partial";
     internal const string StatusError = "error";
@@ -71,17 +79,20 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
     private static readonly JsonSerializerOptions ResultJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IOptions<EbillingOptions> _ebilling;
     private readonly IConfiguration _configuration;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RecordRuleSetRetireJob> _logger;
 
     public RecordRuleSetRetireJob(
         IServiceScopeFactory scopeFactory,
+        IOptions<EbillingOptions> ebilling,
         IConfiguration configuration,
         TimeProvider timeProvider,
         ILogger<RecordRuleSetRetireJob> logger)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -109,7 +120,9 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
         ArgumentNullException.ThrowIfNull(context);
 
         var started = _timeProvider.GetTimestamp();
-        var apply = bool.TryParse(_configuration[ApplyKey], out var a) && a;
+        // ADR-018: the kill switch first. Off = no read and no write, whatever Apply says.
+        var skippedReason = _ebilling.Value.Enabled ? null : SkippedEbillingDisabled;
+        var apply = skippedReason is null && bool.TryParse(_configuration[ApplyKey], out var a) && a;
         var pageSize = Math.Min(PositiveInt(_configuration[PageSizeKey], DefaultPageSize), MaxPageSize);
         var maxPages = PositiveInt(_configuration[MaxPagesKey], DefaultMaxPages);
         var minAgeMinutes = PositiveInt(_configuration[MinAgeMinutesKey], DefaultMinAgeMinutes);
@@ -119,41 +132,44 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
         RuleSetService.UnlinkedRecordSetRetireResult? sets = null;
         ProcedureAssignmentService.OrphanAssignmentDeleteResult? assignments = null;
 
-        try
+        if (skippedReason is null)
         {
-            using var scope = _scopeFactory.CreateScope();
-            var ruleSets = scope.ServiceProvider.GetRequiredService<RuleSetService>();
-            var assignmentService = scope.ServiceProvider.GetRequiredService<ProcedureAssignmentService>();
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var ruleSets = scope.ServiceProvider.GetRequiredService<RuleSetService>();
+                var assignmentService = scope.ServiceProvider.GetRequiredService<ProcedureAssignmentService>();
 
-            sets = await ruleSets.RetireUnlinkedRecordSetsAsync(apply, modifiedBefore, pageSize, maxPages, cancellationToken)
-                .ConfigureAwait(false);
-            assignments = await assignmentService.DeleteOrphanAssignmentsAsync(apply, modifiedBefore, pageSize, maxPages, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            status = StatusCancelled;
-            problems.Add("Cancelled before the run finished.");
-        }
-        // A scheduled job's last line of defence: record the failure, never let it escape unrecorded.
-        catch (Exception ex)
-        {
-            status = StatusError;
-            problems.Add(ex.Message);
-            _logger.LogError(ex, "{Prefix} Run failed. correlationId={CorrelationId}", LogPrefix, context.CorrelationId);
-        }
-
-        if (status == StatusOk)
-        {
-            // ADR-003 for a writer: a page that could not be read is a FAILED run, never "nothing to do".
-            if (sets!.ReadFailed || assignments!.ReadFailed)
+                sets = await ruleSets.RetireUnlinkedRecordSetsAsync(apply, modifiedBefore, pageSize, maxPages, cancellationToken)
+                    .ConfigureAwait(false);
+                assignments = await assignmentService.DeleteOrphanAssignmentsAsync(apply, modifiedBefore, pageSize, maxPages, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                status = StatusCancelled;
+                problems.Add("Cancelled before the run finished.");
+            }
+            // A scheduled job's last line of defence: record the failure, never let it escape unrecorded.
+            catch (Exception ex)
             {
                 status = StatusError;
-                problems.Add("A page of the selection could not be read; the rows after it were not examined.");
+                problems.Add(ex.Message);
+                _logger.LogError(ex, "{Prefix} Run failed. correlationId={CorrelationId}", LogPrefix, context.CorrelationId);
             }
-            else if (sets.Faulted > 0 || assignments.Faulted > 0)
+
+            if (status == StatusOk)
             {
-                status = StatusPartial;
+                // ADR-003 for a writer: a page that could not be read is a FAILED run, never "nothing to do".
+                if (sets!.ReadFailed || assignments!.ReadFailed)
+                {
+                    status = StatusError;
+                    problems.Add("A page of the selection could not be read; the rows after it were not examined.");
+                }
+                else if (sets.Faulted > 0 || assignments.Faulted > 0)
+                {
+                    status = StatusPartial;
+                }
             }
         }
 
@@ -163,16 +179,16 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
             : !apply && ((sets?.Selected ?? 0) > 0 || (assignments?.Selected ?? 0) > 0) ? LogLevel.Warning
             : LogLevel.Information;
 
-        // THE HEARTBEAT (ADR-036 A1 rule 5): one line per run, with nothing to do as well.
+        // THE HEARTBEAT (ADR-036 A1 rule 5): one line per run, with nothing to do (or the kill switch off) as well.
         _logger.Log(
             level,
-            "{Prefix} heartbeat status={Status} mode={Mode} apply={Apply} setsSelected={SetsSelected} setsRetired={SetsRetired} "
-            + "setsSkipped={SetsSkipped} setsFaulted={SetsFaulted} policiesSwitchedOff={PoliciesSwitchedOff} setsMoreRemain={SetsMoreRemain} "
-            + "assignmentsSelected={AssignmentsSelected} assignmentsDeleted={AssignmentsDeleted} assignmentsSkipped={AssignmentsSkipped} "
-            + "assignmentsFaulted={AssignmentsFaulted} assignmentsMoreRemain={AssignmentsMoreRemain} modifiedBefore={ModifiedBefore:o} "
-            + "attempt={Attempt} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
-            LogPrefix, status, mode, apply, sets?.Selected ?? 0, sets?.Retired ?? 0, sets?.Skipped ?? 0, sets?.Faulted ?? 0,
-            sets?.PoliciesSwitchedOff ?? 0, sets?.MoreRemain ?? false, assignments?.Selected ?? 0, assignments?.Deleted ?? 0,
+            "{Prefix} heartbeat status={Status} skippedReason={SkippedReason} mode={Mode} apply={Apply} setsSelected={SetsSelected} "
+            + "setsRetired={SetsRetired} setsSkipped={SetsSkipped} setsFaulted={SetsFaulted} policiesSwitchedOff={PoliciesSwitchedOff} "
+            + "setsMoreRemain={SetsMoreRemain} assignmentsSelected={AssignmentsSelected} assignmentsDeleted={AssignmentsDeleted} "
+            + "assignmentsSkipped={AssignmentsSkipped} assignmentsFaulted={AssignmentsFaulted} assignmentsMoreRemain={AssignmentsMoreRemain} "
+            + "modifiedBefore={ModifiedBefore:o} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
+            LogPrefix, status, skippedReason ?? "no", mode, apply, sets?.Selected ?? 0, sets?.Retired ?? 0, sets?.Skipped ?? 0,
+            sets?.Faulted ?? 0, sets?.PoliciesSwitchedOff ?? 0, sets?.MoreRemain ?? false, assignments?.Selected ?? 0, assignments?.Deleted ?? 0,
             assignments?.Skipped ?? 0, assignments?.Faulted ?? 0, assignments?.MoreRemain ?? false, modifiedBefore, context.Attempt,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
@@ -185,6 +201,7 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
                 new
                 {
                     status,
+                    skippedReason,
                     mode,
                     apply,
                     attempt = context.Attempt,

@@ -7,12 +7,14 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
@@ -47,6 +49,9 @@ public sealed class RecordRuleSetRetireJobTests
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly Dictionary<string, string?> _settings = new();
     private readonly List<(LogLevel Level, string Message)> _logs = [];
+
+    /// <summary>The eBilling kill switch (<c>Ebilling:Enabled</c>) the job is built with: on, unless a test switches it off.</summary>
+    private bool _ebillingEnabled = true;
 
     private RuleSetServiceTests.Harness H => _world.H;
 
@@ -126,18 +131,25 @@ public sealed class RecordRuleSetRetireJobTests
         services.AddScoped(_ => H.Service());
         services.AddScoped(_ => _world.Service());
         var provider = services.BuildServiceProvider();
-        return new RecordRuleSetRetireJob(provider.GetRequiredService<IServiceScopeFactory>(), configuration, _clock, new ListLogger(_logs));
+        return new RecordRuleSetRetireJob(
+            provider.GetRequiredService<IServiceScopeFactory>(), Options.Create(new EbillingOptions { Enabled = _ebillingEnabled }), configuration, _clock,
+            new ListLogger(_logs));
     }
 
     private async Task<JsonElement> RunAsync(bool? apply = true)
     {
+        var result = await RunJobAsync(apply);
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        return doc.RootElement.Clone();
+    }
+
+    private async Task<JobRunResult> RunJobAsync(bool? apply = true)
+    {
         // Only the run's own requests are recorded (the seeding above sent none).
         H.Entities.Invocations.Clear();
         H.Queries.Clear();
-        var result = await NewJob(apply).ExecuteAsync(
+        return await NewJob(apply).ExecuteAsync(
             new JobRunContext(Guid.NewGuid(), "corr-117", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()), CancellationToken.None);
-        using var doc = JsonDocument.Parse(result.ResultJson!);
-        return doc.RootElement.Clone();
     }
 
     /// <summary>
@@ -367,6 +379,30 @@ public sealed class RecordRuleSetRetireJobTests
         await RunAsync(apply: null);
 
         WriteCount.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "117: with the eBilling kill switch off and Apply on, the run sends no request at all and heartbeats ebilling-disabled")]
+    public async Task EbillingDisabled_WithApplyOn_SendsNoRequest_AndHeartbeatsTheSkip()
+    {
+        var set = Set();
+        var rule = Rule(set, "BRR-1");
+        var orphan = AssignmentRow();
+        _ebillingEnabled = false;
+
+        var result = await RunJobAsync(apply: true);
+
+        H.Entities.Invocations.Should().BeEmpty("ADR-018: with eBilling off the job reads nothing and writes nothing");
+        H.Queries.Should().BeEmpty();
+        Status(set).Should().Be(RuleSetService.RuleSetPublished);
+        Enabled(rule.Policy).Should().BeTrue();
+        Exists(Assignment, orphan).Should().BeTrue();
+        result.Success.Should().BeTrue("a switched-off run is not a failure");
+        result.Skipped.Should().BeFalse("only the host sets Skipped (scheduled-jobs pattern)");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("skippedReason").GetString().Should().Be("ebilling-disabled");
+        doc.RootElement.GetProperty("apply").GetBoolean().Should().BeFalse();
+        _logs.Should().ContainSingle(l => l.Message.Contains("heartbeat"))
+            .Which.Message.Should().Contain("skippedReason=ebilling-disabled").And.Contain("setsSelected=0");
     }
 
     // ── Age floor ────────────────────────────────────────────────────────────────────────────────────────────────────
