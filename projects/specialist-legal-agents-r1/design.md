@@ -1,6 +1,12 @@
 # Specialist Legal Agents — Program Design (`specialist-legal-agents-r1`)
 
-> **Status:** Draft v0.5, umbrella program design. v0.5 (2026-11-23) adds §0 (the model in one page: seven components, how they stack, tiers, the pattern for every persona) and §3.11 (Word, Chat, Cowork and Home after Ignite). **Gate A0 (alignment with spaarke-legal-ai-accelerator-r1, §10.1): accelerator review received and folded in on 2026-11-23; owner decisions D-A11, D-A16 and the Q7 catalogue owner still pending.** v0.2 (2026-11-23) added §3.9 (function vs persona framing, D-A12) and Phase 0 test G5. v0.3 (2026-11-23) adds §3.10 (Microsoft's legal skills, D-A13), §10.1 (accelerator alignment, D-A14) and Phase 0 test G6. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
+> **Status:** Draft v0.6, umbrella program design. **v0.6 (2026-11-23)** adds:
+> - §0.5, the Ask/Do/Practice user model and agent-creation rule, from Copilot's synopsis with corrections;
+> - §3.12, the agent build paths, including the code we already have and the verdict on "Spaarke AI";
+> - the G8 result (an agent cannot use the tenant connector), with G8-P2, G9 and G10;
+> - T-7 (auth by build path) and a revised D-A1.
+>
+> Earlier: v0.5. v0.5 (2026-11-23) adds §0 (the model in one page: seven components, how they stack, tiers, the pattern for every persona) and §3.11 (Word, Chat, Cowork and Home after Ignite). **Gate A0 (alignment with spaarke-legal-ai-accelerator-r1, §10.1): accelerator review received and folded in on 2026-11-23; owner decisions D-A11, D-A16 and the Q7 catalogue owner still pending.** v0.2 (2026-11-23) added §3.9 (function vs persona framing, D-A12) and Phase 0 test G5. v0.3 (2026-11-23) adds §3.10 (Microsoft's legal skills, D-A13), §10.1 (accelerator alignment, D-A14) and Phase 0 test G6. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
 > **Date:** 2026-11-23
 > **Author:** Ralph Schroeder + Claude Code
 > **Source:** [notes/source/design-synopsis-2026-11-22.md](notes/source/design-synopsis-2026-11-22.md), the owner's synopsis of 22 Nov 2026 (verbatim copy). This document keeps the synopsis's design. It changes four things: the primitives table is corrected against code (§6), live Copilot evidence is folded in (§7), the Phase 0 scope is narrowed to what that evidence leaves open (§8), and coordination points and ADR tensions are added (§10, §11).
@@ -375,6 +381,36 @@ So the persona agent may only be able to *recommend* the Microsoft skill. Phase 
 
 These decide where each function's procedure and engine can run.
 
+### 3.12 Agent build paths after G8 (v0.6, 2026-11-23)
+
+**First, Ask and Do need no agent.**
+- For Chat and Cowork the build artifacts are **skills** (ours, plus Microsoft's 20 legal skills used as they are) and **connector tools**, shipped as a **plugin package** (mcp-r1 task 040: skills only, with the one tenant connector).
+- Copilot Studio and Agent Builder are agent builders, so they have no role in Ask or Do.
+- (Owner question, 2026-11-23: "if we are building Ask/Do agents … Copilot Studio seems to be the right build path". The answer is no agent at all. The package build is the path.)
+
+**Practice agents, the build options:**
+
+| Path | How it reaches Spaarke MCP | Who orchestrates | Lifecycle and distribution | Auth (T-7) | Cost | Fit |
+|---|---|---|---|---|---|---|
+| **Agent Builder** | It can't (G8 ❌) | Copilot | Per-user, hand-built | — | Licence | Prototypes only |
+| **Copilot Studio** | An MCP tool on the agent (its own connection) | Copilot Studio (generative orchestration, topics, flows) | Built in the portal. Agents are **Dataverse solution components**, so they can travel in Spaarke's solutions. Hard to generate from one persona definition | (b): check in G10 | Check billing (Copilot credits?) | Comparison point (G10). Firm-authored agents (D-A6) |
+| **Coded declarative agent** (manifest + MCP action, in the package) | Its own MCP action, using the existing OAuth registration | Copilot, under our instructions | **Generated from the persona definition, versioned in the repo**, packaged and admin-deployed | (a): covered by A10 | Licence | **The default Practice vehicle** (D-A1). Test G8-P2 |
+| **Spaarke runtime agent** (custom engine: Spaarke reasons, Copilot or Teams is the chat window) | Direct, in process or over MCP, plus **Work IQ** for M365 context | **Spaarke**: the profile is enforced in code, with state, gates and model routing | Hosting to choose (ADR-052; #1027) | (c): new amendment | Our Azure OpenAI spend + Work IQ usage | T3 governed work, **if** G9 shows it can appear where attorneys work. Cannot call Microsoft's legal skills |
+
+**Owner question 2 (2026-11-23): "Practice agents may use the Copilot runtime as a declarative agent, or we could build our own runtime."** Correct. Both paths reach the same MCP server and the same BFF functions. The functions (engines, golden sets) are written once; only the orchestrator differs. Copilot Studio is a third option, judged in G10.
+
+**What we have already built** `[Code]` (master unless noted; inventory 2026-11-23):
+
+| Piece | Where | What it is | Reuse |
+|---|---|---|---|
+| **"Spaarke AI" declarative agent** (tenant D1) | `src/solutions/CopilotAgent/`: `declarativeAgent.json` (schema v1.8), app manifest 1.30 (v1.1.0), `spaarke-api-plugin.json` (v2.4, **OpenAPI** runtime, `OAuthPluginVault`), `spaarke-bff-openapi.yaml`, 9 adaptive cards | A general "ask Spaarke" agent. It has about 19 REST functions on the BFF: search, documents, summarise, list/execute playbooks and run status, events, portfolio, briefing, matter AI/finance summaries | **The harness, yes. The agent, no.** It proves the coded-DA packaging and the OAuth vault. But under the agent-creation rule (§0.5) a general data agent is an **Ask anti-pattern**: its functions belong on the connector as MCP tools (mcp-r1). Its OpenAPI spec is a tool-parity checklist for MCP. Recommend: keep the code; retire the tenant registration once MCP covers its functions (copilot-platform-coordination D1) |
+| **Custom-engine / bot entry** | `Sprk.Bff.Api.csproj:82` `Microsoft.Agents.Hosting.AspNetCore` 1.0.1 (in use); `Api/Agent/AgentEndpoints.cs:35-80` `POST /api/agent/message`, `/api/agent/run-playbook`; `Api/Agent/SpaarkeAgentHandler.cs:21` (`ActivityHandler`); `AgentTokenService` (Graph + Dataverse OBO for the Copilot agent, ADR-028 registry); Azure Bot `spaarke-bot-dev` (tenant A3) | The April activity-protocol entry point. A Copilot or Teams message reaches a BFF handler that can run a playbook | **The seed of a Spaarke runtime agent (G9).** Whether it is still live, and how it surfaces after Ignite, is G9's question. `Microsoft.Agents.AI` (the agent framework) was removed (#1027); the hosting package remains |
+| **The Spaarke runtime itself** | `AiModule.cs:147-155` `IChatClient` with function invocation; `SprkChatAgent` / `SprkChatAgentFactory.cs:777-816`; `SideEffectGateAIFunction.cs:107` + `PendingPlanManager.RequiresConfirmation` + `ConfirmationPolicyEngine`; `SessionLedger`; `SessionDispatchOrchestrator`, `AdvisoryCapabilityRunner`; `ChatEndpoints.cs:94` (SSE multi-step tool loop with confirm-suspend/resume); `AnalysisOrchestrationService` + JPS playbooks; NDA review memo (`ReviewMemoAssembler`, `NdaStandardEndpoints`) | A governed multi-step agent loop: tools, confirmation gate, budget, prompt shield, ledger, playbooks | **This is the Practice runtime's engine.** A runtime agent (G9) puts a Copilot/Teams front door on it. It does not build a new orchestrator. The agent-framework assessment (2026-06-03): S2 playbooks DON'T ADOPT a framework swap; S5B multi-day human-in-the-loop legal workflow is the one ADOPT candidate |
+| **MCP server** | **mcp-r1 branch only** (`Api/Mcp/`, `/mcp/legal-operations`, `McpToolAuthorization.cs` enforcing A10, `ModelContextProtocol.AspNetCore` 2.3.1) | The one capability layer (§0.5) | Every agent path's tool surface |
+| **Work IQ seam** | `PublicContracts/ContextEnvelope.cs:90,284`, `IOrganizationalContextProvider` ("Work IQ candidate") | An empty interface; no provider wired. No MCP client code in `src` | Where a Work IQ provider plugs in (G9) |
+
+**What this means:** "build our own runtime" mostly means **expose the runtime we have** through the existing activity entry (`/api/agent/message`), with Work IQ behind the existing seam. The open questions are surfacing and auth (G9, T-7(c)), not orchestration.
+
 ## 4. Program structure (OD-3)
 
 This folder is the umbrella. It holds this design, the decision log, the coordination register and the Phase 0 go/no-go record. It carries no implementation tasks of its own. Each phase is a child project registered under the same Epic. A child starts only after the previous gate passes.
@@ -506,12 +542,38 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
   - together with S-2 (= mcp-r1 T10), whether rule R2 (packages carry skills and agents only) holds.
 - *Run early:* the owner approved it on 2026-11-23 ("Yes, run G8 early"). Test kit, steps and results: [phase0/g8/README.md](phase0/g8/README.md).
 - *Before the test agent is created:* send its inventory row (owner project, removal plan, removal date) to copilot-platform-coordination (R4, §10).
-- **Interim result (2026-11-23, Agent Builder route): ❌.**
-  - The agent cannot see the tenant's Spaarke MCP tools, although the user is connected and plain Chat reaches them.
-  - Agent Builder knowledge shows "No connectors available".
-  - Skills added to the agent don't help.
-  - So persona agents reach our tools only through their own (agent-private) MCP action. P1 (packaged) is still to run.
-  - R1 may need refining to "one tenant-wide connector per URL" (proposed; see [phase0/g8/README.md](phase0/g8/README.md)).
+- **Result (2026-11-23): ❌ an agent cannot use the tenant connector.** Detail is in [phase0/g8/README.md](phase0/g8/README.md).
+  - A1 / A2 / owner extra:
+    - The Agent Builder agent sees no Spaarke MCP tools, although the user is connected and plain Chat calls them (`spike_whoami` ✅).
+    - Knowledge › Copilot connectors shows "No connectors available".
+    - Skills inside the agent don't bring the tools in.
+    - App Insights shows `tools/list` only, with no `tools/call`.
+  - **P1 dropped:** its `GraphConnectors` capability is the same knowledge setting A2 showed empty.
+  - **Copilot Studio** adds an MCP *tool* to the agent: that is the agent's own tool, not the tenant connector.
+  - **Conclusion:** agents are **direct MCP clients**. The tenant connector is the horizontal path for Chat, Cowork and Word (§0.5).
+- **G8-P2, next test, not created; the owner decides after v0.6** (owner via copilot-platform-coordination, 2026-11-23).
+  - What it is: the same coded package, with its **own MCP action** on `/mcp/legal-operations` (plugin manifest v2.4, `RemoteMCPServer`, the existing OAuth registration A1).
+  - What it shows:
+    - whether a coded declarative agent runs our tools in Chat, Word and Teams;
+    - whether each call runs **once**: no double-fire with C1, because the agent cannot see C1.
+  - That second point decides coordination's R1′ ("one tenant-wide connector per URL; agent-private actions allowed").
+  - R4 row before any upload.
+
+**G9: can a Spaarke runtime agent appear where attorneys work, and can it use Work IQ?** Desk research first (researcher agent); a build only if the research says the path is viable. Same as the Copilot synopsis's experiments D, E and F.
+- *Questions:*
+  1. Current pro-code agent models for Microsoft 365 Copilot after Ignite: custom engine agents (M365 Agents SDK), Agent 365, and Foundry-hosted agents published to M365. GA or preview.
+  2. Does such an agent appear in Chat's agent list, in Teams, in **Word**, in **Cowork**? With SSO, admin deployment and handoff from Chat or to Cowork?
+  3. **Work IQ** (A2A, MCP, REST; usage-billed; delegated-only `WorkIQAgent.Ask`):
+     - Which parts are GA? (Learn 2026-11: the standard MCP integration is GA; `retrieve` and the Foundry tool are preview.)
+     - Can the BFF call it OBO on the attorney's behalf? (That needs a T-7(c) amendment.)
+     - Do citations and security trimming survive?
+     - What are the latency and cost?
+  4. Where would the runtime live (ADR-052 placement, BFF hygiene, #1027 / the agent-framework fit assessment), given that the BFF already orchestrates playbooks (§3.12)?
+- *Decides:* D-A1, the T3 half; and whether D-A7 "server-side profile" has a native front door.
+
+**G10 (optional): Copilot Studio comparison.** A minimal Studio agent with Spaarke MCP added as an MCP tool, calling `spike_whoami`.
+- *Measure:* tool catalogue, auth (can the connection use the Spaarke-tenant authority, PKCE and the dedicated client? T-7(b)), identity claims, approval cards, latency, ALM (Studio agents are Dataverse solution components) and billing.
+- *Run it only* if G8-P2 or G9 leaves a gap that Studio could fill. R4 row first.
 
 **Code inventory follow-ups (no spike; Phase 0 desk work):**
 - **I-1 Tool surface:** which surface the profile governs (MCP catalog vs `IAnalysisToolHandler` vs `IAiToolHandler`), and whether the chat Confirmation Gate (`SideEffectGateAIFunction`) also applies on the MCP path.
@@ -609,12 +671,13 @@ The paths are proposals. The human chooses the path for each tension before the 
 | **T-4** | **ADR-039**: one dispatch protocol, closed catalogs, "the LLM never invokes an unlisted tool"; the Text path is Spaarke's one bounded agent turn | Under Path B, Copilot's orchestrator is the probabilistic decider over our MCP catalog, and a profile "whitelists tools" | **C**: profiles may only **narrow** the closed catalog (never add); MCP tools stay cataloged; reuse mcp-r1's treatment of Copilot-as-caller | The ratchet is a narrowing operation by design, so it fits the closed catalog | Per-profile tool definitions: an open catalog |
 | T-5 | **ADR-013** (extend the BFF), **ADR-004/036/052** (background work), **ADR-002** (no plugins; one owner per invariant) | None expected: the Coach is a Service Bus job; the ratchet invariant is owned by the BFF profile write path | **C** | Recorded so the specs cite it | — |
 | T-6 | Not an ADR: the **#1027** removal of `Microsoft.Agents.AI` | Synopsis: backend orchestration and supervision on Microsoft Agent Framework | Decide in Phase 4 with the fit assessment; Phases 0–3 do not need it | — | — |
+| **T-7** | **ADR-028 A10** (on mcp-r1's branch, owner-approved 2026-11-05, not yet on master): the Copilot connector plane. It requires OAuth pinned to the Spaarke tenant, `user_impersonation`, a dedicated connector client, `systemuser` callers only, and OBO as the caller | The agent build paths in §3.12 (v0.6) | **By path:**<br>(a) **Coded declarative agent with its own MCP action:** **C**. A10 names declarative agents explicitly ("a federated connector, a plugin package (`agentConnectors`) or a declarative agent"). Same dedicated client and OAuth registration.<br>(b) **Copilot Studio MCP tool:** **C** if its MCP connection can use the Spaarke-tenant authority, PKCE and the dedicated client (G10 checks). Otherwise **B**, an A10 follow-up.<br>(c) **Spaarke runtime agent:** **B**, a new amendment. It is a new client plane (the channel's SSO token to the runtime), plus **OBO to Work IQ** (`WorkIQAgent.Ask`, a new downstream; Work IQ is **delegated-only**). Written when G9 says the path is viable.<br>(d) **Background or autonomous Practice runs:** unchanged (T-1, T-2). Work IQ has no app-only mode, so a background run cannot use it. | **Owner principle (2026-11-23):** "if Microsoft requires a certain auth approach and it is safe, it is OK to adjust" the ADRs. So when a Microsoft-mandated client shape is safe, amend through **path B**, with security review and the owner's sign-off (root CLAUDE.md §6.5). Never work around it silently | A Spaarke-side proxy that hides Microsoft's auth shape: it adds a second authorization model (A10 already rejected this) |
 
 ## 12. Open decisions
 
 | ID | Decision | Leaning | Decided by |
 |---|---|---|---|
-| D-A1 | Declarative agent or custom engine agent as front door | Declarative agent (needed for `@`, E5); custom engine only on a failed requirement or eval | Synopsis; confirm after G1 |
+| **D-A1** | **The Practice front door: coded declarative agent, Spaarke runtime agent, or both** (revised v0.6; §0.5, §3.12) | **Both, by tier.** The default is a **coded declarative agent with its own MCP action**: within the licence, alongside Microsoft's legal skills, generated from the persona definition, covered by A10. Add a **Spaarke runtime agent** for T3 governed work, where the profile is enforced in code, *if* G9 shows it can appear where attorneys work. Copilot Studio only if G10 shows a capability the coded agent lacks. Agent Builder is out (G8). Ask/Do need **no** agent | **Owner**, after G1, G8-P2, G9 (and G10 if run) |
 | D-A2 | Identity for chat vs background | Delegated attorney for chat (T5 ✅); background per T-1/T-2 | ADR-028 owners |
 | D-A3 | Profile storage | One versioned JSON document with indexed header fields | Phase 1 spec |
 | D-A4 | Consent and privilege for correction harvesting | Owner-scoped, matter-restricted, opt-in per matter | Counsel + owner, Phase 2 |

@@ -9,9 +9,9 @@
 | Field | Value |
 |---|---|
 | **Active work** | Writing **design.md v0.6**. Owner said 2026-11-23: "and then yes write v0.6". It folds in Copilot's Ask/Do/Practice synopsis (with corrections), the G8 result, the build paths, the existing code inventory, the "Spaarke AI" agent's usefulness and an auth-ADR review |
-| **Step** | §0.5 (Ask/Do/Practice, agent-creation rule, two-path diagram, 6 corrections, decision order) **written, uncommitted**. The synopsis was saved to `notes/source/copilot-synopsis-ask-do-practice-2026-11-23.md` (uncommitted). Waiting on a code-mapper agent (Sonnet): an inventory of the existing DA harness (`src/solutions/CopilotAgent`, `AgentTokenService`), bot/custom-engine code, the BFF orchestration runtime, the MCP server and Work IQ usage |
+| **Step** | v0.6 written and committed. Next: the owner reviews it; the owner decides on G8-P2 after v0.6 (coordination says do not create it yet) |
 | **Design version** | design.md v0.5 + G8 interim result (last commit `9c557d7e95`) |
-| **Uncommitted** | design.md §0.5; the synopsis source note; this file |
+| **Uncommitted** | none |
 
 ## Next action (exact)
 1. Read the code-mapper result.
