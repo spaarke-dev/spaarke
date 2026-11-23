@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | Writing **design.md v0.6**. Owner said 2026-11-23: "and then yes write v0.6". It folds in Copilot's Ask/Do/Practice synopsis (with corrections), the G8 result, the build paths, the existing code inventory, the "Spaarke AI" agent's usefulness and an auth-ADR review |
-| **Step** | G9 desk research DONE (phase0/g9/research.md; design §3.12, §8 G9, T-7(c), D-A1 updated). Runtime agent = optional Chat/Teams-only T3 channel; not in Word. Next: owner decides G8-P2 go and whether to pursue the T3 channel (G9 spike list) |
+| **Step** | G8-P2 package PREPPED (phase0/g8/package-p2, app id 802fd9cc-…, schema-valid, zip built + gitignored); R4 row sent to coordination. Next: owner uploads (R7 scope) and runs README § G8-P2 steps 1–7, then this session checks App Insights and records results; owner removes by 2026-11-30 |
 | **Design version** | design.md **v0.6** (commit `fc0c62c257`, pushed) |
 | **Uncommitted** | none |
 
