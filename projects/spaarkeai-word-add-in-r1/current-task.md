@@ -67,7 +67,7 @@
 
 ## Peers (SendMessage by session name)
 - `uac-r2`: dev BFF deploys, roles, review of the assign-firm route.
-- `ebilling-r1`: 095e/f/g; sends master and dev SHAs.
+- `ebilling-r1`: 095e/f/g; sends master and dev SHAs. Task 123 upload contract: we agreed to their five revisions on 2026-11-23 (503 `file_store_unavailable` with Retry-After 30; Paid counts as inactive; a 409 owner-refusal row; wider 400/404 cases; octet-stream default). The final table is `projects/ebilling-r1/notes/123-upload-contract.md` on `task/ebilling-123`; they will resend it if the reviews change anything. The pane's supporting-files choice stays unwired until 123 merges.
 - `ontology-r1`: task 189 templates route (Word Email tab).
 - `field-mapping-r1`, `provisioning-r1`: nothing open.
 
