@@ -560,7 +560,7 @@ az search index list \
 # Expected output should include: spaarke-knowledge-index-v2
 ```
 
-**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/spaarke-knowledge-index-v2.json)
+**Index Definition**: [`infrastructure/ai-search/_archive/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/_archive/spaarke-knowledge-index-v2.json)
 
 #### Index Schema
 

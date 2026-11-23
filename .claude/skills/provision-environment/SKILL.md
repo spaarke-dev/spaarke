@@ -2508,7 +2508,7 @@ handoff, and continue.
 
 ### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
 
-Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
+Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
 
 Trigger conditions (each writes a distinct postmortem):
 - `Completed` (H13 acceptance passed; sprk_setupstatus=Ready reached) — capture what worked + manual gates encountered + recommendations
