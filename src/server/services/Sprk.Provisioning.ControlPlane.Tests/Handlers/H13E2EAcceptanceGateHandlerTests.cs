@@ -346,6 +346,37 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Registry.CallCount.Should().Be(0, "registry PATCH never runs on failure");
     }
 
+    // ---------- ISS-035: a later success clears the earlier failure ----------
+
+    [Fact]
+    public async Task ISS035_FailedThenResumedAndSucceeded_ClearsItsMarkerAndLeavesFailedHandlers()
+    {
+        // First pass: extended validation fails -> the failure marker is written and (as the dispatcher's outcome
+        // applier does) H13 is recorded in FailedHandlers.
+        var repo = new FakeRepository(BuildRun(), etag: "etag-iss035");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Validator = FakeValidator.Failure(new[] { "bff-healthz" }, "500 from /healthz"));
+        var failed = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+        failed.Should().BeOfType<HandlerResult.Failure>();
+        var run = repo.LastWrittenRun!;
+        run.MarkPhaseFailed("H13", RunStatus.Failed, "[h13-extended-validation-failed] 500");
+        var markerKey = run.GateStates.Single(g => g.Value.Status == GateState.Pending && g.Value.FailureOfHandler == "H13").Key;
+
+        // Second pass (operator fixed it and resumed): everything is green now.
+        var resumedRepo = new FakeRepository(run, etag: "etag-iss035-2");
+        var resumed = BuildHandler(resumedRepo, out _);
+        var result = await resumed.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var final = resumedRepo.LastWrittenRun!;
+        final.Status.Should().Be(RunStatus.Completed);
+        final.FailedHandlers.Should().NotContain("H13", "H13 succeeded, so it is no longer a failed handler");
+        final.GateStates[markerKey].Status.Should().Be(GateState.Cleared);
+        final.GateStates[markerKey].VerifierHandler.Should().Be("system:handler-succeeded");
+        final.GateStates[markerKey].VerifiedAt.Should().NotBeNull();
+        final.GateStates.Values.Should().NotContain(g => g.Status == GateState.Pending, "nothing is owed on a Completed run");
+    }
+
     // ---------- AC-4 extended validate script infra fault ----------
 
     [Fact]

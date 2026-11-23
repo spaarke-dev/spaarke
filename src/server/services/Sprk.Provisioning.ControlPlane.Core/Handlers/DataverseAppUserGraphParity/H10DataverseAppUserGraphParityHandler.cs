@@ -770,11 +770,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[$"h10-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h10-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
