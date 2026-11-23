@@ -1,6 +1,6 @@
 # Specialist Legal Agents — Program Design (`specialist-legal-agents-r1`)
 
-> **Status:** Draft v0.4, umbrella program design. **Gate A0 (alignment with spaarke-legal-ai-accelerator-r1, §10.1): accelerator review received and folded in on 2026-11-23; owner decisions D-A11, D-A16 and the Q7 catalogue owner still pending.** v0.2 (2026-11-23) added §3.9 (function vs persona framing, D-A12) and Phase 0 test G5. v0.3 (2026-11-23) adds §3.10 (Microsoft's legal skills, D-A13), §10.1 (accelerator alignment, D-A14) and Phase 0 test G6. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
+> **Status:** Draft v0.5, umbrella program design. v0.5 (2026-11-23) adds §0 (the model in one page: seven components, how they stack, tiers, the pattern for every persona) and §3.11 (Word, Chat, Cowork and Home after Ignite). **Gate A0 (alignment with spaarke-legal-ai-accelerator-r1, §10.1): accelerator review received and folded in on 2026-11-23; owner decisions D-A11, D-A16 and the Q7 catalogue owner still pending.** v0.2 (2026-11-23) added §3.9 (function vs persona framing, D-A12) and Phase 0 test G5. v0.3 (2026-11-23) adds §3.10 (Microsoft's legal skills, D-A13), §10.1 (accelerator alignment, D-A14) and Phase 0 test G6. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
 > **Date:** 2026-11-23
 > **Author:** Ralph Schroeder + Claude Code
 > **Source:** [notes/source/design-synopsis-2026-11-22.md](notes/source/design-synopsis-2026-11-22.md), the owner's synopsis of 22 Nov 2026 (verbatim copy). This document keeps the synopsis's design. It changes four things: the primitives table is corrected against code (§6), live Copilot evidence is folded in (§7), the Phase 0 scope is narrowed to what that evidence leaves open (§8), and coordination points and ADR tensions are added (§10, §11).
@@ -9,6 +9,63 @@
 > **Tags:** `[Synopsis]` taken from the source synopsis · `[Code]` checked against master on 2026-11-23 · `[Tested]` live result from `spaarkeai-mcp-bff-api-r1` Phase 0 (dev tenant, 2026-11-12 to 14) · `[Open]` owner decision · `[Verify]` Phase 0 must prove it
 
 ---
+
+## 0. The model in one page (v0.5, 2026-11-23)
+
+**The idea in one sentence.** Legal expertise is written once, as **practice content**, and turned into **functions** (one legal task each). Functions are grouped into **personas** (one per practice area) and tuned by each **attorney's profile**. All of this is delivered through **wrappers** for each Microsoft surface. From T2, it runs on a **Spaarke runtime** that adds Spaarke data, server-side engines and governance.
+
+The accelerator (spaarke-legal-ai-accelerator-r1) already does this for NDA at the individual and team tiers, with no IT and no connector. This program generalises that pattern to every practice and adds the runtime for T2/T3. The accelerator is **not finished**; it completes in parallel, and this program builds on it in two ways: on its NDA capabilities, and on its structure as the **pattern** for every other persona.
+
+### 0.1 Seven components
+
+| # | Component | What it is | NDA example | At T0/T1 (accelerator, files only) | At T2/T3 (this program) |
+|---|---|---|---|---|---|
+| 1 | **Microsoft platform** | The surfaces (Word Copilot; the Copilot app with Chat, Cowork and Home), Microsoft's orchestrator and models, the **Legal for Cowork** skills and the **Word legal plugin**, and the built-in skills | Microsoft's `review-contract`, `summarize-redlines`; Word "Review contract" | Ridden as is | Ridden as is. Spaarke never competes with a Microsoft function (§3.10) |
+| 2 | **Practice content** | The expertise for one practice area: topic catalogue, baseline positions (the legal playbook), references, eval cases, output schemas | `topics.yaml` (`nda.*`), `baseline-mutual.md`, the Bluefin Harbor evals, `review-result.schema.json` | `src/accelerators/practices/nda/`, built into files | **The same source**, also rendered as JPS Actions and Knowledge. Customer positions are mastered in Dataverse and exported back to files |
+| 3 | **Function** | One legal task: procedure + **engine** (the deterministic mechanics) + output contract + **golden set** | `nda-review`, `nda-library-review` | A Cowork skill with Python engines | The same procedure, with a **C# engine in the BFF** behind a connector tool, tested on the **same fixtures** |
+| 4 | **Persona** (archetype) | One per **practice area**: which functions (Spaarke **and** Microsoft), default positions, authority and autonomy ceiling. Role (partner, associate, paralegal) is a setting, not a separate persona | "Commercial contracts counsel" = {`nda-review`, `nda-library-review`, Microsoft `review-contract` + the attorney's playbook, Microsoft `summarize-redlines`, …} | Light: the setup's recommended skill set per role, quick cards, and an optional agent recipe | An archetype record compiled at run time. The **area agent** is its front door in Chat |
+| 5 | **Attorney profile** (instance) | One attorney's positions (playbook overrides), defaults (side, posture, jurisdiction), voice and thresholds | "Jane: usually the disclosing party, balanced posture, never accept uncapped indemnity" | `Documents/Cowork/Profile/legal-profile.md` + personal playbook files, written by `accelerator-setup` | The Dataverse master with layers L0–L4 and the ratchet (§3.2), **exported** back to the same files so T0/T1 skills keep working (round-trip: D-A15) |
+| 6 | **Delivery wrappers** | How each surface receives components 2–5 | Word playbook `.docx`; `nda-review` skill; the NDA Review agent recipe | Word playbook, Cowork skills and plugin, Agent Builder agent (advanced tiers), packaged agent (team with IT) | Plus the **area agent + Spaarke connector**, which replaces the packaged agent. All wrappers are generated by the build from one source |
+| 7 | **Spaarke runtime** | T2/T3 only: connector tools, BFF engines, profile compiler with ratchet, gates, run record, golden-set gate and tuning loop, Spaarke data (matters, SPE documents) | `spaarke_review_nda`-style tool; the deployed NDA-REVIEW Action | — | This program's main build |
+
+### 0.2 How they stack
+
+```
+ Surfaces (Microsoft)    Word Copilot            Copilot app:  Chat  ·  Cowork   (Home = the entry, §3.11)
+                              │                                  │          │
+ Wrappers (6)           Word playbook .docx           agent (front door)   skills / plugin
+                              └──────────────────┬───────────────┴──────────┘
+ Persona (4)            practice area: which functions · default positions · authority ceiling · role
+                                                 │ tuned by
+ Attorney profile (5)   positions · defaults · voice · thresholds        (L0 platform … L4 matter, ratchet)
+                                                 │ parameterises
+ Functions (3)          Spaarke functions (NDA, legal hold, IP …)   +   Microsoft Legal functions (1)
+                                                 │ built from
+ Practice content (2)   topics · baseline positions · references · eval cases · schemas
+ ───────────────────────────────────────────────────────────────────────────────────────────────
+ Spaarke runtime (7)    T2/T3 only, under the functions: connector · BFF engines · profile compiler
+                        and ratchet · gates · run record · tuning loop · matters and SPE documents
+```
+
+### 0.3 Tiers: same content, more runtime
+
+| Tier | Owner | Adds | Profile lives in | Engines run in | Governance |
+|---|---|---|---|---|---|
+| **T0 individual / T1 team** (the accelerator's four packages: individual base and advanced, team without IT and with IT) | Accelerator | Files, Cowork skills, Word playbook; Agent Builder or packaged agents in the advanced tiers | `legal-profile.md` (a file) | Python in the Cowork sandbox | Microsoft's only (approval cards; the user's own rights) |
+| **T2 firm or department** | This program + accelerator content | **The Spaarke connector**: Spaarke data, BFF engines, server-side profile, Spaarke's own gates and run record; the area agent replaces the packaged agent | Dataverse, exported to the file | BFF (C#), with Python still available in Cowork | Spaarke gates, run record, admin deployment |
+| **T3 Spaarke platform** | This program (+ ontology) | The positions master (Policy versions), layers L0–L4 with the ratchet, tuning loop with the golden-set gate, gated autonomy, matters | Dataverse (master) | BFF | Full: ratchet, tested diffs, audit, autonomy ladder |
+
+### 0.4 The pattern for every other persona
+
+A new persona (patents, trademarks, employment, …) is built the way the accelerator built NDA (accelerator design §5.1: customer layer, practice layer, core):
+1. **Practice content.** A topic catalogue, baseline positions, references, eval cases and schemas, reviewed by an attorney. Use the researched sources, and do not inherit untested Spaarke content (accelerator §7.3).
+2. **Microsoft-first inventory.** For each task: does Microsoft own it? If yes, reuse it and feed it the attorney's exported positions. If no, it becomes a Spaarke function (§3.10).
+3. **Spaarke functions.** A skill + engines + golden set. At T2 the engine also exists in the BFF, tested on the same fixtures.
+4. **The persona definition.** Its function list (Spaarke and Microsoft), default positions, authority ceiling and role presets.
+5. **Onboarding.** The setup interview (`accelerator-setup` pattern) writes the attorney profile.
+6. **Wrappers.** Generated by the build for each surface and tier from the one source, with collision, recipe and forbidden-content gates.
+
+**NDA is the reference implementation** (accelerator `practices/nda/`). Every later persona copies its shape.
 
 ## 1. Owner decisions (2026-11-23)
 
@@ -218,6 +275,61 @@ So the persona agent may only be able to *recommend* the Microsoft skill. Phase 
 
 **Differentiation that survives Microsoft's roadmap.** Per-attorney, governed positions with a ratchet and tested diffs; Spaarke matter and document data through the connector; verified deterministic output (engines checked by script); golden sets and audit; gated autonomy; and the IP practice. Generic legal reasoning, drafting from precedent and document checks are Microsoft's to own.
 
+### 3.11 Surfaces after Ignite: Word, Chat, Cowork and Home (2026-11-23)
+
+**Source:** [notes/research/copilot-surfaces-post-ignite-2026-11-23.md](notes/research/copilot-surfaces-post-ignite-2026-11-23.md). It has the full 7-column matrix and a source and tag for every cell. It is built on the accelerator's Word/Cowork research and the mcp-r1 tenant tests.
+
+**Names.** The "Microsoft 365 Copilot app" is now **Microsoft Copilot**. **Home** is a tab in that app, not a separate product: one composer that switches between **Chat** and **Cowork**, plus **Office in Copilot** (a Word, Excel or PowerPoint canvas beside the conversation). Microsoft's Ignite blog (17 Nov) calls Home GA. The rollout is still going, and some Learn pages still say Frontier. Whether our dev tenant has it is unknown.
+
+**Verdict: Chat and Cowork are partially collapsing.**
+- **Converged:**
+  - Home, one entry point.
+  - Chat recommends Cowork and hands over its context (GA). Automatic routing across modes is "coming soon".
+  - **Skills are GA in Chat and shared with Cowork** (MC1493223; Chat skills need Copilot Premium).
+  - **One plugin registry**, with admin-deployed plugins available in both.
+  - Plugin and skill governance is GA.
+- **Still separate:**
+  - **Declarative agents:** GA in Chat; Cowork can call them only in a Frontier private preview.
+  - **Billing:** Chat is within the licence; Cowork bills **credits per step**.
+  - **Memory and instructions:** separate.
+  - **Runtime:** Cowork runs our Python with `lxml`. Chat's documented script sandbox has a fixed package list **without `lxml`**.
+  - **Connectors:** connector-only plugins are not in Chat's store yet, and our package-delivered connector failed in Chat on 23 Nov (T2/T13/T14).
+
+**Key differences by surface** (✅ yes · ⚠️ partly · ❌ no · ? unknown; detail and sources in the note):
+
+| Capability | Word (desktop) | Word (web) | Chat | Cowork | Outlook / Teams |
+|---|---|---|---|---|---|
+| Microsoft legal skills | ✅ legal plugin: 3 skills + Review contract | ❌ | ? (skills GA in Chat; Legal for Cowork in Chat untested) | ✅ all 20 | ? |
+| Runs **our** `SKILL.md` | ❌ listed, never loads | ❌ | ✅ documented GA, **untested with ours** | ✅ tested | ? |
+| Runs our skill **scripts** (Python engines) | ❌ | ❌ | ⚠️ sandbox without `lxml` | ✅ tested (Python 3.12, lxml) | ❌ |
+| Hosts a **declarative agent** (our persona front door) | ✅ reads and advises; cannot edit | ✅ | ✅ | ❌ (Frontier preview) | ✅ (classic Outlook, Teams) |
+| **Spaarke connector** tools | ? | ⚠️ after a plugin pick + approval card, no widget | ⚠️ Dev Portal connector ✅; package connector ❌ today | ✅ | ❌ Outlook not offered (our test) |
+| MCP Apps **widgets** | ? | ❌ | ✅ | ✅ (later widget hides earlier) | ? |
+| **Tracked changes** | ✅ legal plugin Run Review | ⚠️ edits are "trackable" | ❌ | ? (not mentioned in any source) | ❌ |
+| Billing | Licence | Licence | Licence | **Credits per step** | Licence |
+
+**What this means for the model (§0):**
+1. **A persona needs two wrappers, not one.**
+   - In **Chat** (and Word, Teams, Outlook) its front door is the **area declarative agent**.
+   - In **Cowork**, where agents cannot run, the persona is its **set of skills + the attorney profile + custom instructions**, as the accelerator does today.
+   - Home puts both behind one composer, so the attorney sees one app. The build generates both wrappers from one persona definition.
+2. **Function procedures now reach Chat too**, because skills are shared. The Python engines are another matter: Chat's sandbox lacks `lxml`, so the accelerator's redline engine may not run there. This is one more reason the T2+ engine lives in the **BFF behind the connector**, which works from any surface that reaches the connector.
+3. **Route work by cost and depth.** Use **Chat** (within the licence) for conversational review, questions about a playbook and quick rated reviews. Use **Cowork** (credits) for packaged deliverables, batches and multi-file work. At T2+, the BFF engine can produce packaged output from Chat too, with no Cowork credits (Spaarke's Azure cost instead).
+4. **Word is content plus advice, not Spaarke execution.**
+   - Spaarke contributes the attorney's **exported positions as the Word playbook** for Microsoft's legal plugin. That plugin is desktop only and writes the tracked changes.
+   - A declarative agent can read and advise, but cannot edit.
+   - Connector tools work in Word web only after a plugin pick and an approval card.
+
+   This matches the accelerator's rule "in Word, review = Microsoft Legal + the Spaarke Word playbook".
+5. **Packaging risk is now concrete.** The package connector fails in Chat today, and duplicate registrations double-fire (T2/T14). G2 must prove Chat delivery before Phase 1 commits to the area agent in Chat.
+
+**New Phase 0 test G7 (folded into G2):**
+- Does our plugin skill run in **Chat**, with and without a Python script?
+- Do Legal for Cowork skills run in Chat and in the Office-in-Copilot Word canvas?
+- Do Cowork or canvas edits produce **tracked changes**?
+
+These decide where each function's procedure and engine can run.
+
 ## 4. Program structure (OD-3)
 
 This folder is the umbrella. It holds this design, the decision log, the coordination register and the Phase 0 go/no-go record. It carries no implementation tasks of its own. Each phase is a child project registered under the same Epic. A child starts only after the previous gate passes.
@@ -283,7 +395,7 @@ Source: `projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md` on branch `w
 | "Each user needs a Microsoft 365 Copilot licence" | **T11 ⚠️** (informal): with only Copilot Chat (Basic) the connector is not offered; with the licence and a new chat it is. | Confirmed as a precondition. It goes in licensing (D-A5) and user setup. |
 | "Chat runs execute under the attorney's own delegated identity" | **T5 ✅**: OAuth via the federated connector, then OBO as the caller (`oid` = the user; WhoAmI returned the user's own `systemuser`). **T0 ✅**: the server is stateless (no SSE; GET 405). | Delegated identity is proven, so profile resolution from `oid` is feasible. But the server is **stateless**: there is no built-in "run" or "conversation" boundary on which to compile and pin a profile "once per run" (G3). |
 | Work IQ context alongside our tools (tuning signals, cold start) | **T9 ✅**: Work IQ mail search and our tool ran in the same turn. | Composition works in Chat. Work IQ as a *scheduled* signal without the attorney present stays `[Verify]` (Phase 2, not Phase 0). |
-| "Whether one package can hold several agents"; core plus practice plugins | **T2/T14 🔲**: a package with two connectors (`/mcp/legal-operations` + `/mcp/spike-area-b`, one OAuth registration) is built and valid against the post-Ignite 1.30 schema. The owner's upload and test was under way on 2026-11-23 and is not yet recorded. Known risk: the package may not attach to the existing Dev Portal connector (a second source appears). | Partly open. T2/T14 cover connector(s) and skills; they do not cover a declarative agent in the same package, or several agents, or plugin-to-plugin dependency (G2). Record T2/T14 here when mcp-r1 records them. |
+| "Whether one package can hold several agents"; core plus practice plugins | **T2/T14, run 2026-11-23** (package with two connectors, one OAuth registration, deployed through admin center Agents > Tools > Registry). **Cowork ✅**: both connectors listed and run, the widget renders, and one sign-in connects both. But with the Dev Portal connector still on, **both** registrations answered one prompt (two widgets). **Chat ❌**: calls through the package connector failed before reaching the BFF (T13 live). Cowork shows the **plugin** name, not the connector name. | **Packaging works in Cowork and fails in Chat today.** Chat is the area agent's home, so this is a live risk for G2. Retire the duplicate Dev Portal registration before any user test. Still untested: a declarative agent in the same package, several agents, plugin-to-plugin dependency (G2). |
 | Route per area (`/mcp/{area}`) and display name on cards | **T13 🔲**: local pass only (each route lists only its own tools); live test pending. | A per-archetype or per-area route is the cleanest "which agent called" signal for G3. It depends on T13 going live. |
 | Skill naming a connector tool | **T10 🔲**: not run. | Needed for "write each procedure once, package as agent component and Cowork skill" (G2). |
 | Cowork credit cost per task | Accelerator r1 POC (2026-11-06): `nda-library-review` used **185 credits** (375/384 topic cells), against Microsoft `compare-key-terms` at 259 and `review-contract` at 449. | First real data point for D-A5. It is for a file-based skill, not the connector path. |
