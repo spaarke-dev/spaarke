@@ -43,7 +43,7 @@
      `AiSearch__AllowedIndexes__N` item).
    - H9 redeploys 2026.10.16-2 (a restart, same code).
    - The rest re-runs idempotently; H13 sets Ready and writes `sprk_solutionversion` "SpaarkeMaster Managed 1.3.2.0".
-4. **PARTLY DONE 2026-11-23**: 1.3.2.1 managed on ACME, registry row Ready and current, `/healthz` 200 on both slots, Core User on `sprk_invoicecorrection` = Read/Append/AppendTo only, run recorded in the run log §6. **Open:** the Basic User guest Console sign-in (needs a person) and Step 6e's probe items (owner OK). Original step: **Verify.** Solution 1.3.2.0 managed on ACME; registry row updated; `sprk-acme-prod-api` `/healthz`; Core User on
+4. **PARTLY DONE 2026-11-23**: 1.3.2.1 managed on ACME, registry row Ready and current, `/healthz` 200 on both slots, Core User on `sprk_invoicecorrection` = Read/Append/AppendTo only, run recorded in the run log §6. Step 6e all PASS incl. probes (2026-11-23). **Open:** the Basic User guest Console sign-in (needs a person). Original step: **Verify.** Solution 1.3.2.0 managed on ACME; registry row updated; `sprk-acme-prod-api` `/healthz`; Core User on
    `sprk_invoicecorrection` holds only Read/Append/AppendTo (`spaarkemaster-1.3.2.0.json`); a sign-in as a Basic User guest
    opens the Console. Record the run in `notes/t186-acme-run-log.md`.
 

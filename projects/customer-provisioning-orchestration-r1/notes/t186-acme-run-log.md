@@ -285,7 +285,7 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 ACME's first UPGRADE run: SpaarkeMaster managed 1.3.0.0 → **1.3.2.1**, BFF pinned to the build it already ran
 (`buildId = 2026.10.16-2`). Plan: `notes/acme-1.3.2.0-upgrade-plan.md`. Handoff: `runs/3b6f7b65-033d-400b-bba4-59541a0cc340.md`.
 Lessons (9): `provisioning-runs/acme-3b6f7b65-033d-400b-bba4-59541a0cc340/lessons-learned.md`. Result: **Completed**
-2026-11-23 14:01:48Z; registry Ready; secure-record read-only checks pass (probe items await owner OK).
+2026-11-23 14:01:48Z; registry Ready; secure-record ready (all §7 items pass, probes included).
 
 | When (UTC) | Step | Lesson / issue |
 |---|---|---|
@@ -301,3 +301,4 @@ Lessons (9): `provisioning-runs/acme-3b6f7b65-033d-400b-bba4-59541a0cc340/lesson
 | 11-23 ~13:50 | PR #2980 merged `c4d7da8d57` (35 pass / 9 skipped; actionlint download flake re-run, filed #2983); dev L2 Worker deployed, healthy | U-L08 fixed |
 | 11-23 14:01:09–14:01:49 | Resumed → **H13 ✓ in 40 s** (14 live checks, T1–T7, I2–I5, ARM keyless ×10, cost $344.62 / −13.8 %, census Isolated, mailbox) → run **Completed** | — |
 | 11-23 14:0x–14:3x | Step 6a: registry already Ready, all columns match (nothing reconciled). Step 6e read-only: items 1, 2, 3, 3b, 4, 5, 5b, 9 (Isolated), 10, 11, 12, 14, 15 PASS; 2b/6/7/8/13 not run (probe writes). Plan step 4: Core User on `sprk_invoicecorrection` = Read/Append/AppendTo only; `/healthz` 200 both slots; guest Console sign-in not run. Completed run still shows 5 `Pending` failure-marker gates | U-L09 ISS-035 #2986 |
+| 11-23 ~15:00–15:10 | Step 6e probe items with owner OK ("Yes, run probes"): 2b (40/40 tables), 6, 7 (jane/john 403 on secure project/matter/work assignment), 13 (child readable to the sharee after 22 s, revoked after 93 s), 8 (46 probes deleted, each re-read 404) — all PASS. ACME is secure-record ready on 1.3.2.1 | — |

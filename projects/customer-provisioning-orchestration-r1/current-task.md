@@ -9,14 +9,14 @@
 | Field | Value |
 |-------|-------|
 | **Task** | None in progress (T186-style live run, no POML). Last completed: ACME UPGRADE run `3b6f7b65-033d-400b-bba4-59541a0cc340` — SpaarkeMaster managed 1.3.0.0 → **1.3.2.1**, BFF pinned 2026.10.16-2, **Completed 2026-11-23 14:01:48Z**, registry Ready. Before it: task 270 (PR #2862 / #2871). |
-| **Next Action** | Run artifacts written, NOT YET COMMITTED (see Working tree). Then: (1) owner OK to run Step 6e probe items 2b/6/7/8/13 on ACME (create+delete probes, as run b6941254 did) and record them in `runs/3b6f7b65….md`; (2) a Basic User guest signs in to the Console (plan step 4, needs a person); (3) owner decision on stamp plan sizing (ISS-034 second bullet, NFR-04); (4) open defects from the run: ISS-030 #2925, ISS-031 #2926, ISS-032 #2942, ISS-035 #2986, ISS-036 #2987; (5) remove worktrees `C:\code_files\wth2b` (branch fix/h13-keyless-proof-retry, merged) and `C:\code_files\wtcp` (detached `c4d7da8d57`) ONLY via `scripts/worktree/Remove-WorktreeSafe.ps1`. Dev L2: Worker runs `c4d7da8d57` (deployed 2026-11-23 ~13:5xZ); Api production still `c39114e7c6`-era (Api not redeployed; H13 runs in the Worker). Record: run log §6; plan note steps 3–4. |
+| **Next Action** | Run recorded and committed; Step 6e ALL PASS incl. probes (2026-11-23, owner OK; 46 probes deleted, each re-read 404). Open: (2) a Basic User guest signs in to the Console (plan step 4, needs a person); (3) owner decision on stamp plan sizing (ISS-034 second bullet, NFR-04); (4) open defects from the run: ISS-030 #2925, ISS-031 #2926, ISS-032 #2942, ISS-035 #2986, ISS-036 #2987; (5) remove worktrees `C:\code_files\wth2b` (branch fix/h13-keyless-proof-retry, merged) and `C:\code_files\wtcp` (detached `c4d7da8d57`) ONLY via `scripts/worktree/Remove-WorktreeSafe.ps1`. Dev L2: Worker runs `c4d7da8d57` (deployed 2026-11-23 ~13:5xZ); Api production still `c39114e7c6`-era (Api not redeployed; H13 runs in the Worker). Record: run log §6; plan note steps 3–4. |
 | **Done 2026-11-11/13** | PR #2676 (task 267) → `df93d2029c`. ebilling #2689 → `2fc434c912`. Task 268 → PR #2766 `4b45bdf3fe`; #2725 / ISS-028 filed (19 operator scripts excuse System Administrator by name; ebilling fixing its 4 sites). SpaarkeMaster 1.3.1.0 published 2026-11-13. |
 | **Quality alert** | #1821 mutation-nightly open (2026-11-15); not started. |
-| **Working tree** | Uncommitted (2026-11-23): `runs/3b6f7b65-033d-400b-bba4-59541a0cc340.md` (new), `provisioning-runs/acme-3b6f7b65-…/lessons-learned.md` (new), `provisioning-runs/INDEX.md`, `notes/defer-issues.md` (ISS-035/036 added, ISS-034 Fixed), `notes/t186-acme-run-log.md` (§6), `notes/acme-1.3.2.0-upgrade-plan.md`, this file. |
+| **Working tree** | Clean after the probe-results commit (2026-11-23). |
 
 ## 🔔 Owner questions open
 
-1. DONE 2026-11-23: ACME migrated through upgrade run `3b6f7b65` (writer unit live at H10, H7b procedure 10 incl. S25–S28). Open from it: Step 6e probe items (owner OK), guest Console sign-in, stamp plan sizing.
+1. DONE 2026-11-23: ACME migrated through upgrade run `3b6f7b65` (writer unit live at H10, H7b procedure 10 incl. S25–S28). Open from it: guest Console sign-in, stamp plan sizing.
 2. Open from before: `version-compat-matrix.json` stale v1 cell; #2443/#2532 go-live gates (prod workforce client, CIAM BFF app T240d, routing T240c, GitHub env vars, A9 on ACME, DNS); L56 AI content for ACME; demo accounts; dev BFF secrets rotation; ISS-026.
 
 ## Follow-ups unblocked by ebilling #2689 (not started)
@@ -42,6 +42,7 @@
 - ACME BFF upgrade gated on A9 home sign-in; any BFF from master needs `Set-ExternalAccessContactSecuritySchema.ps1 -Apply` + `-Verify` first.
 - **L2 Worker with H7b procedure version 10 (task 270, S27): ordering rule LIFTED 2026-11-20** — SpaarkeMaster 1.3.2.0 is published. Worker DEPLOYED 2026-11-20 (owner go). Now every existing stamp re-runs H7b (the version salts its key) and stops there (Resumable, S27) until a NEW run imports 1.3.2.0 at H6.
 - Never remove System Administrator from the BFF identities.
+- **Before ANY stamp's next SpaarkeMaster MANAGED UPGRADE past 1.3.2.1** (ebilling-r1 task 193, 2026-11-23): run `scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1` in report mode (no `-Apply`) against the stamp. The upgrade drops `sprk_ratecard.sprk_matter` / `sprk_project` / `sprk_workassignment` and any data in them, unguarded. Script on `work/ebilling-r1` `c21bde55a2` until their next PR reaches master.
 
 ## 📋 Remaining (detail in the archive file)
 
