@@ -369,13 +369,7 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     {
         run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
-        var gateEntry = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-            Evidence = evidence,
-        };
-        run.GateStates[$"appconfig-{rejectionCode}"] = gateEntry;
+        run.RecordFailureGate($"appconfig-{rejectionCode}", HandlerIdentifier, evidence);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
