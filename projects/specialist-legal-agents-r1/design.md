@@ -465,6 +465,12 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
   - together with S-2 (= mcp-r1 T10), whether rule R2 (packages carry skills and agents only) holds.
 - *Run early:* the owner approved it on 2026-11-23 ("Yes, run G8 early"). Test kit, steps and results: [phase0/g8/README.md](phase0/g8/README.md).
 - *Before the test agent is created:* send its inventory row (owner project, removal plan, removal date) to copilot-platform-coordination (R4, §10).
+- **Interim result (2026-11-23, Agent Builder route): ❌.**
+  - The agent cannot see the tenant's Spaarke MCP tools, although the user is connected and plain Chat reaches them.
+  - Agent Builder knowledge shows "No connectors available".
+  - Skills added to the agent don't help.
+  - So persona agents reach our tools only through their own (agent-private) MCP action. P1 (packaged) is still to run.
+  - R1 may need refining to "one tenant-wide connector per URL" (proposed; see [phase0/g8/README.md](phase0/g8/README.md)).
 
 **Code inventory follow-ups (no spike; Phase 0 desk work):**
 - **I-1 Tool surface:** which surface the profile governs (MCP catalog vs `IAnalysisToolHandler` vs `IAiToolHandler`), and whether the chat Confirmation Gate (`SideEffectGateAIFunction`) also applies on the MCP path.

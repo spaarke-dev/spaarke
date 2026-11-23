@@ -106,11 +106,23 @@ az monitor app-insights query --apps $id --offset 3h --analytics-query "requests
 
 | Step | Surface | Time (UTC) | Agent's answer | BFF `tools/call` seen? | Verdict |
 |---|---|---|---|---|---|
-| A1 | Chat | | | | |
-| A2 picker | — | | Spaarke MCP listed? | — | |
-| A2 | Chat | | | | |
-| P1 | Chat | | | | |
+| A1 | Chat | ~20:45–20:50 | "I cannot see or call the Spaarke MCP `spike_echo` tool … `spike_echo` did **not** run." It listed M365 search, web, Python, image generation, tasks and document skills, but **no Spaarke tools**. Asked "can you see the Spaarke MCP connector": "No … none are exposed to me." Spaarke MCP **was** connected for the user | **No `tools/call`.** Chat (`Sydney 1.0.0`) did run `initialize` + `tools/list` three times (20:47:25, 20:49:17, 20:49:42Z), so discovery reached the server, but no tool was invoked (these may come from the plain-Copilot prompt below) | ❌ |
+| A2 picker | — | same | Agent Builder › Knowledge › **Copilot connectors: "No connectors available"**. The federated connector is **not offered** as agent knowledge (that list shows synced connectors only) | — | ❌ (not attachable) |
+| A2+ (owner's extra) | Chat | same | The owner added two skills to the agent (`spaarke-mcp-operations`, `spaarke-tool-test`) that tell it to call Spaarke MCP. Agent: "The Spaarke operations skill is available, but the underlying Spaarke MCP (`mcp__spaarke`) tool catalog is **not exposed to me in this session** … No Spaarke operation was executed" | No `tools/call` | ❌ A skill inside an agent does not bring the connector's tools in |
+| Control | Chat, **plain Copilot** (no agent) | same | Copilot listed "discover available connector tools through `api_tool.list_resources` … a Spaarke MCP tool such as `spike_whoami` or a Spike echo tool". So outside an agent, the connector is reachable by discovery (as mcp-r1 T1/T5 showed) | (the `tools/list` calls above) | ✅ control |
+| P1 | Chat | | not yet run | | |
 | P1 | Word (web) | | | | |
 | P1 | Teams | | | | |
 
-**Conclusion and what it means for R1/R2 and G2:** (to write)
+**Interim conclusion (2026-11-23, Agent Builder route):**
+- **An Agent Builder agent cannot use the tenant's federated "Spaarke MCP" connector.**
+  - The connector is connected for the user and works in plain Chat.
+  - Inside the agent, its tools are not exposed.
+  - Agent Builder does not offer it as knowledge.
+  - Skills in the agent don't bring the tools in.
+- **Consequence:** an agent reaches our tools only through **its own MCP action**, which Learn says is private to that agent. The packaged route (P1, `GraphConnectors`) is still to run, but it is unlikely to differ, since the Agent Builder knowledge list is that same capability.
+- **What this means for R1:**
+  - The double-firing in T2 came from **two tenant-wide connectors** on one URL, both visible in the same Chat.
+  - An agent-private action is visible only inside that agent, and the tenant connector is **not** visible there (A1).
+  - So an agent action pointing at `/mcp/legal-operations` should not double-fire. R1 could be refined to "one **tenant-wide** connector per URL; agent-private actions allowed".
+  - This needs one more test (G8-P2): mcp-r1's existing spike agent package `spaarke-mcp-spike-agent.zip` has actions only, and its call should run once inside the agent. **Owner decision; proposed to copilot-platform-coordination, not decided.**
