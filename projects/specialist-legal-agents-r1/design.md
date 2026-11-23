@@ -213,7 +213,7 @@ A firm can still publish a role-named agent if it wants one; it is the same arch
 
 **Consequences:**
 - **OD-2 (NDA first) stands.** In this model NDA review is the first *function* of the first *area archetype* (commercial contracts). Phase 1 should deliver it as the contracts archetype with NDA review as its first function. If a second existing function (for example legal hold review, which the accelerator already packages) can be added cheaply, Phase 1 also proves routing between functions within one persona.
-- **The existing single-function agents** (*Spaarke NDA Review*, *Legal Review*, *Legal Hold Review*) become either presets of their area agent or are retired in favour of it. That is a coordination item with accelerator r1 (D-A11).
+- **The existing agents** (the single-function *Spaarke NDA Review* and *Legal Hold Review*, and the two-function *Legal Review*) become either presets of their area agent or are retired in favour of it. That is a coordination item with accelerator r1 (D-A11).
 - **New Phase 0 test G5 (§8):** can a persona-level declarative agent route reliably among its functions?
 
 **Open for the owner:** confirm the three-layer model, and whether the persona grouping is the **practice area** (proposed) or the **professional role**.
