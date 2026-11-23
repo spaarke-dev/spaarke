@@ -4,7 +4,7 @@
     <title>Retire sprk_ratecard's core-record lookups (sprk_matter, sprk_project, sprk_workassignment): solution source, schema script, docs, and a guarded dev delete</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148) follow-up; added 2026-11-23 (owner decision relayed by uac-r2 during 117)</phase>
     <gate>Owner's go typed in the ebilling-r1 session before the build starts, and a second one before the dev -Apply; uac-r2 reviews the PR before merge; uac-r2 notices before and after the dev -Apply</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Destructive dev schema change (three relationships and their lookup columns) plus SpaarkeMaster solution source edits.</rigor-reason>
     <model-tier>sonnet</model-tier>

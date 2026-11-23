@@ -10,6 +10,7 @@
 
 ## Quick recovery
 
+- **Task 193 (parallel):** owner go to build typed 2026-11-23 ("Yes proceed with those items"); build agent on `task/ebilling-193` from 7a6c530000. The dev -Apply (live column delete) needs a SECOND owner go plus uac-r2 notices; uac-r2 reviews the PR first.
 - **Active task: 117** (FULL, opus @ high; started 2026-11-23). Build agent on `task/ebilling-117` from b8e6e686c0. uac-r2 CONFIRMED the five delete-list points and added: an age floor (modifiedon margin), the assignment-delete cascade direction check, the Restrict check (§15) and rate-card evidence (dev still has the three RemoveLink core lookups; 085 stopped reading them). Scope also deletes orphan assignment rows (uac-r2 design §14). Next: review (2 Opus passes, tenant isolation), then uac-r2 review of branch + SHA before merge. 096 and 121 stay gated.
 - **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
 - `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
