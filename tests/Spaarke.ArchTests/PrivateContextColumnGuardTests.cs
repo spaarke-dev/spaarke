@@ -24,7 +24,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>Rule 2, the allow-list.</b> Only the files in <see cref="AllowedFiles"/> under <c>src/server</c> may name the columns:
 /// the column literal (any form, <c>_{column}_value</c> included), the <c>PrivateContextColumns</c> type, or a string constant that
 /// holds a column (found to a fixed point: a constant defined from a known one is one too) used through its declaring type from
-/// another file. <c>Api/CommunicationEndpoints.cs</c> may use <c>PrivateContextColumns.TryParseAbout</c> and nothing else. The
+/// another file. <c>Api/CommunicationEndpoints.cs</c> may use <c>PrivateContextColumns.TryParseAbout</c> and nothing else. Any file
+/// may call the members that hide the column names (<see cref="EncapsulatedMembers"/>: the never-filed predicate and its read
+/// helpers, UAC-r2 2026-11-22). The
 /// send path's writer (<c>PrivateMessageSendGate.cs</c>) may be present or absent. Line comments are stripped; collections that
 /// hold a column (for example <c>ParentLineage.BffOwnedCommunicationColumns</c>) are not aliases, so code that uses such a set
 /// generically does not name the columns.</para>
@@ -110,7 +112,7 @@ public class PrivateContextColumnGuardTests
         {
             var file = files.SingleOrDefault(f => f.File == path);
             Assert.True(file.Lines is not null, $"{path} is missing: update RegistrySourceFiles.");
-            problems.AddRange(Namings(file.File, file.Lines!, aliases).Select(n => $"{n.File}:{n.Line}: {n.Text}"));
+            problems.AddRange(Namings(file.File, file.Lines!, aliases).Where(n => !n.IsEncapsulatedCall).Select(n => $"{n.File}:{n.Line}: {n.Text}"));
         }
 
         Assert.True(problems.Count == 0, "These registries must not name the private-context columns (fm task 056):\n" + string.Join("\n", problems));
@@ -154,7 +156,7 @@ public class PrivateContextColumnGuardTests
             "private-context columns (fm task 056, design note §3.4); see this guard's maintenance note:\n" + string.Join("\n", problems));
     }
 
-    [Fact(DisplayName = "fm 056 guard control: a literal, the type, an alias (two hops) and a non-parser endpoint use fire; comments, the parser and a generic set do not")]
+    [Fact(DisplayName = "fm 056 guard control: a literal, the type, an alias (two hops) and a non-parser endpoint use fire; comments, the parser, the encapsulated members and a generic set do not")]
     public void AllowList_MustFireAndMustNotFire()
     {
         var files = new List<(string File, IReadOnlyList<string> Lines)>
@@ -179,6 +181,13 @@ public class PrivateContextColumnGuardTests
             ("other/TypeUse.cs", Lines("""var all = PrivateContextColumns.All;""")),
             ("other/AliasUse.cs", Lines("""var key = Gate.MatterKey;""")),
             ("other/TwoHopAliasUse.cs", Lines("""row[Gate.TwiceKey] = id;""")),
+            ("other/EncapsulatedUse.cs", Lines("""
+                if (PrivateContextColumns.IsPrivate(row)) return;
+                var clause = await PrivateContextColumns.NotPrivateODataFilterAsync(entities, ct);
+                columns.AddRange(PrivateContextColumns.PresentColumnsOf(table, host));
+                """)),
+            ("other/EncapsulatedWithColumn.cs", Lines(
+                """if (PrivateContextColumns.IsPrivate(row) && row.Contains(PrivateContextColumns.Matter)) return;""")),
             ("other/CommentOnly.cs", Lines("""
                 // reads sprk_privatecontextmatter? No: this is a comment. PrivateContextColumns.Matter too.
                 var ok = Gate.OtherKey;
@@ -212,13 +221,17 @@ public class PrivateContextColumnGuardTests
         Assert.Contains(dirty, p => p.StartsWith("endpoints/Endpoints.cs:3", StringComparison.Ordinal));
         // The parser is allowed in the endpoints file only: the same call in any other file fires.
         Assert.Contains(dirty, p => p.StartsWith("endpoints/CleanEndpoints.cs:1", StringComparison.Ordinal));
-        Assert.Equal(7, dirty.Count);
+        // An encapsulated member on a line that also names a column fires.
+        Assert.Contains(dirty, p => p.StartsWith("other/EncapsulatedWithColumn.cs:1", StringComparison.Ordinal));
+        Assert.Equal(8, dirty.Count);
 
-        // Must not fire: the allowed files, a comment, an unrelated derived constant, a generic set, the parser call.
+        // Must not fire: the allowed files, a comment, an unrelated derived constant, a generic set, the parser call, and the
+        // members that hide the column names (EncapsulatedMembers) in any file.
         Assert.DoesNotContain(dirty, p => p.StartsWith("allowed/", StringComparison.Ordinal));
         Assert.DoesNotContain(dirty, p => p.StartsWith("other/CommentOnly.cs", StringComparison.Ordinal));
+        Assert.DoesNotContain(dirty, p => p.StartsWith("other/EncapsulatedUse.cs", StringComparison.Ordinal));
         Assert.DoesNotContain(dirty, p => p.StartsWith("endpoints/Endpoints.cs:1", StringComparison.Ordinal));
-        Assert.Equal(4, clean.Count);
+        Assert.Equal(5, clean.Count);
         Assert.DoesNotContain(clean, p => p.StartsWith("endpoints/", StringComparison.Ordinal));
     }
 
@@ -337,7 +350,7 @@ public class PrivateContextColumnGuardTests
 
     // ── the source scan ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private sealed record Naming(string File, int Line, string Text, bool IsParserCall);
+    private sealed record Naming(string File, int Line, string Text, bool IsParserCall, bool IsEncapsulatedCall);
 
     private sealed record AliasRef(string File, string Type, string Name);
 
@@ -418,9 +431,20 @@ public class PrivateContextColumnGuardTests
                 continue;
 
             var onlyParser = !other && typeUses.All(m => m.Groups[1].Value == "TryParseAbout");
-            yield return new Naming(file, i + 1, code.Trim(), onlyParser);
+            var onlyEncapsulated = !other && typeUses.All(m => EncapsulatedMembers.Contains(m.Groups[1].Value));
+            yield return new Naming(file, i + 1, code.Trim(), onlyParser, onlyEncapsulated);
         }
     }
+
+    /// <summary>
+    /// The <c>PrivateContextColumns</c> members any file may call (UAC-r2, 2026-11-22: a private message is never filed, so every
+    /// reader of a filing fails closed on one). Each hides the column names from its caller: the predicate
+    /// (<c>IsPrivate</c>), the columns a read adds so the predicate can answer (<c>PresentColumnsOf</c>) and the OData clause
+    /// that keeps private messages out of a read (<c>NotPrivateODataFilterAsync</c>). None can turn a column into a filing,
+    /// scope or ownership selector. A line that also names a column, an alias or any other member still fires.
+    /// </summary>
+    private static readonly IReadOnlySet<string> EncapsulatedMembers =
+        new HashSet<string>(StringComparer.Ordinal) { "IsPrivate", "PresentColumnsOf", "NotPrivateODataFilterAsync" };
 
     private static List<string> Judge(
         IReadOnlyList<(string File, IReadOnlyList<string> Lines)> files, IReadOnlySet<string> allowed, string endpointsFile)
@@ -429,7 +453,7 @@ public class PrivateContextColumnGuardTests
         return files
             .Where(f => !allowed.Contains(f.File))
             .SelectMany(f => Namings(f.File, f.Lines, aliases))
-            .Where(n => !(n.File == endpointsFile && n.IsParserCall))
+            .Where(n => !n.IsEncapsulatedCall && !(n.File == endpointsFile && n.IsParserCall))
             .OrderBy(n => n.File, StringComparer.Ordinal).ThenBy(n => n.Line)
             .Select(n => $"{n.File}:{n.Line}: {n.Text}")
             .ToList();

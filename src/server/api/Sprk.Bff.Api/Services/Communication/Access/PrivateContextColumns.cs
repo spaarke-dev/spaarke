@@ -1,3 +1,6 @@
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+
 namespace Sprk.Bff.Api.Services.Communication.Access;
 
 /// <summary>
@@ -45,6 +48,74 @@ internal static class PrivateContextColumns
 
     /// <summary>All three reference columns.</summary>
     internal static readonly IReadOnlyList<string> All = new[] { Matter, Project, WorkAssignment };
+
+    // ── A private message is never filed (owner, 2026-11-22; UAC-r2: fail closed wherever a filing is read) ─────────────────────
+
+    /// <summary>The table the reference columns are on.</summary>
+    private const string CommunicationTable = "sprk_communication";
+
+    /// <summary>
+    /// Whether <paramref name="row"/> (a <c>sprk_communication</c> read with the reference columns) is a PRIVATE message: any
+    /// reference column holds a record. A private message holds no filing anywhere, so every reader of a filing that meets one
+    /// treats it as filed under nothing. A <c>null</c> or an <see cref="EntityReference"/> to <see cref="Guid.Empty"/> is no
+    /// reference; any other value cannot be read as "no reference", so it counts as one (fail closed). A column the row was not
+    /// read with is no reference: the caller reads the columns that exist (<see cref="PresentColumnsOf"/>).
+    /// </summary>
+    internal static bool IsPrivate(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        foreach (var column in All)
+        {
+            if (!row.Attributes.TryGetValue(column, out var value) || value is null)
+                continue;
+            if (value is not EntityReference reference || reference.Id != Guid.Empty)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The reference columns a read of <paramref name="table"/> adds so <see cref="IsPrivate"/> can answer: on
+    /// <c>sprk_communication</c>, those of <paramref name="hostColumns"/> (the table's columns in this environment, from the
+    /// caller's own metadata read); none on any other table. A column absent from metadata holds no reference.
+    /// </summary>
+    internal static IEnumerable<string> PresentColumnsOf(string table, IReadOnlySet<string> hostColumns)
+    {
+        ArgumentNullException.ThrowIfNull(hostColumns);
+        return string.Equals(table, CommunicationTable, StringComparison.OrdinalIgnoreCase)
+            ? All.Where(hostColumns.Contains)
+            : Enumerable.Empty<string>();
+    }
+
+    /// <summary>
+    /// The OData <c>$filter</c> clause that keeps every private message out of a <c>sprk_communication</c> read:
+    /// <c>_{column}_value eq null</c> for each reference column that exists on the table (published metadata, through the
+    /// send gate's cached column-presence check, <see cref="PrivateMessageSendGate.CommunicationColumnsPresentAsync"/>), joined
+    /// with <c>and</c> and parenthesised; <c>null</c> when none exists (no private message can exist, so the read is unchanged).
+    /// A metadata read that faults propagates, and one that gives no answer throws: either is a fault of the caller's read.
+    /// </summary>
+    internal static async Task<string?> NotPrivateODataFilterAsync(IGenericEntityService entities, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var present = new List<string>(All.Count);
+        foreach (var column in All)
+        {
+            switch (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(entities, new[] { column }, ct).ConfigureAwait(false))
+            {
+                case true:
+                    present.Add(column);
+                    break;
+                case false:
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Whether {CommunicationTable}.{column} exists could not be read; the read does not run without that answer.");
+            }
+        }
+
+        return present.Count == 0 ? null : "(" + string.Join(" and ", present.Select(c => $"_{c}_value eq null")) + ")";
+    }
 
     /// <summary>
     /// Parses an <c>about</c> query value, <c>{table}:{guid}</c> (for example <c>sprk_matter:7f…</c>). Returns false for
