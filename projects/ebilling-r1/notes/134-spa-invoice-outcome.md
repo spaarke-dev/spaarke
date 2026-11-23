@@ -117,3 +117,9 @@ Branch `task/ebilling-134-fix1`, from `f70380b196` (work/ebilling-r1 tip). Clien
 ### Checks
 
 `npx tsc --noEmit -p tsconfig.json` clean; `npx eslint src tests` clean; `npx vitest run` 66 files, 1890 tests passed.
+
+### spa-r4 re-check of the fix (2026-11-23)
+
+spa-r4: OK on f70380b196..2304de2bb5, no findings. `git merge-tree` with origin/master 2dcbe35e34 is clean. Merged into work as 7600c21f65.
+
+**Known limit for the master PR (K2, agreed with spa-r4):** the Outcome gate is "caller is a member of a firm", not "a member of this invoice's firm" (the SPA invoice read does not carry `sprk_vendororg`). A member of another firm reaches an invoice only if it can open that invoice at all. Under D-70 (owner ruling 2026-11-08) the invoice lists never offer it, and a deep link goes through the invoice read's own checks. Worst case: one refused `/outcome` read, with nothing shown. List this in the master PR's known limits.
