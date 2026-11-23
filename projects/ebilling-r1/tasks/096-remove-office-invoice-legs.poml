@@ -4,7 +4,7 @@
     <title>Remove the Office server legs for Invoice as a save target and invoice quick-create</title>
     <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-F</phase>
     <gate>blocked until 095 is done AND word-add-in-r1 has removed the add-in's Invoice save target and invoice quick-create AND one add-in release has passed since</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Breaking change to two authorized BFF route contracts (/api/office/save and Office quick-create; tags bff-api, api).</rigor-reason>
     <model-tier>sonnet</model-tier>
