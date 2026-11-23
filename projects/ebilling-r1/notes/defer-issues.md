@@ -1581,6 +1581,8 @@ Each restamps afterwards, but none refuses any of these:
 
 **Suggested fix**: before any write, probe AppendTo on the core record as the caller. A caller without it gets a 403 and nothing is written. Add a must-fire and a must-not-fire test.
 
+Moot once task 193's columns are gone on every environment; close then.
+
 ---
 
 ### DEF-029 — 105: a planted empty Signal set makes a decision resolve no Signals (known limit)
