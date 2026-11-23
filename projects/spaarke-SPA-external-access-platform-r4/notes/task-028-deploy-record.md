@@ -61,4 +61,25 @@ FR-11 and FR-13 can both be checked in this round; neither is deferred.
 
 ## E2E
 
-Pending.
+### Round 1: owner, writer (Collaborate) on PRJ-000046 and PRJ-000038, 2026-11-23 from about 15:00Z
+
+| # | Check | Result | Note |
+|---|---|---|---|
+| 1 | PDF preview | ✅ | It previews in place, and Download is in the toolbar. |
+| 1 | .docx | ✅ (as designed) | The record opens with "This type of file cannot be previewed here. Use Download…". The owner asked for a docx viewer: none exists in the shared lib (`mammoth` is used only for chat text extraction). Internal apps preview Word through SharePoint's viewer, which the external plane can't use (ADR-028 A1, ADR-007). A docx preview would be new scope; the owner decides. |
+| 2 | Documents grid at 1000px: no overlap | ✅ | At 1000px the Type and Date headers shrink to "Ty…" / "D…" and the dates are cut off ("11/12/…"). |
+| 2 | Column resize | ❌ | The cursor shows the resize grab, but dragging doesn't resize (the header text gets selected instead). Under investigation: we don't yet know whether it happens only on the record grid or also on the home grids. |
+| 2 | Upload / download / delete own (writer) | ✅ | Delete is offered only on own rows. |
+| 3 | Review detail | ❓ | INV-123456.7 shows "In Review" but no Review detail line in Information. By the gate, raw statuscode 1 with a blank value should show "The client is reviewing this invoice." So either its "In Review" is not statuscode 1, or there is a defect. A read-only read is prepared (`read-invoice-status.ps1`). The owner hasn't yet checked the home Invoices grid for the new column; the record's Invoices section has no column, it shows a line suffix. |
+| 4 | Invoice file download | ✅ | INV-123456.7.1.pdf downloads and opens. |
+| 5 | Empty states | ✅ | The new shared style: "No Documents" with icon and the "Use Upload above" hint, "No events yet" with the Add event hint, "No invoices". |
+| — | Cosmetic | ⚠️ | An empty rounded band sits above the Documents grid header. |
+| — | View-only partner | pending | |
+
+**Review detail: diagnosis.** Owner-approved read-only read at about 15:20Z: INV-123456.7 has statecode 0, statuscode **1** ("In Review"), and an empty `sprk_reviewdetail`. Invoice status options: 659490000 Approved, 1 In Review, 659490001 Sent to AP, 2 Cancelled, 659490002 Paid, 659490003 Rejected, 659490004 Returned to Firm, 659490005 Superseded.
+
+So the Information field SHOULD show "The client is reviewing this invoice." It doesn't. That is a defect, F1, in task 020's code.
+
+Likely cause: the record and the Invoices-section rows come from the module fetch seam. `FetchService.ProjectEntity` passes SDK values through as objects, so `statuscode` arrives as the serialised `OptionSetValue`, about `{"value":1,...}`. The status label still shows because `formatDetailValue` uses `@formattedValues`. But `reviewDetail.ts` `wholeNumberOf` accepts only a number or a digit string, so the gate always answers blank. The task 020 tests used a bare `statuscode: 1`, so they never saw the live shape.
+
+The same gate feeds all four render points: the grid cell, the section line, the header line and Information. So a real review detail value would be hidden everywhere too. The BFF-side gate (`ExternalInvoiceReviewDetail.IsInReview`) does handle `OptionSetValue`, so the server is right; the SPA is not.
