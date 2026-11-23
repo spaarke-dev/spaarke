@@ -154,3 +154,35 @@ clean. `client-lint check`: `ui-components` ok (the touched surface); `ai-widget
 `AISummaryDialog.tsx:455`) and a stale-suppression warning; not caused by this change.
 PCF: CategoryForm / ClassificationArea are not imported by any PCF (grep over `src/client/pcf` and `src/solutions`: only the Console
 web resource and `Spaarke.AI.Widgets` OntologyAdminWorkspaceWidget); no PCF bundle changed, no further bump.
+
+## Follow-up: modal swap handover (2026-11-23)
+
+Defect (found on dev, Console built from 6311cd0a69): Ontology admin > Rules > focus "New rule" > click > wizard opens > Cancel (nothing
+typed) > focus ends on `<body>`; expected "New rule". Every other 202 path passed on dev.
+
+Cause (focusin + MutationObserver trace on dev): `RuleWizard` renders a "loading" `SprkModal` until the catalog loads, then returns
+`RuleWizardBody`, whose `WizardShell` mounts a DIFFERENT `SprkModal`. Sequence: focusin New rule (opener) -> focusin Close (loading modal's
+first element) -> loading modal unmounts and the wizard's modal mounts (loading modal restores to its opener, focusin New rule) -> focusin
+Maximize dialog (new modal's first element) -> Cancel -> dialog removed -> focus on `<body>`. The second modal captures its opener in render,
+when `document.activeElement` is still the loading modal's Close button. At close that button is disconnected, so 202's "opener still
+connected" rule correctly declines, and nothing is restored.
+
+Fix (`SprkModal/SprkModal.tsx` only; no new prop, no export, no new file): a module-level `WeakMap` keyed by surface element holds each open
+modal's record `{ surface, chain }`. The chain is the opener candidates in order: the element focused when the modal opened, then (when that
+element lies inside another SprkModal's surface) that modal's own chain, recursively, so a swap of a swap still works. An inherited candidate
+carries the surfaces it sat behind and is usable only when all of them are disconnected, so a nested modal (focus inside a still-open outer
+modal) never hands focus to a control behind the outer. At restore the first candidate that is connected, enabled and not inside `[inert]`
+wins; 202's "focus is lost" rule (`isKept`) and `scheduleFocusReturn` are unchanged. A nested confirm still returns to the inner button (it
+is connected, so it is first in the chain). The ancestor lookup walks `parentElement` against the registry instead of
+`closestDialogOrSelf`: that helper matches `[role="dialog"]` only and the confirm presets use `alertdialog`.
+
+Tests (filtered jest, ADR-038): `SprkModal/__tests__/swapHandover.test.tsx` (7) and
+`OntologyAdmin/RuleWizard/__tests__/RuleWizardFocusReturn.test.tsx` (2, the real RuleWizard with a stub service: Cancel with nothing entered,
+and Cancel then Discard). Fail-before (SprkModal.tsx reverted to origin/master): 6 of the 9 fail (the swap, the swap of a swap, header close,
+confirm over a swapped-in wizard, and both real-RuleWizard tests); the 3 that pass there are the negative cases (opener and first modal both
+gone: no throw, focus not forced; host moved focus: kept; inherited opener not used while the modal it sat behind is still open). Mutation
+check: dropping the `goneSurfaces` condition makes the last negative case fail.
+
+Other sites with the same loading-modal -> different-modal swap: `src/solutions/WorkspaceLayoutWizard/src/App.tsx:1019` (a loading or
+error `SprkModal`, then `WizardShell`). Fixed by the same change (SprkModal-level). Not found elsewhere in a pattern search of
+`return <SprkModal|WizardShell` sites; a host that swaps through some other construct would not show in that search.
