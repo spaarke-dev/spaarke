@@ -1,0 +1,284 @@
+# Specialist Legal Agents — Program Design (`specialist-legal-agents-r1`)
+
+> **Status:** Draft v0.1, umbrella program design. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
+> **Date:** 2026-11-23
+> **Author:** Ralph Schroeder + Claude Code
+> **Source:** [notes/source/design-synopsis-2026-11-22.md](notes/source/design-synopsis-2026-11-22.md), the owner's synopsis of 22 Nov 2026 (verbatim copy). This document keeps the synopsis's design. It changes four things: the primitives table is corrected against code (§6), live Copilot evidence is folded in (§7), the Phase 0 scope is narrowed to what that evidence leaves open (§8), and coordination points and ADR tensions are added (§10, §11).
+> **Epic:** #421 SPAARKE AI AND AUTOMATION
+>
+> **Tags:** `[Synopsis]` taken from the source synopsis · `[Code]` checked against master on 2026-11-23 · `[Tested]` live result from `spaarkeai-mcp-bff-api-r1` Phase 0 (dev tenant, 2026-11-12 to 14) · `[Open]` owner decision · `[Verify]` Phase 0 must prove it
+
+---
+
+## 1. Owner decisions (2026-11-23)
+
+| # | Decision | Choice |
+|---|---|---|
+| OD-1 | Project name | `specialist-legal-agents-r1` |
+| OD-2 | First archetype (Phase 1 vertical slice) | **NDA reviewer.** This replaces the synopsis's biotech patent claim-drafting associate. Reasons: the accelerator projects already ship an NDA agent, playbook, positions, eval corpus and Cowork skills; the BFF already runs a deployed NDA-REVIEW Action (§9); and the synopsis's autonomous-run example is the NDA. The patent associate moves to Phase 4 as the second archetype, together with the supervision protocol it exercises. |
+| OD-3 | Shape | **Umbrella program with phased child projects** (§4). This folder holds the program design, decisions and coordination; each phase runs as its own child project. |
+
+Still open from the parent session's recommendations: whether deterministic gates and profile application live server-side (D-A7, §12) and the NDA-first choice's knock-on for the supervision protocol (D-A8). OD-2 settles the archetype only.
+
+## 2. Summary `[Synopsis]`
+
+**Build one governed runtime and many attorney-owned Role Profiles, not many bespoke agents.** A specialist ("NDA reviewer", "CRE partner", "biotech patent claim-drafting associate") is a versioned configuration document: charter, positions, knowledge scopes, skills, tools, authority limits and output contracts. A shared runtime compiles it at invocation. The attorney owns and edits the profile; the platform owns the guardrails the profile cannot loosen. Attorneys meet the agent in Microsoft 365 Copilot through plugin-packaged declarative agents backed by the Spaarke BFF MCP connector, with a custom engine agent as the pro-code fallback.
+
+Three decisions carry the design:
+
+1. **Profile layering with a one-way ratchet.** Platform → archetype → firm policy → owner → matter. Lower layers may narrow authority and tighten gates; they can never widen them.
+2. **Tuning is propose-and-approve, never silent learning.** Conversation, redline corrections and example documents all produce a reviewable profile diff. The diff is tested against the agent's golden set before it goes live.
+3. **Attributed to the owner, enforced in tools.** Chat runs execute under the attorney's delegated identity. Every run is ledgered to the owner and the profile version. Background agents get Entra Agent IDs (but see ADR tension T-2, §11).
+
+**What the evidence changes (§7).** Copilot did not honour MCP server `instructions` in Chat or Cowork (T7), and it calls our tools for most domain prompts even when the source is switched off (T6/T6b). Both point the same way: the attorney profile and every gate should be **applied by Spaarke on the server**, with Copilot as router and renderer, unless Phase 0 shows a declarative agent reliably follows a profile it is handed. That is Phase 0's go/no-go (§8, G1).
+
+## 3. Core design `[Synopsis]`
+
+### 3.1 A specialist is a governed configuration
+
+An attorney gets an **Agent Instance**: an Archetype plus their own overrides, bound to the shared runtime. At invocation the runtime compiles the layers into one effective, versioned instruction-and-permission set. Every run records which profile version produced it.
+
+Why configuration rather than code:
+- the attorney tunes a document they can read, diff and roll back;
+- a role changes parameters, positions and gates, not machinery (template-matching doctrine);
+- one runtime to secure, evaluate and meter (ADR-013, ADR-016);
+- archetypes become distributable templates, and a firm's tuned instance is a private fork.
+
+Two role shapes: a **partner** profile, weighted toward judgment, risk positions and escalation, and an **associate** profile, weighted toward production under a named supervising profile or human.
+
+### 3.2 Profile layers and the ratchet
+
+| Layer | Owner | Typical content | Locked against lower layers |
+|---|---|---|---|
+| L0 Platform | Spaarke | Privilege handling, D-F0 fact rules, epistemic-class grounding, write gates, audit | Everything |
+| L1 Archetype | Spaarke or firm knowledge team | Role charter, default skills, output contracts, baseline positions | Tools and scopes it does not list |
+| L2 Firm or department policy | GC, managing partner, practice head | Approved positions, conflicts and ethical-wall rules, model tier, autonomy ceiling | Autonomy ceiling, data scopes |
+| L3 Owner profile | Owning attorney | Personal positions and fallbacks, voice, review habits, preferred precedents, escalation thresholds | Nothing above it |
+| L4 Matter overlay | Matter lead | Client instructions, deal specifics, jurisdiction, deadlines | Nothing above it |
+
+Authority, gates and data access ratchet one way. Style and emphasis merge freely. The existing `PromptSchemaOverrideMerger` (§6) merges by "arrays concatenate, scalars replace, `__replace` directive". That is a free merge with no ratchet, so the layer compiler is new code, not a configuration of the merger.
+
+### 3.3 Tuning
+
+There are four inputs and one output: a **proposed profile diff** in plain language.
+1. Direct edit in a profile editor (Fluent v9 Code Page).
+2. Conversational ("from now on, never accept uncapped indemnity without flagging it"): the Builder Agent elicits variables and emits the diff.
+3. Correction harvesting: repeated edits and rejections on agent output become a suggested position change, with examples attached.
+4. Exemplar-based: "this document is how I do it" produces style and structure rules, with the source excerpts cited.
+
+**Activation is gated.** The diff runs against the golden set, the attorney sees the behaviour diff and approves, and every run records its version. Rollback is one action. The attorney can never tune the platform gates, the privilege rules, the fact layer (dates, arithmetic and deadlines are computed) or the human-review requirement for external effect.
+
+### 3.4 Evaluation loop
+
+Seed (archetype golden set) → Extend (promote accepted, rejected or corrected outputs with one action) → Gate (every diff runs against the set) → Monitor (override, escalation and cost rates per agent) → Retire (stale positions flagged). Deterministic checks run as tools and as eval assertions.
+
+### 3.5 Self-tuning (Coach)
+
+A Service Bus job (ADR-004) turns signals into suggestions; nothing changes silently. The signals are: corrections in the run ledger and SPE versions; buttons on outputs (Add to my knowledge, Make this my position, Use as my example, Never do this again); and, opt-in, Work IQ context. Suggestions are delivered under a nudge budget. Store derived rules, not client content. Harvesting is matter-scoped (D-A4).
+
+### 3.6 Autonomous runs
+
+An event (for example an incoming email classified as an NDA) starts the same specialist headlessly through the backend:
+1. Graph change notification.
+2. Service Bus job with an idempotency key and an authority envelope.
+3. Compile L0–L4.
+4. D-F0 deterministic checks, then GREEN, YELLOW or RED triage.
+5. OOXML redline and draft reply.
+6. The send is a write gate: the attorney gets an Outlook draft and a Teams approval card.
+
+The autonomy ladder is triage only → prepare (default) → auto-send (GREEN, standard paper, only where L2 and L3 both allow) → never automatic (RED, non-standard, privileged, first runs after retune). **The synopsis's "run as the delegated attorney first" conflicts with ADR-052 and ADR-028 A5 (T-1, §11).**
+
+### 3.7 Governance
+
+- **Accountable human per instance**, plus a named supervising reviewer for associate roles.
+- **Reads permissive, writes gated.**
+- **Ethical walls in Spaarke's scope tools.** Purview Information Barriers are not supported for plugin management.
+- **Agent work product is attorney work product.** It is tenant-resident and never used for shared training.
+- **Honesty contract:** each output carries its epistemic class and citations.
+- **Exportable audit.**
+- **Cross-client learning off by default.**
+
+### 3.8 Microsoft platform mapping and delivery `[Synopsis]`, evidence in §7
+
+| Concern | Microsoft service | Recommendation |
+|---|---|---|
+| Attorney chat surface | M365 Copilot (Chat, Cowork), Teams, Outlook, Word | Chat and Cowork are proven surfaces for our connector; Word is partial and Outlook is absent today (T1) |
+| Packaging | Plugin (M365 app package): agents, skills (≤ 20), connectors (≤ 10) | Core plugin (connector + shared skills) plus one plugin per practice area |
+| Front door (Path B, default) | Declarative agent with skills and MCP actions, one per archetype; instructions ≤ 8,000 chars | Needed for `@`-routing (E5) |
+| Pro-code fallback (Path A) | Custom engine agent (Agents SDK / Foundry; Copilot harness SDK 2.0 is a new middle option) | Only on a failed requirement or eval |
+| Backend orchestration | In the BFF, behind tools | Identical under both paths. Note: `Microsoft.Agents.AI` was removed from the BFF on 2026-09-29 (#1027), so see §10 |
+| Knowledge | Azure AI Search, SPE, Foundry IQ | Knowledge Scopes as filtered, security-trimmed views |
+| Identity | Delegated attorney for chat (proven, T5); Entra Agent ID for background agents | The Agent ID part needs an ADR-028 decision (T-2) |
+| Memory | Foundry or Copilot memory | Non-authoritative; Dataverse profile is the source of truth |
+| Tuning UI and storage | Code Page + Dataverse | Profile editor and diff review |
+| Evaluation | Foundry evals, Copilot Agent Evaluations (preview), our eval harness | Whether Copilot's evals cover declarative agents is `[Verify]`, not Phase 0 |
+
+**Decision rule `[Synopsis]`.** Conversational and tuned: agent. Multi-step, long-running, approval-gated or scheduled: Cowork skill. Data or actions: the single connector. Each procedure is written once in the skill library and packaged both ways.
+
+## 4. Program structure (OD-3)
+
+This folder is the umbrella. It holds this design, the decision log, the coordination register and the Phase 0 go/no-go record. It carries no implementation tasks of its own. Each phase is a child project registered under the same Epic. A child starts only after the previous gate passes.
+
+| Phase | Child project (proposed slug) | Scope | Gate to next |
+|---|---|---|---|
+| 0 | `specialist-legal-agents-phase0-r1` | Spikes and inventory follow-ups in §8 only | **G1 go/no-go** decides the runtime shape (D-A7) |
+| 1 | `specialist-legal-agents-nda-r1` | Role Profile schema, layer compiler with ratchet, Agent Instance, NDA archetype end to end (Chat + Cowork), run ledger binding | NDA golden set passes for two owner profiles; ratchet tests pass |
+| 2 | `specialist-legal-agents-tuning-r1` | Profile diff review, golden-set gate, versioning and rollback, then correction harvesting and the Coach | Diff-gate eval; no silent change path |
+| 3 | `specialist-legal-agents-governance-r1` | Agent 365 plugin governance, background identity (after T-2), per-archetype budgets (ADR-016), dashboards, autonomous NDA intake (after T-1) | Owner and counsel sign-off on autonomy |
+| 4 | `specialist-legal-agents-archetypes-r1` | Second archetype (biotech patent associate + supervision protocol), CRE partner, L2 firm-policy editor, template distribution | — |
+
+Slugs are proposals, to be confirmed when each child is created. Phase 0's design is §7–§8 of this document. Next step: create the Phase 0 child folder with a `design.md` drawn from those sections, then run `/design-to-spec` on it.
+
+## 5. Scope boundaries
+
+**In:** the runtime, profile, ratchet, tuning loop, golden set per agent, run attribution and the NDA archetype. The rest arrives through child projects.
+
+**Out (owned elsewhere):**
+- the MCP host, connector auth and plugin packaging mechanics (`spaarkeai-mcp-bff-api-r1`);
+- the Cowork and file-based NDA skills and the accelerator tiers (`spaarke-legal-ai-accelerator-r1`, `-claude-r2`);
+- the Template/Action engine itself (`ai-spaarke-action-engine-r1`);
+- the Fact/Observation/Inference taxonomy (insights engine);
+- the access model and Entra Agent ID policy (`unified-access-control-r2` and ADR-028 owners).
+
+**Not adopted:** Copilot Studio as the agent environment; Copilot memory as a profile store; dependence on Cowork invoking declarative agents (Frontier private preview); auto-send before counsel's view on supervision and privilege.
+
+## 6. Primitives — corrected against code `[Code]`
+
+The inventory ran on 2026-11-23 against master `1aedc9ea74` (read-only `code-mapper` pass). Paths are relative to `src/server/api/Sprk.Bff.Api/` unless stated otherwise. The verdicts are Exists, Partial, Absent and Design-only.
+
+| Primitive | Synopsis said | Real status | Evidence | Gap the program must close |
+|---|---|---|---|---|
+| **Archetype** | `[PROPOSED]`, extends the Action Engine Template | **Design-only.** No `ActionTemplate` or Action Engine code in `src/` | `projects/ai-spaarke-action-engine-r1` (ON HOLD; its resumption trigger, redesign-r1 G-P3, has passed, so it waits only for an owner go) | "Extends Template" depends on an engine that does not exist. Either Phase 1 defines Archetype on its own and the Action Engine adopts it later, or the Action Engine resumes first (D-A9) |
+| **Agent Instance** | `[PROPOSED]` | **Absent.** No per-user agent configuration entity or class | — | New Dataverse entity. Needs a §11 justification |
+| **Role Profile** | Dataverse JPS, extends the Scope System | **Partial.** JPS exists: `Services/Ai/PromptSchemaRenderer.cs:23`, `Services/Ai/Schemas/PromptSchema`. Node-level override merge: `Services/Ai/PromptSchemaOverrideMerger.cs:23`. Personas are looked up per playbook: `Services/Ai/AnalysisPersonaService.cs:22`, `PlaybookPersonaLookup` (`:369`) | No per-user or per-attorney overlay (`UserPreference` and `PromptOverlay` have 0 hits). The merger is free-merge with no ratchet | Layer compiler with a one-way ratchet; owner (L3) and matter (L4) layers; version pinning per run |
+| **Skill** | Exists (Skills), with worked examples | **Partial.** `sprk_analysisskill` with `PromptFragment` (`Services/Ai/AnalysisSkillService.cs:403`); siblings `AnalysisKnowledgeService` and `AnalysisToolService`. Separately, the accelerator `SKILL.md` skills (Cowork/Copilot) live on the accelerator branch, not master | No examples field on the skill model (Dataverse columns not checked). Two different things are both called "skill": the Scope-System `sprk_analysisskill` (a BFF prompt fragment) and the Agent Skills `SKILL.md` (a Copilot package component) | Decide which one the synopsis's Skill is. Probably both: `SKILL.md` in the package and `sprk_analysisskill` server-side (D-A10) |
+| **Tool** | Exists: BFF `IAiToolHandler`, exposed as MCP | **Partial: three separate surfaces, not one.** (1) `Services/Ai/IAiToolHandler.cs:13` has **one** implementation (`Services/Finance/Tools/FinancialCalculationToolHandler.cs:15`). (2) About 37 `IAnalysisToolHandler` handlers via `ToolHandlerRegistry`, wrapped for chat by `AgentToolCatalogProjector` / `ToolHandlerToAIFunctionAdapter`. (3) MCP: `Api/Mcp/McpEndpoints.cs:41,58` (`MapMcp`), `McpToolCatalog.cs`, `McpToolAuthorization.cs`, `Infrastructure/DI/McpModule.cs`, with 5 decision tools + 1 widget in `Api/Mcp/LegalOperations/Decisions/` | No file under `Api/Mcp` references `IAiToolHandler`, `IAnalysisToolHandler` or `ToolHandlerRegistry` | A profile "whitelists tools" across which surface? The MCP catalog is what Copilot sees; the analysis handlers are what playbooks run. Phase 0 inventory item I-1 |
+| **Knowledge Scope** | Exists (index v2) | **Partial.** RAG index `spaarke-discovery-index` (`Configuration/AiSearchOptions.cs:31`), records index `spaarke-records-index`, references index `spaarke-rag-references`. Filters in `Services/Ai/RagService.cs`: tenant (`:205`, `:1075`, `:1172`), `speFileId` (`:939`), `ParentEntityId` (`:1192`). Named scopes are `sprk_analysisknowledge` rows | "Index v2" matches nothing in code. Trimming is by tenant and optionally parent entity or document; **no per-user ACL trim in `RagService`** | Security trimming to the caller and ethical-wall combinations (L2) are not there today. That is a dependency on UAC (§10) |
+| **Position Library** | Extends Playbooks; `PlaybookExecutionEngine` is the execution path | **Playbooks exist; positions are absent in the BFF.** There is **no `PlaybookExecutionEngine`** (0 hits). The real path is `Services/Ai/PlaybookOrchestrationService.cs` (+ `IPlaybookOrchestrationService`, `NullPlaybookOrchestrationService`), with nodes via `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs`; data `sprk_aiplaybook` / `sprk_playbooknode`; chat playbooks `Services/Ai/Chat/Playbooks/*.playbook.json` | No clause-position or per-attorney construct in `src/`. NDA positions exist as Markdown on the accelerator branch (`src/accelerators/practices/nda/positions/`, §9) | Position schema (position, fallbacks, rationale, owner, layer) and its binding into playbook nodes |
+| **Authority and Gate Policy** | Exists; needs per-profile binding | **Exists, but hard-coded rather than policy-driven.** "The ONE Confirmation Gate": `Services/Ai/Chat/SideEffectGateAIFunction.cs:13`; `PendingPlanManager.cs:172` `RequiresConfirmation(ToolSideEffectClass?, BindingRisk, bool)`; `Services/Ai/Chat/Gate/GateRiskProfile.cs`; `PublicContracts/DecisionGateTier.cs`, `GateDecisionV2.cs`; `Services/Signals/GateDecisionRecordJob.cs` | The gate is a static function of the tool's `sprk_sideeffectclass` + `BindingRisk`. It fails closed, but takes no per-user, per-profile or per-tenant policy input. Whether the chat gate also covers MCP-invoked tools is not shown. MCP writes are gated by the widget's own Confirm (T3) | A policy input (L0–L4 ratchet) to the gate, the same gate on the MCP path, and an autonomy ceiling |
+| **Supervision Protocol** | `[PROPOSED]`, Agent Framework workflow | **Absent.** `Microsoft.Agents.AI` (Agent Framework) was **removed** from the BFF on 2026-09-29 (#1027, zero call sites; `Sprk.Bff.Api.csproj:66–76`). The M365 Agents SDK (`Microsoft.Agents.Hosting.AspNetCore` 1.0.1) and `Microsoft.Extensions.AI` 10.11.0 remain | No delegation or supervisor workflow code | Moves to Phase 4 with the patent associate (OD-2). Re-adding Agent Framework goes back through `agent-framework-fit-assessment-r1` (§10) |
+| **Golden Set** | Exists; needs per-agent scoping | **Exists, global and per-capability.** CI "Eval Gate (Golden Utterances)" in `.github/workflows/ci-tier1-blocking.yml:674–702` (`Category=GoldenUtteranceEval`); 15 suites in `tests/integration/contract/Eval/*`, including **`NdaReviewDispatchEvalTests`**; `tests/unit/Sprk.Bff.Api.Tests/Eval/PredictMatterCostEvalHarnessTests.cs`. Accelerator NDA eval corpus (4 documents + expected outputs) on the accelerator branch | No per-agent or per-owner golden-set concept, and no data-driven registry: suites are code | Per-agent golden set as data (owner-promotable cases), runnable on a profile diff outside CI |
+| **Run Ledger** | Exists (session ledger), Dataverse + Cosmos | **Exists, but session-scoped and erasable.** `Models/Ai/Chat/SessionLedgerEntries.cs:32` (ADR-040): `SessionOutput`, `SessionToolChain`, `SessionToolCall`, `SessionWidgetEvent`, `SessionGate`, `SessionContextFingerprint`. Redis hot, Cosmos warm (`Services/Ai/Sessions/StoredLedgerEntries.cs`), Dataverse cold | No profile-version or reviewer-action fields found. ADR-040 makes the ledger **Tier 3, GDPR-erasable, per session**. That is not the synopsis's "immutable, exportable for a regulator" record (T-3) | Profile version + owner + reviewer action on every run; a durable record (the Decision Record?) that does not depend on session erasure |
+
+**Declarative agents in the repo.** On master there is one: `src/solutions/CopilotAgent/declarativeAgent.json` ("Spaarke AI", general legal ops, no NDA content). The NDA Review / Legal Review / Legal Hold Review agents and the `nda-review` / `nda-library-review` / `legal-hold-review` skills seen in the tenant's Plugins page were built on the accelerator r1 branch (`src/accelerators/`, not merged), §9.
+
+## 7. Evidence already collected — mapped to the synopsis's `[VALIDATION NEEDED]` items `[Tested]`
+
+Source: `projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md` on branch `work/spaarkeai-mcp-bff-api-r1` (PR #2587). The tests ran against a **federated MCP connector** ("Spaarke MCP"), not a declarative agent. Where the synopsis's question is about a declarative agent, the result is a strong indication, not an answer. The test user was a licensed non-admin.
+
+| Synopsis item | Evidence | What it means for this program |
+|---|---|---|
+| Profile "loaded by the first tool call"; "whether Cowork reliably follows a profile returned by a tool" | **T7 ❌**: MCP server `instructions` were **not honoured** in Chat or in Cowork (the tool got `instructions check` with no required prefix). | A **warning sign** for the central mechanism. Copilot ignored server-level guidance it is supposed to read. A profile returned as a tool *result* is a different channel and is untested, but the prior is poor. This is the main reason G1 (§8) is a go/no-go. mcp-r1's rule: put guidance in tool descriptions, not `instructions`. |
+| "Widget-to-tool callbacks `[VALIDATION NEEDED]`" (tuning buttons) | **T1 ✅** Chat: the widget's button made an app-initiated `callServerTool` round trip. **Cowork ✅**: renders after the user switches the plugin on once under Customize (it is off by default in Cowork, on in Chat). A later widget in the same Cowork task collapses the earlier frame to 0×0. | Tuning buttons as MCP Apps widgets work in both surfaces. "Buttons on every output" in Cowork will hide earlier outputs' buttons, so design one live card per task there. Size budget: aim < 1 MB, 3 MB fail (paint delay grows with size). |
+| "Tuning buttons … Cowork support `[VALIDATION NEEDED]`"; "whether Cowork renders widgets" | **T1 Cowork ✅**, as above. | Answered. Remove from Phase 0. |
+| Agents also work in Teams, Outlook, Word | **T1 Word ⚠️**: the tool runs only after an explicit **+ › Choose plugins** pick, with Word's own approval card **even for read-only tools**; no widget. **T1 Outlook ❌**: the connector is not offered at all. Teams not tested. | The synopsis's "also Teams, Outlook, Word" does not hold for the connector today. Whether a *declarative agent* with an MCP action reaches Word or Outlook is untested (G4). Tuning widgets are Chat- and Cowork-only for now. |
+| "Read permissive, write gated … deterministic confirmation gate" | **T3**: a widget calling an app-only write tool ran with **no host confirmation card**, in Chat and in Cowork. **T4**: a model-initiated write gets a per-call host card with raw parameters, and the user can pick **Always allow** (per tool, Cowork). The model also once *claimed* a write it never made. **T12**: tools without annotations are treated as writes; set `readOnlyHint` explicitly. | **The host's card is not a governance gate.** It is skipped for widget writes and can be permanently waived by the user. Every gate the ratchet promises must be **Spaarke's own, enforced server-side**, and the ledger, not the model's reply, is the record of what happened. |
+| `@`-mention routing among legal agents; "decide how our specialists are named and routed when several legal agents share one Copilot" | **E5 ❌**: a connector **cannot be `@`-mentioned**. Declarative and Copilot Studio agents can (the "Spaarke Dataverse MCP" agent appeared in the `@` picker). **E1/E2 ✅**: skills appear under `/` in Chat and Cowork. Harvey and Legora sit in the same pickers. | Each archetype needs a **declarative agent** as its addressable front door (supports Path B for routing). The connector alone is reached only by naming the task (T6), by Sources (E3) or by a skill under `/`. |
+| Tool scoping: "the profile whitelists them" | **T6**: Copilot called our tool for **13/15 (87%)** of domain prompts that never mention Spaarke, and 0/5 controls. **T6b**: switching the Spaarke MCP source **off does not stop calls** (5/5 still called); the switch resets on every new chat. | Our tools can be called **outside any specialist agent** and against the user's apparent choice. The server cannot assume a call came through an archetype's agent. Authority and profile must be resolved per call from identity plus an explicit agent or route signal (G3). Tool descriptions must keep unrelated prompts away (0/5 controls is the bar). |
+| "Each user needs a Microsoft 365 Copilot licence" | **T11 ⚠️** (informal): with only Copilot Chat (Basic) the connector is not offered; with the licence and a new chat it is. | Confirmed as a precondition. It goes in licensing (D-A5) and user setup. |
+| "Chat runs execute under the attorney's own delegated identity" | **T5 ✅**: OAuth via the federated connector, then OBO as the caller (`oid` = the user; WhoAmI returned the user's own `systemuser`). **T0 ✅**: the server is stateless (no SSE; GET 405). | Delegated identity is proven, so profile resolution from `oid` is feasible. But the server is **stateless**: there is no built-in "run" or "conversation" boundary on which to compile and pin a profile "once per run" (G3). |
+| Work IQ context alongside our tools (tuning signals, cold start) | **T9 ✅**: Work IQ mail search and our tool ran in the same turn. | Composition works in Chat. Work IQ as a *scheduled* signal without the attorney present stays `[Verify]` (Phase 2, not Phase 0). |
+| "Whether one package can hold several agents"; core plus practice plugins | **T2/T14 🔲**: a package with two connectors (`/mcp/legal-operations` + `/mcp/spike-area-b`, one OAuth registration) is built and valid against the post-Ignite 1.30 schema. The owner's upload and test was under way on 2026-11-23 and is not yet recorded. Known risk: the package may not attach to the existing Dev Portal connector (a second source appears). | Partly open. T2/T14 cover connector(s) and skills; they do not cover a declarative agent in the same package, or several agents, or plugin-to-plugin dependency (G2). Record T2/T14 here when mcp-r1 records them. |
+| Route per area (`/mcp/{area}`) and display name on cards | **T13 🔲**: local pass only (each route lists only its own tools); live test pending. | A per-archetype or per-area route is the cleanest "which agent called" signal for G3. It depends on T13 going live. |
+| Skill naming a connector tool | **T10 🔲**: not run. | Needed for "write each procedure once, package as agent component and Cowork skill" (G2). |
+| Cowork credit cost per task | Accelerator r1 POC (2026-11-06): `nda-library-review` used **185 credits** (375/384 topic cells), against Microsoft `compare-key-terms` at 259 and `review-contract` at 449. | First real data point for D-A5. It is for a file-based skill, not the connector path. |
+| Cowork invoking a declarative agent | Ignite: Frontier private preview (synopsis). Not tested. | Do not depend on it (unchanged). |
+| Events invoking a declarative agent; Copilot harness agents publishable into Chat; Copilot evals covering declarative agents; admin pin or pre-enable for a group; Work IQ listen status | Not tested. Only partial signal: the Cowork plugin was **off by default** for the user and the Chat source **on by default** (T1, T6b). | Stay `[Verify]`. None is a Phase 0 go/no-go. They belong to Phases 2–3. |
+
+## 8. What Phase 0 still has to prove
+
+Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1 is the go/no-go for the program's runtime shape.
+
+**G1 — Profile adherence (GO/NO-GO).** Does a declarative agent reliably follow an attorney profile, or must the profile drive server-side execution while Copilot only routes?
+- *Setup:* an NDA declarative agent; two owner profiles that differ on at least five NDA positions (for example term, residuals, non-solicit, governing law, uncapped indemnity flag); the accelerator NDA corpus plus about ten more NDAs.
+- *Variants:*
+  - (a) profile returned in the first tool result and the model applies it;
+  - (b) archetype-level guidance in the agent's instructions (≤ 8,000 chars, static) plus the per-owner profile from a tool;
+  - (c) **server-side**: a single `spaarke_review_nda`-style tool runs the review in the BFF with the compiled profile (reusing NDA-REVIEW, §9), and Copilot routes the request and renders the result.
+- *Measure,* in Chat and Cowork: the share of position decisions that match the active profile; cross-profile bleed (owner A's position applied for owner B); a ratchet probe (a user prompt asks the agent to skip a gate or widen authority).
+- *Pass for (a)/(b):* at least 95% position adherence on both surfaces and zero ratchet escapes; otherwise (c) is the runtime. Thresholds are to be confirmed in the Phase 0 spec.
+- *Expected, given T7:* (c) wins. In that case the declarative agent is a thin router and renderer, and "follows the profile" becomes "routes to the profile-driven tool".
+
+**G2 — One package: declarative agent + connector + skills.** Extends T2/T14 (connectors + skills) and T10 (a skill naming a connector tool).
+- *Pass:* one app package installs a declarative agent whose action is our connector, plus at least one `SKILL.md`, and both work in Chat. The Cowork side is a skill + connector (Cowork cannot call agents).
+- *Also record:* several agents in one package, and whether a practice plugin can depend on the core plugin. Both are informational and decide packaging, not go/no-go.
+
+**G3 — Profile resolution from the caller's identity on the first tool call.**
+- *Pass:* with a stateless server (T0), a tool call resolves `oid` → `systemuser` → Agent Instance → compiled profile version within the tool-call latency budget, and the same version is used for every call that belongs to one run.
+- *Must establish:*
+  - what Copilot sends that can key a "run" or conversation (a conversation id header, or nothing);
+  - whether the server can tell **which agent** invoked the tool (per-archetype route via T13, or a header), because T6/T6b show calls also arrive from outside the agent;
+  - fail-closed behaviour when no Agent Instance exists (platform defaults only, never another owner's profile).
+
+**G4 — Declarative agent reach in Word and Outlook.** T1 tested only the bare connector there. *Record:* whether a declarative agent with our MCP action is addressable and can call tools in Word and Outlook, and whether widgets render. This is informational and sets the surface list for Phase 1.
+
+**Code inventory follow-ups (no spike; Phase 0 desk work):**
+- **I-1 Tool surface:** which surface the profile governs (MCP catalog vs `IAnalysisToolHandler` vs `IAiToolHandler`), and whether the chat Confirmation Gate (`SideEffectGateAIFunction`) also applies on the MCP path.
+- **I-2 Gate policy input:** can `RequiresConfirmation` take a policy argument (the ratchet) without forking the one gate, given ADR-039 "one dispatch protocol".
+- **I-3 Durable run record:** the Decision Record vs the ADR-040 session ledger for profile-version, owner and reviewer attribution (T-3).
+- **I-4 Per-user knowledge trimming:** what UAC provides today, given that `RagService` trims by tenant and parent only.
+
+**Already answered, so out of Phase 0:** widget callbacks; widgets in Cowork; host confirmation for widget writes; the licence requirement; `@`-mention of a connector; tool-call rate without "Spaarke"; delegated OBO identity.
+
+## 9. NDA archetype — what already exists to reuse
+
+| Asset | Where | Use in Phase 1 |
+|---|---|---|
+| NDA positions (`baseline-mutual.md`, "Spaarke NDA – Mutual v1.2") | `src/accelerators/practices/nda/positions/` on `work/spaarke-legal-ai-accelerator-r1` (PR #2528, not merged) | Seed for the L1 archetype positions. They are test positions, **not attorney-approved** (`accelerator.yaml` `status: mvp-test`) |
+| NDA eval corpus (4 documents incl. a counterparty markup and an **injection** case) + expected outputs and golden plan | `src/accelerators/practices/nda/evals/` (same branch) | Seed for the NDA golden set and the G1 test bed; the injection case seeds the ratchet probe |
+| `nda-review`, `nda-library-review`, `accelerator-setup` skills; `nda-review.instructions.md` agent instructions | `src/accelerators/practices/nda/`, `src/accelerators/core/` (same branch) | `accelerator-setup` "records the attorney's defaults and runs a trial review". That is an early **L3 owner profile and tailoring interview**, so align rather than duplicate |
+| NDA-REVIEW Action (`nda-review.action.json`, Reasoning tier, advisory output, closed schema `{overallRisk, flaggedSections[]}`), KNW-011 grounding standard, Compose single-surface UX, model-tier picker | `ai-advanced-capabilities-nda-r1` (COMPLETE, deployed to dev 2026-07-28, archived) | Server-side execution path for G1 variant (c). The profile would parameterise this Action rather than a new pipeline |
+| `NdaReviewDispatchEvalTests` | `tests/integration/contract/Eval/` (master) | Existing NDA dispatch eval to extend per profile |
+| Accelerator four-tier decision (2026-11-19): advanced tiers include declarative agents (Agent Builder, shared, admin-deployed) | accelerator r1 `design.md` owner decisions | **Ownership overlap**: whose NDA declarative agent is it? Coordinate before Phase 1 (§10) |
+
+## 10. Coordination points
+
+| Project | Overlap | What we need, or must not break |
+|---|---|---|
+| **spaarke-legal-ai-accelerator-r1** (worktree `spaarke-wt-spaarke-legal-ai-accelerator-r1`, PR #2528) | NDA and Legal Hold agents and skills, NDA positions and evals, the `accelerator-setup` tailoring step, four-tier packaging with declarative agents in the advanced tiers | Agree the **naming rule**: plugin `spaarke-{area}`, skills `spaarke-{area}-{capability}` (core drops the area), MCP tools `spaarke_{verb}_{object}`, build gate `^spaarke(-[a-z0-9]+)+$` ≤ 64 chars. Agree who owns the NDA declarative agent and how a file-based (T0/T1) accelerator relates to a profile-driven specialist. Reuse positions and evals rather than fork them |
+| **spaarke-legal-ai-accelerator-claude-r2** | Claude for Legal research (practice plugins, tailoring interviews, watcher templates) | Synopsis's "borrow and benchmark" item. Check licence terms and quality there, not here |
+| **spaarkeai-mcp-bff-api-r1** (PR #2587) | The single `/mcp/{area}` connector host; **ADR-028 A10** connector auth (OBO as caller, `systemuser` only); **task 040** plugin package + skill (held on T2/T14/T10); naming O-25; T13 route-per-area; widget budget | All specialist tools go on that host. No second MCP server (the synopsis also wants the two existing entries consolidated). Phase 0 G2/G3 build on 040 and T13 rather than duplicating them. Record T2/T14 from mcp-r1's results |
+| **ai-spaarke-action-engine-r1** (ON HOLD, Issue #435) | Archetype = Template, Agent Instance = Action (synopsis) | Its resumption trigger (redesign-r1 G-P3) has passed and it waits on an owner go. D-A9: resume it, or let Phase 1 define Archetype independently and have the Action Engine adopt it |
+| **ai-spaarke-insights-engine-r1 / r2 / r3** (r1 design complete, r2 complete, r3 paused) | Fact / Observation / Inference taxonomy = the honesty contract (epistemic class per output) | Consume the taxonomy; do not re-derive facts. D-F0 deterministic facts first |
+| **ai-advanced-capabilities-nda-r1** (COMPLETE) | NDA-REVIEW Action, ADR-039 advisory mode, NDA eval | Reuse as the server-side NDA executor (§9) |
+| **agent-framework-fit-assessment-r1** (COMPLETE, `docs/assessments/agent-framework-fit-assessment-2026-06-03.md`) | Supervision protocol "on Microsoft Agent Framework"; the BFF removed `Microsoft.Agents.AI` (#1027) | Any re-adoption (Phase 4) cites that assessment and passes BFF hygiene §10 (publish-size delta, CVE) |
+| **unified-access-control-r2** (Issue #808, in progress) | **Entra Agent ID** for background agents and any ADR-028 change; ethical walls and scope trimming (L2); per-user knowledge trimming (I-4) | Auth ADR amendments go through its owners. Ethical walls build on its access model, not a parallel one |
+| spaarke-ai-architecture-redesign-r1 / r2 (r1 COMPLETE) | One confirmation gate, Binding capability model, ADR-039 | The profile feeds the existing gate and catalogs. No second gate or dispatch path |
+
+## 11. ADR tensions (root CLAUDE.md §6.5)
+
+The paths are proposals. The human chooses the path for each tension before the affected phase's spec.
+
+| # | ADR and rule | Conflict | Proposed path | Rationale | Alternatives rejected |
+|---|---|---|---|---|---|
+| **T-1** | **ADR-052** "MUST NOT let the caller's token (OBO, user tokens) leave the BFF request that holds it"; impersonation per **ADR-028 A5** only "for work that user started through an authenticated BFF request — never timer, webhook or system-triggered work" | Synopsis §Autonomous runs: "Start by running as the delegated attorney" for a Graph-notification-triggered NDA run. That is webhook-triggered work acting as a user | **C (comply)** for Phase 3: the background run is app-only (stamp MI), produces **draft-only** output, is attributed to the owning attorney in the ledger, and the attorney's own send is the write gate. Revisit with T-2 | Keeps ADR-052 intact; "prepare" (the default autonomy level) never needs the user's identity | Path A exception for impersonating on webhooks: weakens a fail-closed auth rule for convenience |
+| **T-2** | **ADR-028** (A1–A10) has no provision for **Entra Agent ID** identities | Synopsis D-A2: background agents (Coach, autonomous NDA) get Entra Agent IDs | **B (amendment)**, owned with unified-access-control-r2, **before Phase 3**; not needed for Phases 0–2 | A new principal type in the auth model is exactly what ADR-028 governs; §6.5 bars bypassing auth ADRs without sign-off | Use the stamp MI forever: loses per-agent attribution and revocation, which is the synopsis's point |
+| **T-3** | **ADR-040**: the session ledger is "Tier 3 (user-owned, GDPR-erasable, tenant-partitioned)" | Synopsis Run Ledger: "immutable record … exportable for a client or regulator inquiry" | **C**: keep the session ledger as is; write the durable attribution (profile version, owner, reviewer action, gate decisions) to the append-only **Decision Record**, if I-3 confirms it fits. Otherwise **B** | The erasure guarantee is a privacy commitment; durability belongs in a store designed for it | Making session entries non-erasable: breaks ADR-040/ADR-015 |
+| **T-4** | **ADR-039**: one dispatch protocol, closed catalogs, "the LLM never invokes an unlisted tool"; the Text path is Spaarke's one bounded agent turn | Under Path B, Copilot's orchestrator is the probabilistic decider over our MCP catalog, and a profile "whitelists tools" | **C**: profiles may only **narrow** the closed catalog (never add); MCP tools stay cataloged; reuse mcp-r1's treatment of Copilot-as-caller | The ratchet is a narrowing operation by design, so it fits the closed catalog | Per-profile tool definitions: an open catalog |
+| T-5 | **ADR-013** (extend the BFF), **ADR-004/036/052** (background work), **ADR-002** (no plugins; one owner per invariant) | None expected: the Coach is a Service Bus job; the ratchet invariant is owned by the BFF profile write path | **C** | Recorded so the specs cite it | — |
+| T-6 | Not an ADR: the **#1027** removal of `Microsoft.Agents.AI` | Synopsis: backend orchestration and supervision on Microsoft Agent Framework | Decide in Phase 4 with the fit assessment; Phases 0–3 do not need it | — | — |
+
+## 12. Open decisions
+
+| ID | Decision | Leaning | Decided by |
+|---|---|---|---|
+| D-A1 | Declarative agent or custom engine agent as front door | Declarative agent (needed for `@`, E5); custom engine only on a failed requirement or eval | Synopsis; confirm after G1 |
+| D-A2 | Identity for chat vs background | Delegated attorney for chat (T5 ✅); background per T-1/T-2 | ADR-028 owners |
+| D-A3 | Profile storage | One versioned JSON document with indexed header fields | Phase 1 spec |
+| D-A4 | Consent and privilege for correction harvesting | Owner-scoped, matter-restricted, opt-in per matter | Counsel + owner, Phase 2 |
+| D-A5 | Per-agent pricing and Agent 365 licensing | `[Verify]` with Microsoft contacts; Copilot licence required (T11); Cowork 185 credits per library review (accelerator POC) | Owner |
+| D-A6 | Firm-authored Copilot Studio agents as A2A peers | Defer to Phase 4 | — |
+| **D-A7** | **Where profile application and gates run** | **Server-side** (G1 variant c) unless G1 shows ≥ 95% adherence for (a)/(b). Recommended by the mcp-r1 session from T7/T3/T6 | **Owner, at the G1 gate.** Not yet decided |
+| D-A8 | Supervision protocol timing | Moves to Phase 4 with the patent associate (follows from OD-2) | Owner |
+| D-A9 | Archetype vs Action Engine Template | Phase 1 defines Archetype minimally; the Action Engine adopts it if and when it resumes | Owner, with action-engine-r1 |
+| D-A10 | What "Skill" means here | Both: the `SKILL.md` package component (shared with the accelerator) and server-side `sprk_analysisskill` prompt fragments; name them differently in the spec | Phase 0 spec |
+| D-A11 | Ownership of the NDA declarative agent | This program owns the profile-driven NDA specialist; the accelerator keeps file-based tiers. To agree with accelerator r1 | Owner + accelerator r1 |
+
+## 13. Market position `[Synopsis]`, summary
+
+Harvey (Agent Builder, 500+ agents, in Copilot and Cowork since June 2026) uses the same delivery pattern. Legora (aOS, Word/Outlook add-ins, Copilot connection), CoCounsel (agentic, Westlaw-grounded) and Claude for Legal (Apache 2.0 plugins and tailoring interviews, not on Copilot) are the other reference points. AI-native firms sell outcomes, not software.
+
+- **Our claimed difference:** per-attorney ownership with a one-way ratchet, tuning by tested diff, gates and walls enforced in tools, and delivery inside the customer's tenant.
+- **Where we are behind:** licensed content, liability or insurance, and chained autonomy.
+
+The full text, with sources, is in the source synopsis.
