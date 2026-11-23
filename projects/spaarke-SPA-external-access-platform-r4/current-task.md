@@ -1,41 +1,35 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-22 (task 024 done + committed; master merged; PR next)
+> **Last Updated**: 2026-11-23 ~15:40Z (task 028 in progress: live steps A–C done; E2E round 1 found defects; fix round started)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **024** ✅ — shared EmptyState (FR-17). Notes `notes/task-024-notes.md`. POML completed, TASK-INDEX ✅, drift clean, portfolio synced (#2680: 46 / 23). |
-| **Step** | Committed `65f60cf42f` (024), merged origin/master `ff65c019b2` (conflicts only = our own 023c squash → branch side), fix `eae345869a` (two tests the merge had reverted to 023c text). Verified after merge: lib tsc, DataGrid jest 20/178, client-lint ok, SPA tsc, 9 touched SPA test files green, ArchTest grid guard 231/231. Full SPA vitest 1935/1935 + build ok (pre-merge). |
-| **Status** | Push + PR in progress (body: scratchpad `pr-024.md`). Nothing from 023/024 is deployed. |
-| **Next Action** | Owner's merge go for the 024 PR, with sign-off on its two shared-grid changes (`emptyState` host option; `useHostRowSource` no-empty-flash fix). Arm auto-merge only after that go. Then tell uac-r2 024 is ready (live BFF still lacks #2941) → task 028. |
-| **Side** | #1906b → ebilling-r1; #2866 landed on master (duplication sweep). |
+| **Task** | **028** 🔄 P2 deploy + E2E (STANDARD, prescriptive; the fix round is code, so quality gates apply). Record: `notes/task-028-deploy-record.md` (has uncommitted edits: E2E round 1 + Review detail diagnosis). |
+| **Live (all with owner go + rollback)** | A: grid row `286be8b4` created 12:44Z (rollback: delete row). B: SPA master `2dcbe35e34` live 13:04:40Z, run 45180011706 (rollback: redeploy `2963d1565b`). C: `3ff4102c` Review detail column PATCHed 14:58:28Z, versionnumber 32877194 (rollback: `scratchpad/patch-3ff4102c.ps1 -Rollback`; the raw original is also in the deploy record). Dev BFF `9df4e5c819` (uac-r2, gate passed 13:01Z). |
+| **Owner go (2026-11-23)** | "Yes, fix both": the Review detail defect and the column resize defect, then redeploy the SPA. Merge and redeploy each still need the owner's go. |
+| **Fix 1: Review detail (F1)** | ROOT CAUSE CONFIRMED. The module fetch (`FetchService.ProjectEntity`) serialises SDK values as objects: `statuscode` → `{"value":1,"extensionData":null}`, Money → `{"value":77.25,...}` (measured by serialising `OptionSetValue` with Web defaults). `reviewDetail.ts` `wholeNumberOf` accepts only a number or a digit string, so all four render points are always blank. Same class: `api/delete-own.ts:116` `isServiceRequestClosed` uses `Number(record.statuscode)`, which is NaN on the object, so a closed SR is still offered Delete (server 409). FIX: one helper that accepts number / digit string / `{value:n}` (and `{Value:n}`); use it in both places. Tests use the REAL object shape at all four render points and in `isServiceRequestClosed`. The task 020 tests used a bare `1`, which is why they missed it. Grep for other `Number(record.<optionset>)` / raw option reads. |
+| **Fix 2: column resize (F1)** | The record Documents grid (DataGrid with rowSource, 023a) shows the resize cursor, but dragging doesn't resize; the header text gets selected instead. Cause unknown; needs a browser repro. The SPA has no mock mode in package.json (`dev` = vite). Option: a jsdom-free repro with Vite `dev` in the in-app browser, or a Storybook/harness. Suspects: Fluent `columnSizingOptions` being re-applied (`DataGrid.tsx` ~1440-1510 memo; `key` remount on 50px width bucket ~1741); HeaderCellContent swallowing the pointer. Ask the owner whether the home Invoices grid resizes too (pre-existing vs new). |
+| **Also (cosmetic, same PR if cheap)** | At 1000px the Type and Date columns shrink to "Ty…"/"D…" (minWidth = max(80, 0.5×width)); an empty rounded strip above the Documents grid header. |
+| **E2E round 1 (owner, writer)** | ✅ PDF preview, upload/download/delete, invoice file download, empty states. .docx = no preview by design (owner asked about a docx viewer: none reusable; the external plane can't use SharePoint's viewer; offer to file an Idea). ❌ resize. ❌ Review detail. Pending: owner checks the home Invoices grid column + resize there; the View-only pass after the redeploy. |
+| **Next Action** | Implement Fix 1 (helper + tests) → reproduce Fix 2 → fix → tests → one adversarial review → PR (owner merge go) → SPA redeploy (owner go; tell uac-r2) → owner E2E incl. View-only → tell uac-r2 the E2E end time → close 028 (deploy record, notes, TASK-INDEX, drift check, portfolio sync). |
+
+## Side work
+- ebilling-r1 task 134 (Outcome report): R4 review sent (F1 no-access card, F4 modal report); its fix `2304de2bb5` reviewed: OK, residual K2 agreed. Nothing pending from R4.
+- uac-r2: told about the E2E window from 14:59Z; it reads external 4xx/5xx/403 by route. Send it the E2E end time.
 
 ## Merge trap (seen 2026-11-22)
-- Merging master after a squash of our own work: a line 023c changed and 024 changed BACK looks unchanged from the merge base, so git silently takes master's 023c text. After such merges, for files where `origin/master` == the pre-squash branch tip, restore `HEAD^1`'s copy.
+- Merging master after a squash of our own work: a line that 023c changed and 024 changed BACK looks unchanged from the merge base, so git takes master's text. For files where `origin/master` == the pre-squash branch tip, restore `HEAD^1`'s copy.
 
 ## Owner questions open
-- Merge go for the 024 PR, with sign-off on its two shared-grid changes.
+- A docx preview as an Idea? (FR-14 owner decision 2026-11-09 = PDF + images only.)
 - Older: show "The client is reviewing this invoice." beyond the Information field?
-- K: add `useHostRowSource` to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval).
+- `useHostRowSource` row in `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval).
 
-## Filed this session
-- D-24 #2939, D-25 #2960, D-26 #2961, D-27 #2962, D-28 #2963 (config row not applied by Deploy-Release / provisioning — do it in or before 028), D-29 #2964 (SPA suite flake; full run green this time), D-30 #2975 (remaining hand-rolled empty states, Idea).
-
-## Task 028 reminders (P2 deploy)
-- Waits for uac-r2's live notice of a dev BFF containing #2941 (`9461dc0bb3`). uac-r2 picks the SHA and asks the owner itself — never name a SHA to the owner.
-- Then, each with owner go + stated rollback: apply `scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1` (-WhatIf, apply, -Verify -RequireRow; rollback = delete row `286be8b4-f96f-4d5a-b1d5-82fd83ca9693`); grid PATCH 3ff4102c; SPA deploy of the approved SHA via `deploy-external-spa.yml` (builds master HEAD — if master moved, tell owner + uac-r2 first); E2E incl. 1000px.
-
-## Live state
-- **Dev BFF** `c8ab2cba9e` (uac-r2, 2026-11-20). Rollback `5ae2804884`. Neither has #2941. uac-r2: #2941 rides its next deploy (fm task 055 from master, or a master candidate if 055 isn't on master when we're ready — tell uac-r2 then); it pings before the swap and sends a live notice after its 30-min gate. `/healthz/catalog` 503 until ebilling seeds EB-D-256 (not a regression).
-- **Dev SPA** master `2963d1565b` (live 2026-11-19). Rollback = redeploy `ea7ba661d6`, then `ed3a5c2752`.
+## Filed
+- D-24 #2939, D-25 #2960, D-26 #2961, D-27 #2962, D-28 #2963 (config row not in Deploy-Release/provisioning), D-29 #2964, D-30 #2975.
 
 ## Coordination
-- uac-r2 reviews BFF PRs and deploys the dev BFF. Peer messages are not owner approval.
-
-## Open items
-- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823; D-19 #2854, D-20 #2860. Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, #2786 backfill.
-- Phase 2 remaining: 028. Task 016 🔄 (owner retest 3–7).
-- CI: office-scope legs sit at their 20-min cap (known #1474/#1718/#2767). Re-run on a cancel; not ours.
+- uac-r2 deploys the dev BFF only; peer messages are not owner approval. An SPA deploy builds master HEAD, so re-check HEAD before dispatch.
