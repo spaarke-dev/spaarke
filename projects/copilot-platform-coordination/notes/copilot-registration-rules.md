@@ -11,12 +11,13 @@ Each MCP URL (`/mcp/{area}`) is registered **once** per tenant: either as a fede
 - **Status: holds as written.** Test S-1 (does the model see each tool twice, under which names?) will sharpen the wording, not the rule.
 - **Today in the dev tenant:** the single registration is the federated connector **"Spaarke MCP"** (inventory C1). The spike package (C2) breaks this rule until it is removed.
 - **Not an off switch:** the Chat Sources toggle does not stop tool calls (T6b). Turning a duplicate "off" there does not fix a double registration; removing it does.
+- **Proposed amendment R1′ (specialist-legal-agents-r1, 2026-11-23; NOT decided — owner):** "**One tenant-wide registration per URL** (federated connector or package connector). **Agent-private MCP actions on the same URL are allowed**, using the same OAuth registration (A1)." Reason: G8 (S-3) showed an Agent Builder agent cannot see the tenant connector C1 at all, so persona agents can only reach our tools through their own action. An agent's action is documented as private to that agent [D], and inside the agent C1 is not visible [O], so the model should see one copy inside the agent and none outside. The T2 double call came from two **tenant-wide** registrations both visible in plain Chat. **To confirm:** test G8-P2 (an agent with a private action on `/mcp/legal-operations`: does it run once, and is the action invisible in plain Chat?). Row before any upload (R4).
 
 ## R2. Packages carry skills (and agents where needed), not a second connector
 
 A Spaarke plugin package adds `agentSkills` and, where a practice needs one, a declarative agent. It does **not** add an `agentConnectors` entry for an MCP URL already registered under R1.
 
-- **Status: NOT confirmed (owner, 2026-11-23).** Microsoft documents skills naming tools "from the same package"; it says nothing about a skill using a server registered outside its package. Agents are a further open point: an agent's MCP actions are private to that agent (test S-3).
+- **Status: NOT confirmed (owner, 2026-11-23).** Microsoft documents skills naming tools "from the same package"; it says nothing about a skill using a server registered outside its package. Agents: G8 (S-3, 2026-11-23) showed an Agent Builder agent cannot use the tenant connector, so an agent that needs our tools needs its own private action (see R1′). The packaged-agent case (G8-p) is still to run.
 - **Pending evidence:** whether a package skill can drive the tools of a connector registered outside the package is mcp-r1's **T10** ("a skill naming a connector tool", not yet run). If T10 fails, mcp-r1's fallback (2026-11-23) is one "core" package carrying the single connector registration (the federated connector is then removed), with every other package carrying skills only; that still satisfies R1. The owner decides. This rule is re-decided then; until then, no new package connector for an already-registered URL.
 - **Known host gap:** a package connector worked in Cowork but failed in Chat before reaching the BFF (T2/T13/T14). Another reason not to rely on package connectors for Chat yet.
 
@@ -60,7 +61,7 @@ A model can call a tool twice (a duplicate registration, a retry, or a skill tha
 
 | Rule | State | Waits on |
 |---|---|---|
-| R1 one registration | Holds | S-1 only sharpens the wording |
+| R1 one registration | Holds; amendment R1′ (agent-private actions allowed) proposed | S-1 sharpens the wording; R1′ needs G8-P2 and the owner |
 | R2 packages carry skills/agents, not a connector | **Open** | S-2 (= mcp-r1 T10), S-3 |
 | R3 naming | Holds for new artifacts | accelerator OD-42 for existing skills |
 | R4–R7 process rules | Independent of structure | — |
