@@ -522,10 +522,12 @@ public sealed class DecisionCommitService
         var ids = new List<Guid> { signalId };
         ids.AddRange(also);
         var lanes = new Dictionary<Guid, SignalAccessDecision>();
+        // Task 205 (DI-146): items on one core record ask the caller's Read on it once; each Signal is still read as the caller.
+        var coreReads = new SignalCoreRecordAccess.CoreReadMemo();
         foreach (var id in ids)
         {
             // Readability only here; the Do-lane "mine" half (D-141) follows below, once the review id is known (task 150).
-            var decision = await _access.AuthorizeAsync(id, ct, enforceDoLaneMine: false).ConfigureAwait(false);
+            var decision = await _access.AuthorizeAsync(id, ct, enforceDoLaneMine: false, coreReads).ConfigureAwait(false);
             if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
                 return new DecisionCommitResult { Status = DecisionCommitStatus.CallerUnresolved, ReviewId = review.ReviewId };
             if (decision.Outcome == SignalAccessOutcome.Unavailable)
@@ -929,11 +931,12 @@ public sealed class DecisionCommitService
             return first with { Replayed = true };
 
         // K5: the caller's rights, again, on what the repair would touch: AppendTo on the core record and Write on each subject.
-        var primary = await ReadSignalAsync(ids[0], CancellationToken.None).ConfigureAwait(false);
+        var read = await ReadSignalsAsync([ids[0], .. open], CancellationToken.None).ConfigureAwait(false);
+        var primary = read?.GetValueOrDefault(ids[0]);
         var rows = new List<SignalRow>();
         foreach (var id in open)
         {
-            if (await ReadSignalAsync(id, CancellationToken.None).ConfigureAwait(false) is { } row)
+            if (read?.GetValueOrDefault(id) is { } row)
                 rows.Add(row);
         }
 
@@ -979,15 +982,37 @@ public sealed class DecisionCommitService
         return updated with { Replayed = true };
     }
 
+    /// <summary>Task 205 (DI-146): how many Signals of one decision are closed at the same time. Each close is still its own
+    /// row-version update with its own outcome; the bound only keeps a large row from waiting on one round trip after another.</summary>
+    internal const int CloseParallelism = 4;
+
     /// <summary>Closes (or links) <paramref name="signalIds"/> with an already-written record. Uncancellable: these are writes
-    /// after the record.</summary>
+    /// after the record. Results are in the order of <paramref name="signalIds"/>.</summary>
+    /// <remarks>Task 205 (DI-146): the Signals are first read together in pages (<see cref="ReadSignalsAsync"/>), after the record was
+    /// written, and each close starts from its own row's read; then up to <see cref="CloseParallelism"/> closes run at once. Every rule of
+    /// <see cref="CloseSignalAsync"/> is per item and unchanged: a row that changed since that read fails its row-version update and is
+    /// read again on its own and decided again; a row the paged read did not return (or a read that faulted) is read on its own; and one
+    /// item's outcome never depends on another's.</remarks>
     private async Task<IReadOnlyList<DecisionCommitSignal>> CloseAllAsync(
         IReadOnlyList<Guid> signalIds, Resolution resolution, string? dismissalText, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart,
         DateTimeOffset? clearedSince = null)
     {
-        var signals = new List<DecisionCommitSignal>();
-        foreach (var id in signalIds)
-            signals.Add(await CloseSignalAsync(id, resolution, dismissalText, recordId, confirmedBy, reviewStart, CancellationToken.None, clearedSince).ConfigureAwait(false));
+        var read = await ReadSignalsAsync(signalIds, CancellationToken.None).ConfigureAwait(false);
+        var signals = new DecisionCommitSignal[signalIds.Count];
+        using var slots = new SemaphoreSlim(CloseParallelism);
+        await Task.WhenAll(signalIds.Select(async (id, i) =>
+        {
+            await slots.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                signals[i] = await CloseSignalAsync(id, resolution, dismissalText, recordId, confirmedBy, reviewStart, CancellationToken.None, clearedSince,
+                    read?.GetValueOrDefault(id)).ConfigureAwait(false);
+            }
+            finally
+            {
+                slots.Release();
+            }
+        })).ConfigureAwait(false);
         return signals;
     }
 
@@ -1232,12 +1257,12 @@ public sealed class DecisionCommitService
         if (existingRecord is { } stored && !stored.Covers(ids, hash))
             return Refused(reviewId, DecisionCommitReasons.ReviewChanged, "This review id was already used for a different decision.");
 
-        // ---- (1c) The Signals, app-only: their server-written columns -------------------------------------------------
+        // ---- (1c) The Signals, app-only: their server-written columns (task 205: read in pages, not one Retrieve per item) ---
+        var read = await ReadSignalsAsync(ids, ct).ConfigureAwait(false);
         var rows = new List<SignalRow>();
         foreach (var id in ids)
         {
-            var row = await ReadSignalAsync(id, ct).ConfigureAwait(false);
-            if (row is null)
+            if (read?.GetValueOrDefault(id) is not { } row)
                 return Unavailable(reviewId, DecisionCommitReasons.SignalUnreadable, "An item in this decision could not be read; nothing was done.");
             rows.Add(row);
         }
@@ -1491,15 +1516,8 @@ public sealed class DecisionCommitService
         }
 
         // ---- (6) Close (or, for an inquiry only, link) every Signal the decision covers -------------------------------------
-        var signals = new List<DecisionCommitSignal>();
-        var warnings = new List<string>();
-        foreach (var row in p.Resolved)
-        {
-            var closed = await CloseSignalAsync(row.Id, p.Resolution, p.DismissalText, recordId, confirmedBy, reviewStart, writeCt, clearedSince).ConfigureAwait(false);
-            signals.Add(closed);
-            if (closed.Warning is { } warning)
-                warnings.Add(warning);
-        }
+        var signals = await CloseAllAsync(p.Resolved.Select(r => r.Id).ToList(), p.Resolution, p.DismissalText, recordId, confirmedBy, reviewStart, clearedSince).ConfigureAwait(false);
+        var warnings = signals.Where(s => s.Warning is not null).Select(s => s.Warning!).ToList();
 
         // A step that finished (Done) with a warning of its own: the budget inquiry sent but its .eml was not archived (D-216).
         warnings.AddRange(executed.Where(e => !string.IsNullOrEmpty(e.Warning)).Select(e => e.Warning!));
@@ -1911,6 +1929,38 @@ public sealed class DecisionCommitService
             _logger.LogWarning("Decision commit: Signal {SignalId} could not be read app-only ({ExceptionType}).", id, ex.GetType().Name);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Task 205 (DI-146): <paramref name="ids"/> read app-only in pages of <see cref="ResolvedSignalReadPage"/> (one <c>RetrieveMultiple</c>
+    /// per page, the paging <see cref="ResolvedSignalSubjectsOfRecordAsync"/> uses), on the same writer connection, with the same columns
+    /// and row version as <see cref="ReadSignalAsync"/>. A Signal that no longer exists is absent from the answer; any fault answers null
+    /// (nothing is known).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<Guid, SignalRow>?> ReadSignalsAsync(IReadOnlyList<Guid> ids, CancellationToken ct)
+    {
+        var read = new Dictionary<Guid, SignalRow>();
+        try
+        {
+            foreach (var page in ids.Distinct().Chunk(ResolvedSignalReadPage))
+            {
+                var query = new QueryExpression("sprk_signal") { ColumnSet = new ColumnSet(SignalColumns) };
+                query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, page.Cast<object>().ToArray());
+                var signals = await _writer.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var signal in signals.Entities)
+                {
+                    if (page.Contains(signal.Id))
+                        read[signal.Id] = ToRow(signal.Id, signal);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision commit: {Count} Signal(s) could not be read app-only ({ExceptionType}).", ids.Count, ex.GetType().Name);
+            return null;
+        }
+
+        return read;
     }
 
     internal static SignalRow ToRow(Guid id, Entity e)
@@ -2479,16 +2529,18 @@ public sealed class DecisionCommitService
     /// <summary>
     /// Closes (or links) one Signal with the record. Applied only to a Signal still open, or one the SYSTEM resolved since the
     /// review started (re-closed with this decision, so Signal and record agree). A Signal a person resolved is left alone.
-    /// Row-version conditional; a concurrent change is re-read once.
+    /// Row-version conditional; a concurrent change is re-read once. Task 205: <paramref name="alreadyRead"/>, when given, is this row as
+    /// read after the record was written (<see cref="CloseAllAsync"/>'s paged read) and stands in for the first attempt's read; the retry
+    /// after a version mismatch always reads the row again by id.
     /// </summary>
     private async Task<DecisionCommitSignal> CloseSignalAsync(
         Guid signalId, Resolution resolution, string? dismissalText, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart, CancellationToken ct,
-        DateTimeOffset? clearedSince = null)
+        DateTimeOffset? clearedSince = null, SignalRow? alreadyRead = null)
     {
         var state = resolution.ToString();
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            var row = await ReadSignalAsync(signalId, ct).ConfigureAwait(false);
+            var row = attempt == 0 && alreadyRead is not null ? alreadyRead : await ReadSignalAsync(signalId, ct).ConfigureAwait(false);
             if (row is null)
                 return Warn(signalId, "signal_unreadable", "The item could not be read to close it.");
 

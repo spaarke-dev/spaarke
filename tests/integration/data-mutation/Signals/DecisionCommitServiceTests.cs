@@ -291,6 +291,14 @@ public sealed partial class DecisionCommitServiceTests
 
             Org.Setup(o => o.RetrieveAsync("sprk_signal", It.IsAny<Guid>(), It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, ColumnSet _, CancellationToken _) => Snapshot(id));
+            // Task 205: the writer's paged read of a decision's Signals (sprk_signalid IN the page), answered like Dataverse: the rows
+            // that exist, each with its row version.
+            Org.Setup(o => o.RetrieveMultipleAsync(It.Is<QueryBase>(q => q is QueryExpression && ((QueryExpression)q).EntityName == "sprk_signal"), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryBase query, CancellationToken _) =>
+                {
+                    var page = ((QueryExpression)query).Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalid" && c.Operator == ConditionOperator.In);
+                    return new EntityCollection(page.Values.Cast<Guid>().Where(Signals.ContainsKey).Select(Snapshot).ToList());
+                });
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Returns((Entity e, CancellationToken _) =>
                 {
