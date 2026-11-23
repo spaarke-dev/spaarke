@@ -7,8 +7,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | None in progress. **028 ✅ completed 2026-11-23** (record: `notes/task-028-deploy-record.md`). |
-| **Next** | First 🔲 in `tasks/TASK-INDEX.md`: **030**, live-metadata check of Information columns (FR-18a). It is a live read-only Dataverse read, so show the commands and get the owner's go first. Run it through task-execute. |
+| **Task** | None in progress. **030 ✅ completed 2026-11-23**: 18 of 29 columns found, 11 dropped, none secured. The owner said yes to `createdon` as the open date and to all three people columns. The final list for 031 is in `notes/task-030-information-fields.md`. |
+| **Next** | Phase 3 Group C: **031** (ReadableColumns + Information section; opus/high; BFF, with UAC review per column via uac-r2; run `/conflict-check` before the BFF PR; include D-33 #3010's comment fix), **032** (DataGrid persisted widths/sort + Reset columns; builds on PR #3000's `userColumnWidths`) and **034** (Messages refresh). Run them through task-execute; Group C tasks can run in parallel. |
+| **Previous** | 028 ✅ (record: `notes/task-028-deploy-record.md`). |
 | **Live on dev** | **SPA:** master `9d08576e63`, run 45260396182, live 20:34:15Z (rollback: redeploy `2dcbe35e34`). **BFF:** `a48398746d` (uac-r2, gate passed). **Grid config:** row `286be8b4` created; `3ff4102c` has the Review detail column (rollback string in the deploy record). |
 | **Phase 2 result** | E2E round 2 (owner as writer + View-only partner): all pass. uac-r2 server readout: PASS (9 requests, all 200, no errors). Fix PR #3000 (Review detail option-set shape + DataGrid column resize) merged. |
 

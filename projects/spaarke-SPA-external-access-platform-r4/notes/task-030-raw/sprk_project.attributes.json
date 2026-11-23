@@ -1,0 +1,53 @@
+{
+  "@odata.context": "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/$metadata#EntityDefinitions('sprk_project')/Attributes(LogicalName,AttributeType,IsSecured,IsValidForRead)",
+  "value": [
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.DateTimeAttributeMetadata",
+      "MetadataId": "86b030c1-3de6-4aa3-8076-aaf74957dc14",
+      "AttributeType": "DateTime",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "modifiedon"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "2efe7a1e-da1e-4f66-8c53-8fe24e14c9f0",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_assignedattorney1"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "fabe2a9d-6935-48d5-a0bb-5aca59dfd15b",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_assignedparalegal1"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "3eb9e807-ac7c-41de-b0d2-9a3a967a82e8",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_practicearea"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.MemoAttributeMetadata",
+      "MetadataId": "d7bc600f-1409-f111-8407-7ced8d1dc988",
+      "AttributeType": "Memo",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_projectdescription"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "82c6c88a-2d8a-41c3-8328-3f1de9fb8c91",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_projecttype_ref"
+    }
+  ]
+}
