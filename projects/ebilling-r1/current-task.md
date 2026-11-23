@@ -20,7 +20,6 @@
   2. Wait for uac-r2's review of 193 at 46a89e55f8.
   3. After uac-r2 approves, merge 193 into work and tell provisioning-r1 about the upgrade-import requirement.
   4. Ask the owner for the dev -Apply go.
-  5. Remove agent worktrees with Remove-WorktreeSafe.ps1 (run in pwsh 7, not powershell 5): the 193 r2 worktree agent-ae6adbfd41129c582 if its removal did not finish (the others are removed).
 - **117 ✅ just merged (f4a272136c).** Apply stays off until 079 (owner OK). 096 and 121 stay gated.
 - **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
 - `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
