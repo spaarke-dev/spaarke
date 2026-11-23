@@ -465,6 +465,24 @@ public sealed class RecordRuleSetRetireJobTests
         Status(set).Should().Be(RuleSetService.RuleSetPublished);
     }
 
+    [Fact(DisplayName = "117: a huge age floor is clamped to one year; the run completes, never throws")]
+    public async Task AHugeAgeFloor_IsClampedToOneYear_AndTheRunCompletes()
+    {
+        var withinTheYear = Set();
+        var olderThanAYear = Set();
+        H.SetModifiedOn(withinTheYear, Now.UtcDateTime.AddDays(-300));
+        H.SetModifiedOn(olderThanAYear, Now.UtcDateTime.AddDays(-400));
+        _settings[RecordRuleSetRetireJob.MinAgeMinutesKey] = int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = await RunJobAsync();
+
+        result.Success.Should().BeTrue();
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("modifiedBefore").GetDateTime().Should().Be(Now.UtcDateTime.AddMinutes(-RecordRuleSetRetireJob.MaxMinAgeMinutes));
+        Status(withinTheYear).Should().Be(RuleSetService.RuleSetPublished);
+        Status(olderThanAYear).Should().Be(RuleSetService.RuleSetRetired);
+    }
+
     // ── Faults ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "117: a policy update fault leaves that set Active and its run partial, the next set is retired, the next run retires it")]

@@ -66,6 +66,10 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
     internal const int DefaultMaxPages = 10;
     internal const int DefaultMinAgeMinutes = 15;
 
+    /// <summary>The largest age floor taken (one year): a larger <see cref="MinAgeMinutesKey"/> is clamped to it, so the floor's date is always
+    /// representable and nothing escapes <see cref="ExecuteAsync"/>.</summary>
+    internal const int MaxMinAgeMinutes = 525_600;
+
     /// <summary>The heartbeat's skip reason when <c>Ebilling:Enabled</c> is false (as <c>EligibleApproverRefreshJob</c>).</summary>
     internal const string SkippedEbillingDisabled = "ebilling-disabled";
 
@@ -125,7 +129,7 @@ public sealed class RecordRuleSetRetireJob : IScheduledJob
         var apply = skippedReason is null && bool.TryParse(_configuration[ApplyKey], out var a) && a;
         var pageSize = Math.Min(PositiveInt(_configuration[PageSizeKey], DefaultPageSize), MaxPageSize);
         var maxPages = PositiveInt(_configuration[MaxPagesKey], DefaultMaxPages);
-        var minAgeMinutes = PositiveInt(_configuration[MinAgeMinutesKey], DefaultMinAgeMinutes);
+        var minAgeMinutes = Math.Min(PositiveInt(_configuration[MinAgeMinutesKey], DefaultMinAgeMinutes), MaxMinAgeMinutes);
         var modifiedBefore = _timeProvider.GetUtcNow().UtcDateTime.AddMinutes(-minAgeMinutes);
         var problems = new List<string>();
         var status = StatusOk;
