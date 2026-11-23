@@ -834,8 +834,10 @@ public sealed class StoredFileService
     /// <summary>
     /// ebilling-r1 task 094 (uac-r2 re-check (b); procedure-and-file-model 9.1 undo): withdraws every row of <paramref name="rows"/> that is
     /// not already <see cref="StoredFileStatus.Removed"/> (one write of <c>sprk_filestatus</c> = Removed per row, conditioned on the row
-    /// version that was read), so no row of an invoice being undone is served once its blob is deleted. Only
-    /// <see cref="Submission.SubmissionCommitGate.CompensateAsync"/> calls it, before <see cref="DeleteBlobForUndoAsync"/>. A row changed
+    /// version that was read), so no row of an invoice being undone is served once its blob is deleted. Called before
+    /// <see cref="DeleteBlobForUndoAsync"/> by <see cref="Submission.SubmissionCommitGate.CompensateAsync"/>, by
+    /// <see cref="WithdrawExportFileAsync"/> and (task 123 fix round 2) by the supporting-file upload route when its own file left the invoice
+    /// over the file limit. A row changed
     /// since the read or any fault throws (the undo is held and a later delivery re-reads and retries); a row already gone is skipped.
     /// </summary>
     internal Task WithdrawForUndoAsync(IReadOnlyList<StoredFileRow> rows, CancellationToken ct) =>

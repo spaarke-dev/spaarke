@@ -494,6 +494,126 @@ public sealed class InvoiceFileUploadTests
     private static readonly StoredFileParent Invoice = new(StoredFileParentKind.Invoice, InvoiceId);
 
     // =============================================================================================================================
+    // Fix round 2 (uac-r2 condition 1): the count after the write
+    // =============================================================================================================================
+
+    [Fact(DisplayName = "Fix round 2: a concurrent upload's row lands between the limit check and the write (50 rows when this file's row lands) → 409 ebilling.files.limit_reached; this file's row and blob are removed, the invoice ends at 50")]
+    public async Task Race_OverLimitAfterTheWrite_409_OwnFileRemoved()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        var concurrent = SeedToCount(host, StoredFileEndpoints.MaxListedFiles - 1);
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        response.Headers.RetryAfter.Should().BeNull();
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.files.limit_reached");
+        var uploaded = UploadedFileId(host);
+        host.Rig.Dataverse.Rows.Should().HaveCount(StoredFileEndpoints.MaxListedFiles, "this file's row is removed; the invoice's list answers again");
+        host.Rig.Dataverse.Rows.Should().NotContainKey(uploaded);
+        host.Rig.Dataverse.Rows.Should().ContainKey(concurrent(), "only this request's own file is removed");
+        host.Rig.Gateway.Get(StoredFileSchema.ContainerOf(StoredFilePurpose.InvoiceSupportingFile), StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, uploaded))
+            .Should().BeNull("its blob is deleted");
+        host.Rig.Dataverse.Calls.Should().Contain($"update {StoredFileSchema.Entity} {uploaded}", "withdrawn (Removed) before its blob and row go");
+    }
+
+    [Fact(DisplayName = "Fix round 2 (must not fire): 48 files before the upload, 49 after → 201; the row stays Servable and its blob stays")]
+    public async Task Recount_48Before_Created_RowStays()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.Rig.SeedFile(Guid.NewGuid(), Invoice, "%PDF-1.7"u8.ToArray(), StoredFileStatus.Servable, StoredFilePurpose.InvoicePdf);
+        while (host.Rig.Dataverse.Rows.Count < StoredFileEndpoints.MaxListedFiles - 2)
+        {
+            host.Rig.SeedFile(Guid.NewGuid(), Invoice, Csv, StoredFileStatus.Servable, StoredFilePurpose.InvoiceSupportingFile, contentType: "text/csv");
+        }
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var fileId = JsonNode.Parse(await response.Content.ReadAsStringAsync())!["fileId"]!.GetValue<Guid>();
+        host.Rig.Dataverse.Rows.Should().HaveCount(StoredFileEndpoints.MaxListedFiles - 1);
+        host.Rig.Dataverse.Rows[fileId].GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value.Should().Be((int)StoredFileStatus.Servable);
+        host.Rig.Gateway.Get(StoredFileSchema.ContainerOf(StoredFilePurpose.InvoiceSupportingFile), StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, fileId))
+            .Should().NotBeNull();
+        host.Rig.Dataverse.Calls.Should().NotContain(c => c.StartsWith("delete", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Fix round 2: the count after the write faults → 503 file_store_unavailable with Retry-After, and this file's row and blob are removed (the 503 says nothing was stored)")]
+    public async Task RecountFault_503_OwnFileRemoved()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.Rig.SeedFile(Guid.NewGuid(), Invoice, "%PDF-1.7"u8.ToArray(), StoredFileStatus.Servable, StoredFilePurpose.InvoicePdf);
+        host.Rig.Gateway.BeforeOp = (op, _) =>
+        {
+            if (op == "create")
+            {
+                host.Rig.Dataverse.QueryFault = new TimeoutException("Dataverse slow"); // after both checks before the write
+            }
+        };
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        await AssertStoreUnavailableAsync(response);
+        var uploaded = UploadedFileId(host);
+        host.Rig.Dataverse.Rows.Should().NotContainKey(uploaded);
+        host.Rig.Dataverse.Rows.Should().HaveCount(1, "only the Invoice PDF is left");
+        host.Rig.Gateway.Get(StoredFileSchema.ContainerOf(StoredFilePurpose.InvoiceSupportingFile), StoredFileBlobName.Build(StoredFileRig.Tenant, Invoice, uploaded))
+            .Should().BeNull();
+    }
+
+    [Fact(DisplayName = "Fix round 2: over the limit after the write and the removal faults (the blob delete) → 503 with Retry-After; the row is left withdrawn (Removed), never Servable")]
+    public async Task RemovalFault_503_RowLeftRemoved()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        SeedToCount(host, StoredFileEndpoints.MaxListedFiles - 1);
+        host.Rig.Gateway.FailOp["delete"] = new Azure.RequestFailedException(500, "storage fault");
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        await AssertStoreUnavailableAsync(response);
+        var uploaded = UploadedFileId(host);
+        host.Rig.Dataverse.Rows[uploaded].GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value
+            .Should().Be((int)StoredFileStatus.Removed, "the residue is a Removed row (the invoice stays over the limit, as before this fix), never a Servable one");
+    }
+
+    /// <summary>
+    /// Seeds the invoice's Servable Invoice PDF and supporting files up to <paramref name="before"/> rows, and makes a concurrent upload's
+    /// row land when this request stages its bytes (after both checks before the write). Returns the concurrent row's id once it landed.
+    /// </summary>
+    private static Func<Guid> SeedToCount(Host host, int before)
+    {
+        host.Rig.SeedFile(Guid.NewGuid(), Invoice, "%PDF-1.7"u8.ToArray(), StoredFileStatus.Servable, StoredFilePurpose.InvoicePdf);
+        while (host.Rig.Dataverse.Rows.Count < before)
+        {
+            host.Rig.SeedFile(Guid.NewGuid(), Invoice, Csv, StoredFileStatus.Servable, StoredFilePurpose.InvoiceSupportingFile, contentType: "text/csv");
+        }
+
+        Guid? landed = null;
+        host.Rig.Gateway.BeforeOp = (op, _) =>
+        {
+            if (op == "create" && landed is null)
+            {
+                landed = Guid.NewGuid();
+                host.Rig.SeedFile(landed.Value, Invoice, Csv, StoredFileStatus.Servable, StoredFilePurpose.InvoiceSupportingFile, contentType: "text/csv");
+            }
+        };
+        return () => landed ?? throw new InvalidOperationException("the concurrent row never landed");
+    }
+
+    /// <summary>The id of the Stored File row this request created (the only create call).</summary>
+    private static Guid UploadedFileId(Host host) =>
+        Guid.Parse(host.Rig.Dataverse.Calls.Single(c => c.StartsWith($"create {StoredFileSchema.Entity} ", StringComparison.Ordinal))
+            .Split(' ')[2]);
+
+    // =============================================================================================================================
     // Store failures: 503 with Retry-After, nothing Servable left
     // =============================================================================================================================
 

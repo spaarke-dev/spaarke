@@ -100,6 +100,7 @@ public sealed class InvoiceFileUploadContractTests
         ["inactive invoice", 409, "ebilling.invoice.inactive", false],
         ["submission files pending", 409, "ebilling.invoice.files_pending", true],
         ["file limit reached", 409, "ebilling.files.limit_reached", false],
+        ["file limit reached after the file was stored", 409, "ebilling.files.limit_reached", false],
         ["store failed", 503, "file_store_unavailable", true],
         ["eBilling off", 503, "ebilling.disabled", false],
     ];
@@ -126,6 +127,25 @@ public sealed class InvoiceFileUploadContractTests
             {
                 host.Rig.SeedFile(Guid.NewGuid(), invoice, Bytes, StoredFileStatus.Servable, StoredFilePurpose.InvoiceSupportingFile);
             }
+        }
+        else if (when == "file limit reached after the file was stored")
+        {
+            // Fix round 2 (uac-r2 condition 1): 49 rows pass the checks before the write; a concurrent upload's row lands while this
+            // file is staged, so the count after the write is 51 and this file is removed.
+            while (host.Rig.Dataverse.Rows.Count < Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.MaxListedFiles - 1)
+            {
+                host.Rig.SeedFile(Guid.NewGuid(), invoice, Bytes, StoredFileStatus.Servable, StoredFilePurpose.InvoiceSupportingFile);
+            }
+
+            var landed = false;
+            host.Rig.Gateway.BeforeOp = (op, _) =>
+            {
+                if (op == "create" && !landed)
+                {
+                    landed = true;
+                    host.Rig.SeedFile(Guid.NewGuid(), invoice, Bytes, StoredFileStatus.Servable, StoredFilePurpose.InvoiceSupportingFile);
+                }
+            };
         }
 
         HttpContent content = when switch
