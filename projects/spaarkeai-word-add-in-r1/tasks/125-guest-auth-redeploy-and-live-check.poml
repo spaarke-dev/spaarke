@@ -3,7 +3,7 @@
   <metadata>
     <title>Rebuild and redeploy the guest-auth fix to dev; guest + member live check</title>
     <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployments of many PCFs/code pages to a shared environment.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -33,4 +33,5 @@
     <extension>n/a — deployment.</extension>
     <cost-of-doing-nothing>The fix never reaches users (the library is bundled into each surface).</cost-of-doing-nothing>
   </justification>
+  <notes>2026-11-23 (owner go "yes proceed"). Steps 1-2: NO deploy needed, and none made. A read-only scan of dev found every surface in notes/122 "fail for a guest" already carrying the fix (the `tenant_unresolved` marker of @spaarke/auth's fail-closed tenant rule, on master since 2598b2fb95, 2026-10-08). Other sessions redeployed them from master since (bundle dates 2026-10-10 .. 2026-11-23): SpeDocumentViewer, RelatedDocumentCount, SemanticSearchControl, CommunicationActions, -ConversationPanel, -MessageActions, -Timeline, -TimelineRegarding, -Attachments, TrackingFieldTrio, DocumentRelationshipViewer (PCF + page); pages dailyupdate (Daily Briefing), emailpage, communicationreconciliation, reporting, speadmin, documentuploadwizard, findsimilar, playbookbuilder. Redeploying would only risk overwriting newer versions. The Matter main form no longer holds the dev tenant id or an App Insights value. Step 3 (read-only): client b36e9b91 ("SPE File Viewer PCF") has https://spaarkedev1.crm.dynamics.com as an SPA redirect; the guest systemusers are enabled, licensed, Read-Write, in Spaarke Business Unit 1, each with an Entra object id. Remaining: step 4, the owner's guest + member live check. Step 9.5: no code or config changed, so no review applies.</notes>
 </task>
