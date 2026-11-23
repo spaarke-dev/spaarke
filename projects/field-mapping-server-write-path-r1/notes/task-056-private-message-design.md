@@ -1,6 +1,6 @@
 # Task 056a — Private messages in a record's context: design note
 
-> Status (2026-11-22): **UAC-r2 approved the access parts on conditions C1–C6**, now written into this note. The owner's
+> Status (2026-11-22): **056a APPROVED by UAC-r2 at 51419e7768**; 056b in progress (task/fm-056b). C1–C6 and UAC-r2's three wording clarifications are in this note. The owner's
 > answers are in (`notes/decisions.md`, 2026-11-22): all as recommended, except Q2.4 (either behaviour allowed; the
 > easier one, no revoke, is kept) and Q3 (the refusal text is the owner's). No code until UAC-r2 has checked this revision.
 > Issue: #2923. Starts from: MR-1 in `projects/messages-enhancements-r1/requirements.md`, which holds UAC-r2's access
@@ -72,28 +72,37 @@ UAC-r2's ownership files (POML 056 escalation trigger 1).
 1. **Both participants hold Read on the referenced record.**
    - The sender is checked as the caller (`CallerRecordAccessProbe.GetCallerRightsAsync`).
    - The recipient is checked as the named principal (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync`,
-     `RetrievePrincipalAccess` for that systemuser). An unanswered check refuses.
+     `RetrievePrincipalAccess` for that systemuser). An unanswered check gives 503 (Q2.3); nothing is sent.
    - Precedent: `AssignTaskRecipientGate`.
    - **U1, accepted by UAC-r2.** `RetrievePrincipalAccess` for the named systemuser is Dataverse's answer for that
      principal. No `CallerId`-impersonated read is needed.
    - **C1 (No Access wall).** Dataverse's rights answer can lag a No Access entry until the share reconcile removes the
      share. So when the record is secure, or files under a secure parent, BOTH participants must also pass
-     `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`. Walled or Unverifiable gives the neutral refusal. The
+     `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`. Walled gives the refusal text; the guard's Unverifiable outcome gives 503 (Q2.3). The
      guard is reused as is, not forked (callers today: `InternalUserShareCore`, `GrantAccessNotifier`).
 2. **Restricted record (C2).**
    - A participant flagged external is refused (`InternalShareEndpoints.IsBarredOnRestricted`).
    - Both participants are checked.
    - The flag checked is the record's **effective** Restricted flag through its filing (`EffectiveRootFlags`, round
      84), not only its own stored value.
-   - An effective flag or an external flag that cannot be read refuses.
+   - The Restricted flag decides only for an external participant. When a participant is external and the effective
+     flag or the external flag cannot be read, the answer is 503 (Q2.3) and nothing is sent. When both participants are
+     internal, an unreadable Restricted flag does not change the answer, and the send goes ahead on the Read and No
+     Access checks.
 3. **One refusal for every recipient-side cause.** The text is the owner's: "Recipient does not have required record
    access".
    - It covers the recipient not reading the record, the No Access wall, and an external recipient on a Restricted
      record. It never says which.
    - The sender learns only that this person lacks access to this record. That is what any refusal of this send tells
      them, and nothing about the record's flags.
-   - A sender who fails their own Read check gets "You do not have required record access".
-   - A check that cannot be answered gives 503 "try again". Configuration problems keep their existing 409.
+   - **Sender side (UAC-r2 clarification, 2026-11-22).** C1 and C2 apply to the sender too. Every sender-side cause gives
+     "You do not have required record access". The causes are: no Read, walled, external on a Restricted record, and an
+     unknown or nonexistent record id (NFR-01: unknown and denied give the same answer).
+   - **Order.** The sender's checks run in full before any recipient check, so a sender who fails learns nothing about
+     the recipient's access. A test pins this order.
+   - **Unanswered checks.** A check that cannot be answered gives 503 "try again": a rights question with no answer, the
+     guard's Unverifiable outcome, or an unreadable flag. Walled is an answer and gives the refusal text. Either way
+     nothing is sent. Configuration problems keep their existing 409.
 4. **After the send (C6, Q2.4).** The owner allows either behaviour ("not required if easier to remove access"), so the
    easier one is chosen: nothing revokes. Removing access would need new machinery that watches record and user access
    changes. None of these take the message from either
@@ -106,9 +115,8 @@ UAC-r2's ownership files (POML 056 escalation trigger 1).
    record reference (name, number, link) is resolved **as the viewer** and hidden from a viewer who can no longer read
    the record.
 
-Secure records need no extra rule. The message is never filed, so the 2026-11-09 rule ("participants keep their shares
-when a Direct message is filed, except on secure or Restricted targets") does not come into play until someone files it
-(Q5).
+Secure records need no extra rule. A private message is never filed (Q5), so the 2026-11-09 rule ("participants keep
+their shares when a Direct message is filed, except on secure or Restricted targets") never applies to it.
 
 ### Q3. A recipient who cannot read the record
 
@@ -137,27 +145,25 @@ pair. Grants: UAC-r2 task 198.
 
 ### Q5. Filing to the record later
 
-**Recommendation: allowed, explicit, never automatic.** This is MR-1 rule 4.
+**Owner (2026-11-22): never.** "let's just solve the 1:1 which is it always stays 1:1 - no filing". This supersedes the
+earlier recommendation (filing allowed, explicit, behind a confirmation), which the owner had first approved.
 
-- A participant uses the existing filing action (`PATCH /api/communications/{id}/filing`). The client puts the context
-  record first as the suggested target, behind a confirmation: "Jane's team on Matter X will be able to read this".
-- The existing filing rules then apply unchanged:
-  - owner = the record's team (secure: the Secure team);
-  - the participants keep their shares, except on secure or Restricted targets;
-  - on a Restricted record, external participants lose access.
-- **The reference is left as it is on filing.** Clearing it would need a change in `OwnedChildWrite.RefileAsync`
-  (UAC-r2's file).
-  - The per-viewer read (§3.3) selects only rows with **no** filing lookup. A filed message therefore shows as an
-    ordinary record message, and its reference is ignored.
-  - **U2, agreed by UAC-r2, on C3.**
-    - The `about` reads stay caller-impersonated, so row security decides who reads. The sender/recipient and no-filing
-      filters only narrow what is displayed.
-    - The reference columns stay field-secured, so readers of a filed message cannot read the reference.
-- **Unfiling.** `PATCH /filing` can also unfile a message (054 piece 3b: every unfile path follows one rule). An unfiled
-  private message is again an eligible Direct message and goes back to the Direct team under 3b's rule. Its reference
-  is still there, and the impersonated read keeps that safe: only the pair read the row, so only the pair see the
-  reference.
+- **The rule.** A private message is never filed and never moved to another thread, by any writer: the filing route
+  (`PATCH /api/communications/{id}/filing`), the AI update tools, push, Office reconcile, thread moves and inbound
+  association. Its audience is its two participants for its whole life.
+- **Why.** Filing makes a message a record message, readable by everyone who reads the record, and the reference would
+  go with the row. Field security on the reference columns governs writes only (the 054b readers profile is on every
+  business unit's default team). So the pair-only audience of the row is what keeps the reference private, and filing
+  would end it.
+- **Where it is enforced.** One refusal in the re-file core, reached by every writer, with a stable code. A reference
+  column that is absent from metadata passes (no private message can exist), and a read fault refuses (fail closed).
+  Placement and authorship are agreed with UAC-r2 before code.
+- **The reads.** The `about` reads stay caller-impersonated, so row security decides who reads. The sender/recipient and
+  no-filing filters only narrow what is displayed (U2, agreed by UAC-r2, on C3).
+- **A participant who wants the record's team to see something** sends an ordinary message on the record.
 - **A standalone Direct message cannot gain a reference later.** The reference is written once, at create, by the BFF.
+- **Follow-up (not built here):** invite-only conversations. Participants could add named people, each passing the
+  record-access check, so a conversation widens only by invitation. Filed for `messages-enhancements-r1`.
 
 ### Q6. Where private messages surface
 
@@ -300,8 +306,38 @@ code, and it is open.
 | Q2.4 | owner | After the send: does a later Restricted flag, No Access entry or lost Read take the message from either participant? | Either is acceptable (owner); the easier is kept: no. It stays theirs, and the record reference is hidden from a viewer who cannot read the record (C6) |
 | Q3 | owner | Recipient cannot read the record | Refuse with "Recipient does not have required record access"; the "Send as a direct message instead" offer only if small |
 | Q4 | owner | Ownership | Direct team + the stamped pair, unchanged |
-| Q5 | owner | Filing later | Explicit, confirmed, context record suggested; no reference added to an existing message |
+| Q5 | owner | Filing later | **Never** (owner, 2026-11-22, superseding "explicit, confirmed"): a private message always stays 1:1 and is never filed or moved to another thread; one refusal in the re-file core. No reference is added to an existing message |
 | Q6 | owner | Where it surfaces | Record conversation view (pair only, per counterpart) and the Messages view |
 | U1 | UAC-r2 | Recipient check | **Answered:** `RetrievePrincipalAccess` accepted, with C1 (the No Access wall) |
-| U2 | UAC-r2 | Reference left as is on filing | **Answered:** agreed, with C3 (impersonated reads; columns field-secured) |
+| U2 | UAC-r2 | Reference left as is on filing | **Answered:** agreed, with C3 (impersonated reads). Superseded by Q5 "never": the field security on the columns governs writes only, so the reference stays private because the row is never filed |
 | U3 | UAC-r2 | Guard coverage | **Answered:** covered, with C4 (relationship cascade) and C5 (more selectors) |
+
+## 6. As built (056b): "never filed" enforcement, deploy order, known limits
+
+**One predicate.** `PrivateContextColumns.IsPrivate(row)` (any reference column holds a non-empty lookup) is the only test of "private message". Every site below uses it.
+
+**Where "never filed" is enforced.**
+- **Writes through the BFF.**
+  - `RecordOwnershipResolver.ReparentAsync` refuses a re-file or thread move of a private message (`sdap.communication.private.not_fileable`, 409).
+  - `PrivateMessageWriteGuard` is asked before every generic update of a communication that names a filing column, a typed regarding, the regarding pair, the thread or the owner. Its callers are the filing route (`OwnedChildWrite.RefileAsync`), the update handler, the AI update tool, the field-mapping push, Repair and inbound association.
+  - A read fault refuses with `sdap.communication.private.check_unavailable` (503).
+  - An ArchTest census keeps every generic writer on the guard.
+- **Links set outside the BFF.** The 2-minute Direct-message share reconcile clears any filing columns that exist on a private message, and the pair's display columns, app-only, on a row-version condition.
+- **Until the clear runs, these never act on a private message:**
+  - the secure reconcile (skips the row);
+  - the app-only record reads (excluded in the query);
+  - the core-ancestor stamp (no ancestor; a held stamp is cleared);
+  - the secure-child share mirror (placed under no root).
+- **Column presence.** Every security check asks metadata without remembering a "missing" answer. Only the caller-impersonated thread read, which uses the answer only to decide which columns to select, remembers it for 5 minutes.
+
+**Deploy order, per environment.** Run the schema script (`Set-PrivateContextSchema.ps1`), then field security (`Set-ThreadFlagFieldSecurity.ps1 -Apply`, then `-Verify`), then the BFF. Each step needs the owner's go.
+
+**Known limits.**
+- A refused private send can leave the pair's Direct thread with no message in it.
+- If the message row is created and a later send step fails, a retried echo saves an ordinary Direct message without the reference.
+- With both participants internal, an unreadable Restricted flag does not block the send (Q2, rule 2).
+- After a participant loses access to the record, the reference stays visible to them until the next share reconcile.
+- A failed out-of-band clear is retried on the next reconcile pass that reaches the row.
+- The secure-child share mirror reads the reference columns on rows it reads itself. For rows another job hands it, the secure reconcile's private-row skip applies.
+- Assigning a Direct message to another owner in the model-driven app follows the platform's Assign semantics, for every Direct message. This is tracked in #2979, not in 056.
+- Invite-only conversations are a follow-up: #2977.

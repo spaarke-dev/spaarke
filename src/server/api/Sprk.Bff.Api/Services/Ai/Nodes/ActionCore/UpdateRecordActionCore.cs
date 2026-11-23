@@ -375,6 +375,23 @@ internal sealed class UpdateRecordActionCore
         // written (#2091 round 3; RecordOwnerUnresolvedException, like an unresolved owner).
         var parentChanges = ParentChangesOf(input, updatePayload);
 
+        // fm task 056 (owner 2026-11-22, Q5): a private message is never filed or moved to another thread, by any payload source
+        // (a confirmed proposal written as its person included). An update that sets only a typed regarding that is no ownership
+        // parent, or only the regarding pair, is either a plain PATCH or a reparent the reparent's own rule does not see as a
+        // filing, so the rule is asked here, on the columns this PATCH sends, for both paths, after the bind check above and
+        // before anything is written (app-only read; a fault, or no app-only reader, refuses). The scope is made only for an
+        // update the guard reads for.
+        if (Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.Triggers(input.EntityLogicalName, updatePayload.Keys))
+        {
+            using var privateScope = _scopeFactory.CreateScope();
+            if (await Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.RefuseUpdateAsync(
+                    privateScope.ServiceProvider.GetService<IGenericEntityService>(), input.EntityLogicalName, input.RecordId,
+                    updatePayload.Keys, _logger, cancellationToken).ConfigureAwait(false) is { } privateRefusal)
+            {
+                throw Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.UpdateRefused(input.EntityLogicalName, privateRefusal);
+            }
+        }
+
         // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a
         // re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was isolated
         // is read BEFORE the write (once more after a fault — a timeout included — then handed to the step as a fault): a move

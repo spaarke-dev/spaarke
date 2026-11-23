@@ -56,7 +56,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 Lookups = [new DataverseWriteItemMapper.MappedLookup("sprk_regardingperson", "contact", "contacts", DirectUnfileContact)],
                 ClearedColumns = ["sprk_regardingmatter"],
             },
-            callerObjectId: null, CancellationToken.None, directOwner: DirectUnfileStep(lookup, grants));
+            callerObjectId: null, CancellationToken.None, appOnlyEntities: GuardReaderOverTheWorld(),
+            directOwner: DirectUnfileStep(lookup, grants));
 
         outcome.OwnerRefusal.Should().BeNull("a message re-filed to a contact is still linked to a record: no unfile");
         outcome.Written.Should().BeTrue();
@@ -90,7 +91,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", DirectUnfileMessage, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = null }), _user,
             _world.Resolver(directMessageOwnerTeam: lookup), Restamper(), Children(threads.Object), http,
-            NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
+            NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true, appOnlyEntities: GuardReaderOverTheWorld());
 
         Status(result).Should().Be(StatusCodes.Status204NoContent);
         _world.Row("sprk_communication", DirectUnfileMessage).GetAttributeValue<EntityReference>("owningteam")?.Id
@@ -160,6 +161,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 _world.Resolver(directMessageOwnerTeam: lookup),
                 SecureRootFilingGateFixtures.NothingSecure(),
                 scopes,
+                appOnlyEntities: GuardReaderOverTheWorld(),
                 directOwner: DirectUnfileStep(lookup, new List<Guid>(), calls))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(

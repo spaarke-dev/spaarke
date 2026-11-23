@@ -342,3 +342,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing (messaging-r3's `ConversationWorkspace`), not caused by 055 |
 | **Failure** | The all-mode list loads one `listThreads` page (default 50) and ignores `nextPageToken`, in All and now in Messages. ADR-051 requires infinite lazy-scroll. The server already pages, and `kind=direct` fills each page server-side. |
 | **Status** | Filed and reported. |
+
+## DI-036 — Invite-only conversations for private messages about a record (follow-up, not built here)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-22, owner discussion of task 056 filing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2977 |
+| **Class** | Feature follow-up for `messages-enhancements-r1` |
+| **Need** | Participants invite named people into a private conversation about a record; each invitee passes the recipient's record-access check; the conversation widens only by invitation, never by filing. |
+| **Status** | Filed. 056 ships strictly 1:1, never filed (decisions.md 2026-11-22). The Direct access model is pair-only and belongs to UAC-r2, so this needs a design reviewed with UAC-r2 first. |

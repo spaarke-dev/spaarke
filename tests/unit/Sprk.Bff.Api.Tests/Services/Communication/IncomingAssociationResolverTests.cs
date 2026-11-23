@@ -648,6 +648,24 @@ public class IncomingAssociationResolverTests
         return written;
     }
 
+    /// <summary>
+    /// What the private-message write guard reads before a plain write of the row (fm task 056): the published schema has the
+    /// reference columns, and the stored row holds none (an ordinary message). The guard fails closed on an unanswered read.
+    /// </summary>
+    private void AnOrdinaryMessageIsStored()
+    {
+        _dataverseServiceMock
+            .Setup(d => d.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.All.Append("sprk_communicationid")
+                .ToDictionary(c => c, c => new ColumnMetadata(c, "Lookup", true, true, null), StringComparer.OrdinalIgnoreCase));
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_communication"
+                    && q.ColumnSet.Columns.Contains(Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.Matter)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection(new List<DataverseEntity> { new("sprk_communication", TestCommunicationId) }));
+    }
+
     // An operator can add invoice / work assignment to the core-writable set (AutoFileOptions.CoreWritableEntities, no
     // redeploy) — then they auto-file and headline the denormalized Regarding, so their number column matters.
     private IncomingAssociationResolver ResolverWith(IAssociationRung rung) => new(
@@ -730,6 +748,7 @@ public class IncomingAssociationResolverTests
     {
         var matter = Guid.NewGuid();
         CaptureCommunicationUpdate();
+        AnOrdinaryMessageIsStored();
         var threads = new Mock<IThreadResolver>();
         var rung = new StubRegardingRung("sprk_regardingmatter", "sprk_matter", matter);
         var resolver = FilingResolverWith(rung, new(), threads.Object);

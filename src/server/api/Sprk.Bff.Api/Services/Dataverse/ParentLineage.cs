@@ -728,7 +728,9 @@ internal static class InheritedAccessPermission
     /// <item><c>sprk_communication</c>: <c>sprk_sentby</c> and <c>sprk_directrecipient</c> (a Direct message's two participants,
     /// the audience its participant grants read) and the thread lookup <c>sprk_communicationthread</c> (the unfile step derives
     /// the thread participants from it). Written by the create paths' typed stamps and the one thread filing write
-    /// (<c>DirectMessageRecipient.WriteThreadFilingAsync</c>).</item>
+    /// (<c>DirectMessageRecipient.WriteThreadFilingAsync</c>). Also the three private-context references
+    /// (<c>PrivateContextColumns.All</c>, fm task 056): the core record a private message is about. They only decide where the
+    /// message is shown to its two participants; the BFF writes them once, at create, and no mapping, playbook or caller sets them.</item>
     /// </list>
     /// <c>scripts/Set-ThreadFlagFieldSecurity.ps1</c> field-secures exactly these columns for the BFF's writer profile, so a
     /// person's own write of one fails at Dataverse; the BFF's generic writers run as the BFF or carry a payload a person,
@@ -749,6 +751,9 @@ internal static class InheritedAccessPermission
                 DirectMessageParticipantShares.SentByColumn,
                 DirectMessageParticipantShares.DirectRecipientColumn,
                 DirectMessageParticipantShares.ThreadLookup,
+                Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.Matter,
+                Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.Project,
+                Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.WorkAssignment,
             },
         };
 

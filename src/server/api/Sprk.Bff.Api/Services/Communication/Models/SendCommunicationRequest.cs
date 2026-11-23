@@ -136,6 +136,17 @@ public sealed record SendCommunicationRequest
     public bool? IsInternalOnly { get; init; }
 
     /// <summary>
+    /// fm task 056 (private messages in a record's context): the one core record a private message is about, or <c>null</c> for
+    /// every other send (the default; every other send is unchanged). Valid only on a <see cref="Models.CommunicationType.Message"/>
+    /// send into the caller's own strict 1:1 Direct thread (<see cref="ThreadId"/>), with no To/Cc/Bcc, no
+    /// <see cref="Associations"/>, no <see cref="InheritRegardingFromCommunicationId"/> and no reply into another thread; anything
+    /// else is a 400. The message stays a Direct message of that pair: the reference decides where it is shown to the two
+    /// participants, never who reads it. Both participants must hold Read on the record before anything is sent
+    /// (<c>Access.PrivateMessageSendGate</c>). Optional.
+    /// </summary>
+    public PrivateMessageContext? PrivateContext { get; init; }
+
+    /// <summary>
     /// Task 185 (owner round 98 Q4): the system-mail (secret-bearing) send option, or <c>null</c> for a normal send (the
     /// default; every other send is unchanged). See <see cref="SystemMailOptions"/>. Internal and <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>:
     /// server code sets it, a request body never can.
@@ -160,4 +171,17 @@ public sealed record SendCommunicationRequest
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     internal bool CreateThreadPrivate { get; init; }
+}
+
+/// <summary>
+/// fm task 056: the record a private message is about (<see cref="SendCommunicationRequest.PrivateContext"/>). JSON
+/// <c>{ "entityType": "sprk_matter", "id": "…" }</c>.
+/// </summary>
+public sealed record PrivateMessageContext
+{
+    /// <summary>The record's table: <c>sprk_matter</c>, <c>sprk_project</c> or <c>sprk_workassignment</c>. Anything else is a 400.</summary>
+    public string? EntityType { get; init; }
+
+    /// <summary>The record's id. An empty id is a 400.</summary>
+    public Guid Id { get; init; }
 }

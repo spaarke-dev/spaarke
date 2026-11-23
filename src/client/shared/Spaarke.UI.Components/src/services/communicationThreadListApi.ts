@@ -202,6 +202,11 @@ export interface IListThreadsOptions {
    * `counterpartName`. Omitted (or `'all'`) is the all-threads list, unchanged.
    */
   kind?: 'all' | 'direct';
+  /**
+   * Private messages about a record (fm task 056): lists the caller's pair threads that hold at least one private message
+   * about this record, one row per counterpart (`counterpartName` set). Sent as `kind=direct&about={entityType}:{id}`.
+   */
+  about?: { entityType: string; id: string };
 }
 
 /**
@@ -221,7 +226,8 @@ export async function listThreads(
   if (options.search) params.set('search', options.search);
   if (options.top) params.set('top', String(options.top));
   if (options.pageToken) params.set('pageToken', options.pageToken);
-  if (options.kind === 'direct') params.set('kind', 'direct');
+  if (options.kind === 'direct' || options.about) params.set('kind', 'direct');
+  if (options.about) params.set('about', `${options.about.entityType}:${options.about.id}`);
 
   const url = resolveUrl(client.bffBaseUrl, '/api/communications/threads', params);
   const response = await client.authenticatedFetch(url, { method: 'GET' });
