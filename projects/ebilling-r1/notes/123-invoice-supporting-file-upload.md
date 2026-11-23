@@ -213,3 +213,27 @@ The must-not-fire test passes on every version.
 - **No separate service test:** the route tests drive the real `StoredFileService` over the fakes. `Race_…` covers the removal's withdraw, blob and row; `RemovalFault_…` covers a failed step leaving the row Removed; `RecountFault_…` covers the removal after a faulted count.
 
 **Not tested here.** No test cancels a request between the write and step (5). The test host has no seam to cancel a request at that point. The rule is structural instead: every call in step (5) passes `CancellationToken.None`, and the request's `ct` is not in scope in either helper.
+
+## 12. Sign-offs and merge (2026-11-23)
+
+**uac-r2.**
+- Approved the task at `c15d510af3` with two conditions.
+- Condition 1 was the 50-limit race. It was fixed in fix round 2, and uac-r2 approved the fix diff at `d12b115f7a`. Its one nit was to move the row delete into `StoredFileService`; `5bb6965b77` does that.
+- Condition 2 stays open on the deploy step, below.
+- uac-r2 accepted the access known limits by message; their detail is not recorded in this public repo.
+
+**word-add-in-r1.**
+- Agreed the contract changes at `b7e5c19c91` and at `c15d510af3`.
+- Was sent the fix round 2 row change at `d12b115f7a` (no new codes).
+
+**Merged** into `work/ebilling-r1` as `72c416e948` (`--no-ff`; branch tip `5bb6965b77`).
+
+**Deploy condition (uac-r2 condition 2, open).** 123's BFF change goes into a later dev deploy. It is not part of the deploy at `9df4e5c819`. After the deploy that carries 123, run a read-only check on dev:
+- count the invoices whose Invoice PDF is Servable and that still hold a non-PDF row from their submission's commit that is Not yet servable;
+- send the count to uac-r2, with any ids by message only.
+
+A count of zero closes K1 (the transitional part-flip limit). Any hit is filed, without ids in the repo.
+
+**Process note.** One adversarial reviewer ran the whole ArchTests suite once, against the project rule; all 2722 passed. A guard the fix-round filters did not select (`WriterOnlyTablesDeleteGuardTests`) failed on `d12b115f7a` and was fixed in `5bb6965b77` (§11). On the merged work branch (`72c416e948`), the builds have 0 errors. The ArchTests filter `Finance|StoredFile|Writer|Delete|RouteAuthorization|Ownership|Submission|ExternalFileStore|InvoicePdf` passed 369, failed 0. The unit filter `InvoiceFileUpload|StoredFile|InvoiceFilesList|SubmissionCommitGate|InvoiceSubmissionPersister|FinanceAuthorizationFilter|FinanceUniformNotFoundForRecord` passed 721, failed 0.
+
+rework: fix-round-2 task 123

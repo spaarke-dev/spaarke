@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-22 (050b, 124 and 086 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-23 (050b, 124, 086 and 123 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,19 +10,10 @@
 
 ## Quick recovery
 
-- **Active task:** 123 (`tasks/123-invoice-supporting-file-upload.poml`), in progress since 2026-11-22. FULL, opus/high, directional; tags bff-api, api, auth, testing.
-  - State 2026-11-23: branch `task/ebilling-123` tip `c15d510af3` (base `134f7a15cf`). Built, two Opus adversarial reviews done, fix round 1 done (every F fixed with fail-before tests; includes a SubmissionCommitGate change: Invoice PDF flipped last, early Passed once it is Servable, route 409 files_pending until then). Scoped Sonnet re-check: K-class only; ADR-002/008/010/018 pass.
-  - word-add-in-r1 agreed the contract at c15d510af3 (both rounds).
-  - **uac-r2 APPROVED c15d510af3 (2026-11-23) with two conditions.**
-    - (1) Fix the 50-limit race before merge: after the upload, re-count; if over 50, remove own row via the existing compensation path, then 409 limit_reached. Fix round 2 agent running on `task/ebilling-123-fix2`; send uac-r2 the fix SHA, and it re-checks the fix diff only.
-    - (2) After the BFF deploy carrying 123, run a read-only dev check and report the count to uac-r2 (ids by message only): invoices whose InvoicePdf is Servable that still hold a commit non-PDF row Not yet servable. Zero closes K1.
-    - 123 is a candidate for a LATER dev deploy, not the one waiting on the owner (9df4e5c819).
-  - After uac-r2 accepts the fix diff: `--no-ff` merge into work, record the approval and word-add-in-r1's agreement in `notes/123-invoice-supporting-file-upload.md`, close the POML/TASK-INDEX, remove both agent worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-a7b5d698809b047ba` and `agent-adaa081eb1afa950c`) with Remove-WorktreeSafe.ps1.
-  - Filed in passing: ISS-043 #2978 (three other multipart routes answer a malformed body with 500).
-  - Escalation trigger checked: `UploadForCallerAsync` already takes an invoice parent with purpose InvoiceSupportingFile (`StoredFileContracts.cs:177`).
-  - Conflict check: soft pass. No open PR or master change touches the 123 files.
-  - Delegated because the work is one coupled change (route, tests, contract test, notes) best done in an isolated worktree, as for 124 and 050b.
-- 086 closed 2026-11-22 (uac-r2 sign-off; owner accepted the -Verify records for criterion 6). Other open build: 117. `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
+- **Active task:** none. Next build candidate: 117 (FULL opus, p-safe false; gate = 089 merged, 080 live on dev, uac-r2 agrees the delete lists before merge). 096 and 121 stay gated.
+- **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
+- **Clean-up:** remove the three 123 agent worktrees with Remove-WorktreeSafe.ps1: `C:\code_files\spaarke\.claude\worktrees\agent-a7b5d698809b047ba`, `agent-adaa081eb1afa950c`, `agent-afeed46b21bade9b7`.
+- `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
 - **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
 - **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
 - **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
@@ -30,6 +21,8 @@
 - **Uncommitted files:** none, after the 134 bookkeeping commit.
 
 ## Recently done (detail in the notes and git)
+
+- **123 ✅** merged into work 72c416e948 (branch `task/ebilling-123`, tip 5bb6965b77). POST /api/finance/invoices/{invoiceId}/files (internal supporting-file upload) plus a SubmissionCommitGate change (Invoice PDF flipped last; early Passed once Servable). Two Opus passes, fix rounds 1-2, scoped re-check K-only; uac-r2 approved (condition 2 open at deploy); word-add-in-r1 agreed the contract. ISS-043 #2978 filed in passing. Notes: `notes/123-invoice-supporting-file-upload.md`.
 
 - **086 ✅** closed 2026-11-22. Pre-deploy count 0, both -Verify PASS, NFR-05 has no sprk_storedfile finding, live dev BFF `c8ab2cba9e` contains it, uac-r2 signed off, owner accepted -Verify for criterion 6. Notes: `notes/086-storedfile-secure-child.md`.
 
@@ -42,7 +35,7 @@
 
 ## Open work
 
-- **Build:** 123, 117, 096 (gated, see above), 121 (waits for uac-r2 191).
+- **Build:** 117, 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
   - 164: the live `-Apply` needs the owner's go.
   - 089 and 050a: owner questions are in their notes.

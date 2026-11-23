@@ -4,7 +4,7 @@
     <title>Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148); added 2026-10-27 (EB-D-161)</phase>
     <gate>090 merged (done); 092 merged (the stage-then-row pattern on submissions); 086 merged (sprk_storedfile is a secure child of sprk_invoice, so the census and role cover the new create); uac-r2 reviews before merge</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>A new BFF upload route that writes file bytes and a secure child row under a caller check.</rigor-reason>
     <model-tier>opus</model-tier>
