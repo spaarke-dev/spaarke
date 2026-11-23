@@ -7,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Tests.DataMutation.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -387,7 +388,7 @@ public sealed class RefileWriterAfterRefileHookTests
                 .AddSingleton(Restamper())
                 .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
                 .AddSingleton(_threads.Object)
-                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
+                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Mock().AnsweringNoPrivateMessage().Object)
                 .AddScoped(_ => Reconciler())
                 .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true })
                 .GetRequiredService<IServiceScopeFactory>(),
@@ -395,7 +396,7 @@ public sealed class RefileWriterAfterRefileHookTests
 
     private DataverseUpdateHandler Handler() =>
         new(
-            _write.Object, new Mock<IGenericEntityService>().Object, Restamper(), new RecordOwnershipResolverDouble(),
+            _write.Object, PrivateMessageGuardFixtures.NoPrivateMessage(), Restamper(), new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
             Reconciler());
 }

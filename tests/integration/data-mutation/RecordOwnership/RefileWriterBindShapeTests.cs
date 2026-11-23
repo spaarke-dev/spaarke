@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Tests.DataMutation.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -501,8 +502,11 @@ public sealed class RefileWriterBindShapeTests
         // update planner reads the row's pair once per child whose payload writes an agreement lookup — one more O(1) read, still
         // no pass over anything filed under it (asserted above).
         _world.RowReads.Should().Be(count, "the planner's one row read per child, nothing more");
-        ((double)total / count).Should().BeLessThanOrEqualTo(6,
-            "a no-op child costs its isolation read, its reparent's row read, the pair planner's row read and its write — not a pass");
+        // fm task 056 (owner 2026-11-22, Q5: a private message is never filed): the private-message guard reads each child's
+        // context references once before its write (the column metadata it needs is cached per connection) — one more O(1) read.
+        ((double)total / count).Should().BeLessThanOrEqualTo(7,
+            "a no-op child costs its isolation read, its private-message read, its reparent's row read, the pair planner's row read "
+            + "and its write — not a pass");
     }
 
     [Fact(DisplayName = "#2091 r4: a field-mapping push rule whose planned bind writes a different filing lookup than the rule names is refused, and nothing is written")]
@@ -1068,7 +1072,7 @@ public sealed class RefileWriterBindShapeTests
             .AddSingleton<IRecordOwnershipResolver>(Resolver())
             .AddSingleton(_threads.Object)
             .AddSingleton(rights ?? FullAccessRights())
-            .AddSingleton(entities ?? EntitySetNameFixtures.Service())
+            .AddSingleton(entities ?? EntitySetNameFixtures.Mock().AnsweringTheGuardFrom(q => _world.Answer(q)).Object)
             .AddScoped(_ => Reconciler())
             .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true })
             .GetRequiredService<IServiceScopeFactory>();
@@ -1078,7 +1082,7 @@ public sealed class RefileWriterBindShapeTests
 
     private DataverseUpdateHandler Handler(IGenericEntityService? entities = null) =>
         new(
-            _write.Object, entities ?? new Mock<IGenericEntityService>().Object, Restamper(), Resolver(),
+            _write.Object, entities ?? new Mock<IGenericEntityService>().AnsweringTheGuardFrom(q => _world.Answer(q)).Object, Restamper(), Resolver(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance, Reconciler());
 
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
@@ -1136,7 +1140,7 @@ public sealed class RefileWriterBindShapeTests
 
     private Mock<IGenericEntityService> AppOnlyReaderMock()
     {
-        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
+        var entities = SecureChildShareWorld.EntitiesOver(() => _world).WithPrivateContextColumns();
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, CancellationToken _) => $"{table}s");
         return entities;
