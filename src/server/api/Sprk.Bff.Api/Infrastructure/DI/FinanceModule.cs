@@ -138,6 +138,12 @@ public static class FinanceModule
         // and exclude a rule for one core record; 089c adds change rule and remove. Concrete (ADR-010). Scoped: it holds the scoped ownership
         // resolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<ProcedureAssignmentService>();
+        // ebilling-r1 task 117 (model 5.2 / 12, O-17): the no-plugin cleanup after a core record's delete — retires each record-scoped rule
+        // set left with no record (RuleSetService, the one rule-set lifecycle writer) and deletes each assignment row left with no core record
+        // (ProcedureAssignmentService). ADR-036 IScheduledJob, ADR-052 "BFF, schedule". Registered DISABLED, as CommunicationThreadFilingSweepJob:
+        // it runs when an admin triggers it (POST /api/admin/jobs/finance-record-rule-set-retire/trigger) or enables the schedule, and writes only
+        // while RecordRuleSetRetireSweep:Apply is true (task 079 switches it on with the owner's OK).
+        services.AddScheduledJob<RecordRuleSetRetireJob>(RecordRuleSetRetireJob.CronOf(configuration), enabled: false);
         services.AddScoped<RecordProcedureReadService>(); // ebilling-r1 task 084: the caller-read lists of a record's Procedures and rules in force
         services.AddScoped<BillingGuidelinesService>(); // ebilling-r1 task 135 (FR-49): the SPA Billing Guidelines read; the route carries the kill switch
 

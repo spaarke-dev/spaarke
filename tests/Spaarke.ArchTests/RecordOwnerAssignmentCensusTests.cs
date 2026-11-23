@@ -145,6 +145,12 @@ public class RecordOwnerAssignmentCensusTests
         + "record rules (BRR- codes) are NOT covered: they are secure children of their core record (SecureChildLineage, "
         + "OwnershipParentEntities), and every writer of one must route its owner through IRecordOwnershipResolver with that parent "
         + "(ForRow / ForChild over the row, EB-D-168) and be listed Routed in its own file. "
+        + "One exception, ebilling-r1 task 117 (the O-17 sweep, model 5.2 / 12; ADR-002: no plugin, the BFF write path cleans up after a "
+        + "core-record delete; ADR-036: an IScheduledJob runs it): RuleSetService.RetireUnlinkedRecordSetsAsync UPDATES record-scoped sets "
+        + "whose core lookups are all null — statecode / statuscode (Inactive, Retired) on the set and sprk_enabled = No on its live Billing "
+        + "policies, and nothing else: no create, no owner write, no lookup write, no Assign, no delete "
+        + "(RuleSetServiceRecordSetRetireWritesStatusOnly, with must-fire and must-not-fire controls). It decides no owner, so it needs no "
+        + "Routed entry; its record-scope predicate sits in RecordRuleSet, so condition (1) still holds. "
         + "Condition (1): no waived rule-set file names a record scope (WaivedRuleFamilyWritersNameNoRecordScope, with must-fire and "
         + "must-not-fire controls). Condition (2): RuleSetService never writes sprk_matter on sprk_policy, on create or update "
         + "(RuleSetServiceNoMatterScopeGuardTests and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate). "
@@ -2620,6 +2626,114 @@ public class RecordOwnerAssignmentCensusTests
         };
 
         Assert.Empty(RuleFamilyWaiverProblems(census, new[] { "ProcedureSets.cs" }, SeededRuleFiles()));
+    }
+
+    /// <summary>The member of the waived <c>RuleSetService.cs</c> that writes record-scoped sets (the waiver's task 117 exception).</summary>
+    private const string RecordSetRetireMember = "RetireUnlinkedRecordSetsAsync";
+
+    /// <summary>The only columns the task 117 exception may write.</summary>
+    private static readonly string[] RecordSetRetireWritableKeys = { "statecode", "statuscode", "sprk_enabled" };
+
+    /// <summary>What the task 117 exception may never do: create, re-own, re-link, Assign or delete.</summary>
+    private static readonly (string Name, Regex Pattern)[] RecordSetRetireForbidden =
+    {
+        ("a create", new Regex(@"\bnew\s+(?:Entity|DataverseEntity)\s*\(|\bCreateRequest\b|\bCreate\w*Async\s*\(|\bUpsert\w*\b", RegexOptions.Compiled)),
+        ("an owner or creator-person write", new Regex(@"""ownerid|""sprk_createdbyperson|\bApplyTo\s*\(|\bResolveOwner\w*\s*\(", RegexOptions.Compiled)),
+        ("a lookup write", new Regex(@"\bnew\s+EntityReference\s*\(|@odata\.bind", RegexOptions.Compiled)),
+        ("an Assign", new Regex(@"\bAssign\w*\b", RegexOptions.Compiled)),
+        ("a delete", new Regex(@"\bDelete\w*\s*\(", RegexOptions.Compiled)),
+    };
+
+    private static readonly Regex RetireWrittenKey = new(@"\[\s*""(?<key>[^""]+)""\s*\]\s*=(?!=)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// The problems of the waiver's task 117 exception in <paramref name="code"/>: the member must exist once and update something, write
+    /// only <see cref="RecordSetRetireWritableKeys"/>, and hold none of <see cref="RecordSetRetireForbidden"/>.
+    /// </summary>
+    private static List<string> RecordSetRetireProblems(string? code)
+    {
+        if (code is null)
+            return new List<string> { "RuleSetService.cs: not found (the exception's condition would be vacuous)" };
+        var regions = MemberRegions(code, RecordSetRetireMember).ToList();
+        if (regions.Count != 1)
+            return new List<string> { $"{RecordSetRetireMember}: expected one member, found {regions.Count}" };
+
+        var problems = new List<string>();
+        var region = regions[0];
+        if (!Regex.IsMatch(region, @"\bUpdateAsync\s*\("))
+            problems.Add($"{RecordSetRetireMember}: sends no update (the condition would be vacuous)");
+        foreach (var key in RetireWrittenKey.Matches(region).Select(m => m.Groups["key"].Value).Distinct(StringComparer.Ordinal))
+        {
+            if (!RecordSetRetireWritableKeys.Contains(key, StringComparer.Ordinal))
+                problems.Add($"{RecordSetRetireMember}: writes {key}");
+        }
+
+        foreach (var (name, pattern) in RecordSetRetireForbidden)
+        {
+            if (pattern.Match(region) is { Success: true } hit)
+                problems.Add($"{RecordSetRetireMember}: {name} ({hit.Value})");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "ebilling-r1 117: the RuleSetService waiver's one record-scoped exception writes status and sprk_enabled only")]
+    public void RuleSetServiceRecordSetRetireWritesStatusOnly()
+    {
+        var problems = RecordSetRetireProblems(CodeOf(ServerFiles(), "RuleSetService.cs"));
+        Assert.True(
+            problems.Count == 0,
+            "The RuleSetService waiver lets task 117's retire write a record-scoped set's statecode / statuscode and its policies' "
+            + "sprk_enabled only (ADR-002, ADR-036). Anything else on a record-scoped row is a secure child's write and must be Routed.\n"
+            + string.Join("\n", problems));
+    }
+
+    private static string SeededRetire(string body) => SourceScan.CodeText(new[]
+    {
+        "internal sealed class Seeded",
+        "{",
+        "    internal async Task<int> RetireUnlinkedRecordSetsAsync(bool apply, CancellationToken ct)",
+        "    {",
+        "        await _entities.UpdateAsync(\"sprk_policy\", id, new Dictionary<string, object> { [\"sprk_enabled\"] = false }, ct);",
+        "        await _entities.UpdateAsync(\"sprk_ruleset\", id, new Dictionary<string, object> { [\"statecode\"] = new OptionSetValue(1),",
+        "            [\"statuscode\"] = new OptionSetValue(2) }, ct);",
+        "        " + body,
+        "        return 0;",
+        "    }",
+        "",
+        "    internal sealed record Next(int A);",
+        "}",
+    });
+
+    [Theory(DisplayName = "ebilling-r1 117: control — a retire that writes another column, creates, re-owns, re-links, Assigns or deletes fires (must fire)")]
+    [InlineData("var f = new Dictionary<string, object> { [\"sprk_matter\"] = null! };", "writes sprk_matter")]
+    [InlineData("var f = new Dictionary<string, object> { [\"ownerid\"] = team };", "writes ownerid")]
+    [InlineData("var row = new Entity(\"sprk_ruleset\");", "a create")]
+    [InlineData("await _entities.CreateAsync(row, ct);", "a create")]
+    [InlineData("owner.ApplyTo(row);", "an owner or creator-person write")]
+    [InlineData("var r = new EntityReference(\"sprk_matter\", id);", "a lookup write")]
+    [InlineData("await _entities.ExecuteAsync(new AssignRequest(), ct);", "an Assign")]
+    [InlineData("await _entities.DeleteAsync(\"sprk_ruleset\", id, ct);", "a delete")]
+    public void RecordSetRetire_Control_Fires(string planted, string problem)
+    {
+        var problems = RecordSetRetireProblems(SeededRetire(planted));
+
+        Assert.Contains(problems, p => p.Contains(problem, StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 117: control — a retire that writes status and sprk_enabled only passes; a missing or update-less member fires")]
+    public void RecordSetRetire_Control_StatusOnlyPasses_VacuousFires()
+    {
+        Assert.Empty(RecordSetRetireProblems(SeededRetire("_logger.LogInformation(\"retired\");")));
+        Assert.NotEmpty(RecordSetRetireProblems(SourceScan.CodeText(new[] { "internal sealed class Seeded", "{", "}" })));
+        Assert.NotEmpty(RecordSetRetireProblems(null));
+        Assert.NotEmpty(RecordSetRetireProblems(SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    internal Task<int> RetireUnlinkedRecordSetsAsync(bool apply, CancellationToken ct) => Task.FromResult(0);",
+            "}",
+        })));
     }
 
     // =============================================================================================
