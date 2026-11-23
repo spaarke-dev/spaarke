@@ -32,10 +32,10 @@ vi.mock('../src/components/shell/NotificationBell', async () => {
     },
   };
 });
-vi.mock('../src/components/detail/RecordDetailModal', () => ({
-  RecordDetailModal: (props: {
+vi.mock('../src/components/record/RecordTemplateModal', () => ({
+  RecordTemplateModal: (props: {
     open: boolean;
-    entityName: string;
+    config: { entity: string };
     recordIds: readonly string[];
     index: number;
     onSettled?: () => void;
@@ -52,7 +52,7 @@ vi.mock('../src/components/detail/RecordDetailModal', () => ({
     return React.createElement('div', {
       role: 'dialog',
       'data-testid': 'detail',
-      'data-entity': props.entityName,
+      'data-entity': props.config.entity,
       'data-id': props.recordIds[props.index],
     });
   },

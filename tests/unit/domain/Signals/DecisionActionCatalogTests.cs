@@ -67,8 +67,28 @@ public class DecisionActionCatalogTests
         DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
 
         // Task 043 added the optional outside firm (sprk_regardingorganization); still no reply-due parameter (D-56/D-20).
-        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body", "outsideFirm");
+        // Task 190 (D-222) added the optional cc and bcc.
+        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body", "cc", "bcc", "outsideFirm");
         inquiry.Parameters.Single(p => p.Code == "outsideFirm").Required.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SendBudgetInquiry_DeclaresCcAndBccAsOptionalText_AndSendReminderKeepsItsParameters_Task190()
+    {
+        DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
+        DecisionActionCatalog.TryGet("send-reminder", out var reminder).Should().BeTrue();
+
+        foreach (var code in new[] { "cc", "bcc" })
+        {
+            var parameter = inquiry.Parameters.Single(p => p.Code == code);
+            parameter.Required.Should().BeFalse(code);
+            parameter.Kind.Should().Be(DecisionParameterKind.Text, code);
+        }
+
+        // Scope: the shared message parameters did not gain cc/bcc, so send-reminder (and any other user of them) is as before.
+        reminder.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body");
+        DecisionActionCatalog.All.Where(a => a.Code != "send-budget-inquiry")
+            .SelectMany(a => a.Parameters).Select(p => p.Code).Should().NotContain(["cc", "bcc"]);
     }
 
     [Fact]
@@ -325,8 +345,13 @@ public class DecisionActionCatalogTests
     // Billing actions (ebilling-r1 task 074; FR-30, D-75): a closed set of their own, outside the Signals commit route
     // =================================================================================================
 
+    // 095f-2b (EB-D-241; design 3 option A): add-adjustment and remove-adjustment amend this exact set (ontology-r1 reviewed amendment of D-100's
+    // "additive only", not an addition). ISS-034 / iss034a (EB-D-244): finish-stranded-decision amends it the same way (ontology-r1 reviews it).
     private static readonly string[] BillingCodes =
-        ["accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm", "add-line"];
+    [
+        "accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm", "add-line",
+        "add-adjustment", "remove-adjustment", "finish-stranded-decision",
+    ];
 
     [Fact]
     public void BillingActions_AreExactlyTheStatedSet_EachWithAPlanLaneARecordClassAndAGate()
@@ -355,12 +380,25 @@ public class DecisionActionCatalogTests
     [InlineData("override-submission", DecisionRecordClass.Judgement, GateRiskTier.Tier3)]
     [InlineData("assign-firm", DecisionRecordClass.Judgement, GateRiskTier.Tier4)] // 095d-1b: declared Tier3; not reversible and visible to the firm, it resolves to Tier4
     [InlineData("add-line", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 164a-2 (EB-D-198): Tier2b, reversible by a later disallow-line
+    [InlineData("add-adjustment", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 095f-2b (EB-D-241): gates as add-line
+    [InlineData("remove-adjustment", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 095f-2b (EB-D-241): gates as add-line
+    [InlineData("finish-stranded-decision", DecisionRecordClass.Judgement, GateRiskTier.Tier4)] // iss034a (EB-D-244): not reversible, a record-of-truth change
     public void EachBillingAction_HasItsRecordClassAndGateTier(string code, DecisionRecordClass recordClass, GateRiskTier tier)
     {
         DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
 
         action.RecordClass.Should().Be(recordClass);
         DecisionGateTier.Resolve(action.Gate!).Should().Be(tier);
+    }
+
+    [Fact(DisplayName = "iss034a review round 1 (ontology-r1): finish-stranded-decision gates with return-to-firm's factors: not reversible, externally visible (a finished return reaches the firm), a record-of-truth change, Tier4")]
+    public void FinishStrandedDecision_GatesAsReturnToFirm_ExternallyVisible()
+    {
+        DecisionActionCatalog.TryGetBilling("finish-stranded-decision", out var finish).Should().BeTrue();
+        DecisionActionCatalog.TryGetBilling("return-to-firm", out var returned).Should().BeTrue();
+
+        finish.Gate.Should().Be(new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true));
+        finish.Gate.Should().Be(returned.Gate, "a finished return reaches the firm, so the finish gates as return-to-firm does");
     }
 
     [Theory]
@@ -371,6 +409,9 @@ public class DecisionActionCatalogTests
     [InlineData("override-submission", "reason")]
     [InlineData("assign-firm", "firm")] // 095d-1b: the firm is required, the note is not
     [InlineData("add-line", "reason")] // 164a-2 (EB-D-198): the reason is required
+    [InlineData("add-adjustment", "method", "value", "reason")] // 095f-2b (EB-D-241): the rule and the note are optional
+    [InlineData("remove-adjustment", "adjustment")] // 095f-2b (EB-D-241): no reason (the remove route takes none); the note is optional
+    [InlineData("finish-stranded-decision", "finishedDecision", "finishedRecord", "reason")] // iss034a (EB-D-244): the operator's note is optional
     [InlineData("accept-line")]
     [InlineData("approve-invoice")]
     public void BillingActions_RequireExactlyTheStatedParameters_AReasonForEveryAdverseDecisionAndOverride(string code, params string[] required)
@@ -382,6 +423,30 @@ public class DecisionActionCatalogTests
             action.Parameters.Single(p => p.Code == "reason").Kind.Should().Be(DecisionParameterKind.TextArea);
         if (required.Contains("approvedAmount"))
             action.Parameters.Single(p => p.Code == "approvedAmount").Kind.Should().Be(DecisionParameterKind.Money);
+    }
+
+    /// <summary>ebilling-r1 095f-2a (EB-D-236; design 8, Q6): every invoice-level decision declares the optional "note" its service writes to
+    /// <c>Values["note"]</c> when a note is given. Must fire: reject-invoice and return-to-firm declared no note before 095f-2a, and
+    /// override-submission (the Override's code) none before 095f-2c, and accept-line, reduce-line and disallow-line none before 095f-2d1 (the
+    /// line decision's note, one per line's own record).</summary>
+    [Theory]
+    [InlineData("accept-line")]
+    [InlineData("reduce-line")]
+    [InlineData("disallow-line")]
+    [InlineData("approve-invoice")]
+    [InlineData("reject-invoice")]
+    [InlineData("return-to-firm")]
+    [InlineData("override-submission")]
+    [InlineData("add-adjustment")] // 095f-2b (EB-D-241)
+    [InlineData("remove-adjustment")] // 095f-2b (EB-D-241)
+    [InlineData("finish-stranded-decision")] // iss034a (EB-D-244)
+    public void InvoiceDecisions_DeclareNoteAsAnOptionalTextAreaParameter(string code)
+    {
+        DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
+
+        var note = action.Parameters.Should().ContainSingle(p => p.Code == "note").Subject;
+        note.Required.Should().BeFalse("a decision without a note is unchanged (EB-D-236)");
+        note.Kind.Should().Be(DecisionParameterKind.TextArea);
     }
 
     [Fact]
@@ -1019,9 +1084,57 @@ public class DecisionActionCatalogTests
     [Fact]
     public void NoOtherActionDeclaresADefaultSourceOrANotBefore_MustNotFire_D193()
     {
+        // Task 192 (D-224): send-budget-inquiry's own Subject and Message are the only other declared sources.
         DecisionActionCatalog.All.Where(a => a.Code != "create-budget")
-            .SelectMany(a => a.Parameters)
-            .Should().OnlyContain(p => p.DefaultSource == null && p.NotBefore == null);
+            .SelectMany(a => a.Parameters.Select(p => (Action: a.Code, Parameter: p)))
+            .Where(x => !(x.Action == "send-budget-inquiry" && x.Parameter.Code is "subject" or "body"))
+            .Should().OnlyContain(x => x.Parameter.DefaultSource == null && x.Parameter.NotBefore == null);
+    }
+
+    [Fact]
+    public void SendBudgetInquiry_DeclaresTheDefaultSubjectAndMessageSources_AndSendReminderDeclaresNone_D224()
+    {
+        DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
+        Param(inquiry, "subject").DefaultSource.Should().Be(DecisionParameterSources.BudgetInquirySubjectDefault);
+        Param(inquiry, "body").DefaultSource.Should().Be(DecisionParameterSources.BudgetInquiryBodyDefault);
+        Param(inquiry, "subject").Kind.Should().Be(DecisionParameterKind.Text);
+        Param(inquiry, "body").Kind.Should().Be(DecisionParameterKind.TextArea);
+        inquiry.Parameters.Where(p => p.Code is not ("subject" or "body")).Should().OnlyContain(p => p.DefaultSource == null && p.DefaultValue == null);
+
+        // The shared To/Subject/Message array is not changed: send-reminder keeps no default (must not fire).
+        DecisionActionCatalog.TryGet("send-reminder", out var reminder).Should().BeTrue();
+        reminder.Parameters.Should().OnlyContain(p => p.DefaultSource == null && p.DefaultValue == null);
+        DecisionActionDto.From(reminder, isRecommended: false, parameterFacts: new DecisionParameterFacts(
+                new Dictionary<string, IReadOnlyList<DecisionParameterOption>>(),
+                new Dictionary<string, string>
+                {
+                    [DecisionParameterSources.BudgetInquirySubjectDefault] = "x",
+                    [DecisionParameterSources.BudgetInquiryBodyDefault] = "y",
+                }))
+            .Parameters.Should().OnlyContain(p => p.DefaultValue == null);
+    }
+
+    [Fact]
+    public void ThePlanDto_CarriesTheBudgetInquirysResolvedSubjectAndMessage_AsTheirDefaults_D224()
+    {
+        DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
+        var facts = new DecisionParameterFacts(
+            new Dictionary<string, IReadOnlyList<DecisionParameterOption>>(),
+            new Dictionary<string, string>
+            {
+                [DecisionParameterSources.BudgetInquirySubjectDefault] = "Budget inquiry: MTR-1 Acme",
+                [DecisionParameterSources.BudgetInquiryBodyDefault] = "Hello,\n\nThank you,",
+            });
+
+        var dto = DecisionActionDto.From(inquiry, isRecommended: true, parameterFacts: facts);
+
+        dto.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().Be("Budget inquiry: MTR-1 Acme");
+        dto.Parameters.Single(p => p.Code == "body").DefaultValue.Should().Be("Hello,\n\nThank you,");
+        dto.Parameters.Where(p => p.Code is not ("subject" or "body")).Should().OnlyContain(p => p.DefaultValue == null);
+
+        // A default that could not be built is absent: the subject and message have no default and stay empty for the user.
+        var none = DecisionActionDto.From(inquiry, isRecommended: true, parameterFacts: DecisionParameterFacts.None);
+        none.Parameters.Should().OnlyContain(p => p.DefaultValue == null);
     }
 
     [Fact]
@@ -1141,6 +1254,87 @@ public class DecisionActionCatalogTests
         { CallBase = false };
         sources.Setup(s => s.ForPlanAsync(It.IsAny<HttpContext>(), It.IsAny<ResolvedDecisionPlan>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(facts);
         return sources;
+    }
+
+    /// <summary>Task 192 (D-224): the REAL resolver over the caller's own reads of the matter, WhoAmI and their systemuser row.</summary>
+    private static DecisionParameterSources RealSources(DataverseUserResponse matter, DataverseUserResponse? systemUser = null)
+    {
+        var caller = Guid.Parse("dddddddd-0000-0000-0000-000000000001");
+        var user = new Mock<IDataverseUserClient>();
+        user.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(matter);
+        user.Setup(u => u.GetAsync("WhoAmI()", It.IsAny<CancellationToken>())).ReturnsAsync(Ok(new { UserId = caller }));
+        user.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("systemusers(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(systemUser ?? Ok(new { fullname = "Dana Whitfield" }));
+        return new DecisionParameterSources(
+            user.Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalAccessOptions>>().Object,
+            NullLogger<DecisionParameterSources>.Instance);
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_StartsWithTheApprovedSubjectAndMessage_AndSendReminderWithNone_D224()
+    {
+        var (users, _) = UsersWithBudgets();
+        var sources = RealSources(Ok(new { sprk_mattername = "Acme v. Beta", sprk_matternumber = "MTR-00042" }));
+
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(1)), sources: sources);
+
+        var inquiry = body.Actions.Single(a => a.Code == "send-budget-inquiry");
+        inquiry.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().Be("Budget inquiry: MTR-00042 Acme v. Beta");
+        inquiry.Parameters.Single(p => p.Code == "body").DefaultValue.Should().Be(
+            "Hello,\n\n"
+            + "We received notice of a fee or scope change on Acme v. Beta (MTR-00042). The matter's budget has not been revised to reflect it.\n\n"
+            + "Please send us a revised budget estimate, or confirm that the change does not affect the current budget.\n\n"
+            + "Thank you,\nDana Whitfield");
+        inquiry.Parameters.Single(p => p.Code == "to").DefaultValue.Should().BeNull("To is the task-160 pre-fill (PrefillTo), not a default");
+        body.Actions.Where(a => a.Code != "send-budget-inquiry").SelectMany(a => a.Parameters).Should().OnlyContain(p => p.DefaultValue == null);
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_WhenTheMatterReadFails_StillAnswers200_WithNoSubjectOrMessageDefault_D224()
+    {
+        foreach (var matter in new[]
+                 {
+                     Fail(403, DataverseUserClientErrorCodes.AccessDenied),
+                     Fail(404, DataverseUserClientErrorCodes.NotFound),
+                     Fail(503, DataverseUserClientErrorCodes.ServiceError),
+                 })
+        {
+            var (users, _) = UsersWithBudgets();
+
+            var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(1)), sources: RealSources(matter));
+
+            var inquiry = body.Actions.Single(a => a.Code == "send-budget-inquiry");
+            inquiry.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().BeNull();
+            inquiry.Parameters.Single(p => p.Code == "body").DefaultValue.Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_WhenTheCallersNameCannotBeRead_StillAnswers200_AndTheMessageEndsThankYou_D224()
+    {
+        var (users, _) = UsersWithBudgets();
+        var sources = RealSources(
+            Ok(new { sprk_mattername = "Acme v. Beta", sprk_matternumber = "MTR-00042" }),
+            Fail(403, DataverseUserClientErrorCodes.AccessDenied));
+
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(1)), sources: sources);
+
+        var inquiry = body.Actions.Single(a => a.Code == "send-budget-inquiry");
+        inquiry.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().Be("Budget inquiry: MTR-00042 Acme v. Beta");
+        inquiry.Parameters.Single(p => p.Code == "body").DefaultValue.Should().EndWith("Thank you,");
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_ForACoreThatIsNotAMatter_HasNoSubjectOrMessageDefault_D224()
+    {
+        var (users, _) = UsersWithBudgets();
+        var sources = RealSources(Ok(new { sprk_mattername = "Acme v. Beta", sprk_matternumber = "MTR-00042" }));
+
+        var body = await PlanRouteAsync(Access(users, coreTable: "sprk_project", coreSet: "sprk_projects", budgets: new AppBudgets(1)), sources: sources);
+
+        body.Actions.Single(a => a.Code == "send-budget-inquiry").Parameters.Should().OnlyContain(p => p.DefaultValue == null);
     }
 
     private static void CallerBudgetsReadTimes(Mock<IDataverseUserClient> mock, Times times) =>

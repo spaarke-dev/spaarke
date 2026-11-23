@@ -71,7 +71,6 @@ public class ADR013_LinearConsumerBoundaryTests
         "Sprk.Bff.Api.Services.Workspace.WorkspaceAiService",
         "Sprk.Bff.Api.Services.Workspace.ProjectPreFillService",
         "Sprk.Bff.Api.Services.Workspace.MatterPreFillService",
-        "Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceExtractionJobHandler",
     };
 
     [Fact(DisplayName = "ADR-013/FR-14: no code outside the AI domain may depend on IActionResolver/IActionRunner — use a Services/Ai/PublicContracts facade")]

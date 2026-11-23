@@ -849,6 +849,14 @@ public sealed partial class InvoiceSubmissionRerunTests
             var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression query, CancellationToken _) => Retrieve(query));
+            // 130e-1 (C1): the rule Signal replay re-reads the policy version (and its policy and rule set names) for the firm description.
+            foreach (var firmEntity in new[] { "sprk_policyversion", "sprk_policy", "sprk_ruleset" })
+            {
+                entities.Setup(e => e.RetrieveAsync(firmEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) =>
+                        _rows.TryGetValue(id, out var row) && row.LogicalName == entity ? Copy(row) : new Entity(entity, id));
+            }
+
             entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
                 .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) => Execute(requests));
             entities.Setup(e => e.UpdateIfRowVersionMatchesAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))

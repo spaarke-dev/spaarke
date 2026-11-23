@@ -154,7 +154,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
         dv.ReaderProfileId = dv.AddProfile(SecureRecordSetupProcedure.ReaderProfileName);
         dv.WriterProfileId = dv.AddProfile(SecureRecordSetupProcedure.WriterProfileName);
-        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName);
+        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName,
+            SecureRecordSetupProcedure.SystemAdministratorFieldSecurityProfileId);
         foreach (var table in LockedTables)
         {
             dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, table, 4, 0, 0));
@@ -173,6 +174,25 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             permissions.Add(new SecureSetupFieldPermission(dv.LinkWriterProfileId, table, 4, 4, 4));
             permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, table, 4, 4, 4));
             dv.SecuredColumns[ColumnKey(table, column)] = true;
+        }
+
+        // Task 268 (ebilling task 166, EB-D-200): the invoice amounts and firm as SpaarkeMaster ships them (secured; Readers
+        // 4/0/0, Writers 4/4/4, plus the platform's System Administrator profile).
+        foreach (var column in SecureRecordSetupProcedure.InvoiceMoneyColumns)
+        {
+            var permissions = dv.ColumnPermissions(column);
+            permissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 0, 0));
+            permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InvoiceMoneyTable, column)] = true;
+        }
+
+        // Task 270: the invoice-family links (#2799) and the four packaged message-access columns (field-mapping 054b) as a
+        // release carrying both locks ships them. The direct recipient is absent (provisioning never creates it):
+        // AddDirectRecipient adds it.
+        foreach (var (table, column) in SecureRecordSetupProcedure.InvoiceFamilyLinkColumns.Concat(SecureRecordSetupProcedure.MessageAccessColumns))
+        {
+            dv.SeedBffManagedLock(table, column);
         }
 
         // ISS-020: the standing-grant profile as SpaarkeMaster ships it (Read/Create/Update on contact.sprk_standinggrant,
@@ -294,6 +314,34 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
     internal static string ColumnKey(string table, string column) => $"{table}.{column}";
 
+    /// <summary>
+    /// Task 270: a BFF-managed column lock as SpaarkeMaster ships it on <paramref name="table"/>.<paramref name="column"/> —
+    /// secured; Readers 4/0/0, Writers 4/4/4, plus the platform's System Administrator profile.
+    /// </summary>
+    internal void SeedBffManagedLock(string table, string column)
+    {
+        var permissions = ColumnPermissions(column);
+        permissions.Add(new SecureSetupFieldPermission(ReaderProfileId, table, 4, 0, 0));
+        permissions.Add(new SecureSetupFieldPermission(WriterProfileId, table, 4, 4, 4));
+        permissions.Add(new SecureSetupFieldPermission(SystemAdministratorProfileId, table, 4, 4, 4));
+        SecuredColumns[ColumnKey(table, column)] = true;
+    }
+
+    /// <summary>Task 270: the environment ran scripts/Set-DirectRecipientSchema.ps1 and Set-ThreadFlagFieldSecurity.ps1.</summary>
+    internal void AddDirectRecipient()
+        => SeedBffManagedLock(SecureRecordSetupProcedure.DirectRecipientColumn.Table, SecureRecordSetupProcedure.DirectRecipientColumn.Column);
+
+    /// <summary>Every permission row on <paramref name="table"/>.<paramref name="column"/> for <paramref name="profileId"/> removed.</summary>
+    internal void RemoveGrant(string table, string column, Guid profileId)
+        => ColumnPermissions(column).RemoveAll(p => p.ProfileId == profileId && string.Equals(p.EntityName, table, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary><paramref name="profileId"/>'s grant on <paramref name="table"/>.<paramref name="column"/> replaced by read/create/update.</summary>
+    internal void SetGrant(string table, string column, Guid profileId, int read, int create, int update)
+    {
+        RemoveGrant(table, column, profileId);
+        ColumnPermissions(column).Add(new SecureSetupFieldPermission(profileId, table, read, create, update));
+    }
+
     internal List<SecureSetupFieldPermission> ColumnPermissions(string column)
     {
         if (!FieldPermissionsByColumn.TryGetValue(column, out var permissions))
@@ -303,9 +351,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return permissions;
     }
 
-    internal Guid AddProfile(string name)
+    internal Guid AddProfile(string name, Guid? fixedId = null)
     {
-        var id = Guid.NewGuid();
+        var id = fixedId ?? Guid.NewGuid();
         if (!Profiles.TryGetValue(name, out var ids))
         {
             Profiles[name] = ids = [];

@@ -22,7 +22,9 @@ name: CI Standalone Checks
 #                                                                 suite on a push (client-tests.yml is nightly).
 #   client-typecheck        Client Quality > shared-lib builds    The only `tsc` check of the shared client
 #                           + Spaarke.AI.Widgets tsc --noEmit     libraries (client-lint is an ESLint
-#                                                                 ratchet, Tier 2 lint is Prettier + ESLint).
+#                                                                 ratchet, Tier 2 lint is Prettier + ESLint),
+#                                                                 and of LegalWorkspace + SemanticSearch,
+#                                                                 whose bundlers do not type-check (#2808).
 #   pcf-eslint              Client Quality > PCF ESLint           Tier 2 `lint` runs PCF ESLint only when
 #                                                                 SpaarkeAi/BFF paths change and client-lint.yml
 #                                                                 does not cover src/client/pcf, so a PCF-only PR
@@ -294,14 +296,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx tsc
 
-      - name: Install Spaarke.DocumentOperations deps
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.DocumentOperations
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npx tsc
-
       - name: Install Spaarke.Compose.Components deps
         working-directory: src/client/shared/Spaarke.Compose.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -351,20 +345,37 @@ jobs:
         with:
           node-version: '20'
 
+      # ISS-005 / #2808: LegalWorkspace (Vite) and SemanticSearch (webpack) bundle without a
+      # type check, so a type error reached review only if it also broke bundling. Neither
+      # depends on the shared-lib steps below: each tsconfig maps @spaarke/* to SOURCE and resolves bare
+      # imports from that source through its own node_modules, as its bundler does.
+      # They run FIRST, before any shared-lib install, so CI sees what a clean checkout sees:
+      # a shared lib's own node_modules must not change how these two resolve.
+      # LegalWorkspace: src/** must be clean; errors in the shared source it compiles are
+      # pinned in tsc-baseline.json (a new one fails; --fail-on-stale makes a fixed one that
+      # is still listed fail too, so the baseline is pruned in the PR that fixes it).
+      - name: Install LegalWorkspace deps
+        working-directory: src/solutions/LegalWorkspace
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: LegalWorkspace — tsc ratchet
+        working-directory: src/solutions/LegalWorkspace
+        run: node ../../../scripts/tsc-surface-gate.mjs --baseline tsc-baseline.json --fail-on-stale
+
+      - name: Install SemanticSearch deps
+        working-directory: src/client/code-pages/SemanticSearch
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: SemanticSearch — tsc --noEmit
+        working-directory: src/client/code-pages/SemanticSearch
+        run: npm run typecheck
+
       - name: Install Spaarke.Auth deps
         working-directory: src/client/shared/Spaarke.Auth
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Build Spaarke.Auth
         working-directory: src/client/shared/Spaarke.Auth
-        run: npx tsc
-
-      - name: Install Spaarke.AI.Context deps
-        working-directory: src/client/shared/Spaarke.AI.Context
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Context
-        working-directory: src/client/shared/Spaarke.AI.Context
         run: npx tsc
 
       - name: Install Spaarke.SdapClient deps
@@ -500,7 +511,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Deploy-EbillingInvoiceReviewDetailColumn.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1, tests/scripts/Set-BffDecisionRecordReaderRole.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Deploy-EbillingInvoiceReviewDetailColumn.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1, tests/scripts/Set-BffDecisionRecordReaderRole.Tests.ps1, tests/scripts/Deploy-EbillingRolePrivileges.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
@@ -511,6 +522,12 @@ jobs:
   # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
   # config/*-owner-role.json; nothing talks to Dataverse. Pester is pinned to 5.7.1: under 6.x a container can fail
   # with "Export-ModuleMember ... can only be called from inside a module", which would turn this job red on a release.
+  # Also tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1 (field-mapping-server-write-path-r1 task 054b): the script
+  # refuses, in every mode and before any write, unless each of its eight target columns exists (same mocked shape).
+  # Also tests/scripts/Set-PrivateContextSchema.Tests.ps1 (task 056b): the private-context schema script's -Verify fails on any non-NoCascade
+  # Assign/Share/Unshare/Reparent or a Delete that is not RemoveLink, over the same kind of mock.
+  # Also scripts/Migrate-DirectMessagesToOwnerTeam.ps1 (field-mapping-server-write-path-r1 task 054c): the field-security
+  # precondition, the Stamp pair rule, the Move assign invariant and the Direct team checks, over the same kind of mock.
   # --------------------------------------------------------------------------
   owner-teams-script-tests:
     name: Owner teams script tests (Pester)
@@ -530,7 +547,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1, tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1, tests/scripts/Set-AccessMarkerFieldSecurity.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1, tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1, tests/scripts/Set-AccessMarkerFieldSecurity.Tests.ps1, tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1, tests/scripts/Set-PrivateContextSchema.Tests.ps1, tests/scripts/Migrate-DirectMessagesToOwnerTeam.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------

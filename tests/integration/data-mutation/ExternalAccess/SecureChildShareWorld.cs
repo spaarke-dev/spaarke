@@ -58,6 +58,13 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<Guid> _ignoredOwnerWrites = new();
     private readonly List<(string Table, int AfterCount, Action<SecureChildShareWorld> Change)> _afterQueries = new();
 
+    /// <summary>
+    /// fm task 056: what the metadata read of <c>sprk_communication</c> answers (the synchronizer asks it before it reads the
+    /// private-message reference columns): the table's columns, or a throw for a fault. <c>null</c> (the default) is a table
+    /// without those columns, which is how every other test of this world reads.
+    /// </summary>
+    public Func<IReadOnlyDictionary<string, ColumnMetadata>>? CommunicationColumnMetadata { get; set; }
+
     /// <summary>#2091 round 4: how many single-row reads (<see cref="Retrieve"/>) this world answered.</summary>
     public int RowReads { get; private set; }
 
@@ -281,6 +288,12 @@ internal sealed class SecureChildShareWorld
         _endlessTables.Add(table);
         return this;
     }
+
+    /// <summary>
+    /// #2750: answers a PAGED query at most this many rows a page (the next page continues after them), so a listing reaches
+    /// its page ceiling with a few rows instead of a hundred thousand. Null: the page size the query asks for.
+    /// </summary>
+    public int? MaxRowsPerPage { get; set; }
 
     /// <summary>Task 175: every access-record (<c>sprk_accessinheritance</c>) write, in order.</summary>
     public List<(string Table, Guid Id, string Text)> AccessRecordWrites { get; } = new();
@@ -679,6 +692,11 @@ internal sealed class SecureChildShareWorld
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(current().Answer(query)));
+        // fm task 056: the columns of sprk_communication (the private-message reference columns are read where they exist).
+        entities
+            .Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(
+                current().CommunicationColumnMetadata?.Invoke() ?? new Dictionary<string, ColumnMetadata>()));
         // 194b: a single-row read (the record-type catalog row a Signal's or Decision Record's core pair names).
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -891,9 +909,10 @@ internal sealed class SecureChildShareWorld
         var more = false;
         if (query.PageInfo is { Count: > 0 } page)
         {
-            var skip = (Math.Max(page.PageNumber, 1) - 1) * page.Count;
-            more = matched.Count > skip + page.Count || _endlessTables.Contains(query.EntityName);
-            matched = matched.Skip(skip).Take(page.Count).ToList();
+            var count = MaxRowsPerPage is { } most ? Math.Min(most, page.Count) : page.Count;
+            var skip = (Math.Max(page.PageNumber, 1) - 1) * count;
+            more = matched.Count > skip + count || _endlessTables.Contains(query.EntityName);
+            matched = matched.Skip(skip).Take(count).ToList();
         }
 
         var projected = matched.Select(r => Project(r, query.ColumnSet)).ToList();
@@ -1012,11 +1031,43 @@ internal sealed class SecureChildShareWorld
         };
     }
 
-    /// <summary>Dataverse LIKE: <c>%</c> any run, <c>_</c> one character, case-insensitive.</summary>
-    private static bool Like(string text, string pattern) =>
-        System.Text.RegularExpressions.Regex.IsMatch(text,
-            "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("%", ".*").Replace("_", ".") + "$",
+    /// <summary>
+    /// Dataverse LIKE: <c>%</c> any run, <c>_</c> one character, <c>[...]</c> one character of the set (so <c>[%]</c> is a literal
+    /// <c>%</c>, as Dataverse and SQL escape a wildcard; 084d-5a), case-insensitive. An unclosed <c>[</c> is a literal.
+    /// </summary>
+    private static bool Like(string text, string pattern)
+    {
+        var regex = new System.Text.StringBuilder("^");
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            var c = pattern[i];
+            var close = c == '[' && i + 2 < pattern.Length ? pattern.IndexOf(']', i + 2) : -1;
+            if (c == '%')
+            {
+                regex.Append(".*");
+            }
+            else if (c == '_')
+            {
+                regex.Append('.');
+            }
+            else if (close > i)
+            {
+                var set = pattern.Substring(i + 1, close - i - 1);
+                var negated = set.StartsWith('^');
+                regex.Append('[').Append(negated ? "^" : string.Empty)
+                    .Append(System.Text.RegularExpressions.Regex.Escape(negated ? set[1..] : set).Replace("]", "\\]").Replace("-", "\\-"))
+                    .Append(']');
+                i = close;
+            }
+            else
+            {
+                regex.Append(System.Text.RegularExpressions.Regex.Escape(c.ToString()));
+            }
+        }
+
+        return System.Text.RegularExpressions.Regex.IsMatch(text, regex.Append('$').ToString(),
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+    }
 
     private static bool Same(object? actual, object? expected) => (actual, expected) switch
     {

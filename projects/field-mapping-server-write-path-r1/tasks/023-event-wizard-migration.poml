@@ -4,7 +4,7 @@
     <title>Migrate Create Event wizard to the server write path (FR-16)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>022 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, deploy, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>

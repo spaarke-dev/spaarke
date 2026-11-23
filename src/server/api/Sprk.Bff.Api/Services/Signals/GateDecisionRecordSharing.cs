@@ -26,9 +26,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// dropped, and each user-owned gate record gets a Read share for each of them except its owner. So whichever of the record and the
 /// communication share comes first, the record ends with the communication's sharees.</para>
 /// <para><b>Internal only</b> (owner, 2026-10-18). A sharee is skipped when it is a team (no flag to read), when its <c>systemuser</c> row is
-/// missing or cannot be read, when <c>sprk_isexternal</c> is <c>true</c>, or when its <c>domainname</c> marks a B2B guest
-/// (<see cref="ContactBindingDecision.IsGuestDomainName"/>). A blank flag is internal (owner round 67: "sprk_isexternal means they're
-/// external", the rule <c>ISystemUserIdentityResolver.IsExternalAsync</c> applies).</para>
+/// missing or cannot be read, or when <c>sprk_isexternal</c> is <c>true</c>. Only that stored flag is external: a B2B guest's
+/// <c>domainname</c> is never read (uac-r2 task 197b; ADR-028 A9 Model 1: licensed core users sign in as B2B guests). A blank flag
+/// is internal (owner round 67: "sprk_isexternal means they're external", the rule <c>ISystemUserIdentityResolver.IsExternalAsync</c> applies).</para>
 /// <para><b>Never a team-owned record</b> (D-123). Only a record whose owner is a user is shared, and after each pass's grants the owner is read
 /// again: when the record is now owned by a team (a filing re-owned it in between) or the owner cannot be read, every grant the pass made is
 /// revoked. A communication owned by any team (the Secure Record team, or a category-routed team) is never mirrored.</para>
@@ -93,7 +93,6 @@ public sealed class GateDecisionRecordSharing
     private const string OwnerColumn = "ownerid";
     private const string ConfirmedByColumn = "sprk_confirmedby";
     private const string ExternalFlagColumn = "sprk_isexternal";
-    private const string DomainNameColumn = "domainname";
     private const string ReadAccessRights = "ReadAccess";
 
     /// <summary>Dataverse's <c>AccessRights.ReadAccess</c> bit in a share row's <c>accessrightsmask</c>.</summary>
@@ -506,7 +505,7 @@ public sealed class GateDecisionRecordSharing
     {
         var query = new QueryExpression(SystemUserTable)
         {
-            ColumnSet = new ColumnSet(ExternalFlagColumn, DomainNameColumn),
+            ColumnSet = new ColumnSet(ExternalFlagColumn),
             NoLock = true,
         };
         query.Criteria.AddCondition("systemuserid", ConditionOperator.In, userIds.Cast<object>().ToArray());
@@ -523,8 +522,8 @@ public sealed class GateDecisionRecordSharing
                 continue;
             }
 
-            if (row.GetAttributeValue<bool?>(ExternalFlagColumn) == true
-                || ContactBindingDecision.IsGuestDomainName(row.GetAttributeValue<string>(DomainNameColumn)))
+            // uac-r2 197b (round 67, ADR-028 A9): only a stored true is external; a guest-shaped domainname is not read.
+            if (row.GetAttributeValue<bool?>(ExternalFlagColumn) == true)
             {
                 _logger.LogInformation(
                     "Communication {CommunicationId}: sharee {UserId} is external; its gate Decision Records are not shared with them (D-169).",

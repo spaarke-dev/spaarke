@@ -89,6 +89,13 @@ public static class StoredFileSchema
     public const int NameMaxLength = 400, ContentTypeMaxLength = 255, AttachmentIdentityMaxLength = 1000, BlobPathMaxLength = 1024;
 
     /// <summary>
+    /// The display name as <c>sprk_name</c> stores it: at most <see cref="NameMaxLength"/> characters. The ONE copy of the rule, used by the
+    /// row writer (<c>StoredFileService.BuildRow</c>) and by the upload route's 201 <c>fileName</c> (ebilling-r1 task 123 fix round 1), so the
+    /// two cannot drift.
+    /// </summary>
+    public static string StoredName(string name) => name.Length <= NameMaxLength ? name : name[..NameMaxLength];
+
+    /// <summary>
     /// ebilling-r1 task 094 (review round 5, uac K1-a): a value (a tracking number) made safe to stand in a stored file's display name:
     /// path separators (<c>/</c>, <c>\</c>) and control characters removed, then trimmed. <c>null</c> when nothing is left.
     /// </summary>
@@ -612,3 +619,40 @@ public sealed record InvoiceFileListItem(
 
 /// <summary>The email Document a file was copied from (outbound; see <see cref="InvoiceFileListItem"/>).</summary>
 public sealed record InvoiceFileSourceEmail(Guid DocumentId, string? Name);
+
+/// <summary>
+/// The 201 body of <c>POST /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 123, wire contract
+/// <c>projects/ebilling-r1/notes/123-upload-contract.md</c>): the new Stored File, already Servable (a download still waits for its scan).
+/// </summary>
+/// <param name="FileId">The Stored File's id (the <c>Location</c> is its internal content route).</param>
+/// <param name="FileName">The name as stored (the part's file name).</param>
+/// <param name="SizeBytes">The stored length in bytes.</param>
+public sealed record InvoiceFileUploaded(Guid FileId, string FileName, long SizeBytes);
+
+/// <summary>
+/// One row of the firm route <c>GET /api/v1/external/invoices/{id}/files</c> (ebilling-r1 task 093, model 9.3): an OUTBOUND response record
+/// (outside <c>Api/**</c>, as <see cref="InvoiceFileListItem"/>). Built field by field from the visible file set; it carries no blob path,
+/// container, source id, storage URL or SAS.
+/// </summary>
+/// <param name="Id">The Stored File id: the content route's <c>{fileId}</c>.</param>
+/// <param name="FileName">The file's display name.</param>
+/// <param name="ContentType">The stored media type.</param>
+/// <param name="SizeBytes">The size, when recorded.</param>
+/// <param name="CreatedOn">When the row was created (UTC).</param>
+/// <param name="ScanStatus"><see cref="ExternalInvoiceFileScanStatus.Clean"/>, <see cref="ExternalInvoiceFileScanStatus.NotScanned"/> (both
+/// served) or <see cref="ExternalInvoiceFileScanStatus.Checking"/> (the malware scan has no verdict yet; content answers 409).</param>
+public sealed record ExternalInvoiceFileItem(
+    Guid Id, string FileName, string? ContentType, int? SizeBytes, DateTime? CreatedOn, string ScanStatus);
+
+/// <summary>The <c>scanStatus</c> values of <see cref="ExternalInvoiceFileItem"/> (model 4.2; reviews 5 Q: Pending is shown as "Checking file…").</summary>
+public static class ExternalInvoiceFileScanStatus
+{
+    /// <summary>Scanned, no threat found: served.</summary>
+    public const string Clean = "Clean";
+
+    /// <summary>Scanning is off for this store: served.</summary>
+    public const string NotScanned = "NotScanned";
+
+    /// <summary>No verdict yet (Pending): listed, its content is 409 <c>file_scan_pending</c>.</summary>
+    public const string Checking = "Checking";
+}

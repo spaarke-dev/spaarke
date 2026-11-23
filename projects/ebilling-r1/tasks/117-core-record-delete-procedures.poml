@@ -4,7 +4,7 @@
     <title>Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-D</phase>
     <gate>089 merged (record-scoped sets and assignment rows are secure children); 080 live on dev (assignment record lookups Cascade, rule-set record lookups RemoveLink); uac-r2 reviews the job and agrees the delete lists before merge (uac-r2 owns the core-record delete path); no live writes</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New scheduled job writing status on Secure-owned rule sets and policies; a wrong match switches a live record's changed rule off (fail-open on that record); coordination with uac-r2's delete design.</rigor-reason>
     <model-tier>opus</model-tier>

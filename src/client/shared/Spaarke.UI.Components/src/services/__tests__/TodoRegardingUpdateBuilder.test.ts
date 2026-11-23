@@ -22,6 +22,8 @@ import {
   buildTodoRegardingUpdate,
   buildTodoRegardingClear,
   discoverTodoNavProps,
+  findRegardingCatalogEntry,
+  resolveAllowedCatalog,
   TODO_REGARDING_CATALOG,
   _resetTodoNavPropCacheForTests,
 } from '../TodoRegardingUpdateBuilder';
@@ -588,5 +590,48 @@ describe('regardingrecordurl shape (FR-13 link target)', () => {
       expect(url).toMatch(new RegExp(`etn=${target.entityType}`));
       expect(url).toMatch(/id=aaaaaaaa-1111-1111-1111-111111111111/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Catalog helpers shared by both PCF write handlers (Pattern D, #2803 / #2804):
+// `resolveAllowedCatalog` (was a byte-identical copy in ConnectionsWriteHandler and ResolverWriteHandler) and
+// `findRegardingCatalogEntry` (the first step of both handlers' `applyRegardingSelection`).
+// ---------------------------------------------------------------------------
+
+describe('resolveAllowedCatalog', () => {
+  it('returns the full canonical catalog for an empty, blank, null or undefined allow-list', () => {
+    expect(resolveAllowedCatalog(undefined)).toBe(TODO_REGARDING_CATALOG);
+    expect(resolveAllowedCatalog(null)).toBe(TODO_REGARDING_CATALOG);
+    expect(resolveAllowedCatalog('')).toBe(TODO_REGARDING_CATALOG);
+    expect(resolveAllowedCatalog('   ')).toBe(TODO_REGARDING_CATALOG);
+    expect(resolveAllowedCatalog(undefined)).toHaveLength(12);
+  });
+
+  it('filters to the comma-separated list, case-insensitively and ignoring blanks', () => {
+    const filtered = resolveAllowedCatalog(' SPRK_Matter, sprk_project ,, contact ');
+    expect(filtered.map(c => c.entityType).sort()).toEqual(['contact', 'sprk_matter', 'sprk_project']);
+  });
+
+  it('returns an empty list when nothing in the allow-list is a catalog target', () => {
+    expect(resolveAllowedCatalog('sprk_nothing')).toEqual([]);
+  });
+});
+
+describe('findRegardingCatalogEntry', () => {
+  it('returns the entry whose entityType equals the selection', () => {
+    const entry = findRegardingCatalogEntry(TODO_REGARDING_CATALOG, 'sprk_matter');
+    expect(entry).toBeDefined();
+    expect(entry?.entitySet).toBe('sprk_matters');
+  });
+
+  it('returns undefined for an unknown type and for a type outside a restricted catalog', () => {
+    expect(findRegardingCatalogEntry(TODO_REGARDING_CATALOG, 'sprk_nothing')).toBeUndefined();
+    const restricted = resolveAllowedCatalog('sprk_project');
+    expect(findRegardingCatalogEntry(restricted, 'sprk_matter')).toBeUndefined();
+  });
+
+  it('matches the entity type exactly (the selection carries the logical name, lowercase)', () => {
+    expect(findRegardingCatalogEntry(TODO_REGARDING_CATALOG, 'SPRK_MATTER')).toBeUndefined();
   });
 });

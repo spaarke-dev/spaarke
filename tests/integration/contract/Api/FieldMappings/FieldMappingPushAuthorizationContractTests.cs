@@ -432,6 +432,7 @@ public class FieldMappingPushAuthorizationContractTests
     [InlineData("sprk_signal")]
     [InlineData("sprk_decisionrecord")]
     [InlineData("sprk_budgetrevision")]
+    [InlineData("sprk_invoicecorrection")]
     public async Task Push_ToATableOnlyItsWriterChanges_Is400_AndNothingIsAsked(string targetEntity)
     {
         await using var host = await PushHost.StartAsync();

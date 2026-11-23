@@ -33,10 +33,12 @@ import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { CreateProjectStep } from './CreateProjectStep';
 import { ProjectService } from './projectService';
+import { searchOrganizationsAsLookup } from '../CreateMatterWizard/matterService';
 import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
+import { discoverNavProps } from '../../services/PolymorphicResolverService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
@@ -48,6 +50,10 @@ import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignm
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AssociationResult } from '../AssociateToStep/types';
 import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
+import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
+import { searchContactsAsLookup, searchUsersAsLookup } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -91,29 +97,10 @@ async function associateProjectWithAccount(
   projectId: string,
   accountId: string
 ): Promise<void> {
-  // Attempt to discover the nav-prop for the account relationship.
-  // Fall back to a known column name if metadata is unavailable.
-  let navPropBind = `sprk_Account@odata.bind`;
-  try {
-    const orgUrl = window.location.origin;
-    const resp = await fetch(
-      `${orgUrl}/api/data/v9.0/EntityDefinitions(LogicalName='sprk_project')/ManyToOneRelationships` +
-        `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`,
-      { credentials: 'include' }
-    );
-    if (resp.ok) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json = (await resp.json()) as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rels: Array<any> = json.value ?? [];
-      const accountRel = rels.find((r: { ReferencedEntity: string }) => r.ReferencedEntity === 'account');
-      if (accountRel?.ReferencingEntityNavigationPropertyName) {
-        navPropBind = `${accountRel.ReferencingEntityNavigationPropertyName}@odata.bind`;
-      }
-    }
-  } catch {
-    // Use fallback column name
-  }
+  // The nav-prop of the project's account lookup, from the shared discovery (#2909: one query and one cache per
+  // entity for the page). It never throws; when metadata is unavailable it returns [] and the known column name stands.
+  const accountRel = (await discoverNavProps('sprk_project')).find(e => e.referencedEntity === 'account');
+  const navPropBind = `${accountRel?.navPropName || 'sprk_Account'}@odata.bind`;
 
   await dataService.updateRecord('sprk_project', projectId, {
     [navPropBind]: `/accounts(${accountId})`,
@@ -124,47 +111,7 @@ async function associateProjectWithAccount(
 // Search helper functions (use IDataService instead of IWebApi)
 // ---------------------------------------------------------------------------
 
-async function searchContactsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safeFilter}')` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('contact', options);
-  return result.entities.map(e => ({
-    id: e['contactid'] as string,
-    name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
-  }));
-}
-
-async function searchOrganizationsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=sprk_organizationid,sprk_name` +
-    `&$filter=contains(sprk_name,'${safeFilter}')` +
-    `&$orderby=sprk_name asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('sprk_organization', options);
-  return result.entities.map(e => ({
-    id: e['sprk_organizationid'] as string,
-    name: e['sprk_name'] as string,
-  }));
-}
-
-async function searchUsersAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('systemuser', options);
-  return result.entities.map(e => ({
-    id: e['systemuserid'] as string,
-    name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
-  }));
-}
+// Contact and user search: the shared services/userLookup implementations (#2866).
 
 async function searchMatterTypesAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
   if (!query || query.trim().length < 1) return [];
@@ -209,6 +156,11 @@ export interface ICreateProjectWizardProps {
   uploadService?: IUploadService;
   /** Optional INavigationService for opening records after creation. */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** When true, hides the title bar (Dataverse modal provides chrome). */
   embedded?: boolean;
   /**
@@ -316,25 +268,6 @@ function handoffFileToUploaded(file: File): IUploadedFile | null {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter: build a webApi-shaped object from IDataService for CreateRecordWizard
-// ---------------------------------------------------------------------------
-
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // CreateProjectWizard
 // ---------------------------------------------------------------------------
 
@@ -344,6 +277,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   dataService,
   uploadService: _uploadService,
   navigationService,
+  emailComposeHandlers,
   embedded,
   uiScale,
   authenticatedFetch: authFetch,
@@ -490,7 +424,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   );
 
   // ── WebApi adapter for CreateRecordWizard ─────────────────────────────
-  const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // ── Wizard config ───────────────────────────────────────────────────────
   const config: ICreateRecordWizardConfig = React.useMemo(
@@ -550,6 +484,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       searchUsers: handleSearchUsers,
       searchMatterTypes: handleSearchMatterTypes,
       searchPracticeAreas: handleSearchPracticeAreas,
+
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
+      // Send Email follow-on: the host's composer handlers (task 182, D-219).
+      emailComposeHandlers,
 
       getAssignWorkDefaults: () => ({
         // Projects don't have a matterTypeId; seed practice area from the project form
@@ -750,8 +690,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               description: context.followOn.createEventDescription,
               regardingRecordId: projectId,
               regardingRecordName: projectName,
-              assignedToId: '',
-              assignedToName: '',
+              assignedToId: context.followOn.createEventAssignedToId,
+              assignedToName: context.followOn.createEventAssignedToName,
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_project');
             if (eventResult.warnings.length > 0) warnings.push(...eventResult.warnings);
@@ -895,17 +835,19 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 3. Send email (if selected) — the sent message is recorded against the project, so it is held back too.
-        const wantsEmail = context.selectedActions.includes('send-email') && !!context.followOn.emailTo.trim();
+        const wantsEmail = context.selectedActions.includes('send-email') && context.followOn.email.to.length > 0;
         if (secureBlocked && wantsEmail) skippedForSecure.push('the email');
         if (!secureBlocked && wantsEmail && authFetch && bffBaseUrl) {
-          const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
-          const emailResult = await emailService.sendEmail({
-            to: context.followOn.emailTo,
-            subject: context.followOn.emailSubject,
-            body: context.followOn.emailBody,
+          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the project.
+          const emailResult = await sendComposedEmail(context.followOn.email, {
             associations: [{ entityType: 'sprk_project', entityId: projectId, entityName: projectName }],
+            authenticatedFetch: authFetch,
+            bffBaseUrl,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (!secureBlocked && wantsEmail) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         // Surface a provisioning refusal as the designed state the service classified, VERBATIM.
@@ -1010,6 +952,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       authFetch,
       bffBaseUrl,
       navigationService,
+      emailComposeHandlers,
       resolveSpeContainerId,
       webApiAdapter,
       handoffFiles,

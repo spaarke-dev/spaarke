@@ -64,6 +64,8 @@ import {
   cleanGuid,
   EmptyState,
   getXrm,
+  openInDesktopApp,
+  OPEN_IN_DESKTOP_FAILED_MESSAGE,
 } from '@spaarke/ui-components';
 import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
@@ -157,6 +159,7 @@ export interface DailyBriefingAppProps {
 type EmailDialogState =
   | { mode: 'briefing'; defaultSubject: string; defaultBody: string }
   | { mode: 'item'; item: HighPriorityItemResult; defaultSubject: string; defaultBody: string };
+// Both modes carry an HTML `defaultBody`: the composer opens in rich text (task 197).
 
 /**
  * A modal's content, whether it is open, and a key per opening (#2658). A Fluent Dialog unmounted while open leaves
@@ -200,7 +203,7 @@ export function buildRecordDeepLink(clientUrl: string, entityType: string, entit
 export function buildItemEmailDraft(
   item: HighPriorityItemResult,
   clientUrl: string
-): { subject: string; body: string } {
+): { subject: string; body: string; html: string } {
   const kind = item.kindLabel ? `${item.kindLabel}: ` : '';
   const subject = `${kind}${item.name || 'Record'}`.slice(0, 200);
   const link = buildRecordDeepLink(clientUrl, item.entityType, item.entityId);
@@ -208,7 +211,17 @@ export function buildItemEmailDraft(
   if (item.description) lines.push('', item.description);
   if (link) lines.push('', `Open the record: ${link}`);
   lines.push('', '— Shared from the Daily Briefing');
-  return { subject, body: lines.join('\n') };
+  // The same draft as HTML for the rich-text composer (task 197 fix round 1): the record URL is a real anchor, as in the
+  // briefing email below, not text a rich editor leaves unlinked. Every field is escaped.
+  const html = [
+    `<p>${esc(item.name || 'Record')}</p>`,
+    item.description ? `<p>${esc(item.description).replace(/\r?\n/g, '<br>')}</p>` : '',
+    link ? `<p><a href="${esc(link)}">Open the record</a></p>` : '',
+    '<p>— Shared from the Daily Briefing</p>',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return { subject, body: lines.join('\n'), html };
 }
 
 /** Minimal HTML escaper for the briefing-email builder below. */
@@ -685,8 +698,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
 
   const handleEmailItem = React.useCallback(
     (item: HighPriorityItemResult) => {
-      const { subject, body } = buildItemEmailDraft(item, clientUrl);
-      setEmailSlot(prev => openModalSlot(prev, { mode: 'item', item, defaultSubject: subject, defaultBody: body }));
+      const { subject, html } = buildItemEmailDraft(item, clientUrl);
+      setEmailSlot(prev => openModalSlot(prev, { mode: 'item', item, defaultSubject: subject, defaultBody: html }));
     },
     [clientUrl]
   );
@@ -877,7 +890,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           titleOverride={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
           initialSubject={emailDialog.defaultSubject}
           initialBody={emailDialog.defaultBody}
-          initialBodyFormat={emailDialog.mode === 'briefing' ? 'HTML' : 'PlainText'}
+          initialBodyFormat="HTML"
           onSearchRecipients={handleSearchUsers}
           authenticatedFetch={authenticatedFetch}
           bffBaseUrl=""
@@ -918,8 +931,35 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           onClose={closePreview}
           // Same BFF endpoint the Semantic Search PCF uses — SPE preview embed URL.
           fetchPreviewUrl={() => getDocumentPreviewUrl(previewDoc.documentId)}
-          // "Open file": open the SPE preview URL in a new tab (both modes).
-          onOpenFile={async () => {
+          // "Open file" / "Download": desktop mode goes through the shared open-in-desktop behaviour (ISS-004):
+          // the Office app for Word / Excel / PowerPoint, otherwise a download through the BFF. Web mode keeps
+          // opening the SPE preview URL in a new tab.
+          onOpenFile={async mode => {
+            if (mode === 'desktop') {
+              try {
+                const response = await authenticatedFetch(
+                  `/api/documents/${encodeURIComponent(previewDoc.documentId)}/open-links`
+                );
+                const links = await response.json();
+                // Relative base: `authenticatedFetch` resolves `/api/...` against the BFF host set in `initAuth`.
+                await openInDesktopApp({
+                  bffBaseUrl: '',
+                  documentId: previewDoc.documentId,
+                  links,
+                  fetch: authenticatedFetch,
+                  fallbackFileName: previewDoc.documentName,
+                });
+              } catch (err) {
+                console.error('[DailyBriefing] Open in desktop failed:', err);
+                dispatchToast(
+                  <Toast>
+                    <ToastTitle>{OPEN_IN_DESKTOP_FAILED_MESSAGE}</ToastTitle>
+                  </Toast>,
+                  { intent: 'error', timeout: 8000 }
+                );
+              }
+              return;
+            }
             const url = await getDocumentPreviewUrl(previewDoc.documentId);
             if (url && typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
           }}

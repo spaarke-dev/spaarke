@@ -162,19 +162,7 @@ public static class DocumentOperationsEndpoints
                 // person holding the lock — it can only say "someone". `error`, `detail`, `checkedOutBy`
                 // and `checkedOutAt` keep their existing names and shapes, so every current reader is
                 // unaffected; this is a superset of what was sent before.
-                ConflictCheckoutResult conflict => TypedResults.Json(
-                    new
-                    {
-                        status = 409,
-                        title = "Document Locked",
-                        error = conflict.ConflictError.Error,
-                        detail = conflict.ConflictError.Detail,
-                        checkedOutBy = conflict.ConflictError.CheckedOutBy,
-                        checkedOutAt = conflict.ConflictError.CheckedOutAt,
-                        correlationId,
-                    },
-                    statusCode: 409
-                ),
+                ConflictCheckoutResult conflict => DocumentLocked(conflict.ConflictError, correlationId),
                 _ => TypedResults.Problem(
                     statusCode: 500,
                     title: "Unexpected Error",
@@ -464,6 +452,28 @@ public static class DocumentOperationsEndpoints
     }
 
     /// <summary>
+    /// The 409 a checked-out document answers on checkout and on delete: <c>status</c> and <c>title</c> (so
+    /// <c>authenticatedFetch</c>'s RFC 7807 parser recognises the body — FR-S09 item 4, spaarkeai-compose-r8 task 016), plus
+    /// the <see cref="DocumentLockedError"/> members under their existing names (<c>error</c>, <c>detail</c>,
+    /// <c>checkedOutBy</c>, <c>checkedOutAt</c>) and the <c>correlationId</c>. One builder for both routes, so the two 409s
+    /// cannot drift apart again (#2271: the delete 409 sent the bare error and parsed as nothing).
+    /// </summary>
+    private static IResult DocumentLocked(DocumentLockedError locked, string correlationId) =>
+        TypedResults.Json(
+            new
+            {
+                status = 409,
+                title = "Document Locked",
+                error = locked.Error,
+                detail = locked.Detail,
+                checkedOutBy = locked.CheckedOutBy,
+                checkedOutAt = locked.CheckedOutAt,
+                correlationId,
+            },
+            statusCode: 409
+        );
+
+    /// <summary>
     /// DELETE /api/documents/{documentId}
     /// Deletes a document from both Dataverse and SharePoint Embedded. The file goes first; if it cannot be deleted
     /// the row is kept and this answers 503 (retry) or 409 (pointer refused) — R3 ISS-004, #1650.
@@ -494,10 +504,10 @@ public static class DocumentOperationsEndpoints
                     detail: $"Document {documentId} was not found",
                     extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
                 ),
-                CheckedOutDeleteResult checkedOut => TypedResults.Json(
-                    checkedOut.CheckedOutError,
-                    statusCode: 409
-                ),
+                // #2271 residual (spaarke-SPA-external-access-platform-r4 task 002, FR-09): the checkout 409's shape, so the
+                // body parses as ProblemDetails and a caller can name the person holding the lock. Superset of the bare
+                // DocumentLockedError sent before (error, detail, checkedOutBy, checkedOutAt unchanged).
+                CheckedOutDeleteResult checkedOut => DocumentLocked(checkedOut.CheckedOutError, correlationId),
                 // Task 188 slice D: still the parent of other documents. From the pre-check nothing was deleted; from
                 // Dataverse's Restrict at the row (a child created after the count) the file is gone and the row kept.
                 HasChildDocumentsDeleteResult hasChildren =>

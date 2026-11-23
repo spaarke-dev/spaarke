@@ -54,6 +54,10 @@ Skills wired to this knowledge base (see Phase 3 of the setup project):
 - `.claude/skills/spe-integration/` → `sharepoint-embedded/`
 - `.claude/skills/widget-design/` → `mcp-apps/`
 
+### Microsoft Learn MCP server (fallback after this tree)
+
+The `researcher` agent queries the Microsoft Learn MCP server (`microsoft-learn` in the repo-root `.mcp.json`, `https://learn.microsoft.com/api/mcp`, no sign-in) for what this tree does not cover, or to check whether a page here is still current. It is a project-scoped MCP server, so Claude Code asks each user to approve it once per machine; until it is approved, the researcher falls back to `WebFetch` on `learn.microsoft.com`. Queries go to Microsoft, so they never contain customer data, tenant names or secrets.
+
 ## Refresh cadence
 
 - **Monthly** (first business day of the month) — re-clone source repos, diff against curated copy, update samples and `SOURCE.md`. See `REFRESH-PROCEDURE.md` (created in Phase 6).

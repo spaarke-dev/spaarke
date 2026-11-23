@@ -402,8 +402,9 @@ public static class ConsumerTypes
 
     /// <summary>
     /// <see cref="IInvoiceAi.DraftFirmNoticeAsync"/> — firm-notice prose drafting (spec
-    /// <c>INVOICE-FIRM-NOTICE@v1</c>, FR-50). Binding + Action seeded by ebilling-r1 task 131, which also adds
-    /// this constant to <see cref="All"/>.
+    /// <c>INVOICE-FIRM-NOTICE@v1</c>, FR-50). Action <c>invoice-firm-notice</c> + Binding mirrored by ebilling-r1 task 131
+    /// (<c>infra/dataverse/actions/invoice-firm-notice.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>; live seeding
+    /// is task 136's deploy order, with the BFF); this constant is in <see cref="All"/> from the same change.
     /// </summary>
     public const string InvoiceFirmNotice = "invoice-firm-notice";
 
@@ -445,5 +446,6 @@ public static class ConsumerTypes
         InvoiceLineCode,
         InvoiceCodeSetMatch,
         BillingRuleDraft,
+        InvoiceFirmNotice,
     };
 }

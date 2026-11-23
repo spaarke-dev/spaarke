@@ -90,17 +90,66 @@ public class DirectMessageOwnerTeamTests
     // ── Each refusal state ───────────────────────────────────────────────────
 
     [Theory]
-    [InlineData(null, DirectTeamName)]
-    [InlineData(DirectBuName, null)]
     [InlineData(null, null)]
-    [InlineData("  ", DirectTeamName)]
-    [InlineData(DirectBuName, "")]
-    public async Task Resolve_SettingUnset_RefusesNotConfigured_WithoutReading(string? buName, string? teamName)
+    [InlineData("  ", null)]
+    [InlineData(null, "")]
+    [InlineData(" ", "\t")]
+    public async Task Resolve_BothSettingsUnset_RefusesNotConfigured_WithoutReading(string? buName, string? teamName)
     {
         var result = await Lookup(Config(buName, teamName)).ResolveDirectMessageOwnerTeamAsync(CancellationToken.None);
 
         AssertRefused(result, DirectMessageOwnerTeamRefusal.NotConfigured);
+        result.IsNotConfigured.Should().BeTrue();
+        result.MissingSetting.Should().BeNull();
         _directory.Reads.Should().BeEmpty("there is no default to look up");
+    }
+
+    // 054 piece 3a (agreed with uac-r2 2026-11-11): exactly one setting set is a configuration error, never "off".
+    [Theory]
+    [InlineData(null, DirectTeamName, DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData("  ", DirectTeamName, DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectBuName, null, DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    [InlineData(DirectBuName, "", DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    [InlineData(DirectBuName, " \t ", DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task Resolve_OnlyOneSettingSet_RefusesPartiallyConfigured_NamingTheMissingSetting_WithoutReading(
+        string? buName, string? teamName, string missing)
+    {
+        var result = await Lookup(Config(buName, teamName)).ResolveDirectMessageOwnerTeamAsync(CancellationToken.None);
+
+        AssertRefused(result, DirectMessageOwnerTeamRefusal.PartiallyConfigured);
+        result.Refusal.Should().EndWith("partially_configured");
+        result.IsNotConfigured.Should().BeFalse("one setting set is an error, not the rule switched off");
+        result.MissingSetting.Should().Be(missing, "the refusal names the missing setting by name");
+        result.Fault.Should().BeNull();
+        _directory.Reads.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null, DirectTeamName, DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectBuName, " ", DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task Identify_OnlyOneSettingSet_IsPartiallyConfigured_WithNoIds_AndCannotBeAnswersFalse(
+        string? buName, string? teamName, string missing)
+    {
+        var lookup = Lookup(Config(buName, teamName));
+        var identity = await lookup.IdentifyDirectMessageOwnerTeamAsync(CancellationToken.None);
+
+        identity.Refusal.Should().Be(DirectMessageOwnerTeamRefusal.PartiallyConfigured);
+        identity.IsNotConfigured.Should().BeFalse();
+        identity.IsIdentified.Should().BeFalse();
+        identity.TeamId.Should().BeNull();
+        identity.MissingSetting.Should().Be(missing);
+        (await lookup.CannotBeDirectOwnerTeamAsync(SecureTeam, CancellationToken.None))
+            .Should().BeFalse("an unknown configuration never proves a team is not the Direct team");
+        _directory.Reads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PartiallyConfigured_RefusalNamesNoConfiguredValue()
+    {
+        // The refusal and its missing-setting name carry setting NAMES only.
+        DirectMessageOwnerTeamRefusal.PartiallyConfigured.Should().Be("sdap.communication.direct_owner_team.partially_configured");
+        new[] { DirectMessageOwnerTeam.BusinessUnitNameConfigKey, DirectMessageOwnerTeam.OwnerTeamNameConfigKey }
+            .Should().OnlyContain(k => k.StartsWith("DirectMessage:", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -493,8 +542,10 @@ public class DirectMessageOwnerTeamTests
     [Fact]
     public async Task Resolve_IsNotConfigured_OnlyForAnUnsetSetting()
     {
-        (await Lookup(Config(teamName: null)).ResolveDirectMessageOwnerTeamAsync(CancellationToken.None))
+        (await Lookup(Config(buName: null, teamName: null)).ResolveDirectMessageOwnerTeamAsync(CancellationToken.None))
             .IsNotConfigured.Should().BeTrue();
+        (await Lookup(Config(teamName: null)).ResolveDirectMessageOwnerTeamAsync(CancellationToken.None))
+            .IsNotConfigured.Should().BeFalse("one setting set is PartiallyConfigured, never 'off'");
 
         _directory.Member(DirectTeam, SomeUser);
         (await Lookup().ResolveDirectMessageOwnerTeamAsync(CancellationToken.None))
@@ -502,9 +553,9 @@ public class DirectMessageOwnerTeamTests
     }
 
     [Theory]
-    [InlineData(null, DirectTeamName)]
-    [InlineData(DirectBuName, " ")]
-    public async Task Identify_SettingUnset_IsNotConfigured_WithNoIdsNoFaultNoRead(string? buName, string? teamName)
+    [InlineData(null, null)]
+    [InlineData(" ", " ")]
+    public async Task Identify_BothSettingsUnset_IsNotConfigured_WithNoIdsNoFaultNoRead(string? buName, string? teamName)
     {
         var identity = await Lookup(Config(buName, teamName)).IdentifyDirectMessageOwnerTeamAsync(CancellationToken.None);
 

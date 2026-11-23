@@ -133,6 +133,15 @@ public sealed record ResolvedPolicyVersion
     /// <summary><c>sprk_basedonversion</c>: on a record rule's version, the base rule's version it was copied from.</summary>
     public Guid? BasedOnVersionId { get; init; }
 
+    /// <summary>ebilling-r1 task 130e-1 (DEF-060): <c>sprk_firmdescription</c> as stored, raw (validated by the mapper before any use).</summary>
+    public string? FirmDescription { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (uac-r2 C4): the policy's <c>sprk_name</c>, for the firm description's name check only.</summary>
+    public string? PolicyName { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (uac-r2 C4): the rule set's <c>sprk_name</c>, for the firm description's name check only.</summary>
+    public string? RuleSetName { get; init; }
+
     /// <summary><c>createdon</c> (UTC): which episode of a change a record rule's version belongs to. Internal: it is not part of the snapshot.</summary>
     internal DateTime? CreatedOn { get; init; }
 
@@ -766,23 +775,32 @@ public sealed class ProcedureResolution
     /// and the episode's first version in one transaction). The base rule must not quietly run in its place. A date before the episode's
     /// first effective-from is not that: the episode has versions, and the base rule runs.</para>
     /// </summary>
-    private ResolvedPolicyVersion? RecordRuleVersionOn(PolicyRow recordRule, ProcedureOverrideRow exclude, DateOnly date)
+    private ResolvedPolicyVersion? RecordRuleVersionOn(PolicyRow recordRule, ProcedureOverrideRow exclude, DateOnly date) =>
+        Latest(CurrentEpisodeVersions(recordRule.Id, _versionsByPolicy[recordRule.Id].ToList(), exclude), date);
+
+    /// <summary>
+    /// The versions of a record rule that belong to its CURRENT episode (see <see cref="RecordRuleVersionOn"/>; ebilling-r1 084e, the one episode
+    /// filter the resolver and the record's rules-in-force read share): with no <c>createdon</c> on the change's Exclude row, every version; else
+    /// the versions created on or after it ("on or after": a version created at the row's own instant counts), a version with no <c>createdon</c>
+    /// never. A known boundary that no version of a rule WITH versions reaches is the fault state described there
+    /// (<see cref="ProcedureResolutionFaultException"/>). No versions at all is an empty list, not a fault.
+    /// </summary>
+    internal static List<ResolvedPolicyVersion> CurrentEpisodeVersions(Guid recordRuleId, IReadOnlyList<ResolvedPolicyVersion> all, ProcedureOverrideRow exclude)
     {
-        var all = _versionsByPolicy[recordRule.Id].ToList();
         if (exclude.CreatedOn is not { } episodeStart)
         {
-            return Latest(all, date);
+            return all.ToList();
         }
 
         var inEpisode = all.Where(v => v.CreatedOn is { } created && created >= episodeStart).ToList();
         if (all.Count > 0 && inEpisode.Count == 0)
         {
             throw new ProcedureResolutionFaultException(
-                $"Record rule {recordRule.Id} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}; "
+                $"Record rule {recordRuleId} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}; "
                 + "the current change has no version, so it cannot be told from an older change that was removed.");
         }
 
-        return Latest(inEpisode, date);
+        return inEpisode;
     }
 
     private List<RuleOverride> RuleOverridesOf(Guid basePolicyId)
@@ -869,7 +887,7 @@ public sealed class ProcedureResolution
 /// </remarks>
 public static class ProcedureResolver
 {
-    private const int StateActive = 0;
+    private const int StateActive = ProcedureEntity.StateActive;
     private const int PageSize = 5000;
     private const string UnnamedProcedure = "(unnamed Procedure)";
     private const string PolicyCodeColumn = "sprk_policycode";
@@ -904,7 +922,7 @@ public static class ProcedureResolver
         var sets = (await ReadProcedureSetsAsync(entities, procedureIds, ct).ConfigureAwait(false))
             .Concat(chain.Count == 0 ? [] : await ReadRecordSetsAsync(entities, chain, firmId, ct).ConfigureAwait(false))
             .ToList();
-        var policies = await ReadPoliciesAsync(entities, sets.Select(s => s.Id).ToList(), ct).ConfigureAwait(false);
+        var policies = await ReadPoliciesAsync(entities, sets.Select(s => s.Id).ToList(), sets.GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.First().Name), ct).ConfigureAwait(false);
         var policyVersions = await ReadPolicyVersionsAsync(entities, policies, ct).ConfigureAwait(false);
         return new ProcedureRows(firmId, chain, overrides, procedures, versions, sets, policies, policyVersions);
     }
@@ -1025,11 +1043,13 @@ public static class ProcedureResolver
             {
                 ColumnSet = new ColumnSet(
                     ProcedureEntity.NameColumn, ProcedureEntity.AreaColumn, ProcedureEntity.AppliesToColumn, ProcedureEntity.FirmColumn,
-                    ProcedureEntity.StatusColumn),
+                    ProcedureEntity.StatusColumn, "statecode"),
                 NoLock = true,
             };
             query.Criteria.AddCondition(ProcedureEntity.AreaColumn, ConditionOperator.Equal, RuleDomains.PolicyDomainBilling);
             query.Criteria.AddCondition(ProcedureEntity.StatusColumn, ConditionOperator.Equal, ProcedureEntity.StatusActive);
+            // ISS-021: a Procedure deactivated in Dataverse (statecode Inactive) is not applicable, whatever its Status says.
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, StateActive);
             var sources = new FilterExpression(LogicalOperator.Or);
             if (i == 0)
             {
@@ -1048,9 +1068,11 @@ public static class ProcedureResolver
             query.Criteria.AddFilter(sources);
             foreach (var row in await AllAsync(entities, query, ct).ConfigureAwait(false))
             {
-                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1).
+                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1), and not deactivated
+                // (ISS-021: an assignment to a deactivated Procedure is ignored too).
                 if (row.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling
-                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive)
+                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive
+                    || row.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or StateActive))
                 {
                     continue;
                 }
@@ -1080,6 +1102,8 @@ public static class ProcedureResolver
         var versions = new List<ProcedureVersionRow>();
         foreach (var chunk in procedureIds.Chunk(BillingFactLoader.MaxInValues))
         {
+            // statecode deliberately not checked (ISS-021 known limit): a version's lifecycle is Status, owned by ProcedureService (Retire is
+            // the supported stop); filtering here would make Follow latest / ByDate fall back silently to an older version's rules.
             var query = new QueryExpression(ProcedureEntity.VersionEntity)
             {
                 ColumnSet = new ColumnSet(
@@ -1121,7 +1145,7 @@ public static class ProcedureResolver
         {
             var query = new QueryExpression(BillingFactLoader.RuleSetEntity)
             {
-                ColumnSet = new ColumnSet(BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode"),
+                ColumnSet = new ColumnSet(BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode", BillingFactLoader.NameColumn),
                 NoLock = true,
             };
             RuleDomains.AddBillingFilter(query);
@@ -1134,7 +1158,7 @@ public static class ProcedureResolver
                     && row.GetAttributeValue<EntityReference>(BillingFactLoader.ProcedureColumn)?.Id is { } procedureId
                     && chunk.Contains(procedureId))
                 {
-                    sets.Add(new RuleSetRow(row.Id, procedureId, null, null));
+                    sets.Add(new RuleSetRow(row.Id, procedureId, null, null, row.GetAttributeValue<string>(BillingFactLoader.NameColumn)));
                 }
             }
         }
@@ -1149,7 +1173,7 @@ public static class ProcedureResolver
         {
             ColumnSet = new ColumnSet(CoreTables.Concat(new[]
             {
-                ScopeColumn, FirmColumn, BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode",
+                ScopeColumn, FirmColumn, BillingFactLoader.ProcedureColumn, RuleDomains.PolicyDomainColumn, "statecode", BillingFactLoader.NameColumn,
             }).ToArray()),
             NoLock = true,
         };
@@ -1176,20 +1200,23 @@ public static class ProcedureResolver
                 continue;
             }
 
-            sets.Add(new RuleSetRow(row.Id, null, link, firm));
+            sets.Add(new RuleSetRow(row.Id, null, link, firm, row.GetAttributeValue<string>(BillingFactLoader.NameColumn)));
         }
 
         return sets;
     }
 
-    private static async Task<IReadOnlyList<PolicyRow>> ReadPoliciesAsync(IGenericEntityService entities, IReadOnlyList<Guid> setIds, CancellationToken ct)
+    private static async Task<IReadOnlyList<PolicyRow>> ReadPoliciesAsync(
+        IGenericEntityService entities, IReadOnlyList<Guid> setIds, IReadOnlyDictionary<Guid, string?> setNames, CancellationToken ct)
     {
         var policies = new List<PolicyRow>();
         foreach (var chunk in setIds.Distinct().Order().Chunk(BillingFactLoader.MaxInValues))
         {
             var query = new QueryExpression(BillingFactLoader.PolicyEntity)
             {
-                ColumnSet = new ColumnSet(PolicyCodeColumn, RuleSetColumn, "sprk_lane", "sprk_severity", "sprk_enabled", "statecode", RuleDomains.PolicyDomainColumn),
+                ColumnSet = new ColumnSet(
+                    PolicyCodeColumn, RuleSetColumn, "sprk_lane", "sprk_severity", "sprk_enabled", "statecode", RuleDomains.PolicyDomainColumn,
+                    BillingFactLoader.NameColumn),
                 NoLock = true,
             };
             RuleDomains.AddBillingFilter(query);
@@ -1208,13 +1235,24 @@ public static class ProcedureResolver
                     && !string.Equals(code, BillingRuleCatalogue.SystemPolicyCode, StringComparison.Ordinal))
                 {
                     policies.Add(new PolicyRow(row.Id, code, setId,
-                        row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value, row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value));
+                        row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value, row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
+                        row.GetAttributeValue<string>(BillingFactLoader.NameColumn), setNames.GetValueOrDefault(setId)));
                 }
             }
         }
 
         return policies.OrderBy(p => p.Id).ToList();
     }
+
+    /// <summary>The <c>sprk_policyversion</c> columns the Published-version read selects (task 130e-1 fix round 1 F2a, pinned against the solution
+    /// source by <c>PolicyVersionColumnsGuardTests</c>).</summary>
+    internal static readonly string[] PolicyVersionColumns =
+    [
+        "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
+        "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", RuleSetService.ProcedureVersionColumn,
+        RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn, CreatedOnColumn,
+        BillingFactLoader.FirmDescriptionColumn,
+    ];
 
     private static async Task<IReadOnlyList<ResolvedPolicyVersion>> ReadPolicyVersionsAsync(
         IGenericEntityService entities, IReadOnlyList<PolicyRow> policies, CancellationToken ct)
@@ -1223,12 +1261,11 @@ public static class ProcedureResolver
         var versions = new List<ResolvedPolicyVersion>();
         foreach (var chunk in byId.Keys.Order().Chunk(BillingFactLoader.MaxInValues))
         {
+            // statecode deliberately not checked (ISS-021 known limit): only Published versions of active policies are read, and the BFF
+            // deactivates only Drafts (EB-D-216).
             var query = new QueryExpression(BillingFactLoader.VersionEntity)
             {
-                ColumnSet = new ColumnSet(
-                    "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
-                    "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", RuleSetService.ProcedureVersionColumn,
-                    RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn, CreatedOnColumn),
+                ColumnSet = new ColumnSet(PolicyVersionColumns),
                 NoLock = true,
             };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, chunk.Cast<object>().ToArray());
@@ -1263,6 +1300,9 @@ public static class ProcedureResolver
                     ProcedureVersionId = row.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id,
                     BasedOnVersionId = row.GetAttributeValue<EntityReference>(ProcedureAssignmentService.BasedOnVersionColumn)?.Id,
                     CreatedOn = row.GetAttributeValue<DateTime?>(CreatedOnColumn),
+                    FirmDescription = row.GetAttributeValue<string>(BillingFactLoader.FirmDescriptionColumn),
+                    PolicyName = policy.Name,
+                    RuleSetName = policy.RuleSetName,
                 });
             }
         }
@@ -1366,6 +1406,9 @@ internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number
 }
 
 /// <summary>A Procedure's rule set (<see cref="ProcedureId"/>) or a chain record's record-scoped set (<see cref="Record"/>, <see cref="FirmId"/>).</summary>
-internal sealed record RuleSetRow(Guid Id, Guid? ProcedureId, CoreRecordLink? Record, Guid? FirmId);
+/// <param name="Name">ebilling-r1 task 130e-1: the set's <c>sprk_name</c>, for the firm description's name check only.</param>
+internal sealed record RuleSetRow(Guid Id, Guid? ProcedureId, CoreRecordLink? Record, Guid? FirmId, string? Name = null);
 
-internal sealed record PolicyRow(Guid Id, string Code, Guid RuleSetId, int? Lane, int? Severity);
+/// <param name="Name">ebilling-r1 task 130e-1: the policy's <c>sprk_name</c>, for the firm description's name check only.</param>
+/// <param name="RuleSetName">ebilling-r1 task 130e-1: its rule set's <c>sprk_name</c>, for the same check.</param>
+internal sealed record PolicyRow(Guid Id, string Code, Guid RuleSetId, int? Lane, int? Severity, string? Name = null, string? RuleSetName = null);

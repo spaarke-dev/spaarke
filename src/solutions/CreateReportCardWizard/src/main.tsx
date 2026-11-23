@@ -24,6 +24,7 @@ function App() {
         onClose={b.closeDialog}
         dataService={b.dataService}
         navigationService={b.navigationService}
+        emailComposeHandlers={b.emailComposeHandlers}
         embedded={true}
         authenticatedFetch={b.authenticatedFetch}
         bffBaseUrl={b.bffBaseUrl}

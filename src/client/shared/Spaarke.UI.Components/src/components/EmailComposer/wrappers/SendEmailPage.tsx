@@ -21,12 +21,23 @@ import type {
   IRecordLookupTarget,
   IPickedRecord,
   IRecipient,
+  IEmailComposerProps,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation } from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
-export interface ISendEmailPageProps {
+/**
+ * Props of the Page wrapper. Besides the URL-driven fields it carries the Send Email dialog's feature handlers
+ * (task 188, D-219 Q3): the template picker needs BOTH `onListEmailTemplates` and `onRenderEmailTemplate`; the AI
+ * sparkle needs `onDraftWithAi`; a locally picked file is send-eligible only with `onUploadLocalAttachment`.
+ * Omitted -> the feature is hidden. Typed from the engine's own props so the contract has ONE definition; hosts
+ * take all four from `createXrmEmailComposeHandlers`.
+ */
+export interface ISendEmailPageProps extends Pick<
+  IEmailComposerProps,
+  'onListEmailTemplates' | 'onRenderEmailTemplate' | 'onDraftWithAi' | 'onUploadLocalAttachment'
+> {
   /** REQUIRED — driven by the Code Page URL parameter. */
   mode: EmailComposerMode;
   /** Required for view/reply/forward/draft modes. */

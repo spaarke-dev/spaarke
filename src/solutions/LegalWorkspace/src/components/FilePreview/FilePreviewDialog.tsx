@@ -10,12 +10,12 @@
  */
 
 import * as React from 'react';
-import { SendEmailDialog } from '@spaarke/ui-components';
+import { SendEmailDialog, createXrmEmailComposeHandlers, plainTextToHtml } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
-import { createXrmNavigationService, getXrm } from '@spaarke/ui-components';
+import { createXrmDataService, createXrmNavigationService, getXrm, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
-import { searchUsersAsLookup } from '../CreateMatter/matterService';
+import { searchUsersAsLookup } from '@spaarke/ui-components/services/userLookup';
 import { authenticatedFetch } from '../../services/authInit';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 
@@ -82,29 +82,21 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     [documentId]
   );
 
-  // Open File: desktop protocol for Office files; download via BFF for others.
+  // Open File: Office files open in the Office app; anything else downloads (shared behaviour, ISS-004).
   const handleOpenFile = React.useCallback(async () => {
-    const links = await getDocumentOpenLinks(documentId);
-    if (links?.desktopUrl) {
-      window.location.href = links.desktopUrl;
-      return;
-    }
     try {
-      const contentUrl = `${getBffBaseUrl()}/api/documents/${encodeURIComponent(documentId)}/content`;
-      const response = await authenticatedFetch(contentUrl);
-      if (response.ok) {
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = objectUrl;
-        a.download = links?.fileName ?? documentName ?? 'document';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(objectUrl);
-      }
+      const links = await getDocumentOpenLinks(documentId);
+      await openInDesktopApp({
+        bffBaseUrl: getBffBaseUrl(),
+        documentId,
+        links: links ?? {},
+        fetch: authenticatedFetch,
+        fallbackFileName: documentName,
+      });
     } catch (err) {
-      console.error('[FilePreviewDialog] Download failed:', err);
+      console.error('[FilePreviewDialog] Open file failed:', err);
+      // The preview dialog is modal, so use the platform dialog (an inline bar would sit behind it).
+      void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
     }
   }, [documentId, documentName]);
 
@@ -148,8 +140,16 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   const handleSearchUsers = React.useCallback(async (query: string) => {
     const xrm = getXrm();
     if (!xrm?.WebApi) return [];
-    return searchUsersAsLookup(xrm.WebApi, query);
+    return searchUsersAsLookup(createXrmDataService(), query);
   }, []);
+
+  // D-219 Q3 (task 186): EmailComposer shows the template picker and the AI-draft sparkle only when
+  // the host passes these handlers. One Xrm/BFF-backed instance for this dialog.
+  const bffBaseUrl = getBffBaseUrl();
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [bffBaseUrl]
+  );
 
   return (
     <>
@@ -170,12 +170,16 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         open={emailDialogOpen}
         onClose={() => setEmailDialogOpen(false)}
         initialSubject={buildEmailSubject(documentName)}
-        initialBody={buildEmailBody(documentName, fileSummary)}
-        initialBodyFormat="PlainText"
+        initialBody={plainTextToHtml(buildEmailBody(documentName, fileSummary))}
+        initialBodyFormat="HTML"
         associations={[{ entityType: 'sprk_document', entityId: documentId }]}
         onSearchRecipients={handleSearchUsers}
         authenticatedFetch={authenticatedFetch}
-        bffBaseUrl={getBffBaseUrl()}
+        bffBaseUrl={bffBaseUrl}
+        onListEmailTemplates={emailComposeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={emailComposeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={emailComposeHandlers.onDraftWithAi}
+        onUploadLocalAttachment={emailComposeHandlers.onUploadLocalAttachment}
         onError={err => console.error('[FilePreviewDialog] Send failed:', err.detail)}
       />
     </>

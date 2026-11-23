@@ -104,13 +104,11 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectDocuments = ReadDocumentsOf(ProjectTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadMatterDocuments = ReadDocumentsOf(MatterTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentDocuments = ReadDocumentsOf(WorkAssignmentTable);
-    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceDocuments = ReadDocumentsOf(InvoiceTable);
 
     /// <summary>A document upload to a record: Create on the document, AppendTo on the record (its parent lookup).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadProjectDocument = UploadDocumentTo(ProjectTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadMatterDocument = UploadDocumentTo(MatterTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadWorkAssignmentDocument = UploadDocumentTo(WorkAssignmentTable);
-    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UploadInvoiceDocument = UploadDocumentTo(InvoiceTable);
 
     /// <summary>To-dos regarding a root: Read on the root and on <c>sprk_todo</c>; a create is Create + AppendTo the root.</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectTodos = ReadChildrenOf(ProjectTable, TodoTable);
@@ -120,11 +118,32 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateMatterTodo = CreateChildUnder(MatterTable, TodoTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateWorkAssignmentTodo = CreateChildUnder(WorkAssignmentTable, TodoTable);
 
-    /// <summary>Calendar events regarding a root: Read on the root and on <c>sprk_event</c>; the project create is Create + AppendTo.</summary>
+    /// <summary>Calendar events regarding a root: Read on the root and on <c>sprk_event</c>; a create is Create + AppendTo the root
+    /// (the matter and work-assignment creates: spaarke-SPA-external-access-platform-r4 task 002, FR-08).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectEvents = ReadChildrenOf(ProjectTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadMatterEvents = ReadChildrenOf(MatterTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentEvents = ReadChildrenOf(WorkAssignmentTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateProjectEvent = CreateChildUnder(ProjectTable, EventTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateMatterEvent = CreateChildUnder(MatterTable, EventTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateWorkAssignmentEvent = CreateChildUnder(WorkAssignmentTable, EventTable);
+
+    /// <summary><c>GET /events/{id}</c> (R4 task 014b): Read on the event (its parents are read only to gate it).</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadEvent = Set((EventTable, AccessRights.Read));
+
+    /// <summary><c>PATCH /events/{id}</c> (R4 task 014b): Write on the event.</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UpdateEvent = Set((EventTable, AccessRights.Write));
+
+    /// <summary><c>GET /{root}/{id}/assignable-people</c> (R4 task 014b): the record and the contacts it returns (names).</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectAssignablePeople = Set(
+        (ProjectTable, AccessRights.Read), (ContactTable, AccessRights.Read));
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadMatterAssignablePeople = Set(
+        (MatterTable, AccessRights.Read), (ContactTable, AccessRights.Read));
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentAssignablePeople = Set(
+        (WorkAssignmentTable, AccessRights.Read), (ContactTable, AccessRights.Read));
+
+    /// <summary>An event create that names an assignee (R4 task 014b, uac-r2 gate F3): it asks the record's assignable set, so the
+    /// role reads contacts — the contact half of the assignable-people sets above. Asked by the handler, not the route.</summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> AssignEventContact = Set((ContactTable, AccessRights.Read));
 
     /// <summary><c>PATCH /todos/{id}</c>: Write on the to-do (its root is read only to gate it; nothing of it is returned).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UpdateTodo = Set((TodoTable, AccessRights.Write));
@@ -208,6 +227,14 @@ internal static class WorkforceRoleCeilingGate
     /// </summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissionsWithInvoice = Set(
         (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /invoices/{id}/files</c> and its <c>/content</c> (ebilling-r1 task 093, the firm file routes): Read on <c>sprk_invoice</c>,
+    /// whose files they list and serve. Not <c>sprk_storedfile</c>: it is one of the hard-deny tables (model 5.2, owner round 131), held
+    /// by a memberless team and read only by the BFF application user (field security, uac-r2 F1-b), so no user role carries Read on it
+    /// and requiring it would refuse every workforce caller. The rows are decided by the route's gate, never by a role.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceFiles = Set((InvoiceTable, AccessRights.Read));
 
     /// <summary>
     /// <c>GET /ebilling/invoices/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoice</c> (status, tracking number,
@@ -309,6 +336,30 @@ internal static class WorkforceRoleCeilingGate
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether the ceiling would let the caller through a route that declares <paramref name="required"/> — the same
+    /// decision <see cref="DenyAsync"/> makes, as a boolean and without logging a refusal. For a list that tells the caller
+    /// whether the matching create route would admit them (<c>canCreate</c>, spaarke-SPA-external-access-platform-r4 task 002,
+    /// FR-06): <see langword="true"/> when the ceiling does not apply (a systemuser, a CIAM partner — nothing is read);
+    /// otherwise only when the role is available and holds every requirement. An unavailable role and an empty set are
+    /// <see langword="false"/> (fail closed). The role read is the one the list route's own ceiling filter has just made
+    /// (cached, <see cref="IDataversePrivilegeChecker.GetWorkforceRoleCeilingAsync"/>).
+    /// </summary>
+    internal static async Task<bool> AdmitsAsync(
+        CallerPrincipal principal,
+        IDataversePrivilegeChecker privileges,
+        IReadOnlyList<WorkforceCeilingRequirement> required,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(required);
+        // An empty set is the callers' deny state (their `_ => Array.Empty<…>()` fallbacks), so it is refused before the
+        // ceiling is read — otherwise a caller the ceiling does not apply to (a systemuser, a CIAM partner) would be admitted.
+        if (required.Count == 0) return false;
+        var ceiling = await CeilingForAsync(principal, privileges, ct).ConfigureAwait(false);
+        return ceiling is null
+               || (ceiling.IsAvailable && required.All(r => ceiling.Holds(r.Table, r.Rights)));
     }
 
     /// <summary>

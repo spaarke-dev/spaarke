@@ -357,7 +357,10 @@ internal static class DirectMessageRecipient
     {
         try
         {
-            var columns = new List<string> { ThreadTypeColumn, OwnerColumn, CommunicationInternalOnlyFloor.ThreadPrivacyField };
+            var columns = new List<string>
+            {
+                ThreadTypeColumn, OwnerColumn, CommunicationInternalOnlyFloor.ThreadPrivacyField, DirectMessageParticipantShares.DefaultThreadColumn,
+            };
             columns.AddRange(ThreadResolver.ThreadRegardingColumns);
             var thread = await entities.RetrieveAsync(ThreadTable, threadId, columns.ToArray(), ct);
 
@@ -380,6 +383,9 @@ internal static class DirectMessageRecipient
             var (other, reason) = StrictOtherOf(owner, shares);
             return other is { } o
                 ? new DirectPairShape(true, owner, o, null)
+                {
+                    IsDefaultThread = thread.GetAttributeValue<bool?>(DirectMessageParticipantShares.DefaultThreadColumn) == true,
+                }
                 : DirectPairShape.Not(reason!);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -518,6 +524,14 @@ internal sealed record DirectPairShape(bool IsStrictPair, Guid? OwnerId, Guid? O
 
     /// <summary>The fault behind <see cref="DirectPairShapeReason.ParticipantReadFault"/>, for the caller's log; otherwise null.</summary>
     public Exception? Fault { get; init; }
+
+    /// <summary>
+    /// fm task 054 piece 3a: a strict pair whose thread is the per-user master thread (<c>sprk_isdefaultthread</c>). Read in the same
+    /// thread read; it does not change <see cref="IsStrictPair"/>. The 1:1 pre-send check
+    /// (<see cref="DirectMessageOwnerStep.CheckBeforeSendAsync(Guid?, CancellationToken)"/>) treats such a thread as not 1:1, as the
+    /// Direct owner step and task 198 do.
+    /// </summary>
+    public bool IsDefaultThread { get; init; }
 }
 
 /// <summary>Why a thread is not a strict Direct pair (<see cref="DirectMessageRecipient.ReadStrictPairShapeAsync"/>). Stable codes.</summary>

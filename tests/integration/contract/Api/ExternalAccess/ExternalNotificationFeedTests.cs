@@ -178,6 +178,76 @@ public class ExternalNotificationFeedTests
         _queries.Should().BeEmpty("no message is read without Read on sprk_communication");
     }
 
+    // ── eBilling items (ebilling-r1 task 132, FR-39, EB-D-258): the existing "message" item shape, no new kind ──
+
+    private static EbillingFeedSource BillingSource(Guid invoice, DateTimeOffset at, List<int>? reads = null) => new(
+        () => true,
+        (_, _) => Task.FromResult(((IReadOnlyList<Guid>)[Guid.NewGuid()], false)),
+        (_, _, _) => Task.FromResult<IReadOnlyList<Guid>>([]),
+        (contact, _, _, _, _) =>
+        {
+            reads?.Add(1);
+            // The caller is the invoice's submitter, so the audience re-check passes (the audience rules have their own suite, EbillingFeedSourceTests).
+            return Task.FromResult<IReadOnlyList<Microsoft.Xrm.Sdk.Entity>>([new Microsoft.Xrm.Sdk.Entity("sprk_invoice", invoice)
+            {
+                ["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(659490003),
+                ["modifiedon"] = at.UtcDateTime,
+                ["sprk_submittedby"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contact),
+            }]);
+        },
+        (_, _, rows, _) => Task.FromResult<IReadOnlyDictionary<Guid, InvoiceFeedDecision>>(rows.ToDictionary(r => r.Id, _ => InvoiceFeedDecision.Visible)),
+        (_, _) => Task.FromResult<Sprk.Bff.Api.Services.Finance.FirmOutcome?>(null),
+        NullLogger<EbillingFeedSource>.Instance);
+
+    private Task<IResult> FeedWithBilling(CallerPrincipal caller, EbillingFeedSource? source, Func<string, bool>? canRead = null) =>
+        ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
+            caller, Tenant, ProductionRegistry(), _data, ReadService(), _cache, Now, NullLogger.Instance, CancellationToken.None,
+            canRead, _invoiceHiding.Seam, source);
+
+    [Fact(DisplayName = "132 feed: an eBilling item is a 'message' item on the 'invoices' route with the fixed sender, titled by the invoice's name; the SPA contract is unchanged")]
+    public async Task EbillingItem_HasTheExistingMessageShape()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Name(invoice, "INV-2026-001");
+
+        var feed = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3))));
+
+        var item = feed.Value.Should().ContainSingle().Subject;
+        item.Kind.Should().Be("message");
+        item.Id.Should().Be(invoice.ToString("D"));
+        item.RecordType.Should().Be("invoices");
+        item.RecordId.Should().Be(invoice.ToString("D"));
+        item.SenderName.Should().Be("Billing");
+        item.RecordTitle.Should().Be("INV-2026-001", "an invoice is titled by its name (ExternalDataService.GetRecordNamesAsync knows sprk_invoice)");
+        feed.Truncated.Should().BeFalse("a title the read could not give would set truncated; the production read does give this one");
+    }
+
+    [Fact(DisplayName = "132 feed: with no eBilling source registered, or when the ceiling cannot Read sprk_invoice, there is no eBilling item and the source is not read")]
+    public async Task EbillingItem_IsAbsent_WithoutASource_OrWithoutInvoiceRead()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Name(invoice, "INV-2026-001");
+        var reads = new List<int>();
+
+        var noSource = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), null));
+        var noRead = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3), reads), table => table != "sprk_invoice"));
+
+        noSource.Value.Should().BeEmpty();
+        noRead.Value.Should().BeEmpty();
+        reads.Should().BeEmpty("a table the role cannot Read is not read");
+    }
+
+    [Fact(DisplayName = "132 feed: an eBilling item whose invoice no longer exists (a complete title read does not return it) is dropped")]
+    public async Task EbillingItem_ForAnInvoiceThatIsGone_IsDropped()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Delete(invoice);
+
+        var feed = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3))));
+
+        feed.Value.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Ceiling_WithoutProjectRead_DropsTheProjectsGrantAndMessages()
     {
@@ -251,7 +321,9 @@ public class ExternalNotificationFeedTests
         Mock.Of<ICallerSystemUserResolver>(MockBehavior.Strict),
         _identity.Object,
         Mock.Of<ILogger<CommunicationThreadReadService>>(),
-        _appOnly.Object);
+        _appOnly.Object,
+        // fm task 056: an environment without the private-message reference columns, so the read is unchanged.
+        entities: CommunicationSchemaDouble.WithoutReferenceColumns());
 
     private Task<IResult> Feed(CallerPrincipal caller, ExternalModuleRegistry? registry = null, DateTimeOffset? now = null) =>
         ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
@@ -1379,6 +1451,12 @@ public class ExternalNotificationFeedTests
         public List<string> NameReads { get; } = new();
         public bool NamesReadFails { get; set; }
 
+        /// <summary>The entities the production title read knows (<c>ExternalDataService.NameBindingFor</c>).</summary>
+        private static readonly HashSet<string> NamedEntities = new(StringComparer.Ordinal)
+        {
+            "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice",
+        };
+
         public Guid AddGrant(Guid contact, ExternalGrantRootType rootType, Guid rootId, DateTimeOffset grantedOn,
             DateTimeOffset? renewedOn = null)
         {
@@ -1440,6 +1518,11 @@ public class ExternalNotificationFeedTests
         {
             NameReads.Add(entityLogicalName);
             if (NamesReadFails)
+                return Task.FromResult(new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: false));
+
+            // As the production read: only the entities it has a binding for are read; any other entity is an incomplete read (no title),
+            // so a test that names a record the real service could not title cannot pass here (ebilling-r1 132 review F1: sprk_invoice was unknown).
+            if (!NamedEntities.Contains(entityLogicalName))
                 return Task.FromResult(new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: false));
 
             var names = ids.Where(id => !_deleted.Contains(id))

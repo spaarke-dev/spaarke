@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useContext } from 'react';
-import type { EntitySearchResult } from './useEntitySearch';
+import type { EntitySearchResult, EntityType } from './useEntitySearch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import {
@@ -337,6 +337,22 @@ const DEFAULT_PROCESSING_OPTIONS: ProcessingOptions = {
 };
 
 /**
+ * The record types a Save can file to, and that its "+ New" can create: the ONE list for both pickers in
+ * `SaveFlow`, the restored last association and the select backstops.
+ *
+ * Task 133 slice C (owner go 2026-11-20): Invoice left Save and "+ New" in both hosts. An invoice is created only by
+ * an invoice submission (the Outlook Invoice tab, ebilling's from-email route), never as a Save target or a blank
+ * quick-created record. Invoices are still FOUND and still shown as the record a document is filed to (Find, the
+ * Related-to card), because reading one is unchanged.
+ */
+export const SAVE_TARGET_TYPES: readonly EntityType[] = ['Matter', 'Project'];
+
+/** True when Save can file to (and "+ New" can create) a record of this type. */
+export function isSaveTargetType(entityType: string | undefined | null): boolean {
+  return SAVE_TARGET_TYPES.includes(entityType as EntityType);
+}
+
+/**
  * Storage key for last-used association.
  */
 const LAST_ASSOCIATION_KEY = 'spaarke-last-association';
@@ -351,8 +367,10 @@ function getLastAssociation(): EntitySearchResult | null {
     const stored = sessionStorage.getItem(LAST_ASSOCIATION_KEY);
     const entity = stored ? (JSON.parse(stored) as EntitySearchResult) : null;
     // Task 084: this restore is a pre-selection path, and a record the caller cannot file to is never
-    // pre-selected (the save would refuse it).
-    return entity?.canFile === false ? null : entity;
+    // pre-selected (the save would refuse it). Task 133 slice C: nor a record Save no longer files to (an invoice
+    // remembered from before Invoice left Save would otherwise come back pre-selected).
+    if (!entity || entity.canFile === false || !isSaveTargetType(entity.entityType)) return null;
+    return entity;
   } catch {
     return null;
   }
@@ -576,6 +594,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
   // Set selected entity and save to storage
   const setSelectedEntity = useCallback((entity: EntitySearchResult | null) => {
+    // Task 133 slice C: the save's record is only ever a Save target type, whatever path asks (the pickers offer
+    // nothing else; this is the hook-level backstop, as the canFile check in SaveFlow is the pane-level one).
+    if (entity && !isSaveTargetType(entity.entityType)) return;
     setSelectedEntityState(entity);
     if (entity) {
       saveLastAssociation(entity);

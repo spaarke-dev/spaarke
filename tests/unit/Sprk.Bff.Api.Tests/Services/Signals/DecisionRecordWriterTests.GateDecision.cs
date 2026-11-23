@@ -260,9 +260,9 @@ public sealed partial class DecisionRecordWriterTests
             .WithUser(BasicColleague, Guid.NewGuid(), ChildBu)
             .WithRecord("sprk_communication", CommunicationId, ChildBu);
         var world = SharedCommunication();
-        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing);
+        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing, derivedRecordIds: DerivedIdOptIn);
         CommunicationOwnedBy(h, UserRef(CommunicationOwner));
-        world.WithGateRecord(h.NewId, CommunicationId, CommunicationOwner); // the row as Dataverse holds it after the create (its owner is read back)
+        world.WithGateRecord(GateRecordId(), CommunicationId, CommunicationOwner); // the row as Dataverse holds it after the create (its owner is read back; 084h-5: under its derived id)
 
         var result = await h.Writer.WriteGateDecisionAsync(Gate());
 
@@ -310,13 +310,13 @@ public sealed partial class DecisionRecordWriterTests
         var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
         var world = SharedCommunication();
         world.Shares.FailReadFor.Add(GateSharingWorld.Communication);
-        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing);
+        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing, derivedRecordIds: DerivedIdOptIn);
         CommunicationOwnedBy(h, UserRef(CommunicationOwner));
-        world.WithGateRecord(h.NewId, CommunicationId, CommunicationOwner);
+        world.WithGateRecord(GateRecordId(), CommunicationId, CommunicationOwner);
 
         var result = await h.Writer.WriteGateDecisionAsync(Gate());
 
-        result.RecordId.Should().Be(h.NewId, "the record is written");
+        result.RecordId.Should().Be(GateRecordId(), "the record is written (084h-5: under its derived id)");
         h.Row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(UserRef(CommunicationOwner), "and owner-visible");
         world.RecordSharees(result.RecordId).Should().BeEmpty("a failed read never widens");
         world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionRecordEvents.ParticipantShareFailed);

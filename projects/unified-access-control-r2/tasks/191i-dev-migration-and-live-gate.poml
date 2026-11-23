@@ -71,7 +71,7 @@
     <step order="7">Owner go: placement writes on; verify each moved user's BU, role and default team; census clean.</step>
     <step order="8">Owner go: re-own of flagged-owned rows and reassignment of a Restricted root with a flagged owner.</step>
     <step order="9">First sweep: confirm internal-only per-user shares from the secure mirror and Direct messages are revoked.</step>
-    <step order="10">Owner go: Office item-grant setting on.</step>
+    <step order="10">Owner go: Office item grants. First the marker gate (task-191g note §4): in the dev BFF console write ONE option-B marker (39-character SprkItm key, ~100-character value) on the test container, read it back exactly, delete it and verify it is gone (add 200/201, delete 204/200). If the gate fails, run the 191g five-case probe under the same go and STOP with the setting off; a code change to the largest passing shape comes first. Only after the gate passes: Office item-grant setting on (ExternalAccess__FlaggedOfficeEdit__Enabled).</step>
     <step order="11">Live gate: AC-1 to AC-10 of the design (§3.17) with a test flagged user and an unflagged control holding the same shares; writes as the test user are undone afterwards. Re-check Dataverse search after 24 hours (F3).</step>
     <step order="12">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
     <step order="13">Record results and deviations in the task note.</step>

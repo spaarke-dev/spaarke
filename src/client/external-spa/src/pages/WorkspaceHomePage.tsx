@@ -76,6 +76,15 @@ const useStyles = makeStyles({
   },
 });
 
+/**
+ * Whether the caller's workspace has the pinned Quick Start tab. Not for a partner (CIAM plane): Quick Start's request
+ * forms are for the customer's own people, not outside counsel (owner, 2026-11-17). Internal contacts (workforce) and the
+ * admin persona keep it. `me.plane` is the BFF's answer from the caller's token (or the plane fallback on a 5xx).
+ */
+export function hasQuickStartFor(me: Pick<MeEntitlementsResponse, 'plane'>): boolean {
+  return me.plane !== 'ciam';
+}
+
 export interface WorkspaceHomePageProps {
   /** Whether the app is running inside the Teams host (workforce SSO) — threaded from App.tsx. */
   teamsHost?: boolean;
@@ -127,9 +136,10 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
 
   // Assistant dock: default LEFT per the AI-maturity theory (design.md §12 / ux
   // refinement #5 — the assistant migrates from far-right accessory to first-class
-  // left primary pane). Collapsible; movable left/right.
+  // left primary pane). Collapsible; movable left/right. Starts COLLAPSED (owner, 2026-11-17): the assistant is not
+  // activated yet, so it shows only as the rail with "Open assistant" until it is.
   const [assistantDock, setAssistantDock] = React.useState<'left' | 'right'>('left');
-  const [assistantCollapsed, setAssistantCollapsed] = React.useState(false);
+  const [assistantCollapsed, setAssistantCollapsed] = React.useState(true);
 
   const [libraryOpen, setLibraryOpen] = React.useState(false);
 
@@ -154,15 +164,19 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   );
 
   // Seed the role-defaulted widget tabs once `/me` resolves, then restore focus to the pinned
-  // Quick Start tab — the defaults open BEHIND it, they don't steal the initial view.
+  // Quick Start tab — the defaults open BEHIND it, they don't steal the initial view. A partner has no Quick Start
+  // (see `hasQuickStart`), so the FIRST default widget tab is the initial view instead.
   const seededRef = React.useRef(false);
   React.useEffect(() => {
     if (!me || seededRef.current) return;
     seededRef.current = true;
+    const opened: string[] = [];
     for (const id of defaultWidgetIdsFor(me)) {
+      if (getWidgetDefinition(id) && isEntitledToWidgetId(me, id)) opened.push(id);
       onEntitledOpenWidget(id);
     }
-    selectTab(QUICK_START_TAB);
+    const initialTab = hasQuickStartFor(me) ? QUICK_START_TAB : opened[0];
+    if (initialTab) selectTab(initialTab);
   }, [me, onEntitledOpenWidget, selectTab]);
 
   const onAddWidget = React.useCallback(() => setLibraryOpen(true), []);
@@ -246,7 +260,7 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
         onSelectTab={selectTab}
         onCloseTab={closeTab}
         onAddWidget={onAddWidget}
-        quickStart={<QuickStartPane me={me} onOpenWidget={onEntitledOpenWidget} />}
+        quickStart={hasQuickStartFor(me) ? <QuickStartPane me={me} onOpenWidget={onEntitledOpenWidget} /> : undefined}
         assistant={<AssistantPane />}
         renderWidget={renderWidget}
         assistantCollapsed={assistantCollapsed}

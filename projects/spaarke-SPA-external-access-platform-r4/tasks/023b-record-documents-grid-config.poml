@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023b" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>"External record documents" grid configuration (repo definition + apply script) and BFF read admission (design §3.3)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>owner chose a Dataverse configuration record 2026-11-22; live create happens in task 028 with owner approval; BFF deploy via uac-r2</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the external-access BFF surface (ExternalAccessModule.cs) shared with uac-r2 and ebilling</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, fully specified change with a reference script to copy</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>BFF + config + scripts only; 023a touches only the shared DataGrid</parallel-reason>
+    <deps>none (design approved)</deps>
+    <tags>bff-api, dataverse, config</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Define the "External record documents" sprk_gridconfiguration row in the repo, add an idempotent apply script for it, and admit its id to the external grid-configuration read allow-list.</prompt>
+  <role>SPAARKE platform developer. Follows the external-access BFF rules in the project CLAUDE.md §2.</role>
+  <goal>The SPA can read the new grid configuration through the existing grid-configuration module; the row's definition lives in the repo and can be created or verified on any environment by one script.</goal>
+
+  <context>
+    <background>Design `notes/task-023-design.md` §3.3. Fixed row id `286be8b4-f96f-4d5a-b1d5-82fd83ca9693`. Entity `sprk_document`; columns Name (`sprk_documentname`, primary), Type (`sprk_documenttype`), Date Added (`createdon`), AI Summary (`sprk_summary`); `display.truncateWithTooltip: true`. The SPA gives this grid its rows from the record route (023c), so the FetchXML source is never executed by the SPA — but it must be valid (same shape as grid 3af4102c's inline source) so any other host can use it. Admission: `OutsideCounselGridConfigurationIds` (`ExternalAccessModule.cs:58`), read by the `grid-configuration` module (~:676). No scope-dimension, ReadableColumns or route change. Reference for the definition + script pattern: `config/worklist.gridconfiguration.json` + `scripts/Apply-WorklistGridConfiguration.ps1` (idempotent create/update, -WhatIf, -Verify read-only). Read live 3af4102c's `sprk_configjson` shape from the repo references (task 157 notes in unified-access-control-r2) — do NOT read Dataverse in this task without showing the owner the command first.</background>
+    <relevant-files>
+      <file role="create">config/external-record-documents.gridconfiguration.json</file>
+      <file role="create">scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">tests that cover the grid-configuration module's id set (find them; add one if none pins the set)</file>
+      <file role="canonical-reference">scripts/Apply-WorklistGridConfiguration.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §4">Run `/conflict-check` first (BFF hot path shared with uac-r2 and ebilling). The PR is reviewed by uac-r2; the dev BFF deploy goes through uac-r2 with the owner's go per SHA. Never deploy the BFF directly.</constraint>
+    <constraint source="project">No live Dataverse write or read in this task. The script is run in task 028 (-WhatIf, then apply, then -Verify) with owner approval and a stated rollback (delete the row by id).</constraint>
+    <constraint source="bff-extensions">Placement justification in the PR; publish-size delta vs a fresh master build; no new package, DI registration or background work.</constraint>
+    <constraint source="ADR-038">Test: the new id is readable through the grid-configuration module; an unlisted id is still refused (must-fire / must-not-fire).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/notes/task-023-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load knowledge; declare rigor; /conflict-check.</step>
+    <step order="1">Write the definition JSON (columns, labels, widths, display flag) matching the shape the DataGrid's configResolution reads.</step>
+    <step order="2">Write the apply script modelled on Apply-WorklistGridConfiguration.ps1 (lint, -WhatIf, -Verify, idempotent create/update by fixed id).</step>
+    <step order="3">Admit the id in OutsideCounselGridConfigurationIds; add/adjust the test.</step>
+    <step order="4">Build the BFF; run the touched tests; measure publish size delta.</step>
+    <step order="5">Notes, POML status, TASK-INDEX, drift check.</step>
+  </steps>
+
+  <outputs>
+    <output type="config">config/external-record-documents.gridconfiguration.json</output>
+    <output type="code">scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The definition parses, names entity sprk_document, the four columns and `display.truncateWithTooltip: true`, and carries a well-formed FetchXML over the module's readable columns only.</criterion>
+    <criterion testable="true">The script's lint passes; -WhatIf writes nothing.</criterion>
+    <criterion testable="true">A test shows the new id is admitted by the grid-configuration module and an unlisted id is refused.</criterion>
+    <criterion testable="true">BFF builds; touched tests pass; publish-size delta recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Split from task 023 by owner decision 2026-11-22 ("Yes, Dataverse record").</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

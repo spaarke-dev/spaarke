@@ -6,7 +6,7 @@
  * Panel dimensions match PCF SemanticSearchControl preview: 880px × 85vh.
  *
  * Shows an embedded SharePoint file preview with a toolbar of actions:
- *   - Open File: opens the document in a new browser tab
+ *   - Open File: opens the document in its desktop app (Office app, else a download through the BFF)
  *   - Open Record: opens the Dataverse entity form in a dialog
  *   - Find Similar: triggers a similarity search (callback to parent)
  *
@@ -21,6 +21,8 @@ import {
   makeStyles,
   tokens,
   Button,
+  MessageBar,
+  MessageBarBody,
   Spinner,
   Text,
   Toolbar,
@@ -30,6 +32,7 @@ import {
 import { Dismiss24Regular, Open20Regular, DocumentRegular, SearchRegular } from '@fluentui/react-icons';
 import type { DocumentSearchResult } from '../types';
 import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
+import { useDocumentActions } from '@spaarke/ui-components/hooks/useDocumentActions';
 import { getBffBaseUrl } from '../services/apiBase';
 import { openEntityRecord } from './EntityRecordDialog';
 
@@ -294,15 +297,14 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
 
   // --- Action handlers ---
 
+  // Open File = the same behaviour as the command bar's "Open in desktop" (ISS-004): the Office app for
+  // Word / Excel / PowerPoint, otherwise a download through the BFF. `actionError` is shown in the panel.
+  const { openInDesktop, actionError } = useDocumentActions({ bffBaseUrl: getBffBaseUrl() });
   const handleOpenFile = useCallback(() => {
     if (documentId) {
-      if (result?.fileUrl) {
-        window.open(result.fileUrl, '_blank');
-      } else if (previewUrl) {
-        window.open(previewUrl, '_blank');
-      }
+      void openInDesktop(documentId);
     }
-  }, [documentId, result?.fileUrl, previewUrl]);
+  }, [documentId, openInDesktop]);
 
   const handleOpenRecord = useCallback(() => {
     if (documentId) {
@@ -351,6 +353,12 @@ export const DocumentPreviewDialog: React.FC<DocumentPreviewDialogProps> = ({
             Find Similar
           </ToolbarButton>
         </Toolbar>
+
+        {actionError && (
+          <MessageBar intent="error" role="alert">
+            <MessageBarBody>{actionError}</MessageBarBody>
+          </MessageBar>
+        )}
 
         {/* Preview area */}
         <div className={styles.previewContainer}>

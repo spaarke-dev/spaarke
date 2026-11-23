@@ -29,6 +29,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -296,10 +297,41 @@ public sealed record SecureRootCreatePlan(
     IReadOnlyList<SecureFilingParent> SecureParents)
 {
     /// <summary>Filed under no secure record: the writer's ordinary create.</summary>
-    public static SecureRootCreatePlan Ordinary { get; } = new(null, false, null, Array.Empty<SecureFilingParent>());
+    public static SecureRootCreatePlan Ordinary { get; } =
+        new(null, false, null, Array.Empty<SecureFilingParent>()) { AccessPermissionFloor = AccessPermissionFloor.NoParent };
 
     internal static SecureRootCreatePlan Refused(RecordOwnerResolution refusal) =>
         new(refusal, false, null, Array.Empty<SecureFilingParent>());
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022b (UAC-r2 Q2): the Access Permission floor the records this create files
+    /// the row under set — the strictest value the plan's own parent read returned
+    /// (<see cref="SecureParentsAnswer.StrictestPermission"/>), never read again. Read-only: the plan writes nothing from it
+    /// and decides nothing by it; the cascade sets the row's stored value after the create, as before. Undecided when the
+    /// plan's answer was not known (a parent that could not be read) and on every refusal.
+    /// </summary>
+    public AccessPermissionFloor AccessPermissionFloor { get; init; } = AccessPermissionFloor.Undecided;
+}
+
+/// <summary>
+/// field-mapping-server-write-path-r1 task 022b (UAC-r2 Q2): the Access Permission floor a create's filing parents set
+/// (<see cref="SecureRootCreatePlan.AccessPermissionFloor"/>). <see cref="Value"/> is the strictest Limited or Restricted
+/// value among them, or <see langword="null"/> (Standard); meaningful only when <see cref="Decided"/>.
+/// </summary>
+public sealed record AccessPermissionFloor(int? Value, bool Decided)
+{
+    /// <summary>The create files the row under nothing: Standard, decided.</summary>
+    public static AccessPermissionFloor NoParent { get; } = new(null, true);
+
+    /// <summary>A parent's value could not be read, or the plan was refused.</summary>
+    public static AccessPermissionFloor Undecided { get; } = new(null, false);
+
+    /// <summary>Decided, and a parent filed in the create is Restricted.</summary>
+    public bool IsRestricted => Decided && Value == InheritedAccessPermission.Restricted;
+
+    /// <summary>The floor <paramref name="answer"/> sets: its strictest value when every parent was read, else undecided.</summary>
+    internal static AccessPermissionFloor Of(SecureParentsAnswer answer) =>
+        answer.IsKnown ? new(answer.StrictestPermission?.Value, true) : Undecided;
 }
 
 /// <summary>A work assignment or project filed under a given record.</summary>
@@ -1222,7 +1254,7 @@ public sealed partial class SecureRootInheritance
             if (!answer.IsKnown)
                 return SecureRootCreatePlan.Refused(Refused(logical, answer.Unverifiable!));
             if (!secureRequested)
-                return SecureRootCreatePlan.Ordinary;
+                return SecureRootCreatePlan.Ordinary with { AccessPermissionFloor = AccessPermissionFloor.Of(answer) };
         }
 
         var why = answer.HasSecureParent ? "filed under a secure record" : "made secure";
@@ -1286,7 +1318,10 @@ public sealed partial class SecureRootInheritance
             "[SECURE-INHERIT] A new {Table} is {Why} {Parents}: it is created INTO isolation (owner team {Team}, flagged) for " +
             "{Creator}.", logical, answer.HasSecureParent ? "filed under secure record(s)" : "secure from creation, as its creator asked",
             string.Join(", ", answer.SecureParents.Select(p => $"{p.Table}:{p.Id:D}")), team, creatorSystemUserId);
-        return new SecureRootCreatePlan(null, Isolated: true, team, answer.SecureParents);
+        return new SecureRootCreatePlan(null, Isolated: true, team, answer.SecureParents)
+        {
+            AccessPermissionFloor = AccessPermissionFloor.Of(answer),
+        };
     }
 
     private RecordOwnerResolution? CreateWallRefusal(
@@ -3055,15 +3090,18 @@ public sealed partial class SecureRootInheritance
     internal static async Task<IReadOnlyDictionary<Guid, SecureParentsAnswer>> ReadSecureParentsOfManyAsync(
         IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyCollection<Guid> recordIds,
         CancellationToken ct, ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1,
-        bool absentIsUnknown = false)
+        bool absentIsUnknown = false, RequestAccessMemo? requestMemo = null)
     {
         ArgumentNullException.ThrowIfNull(recordIds);
         var ids = recordIds.Distinct().ToList();
         if (!Inherits(table) || ids.Count == 0)
             return ids.ToDictionary(id => id, _ => new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null));
 
+        // #2845 round 2: with a request memo (the read-time compositions), each row's filing and each parent's flag are read
+        // once per request per id, and pair types once per request; a chunk that faults is remembered for no id.
         return await ClimbAsync(dataverse, logger, table.Trim().ToLowerInvariant(), ids, batched: true,
-            recordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct, absentIsUnknown).ConfigureAwait(false);
+            recordTypes ?? requestMemo?.RecordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct, absentIsUnknown,
+            requestMemo).ConfigureAwait(false);
     }
 
     /// <summary>One record's climb: what it has visited, what it reads next, and what it has found.</summary>
@@ -3109,7 +3147,8 @@ public sealed partial class SecureRootInheritance
     /// <c>true</c>: read in chunks (#1410).</param>
     private static async Task<Dictionary<Guid, SecureParentsAnswer>> ClimbAsync(
         IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyList<Guid> starts, bool batched,
-        ConcurrentDictionary<Guid, string?> recordTypes, int maxDepth, CancellationToken ct, bool absentIsUnknown = false)
+        ConcurrentDictionary<Guid, string?> recordTypes, int maxDepth, CancellationToken ct, bool absentIsUnknown = false,
+        RequestAccessMemo? requestMemo = null)
     {
         var climbs = starts.Select(id => new ParentClimb((table, id))).ToList();
         var facts = new Dictionary<(string Table, Guid Id), FactsRead>();
@@ -3118,7 +3157,7 @@ public sealed partial class SecureRootInheritance
         for (var level = 1; climbs.Any(c => c.Frontier.Count > 0); level++)
         {
             var rows = climbs.SelectMany(c => c.Frontier).Distinct().ToList();
-            await ReadFactsIntoAsync(dataverse, logger, rows.Where(r => !facts.ContainsKey(r)).ToList(), facts, batched, ct)
+            await ReadFactsIntoAsync(dataverse, logger, rows.Where(r => !facts.ContainsKey(r)).ToList(), facts, batched, ct, requestMemo)
                 .ConfigureAwait(false);
             if (level <= maxDepth)
             {
@@ -3126,7 +3165,8 @@ public sealed partial class SecureRootInheritance
                     .Where(r => !decisions.ContainsKey(r) && facts[r].Facts is not null)
                     .Select(r => facts[r].Facts!)
                     .ToList();
-                await DecideParentsIntoAsync(dataverse, logger, undecided, recordTypes, faultedTypes, decisions, batched, ct, absentIsUnknown)
+                await DecideParentsIntoAsync(dataverse, logger, undecided, recordTypes, faultedTypes, decisions, batched, ct, absentIsUnknown,
+                        requestMemo)
                     .ConfigureAwait(false);
             }
 
@@ -3281,8 +3321,15 @@ public sealed partial class SecureRootInheritance
     /// fault: a row (or, batched, a chunk) that cannot be read is recorded as faulted.</summary>
     private static async Task ReadFactsIntoAsync(
         IGenericEntityService dataverse, ILogger logger, IReadOnlyList<(string Table, Guid Id)> rows,
-        Dictionary<(string Table, Guid Id), FactsRead> into, bool batched, CancellationToken ct)
+        Dictionary<(string Table, Guid Id), FactsRead> into, bool batched, CancellationToken ct,
+        RequestAccessMemo? requestMemo = null)
     {
+        if (batched && requestMemo is not null)
+        {
+            await ReadFactsIntoThroughMemoAsync(dataverse, logger, rows, into, requestMemo, ct).ConfigureAwait(false);
+            return;
+        }
+
         foreach (var group in rows.GroupBy(r => r.Table))
         {
             foreach (var chunk in batched ? group.Chunk(IdsPerQuery) : group.Select(r => new[] { r }))
@@ -3321,6 +3368,132 @@ public sealed partial class SecureRootInheritance
         }
     }
 
+    /// <summary>
+    /// #2845 round 2: <see cref="ReadFactsIntoAsync"/>'s batched read through the request memo — each row's filing is read
+    /// once per request (a later climb, in this composition or another, reads only the rows not yet read), at most
+    /// <see cref="MaxConcurrentChunkReads"/> chunks in flight (each read holding a permit of the process-wide Dataverse gate,
+    /// #2845 F1), and the outcome per chunk is what the batched read decides: a chunk that throws leaves every row it
+    /// needed faulted (and is remembered for none). The query shapes are the walk's own: the many-row read, or the one-row
+    /// read when a single row is left to read.
+    /// </summary>
+    private static async Task ReadFactsIntoThroughMemoAsync(
+        IGenericEntityService dataverse, ILogger logger, IReadOnlyList<(string Table, Guid Id)> rows,
+        Dictionary<(string Table, Guid Id), FactsRead> into, RequestAccessMemo requestMemo, CancellationToken ct)
+    {
+        var fanOut = new SemaphoreSlim(MaxConcurrentChunkReads, MaxConcurrentChunkReads); // not disposed: see BoundedAsync
+        var reads = rows.GroupBy(r => r.Table)
+            .SelectMany(group => group.Chunk(IdsPerQuery).Select(chunk => (Table: group.Key, Chunk: chunk)))
+            .Select(c => (c.Table, c.Chunk, Read: BoundedAsync(fanOut, () => requestMemo.GetOrReadManyAsync(
+                RequestAccessMemo.FilingFactsReader(c.Table),
+                c.Chunk.Select(r => r.Id).ToList(),
+                (missing, token) => GatedAsync(requestMemo, async gated =>
+                {
+                    if (missing.Count == 1)
+                    {
+                        var one = await ReadFactsAsync(dataverse, c.Table, missing[0], gated).ConfigureAwait(false);
+                        return (IReadOnlyDictionary<Guid, FactsRead>)new Dictionary<Guid, FactsRead> { [missing[0]] = new(one, false) };
+                    }
+
+                    var found = await ReadFactsOfManyAsync(dataverse, c.Table, missing.ToArray(), gated).ConfigureAwait(false);
+                    return missing.ToDictionary(id => id, id => new FactsRead(found.TryGetValue(id, out var f) ? f : null, false));
+                }, token),
+                read => !read.Faulted,
+                ct), ct)))
+            .ToList();
+
+        foreach (var (table, chunk, read) in reads)
+        {
+            try
+            {
+                var found = await read.ConfigureAwait(false);
+                foreach (var row in chunk)
+                    into[row] = found.TryGetValue(row.Id, out var f) ? f : new FactsRead(null, true);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} rows could not be read.", chunk.Length, table);
+                foreach (var row in chunk)
+                    into[row] = new FactsRead(null, true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// #2845 round 2: the batched parent read (<see cref="ReadParentsOfManyAsync"/>) through the request memo — each
+    /// parent's flag, name and Access Permission read once per request, at most <see cref="MaxConcurrentChunkReads"/> chunks
+    /// in flight, each read holding a permit of the process-wide Dataverse gate (#2845 F1); a chunk that throws leaves its
+    /// parents faulted, exactly as the batched read does, and is remembered for none.
+    /// </summary>
+    private static async Task<Dictionary<(string Table, Guid Id), ParentRead>> ReadParentsThroughMemoAsync(
+        IGenericEntityService dataverse, ILogger logger, IEnumerable<(string Table, Guid Id)> parents,
+        RequestAccessMemo requestMemo, CancellationToken ct)
+    {
+        var fanOut = new SemaphoreSlim(MaxConcurrentChunkReads, MaxConcurrentChunkReads); // not disposed: see BoundedAsync
+        var reads = parents.Distinct().GroupBy(p => p.Table)
+            .SelectMany(group => group.Chunk(IdsPerQuery).Select(chunk => (Table: group.Key, Chunk: chunk)))
+            .Select(c => (c.Table, c.Chunk, Read: BoundedAsync(fanOut, () => requestMemo.GetOrReadManyAsync(
+                RequestAccessMemo.FilingParentReader(c.Table),
+                c.Chunk.Select(p => p.Id).ToList(),
+                (missing, token) => GatedAsync(requestMemo, async gated =>
+                {
+                    var found = await ReadParentsOfManyAsync(dataverse, c.Table, missing.ToArray(), gated).ConfigureAwait(false);
+                    return (IReadOnlyDictionary<Guid, ParentRead>)missing.ToDictionary(
+                        id => id, id => new ParentRead(found.TryGetValue(id, out var p) ? p : (ParentRow?)null, false));
+                }, token),
+                read => !read.Faulted,
+                ct), ct)))
+            .ToList();
+
+        var result = new Dictionary<(string Table, Guid Id), ParentRead>();
+        foreach (var (table, chunk, read) in reads)
+        {
+            try
+            {
+                var found = await read.ConfigureAwait(false);
+                foreach (var parent in chunk)
+                    result[parent] = found.TryGetValue(parent.Id, out var p) ? p : new ParentRead(null, true);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} rows could not be read.", chunk.Length, table);
+                foreach (var parent in chunk)
+                    result[parent] = new ParentRead(null, true);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// #2845 F1: most chunk reads ONE memoized walk step keeps in flight (the same bound as the participation and deny-list
+    /// readers' chunk fan-out). Each read also holds a permit of the process-wide <see cref="DataverseConcurrencyGate"/>.
+    /// </summary>
+    internal const int MaxConcurrentChunkReads = 6;
+
+    /// <summary>
+    /// #2845 F1: <paramref name="read"/> once <paramref name="fanOut"/> has a permit. The permit is held while the memo read
+    /// waits on ids other callers own, which cannot deadlock: a caller registers the ids it owns only after it has a permit,
+    /// and reads them before it waits on anyone. The semaphore is never disposed: a read still running when its walk step
+    /// is cancelled releases into it later (it holds no wait handle, so there is nothing to dispose).
+    /// </summary>
+    private static async Task<T> BoundedAsync<T>(SemaphoreSlim fanOut, Func<Task<T>> read, CancellationToken ct)
+    {
+        await fanOut.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await read().ConfigureAwait(false);
+        }
+        finally
+        {
+            fanOut.Release();
+        }
+    }
+
+    /// <summary>#2845 F1: one Dataverse read holding a permit of the request's process-wide gate (ungated when the memo has
+    /// none: a test without a service provider). ServiceClient retries a 429 itself; the gate only bounds concurrency.</summary>
+    private static Task<T> GatedAsync<T>(RequestAccessMemo requestMemo, Func<CancellationToken, Task<T>> read, CancellationToken ct)
+        => requestMemo.DataverseGate is { } gate ? gate.RunAsync(read, ct) : read(ct);
+
     /// <summary>Decides what each of <paramref name="rows"/> is filed under, into <paramref name="into"/>: the one-record
     /// decision (<see cref="DecideParentsCoreAsync"/>) per row, or — batched — the same decision
     /// (<see cref="DecideNamedParents"/>) over parent flags read in chunks. Never throws a read fault.</summary>
@@ -3330,7 +3503,7 @@ public sealed partial class SecureRootInheritance
         IGenericEntityService dataverse, ILogger logger, IReadOnlyList<FilingFacts> rows,
         ConcurrentDictionary<Guid, string?> recordTypes, HashSet<Guid> faultedTypes,
         Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> into,
-        bool batched, CancellationToken ct, bool absentIsUnknown = false)
+        bool batched, CancellationToken ct, bool absentIsUnknown = false, RequestAccessMemo? requestMemo = null)
     {
         if (!batched)
         {
@@ -3353,8 +3526,13 @@ public sealed partial class SecureRootInheritance
             named.Add((row, naming));
         }
 
-        var reads = new Dictionary<(string Table, Guid Id), ParentRead>();
-        foreach (var group in named.SelectMany(n => n.Naming.Named).Distinct().GroupBy(p => p.Table))
+        var reads = requestMemo is not null
+            ? await ReadParentsThroughMemoAsync(dataverse, logger, named.SelectMany(n => n.Naming.Named), requestMemo, ct)
+                .ConfigureAwait(false)
+            : new Dictionary<(string Table, Guid Id), ParentRead>();
+        foreach (var group in requestMemo is not null
+                     ? Enumerable.Empty<IGrouping<string, (string Table, Guid Id)>>()
+                     : named.SelectMany(n => n.Naming.Named).Distinct().GroupBy(p => p.Table))
         {
             foreach (var chunk in group.Chunk(IdsPerQuery))
             {

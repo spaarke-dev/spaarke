@@ -26,20 +26,31 @@
  * @see BlockedSubmissionPanel.tsx — findings, Override, Return to firm
  */
 import * as React from 'react';
-import { MessageBar, MessageBarBody, Text, tokens } from '@fluentui/react-components';
+import {
+  Button,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+  Spinner,
+  Text,
+  tokens,
+} from '@fluentui/react-components';
 
 import { InvoiceSubmissionWizard } from '../InvoiceSubmission';
-import type { InvoiceSubmissionStatusView } from '../InvoiceSubmission';
+import type { InvoiceCorrectionTarget, InvoiceSubmissionStatusView } from '../InvoiceSubmission';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
 
 import { BlockedSubmissionPanel } from './BlockedSubmissionPanel';
 import {
   OVERRIDDEN_REASON_CODE,
+  correctionPrefillErrorMessage,
+  correctionTargetFromPrefill,
   createInternalInvoiceSubmission,
   isBlockedStatus,
   resolveInitialInvoiceRecord,
 } from './internalInvoiceSubmission';
+import type { InternalInvoiceSubmission } from './internalInvoiceSubmission';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -68,7 +79,117 @@ export interface ICreateInvoiceWizardProps {
    * Defaults to `false`.
    */
   lockAssociation?: boolean;
+  /**
+   * ebilling-r1 095f-2e2b: the invoice this submission REPLACES (a corrected invoice, launched from Invoice Review). The wizard reads the
+   * invoice's correction prefill (the firm invoice number, record and firm are the invoice's own), asks for a required note, and posts
+   * a Correction. Absent: the wizard is exactly the new-invoice wizard (`initialAssociation` / `lockAssociation` apply only then). When it
+   * is not a GUID, or the server says the invoice cannot be corrected, the wizard shows the plain reason and a Close button instead.
+   */
+  correctionInvoiceId?: string;
 }
+
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type CorrectionState =
+  | { kind: 'loading' }
+  | { kind: 'refused'; message: string; canRetry: boolean }
+  | { kind: 'ready'; target: InvoiceCorrectionTarget };
+
+interface ICorrectionHostProps {
+  open: boolean;
+  embedded?: boolean;
+  invoiceId: string;
+  client: InternalInvoiceSubmission;
+  onClose: () => void;
+  renderReport: (status: InvoiceSubmissionStatusView) => React.ReactNode;
+  renderAccepted: (status: InvoiceSubmissionStatusView) => React.ReactNode;
+}
+
+/**
+ * The corrected-invoice launch: reads the correction prefill, then mounts the shared wizard with `correction`. Its own component so the
+ * new-invoice path above keeps its hooks and markup exactly.
+ */
+const CorrectionHost: React.FC<ICorrectionHostProps> = ({
+  open,
+  embedded,
+  invoiceId,
+  client,
+  onClose,
+  renderReport,
+  renderAccepted,
+}) => {
+  const [state, setState] = React.useState<CorrectionState>({ kind: 'loading' });
+  const [attempt, setAttempt] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!GUID.test(invoiceId)) {
+      setState({
+        kind: 'refused',
+        message: 'The invoice to correct could not be identified. Close this and open it again from the invoice.',
+        canRetry: false,
+      });
+      return undefined;
+    }
+    let cancelled = false;
+    setState({ kind: 'loading' });
+    client
+      .loadCorrectionPrefill(invoiceId)
+      .then(prefill => {
+        if (cancelled) return;
+        const launch = correctionTargetFromPrefill(prefill);
+        setState(
+          launch.ok
+            ? { kind: 'ready', target: launch.target }
+            : { kind: 'refused', message: launch.message, canRetry: false }
+        );
+      })
+      .catch(err => {
+        if (!cancelled) setState({ kind: 'refused', message: correctionPrefillErrorMessage(err), canRetry: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, invoiceId, attempt]);
+
+  // The invoice's own record is the only record: the host answers the wizard's record check with it, no read.
+  const target = state.kind === 'ready' ? state.target : null;
+  const loadRecords = React.useCallback(async () => ({ records: target ? [target.record] : [] }), [target]);
+
+  if (!open) return null;
+  if (state.kind === 'loading') return <Spinner size="small" label="Reading the invoice" />;
+  if (state.kind === 'refused') {
+    return (
+      <MessageBar intent="warning" role="alert" data-testid="correction-refused">
+        <MessageBarBody>{state.message}</MessageBarBody>
+        <MessageBarActions>
+          {state.canRetry && (
+            <Button size="small" onClick={() => setAttempt(n => n + 1)}>
+              Try again
+            </Button>
+          )}
+          <Button size="small" onClick={onClose}>
+            Close
+          </Button>
+        </MessageBarActions>
+      </MessageBar>
+    );
+  }
+  return (
+    <InvoiceSubmissionWizard
+      open={open}
+      embedded={embedded}
+      title="Submit corrected invoice"
+      onClose={onClose}
+      correction={state.target}
+      loadRecords={loadRecords}
+      submit={client.submit}
+      getStatus={client.getStatus}
+      renderReport={renderReport}
+      keepPolling={keepPollingWhileHeld}
+      renderAccepted={renderAccepted}
+    />
+  );
+};
 
 // The status poll keeps going after a terminal answer only for a held submission, which Override / Return can still move.
 const keepPollingWhileHeld = (status: InvoiceSubmissionStatusView): boolean => isBlockedStatus(status);
@@ -86,6 +207,7 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
   bffBaseUrl,
   initialAssociation,
   lockAssociation,
+  correctionInvoiceId,
 }) => {
   const initialRecord = React.useMemo(() => resolveInitialInvoiceRecord(initialAssociation), [initialAssociation]);
 
@@ -128,6 +250,20 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
         </MessageBarBody>
       </MessageBar>
     ) : null;
+  }
+
+  if (correctionInvoiceId !== undefined) {
+    return (
+      <CorrectionHost
+        open={open}
+        embedded={embedded}
+        invoiceId={correctionInvoiceId}
+        client={client}
+        onClose={onClose}
+        renderReport={renderReport}
+        renderAccepted={renderAccepted}
+      />
+    );
   }
 
   return (

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2ui" project="ebilling-r1">
+  <metadata>
+    <title>Decision notes, Invoice Review UI: an optional Note box on every decision, sent through decisionApi and invoiceReviewApi</title>
+    <phase>5 Partner surfaces — 095f part 2</phase>
+    <gate>095f-2a, 2c, 2d1, 2b and 2d2 merged into work (the request shapes). Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-only change to the Invoice Review code page.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2a, 095f-2c, 095f-2d1, 095f-2b, 095f-2d2</deps>
+    <tags>react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build design §7: send note from decisionApi (approve, reject, return, add and remove adjustment, override, blocked return) and from invoiceReviewApi decideLine, decideLines, correctLine and correctHeader; never from acceptClean. One optional "Note" box (maxLength 2000) in InvoiceDecisionWizard, BlockedBanner, the line-decision steps and the correction steps.</prompt>
+
+  <goal>A reviewer can add a short note to any decision in Invoice Review.</goal>
+
+  <constraints>
+    <constraint source="design 1.2">Blank or whitespace-only is sent as absent, never null or "".</constraint>
+    <constraint source="design 2 Change 3">The decision wizard keeps the note across a 503 retry (form state).</constraint>
+    <constraint source="ADR-021">Fluent v9; dark mode.</constraint>
+    <constraint source="project">Only src/solutions/InvoiceReview/**. No shared-library change. No deploy.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Jest: each call sends note when typed and omits the key when blank; acceptClean never sends one (must-not-fire).</criterion>
+    <criterion testable="true">Jest: the 400 note codes show a field message; the existing InvoiceReview suites stay green; npm run build succeeds.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

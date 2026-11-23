@@ -46,6 +46,9 @@ export {
   searchOrganizationsAsLookup,
   searchUsersAsLookup,
 } from '../CreateMatterWizard/matterService';
+import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Metadata discovery (same pattern as MatterService/EventService)
@@ -107,24 +110,7 @@ export class WorkAssignmentService {
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
-    const webApiAdapter = {
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await this._dataService.createRecord(entityName, data);
-        return { id };
-      },
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await this._dataService.updateRecord(entityName, id, data);
-        return { id };
-      },
-      deleteRecord: async (entityName: string, id: string) => {
-        await dataService.deleteRecord(entityName, id);
-        return { id };
-      },
-    };
+    const webApiAdapter = createWebApiFromDataService(this._dataService);
     this._entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
   }
 
@@ -694,23 +680,20 @@ export class WorkAssignmentService {
   // -- Send Email via BFF ----------------------------------------------------
 
   /**
-   * Send an email via the BFF communications endpoint.
+   * Send the composed email (task 182, D-219) through the composer's request path — From, To, Cc, Bcc, attachments and
+   * the composed body format — filed under the work assignment. Never throws; a failure is the returned warning.
    */
   async sendEmail(
     workAssignmentId: string,
     workAssignmentName: string,
-    to: string,
-    subject: string,
-    body: string,
-    cc?: string
+    email: IComposedEmail,
+    onResolveShareLink?: (documentId: string) => Promise<string | null>
   ): Promise<{ success: boolean; warning?: string }> {
-    return this._entityService.sendEmail({
-      to,
-      cc,
-      subject,
-      body,
-      bodyFormat: 'PlainText', // matches server enum BodyFormat (2026-05-25)
+    return sendComposedEmail(email, {
       associations: [{ entityType: 'sprk_workassignment', entityId: workAssignmentId, entityName: workAssignmentName }],
+      authenticatedFetch: this._authenticatedFetch,
+      bffBaseUrl: this._bffBaseUrl,
+      onResolveShareLink,
     });
   }
 }

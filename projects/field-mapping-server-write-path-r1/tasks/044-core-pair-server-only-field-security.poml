@@ -4,7 +4,7 @@
     <title>The Signal / Decision Record core pair is written whole, only by the writers: role allow-list, no field security, fail-closed Signal access (owner 2026-11-06; ontology D-204, D-210)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>042c merged to master. No environment change in this task: the live checks are read-only.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Signal access (bff-api, security) and a role guard over the solution XML (tags security, dataverse, testing).</rigor-reason>
     <model-tier>opus</model-tier>

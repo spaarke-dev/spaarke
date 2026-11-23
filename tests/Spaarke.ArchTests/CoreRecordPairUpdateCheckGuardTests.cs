@@ -44,6 +44,9 @@ public class CoreRecordPairUpdateCheckGuardTests
         // A helper whose callers ask the check first, on tables that hold no core record pair.
         (typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard), "UpdateExistingAsync",
             "Writes a sprk_invoice or sprk_billingevent only (IsUpdateOnlyTarget); its callers' members ask the check first."),
+        (typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite), "PatchAsCallerAsync",
+            "#2799: the OBO write of ChildRecordEndpoints.UpdateAsync, DataverseUpdateRecordHandler and OwnedChildWrite.RefileAsync, " +
+            "which ask the check first; it is itself a recognised generic update (IsGenericUpdate), so they stay seen."),
 
         // Fixed tables: none carries the core record pair.
         (typeof(Sprk.Bff.Api.Services.Finance.FinanceRollupService), "WriteRollupAsync",
@@ -210,7 +213,11 @@ public class CoreRecordPairUpdateCheckGuardTests
                     or nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
                 && typeof(IFieldMappingDataverseService).IsAssignableFrom(declaring))
                || (target.Name == nameof(IDataverseUserClient.PatchAsync)
-                   && typeof(IDataverseUserClient).IsAssignableFrom(declaring));
+                   && typeof(IDataverseUserClient).IsAssignableFrom(declaring))
+               // #2799: the caller's PATCH with its locked invoice-family columns written by the application; its callers
+               // write their body through it, so they are held to the check as before.
+               || (target.Name == nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.PatchAsCallerAsync)
+                   && declaring == typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite));
     }
 
     private static bool IsTheCheck(MethodBase target) =>

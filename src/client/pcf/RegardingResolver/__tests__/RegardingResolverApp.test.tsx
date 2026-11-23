@@ -103,72 +103,11 @@ const mockBuildRegardingSelectionPayload = jest.fn(
   }
 );
 
-jest.mock('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder', () => {
-  const TODO_REGARDING_CATALOG = [
-    {
-      entityType: 'sprk_matter',
-      entitySet: 'sprk_matters',
-      lookupAttribute: 'sprk_regardingmatter',
-      navPropHint: 'matter',
-    },
-    {
-      entityType: 'sprk_project',
-      entitySet: 'sprk_projects',
-      lookupAttribute: 'sprk_regardingproject',
-      navPropHint: 'project',
-    },
-    {
-      entityType: 'sprk_event',
-      entitySet: 'sprk_events',
-      lookupAttribute: 'sprk_regardingevent',
-      navPropHint: 'event',
-    },
-    {
-      entityType: 'sprk_communication',
-      entitySet: 'sprk_communications',
-      lookupAttribute: 'sprk_regardingcommunication',
-      navPropHint: 'communication',
-    },
-    {
-      entityType: 'sprk_workassignment',
-      entitySet: 'sprk_workassignments',
-      lookupAttribute: 'sprk_regardingworkassignment',
-      navPropHint: 'workassignment',
-    },
-    {
-      entityType: 'sprk_invoice',
-      entitySet: 'sprk_invoices',
-      lookupAttribute: 'sprk_regardinginvoice',
-      navPropHint: 'invoice',
-    },
-    {
-      entityType: 'sprk_budget',
-      entitySet: 'sprk_budgets',
-      lookupAttribute: 'sprk_regardingbudget',
-      navPropHint: 'budget',
-    },
-    {
-      entityType: 'sprk_analysis',
-      entitySet: 'sprk_analyses',
-      lookupAttribute: 'sprk_regardinganalysis',
-      navPropHint: 'analysis',
-    },
-    {
-      entityType: 'sprk_organization',
-      entitySet: 'sprk_organizations',
-      lookupAttribute: 'sprk_regardingorganization',
-      navPropHint: 'organization',
-    },
-    { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
-    {
-      entityType: 'sprk_document',
-      entitySet: 'sprk_documents',
-      lookupAttribute: 'sprk_regardingdocument',
-      navPropHint: 'document',
-    },
-  ];
-  return { TODO_REGARDING_CATALOG };
-});
+// The REAL catalog and allow-list helpers (resolveAllowedCatalog / findRegardingCatalogEntry): this suite asserts the
+// App's behaviour against the shared parser, so a change there is seen here (no re-implementation in the mock).
+jest.mock('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder', () =>
+  jest.requireActual('@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder')
+);
 
 jest.mock('@spaarke/ui-components/dist/services/PolymorphicResolverService', () => ({
   applyResolverFields: mockApplyResolverFields,
@@ -188,6 +127,12 @@ jest.mock('@spaarke/ui-components/dist/services/PolymorphicResolverService', () 
   // its nav-prop name; with an empty nav-prop table (jest.setup's fetch returns
   // no relationships) the honest answer is "the host has no such column".
   findHostNavPropForLookup: () => undefined,
+  // Pattern D (#2803 / #2804): the handler calls the shared nav-prop discovery (and its cache). The real implementation
+  // runs here, against jest.setup's fetch (an empty nav-prop table) — the same answer the handler's old private copy got.
+  discoverNavProps: jest.requireActual('@spaarke/ui-components/dist/services/PolymorphicResolverService')
+    .discoverNavProps,
+  _resetNavPropCacheForTests: jest.requireActual('@spaarke/ui-components/dist/services/PolymorphicResolverService')
+    ._resetNavPropCacheForTests,
   // 045c: consumed by `applyRegardingSelection` on a SAVED host. The shared helper has its own unit tests and the
   // real-service suite (ResolverWriteHandler.test.ts) drives it end to end; with this suite's empty nav-prop table the
   // host carries no pair, so the honest answer is "add nothing".
@@ -507,7 +452,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
   // FR-A1-03 — Toolbar-icon menu populated from catalog
   // ---------------------------------------------------------------------------
 
-  test('FR-A1-03 — PolymorphicPicker receives full 11-entity catalog', () => {
+  test('FR-A1-03 — PolymorphicPicker receives the full shared catalog (12 entities, the real TODO_REGARDING_CATALOG)', () => {
     const { context } = buildContext();
     renderWithProvider(
       <RegardingResolverApp
@@ -518,11 +463,11 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       />
     );
 
-    expect(screen.getByTestId('polymorphic-picker-mock-catalog-count')).toHaveTextContent('11');
-    // Confirm the picker mock was called with a catalog prop of length 11.
+    expect(screen.getByTestId('polymorphic-picker-mock-catalog-count')).toHaveTextContent('12');
+    // Confirm the picker mock was called with the whole shared catalog (12 entries).
     const lastCallProps = mockPolymorphicPicker.mock.calls[mockPolymorphicPicker.mock.calls.length - 1][0];
     expect(Array.isArray(lastCallProps.catalog)).toBe(true);
-    expect(lastCallProps.catalog).toHaveLength(11);
+    expect(lastCallProps.catalog).toHaveLength(12);
   });
 
   test('FR-A1-03 — regardingTargets manifest input filters the catalog', () => {
@@ -1085,8 +1030,8 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // record id is derivable via Xrm.Page.data.entity.getId(); context.webAPI
       // returns the sprk_regardingrecordurl for the host row when queried.
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
-      const preLoadedUrl =
-        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      // The shared client writer stores an absolute URL on the org's own origin (with appid).
+      const preLoadedUrl = `${window.location.origin}/main.aspx?appid=11111111-1111-1111-1111-111111111111&pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`;
       const retrieveRecordMock = jest.fn().mockResolvedValue({ sprk_regardingrecordurl: preLoadedUrl });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1124,7 +1069,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       expect(retrieveRecordMock).toHaveBeenCalledWith(
         'sprk_todo',
         '22222222-2222-2222-2222-222222222222',
-        '?$select=sprk_regardingrecordurl'
+        '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value'
       );
       expect(navigateToMock).toHaveBeenCalledWith(
         {
@@ -1142,14 +1087,191 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       );
     });
 
+    test.each([
+      [
+        'an absolute URL on another host',
+        'https://evil.example/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ],
+      [
+        'an absolute URL on another origin (https host vs the page origin)',
+        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ],
+      ['a javascript scheme', 'javascript:alert(1)'],
+    ])(
+      'stored URL is %s — never opened; the target is built from the row pair (record type table + record id)',
+      async (_label, storedUrl) => {
+        const navigateToMock = jest.fn().mockResolvedValue(undefined);
+        const retrieveRecordMock = jest.fn().mockImplementation((entity: string, _id: string, opts?: string) => {
+          if (entity === 'sprk_recordtype_ref') return Promise.resolve({ sprk_recordlogicalname: 'sprk_matter' });
+          if (opts === '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value') {
+            return Promise.resolve({
+              sprk_regardingrecordurl: storedUrl,
+              sprk_regardingrecordid: '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}',
+              _sprk_regardingrecordtype_value: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            });
+          }
+          return Promise.resolve({});
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).Xrm = {
+          WebApi: xrmWebApiStub(),
+          Navigation: { navigateTo: navigateToMock },
+          Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+        };
+        const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.3.6"
+          />
+        );
+        fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+        await waitFor(() => {
+          expect(navigateToMock).toHaveBeenCalledTimes(1);
+        });
+        expect(navigateToMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            entityName: 'sprk_matter',
+            entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          }),
+          expect.anything()
+        );
+      }
+    );
+
+    test('pre-loaded record — a relative stored URL is opened without reading the pair', async () => {
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const retrieveRecordMock = jest.fn().mockResolvedValue({
+        sprk_regardingrecordurl:
+          '/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
+        Navigation: { navigateTo: navigateToMock },
+        Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+      };
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.6"
+        />
+      );
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      await waitFor(() => {
+        expect(navigateToMock).toHaveBeenCalledTimes(1);
+      });
+      expect(navigateToMock).toHaveBeenCalledWith(
+        expect.objectContaining({ entityName: 'sprk_matter', entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
+        expect.anything()
+      );
+      // The stored URL names the row's pair (none is known here): no record-type read.
+      expect(retrieveRecordMock).not.toHaveBeenCalledWith('sprk_recordtype_ref', expect.anything(), expect.anything());
+    });
+
+    test('a same-origin stored URL that names another record than the row pair — the pair wins', async () => {
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const retrieveRecordMock = jest.fn().mockImplementation((entity: string, _id: string, opts?: string) => {
+        if (entity === 'sprk_recordtype_ref') return Promise.resolve({ sprk_recordlogicalname: 'sprk_matter' });
+        if (opts === '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value') {
+          return Promise.resolve({
+            // Names project bbb ...
+            sprk_regardingrecordurl: `${window.location.origin}/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`,
+            // ... but the row's pair is matter aaa.
+            sprk_regardingrecordid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            _sprk_regardingrecordtype_value: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+          });
+        }
+        return Promise.resolve({});
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
+        Navigation: { navigateTo: navigateToMock },
+        Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+      };
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.6"
+        />
+      );
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      await waitFor(() => {
+        expect(navigateToMock).toHaveBeenCalledTimes(1);
+      });
+      expect(navigateToMock).toHaveBeenCalledWith(
+        expect.objectContaining({ entityName: 'sprk_matter', entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
+        expect.anything()
+      );
+    });
+
+    test('stored URL is off-origin and the row pair cannot be read — nothing is opened', async () => {
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const retrieveRecordMock = jest.fn().mockImplementation((_entity: string, _id: string, opts?: string) => {
+        if (opts === '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value') {
+          return Promise.resolve({
+            sprk_regardingrecordurl:
+              'https://evil.example/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          });
+        }
+        return Promise.resolve({});
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
+        Navigation: { navigateTo: navigateToMock },
+        Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+      };
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.6"
+        />
+      );
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      await waitFor(() => {
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cannot open modal'), ...([] as unknown[]));
+      });
+      expect(navigateToMock).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
     test('fresh picker selection wins — WebAPI NOT called (regression guard)', async () => {
       // Belt-and-suspenders: even when the host record's URL would parse to a
       // DIFFERENT target, a fresh picker selection takes priority. Because
       // Priority 1 returns synchronously, the WebAPI call is never made — this
       // guards both the priority ordering AND the WebAPI-avoidance short-circuit.
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
-      const staleUrl =
-        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+      const staleUrl = `${window.location.origin}/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`;
       const retrieveRecordMock = jest.fn().mockResolvedValue({ sprk_regardingrecordurl: staleUrl });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1198,7 +1320,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       expect(retrieveRecordMock).not.toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
-        '?$select=sprk_regardingrecordurl'
+        '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value'
       );
       expect(navigateToMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1291,7 +1413,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         expect(retrieveRecordMock).toHaveBeenCalledWith(
           'sprk_todo',
           '22222222-2222-2222-2222-222222222222',
-          '?$select=sprk_regardingrecordurl'
+          '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value'
         );
       });
       await waitFor(() => {

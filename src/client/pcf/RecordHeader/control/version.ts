@@ -266,4 +266,4 @@
  *   DISPLAY-NAME group header are dropped for good - "not critical, cleaner
  *   without it". Do not add them back.
  */
-export const CONTROL_VERSION = '1.1.12';
+export const CONTROL_VERSION = '1.1.13';

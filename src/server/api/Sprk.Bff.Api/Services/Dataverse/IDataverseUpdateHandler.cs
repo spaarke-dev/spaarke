@@ -1,12 +1,10 @@
-using Sprk.Bff.Api.Services.Ai;
-
 namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
 /// Handles Dataverse entity updates with type conversion, optimistic concurrency, and retry logic.
 /// </summary>
 /// <remarks>
-/// This is NOT a tool handler - it's a code component called by OutputOrchestrator.
+/// This is NOT a tool handler - it's a code component (its former only injector, OutputOrchestratorService, was deleted by ebilling-r1 task 050b; its static helpers are still used by FieldMappingEndpoints and UpdateRecordActionCore).
 /// It provides low-level update operations with advanced features:
 /// - Type conversions for Money, EntityReference, DateTime
 /// - Optimistic concurrency control with row version checking
@@ -38,4 +36,23 @@ public interface IDataverseUpdateHandler
         int maxRetries,
         CancellationToken ct,
         Guid? impersonateSystemUserId = null);
+}
+
+/// <summary>
+/// Concurrency mode for Dataverse updates.
+/// </summary>
+/// <remarks>
+/// Moved here from the deleted OutputOrchestratorService (ebilling-r1 task 050b); the handler is its owner.
+/// </remarks>
+public enum ConcurrencyMode
+{
+    /// <summary>
+    /// No concurrency checking. Last write wins.
+    /// </summary>
+    None,
+
+    /// <summary>
+    /// Optimistic concurrency using row version. Fails if record changed since read.
+    /// </summary>
+    Optimistic
 }

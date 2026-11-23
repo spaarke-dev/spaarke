@@ -58,8 +58,8 @@ export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
 // `Xrm.Navigation.openForm`.
 export { openEmailRecord, EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
 export type { OpenEmailRecordOptions } from './openEmailRecord';
-export { openEmailCompose } from './openEmailCompose';
-export type { OpenEmailComposeOptions, OpenEmailComposeMode } from './openEmailCompose';
+export { openEmailCompose, composeRegardingParams, parseComposeRegarding } from './openEmailCompose';
+export type { OpenEmailComposeOptions, OpenEmailComposeMode, ComposeRegarding } from './openEmailCompose';
 
 // Sub-components (exported for advanced/direct composition + task 023 unit tests)
 export { RecipientField } from './subcomponents/RecipientField';
@@ -82,6 +82,26 @@ export type { IAssociationChipsProps } from './subcomponents/AssociationChips';
 
 export { ComposerActionBar } from './subcomponents/ComposerActionBar';
 export type { IComposerActionBarProps } from './subcomponents/ComposerActionBar';
+
+// Compose-only hosts (task 182): the moved plain-text helper, and the collected email + its send at the host's Finish.
+// `plainTextToHtml` is the one plain-text -> rich-text converter: every host that pre-fills plain text opens in rich text with it (task 197).
+export { plainTextToHtml, toPlainText } from './composeOnlyText';
+export {
+  EMAIL_NOT_SENT_NO_SERVER,
+  EMPTY_COMPOSED_EMAIL,
+  composedEmailFromState,
+  pendingAttachments,
+  invalidRecipients,
+  isComposedEmailReady,
+  joinRecipientAddresses,
+  sendComposedEmail,
+} from './composeOnlySend';
+export type {
+  IComposedEmail,
+  IEmailComposeHandlers,
+  ISendComposedEmailOptions,
+  ISendComposedEmailResult,
+} from './composeOnlySend';
 
 // Reducer + pure helpers (task 023 unit-tests these directly)
 export {

@@ -11,7 +11,8 @@
 # Export-SpaarkeMasterSource.ps1) — never a zip from a laptop.
 #
 # Steps: pack managed + unmanaged with the pac CLI → check both zips (name, version = Other/Solution.xml, managed
-# flag, no environment-variable values) and the source (no missing dependency on solution="Active" — F12) → write
+# flag, no environment-variable values) and the source (no missing dependency on solution="Active" — F12; no form,
+# ribbon or sitemap reference to a web resource the package lacks — Find-MissingWebResourceReferences) → write
 # the manifest with New-SpaarkeMasterManifest (the one producer of its shape; the C# parser and Pester tests share
 # Fixtures/spaarkemaster-manifest.sample.json) → keep everything as a run artifact.
 # Only a manual run on master with `publish: true` then uploads: both zips under versioned names, a versioned
@@ -106,6 +107,11 @@ jobs:
 
           $leaks = @(Find-LeakyDependencies -SolutionXmlPath $sourceXml)
           if ($leaks.Count -gt 0) { $leaks | ForEach-Object { Write-Host "LEAK: $_" }; throw "$($leaks.Count) missing dependency(ies) on solution=Active (F12) — re-export from dev after Assemble." }
+
+          # A hand-edited form, ribbon or sitemap can name a web resource the package lacks; F12 above never sees it
+          # (that list is written only by an export). SpaarkeMaster 1.3.1.0-1.3.2.0 shipped one (sprk_invoicefiles).
+          $unpackaged = @(Find-MissingWebResourceReferences -SourceFolder $env:SOURCE_FOLDER)
+          if ($unpackaged.Count -gt 0) { $unpackaged | ForEach-Object { Write-Host "MISSING: $_" }; throw "$($unpackaged.Count) web resource(s) referenced by the package source but not packaged — add the web resource (WebResources/<name> + .data.xml + a type 61 RootComponent) or remove the reference." }
 
           foreach ($p in @(@{ Zip = 'out/SpaarkeMaster_managed.zip'; Managed = $true }, @{ Zip = 'out/SpaarkeMaster.zip'; Managed = $false })) {
               $info = Get-PackedSolutionInfo -ZipPath $p.Zip

@@ -184,6 +184,8 @@ public class SpeAppOnlyContainerIsolationTests
         "ItemCreator", "MetadataUncached", "DownloadVersion", "CurrentVersionId", "EmbedPreview", "DriveItem",
         "ReplaceContent", "UploadSession",
         "MembershipReadAccess", "MembershipReadMarkers", "MembershipGrantMarked", "MembershipRemoveMarked",
+        // uac-r2 task 191g: the flagged-external item grant, its removal, and the flagged-role sweep.
+        "MembershipGrantItem", "MembershipRemoveItem", "MembershipRemoveFlaggedRole",
     };
 
     [Theory]
@@ -230,6 +232,10 @@ public class SpeAppOnlyContainerIsolationTests
                 ForeignContainer, "marker", "perm",
                 new SpeContainerMembershipService.ContainerAccess(
                     Array.Empty<SpeContainerMembershipService.ContainerUserRole>(), true, new Dictionary<string, string>())),
+            "MembershipGrantItem" => () => membership.GrantMarkedItemWriterAsync(
+                ForeignContainer, "item", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+            "MembershipRemoveItem" => () => membership.RemoveMarkedItemGrantAsync(ForeignContainer, "marker", "item", Guid.NewGuid()),
+            "MembershipRemoveFlaggedRole" => () => membership.RemoveFlaggedUserContainerRoleAsync(ForeignContainer, "perm"),
             _ => throw new ArgumentOutOfRangeException(nameof(path), path, null),
         };
 
@@ -882,25 +888,22 @@ public class SpeAppOnlyContainerIsolationTests
             .Should().BeEquivalentTo("b!default", "b!a;b!b", "b!old1", "b!old2", "b!old3");
     }
 
-    // ebilling-r1 task 028 (owner D-67): the Procedure Library container is a stamp container, so app-only eBilling writers
-    // (rule-set sources, rate-card workbooks) reach it — and nothing else is admitted with it. Task 092 retired the E-Billing
-    // Output Files key (export files are Stored Files): a value left under it admits nothing.
+    // ebilling-r1 tasks 092 and 124 (EB-D-163): eBilling names no SPE container. Export files and Procedure sources are Stored
+    // Files in the Finance file store, so neither Finance key is a stamp container: a value left under either admits nothing.
 
     private const string ProcedureLibrary = "b!procedure-library";
     private const string EbillingOutput = "b!ebilling-output-files";
 
-    [Theory]
-    [InlineData(ProcedureLibrary)]
-    public async Task EbillingContainers_WhenConfigured_AreOwned_WithoutAGraphCall_AndAnUnlistedContainerIsStillRefused(string container)
+    [Fact(DisplayName = "Must-fire control: a configured stamp container (the email default) is owned without a Graph call, and an unlisted container is still refused")]
+    public async Task ConfiguredStampContainer_IsOwned_WithoutAGraphCall_AndAnUnlistedContainerIsStillRefused()
     {
         var graph = new RoutedGraph().Container(ForeignContainer, marker: OtherCustomer);
         var guard = GuardFromConfiguration(graph, new Dictionary<string, string?>
         {
-            ["Finance:ProcedureLibraryContainerId"] = ProcedureLibrary,
-            ["Finance:EbillingOutputContainerId"] = EbillingOutput,
+            ["EmailProcessing:DefaultContainerId"] = "b!default",
         });
 
-        (await guard.ForOwnedContainerAsync(container)).Should().NotBeNull();
+        (await guard.ForOwnedContainerAsync("b!default")).Should().NotBeNull();
         graph.Requests.Should().BeEmpty("a configured stamp container is owned by definition");
 
         var refusal = await Refusal(() => guard.ForOwnedContainerAsync(ForeignContainer));
@@ -908,33 +911,16 @@ public class SpeAppOnlyContainerIsolationTests
         refusal.StatusCode.Should().Be(StatusCodes.Status404NotFound);
     }
 
-    [Fact(DisplayName = "092 must-not-fire: the retired Finance:EbillingOutputContainerId admits nothing, even when it still holds a value")]
-    public async Task RetiredOutputKey_WhenStillConfigured_IsNotOwned()
+    [Theory(DisplayName = "092 / 124 must-not-fire: a retired Finance container key admits nothing, even when it still holds a value")]
+    [InlineData("Finance:EbillingOutputContainerId", EbillingOutput)]
+    [InlineData("Finance:ProcedureLibraryContainerId", ProcedureLibrary)]
+    public async Task RetiredFinanceKey_WhenStillConfigured_IsNotOwned(string key, string container)
     {
-        var graph = new RoutedGraph().Container(EbillingOutput, marker: null);
-        var settings = new Dictionary<string, string?>
-        {
-            ["Finance:ProcedureLibraryContainerId"] = ProcedureLibrary,
-            ["Finance:EbillingOutputContainerId"] = EbillingOutput,
-        };
-        Sprk.Bff.Api.Infrastructure.DI.GraphModule.StampContainerIds(TestSpeOwnership.Configuration(settings))
-            .Should().NotContain(EbillingOutput);
-        var guard = GuardFromConfiguration(graph, settings);
-
-        var refusal = await Refusal(() => guard.ForOwnedContainerAsync(EbillingOutput));
-        refusal.Code.Should().Be(SpeContainerOwnershipGuard.NotOwnedErrorCode);
-    }
-
-    [Theory]
-    [InlineData(ProcedureLibrary)]
-    public async Task EbillingContainers_WhenNotConfigured_AreNotOwned(string container)
-    {
-        // Seeding proof: without the setting the same id is an ordinary container — its marker decides, and it has none.
         var graph = new RoutedGraph().Container(container, marker: null);
-        var guard = GuardFromConfiguration(graph, new Dictionary<string, string?>
-        {
-            ["Finance:ProcedureLibraryContainerId"] = "",
-        });
+        var settings = new Dictionary<string, string?> { [key] = container };
+        Sprk.Bff.Api.Infrastructure.DI.GraphModule.StampContainerIds(TestSpeOwnership.Configuration(settings))
+            .Should().NotContain(container);
+        var guard = GuardFromConfiguration(graph, settings);
 
         var refusal = await Refusal(() => guard.ForOwnedContainerAsync(container));
         refusal.Code.Should().Be(SpeContainerOwnershipGuard.NotOwnedErrorCode);

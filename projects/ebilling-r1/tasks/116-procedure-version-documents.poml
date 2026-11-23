@@ -4,7 +4,7 @@
     <title>Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-D</phase>
     <gate>081, 085 and 090 merged; 080's live schema carries sprk_procedureversion.sprk_notconverted (memo; see escalation); uac-r2 reviews the two new routes before merge; no live writes (the column-removal script runs read-only here)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the drafting job, two write paths and a code page; adds two caller-authorized routes.</rigor-reason>
     <model-tier>opus</model-tier>

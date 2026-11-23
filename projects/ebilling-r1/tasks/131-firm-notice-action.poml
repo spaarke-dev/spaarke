@@ -4,7 +4,7 @@
     <title>Firm notice Action invoice-firm-notice (INVOICE-FIRM-NOTICE@v1) with template fallback</title>
     <phase>5 Firm feedback (WP5) — wave W5-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Established Action + Binding wiring behind an existing facade method (041); output is prose only and every number comes from data, so a model error cannot misstate an amount.</rigor-reason>
     <model-tier>sonnet</model-tier>

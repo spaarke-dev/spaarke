@@ -432,6 +432,27 @@ public class ExternalDocumentNarrowingGuardTests
             "External plane (round 1): the documents module fetch drops the rows ExternalDataService.NarrowDocumentsAsync hides.",
         ["Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints"] =
             "External plane (round 1): download and versions refuse a document ExternalDataService.IsDocumentVisibleAsync hides.",
+        ["Sprk.Bff.Api.Services.Documents.OfficeEditAccessService"] =
+            "uac-r2 191g: asks the visibility seam whether ONE document is externally visible before a flagged-external caller " +
+            "gets a write permission on its file (only Visible from a decision that did not fault grants); no rows, no reasons, " +
+            "nothing returned to the caller but its own edit/view answer.",
+        ["Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync"] =
+            "uac-r2 191g: asks the visibility seam whether the documents of recorded item grants are still externally visible, " +
+            "to REMOVE a grant (Hidden or structurally undecidable) or keep it (Visible, or not decidable for now); no rows, " +
+            "nothing returned to any caller.",
+        ["Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares"] =
+            "uac-r2 197b: asks the visibility seam, for a Direct message's participants flagged external only, whether " +
+            "each row may be granted (Visible, or undecided only for no root), hidden (revoke) or deferred; no rows, nothing " +
+            "returned to any caller.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
+            "uac-r2 197b: resolves the visibility seam in a scope of its own for the live Direct grant's participants flagged " +
+            "external (DirectMessageParticipantShares.DecideForDirectParticipantsAsync), on the Direct-team branch and the other Direct " +
+            "branch (the no-root exemption only for the stamped pair of a recognized unfiled Direct message); a grant decision only.",
+        ["Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob"] =
+            "uac-r2 197b: resolves the visibility seam from its run scope and hands it to DirectMessageParticipantShares.",
+        ["Sprk.Bff.Api.Services.Access.SecureChildReconciler"] =
+            "uac-r2 197b: constructs DirectMessageParticipantShares on the refile path WITHOUT the visibility seam (the optional " +
+            "parameter stays null), so participants flagged external are deferred there and the share job grants them.",
         ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility"] =
             "uac-r2 191b: THE external visibility predicate asks the seam for a document's hide decision only (its verdict, " +
             "never a row) and returns Visible / Hidden / Undecided; every reader it takes is app-only.",
@@ -604,13 +625,151 @@ public class ExternalDocumentNarrowingGuardTests
             "services.AddScoped<InternalRouteDocumentNarrowing>(sp => (ids, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(ids, ct));"));
     }
 
+    // ── ebilling-r1 task 093: the firm file gate (self-contained) ─────────────────────────────────────────────────────
+    // A Stored File is not an SPE document, so THE document narrowing does not apply to it; the firm route's own gate does. Every
+    // external-plane source method that reads or streams a Stored File (any StoredFileService member, or the shared
+    // StoredFileEndpoints.StreamServableAsync) is a firm file surface. It must be THE gate (ExternalInvoiceSubmissionAuthorizationFilter
+    // .DecideInvoiceFilesAsync), which reaches the record gate (ExternalMessageEndpoints.GetRecordRightsDecisionAsync: Read through the
+    // invoice's parents, the secure-roots rule and the (a') predicate) and the one firm definition (ReadCallerFirmsAsync); or a listed
+    // handler that serves only from the gate's set (it reads ExternalInvoiceSubmissionScope.InvoiceFiles). A new surface, a gate that
+    // stops reaching one of the two, a handler that stops reading the set, and a stale entry all fail. Controls:
+    // FirmFileGuard_MustFireAndMustNotFire over the FirmFileControl* fixtures (end of file).
+    // (a') is NOT checked by reach here (task 093 fix round 1, review 2 F1): any path through the record gate reaches the predicate's
+    // invocation, so a reach check passes whether or not the gate hands the record gate a seam. What covers it: the record gate refuses
+    // every invoice when its (a') seam is null (fail closed), and ExternalInvoiceFileRoutesTests' hidden, predicate-fault and "asked once"
+    // cases fail when the seam is null or hides nothing (the 093 notes' seeding proofs).
+
+    /// <summary>THE firm file gate: each must reach the record gate (and with it (a')) and the firm read.</summary>
+    private static readonly string[] FirmFileGates =
+    {
+        $"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideInvoiceFilesAsync",
+    };
+
+    /// <summary>The firm file handlers: each serves only a file of the gate's set (it reads <c>ExternalInvoiceSubmissionScope.InvoiceFiles</c>).</summary>
+    private static readonly string[] FirmFileHandlers =
+    {
+        $"{typeof(ExternalInvoiceSubmissionEndpoints).FullName}::GetInvoiceFileContentAsync",
+    };
+
+    [Fact(DisplayName = "ebilling-r1 093: every external Stored File read is THE firm file gate (record gate, firms, (a')) or a handler serving its set")]
+    public void EveryExternalStoredFileSurface_IsTheFirmFileGate()
+    {
+        var problems = FirmFileProblems(BffTypes.Value, IsExternalPlane, FirmFileGates, FirmFileHandlers);
+        Assert.True(problems.Count == 0,
+            "An external-plane read of a Stored File must go through ExternalInvoiceSubmissionAuthorizationFilter's InvoiceFiles gate " +
+            "(ebilling-r1 task 093): the record gate (with the (a') predicate) and the caller's firms, then the visible file set; a handler " +
+            "serves only a file of that set. Wire it, or list it with a reviewer's reason:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 093: negative control — an unlisted Stored File read, a gate missing a check and a handler not reading the set are found; the full gate and a handler serving its set are not")]
+    public void FirmFileGuard_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(FirmFileControlReadsWithoutTheGate), typeof(FirmFileControlGateSkipsTheFirmRead),
+            typeof(FirmFileControlGateSkipsTheRecordGate), typeof(FirmFileControlFullGate),
+            typeof(FirmFileControlHandlerServesTheSet), typeof(FirmFileControlHandlerWithoutTheSet),
+            typeof(NarrowingGuardControlNoDocuments),
+        };
+        string Key(Type type, string method) => $"{type.FullName}::{method}";
+        var gates = new[]
+        {
+            Key(typeof(FirmFileControlGateSkipsTheFirmRead), "DecideAsync"), Key(typeof(FirmFileControlGateSkipsTheRecordGate), "DecideAsync"),
+            Key(typeof(FirmFileControlFullGate), "DecideAsync"),
+        };
+        var handlers = new[]
+        {
+            Key(typeof(FirmFileControlHandlerServesTheSet), "ServeAsync"), Key(typeof(FirmFileControlHandlerWithoutTheSet), "ServeAsync"),
+        };
+
+        var problems = FirmFileProblems(fixtures.SelectMany(IlCallScan.WithNested), _ => true, gates, handlers);
+
+        Assert.Equal(
+            new[]
+            {
+                $"GATE MISSES the record gate: {Key(typeof(FirmFileControlGateSkipsTheRecordGate), "DecideAsync")}",
+                $"GATE MISSES the firm read: {Key(typeof(FirmFileControlGateSkipsTheFirmRead), "DecideAsync")}",
+                $"HANDLER does not serve from the gate's set: {Key(typeof(FirmFileControlHandlerWithoutTheSet), "ServeAsync")}",
+                $"NEW external Stored File surface: {Key(typeof(FirmFileControlReadsWithoutTheGate), "ListAsync")}",
+            }.Order(StringComparer.Ordinal).ToArray(),
+            problems.Order(StringComparer.Ordinal).ToArray());
+
+        // The ratchet: a listed entry that no longer reads a Stored File is stale.
+        var stale = FirmFileProblems(fixtures.SelectMany(IlCallScan.WithNested), _ => true,
+            gates.Append(Key(typeof(NarrowingGuardControlNoDocuments), "ListAsync")).ToArray(), handlers);
+        Assert.Contains($"STALE entry {Key(typeof(NarrowingGuardControlNoDocuments), "ListAsync")}: it no longer reads a Stored File — remove it.", stale);
+    }
+
+    /// <summary>The external plane: the BFF's external-access API and infrastructure namespaces.</summary>
+    private static bool IsExternalPlane(Type caller) =>
+        IlCallScan.Outermost(caller).Namespace is "Sprk.Bff.Api.Api.ExternalAccess" or "Sprk.Bff.Api.Infrastructure.ExternalAccess";
+
+    private static List<string> FirmFileProblems(
+        IEnumerable<Type> types, Func<Type, bool> inScope, IReadOnlyCollection<string> gates, IReadOnlyCollection<string> handlers)
+    {
+        var list = types.ToList();
+        var inScopeList = list.Where(inScope).ToList();
+        var surfaces = Scan(inScopeList, _ => false, FirmFileSurfacePrimitive).Surfaces;
+        var recordGate = Scan(list, IsRecordGate, _ => null).Reaches;
+        var firms = Scan(list, IsFirmRead, _ => null).Reaches;
+        var fileSet = Scan(list, IsFileSetRead, _ => null).Reaches;
+
+        var problems = new List<string>();
+        foreach (var surface in surfaces.Keys.Where(s => !gates.Contains(s) && !handlers.Contains(s)).Order(StringComparer.Ordinal))
+            problems.Add($"NEW external Stored File surface: {surface}");
+
+        foreach (var gate in gates)
+        {
+            if (!surfaces.ContainsKey(gate))
+            {
+                problems.Add($"STALE entry {gate}: it no longer reads a Stored File — remove it.");
+                continue;
+            }
+
+            if (!recordGate.Contains(gate))
+                problems.Add($"GATE MISSES the record gate: {gate}");
+            if (!firms.Contains(gate))
+                problems.Add($"GATE MISSES the firm read: {gate}");
+        }
+
+        foreach (var handler in handlers)
+        {
+            if (!surfaces.ContainsKey(handler))
+                problems.Add($"STALE entry {handler}: it no longer reads a Stored File — remove it.");
+            else if (!fileSet.Contains(handler))
+                problems.Add($"HANDLER does not serve from the gate's set: {handler}");
+        }
+
+        return problems;
+    }
+
+    private static string? FirmFileSurfacePrimitive(MethodBase method) => method.DeclaringType switch
+    {
+        { } t when t == typeof(Sprk.Bff.Api.Services.Finance.Files.StoredFileService) => $"StoredFileService.{method.Name}",
+        { } t when t == typeof(Sprk.Bff.Api.Api.Finance.StoredFileEndpoints)
+                   && method.Name == nameof(Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.StreamServableAsync) =>
+            "StoredFileEndpoints.StreamServableAsync",
+        _ => null,
+    };
+
+    private static bool IsRecordGate(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalMessageEndpoints)
+        && method.Name == nameof(ExternalMessageEndpoints.GetRecordRightsDecisionAsync);
+
+    private static bool IsFirmRead(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalInvoiceSubmissionAuthorizationFilter)
+        && method.Name == nameof(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync);
+
+    private static bool IsFileSetRead(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalInvoiceSubmissionScope) && method.Name == "get_" + nameof(ExternalInvoiceSubmissionScope.InvoiceFiles);
+
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches);
+    internal sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches, IReadOnlyDictionary<string, HashSet<string>> Calls);
 
     private static ScanResult Scan(IEnumerable<Type> types) => Scan(types, IsNarrowing, SurfacePrimitive);
 
-    private static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
+    internal static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
     {
         var surfaces = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var calls = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -647,7 +806,7 @@ public class ExternalDocumentNarrowingGuardTests
             }
         }
 
-        return new ScanResult(surfaces, reaches);
+        return new ScanResult(surfaces, reaches, calls);
     }
 
     /// <summary>
@@ -668,7 +827,7 @@ public class ExternalDocumentNarrowingGuardTests
 
     private static readonly Regex CompilerPrefix = new(@"^<+([^<>]+)>", RegexOptions.Compiled);
 
-    private static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
+    internal static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
 
     private static bool IsNarrowing(MethodBase method) =>
         method.DeclaringType is { } declaring
@@ -1199,7 +1358,8 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.Coding.CodeSetProposalService::ConfirmAsync"] =
             "Writes only sprk_DefaultBillingCodeSet@odata.bind (DefaultSetBind) on a matter type or practice area reference row.",
         ["Sprk.Bff.Api.Services.Finance.InvoiceLifecycleService::TransitionAsync"] =
-            "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), conditioned on the row version.",
+            "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), plus the blanked review detail and (095f-2a) the decision note, " +
+            "conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Finance.InvoiceTotalsService::RecalculateAsync"] =
             "Writes only sprk_amount on an adjustment sprk_billingevent and the five totals columns on sprk_invoice (literal keys).",
         // ebilling-r1 task 103: the approval claim, conditioned on the approval portion's row version.
@@ -1227,6 +1387,10 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
             "Writes only sprk_filestatus (StoredFileSchema.Status, Servable) on sprk_storedfile, a literal key, under the row's own " +
             "version (UpdateIfRowVersionMatchesAsync); never a document.",
+        // ebilling-r1 task 095g: the firm-assign route's one slot writer, on a matter, project or work assignment only.
+        ["Sprk.Bff.Api.Services.Finance.CoreRecordFirmAssignmentService::WriteAsync"] =
+            "Writes only sprk_assignedlawfirm1 / sprk_assignedlawfirm2 (Slot1Column / Slot2Column, an organization reference or DBNull) on " +
+            "sprk_matter, sprk_project or sprk_workassignment (InvoiceCoreRecord.EntityLogicalName), under the version just read; never a document.",
         // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go. Task 116
         // moved the write into the shared WithdrawRowsAsync (WithdrawForUndoAsync, and ReplaceForCallerAsync for a version's earlier file).
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawRowsAsync"] =
@@ -1250,6 +1414,14 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard::UpdateExistingAsync"] =
             "The invoice family's update-only write primitive: it writes its caller's payload, so it is itself a recognised " +
             "generic update (GenericUpdateNames) and each of its callers is held to the refusal here.",
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite::UpdateExistingSplitAsync"] =
+            "#2799: the same primitive for a write that acts for a person (its locked columns written by the application after " +
+            "the person's checks): it writes its caller's payload, so it is itself a recognised generic update " +
+            "(GenericUpdateNames) and each of its callers is held to the refusal here.",
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite::PatchAsCallerAsync"] =
+            "#2799: its application write is only the locked invoice-family lookups (LockedColumnsOf(table): a family table's " +
+            "core record and invoice lookups, picked out of the body by name), update-only, after the caller's Write/Append/" +
+            "AppendTo checks; never sprk_document. Every other column goes in the caller's own PATCH.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::PutBackFilingAsync"] =
             "Rollback of this re-file's own failed write (#2143): writes back only the values this row held before the re-file " +
             "(`restore`, read from the row before the write), and only while the row is still filed as the re-file left it " +
@@ -1259,6 +1431,13 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid (the team the row's parents resolve to), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::ReleaseOwnSecureWriteAsync"] =
             "Writes only ownerid (the ordinary team the fresh parents give), conditioned on the row version.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::WriteDirectTeamOwnerAsync"] =
+            "fm 054 piece 3a: writes only ownerid (a typed reference to the resolved Direct message owner team), built in this " +
+            "member, conditioned on the row version; never a link value.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::ClearPrivateFilingAsync"] =
+            "fm 056: writes only clears (DBNull) of a private sprk_communication's filing columns (DirectMessageOwnerStep." +
+            "PrivateFilingColumns), built in this member, conditioned on the row version; never a document, a link value or an " +
+            "Access Permission.",
         ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer::ReownAsync"] =
             "uac-r2 task 191c: writes only ownerid (the team a flagged owner's row's own I-6 question gives), conditioned on the " +
             "row version read with the owner check; never a link column.",
@@ -1286,8 +1465,6 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Jobs.Handlers.AttachmentClassificationJobHandler::WriteClassificationToDataverseAsync"] =
             "Writes literal keys only: sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson, " +
             "sprk_mattersuggestionjson, sprk_mattersuggestedref, sprk_invoicereviewstatus.",
-        ["Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceExtractionJobHandler::UpdateInvoiceExtractionStatusAsync"] =
-            "Writes the literal key sprk_extractionstatus only.",
     };
 
     /// <summary>
@@ -1539,6 +1716,9 @@ public class ExternalDocumentNarrowingGuardTests
         // (DataverseUpdateHandler, the Update Record core and the field-mapping push write an invoice or line through it).
         [nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync)] =
             typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard),
+        // #2799: its drop-in for a write that may act for a person; the same three paths will write through it.
+        [nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.UpdateExistingSplitAsync)] =
+            typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite),
     };
 
     private static bool IsGenericUpdate(MethodBase method) =>
@@ -2172,4 +2352,77 @@ internal sealed class DocumentProfileWriterControlThroughItsWrapper(Spaarke.Data
     internal static Dictionary<string, object?> BuildPayload(Guid id, System.Text.Json.JsonElement output) =>
         Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields(
             id, output, "control.pdf", null, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+}
+
+// ── ebilling-r1 task 093: compiled control fixtures for FirmFileGuard_MustFireAndMustNotFire (never run; IL only) ──────
+
+/// <summary>MUST FIRE: an external-plane read of a Stored File that is neither the gate nor a listed handler.</summary>
+internal sealed class FirmFileControlReadsWithoutTheGate(Sprk.Bff.Api.Services.Finance.Files.StoredFileService store)
+{
+    internal Task<IReadOnlyList<Sprk.Bff.Api.Services.Finance.Files.StoredFileRow>> ListAsync(Guid invoiceId) =>
+        store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None);
+}
+
+/// <summary>MUST FIRE: a gate that asks the record gate and the (a') predicate but not the caller's firms.</summary>
+internal sealed class FirmFileControlGateSkipsTheFirmRead(
+    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalModuleRegistry modules, ExternalInvoiceHiding hide,
+    Microsoft.Extensions.Logging.ILogger logger)
+{
+    internal async Task<object> DecideAsync(CallerPrincipal caller, Guid invoiceId)
+    {
+        var decision = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
+            ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
+            (_, _, _, _) => throw new NotSupportedException(), logger, CancellationToken.None, null, null, hide);
+        await hide(caller, new[] { invoiceId }, CancellationToken.None);
+        return (decision, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
+    }
+}
+
+/// <summary>MUST FIRE: a gate that reads the caller's firms and asks the (a') predicate itself, but never asks the record gate.</summary>
+internal sealed class FirmFileControlGateSkipsTheRecordGate(
+    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalParticipationService participations, ExternalInvoiceHiding hide,
+    Microsoft.Extensions.Logging.ILogger logger)
+{
+    internal async Task<object> DecideAsync(CallerPrincipal caller, Guid invoiceId)
+    {
+        var firms = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(caller, participations, logger, CancellationToken.None);
+        await hide(caller, new[] { invoiceId }, CancellationToken.None);
+        return (firms, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
+    }
+}
+
+/// <summary>MUST NOT FIRE: the firm read, the record gate and the (a') predicate, then the Stored File read.</summary>
+internal sealed class FirmFileControlFullGate(
+    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalModuleRegistry modules, ExternalParticipationService participations,
+    ExternalInvoiceHiding hide, Microsoft.Extensions.Logging.ILogger logger)
+{
+    internal async Task<object> DecideAsync(CallerPrincipal caller, Guid invoiceId)
+    {
+        var firms = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(caller, participations, logger, CancellationToken.None);
+        var decision = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
+            ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
+            (_, _, _, _) => throw new NotSupportedException(), logger, CancellationToken.None, null, null, hide);
+        await hide(caller, new[] { invoiceId }, CancellationToken.None);
+        return (firms, decision, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
+    }
+}
+
+/// <summary>MUST NOT FIRE: a handler that streams only a file of the gate's set (through a helper that reads it).</summary>
+internal sealed class FirmFileControlHandlerServesTheSet(Sprk.Bff.Api.Services.Finance.Files.StoredFileService store)
+{
+    internal Task<Microsoft.AspNetCore.Http.IResult> ServeAsync(Microsoft.AspNetCore.Http.HttpContext http, Microsoft.Extensions.Logging.ILogger logger) =>
+        Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.StreamServableAsync(
+            http, FromTheSet(http), store, logger, "application/pdf", null, CancellationToken.None);
+
+    private static Sprk.Bff.Api.Services.Finance.Files.StoredFileServable FromTheSet(Microsoft.AspNetCore.Http.HttpContext http) =>
+        ((ExternalInvoiceSubmissionScope)http.Items["scope"]!).InvoiceFiles!.Files[0].Servable!;
+}
+
+/// <summary>MUST FIRE: a handler that streams a file it was handed, not one of the gate's set.</summary>
+internal sealed class FirmFileControlHandlerWithoutTheSet(Sprk.Bff.Api.Services.Finance.Files.StoredFileService store)
+{
+    internal Task<Microsoft.AspNetCore.Http.IResult> ServeAsync(
+        Microsoft.AspNetCore.Http.HttpContext http, Sprk.Bff.Api.Services.Finance.Files.StoredFileServable file,
+        Microsoft.Extensions.Logging.ILogger logger) =>
+        Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.StreamServableAsync(http, file, store, logger, "application/pdf", null, CancellationToken.None);
 }

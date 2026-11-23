@@ -599,7 +599,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H5** | Dataverse env **adoption** | Adopts the environment the **operator created** (intake `dataverseEnvUrl`; PRQ-C-09) — never creates one (T228). Checks the URL is this customer's (`spaarke-{customerId}[-{environmentName}]`, the rule POST /api/runs applies) and that `GET /WhoAmI` answers for the L2 Worker identity | `InterStepState.DataverseEnvUrl` = the canonical URL; `env-url-invalid` / `worker-not-app-user` / `env-health-check-failed` are Resumable | `dvenv-{customerId}` |
 | **H6** | Solution package import | **One solution, `SpaarkeMaster`** — **managed by default, unmanaged only on explicit instruction** (intake `solutionPackageType`; ADR-027 §3 amended 2026-10-07, owner D8). Refuses a managed↔unmanaged switch and a downgrade. Before the import it applies the org-settings contract (`organization.maxuploadfilesize` ≥ 25 MB — F14; `isauditenabled` = true and `auditretentionperiodv2` = -1, audit kept Forever — #2027, owner decision 2026-10-18; `isuseraccessauditenabled` = true, "Log access": each user's sign-in to the environment is recorded — owner decision 2026-11-10) with one Dataverse Web API PATCH as its importer identity, then reads the row back and fails the step on any setting that did not take (a PATCH of an ignored column still returns 204) (T253: no pac — the Worker host has none; `org-settings-contract-failed` is Resumable). It installs **no** application: the CI-built package needs none a fresh environment lacks (F13's Power BI dependency is gone; `SpaarkeMasterApplicationDependencyTests`). Runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md). ⚠️ *A real run fails here until the package is published in the one-package manifest format (T218c–e).* | SpaarkeMaster present at the package version, `ismanaged` = requested type | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`). First links the environment's **root business unit** to H8's container (`businessunit.sprk_containerid` — unified-access-control-r2 task 076's non-secure default); a root unit already naming another container → Resumable `root-business-unit-container-conflict` naming both, never overwritten (task 227g). **T259:** then links the **customer's own unit** (H10's `customerBusinessUnitId`) to the same container with the same rules (`customer-business-unit-unresolved` / `customer-business-unit-container-conflict`) — every user owns its records there, and the BFF resolves a non-secure record's container from its owning unit | Client startup validates no hardcoded URL fallbacks; the root unit's container reads back | `envvars-{customerId}-{configVer}` |
-| **H7b** | Secure Record setup (T256 — unified-access-control-r2 INCOMING-145) | Read-then-write, as the BFF app registration (H6/H7's identity). **Checks** `sprk_noaccessentry` is readable with the BFF deny-list reader's columns (else Resumable `secure_setup.noaccessentry_missing` — the BFF is never deployed: H9 waits for H7b), `sharetopreviousowneronassign` is off, and the root unit's default team reaches no secure table at Deep/Global. **Creates what is missing**: the `Secure Record` unit (a direct child of the root, no users ever), the named memberless Owner team `Secure Record Owners`, and the `Secure Record Owner` role **inside that unit** (a child-unit role cannot ship in SpaarkeMaster) with exactly the Read-at-Basic set of `config/secure-record-owner-role.json` (metadata names, then the §5.4 strip of what Dataverse injects, every time). Puts the role on the named team only; removes it and System Administrator from the unit's default team. Adds every default team but the ontology writer unit's (task 267: that team is in **no** field-security profile; verify fails if it is in a reader profile) to `Spaarke BFF-Managed Field Readers` and `Spaarke Identity Link Readers`, and H10's two application users (the BFF's) to `Spaarke BFF-Managed Field Writers` and `Spaarke Identity Link Writers` — nobody else (profiles, the `sprk_issecure` lock and the contact identity-binding lock on `contact.sprk_externalobjectid` / `systemuser.sprk_primarycontact` ship in SpaarkeMaster — verified, never created; T255 / INCOMING-141); sets NULL `sprk_issecure` to false. **Procedure version 8 (task 267):** S24 gives the ontology writer, alone in its unit `Spaarke Ontology Writer`, exactly that unit's copy of `Spaarke Ontology Service` and its two profiles, and S25 gives the customer unit's default team its copy of `Spaarke Basic User` (§7.7). Refusals that need an owner decision (users in the unit, team members, wrong parent, a stray member of either writer profile, another profile that may write a locked column) quarantine. Dry run: intake `secureRecordSetupDryRun=true` writes nothing, records the plan in gate `h7b-secure-setup-plan` and stops the run | **T259 (ISS-010, §6 T1/T3):** also refuses, QuarantineRequired, a customer business unit (H10's `customerBusinessUnitId`) that is missing (`secure_setup.customer_bu_missing`) or not a direct child of the root (`secure_setup.customer_bu_wrong_parent`), and a BFF application user outside it (`secure_setup.app_user_outside_customer_bu`); a unit found for the `Secure Record` name whose **id** is the customer unit's (a name differing only by case or accents — H10 had nothing to compare against on a fresh stamp) is `secure_setup.bu_is_customer_bu`; any user of any kind in the `Secure Record` unit is `secure_setup.bu_has_users` | Re-read: role privileges = the file exactly (all Basic), role held by the named team alone, no members/users, all four profiles' memberships exact, no NULL flag | `secure-setup-{customerId}-{setHash}` |
+| **H7b** | Secure Record setup (T256 — unified-access-control-r2 INCOMING-145) | Read-then-write, as the BFF app registration (H6/H7's identity). **Checks** `sprk_noaccessentry` is readable with the BFF deny-list reader's columns (else Resumable `secure_setup.noaccessentry_missing` — the BFF is never deployed: H9 waits for H7b), `sharetopreviousowneronassign` is off, and the root unit's default team reaches no secure table at Deep/Global. **Creates what is missing**: the `Secure Record` unit (a direct child of the root, no users ever), the named memberless Owner team `Secure Record Owners`, and the `Secure Record Owner` role **inside that unit** (a child-unit role cannot ship in SpaarkeMaster) with exactly the Read-at-Basic set of `config/secure-record-owner-role.json` (metadata names, then the §5.4 strip of what Dataverse injects, every time). Puts the role on the named team only; removes it and System Administrator from the unit's default team. Adds every default team but the ontology writer unit's (task 267: that team is in **no** field-security profile; verify fails if it is in a reader profile) to `Spaarke BFF-Managed Field Readers` and `Spaarke Identity Link Readers`, and H10's two application users (the BFF's) to `Spaarke BFF-Managed Field Writers` and `Spaarke Identity Link Writers` — nobody else (profiles, the `sprk_issecure` lock and the contact identity-binding lock on `contact.sprk_externalobjectid` / `systemuser.sprk_primarycontact` ship in SpaarkeMaster — verified, never created; T255 / INCOMING-141); sets NULL `sprk_issecure` to false. **Procedure version 8 (task 267):** S24 gives the ontology writer, alone in its unit `Spaarke Ontology Writer`, exactly that unit's copy of `Spaarke Ontology Service` and its two profiles, and S25 gives the customer unit's default team its copy of `Spaarke Basic User` (§7.7). **Procedure version 9 (task 268):** S26 verifies, never repairs, ebilling task 166's lock on the seven `sprk_invoice` amounts and firm (Resumable `secure_setup.invoice_money_lock_incomplete` until a SpaarkeMaster release **above 1.3.0.0** carrying task 166 is imported, or, only where H7b completed before, ebilling's script is run). **Procedure version 10 (task 270):** S27 verifies, never repairs, the #2799 lock on the 24 invoice-family lookups (Resumable `secure_setup.invoice_family_lock_incomplete` until SpaarkeMaster 1.3.2.0 or later is imported (#2859; 1.3.1.0 does not carry it), or, only where H7b completed before, `Set-InvoiceFamilyFieldSecurity.ps1` is run), and S28 the message-access lock (field-mapping 054b; `secure_setup.message_access_lock_incomplete` until a new run imports 1.3.1.0 or later), the direct recipient only where it exists. The platform's System Administrator profile is excused from every other-writer check **by its fixed id**, never by name. Refusals that need an owner decision (users in the unit, team members, wrong parent, a stray member of either writer profile, another profile that may write a locked column — `secure_setup.invoice_money_lock_other_writer`, `invoice_family_lock_other_writer` and `message_access_lock_other_writer` included) quarantine. Dry run: intake `secureRecordSetupDryRun=true` writes nothing, records the plan in gate `h7b-secure-setup-plan` and stops the run | **T259 (ISS-010, §6 T1/T3):** also refuses, QuarantineRequired, a customer business unit (H10's `customerBusinessUnitId`) that is missing (`secure_setup.customer_bu_missing`) or not a direct child of the root (`secure_setup.customer_bu_wrong_parent`), and a BFF application user outside it (`secure_setup.app_user_outside_customer_bu`); a unit found for the `Secure Record` name whose **id** is the customer unit's (a name differing only by case or accents — H10 had nothing to compare against on a fresh stamp) is `secure_setup.bu_is_customer_bu`; any user of any kind in the `Secure Record` unit is `secure_setup.bu_has_users` | Re-read: role privileges = the file exactly (all Basic), role held by the named team alone, no members/users, all four profiles' memberships exact, no NULL flag | `secure-setup-{customerId}-{setHash}` |
 | **H8** | SPE container | Creates ONE customer container in the pre-existing container type, then activates and verifies it, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s). **Binds the container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1), so it needs **H5**. Before creating, grants the customer's BFF identities on the container-type registration (stamp UAMI application `full`, BFF app delegated `full` — task 227b). **Records what it created at once and RESUMES with it** (rounds 41 + 49): a recorded container is never created again, and one whose activation failed is re-activated. A create whose answer was lost is QuarantineRequired `spe-container-creation-in-doubt`: never repeated, never auto-adopted (§7.5). **A later run reuses the customer's existing container** — the one the environment records in `sprk_SharePointEmbeddedContainerId` — and never removes it; the run's record and the environment naming different containers stops the run naming both (task 227e). After the bind it writes the `spaarkeCustomerId` marker the BFF recognises its containers by (T227d) | Container GET succeeds; stamp reads back; container ID handed to H7 only once bound | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Runs right after H3 + H5 and **before H6** (T228 — H6 and H7 sign in as the BFF app registration it makes an application user). **T259 (ISS-010):** first finds or creates the customer's own business unit (intake `displayName`) **directly under the root**, a sibling of the `Secure Record` unit (another parent → QuarantineRequired `h10-customer-bu-wrong-parent`; two of that name → `h10-customer-bu-ambiguous`; the unit Dataverse finds for the name has the `Secure Record` unit's **id** → QuarantineRequired `h10-customer-bu-is-reserved`, no user placed — Dataverse matches names without case or accents, so H10 compares unit ids, never names; on a fresh stamp it re-checks right after creating the unit, so a colliding name leaves only an empty unit to remove), and records it as `customerBusinessUnitId`. Register 2 App Users (BFF app-reg + UAMI) **in that unit** as System Administrator (the unit's copy of the role); an App User already in another unit is QuarantineRequired `h10-app-user-in-foreign-business-unit` — never moved (a unit change strips its roles); reconcile the stamp identity's Graph app roles to `GraphAppRoles.cs` — grant `FileStorageContainer.Selected`, remove every other Graph role (**T3**, task 261) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
@@ -940,6 +940,18 @@ user on its next run`). One environment's failure fails the run (`[ID-LINK-RECON
 ResultJson's `provisioningTargets.environments[]`) but never stops the others. Deactivating a registry row stops
 the BFF reconciling that environment — deliberately. (Before 2026-10-01's third fix round the job scanned only its
 own environment and this was a recorded gap.)
+
+**Only the rows this BFF serves (#2761, 2026-11-13).** A registry row whose `sprk_appservicename` names ANOTHER App
+Service is a customer stamp. That stamp's own BFF reconciles it as its own `Dataverse:ServiceUrl`, so this BFF skips it.
+Its identity has no application user there (D-12/D-13 stamp isolation), and before the fix the row faulted every run
+with WhoAmI 403 `0x80072560`. A row with a blank `sprk_appservicename` (dev, demo and legacy rows) is reconciled as
+above. The BFF's own name is the App Service's `WEBSITE_SITE_NAME`, compared case-insensitively. Off App Service the
+name is unknown, and every row that names an App Service is skipped. Each run logs the skipped rows by App Service name
+(`[ID-LINK-RECON] Skipped … served by another BFF`) and records their count in
+`provisioningTargets.registryRowsServedByAnotherBff`. A Ready row that has a `sprk_customerid` but no App Service name
+is reconciled here and logged as a warning: a stamp row looks like that when provisioning's registry write failed
+(REGISTRY-STALE; recover with `/provision-environment` Step 6a). **Limit:** if a stamp's App Service is renamed or
+removed while its row still names the old one, no BFF reconciles that environment until the row is corrected.
 
 **Every one of those environments needs the Dataverse prerequisite below** — an environment without it is
 reported by every run as a failed environment, and registration links there deny `binding_column_missing`.
@@ -1399,6 +1411,77 @@ scripts/provisioning/role-privilege-expectations/spaarkemaster-<version>.json` (
 role loses a privilege the release removed only on a stage-and-upgrade, so a leftover means the wrong import method or a
 privilege added by hand. A leftover Signal Write or Decision Record Create lets callers bypass the BFF commit route. Add
 an expectations file for every release that changes roles (the owning project supplies the list).
+
+**Message-access columns: field security on every environment** (field-mapping-server-write-path-r1 task
+054b). Five columns decide who may read a message, and only the BFF writes them: `sprk_communicationthread.sprk_threadtype`
+and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_directrecipient` and `.sprk_communicationthread`.
+`scripts/Set-ThreadFlagFieldSecurity.ps1` secures all five, next to
+`Set-SecureFlagFieldSecurity.ps1` ([SECURE-PROJECT-ENVIRONMENT-SETUP.md](SECURE-PROJECT-ENVIRONMENT-SETUP.md) §7d) and
+`Set-DocumentPointerFieldSecurity.ps1` (the BFF settings list above).
+- The SpaarkeMaster solution source marks four of them `IsSecured` and carries both BFF-managed profiles' permissions on
+  them (readers: Read; writers: Read, Create, Update). The import is not enough on its own: the profiles' members (every
+  business unit's default team on the reader profile, the BFF application users on the writer profile) are per
+  environment, and `sprk_communication.sprk_directrecipient` is not in the solution source. It exists only where
+  `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran, and the script refuses (exit 1, nothing written) until it does.
+- **New environment (stamp):** provisioning does **not** run this script. SpaarkeMaster 1.3.1.0 and later secure the four
+  packaged columns at import (H6), H7b adds the two profiles' members (S11/S12), and H7b S28 (task 270) verifies the lock
+  and refuses the stamp (`secure_setup.message_access_lock_incomplete`, Resumable) where it is not whole. Provisioning does
+  not run `Set-DirectRecipientSchema.ps1` either, so `sprk_directrecipient` is absent on a new stamp and the
+  Direct-message feature stays off (binding rule below); H7b records that in its gate evidence and checks the column's
+  lock only where it exists. To turn the feature on for a stamp: `Set-DirectRecipientSchema.ps1 -Apply`, then this
+  script (dry run, `-Apply`, `-Verify`; each must exit 0), with the owner's OK.
+- **After every SpaarkeMaster import** (an H6 run or a manual import) on an environment where `sprk_directrecipient`
+  exists: run `Set-ThreadFlagFieldSecurity.ps1 -Verify`. A non-zero exit is a gap: run `-Apply`, then `-Verify` again. On
+  a stamp without the column the script refuses in every mode (exit 1 at its first precondition); H7b S28 is the check
+  there, and the remedy for an incomplete lock is a new run that imports SpaarkeMaster 1.3.1.0 or later at H6. On a stamp
+  (or any environment whose default solution is not `SpaarkeCore`) pass `-SolutionUniqueName SpaarkeMaster`.
+- **A new business unit:** its default team joins the reader profile through `Set-RecordCreatorPersonSchema.ps1 -Apply`;
+  then run `-Verify`.
+- **Binding rule:** the BFF settings `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay **unset** on an
+  environment until `Set-ThreadFlagFieldSecurity.ps1 -Verify` exits 0 there. While they are unset, no message is owned by
+  the Direct team and nothing grants access from `sprk_sentby` / `sprk_directrecipient`.
+
+**Invoice-family links: field security on every environment** (unified-access-control-r2 #2799). The 24 lookups that file an
+invoice, invoice line, submission, approval, correction or external identifier under its matter, project or work assignment
+(and link it to its invoice) are written only by the BFF application user. The BFF checks each person-driven write AS THE
+PERSON and then writes these columns AS THE APPLICATION, so a user can no longer re-file a row through a form or the Web API
+and skip those checks.
+
+**From SpaarkeMaster 1.3.2.0 the import applies the lock** (#2859): the package secures the 24 columns and grants them to
+`Spaarke BFF-Managed Field Readers` (read) and `Spaarke BFF-Managed Field Writers` (read/create/update) only, and it carries
+code pages rebuilt from source that no longer write them. A new stamp needs no script; provisioning H7b S27 verifies the lock
+(customer-provisioning-orchestration-r1 task 270, #2859; not yet on master). On an environment that is already deployed,
+deploy the BFF of step 1 below and the current web resources BEFORE importing 1.3.2.0, or client writes of these lookups
+fail once the import secures them. The profiles' members stay per environment (`Set-RecordCreatorPersonSchema.ps1 -Apply`).
+
+`scripts/Set-InvoiceFamilyFieldSecurity.ps1` (the named entry point of `Set-DocumentPointerFieldSecurity.ps1 -Target
+InvoiceFamilyLinks`, with the same two BFF-managed profiles) is ONLY for an environment below SpaarkeMaster 1.3.2.0, and as a
+repair (`-Verify` names a gap on an environment at 1.3.2.0 or above). On those, run it in this order; do not skip a step:
+1. **Deploy the BFF** build that writes the links as the application (#2799 chunks 1-3). Before it, locking would make every
+   person-driven write of these columns fail.
+2. **Redeploy every web resource the dry run (p4a) lists.** It scans the deployed code pages and form scripts for a write of a
+   locked column on a family table, and `-Apply` refuses (nothing written) while any is found. On dev (2026-11-13) it names
+   `sprk_creatematterwizard`, `sprk_spaarkeai` and `sprk_createinvoicewizard`, which are older than source.
+3. **Dry run:** `Set-InvoiceFamilyFieldSecurity.ps1 -EnvironmentUrl <org> -BffApplicationIds <ids>`. Writes nothing; every
+   precondition must be OK.
+4. **Apply, with the owner's go:** the same command plus `-BffWritesInvoiceFamilyLinksAsApp -Apply`. The switch is your
+   confirmation that step 1 is done; `-Apply` refuses without it.
+5. **Verify:** the same command with `-Verify` must exit 0 (non-zero names each gap).
+- **New environment (stamp):** the lock ships in SpaarkeMaster **1.3.2.0** (#2859; owner decision 2026-11-16, task 270
+  path A; **1.3.1.0 does not carry it**). H7b S27 refuses a stamp where it is not
+  whole (`secure_setup.invoice_family_lock_incomplete`, Resumable) until a new run imports 1.3.2.0 or later at H6. Steps
+  3–5 are **not** a remedy on a stamp's first H7b run: H7b refuses before it adds the BFF-managed profiles' members
+  (S11/S12), and the script's preconditions require them. They apply only on a stamp where H7b completed before (a
+  re-run after a procedure change), with the owner's OK, and the run then resumes; even there the dry run may stop at the web-resource precondition (p4a) when the stamp's SpaarkeMaster web resources predate #2799, and then the release import is the only route. A stamp that imports the release
+  needs no step 1 or 2: H9 deploys the master BFF, and the web resources come from the same SpaarkeMaster, which is
+  built after #2799.
+- **After every SpaarkeMaster import:** run `Set-InvoiceFamilyFieldSecurity.ps1 -Verify` (read-only; on a stamp, H7b S27
+  checks the same lock).
+- **A new business unit:** its default team joins the reader profile through `Set-RecordCreatorPersonSchema.ps1 -Apply`; then
+  run `-Verify`.
+- **Known limit (K-1):** a write that sets a locked column and other columns is two requests. If the second fails, the other
+  columns stay saved and the caller gets an error (`invoice_family_locked_write_partly_saved`), never success.
+- Registry row: [DATAVERSE-WRITE-PATH-ARCHITECTURE.md](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md) I-24.
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
@@ -1940,12 +2023,15 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 >   it. Do not assign it in the admin UI: the UI offers the copy in the user's own unit first, and that copy reaches nothing
 >   above that unit. Admins homed in the customer's unit itself need no assignment.
 > - **Then run `-Verify`.** It fails if the org setting is off; if `isinherited` is not 0; if the role grants anything but Read
->   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy or
->   a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
+>   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy,
+>   the `Spaarke Ontology Writer` copy or a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
 >   customer's unit and the units below it (another customer's admin would read this customer's rules); or if a holder of
 >   **another** customer top unit's copy is homed outside that unit and the units below it. The script also refuses to run, in
->   every mode and before any write, when the business-unit tree is not the expected shape: `Secure Record` must be a direct
->   child of the root and outside every customer subtree (D-123).
+>   every mode and before any write, when `Secure Record` or the ontology writer's unit `Spaarke Ontology Writer` (task 267)
+>   sits inside the named customer's subtree (each must be outside every customer subtree, D-123; each customer's own run
+>   checks its subtree). The ontology writer's unit is never a customer unit (task 269): naming it (by name or id) is
+>   refused, it is never counted as another customer top unit, a declared team in or below it is drift, two units of that
+>   name refuse, and a `-SecureBusinessUnitName` that names it refuses.
 > - **Live-proof gate.** Before the first customer with a child unit relies on this, an admin homed in a child unit and holding
 >   the top unit's copy must be able to read (and exclude) a Billing rule owned in the customer's top unit, and must **not** be
 >   able to read a rule owned by `Secure Record Owners` (still 403). See Phase 7a. Until the admin holds the role, that
@@ -2054,6 +2140,38 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   `secure_setup.basic_user_role_reaches_secure_unit` (QuarantineRequired) when that copy holds Read at **Global** on any
   table of `config/secure-record-owner-role.json` — on the default team every customer user would read every secure
   record (as shipped it holds Deep or Basic only, which stops at the customer's unit);
+- a read-only check (S26, task 268; ebilling task 166, owner decision EB-D-200; procedure version 9) that the seven
+  `sprk_invoice` columns only the BFF sets — `sprk_totalamount`, `sprk_approvedtotal`, `sprk_feestotal`,
+  `sprk_expensestotal`, `sprk_lineadjustmentstotal`, `sprk_invoiceadjustmentstotal` and the firm `sprk_vendororg` — are
+  field-secured, that `Spaarke BFF-Managed Field Readers` grants Read and `Writers` 4/4/4, and that no other profile
+  can create or update one (the platform System Administrator profile excepted, matched by its fixed id; the Readers
+  profile is not exempt). A missing column or a wrong lock refuses `secure_setup.invoice_money_lock_incomplete`
+  (Resumable); another writer refuses `secure_setup.invoice_money_lock_other_writer` (QuarantineRequired). **The
+  published SpaarkeMaster 1.3.0.0 predates task 166**, and H6 skips a version that is already installed, so every stamp,
+  fresh or existing, refuses here until either (a) a SpaarkeMaster release **above 1.3.0.0** carrying task 166 is
+  published and a new run imports it at H6, or (b) on a stamp where H7b completed before (so the BFF-managed profiles
+  have their members, which the script requires; on a first H7b run they do not, since S26 refuses before S11/S12
+  write), the operator runs `scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1` (apply, then `-Verify`) with
+  the owner's OK and resumes — a BFF from master assumes only it sets these values. S26 checks profile grants only: an extra
+  read-only grant is allowed (ebilling's script `-Verify` is stricter), and per-record field shares are out of scope;
+- the same read-only check (S27, task 270; unified-access-control-r2 #2799; procedure version 10) on the 24
+  invoice-family lookups of `scripts/common/InvoiceFamilyLockedColumns.psd1` — the matter, project, work assignment and
+  invoice links on `sprk_billingevent`, `sprk_externalidentifier`, `sprk_invoice`, `sprk_invoiceapproval`,
+  `sprk_invoicecorrection` and `sprk_invoicesubmission` — refusing `secure_setup.invoice_family_lock_incomplete`
+  (Resumable) or `secure_setup.invoice_family_lock_other_writer` (QuarantineRequired). **SpaarkeMaster 1.3.1.0 does
+  not carry this lock; 1.3.2.0 does** (#2859): every stamp refuses here until a new run imports 1.3.2.0 or later
+  at H6; only on a stamp where H7b completed before may the operator instead run
+  `scripts/Set-InvoiceFamilyFieldSecurity.ps1` with the owner's OK and resume (§7.4). **Release ordering:** do not
+  deploy an L2 Worker with procedure version 10 before SpaarkeMaster 1.3.2.0 is published, or every new run, and every re-run
+  of an existing stamp (the procedure version salts H7b's idempotency key), stops at H7b;
+- the same read-only check (S28, task 270; field-mapping task 054b) on the message-access columns
+  `sprk_communicationthread.sprk_threadtype` and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby` and
+  `.sprk_communicationthread` (SpaarkeMaster 1.3.1.0 carries their lock), plus `sprk_communication.sprk_directrecipient`
+  only where it exists (provisioning never creates it; its absence is recorded in the gate evidence and the
+  Direct-message feature stays off) — refusing `secure_setup.message_access_lock_incomplete` (Resumable) or
+  `secure_setup.message_access_lock_other_writer` (QuarantineRequired). The remedy on a stamp is a new run that imports
+  SpaarkeMaster 1.3.1.0 or later at H6: `scripts/Set-ThreadFlagFieldSecurity.ps1` refuses wherever
+  `sprk_directrecipient` is absent (§7.4);
 - a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
   Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
   refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`);
@@ -2605,11 +2723,13 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # the CUSTOMER TOP UNIT's copy. -Apply also sets the org setting EnableOwnershipAcrossBusinessUnits if it is off: an
 # ORG-WIDE write, logged as its own step (one orgdborgsettings element changes; the rest is written back as read).
 # -Verify fails while the org setting is off, isinherited is not 0, the role grants anything else or another depth, any team
-# holds any copy, a user holds the root copy, the Secure Record copy or a copy below a customer top unit, or a holder of this
+# holds any copy, a user holds the root copy, the Secure Record copy, the Spaarke Ontology Writer copy or a copy below a
+# customer top unit, or a holder of this
 # unit's copy lacks prvWritesprk_ruleset (the billing-admin marker) or is homed outside the customer's unit and the units
 # below it, or a holder of ANOTHER customer top unit's copy is homed outside that unit and the units below it. Every mode
-# refuses to run, before any write, when Secure Record sits inside the customer's subtree (it must be a direct child of the
-# root and outside every customer subtree, D-123).
+# refuses to run, before any write, when Secure Record or the ontology writer's unit sits inside the customer's subtree (each
+# must be a direct child of the root and outside every customer subtree, D-123 / task 267). The unit 'Spaarke Ontology
+# Writer' is never a customer unit (task 269): naming it is refused, and it is never another customer top unit.
 # Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for the two teams and the role, after H7b
 # and before H9, from the files $DeclaredRoleFiles lists (restricted-content-owner-role.json,
 # customer-configuration-owner-role.json, billing-rule-readers-role.json), with its own gate and an H13 re-check.
@@ -3071,6 +3191,11 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-11-07 | §6.5 settings + §7.2 H2a + H4b note + §7.7 H10 + H7b S24 + §9 T3/T7 + §12.3: the per-stamp ontology writer identity — H2a creates `mi-spaarke-{customerId}-{env}-ontology-writer` on both slots, H4b writes `Ontology__Writer__ManagedIdentityClientId`, H10 creates its App User with no role, H7b S24 (procedure v7) grants exactly `Spaarke Ontology Service` and the two writer profiles and refuses a writer that would hold more (directly, through a team, or through another profile), H10 refuses to adopt an App User whose `azureactivedirectoryobjectid` is not the principal id, H13 T7 reads the setting back and T3 checks the writer holds no Graph app role | `customer-provisioning-orchestration-r1` task 266 (#2605) |
 | 2026-11-10 | §5 displayName + `customerBusinessUnitId` row + §7.7 H10 + H7b S11/S16/S24/S25: the ontology writer sits alone in its own unit `Spaarke Ontology Writer` (H10 finds or creates it, moves a writer task 266 put in the customer's unit, records `ontologyWriterBusinessUnitId`; intake reserves the name); H7b (procedure v8) checks that unit by id, gives the writer that unit's role copy, keeps its default team out of every profile, and S25 gives the customer unit's default team `Spaarke Basic User` so it can own contacts — the operator step for #2618 is gone | `customer-provisioning-orchestration-r1` task 267 (#2618) |
 | 2026-11-10 | §5 H7b row + §6.5.2 + §7.7 H10/S24 + Secure Record setup: the nine operator scripts that add "every default team" to a reader profile skip the ontology writer unit's default team and FAIL when it is there (`scripts/common/OntologyWriterUnit.ps1`); a move keeps roles where `DoNotRemoveRolesOnChangeBusinessUnit` is set (S24 hint, remove by hand); the moved writer holds no role between H10 and H7b S24; H10 also refuses a writer whose client id is the BFF app registration's | `customer-provisioning-orchestration-r1` task 267 review fixes (#2618) |
+| 2026-11-11 | §5 H7b row + Secure Record setup S26: H7b procedure 9 verifies ebilling task 166's lock on the seven `sprk_invoice` amounts and firm (EB-D-200; secured, Readers read, Writers 4/4/4, no other writer); incomplete → `secure_setup.invoice_money_lock_incomplete` (Resumable: a SpaarkeMaster release above 1.3.0.0 carrying 166, or ebilling's script), other writer → `…_other_writer` (QuarantineRequired). The System Administrator profile is now excused by its fixed id in every H7b other-writer check, never by name (task 268). |
+| 2026-11-13 | §7.11 + §12.2 Phase 7a (Set-CustomerOwnerTeams): the ontology writer's unit `Spaarke Ontology Writer` (task 267) is never a customer unit — refused when named (by name or id, every mode), never counted as another customer top unit, a declared team or a role copy holder in it is drift, it must sit outside every customer subtree, and two units of that name refuse (task 269). |
+| 2026-11-16 | Invoice-family links: from SpaarkeMaster 1.3.2.0 the import applies the #2799 lock (24 columns, Readers / Writers only) with code pages rebuilt from source; `Set-InvoiceFamilyFieldSecurity.ps1` is only for environments below 1.3.2.0 and as a repair; an existing environment deploys the #2799 BFF and current web resources before the import; H7b S27 verifies (task 270, not yet on master) | `unified-access-control-r2` #2859 |
+| 2026-11-16 | §5 H7b row, §7.4 (message-access and invoice-family locks) and §7.11: H7b procedure 10 (task 270, owner path A) adds S27, the #2799 invoice-family link lock (24 columns; SpaarkeMaster 1.3.1.0 does not carry it, so a stamp refuses until the uac-r2 release that packages it is imported or the script is run), and S28, the message-access lock (four packaged columns, the direct recipient only where it exists); §7.4 no longer claims provisioning runs Set-ThreadFlagFieldSecurity.ps1. |
+| 2026-11-16 | §5 H7b row and §7.11: S27's remedy and the L2 Worker release-ordering rule name SpaarkeMaster **1.3.2.0** (#2859, uac-r2 PR #2865), the release that carries the #2799 lock. |
 
 ---
 

@@ -2,6 +2,7 @@
 
 > **Status**: R1 shipped (Phase A–C). Phase D (EventsPage migration) + Phase E (SemanticSearch migration) + Phase F (legacy retirement) in progress.
 > **Established**: 2026-06 (project `spaarke-datagrid-framework-r1`)
+> **Last Reviewed**: 2026-11-22 (command bar section only, for `hiddenBuiltInCommands`, #2908; the rest was not re-checked)
 > **Audience**: Developers consuming the framework, makers authoring configuration records.
 > **Operational guide**: [`DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](../guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md)
 > **Supersedes**: [`universal-dataset-grid-architecture.md`](universal-dataset-grid-architecture.md) (PCF — retires in Phase F)
@@ -199,6 +200,54 @@ When to choose host filters vs. configjson chips:
 | **`behavior.parentContextFilter`** | A single declarative parent scope (e.g. drill-through from Matter → KPIs). Stored in the configuration record, not the host. |
 | **`hostFilters` prop** | The filter UI lives outside the grid (e.g. the Calendar widget's filter row + the calendar strip). Host-owned, prop-driven. |
 | **`behavior.membershipFilter`** | "Records the caller is on" (owner + assigned-person roles), broader than `ownerid eq-userid`. Declarative in the config record; resolved at query time via the shared membership service. See §6.6. |
+
+### Host commands (command bar slot, added 2026-11-13 by spaarke-SPA-external-access-platform-r4 task 010)
+
+The command bar's items come from the configuration record's `commandBar.primary` / `secondary` plus the built-ins (`showDefaultCommands`). A host that needs one more action in the toolbar, whose behaviour it owns (for example "Submit invoice", which opens a host dialog or navigates), passes it with `hostCommands` instead of editing a live configuration record or rendering a button beside the grid. The grid places and renders the button; the host owns what it does. Generic by design: no entity names, no Xrm, no data access.
+
+```tsx
+<DataGrid
+  configId="…"
+  hostCommands={useMemo(
+    () => [{ id: 'submit-invoice', label: 'Submit invoice', icon: <AddRegular />, onInvoke: openSubmit }],
+    [openSubmit]
+  )}
+/>
+```
+
+| Property | Type | Purpose |
+|---|---|---|
+| `hostCommands` | `ReadonlyArray<DataGridHostCommand>` | Host-supplied command bar items. Absent or empty: the bar is exactly what the configuration and built-ins give (no change for any other grid). |
+| `DataGridHostCommand.id` | `string` | Stable unique id; reported to `onCommandInvoke(commandId, selectedIds, ctx)` and used as the React key. |
+| `DataGridHostCommand.label` | `string` | Visible label, accessible name and tooltip. |
+| `DataGridHostCommand.icon` | `React.ReactElement` (optional) | Icon element, for example a Fluent icon. |
+| `DataGridHostCommand.onInvoke` | `() => void \| Promise<void>` | Runs on activation. A thrown error is logged (`console.error`), not rethrown. |
+| `DataGridHostCommand.disabled` | `boolean` (optional) | Render disabled. |
+
+Rules (the placement and collision behaviour is fixed, not configurable):
+
+- **Placement.** Host commands come FIRST in the effective item list, in the order supplied, ahead of the configured and built-in items. The grid mounts the bar with `inlineLimit={3}`, so the first three items are inline subtle buttons and the rest are in the `⋯` overflow menu; supplying many host commands therefore pushes the built-ins (Refresh, Delete, New …) into the overflow menu.
+- **Collisions.** A host command NEVER replaces a configured or built-in item: a built-in such as `delete-selected` carries its own confirmation and selection gating, which a host must not bypass. A host command whose `id` equals the `id` of a configured item, or of ANY built-in action (`refresh`, `delete-selected`, `create-form`, `export-excel`, `edit-columns`, `edit-filters`, whether or not that built-in is shown), is SKIPPED (not rendered) and a `console.warn` names the id. Choose an id of your own. Among host commands with the same `id`, the first wins.
+- **Appearance.** Subtle buttons only: there is no primary call-to-action in the grid bar (the same rule as every other item).
+- **Observer.** `onCommandInvoke` fires first for a host command, as for every command; no built-in handler runs for it.
+- **Identity.** Pass a referentially stable array (`useMemo`); the item list is rebuilt when its identity changes.
+- Not a substitute for `onCreateNew` (which re-routes the built-in New) or the handler registry (which gives a configured `custom` item its behaviour): use those when the item is authored in the configuration record.
+
+### Host options: row source, row actions, truncate-with-tooltip (added 2026-11-22 by spaarke-SPA-external-access-platform-r4 task 023a)
+
+Three more optional, generic seams (`DataGrid.tsx`; `useHostRowSource.ts`, `RowActionsCell.tsx`, `TruncatedCellText.tsx`). With none of them passed, the grid renders and loads exactly as before; each has a must-not-fire test beside its must-fire test (`__tests__/DataGrid.rowSource|rowActions|truncateTooltip.test.tsx`). Types are exported from the DataGrid index (`DataGridRowSource`, `DataGridRowSourceRequest`, `DataGridRowSourceResult`, `DataGridRowAction`).
+
+| Prop | Type | Behaviour |
+|---|---|---|
+| `rowSource` | `(req: { page, pageSize, signal }) => Promise<{ rows, hasMore, truncated? }>` | The HOST supplies the rows. The grid still loads the configuration + entity metadata (`configId`) for columns, labels and renderers, but runs **no** FetchXML query (`retrieveMultipleRecords` is never called), no filter chips and no parent-context / host-filter / membership overlay. Page 1 loads once the configuration resolves; page N+1 is requested by the existing sentinel while `hasMore` (ADR-051). A rejected page shows the grid's error banner above the rows and stops paging; `truncated: true` shows a warning notice ("This list is incomplete: only N documents could be shown …"; the noun comes from the optional `rowNoun={{ one, other }}` prop, default row / rows; the banner shows `Error.message` as-is, so the host rejects with a user-fit message). A page with zero rows ends paging even if `hasMore` is true. Each row must carry the configuration's primary id attribute, otherwise `onRecordAction` / `onRecordOpen` receive a synthetic `__row_N` id. `signal` is aborted on unmount, `rowSourceKey` change and Refresh. Sorting stays in the grid. The latest callback is read per request, so an inline function does not reload. |
+| `rowSourceKey` | `string` | Change it to reload page 1 (e.g. after the host uploads or deletes). Until page 1 for the current key has answered (rows or an error), the list counts as loading, never as empty, so no empty state mounts before the first read (task 024). |
+| `emptyState` | `React.ReactNode` | What a truly empty list shows below the column headers, in place of `display.emptyStateMessage`: typically the shared `EmptyState` (`size="compact"`) with a hint that names an action only the host knows the caller is offered. Never shown while loading, after a failed load, or when the row source says the list is truncated. Absent = the configuration's message, unchanged. Added 2026-11-22 by task 024 (`__tests__/DataGrid.emptyState.test.tsx`). |
+| `rowActions` | `ReadonlyArray<{ id, label, icon, isVisible?(record) }>` | A final, fixed-width, non-resizable, non-sortable column of subtle icon buttons (tooltip = aria-label = `label`). A click calls `onRecordAction(id, recordId, record, ctx)` (previously accepted but unwired) and does not toggle row selection (nor does Space / Enter on an action or a "More actions" menu item). `isVisible(record) === false` **hides** the action for that row (never disabled). Up to 3 visible actions are inline; past that, 2 stay inline and the rest fold into a "More actions" menu. Absent or empty: no column. |
+| `truncateWithTooltip` / `display.truncateWithTooltip` | `boolean` | Opt-in. Text cells (the primary-name link and every cell not drawn by an `overrides.columnRenderers` entry) ellipsise; a cell whose content overflows shows the full text in a Fluent `Tooltip` on hover, or when the cell receives keyboard focus (focus lands on the gridcell in `composite` mode; a cell that fits never shows one) (`relationship="inaccessible"` — the full text is in the DOM). The prop, when set, wins over the configuration. Default off. |
+
+Why a callback and not a fetch: data fetching stays with the host (ADR-012). The first consumer is the external SPA's record Documents list, whose rows come from an authorised record route rather than the module FetchXML path (`projects/spaarke-SPA-external-access-platform-r4/notes/task-023-design.md`). Note: the configuration's `secondaryActions` list is still not rendered by the grid; `rowActions` is the host-side per-row seam.
+
+**Hiding built-ins (`hiddenBuiltInCommands`, added 2026-11-22, #2908).** A host that replaces a built-in with its own host commands removes the built-in with `hiddenBuiltInCommands`, for example `['create-form']`. This overrides the configuration for that host only, so other hosts that share the configuration record are unaffected. A configured `custom` item is never removed this way, and the hidden ids stay reserved: a host command still cannot take one. Example: the communications grid (`src/solutions/sprk_communicationspage`) hides `create-form`, which opens the OOB `sprk_communication` form. In its place it adds "New Email", which opens the `sprk_emailpage` composer through `openEmailCompose`, "Related to" the host record. On a record form it also adds "New Message", which opens the form's `CommunicationConversationPanel` Messages modal in place through `openConversationPanel`. When no panel answers, the button says so; it never reloads the page. Other hosts that reference the same configuration record keep the built-in "+ New".
 
 ---
 

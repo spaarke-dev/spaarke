@@ -66,7 +66,6 @@ import { ReportCardService } from './reportCardService';
 import { buildEmptyReportCardForm } from './formTypes';
 import type { ICreateReportCardFormState } from './formTypes';
 
-import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 
@@ -90,6 +89,14 @@ import {
   searchMatterTypes,
   searchPracticeAreas,
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
+import {
+  EMAIL_NOT_SENT_NO_SERVER,
+  EMPTY_COMPOSED_EMAIL,
+  isComposedEmailReady,
+  sendComposedEmail,
+} from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing)
@@ -135,6 +142,11 @@ export interface ICreateReportCardWizardProps {
   dataService: IDataService;
   /** Optional INavigationService for opening records after creation. */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** When true, hides the title bar (Dataverse modal provides chrome). */
   embedded?: boolean;
   /** MSAL-backed authenticated fetch function for BFF API calls (follow-on email/todo/assign-work only — no file pipeline). */
@@ -157,25 +169,6 @@ export interface ICreateReportCardWizardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter: build a webApi-shaped object from IDataService for CreateRecordWizard
-// ---------------------------------------------------------------------------
-
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // CreateReportCardWizard
 // ---------------------------------------------------------------------------
 
@@ -184,6 +177,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   onClose,
   dataService,
   navigationService,
+  emailComposeHandlers,
   embedded,
   authenticatedFetch: authFetch,
   bffBaseUrl,
@@ -218,9 +212,8 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   const [todoForm, setTodoForm] = React.useState<ICreateTodoFormState>(EMPTY_TODO_FORM);
 
   // -- Follow-on state: Send Email --------------------------------------------
-  const [emailTo, setEmailTo] = React.useState('');
-  const [emailSubject, setEmailSubject] = React.useState('');
-  const [emailBody, setEmailBody] = React.useState('');
+  // Task 182 (D-219): the whole composed email — From, To/Cc/Bcc, subject, body, attachments.
+  const [email, setEmail] = React.useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
 
   // Reset all state on open
   React.useEffect(() => {
@@ -242,9 +235,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       setAssignedOutsideCounselId('');
       setAssignedOutsideCounselName('');
       setTodoForm(EMPTY_TODO_FORM);
-      setEmailTo('');
-      setEmailSubject('');
-      setEmailBody('');
+      setEmail(EMPTY_COMPOSED_EMAIL);
     }
   }, [open]);
 
@@ -279,12 +270,8 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   assignedOutsideCounselNameRef.current = assignedOutsideCounselName;
   const todoFormRef = React.useRef(todoForm);
   todoFormRef.current = todoForm;
-  const emailToRef = React.useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = React.useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = React.useRef(emailBody);
-  emailBodyRef.current = emailBody;
+  const emailRef = React.useRef(email);
+  emailRef.current = email;
 
   // -- Search callbacks --------------------------------------------------
   const handleSearchContacts = React.useCallback(
@@ -331,7 +318,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   }, []);
 
   // -- WebApi adapter for CreateRecordWizard ---------------------------------
-  const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // -- Custom Next Steps card set: Send Email / Add To Do / Assign Work ------
   // (design.md §5.9, task 040 — mirrors CreateInvoiceWizard's task 030 set.)
@@ -343,20 +330,13 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         stepLabel: 'Send Email',
         icon: <MailRegular fontSize={28} />,
         description: 'Compose and queue an introductory email about this report card.',
-        canAdvance: () =>
-          emailToRef.current.trim() !== '' &&
-          emailSubjectRef.current.trim() !== '' &&
-          emailBodyRef.current.trim() !== '',
+        canAdvance: () => isComposedEmailReady(emailRef.current),
         renderStep: () => (
           <SendEmailFollowOnStep
-            emailTo={emailToRef.current}
-            onEmailToChange={setEmailTo}
-            emailSubject={emailSubjectRef.current}
-            onEmailSubjectChange={setEmailSubject}
-            emailBody={emailBodyRef.current}
-            onEmailBodyChange={setEmailBody}
-            onSearchUsers={handleSearchUsers}
-            infoNote="This email will be saved as a draft activity on the record. You can review and send it from there."
+            value={emailRef.current}
+            onChange={setEmail}
+            composeHandlers={emailComposeHandlers}
+            onSearchRecipients={handleSearchUsers}
           />
         ),
       },
@@ -369,6 +349,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         renderStep: () => (
           <AddTodoFollowOnStep
             dataService={dataService}
+            navigationService={navigationService}
             formValues={todoFormRef.current}
             onFormValuesChange={setTodoForm}
             onSearchAssignees={handleSearchContacts}
@@ -423,6 +404,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
               outsideCounselValue={ocVal}
               onOutsideCounselChange={handleOutsideCounselChange}
               onSearchOutsideCounsel={handleSearchOrganizations}
+              navigationService={navigationService}
             />
           );
         },
@@ -430,6 +412,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
     ],
     [
       dataService,
+      emailComposeHandlers,
       handleSearchContacts,
       handleSearchOrganizations,
       handleSearchUsers,
@@ -440,6 +423,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       handleAttorneyChange,
       handleParalegalChange,
       handleOutsideCounselChange,
+      navigationService,
     ]
   );
 
@@ -462,6 +446,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         renderContent: () => (
           <CreateReportCardStep
             dataService={dataService}
+            navigationService={navigationService}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             initialFormValues={formValues}
@@ -565,15 +550,22 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         }
 
         // -- Follow-on: Send Email --
-        if (context.selectedActions.includes('send-email') && emailToRef.current.trim() && authFetch && bffBaseUrl) {
-          const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
-          const emailResult = await emailService.sendEmail({
-            to: emailToRef.current,
-            subject: emailSubjectRef.current,
-            body: emailBodyRef.current,
+        if (
+          context.selectedActions.includes('send-email') &&
+          emailRef.current.to.length > 0 &&
+          authFetch &&
+          bffBaseUrl
+        ) {
+          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the report card.
+          const emailResult = await sendComposedEmail(emailRef.current, {
             associations: [{ entityType: 'sprk_reportcard', entityId: reportCardId, entityName: reportCardName }],
+            authenticatedFetch: authFetch,
+            bffBaseUrl,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         const hasWarnings = warnings.length > 0;
@@ -621,7 +613,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       authFetch,
       bffBaseUrl,
       navigationService,
-      webApiAdapter,
+      emailComposeHandlers,
       initialAssociation,
       lockAssociation,
       followOnCards,

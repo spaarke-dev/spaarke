@@ -140,6 +140,10 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
         onThreadRenamed={props.onThreadRenamed}
         regarding={{ entityType, id }}
         onOpenRecord={onOpenRecord}
+        // fm task 056b: a record's "Private · you and …" entry reads its pair thread narrowed to this record; the
+        // link switches the shell to the whole conversation. Both are undefined for the record's own threads.
+        about={props.about}
+        onOpenFullConversation={props.onOpenFullConversation}
         // An email is a sprk_communication row (TimelineMessage.id IS the
         // sprk_communication GUID) — open it via the SAME record-modal path as
         // the regarding record (§B UAT 2026-07-27 item 3).

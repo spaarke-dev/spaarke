@@ -14,6 +14,7 @@ import * as React from 'react';
 import type { ApiFailure } from '../../services/invoiceReviewApi';
 import type { ApprovalState, InvoiceDecisionApi } from '../../services/decisionApi';
 import { approvalNeedsRead } from '../../services/decisionModel';
+import { createDecisionLocks, type DecisionLocks } from './decisionLocks';
 
 export interface ApprovalContextValue {
   state: ApprovalState | null;
@@ -27,6 +28,8 @@ export interface ApprovalContextValue {
   refresh: () => Promise<ApprovalState | null>;
   api: InvoiceDecisionApi;
   invoiceId: string;
+  /** Task 095f-2ui: the requests locked until they finish (a decision saved in part, or with no answer); kept here so closing a form does not lose them. */
+  locks: DecisionLocks;
 }
 
 const Ctx = React.createContext<ApprovalContextValue | null>(null);
@@ -53,6 +56,7 @@ export function ApprovalProvider({ api, invoiceId, children }: ApprovalProviderP
   const inflight = React.useRef<Promise<ApprovalState | null> | null>(null);
   const dirty = React.useRef(false);
   const seen = React.useRef<string | null>(null);
+  const locks = React.useRef<DecisionLocks>(createDecisionLocks());
 
   React.useEffect(() => {
     alive.current = true;
@@ -104,7 +108,7 @@ export function ApprovalProvider({ api, invoiceId, children }: ApprovalProviderP
   );
 
   const value = React.useMemo<ApprovalContextValue>(
-    () => ({ state, failure, loading, sync, refresh, api, invoiceId }),
+    () => ({ state, failure, loading, sync, refresh, api, invoiceId, locks: locks.current }),
     [state, failure, loading, sync, refresh, api, invoiceId]
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

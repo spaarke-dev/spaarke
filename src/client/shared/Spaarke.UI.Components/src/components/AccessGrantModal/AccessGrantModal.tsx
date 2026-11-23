@@ -63,7 +63,7 @@
  *     041's baseline.
  * Each non-standard state shows ONE explanatory MessageBar ("Restricted
  * Access", "Secure – Restricted", "Secure", "Limited Access" — owner O1 FINAL,
- * 2026-10-01). There is NO standing-grant control in this modal (the standing
+ * 2026-10-01), behind the header's notes bell since task 196. There is NO standing-grant control in this modal (the standing
  * grant is set on the Contact record itself, task 073 UAT v1.0.24 #5), so
  * there is nothing standing-related to hide; Current Access rows the state
  * cancels (standing and organization rows on Limited/Secure, every
@@ -225,6 +225,7 @@ import {
   describeEffectiveAccess,
 } from './followsParent';
 import { cleanGuid } from '../../utils/guid';
+import { closestDialogOrSelf, useFocusReturn } from '../../utils/focusReturn';
 import {
   buildNoAccessPath,
   buildVetoIndex,
@@ -241,6 +242,8 @@ import {
   vetoFor,
 } from './noAccess';
 import type { IEffectiveRecordAccess, IKnownDirectParent, NoAccessSectionState } from './noAccess';
+import { buildUserSharesPath, mapUserShares } from './userShares';
+import { AccessNotesBell, type IAccessNote } from './AccessNotesBell';
 
 const useStyles = makeStyles({
   section: {
@@ -379,16 +382,6 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-  },
-  // Secure-record owner/BU read-only row (task 065, design.md §6).
-  secureOwnerRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalM,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    marginBottom: tokens.spacingVerticalM,
   },
   // Task 067: the reason a Current Access row is walled off (No Access list) — the danger status colour.
   vetoReason: {
@@ -1945,51 +1938,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * attempt a write — a stricter, earlier surfacing of the same designed
    * state the write paths hit, never a silent failure. */
   const fetchUserShares = React.useCallback(async (): Promise<IAccessGrantRecord[]> => {
-    const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
-    const data = await getJson<{
-      // Untrusted server JSON: a response without `shares` reads as an empty list (see the `?? []` below).
-      shares?: Array<{
-        systemUserId: string;
-        fullName?: string | null;
-        accessLevel?: number | null;
-        modifiedOn?: string;
-        externalNoAccess?: boolean;
-        // Task 175: the secure parent that passed this share on (task 158's provenance); absent/null = a direct share.
-        inheritedFrom?: { recordType?: unknown; recordId?: unknown } | null;
-        // Task 193 G2: the workforce-app grant paired with this share (`kind: 'grant'`, its accessRecordId).
-        pairedWith?: { id?: unknown; kind?: unknown } | null;
-      }>;
-    }>(`/api/v1/external-access/user-shares?${query}`);
-    return (data.shares ?? []).map(s => {
-      const from = s.inheritedFrom;
-      // Any inheritedFrom object makes the row read-only (inherited), even one whose fields are off-contract: a share
-      // the parent owns is never offered for revoke here.
-      const inheritedFrom =
-        from && typeof from === 'object'
-          ? {
-              recordType: typeof from.recordType === 'string' ? from.recordType : '',
-              recordId: typeof from.recordId === 'string' ? from.recordId : '',
-            }
-          : undefined;
-      const row: IAccessGrantRecord = {
-        contactId: s.systemUserId,
-        fullName: s.fullName ?? '(unknown user)',
-        // Unmapped mask (a share holding rights outside the three levels) reads
-        // as `null` server-side; 0 is a safe sentinel — it matches none of the
-        // fixed ExternalAccessLevel option values, so the row falls through to
-        // the "Custom" display below rather than rendering a raw `null`.
-        accessLevel: s.accessLevel ?? 0,
-        grantedDate: s.modifiedOn,
-        provenance: inheritedFrom ? 'inherited' : 'share',
-        // Task 114: Restricted record + user flagged external — shown as "External user — no access" until removed.
-        externalNoAccess: s.externalNoAccess === true,
-      };
-      if (inheritedFrom) row.inheritedFrom = inheritedFrom;
-      if (s.pairedWith?.kind === 'grant' && typeof s.pairedWith.id === 'string' && s.pairedWith.id) {
-        row.pairedWith = { id: s.pairedWith.id, kind: 'grant' };
-      }
-      return row;
-    });
+    // Task 196: the read and its mapping live in `userShares.ts`, shared with the "Email members" recipients.
+    return mapUserShares(await getJson<Parameters<typeof mapUserShares>[0]>(buildUserSharesPath(recordType, recordId)));
   }, [getJson, recordType, recordId]);
 
   /** Reads the record's Assigned-To ledger (task 142) — a direct, entity-agnostic BFF call like `/user-shares`, behind
@@ -2758,6 +2708,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // "Add Access Permissions" list and auto-selected. Works because the modal is
   // `nonBlocking` (no backdrop covering the page-level lookup pane).
 
+  // Focus return (task 200): the pane leaves focus on <body> or on the link behind the modal, and both "+" triggers are
+  // disabled while it is open, so once the lookup settles focus goes back to the button that opened it.
+  const addPersonRef = React.useRef<HTMLButtonElement>(null);
+  const addOrganizationRef = React.useRef<HTMLButtonElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => addPersonRef.current ?? addOrganizationRef.current,
+    getRegion: () => closestDialogOrSelf(addPersonRef.current ?? addOrganizationRef.current),
+  });
+
   /** Task 193 (#2338): the ONE "Add person" lookup over contacts and system users. A picked contact is staged as a
    * contact (Add sends it to `/grant`, where the server decides between a share and a grant); a picked user as a user
    * (Add sends it to `/share-user`). On a Restricted record the lookup offers users only, and none flagged external
@@ -2779,8 +2738,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       }
     } finally {
       setPicking(false);
+      returnFocus(() => addPersonRef.current);
     }
-  }, [pickPerson, contactGrantsOffered, isRestricted]);
+  }, [pickPerson, contactGrantsOffered, isRestricted, returnFocus]);
 
   const openOrgPicker = React.useCallback(async () => {
     if (!pickOrganization) return;
@@ -2792,8 +2752,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSelectedCandidateIds(prev => new Set(prev).add(picked.id));
     } finally {
       setPicking(false);
+      returnFocus(() => addOrganizationRef.current);
     }
-  }, [pickOrganization]);
+  }, [pickOrganization, returnFocus]);
 
   /** Task 142 (owner A3 = prompt): "Grant" on a suggestion writes through the NORMAL path — `/share-user` for a contact
    * that represents an internal user, `/grant` otherwise — at Collaborate (owner rule 5), and the server marks the entry
@@ -3271,6 +3232,54 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         })
       : [];
 
+  // Task 196 (owner 2026-11-12): the INFORMATIONAL messages sit behind the header bell, not stacked above the body. Shown
+  // once the access data has loaded, as the banners were. Errors, the deny state and anything at the point of action
+  // stay inline below (classification: projects/unified-access-control-r2/notes/task-196-*.md).
+  const accessNotes: IAccessNote[] = [];
+  if (canGrantAccess && !loading) {
+    // Access-Permission note (task 073 UAT #4; task 138 + owner O1 FINAL) — ONE per non-standard state: Restricted /
+    // Secure – Restricted / Secure / Limited. It explains what the hidden options would have done.
+    if (permissionBanner) {
+      accessNotes.push({
+        id: 'access-permission',
+        intent: permissionBanner.intent,
+        title: permissionBanner.title,
+        content: permissionBanner.text,
+      });
+    }
+    // Task 175 (owner round 87, coordinator O-4): the parent's floor. Display only: nothing is hidden or disabled by it.
+    if (parents.length > 0) {
+      accessNotes.push({
+        id: 'parent-floor',
+        intent: 'info',
+        title: 'Minimum access from the parent',
+        content: (
+          <>
+            Minimum access comes from the parent {renderParentReference(parents[0])}
+            {otherParentsSuffix(parents.length)}: this record can be made stricter but not looser.
+            {effectiveAccessLines.map(line => (
+              <div key={line}>{line}</div>
+            ))}
+          </>
+        ),
+      });
+    }
+    // Secure-record owner/BU read-only display (task 065, design.md §6).
+    if (secureOwnerInfo) {
+      accessNotes.push({
+        id: 'secure-owner',
+        intent: 'info',
+        title: 'Secure record',
+        content: (
+          <>
+            Owner: <strong>{secureOwnerInfo.ownerName}</strong> · Business Unit:{' '}
+            <strong>{secureOwnerInfo.businessUnitName}</strong>
+          </>
+        ),
+      });
+    }
+  }
+
   // Task 067: the walls in force on this record, keyed by subject — what marks a Current Access row walled off.
   const vetoIndex = React.useMemo(
     () => buildVetoIndex(noAccessState.kind === 'list' ? noAccessState.entries : []),
@@ -3306,6 +3315,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // feedback 2026-10-07: hiding it read as the modal closing). It stays
         // mounted — staged picks survive.
         yieldToSidePane={picking}
+        // Task 196: the informational notes, behind a bell beside maximize and close.
+        headerActions={canGrantAccess ? <AccessNotesBell notes={accessNotes} loading={loading} /> : undefined}
         footerStart={
           <Button appearance="secondary" onClick={handleCancelAttempt}>
             Cancel
@@ -3365,32 +3376,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               </div>
             ) : (
               <>
-                {/* Access-Permission banner (task 073 UAT #4; task 138 + owner O1 FINAL) — ONE
-                    bar per non-standard state: Restricted / Secure – Restricted / Secure /
-                    Limited. It explains what the hidden options below would have done. */}
-                {permissionBanner && (
-                  <MessageBar intent={permissionBanner.intent} style={{ marginBottom: tokens.spacingVerticalM }}>
-                    <MessageBarBody>
-                      <MessageBarTitle>{permissionBanner.title}</MessageBarTitle>
-                      {permissionBanner.text}
-                    </MessageBarBody>
-                  </MessageBar>
-                )}
-
-                {/* Task 175 (owner round 87, coordinator O-4): the parent's floor, shown WITH the Access Permission
-                    bar above. Display only: nothing below is hidden or disabled by it. */}
-                {parents.length > 0 && (
-                  <MessageBar intent="info" style={{ marginBottom: tokens.spacingVerticalM }}>
-                    <MessageBarBody>
-                      <MessageBarTitle>Minimum access from the parent</MessageBarTitle>
-                      Minimum access comes from the parent {renderParentReference(parents[0])}
-                      {otherParentsSuffix(parents.length)}: this record can be made stricter but not looser.
-                      {effectiveAccessLines.map(line => (
-                        <div key={line}>{line}</div>
-                      ))}
-                    </MessageBarBody>
-                  </MessageBar>
-                )}
+                {/* Task 196: the Access Permission note, the parent's minimum access and the secure owner are behind
+                    the header bell (accessNotes above). */}
 
                 {/* Delegation/auth deny banner (task 008 FR-07 / task 065) — a
                     DESIGNED state per the project constraint, never a toast or
@@ -3403,16 +3390,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       {accessDenyState.message}
                     </MessageBarBody>
                   </MessageBar>
-                )}
-
-                {/* Secure-record owner/BU read-only display (task 065, design.md §6). */}
-                {secureOwnerInfo && (
-                  <div className={styles.secureOwnerRow}>
-                    <Text>
-                      Secure record — Owner: <strong>{secureOwnerInfo.ownerName}</strong> · Business Unit:{' '}
-                      <strong>{secureOwnerInfo.businessUnitName}</strong>
-                    </Text>
-                  </div>
                 )}
 
                 {/* Suggested Access (task 142, owner A3 = prompt): on a SECURE record an "Assigned *" person is
@@ -3515,6 +3492,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       {pickPerson && (
                         <Tooltip content="Add person" relationship="label">
                           <Button
+                            ref={addPersonRef}
                             appearance="secondary"
                             size="small"
                             icon={<PersonRegular />}
@@ -3529,6 +3507,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       {pickOrganization && organizationGrantsOffered && (
                         <Tooltip content="Add organization" relationship="label">
                           <Button
+                            ref={addOrganizationRef}
                             appearance="secondary"
                             size="small"
                             icon={<BuildingRegular />}

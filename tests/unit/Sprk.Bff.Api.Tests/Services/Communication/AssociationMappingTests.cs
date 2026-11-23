@@ -543,11 +543,13 @@ public class AssociationMappingTests
     {
         // Arrange
         var service = CreateService();
+        // Task 045f: the URL written names the associated record itself, in canonical form, whatever URL was sent.
         var url = "https://crm.example.com/main.aspx?id=abc";
+        var matter = Guid.NewGuid();
         var request = CreateRequestWithAssociations(new CommunicationAssociation
         {
             EntityType = "sprk_matter",
-            EntityId = Guid.NewGuid(),
+            EntityId = matter,
             EntityName = "Test Matter",
             EntityUrl = url
         });
@@ -557,7 +559,8 @@ public class AssociationMappingTests
 
         // Assert
         _capturedEntity.Should().NotBeNull();
-        _capturedEntity!["sprk_regardingrecordurl"].Should().Be(url);
+        _capturedEntity!["sprk_regardingrecordurl"].Should().Be(
+            Spaarke.Dataverse.RegardingRecordType.BuildRecordUrl("sprk_matter", matter.ToString("D")));
     }
 
     [Fact]
@@ -688,7 +691,8 @@ public class AssociationMappingTests
         _capturedEntity!["sprk_associationcount"].Should().Be(1);
         _capturedEntity["sprk_regardingrecordname"].Should().Be("Unknown Thing");
         _capturedEntity["sprk_regardingrecordid"].Should().Be(unknownId.ToString());
-        _capturedEntity["sprk_regardingrecordurl"].Should().Be("https://crm.example.com/unknown");
+        // Task 045f: a table the map does not know names no record this row can be filed under, so no url is written.
+        _capturedEntity.Attributes.ContainsKey("sprk_regardingrecordurl").Should().BeFalse();
 
         // But no regarding lookup field should be set (none of the known ones)
         _capturedEntity.Attributes.ContainsKey("sprk_regardingmatter").Should().BeFalse();

@@ -17,6 +17,8 @@ vi.mock('../src/auth/bff-client', async () => {
   return { ...actual, bffApiCall, bffApiBlob: vi.fn() };
 });
 
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
+
 import { DocumentLibrary } from '../src/components/DocumentLibrary';
 
 const PROJECT = 'p-042';

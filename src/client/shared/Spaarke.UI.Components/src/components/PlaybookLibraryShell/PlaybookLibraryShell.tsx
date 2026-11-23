@@ -42,6 +42,7 @@ import type {
 import type { IDataService } from '../../types/serviceInterfaces';
 import { IntentWizardFlow, INTENT_PLAYBOOK_MAP } from './IntentWizardFlow';
 import { DocumentSelector } from './DocumentSelector';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -242,16 +243,7 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
 
   // --- Build a webApi-compatible adapter from IDataService (for playbookService reads) ---
   const webApiAdapter = React.useMemo(
-    () => ({
-      retrieveMultipleRecords: (entityName: string, options?: string) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
-        return { id };
-      },
-    }),
+    () => createWebApiFromDataService(dataService),
     [dataService]
   );
 

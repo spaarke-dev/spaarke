@@ -4,7 +4,7 @@
     <title>Invoice integrity (EB-D-200): hold, approval, AP export and spend decide only from server-written sources</title>
     <phase>4 Review</phase>
     <gate>165a: merged (2fac72b8a5). 165b: 164a and 165a merged into work.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Approval, hold and payment inputs; access-adjacent (uac-r2 classes a/b/c); edits approval and AP export.</rigor-reason>
     <model-tier>opus</model-tier>

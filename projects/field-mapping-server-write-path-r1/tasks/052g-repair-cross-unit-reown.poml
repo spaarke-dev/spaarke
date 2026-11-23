@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052g" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair pass: cross-unit re-own and the isolated-row guard (replaces `owner_moves_business_unit`; FR-25 amended 2026-11-18)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>052e approved (owner 2026-11-18) and 052f merged to the work branch. Nothing here enables the pass on any environment (`RecordRepair:Pass:GoLive` stays unset).</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the single Repair owner write site in Sprk.Bff.Api, run as the system principal: a mistake moves a row, and the rows filed under it, to another business unit or into or out of isolation. Security fails closed.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-tagged ownership change across business units; must hold UAC-r2's isolation rule exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the same Repair owner path as 052f; runs after it (owner Q6).</parallel-reason>
+    <deps>052e, 052f</deps>
+    <tags>bff-api, jobs, security, ownership, testing</tags>
+    <estimated-effort>1 session (plus UAC-r2 review of the guard diff)</estimated-effort>
+  </metadata>
+
+  <prompt>Implement design §3.3 and §3.4 of `notes/task-052e-design.md`. Retire the cross-unit skip (`record_repair.owner_moves_business_unit`, task 016's fail-closed default): when the create owner decision answers a team in another ordinary business unit, Repair writes it (If-Match, eviction, read-back) and counts `ownerMovedBusinessUnit`. Before that decision, add the guard UAC-r2 set: Repair leaves isolated rows to the secure pass (`record_repair.owner_left_to_secure_pass`). Repair makes no call into UAC-r2's family movers; a re-owned root's family follows through their ordinary-moves pass because its `modifiedon` changed.</prompt>
+  <role>SPAARKE platform developer: .NET 10 BFF, the BFF write path (ADR-002), Repair mode, Dataverse ownership and business units, UAC-r2's isolation model (read-only for us). Security fails closed.</role>
+  <goal>A person-owned row whose standard owner is a team in another ordinary unit is re-owned there and counted; a row in or answering into the isolated unit, or owned by or answering a restricted-content owner team, is never written by Repair; every fault in that decision leaves the row unwritten and counted.</goal>
+
+  <context>
+    <background>
+- Design (binding): `notes/task-052e-design.md` §3.3 (guard shape set by UAC-r2, cross-unit write, roots, non-root parents, no hand-off), §3.4 (two writers, 412 handling), §3.5, §3.6, §4 "052g", §5 (owner decisions; UAC-r2 U1–U4).
+- Code today: `RecordCreationService.cs` `RepairOwnerAsync` (~:1572-1722), `OwnerDecided` (~:1513-1533), the cross-unit skip (~:1707-1716), the single owner write `patch[ownerid]` (~:1718), the F1-b mapping block (`mappingBlocked`, ~:1679-1683). Re-grep: line numbers drift.
+- The guard uses the shared isolation read: `RefileIsolationRead.BeforeWriteAsync` with `SecureChildReconciler.IsSecureTeamOwnedAsync` for the current owner, and the answer team's owning unit tested against the configured `SecureRecord:BusinessUnitName`. No hard-coded team id. Read UAC-r2's code; do not edit it.
+- Files of documents filed directly under a non-root row moved across units: UAC-r2's, tracked in their issue (U1). Not in scope.
+- Public repo: code comments, tests, commits and notes state rules only ("Repair leaves isolated rows to the secure pass").
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (`RepairOwnerAsync`: guard, cross-unit write, 412 re-read)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairPassJob.cs and the Repair report/result (new counts and codes)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Access/ (RefileIsolationRead, SecureChildReconciler — read only), src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/RecordRepairCrossUnitTests.cs (or the matching KEEP path)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="UAC-r2 2026-11-18 (binding)">The guard sits at the single Repair owner write site, before the cross-unit decision, uses only the shared isolation read and the configured unit name, keeps the F1-b mapping block, and fails closed. UAC-r2 reviews the diff before merge; list their access-path files at the top of the diff sent to them.</constraint>
+    <constraint source="scope">Do not edit SecureRootInheritance.cs, DirectThreadAccessService.cs, DirectMessageParticipantShares.cs, SecureChildShareReconciliationJob.cs, SecureChildReconciler.cs, OwnedChildWrite.cs, or anything under `.claude/`. No call from Repair into `ReconcileOrdinaryParentMoveAsync` or any other UAC-r2 mover (design §3.3 step 4).</constraint>
+    <constraint source="forward-only / D-204">A pre-go-live row is never written; a secure root is never re-owned; `sprk_signal`, `sprk_decisionrecord`, `sprk_budgetrevision` are never written.</constraint>
+    <constraint source="ADR-036 / ADR-052 / §11">Inside the existing job; no new job, route, store, package or role.</constraint>
+    <constraint source="ADR-038 / §10 / NFR-01">Tests at KEEP paths; each must-fire shown to fail with its rule removed. Two adversarial passes (security tag). Never run Sprk.Bff.Api.Tests unfiltered (use `scripts/verify-suites.sh`). Placement Justification and §11 answers in the notes; publish delta and CVE check are the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch `task/fm-052g` from the work branch tip (with 052f merged); check this POML exists; FULL rigor; read the design sections above and the code; record file:line facts.</step>
+    <step order="1">Isolated-row guard with its must-fire and must-not-fire tests.</step>
+    <step order="2">Cross-unit write replacing the skip; `ownerMovedBusinessUnit` count; log line with table, id and both unit ids (and the family root id when the stamp names one).</step>
+    <step order="3">412 on the If-Match owner write: one re-read, no retry loop.</step>
+    <step order="4">Tests (ACs), build 0 warnings, ArchTests, filtered suites, `dotnet format whitespace --verify-no-changes`; `notes/task-052g-notes.md`. Commit on `task/fm-052g`; do not push. The main session sends the guard diff to UAC-r2.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: a person-owned event filed under a matter in another ordinary unit is re-owned to that unit's team, with `ownerMovedBusinessUnit` counted and both units logged.</criterion>
+    <criterion testable="true">AC2: a person-owned root re-owned across units has its `modifiedon` changed, and Repair makes no other call.</criterion>
+    <criterion testable="true">AC3 (negative, must fire): Repair never writes when the answer is the Secure team, another team in the Secure Record unit, or a restricted-content owner team; each is `owner_left_to_secure_pass`, counted. Covered for a document, an event and a to-do under a secure matter.</criterion>
+    <criterion testable="true">AC4 (negative, must fire): Repair never writes when the current owner is in the Secure Record unit or is a restricted-content owner team.</criterion>
+    <criterion testable="true">AC4a (negative, must fire): a faulted isolation read, or an unreadable owning unit, counts as isolated: skipped and counted, never written.</criterion>
+    <criterion testable="true">AC4b: the guard uses `RefileIsolationRead.BeforeWriteAsync` / `SecureChildReconciler.IsSecureTeamOwnedAsync` and the configured `SecureRecord:BusinessUnitName`, with no hard-coded team id, and keeps the row's F1-b mapping block. Must-not-fire twin: an ordinary cross-unit move is written.</criterion>
+    <criterion testable="true">AC4d (negative, owner Q2 2026-11-18): an event with a note whose answer is isolated (Secure team or a restricted-content owner team), or whose isolation read faults, is skipped whole: the event and its note are untouched (`owner_left_to_secure_pass`, counted). A note never moves to an isolated owner. Must-fire twin: 052f AC3 (an ordinary event's note moves with it). UAC-r2 reviews the note-move path with the guard diff.</criterion>
+    <criterion testable="true">AC4c: a 412 on the owner write leads to one re-read, with no retry loop.</criterion>
+    <criterion testable="true">AC5 (negative): a secure root is never re-owned.</criterion>
+    <criterion testable="true">AC6 (negative): a pre-go-live row is never written.</criterion>
+    <criterion testable="true">AC7: `owner_moves_business_unit` no longer appears as a skip.</criterion>
+    <criterion testable="true">AC8: a must-fire test for each rule; the AC3 test fails with the guard removed; build 0 warnings; ArchTests and affected suites green; owner-write census unchanged.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Any need to edit a UAC-r2 file, change a role or field security, or call a UAC-r2 mover: STOP and message UAC-r2.</trigger>
+    <trigger>If the shared isolation read cannot answer for a case the guard must cover, STOP: do not write a local substitute.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`RepairOwnerAsync` already decides and writes one row's owner and skips cross-unit answers; UAC-r2's shared isolation read already answers "is this isolated".</existing>
+    <extension>Replaces the skip in the existing method and adds one guard there using the existing isolation read. No new service, route or registration.</extension>
+    <cost-of-doing-nothing>Every natively created row whose family sits in another business unit keeps its creator's owner forever, so the owner's binding FR-25 outcome (every family member on the family's owner, 2026-11-02) cannot be met; removing the skip without the guard would let Repair write into or out of isolation.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>Created 2026-11-18 from design §4 after the owner approved 052e. Security tag: two adversarial passes; UAC-r2 reviews the guard diff. Completed 2026-11-19: merged to the work branch at 8f8905209a (task/fm-052g 4e0c8d256d, 59d9c1d18e, bc29b3c0b4) and b5d32ba139 (review round 1, task/fm-052g-r2 5707daf258, cd8193cf21, 17b80a694c). Two adversarial passes (Opus, Fable): no fail-open path. Fixed in round 1: a read-back after an owner write (design §3.3.2), the family root follows the row as it ends, the guard builds its shared read inside the fail-closed path, an abandoned row logs its reason, the team read columns are pinned. Scoped Sonnet re-check of the fix diff: no F-class finding. UAC-r2 PASS on 0b668f03a4..b5d32ba139 (Q1–Q6 answered; conditions recorded as design §6 items 8a and 8b and K14; build-later line on issue 2362). Merged-tree gates: sln 0 warnings; ArchTests 2714/2714, built fresh; filtered suites 9610 passed, 0 failed, 7 skipped; publish delta +13,296 bytes vs master 4d4834dc51 (40.6 MB); no vulnerable packages. Details and K1–K14: `notes/task-052g-notes.md`. No live write, no setting; `RecordRepair:Pass:GoLive` stays unset.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

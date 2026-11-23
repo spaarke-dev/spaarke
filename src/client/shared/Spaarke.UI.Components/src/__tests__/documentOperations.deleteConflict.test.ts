@@ -1,5 +1,5 @@
 /**
- * Task 188 slice D (unified-access-control-r2, owner round 111 item 3) — `sprk_DocumentOperations.js` 1.28.2: the
+ * Task 188 slice D (unified-access-control-r2, owner round 111 item 3) — `sprk_DocumentOperations.js` (since 1.28.2): the
  * model-driven app's Delete command no longer reads every 409 as "checked out".
  *
  * The BFF now refuses to delete a document that other documents name as their parent (an .eml and its attachments)
@@ -11,6 +11,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { declaredScriptVersion } from './helpers/scriptVersion';
 
 const CLIENT_ROOT = path.resolve(__dirname, '../../../..');
 const SCRIPT = path.join(CLIENT_ROOT, 'webresources/js/sprk_DocumentOperations.js');
@@ -30,7 +31,7 @@ function load() {
   const script = document.createElement('script');
   script.textContent = fs.readFileSync(SCRIPT, 'utf8');
   document.head.appendChild(script);
-  expect(win.Spaarke.Document.Config.version).toBe('1.28.2'); // the real script ran
+  expect(win.Spaarke.Document.Config.version).toBe(declaredScriptVersion(SCRIPT)); // the real script ran
   return win.Spaarke.Document;
 }
 
@@ -88,7 +89,7 @@ afterEach(() => {
   delete win.fetch;
 });
 
-describe('sprk_DocumentOperations.js 1.28.2 — Delete 409 message', () => {
+describe('sprk_DocumentOperations.js — Delete 409 message', () => {
   it('a parent with attached documents says how many to delete first, never "checked out"', async () => {
     const x = await deleteAnswered(409, {
       title: 'Document has child documents',

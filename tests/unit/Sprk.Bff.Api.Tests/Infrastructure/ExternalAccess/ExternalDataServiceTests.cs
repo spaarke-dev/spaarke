@@ -321,7 +321,7 @@ public class ExternalDataServiceTests
                 ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Project)!, RootId, "Project", null,
                 TeamId, null),
             CreatePath.Event => ExternalDataService.BuildEventCreatePayload(
-                RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>("{\"sprk_name\":\"Created\"}", web)!, TeamId),
+                ExternalDataService.TodoRootKind.Project, RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>("{\"sprk_name\":\"Created\"}", web)!, TeamId),
             CreatePath.Document => ExternalDataService.BuildDocumentCreatePayload(
                 ExternalDataService.DocumentParentKind.Project, RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId),
             _ => throw new ArgumentOutOfRangeException(nameof(path)),
@@ -398,7 +398,7 @@ public class ExternalDataServiceTests
                 JsonSerializer.Deserialize<CreateExternalTodoRequest>(requestJson, web)!, TeamId,
                 creator.ContactId == Guid.Empty ? null : creator.ContactId, creator),
             CreatePath.Event => service.CreateEventAsync(
-                RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>(requestJson, web)!, TeamId, creator),
+                ExternalDataService.TodoRootKind.Project, RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>(requestJson, web)!, TeamId, creator),
             // The upload route's body is the file only; the pointers are built server-side from the SPE upload.
             CreatePath.Document => service.CreateDocumentAsync(
                 ExternalDataService.DocumentParentKind.Project, RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId, creator),
@@ -656,6 +656,7 @@ public class ExternalDataServiceTests
     [InlineData("sprk_project", "sprk_projects", "sprk_projectid", "sprk_projectname")]
     [InlineData("sprk_matter", "sprk_matters", "sprk_matterid", "sprk_mattername")]
     [InlineData("sprk_workassignment", "sprk_workassignments", "sprk_workassignmentid", "sprk_name")]
+    [InlineData("sprk_invoice", "sprk_invoices", "sprk_invoiceid", "sprk_name")]
     public async Task GetRecordNames_ReadsTheRightEntitySet_WithItsIdAndNameColumns(
         string entity, string entitySet, string idColumn, string nameColumn)
     {
@@ -720,7 +721,7 @@ public class ExternalDataServiceTests
     {
         var (service, handler) = NewService();
 
-        var unknown = await service.GetRecordNamesAsync("sprk_invoice", new[] { Guid.NewGuid() });
+        var unknown = await service.GetRecordNamesAsync("sprk_budget", new[] { Guid.NewGuid() });
         unknown.Names.Should().BeEmpty();
         unknown.Complete.Should().BeFalse("an entity the feed cannot title is not 'gone'");
 

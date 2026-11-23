@@ -4,7 +4,7 @@
     <title>T191g: Office edit for a flagged user is an item-level permission on the one file, never a container role (#2201, Q2 = b)</title>
     <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
     <gate>blocked: 191b merged, and the owner's go for the live test</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Grants SharePoint Embedded permissions to external users; today's path exposes a whole secure container (#2201).</rigor-reason>
     <model-tier>opus</model-tier>

@@ -26,11 +26,17 @@ public class FirmFindingsProjectionCallerBoundaryGuardTests
 {
     private static readonly Type Projection = typeof(FirmFindingsProjection);
 
-    /// <summary>The closed list: the route handlers behind the filter, and the registration.</summary>
+    /// <summary>The closed list: the route handlers behind the filter, the registration, and the firm notice composer (task 131).</summary>
     private static readonly string[] AllowedReferrers =
     [
         typeof(FirmOutcomeEndpoints).FullName!,
+        // Task 132: the external notification feed's eBilling source. It reads the projection only for an invoice that the outcome route's own
+        // invoice rule (FirmOutcomeAuthorizationFilter.DecideInvoiceForFeedAsync) returned Visible, per invoice and fail closed.
+        typeof(EbillingFeedSource).FullName!,
         typeof(FinanceModule).FullName!,
+        // Task 131: its only callers are the ebilling.invoice.decide-filtered draft route and 132's job, both using server-read ids; the composer itself
+        // is held to that list by FirmNoticeComposerCallerBoundaryGuardTests.
+        typeof(FirmNoticeComposer).FullName!,
     ];
 
     [Fact(DisplayName = "130b fix 4: only the firm outcome routes and their DI registration reference FirmFindingsProjection (it has no caller check)")]

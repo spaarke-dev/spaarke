@@ -10,12 +10,13 @@
  */
 import * as React from 'react';
 import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
-import { LookupField } from '../LookupField/LookupField';
+import { DataverseLookupField } from '../LookupField/DataverseLookupField';
+import { ACTIVE_CONTACT_LOOKUP_FILTERS } from '../LookupField/lookupFilters';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { searchContactsAsLookup } from './workAssignmentService';
 import type { ICreateFollowOnEventState } from './formTypes';
 import { EMPTY_FOLLOW_ON_EVENT_STATE } from './formTypes';
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -26,6 +27,11 @@ export interface ICreateFollowOnEventStepProps {
   onValidChange: (isValid: boolean) => void;
   onFormValues: (values: ICreateFollowOnEventState) => void;
   initialValues?: ICreateFollowOnEventState;
+  /**
+   * Host navigation service. When provided Assigned To opens the Dataverse lookup side pane;
+   * when absent it uses the inline contact search, as before.
+   */
+  navigationService?: INavigationService;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +85,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
   onValidChange,
   onFormValues,
   initialValues,
+  navigationService,
 }) => {
   const styles = useStyles();
 
@@ -182,8 +189,11 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
             ))}
           </Dropdown>
         </Field>
-        <LookupField
+        <DataverseLookupField
           label="Assigned To"
+          entityType="contact"
+          filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
+          navigationService={navigationService}
           value={assignedToValue}
           onChange={handleAssignedToChange}
           onSearch={handleSearchAssignees}

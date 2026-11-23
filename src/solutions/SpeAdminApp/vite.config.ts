@@ -26,7 +26,6 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.SdapClient/src"),
-    path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -88,7 +87,6 @@ export default defineConfig({
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
       "@spaarke/sdap-client": path.resolve(__dirname, "../../client/shared/Spaarke.SdapClient/src"),
-      "@spaarke/smart-todo-components": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
     },
     // Force deduplication for shared packages
     dedupe: [

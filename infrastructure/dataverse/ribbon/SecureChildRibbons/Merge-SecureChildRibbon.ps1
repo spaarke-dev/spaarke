@@ -48,9 +48,19 @@ $Labels = @{
     sprk_invoice       = 'Invoice'
     sprk_reportcard    = 'Report Card'
     sprk_document      = 'Document'
-    sprk_communication = 'Message'
+    sprk_communication = 'Email'
     sprk_budget        = 'Budget'
     sprk_kpiassessment = 'KPI Assessment'
+}
+
+# The button's tooltip: "Add a <label> to this secure record (...)" unless a table needs its own wording.
+# sprk_communication: the button opens the email composer (#2908), which sends as well as saves.
+$ToolTips = @{
+    sprk_communication = 'Write an email related to this secure record (sent and saved by Spaarke so it stays as private as the record)'
+}
+$ToolTip = $ToolTips[$Entity]
+if (-not $ToolTip) {
+    $ToolTip = "Add a $($Labels[$Entity]) to this secure record (saved by Spaarke so it stays as private as the record)"
 }
 
 # Task 147 r1c: Spaarke's OWN subgrid creates of a table that also open a parent-prefilled create (quick create) - they
@@ -65,7 +75,7 @@ $NativeCommandId = 'Mscrm.AddNewRecordFromSubGridStandard'
 $RuleId = "sprk.SecureChild.$Entity.NativeNewAllowed.EnableRule"
 
 $templatePath = Join-Path $PSScriptRoot 'secure-child-new.template.xml'
-$templateText = (Get-Content -Raw -LiteralPath $templatePath).Replace('{{entity}}', $Entity).Replace('{{label}}', $Labels[$Entity])
+$templateText = (Get-Content -Raw -LiteralPath $templatePath).Replace('{{entity}}', $Entity).Replace('{{tooltip}}', [System.Security.SecurityElement]::Escape($ToolTip)).Replace('{{label}}', $Labels[$Entity])
 [xml] $template = $templateText
 
 [xml] $ribbon = Get-Content -Raw -LiteralPath $ExportedRibbonDiff

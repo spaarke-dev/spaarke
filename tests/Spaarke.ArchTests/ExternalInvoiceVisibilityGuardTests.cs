@@ -118,6 +118,9 @@ public class ExternalInvoiceVisibilityGuardTests
             "Creates the caller's own submission and returns its receipt (tracking number); a new submission has no invoice yet.",
         [$"{typeof(ExternalUserContextEndpoint).FullName}::HandleAsync"] =
             "Reads the caller's active firm NAMES for the SPA header; no family row.",
+        ["Sprk.Bff.Api.Api.ExternalAccess.BillingGuidelinesEndpoints::GetAsync"] =
+            "Reviewed ebilling-r1 task 135. Reads the caller's active firm NAMES (the same one-query read the SPA header uses) and the billing "
+            + "rules in force for those firms (Procedures, rule sets, rules); no invoice, line, submission or other family row is read or returned.",
         // ── the firm outcome (ebilling-r1 task 130b, FR-38): the predicate is applied by the route's filter, once, before the handler ──
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints::GetInvoiceOutcomeAsync"] =
             "Reviewed 130b. Reads the projection only for the invoice id FirmOutcomeAuthorizationFilter admitted (stored in the request's items; "
@@ -129,6 +132,13 @@ public class ExternalInvoiceVisibilityGuardTests
             + "invoice decision the invoice route makes (its own firm, its own core record, ExternalInvoiceHiding; fix round 1). It passes the "
             + "filter's InvoiceDecided to the projection (fix round 2): false when the invoice did not exist at the filter, and then nothing of "
             + "that invoice is read (in progress: no billed total; Accepted: 503).",
+        // ── the eBilling feed source (ebilling-r1 task 132, FR-39) ──
+        ["Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource::CandidateQuery"] =
+            "Reviewed 132 (review fix). Builds the app-only candidate query (the caller's own firms' invoices that the caller submitted or bills for: ids, "
+            + "status, change time, the audience columns and the access rule's scope columns); it reads nothing itself. ReadAsync re-checks the audience "
+            + "in memory, then returns an invoice only after FirmOutcomeAuthorizationFilter.DecideInvoicesForFeedAsync cleared the whole batch with the "
+            + "outcome route's own invoice rule (firm, core-record Read, secure roots and ExternalInvoiceHiding), fail closed. EbillingFeedSourceTests prove "
+            + "a Denied or undecidable invoice, and an invoice outside the audience, is never an item.",
         ["Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeAuthorizationFilter::.cctor"] =
             "Reviewed 130b fix rounds 5 and 6. Static column lists (the invoice's and the submission's own lookups, incl. the parents the "
             + "secure-roots rule takes in); reads nothing.",
@@ -184,9 +194,18 @@ public class ExternalInvoiceVisibilityGuardTests
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadFindingsJsonAsync"] =
             "Reviewed 130c. Reads the findings text of the one admitted submission, app-only (the column is field-secured to the BFF identity); "
             + "no invoice-family row beyond that submission.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadNoticeProseAsync"] =
+            "Reviewed 130g (EB-D-259). Reads the notice text (sprk_firmnoticetext only, app-only: the column is field-secured to the BFF identity) of the "
+            + "ONE admitted invoice's OWN submission (InvoiceBlockedHold.ReadOwnSubmissionAsync, the one own-submission rule: it queries the submissions "
+            + "linked to the invoice and keeps only its OWN (id-derived) one; no other row's text leaves the method), only for a Rejected or "
+            + "Returned-to-firm invoice GetForInvoiceAsync already built after the route's filter admitted it. It returns the prose alone, re-screened "
+            + "by FirmNoticeProse.Check and only for the matching stored kind; a fault, or anything unreadable, is no prose (never the subject or html).",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRejectionSignalsAsync"] =
             "Reviewed 130c. Reads the firm reasons of Signals the BFF writer created (WriterCreatedRecord) for the derived invoice the caller "
             + "decided, only after BuildRejectionItemsAsync's invoiceDecided check; a Signal naming another invoice is dropped.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::NamesTheFindingsReason"] =
+            "Reviewed 130e-1. A private predicate over a Signal row ReadRejectionSignalsAsync already read: true when the row's stored "
+            + "evidence names the finding's reason code (ReasonCodesOf parses the JSON). Reads nothing.",
     };
 
     /// <summary>
@@ -197,9 +216,10 @@ public class ExternalInvoiceVisibilityGuardTests
     {
         $"{typeof(ExternalModuleDataEndpoints).FullName}::ExecuteScopedFetchCoreAsync",       // (a) the invoices module fetch
         $"{typeof(ExternalMessageEndpoints).FullName}::EvaluateRecordGateAsync",              // (b) an invoice thread's gate
-        $"{typeof(ExternalProjectDataEndpoints).FullName}::RightsForInvoiceAsync",            // (b′) invoice documents
+        $"{typeof(ExternalProjectDataEndpoints).FullName}::RightsForInvoiceAsync",            // (b′) delete-own of a document under an invoice
         $"{typeof(ExternalInvoiceSubmissionEndpoints).FullName}::ListAsync",                   // (c) the submission list
         $"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideReadOneAsync", // (c) the submission read
+        $"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideInvoiceFilesAsync", // task 093: the firm file gate
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler::ExecuteChatAsync",      // (d)
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler::ExecuteChatAsync",     // (d)
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler::DescribeRecordAsync",   // (d)
@@ -300,7 +320,7 @@ public class ExternalInvoiceVisibilityGuardTests
         Assert.False(NamesAFamilyTable("sprk_documents"));
     }
 
-    // ── The 093 / 152 entries (not on this branch): named so they fail until they reach the predicate (130 landed in 130b) ───
+    // ── The 152 entry (not on this branch): named so it fails until it reaches the predicate (130 landed in 130b, 093 in 093) ───
 
     /// <summary>
     /// The model 9.1 surfaces later tasks build, each with what makes the guard see it. They are not on this branch; when they
@@ -309,21 +329,19 @@ public class ExternalInvoiceVisibilityGuardTests
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, string> PendingSurfaces = new Dictionary<string, string>
     {
-        ["093"] = "The firm file routes (GET /api/v1/external/invoices/{id}/files and …/content) in ExternalInvoiceSubmissionEndpoints / "
-            + "ExternalInvoiceSubmissionAuthorizationFilter: external-plane namespace; they read sprk_storedfile through StoredFileService.",
         ["152"] = "External invoice-index retrieval: InvoiceSearchService is a family reader; a call from the external plane is a surface.",
     };
 
     [Fact(DisplayName = "Task 098: the 093 and 152 surfaces are covered by the guard's primitives before they land")]
     public void TheLaterSurfaces_AreCoveredByThePrimitives()
     {
-        Assert.Equal(new[] { "093", "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "152" }, PendingSurfaces.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Contains("Sprk.Bff.Api.Services.Finance.Files.StoredFileService", FamilyReaderTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Services.Finance.InvoiceSearchService", FamilyReaderTypes.Keys);
         Assert.Contains(typeof(Sprk.Bff.Api.Services.Finance.IInvoiceSearchService), FamilyReaderInterfaces.Value); // F3: 152 calls it so
         Assert.Contains("Sprk.Bff.Api.Services.Finance.FirmFindingsProjection", NamedExternalTypes.Keys);
         Assert.Contains("Sprk.Bff.Api.Api.ExternalAccess.FirmOutcomeEndpoints", NamedExternalTypes.Keys);
-        Assert.True(InScope(typeof(ExternalInvoiceSubmissionEndpoints)), "093's routes live in the external-plane namespace.");
+        Assert.True(InScope(typeof(ExternalInvoiceSubmissionEndpoints)), "093's routes live in the external-plane namespace (wired above).");
         Assert.True(InScope(typeof(ExternalInvoiceSubmissionAuthorizationFilter)), "093's gate lives in the external-plane namespace.");
 
         // The readers named must name real types (a typo would hide a surface); 130's projection has landed, so it is checked too.

@@ -120,7 +120,11 @@ public sealed partial class SecureChildShareReconciliationJob
         bool sweep;
         lock (_externalGate)
         {
-            since = _externalSince ?? (startedAt - ExternalInitialLookback).UtcDateTime;
+            // #2735 (the #2709 pattern): the first run's window start is stored before anything can fail. A run that holds the
+            // watermark (the listing throws, or the recent sync fails) then leaves the next run listing from here; recomputing
+            // the look-back from each later run's own start would slide the window past what was never listed.
+            _externalSince ??= (startedAt - ExternalInitialLookback).UtcDateTime;
+            since = _externalSince.Value;
             held = new Dictionary<string, (DateTime At, Guid AfterId)>(_externalHeld, StringComparer.OrdinalIgnoreCase);
             carriedRuns = new Dictionary<(string Table, Guid Id), int>(_externalCarried);
             walkRuns = new Dictionary<(string Table, Guid Id), int>(_externalWalkAgain);

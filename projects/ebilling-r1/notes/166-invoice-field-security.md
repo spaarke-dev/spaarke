@@ -29,6 +29,7 @@ Every other TYPED type in `src/server` only reads these columns (ApExportService
 
 - User-side reads (covered by the Readers grant on every business unit's default team): `src/solutions/ApExport` (reads `sprk_approvedtotal`, `_sprk_vendororg_value` through `Xrm.WebApi` as the user), LegalWorkspace and SmartTodo select lists, the external SPA record detail.
 - The derived Threshold's evaluator (`SignalEvaluator`, DI singleton over `IGenericEntityService`) reads `sprk_totalamount` and `sprk_approvedtotal` org-wide. Its identity keeps read through the profile that covers it, so it still reads them. See finding F1.
+- Task 132 (added 2026-11-18, caught by the C1 guard on the master PR): `EbillingFeedSource` (SPA notification feed) and `EbillingNotificationRecipients` (notification job) read `sprk_vendororg` app-only, through `IGenericEntityService`, to filter and re-check invoices by firm and to find a firm's billing contacts. Neither writes any of the seven columns or renders the firm. Both are listed as Readers in `InvoiceMoneyColumnsAppOnlyWriteGuardTests`.
 
 ## 4. What changed
 
@@ -71,6 +72,7 @@ The read-only `-WhatIf` against dev (the dev application ids as in the script's 
 
 - `InvoiceLineAddService` (task 164a, Add line): a WRITER of a line's `sprk_vendororg` only (it copies the invoice's confirmed firm onto the added line, like `InvoiceAdjustmentService`), through `IGenericEntityService` (app-only). It reads the invoice's billed total and firm; it writes no invoice money column (the totals go through `InvoiceTotalsService`, and its version-only invoice update sets no column).
 - `InvoiceFindingsDiff` (164a-4a): a READER of the invoice's `sprk_vendororg` (the rule facts' firm).
+- `ExternalInvoiceSubmissionAuthorizationFilter` (task 093, the firm file gate): a READER of the route invoice's `sprk_vendororg`, app-only through `ExternalDataService.GetInvoiceLookupsAsync`, to compare it with the caller's firms; it writes nothing.
 
 
 ## 7. Live apply on dev (2026-11-09)

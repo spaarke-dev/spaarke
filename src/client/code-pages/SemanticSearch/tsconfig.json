@@ -1,4 +1,5 @@
 {
+  "//": "Type-check only: webpack (esbuild-loader) emits the bundle, so there is no outDir/rootDir. The paths mirror webpack.config.js's aliases: both @spaarke packages resolve to their SOURCE, and a bare import made from that shared source resolves to THIS package's node_modules (the '*' entry), as webpack's single-React aliasing does. `npm run typecheck` runs this config; `npm run build` runs it first.",
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
@@ -10,13 +11,14 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
-    "outDir": "./out",
-    "rootDir": "./src",
+    "noEmit": true,
     "typeRoots": ["./node_modules/@types"],
     "paths": {
-      "@spaarke/auth": ["../../shared/Spaarke.Auth/src/index"],
-      "@spaarke/document-operations": ["../../shared/Spaarke.DocumentOperations/src/index"],
-      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"]
+      "@spaarke/auth": ["../../shared/Spaarke.Auth/src/index.ts"],
+      "@spaarke/auth/*": ["../../shared/Spaarke.Auth/src/*"],
+      "@spaarke/ui-components": ["../../shared/Spaarke.UI.Components/src/index.ts"],
+      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/src/*"],
+      "*": ["./node_modules/@types/*", "./node_modules/*"]
     }
   },
   "include": ["src/**/*"],

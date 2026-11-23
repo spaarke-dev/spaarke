@@ -95,9 +95,9 @@ $Spec = [ordered]@{
     }
     sprk_ratecard          = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'ownerid' })
+        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'ownerid' })
         Subgrids = @(@{ Name = 'rates'; Label = 'Rates'; Target = 'sprk_ratecardrate'; Relationship = 'sprk_ratecard_ratecardrate_ratecard' })
-        View = 'sprk_name', 'sprk_firm', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_effectivefrom', 'sprk_effectiveto'
+        View = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto'
     }
     sprk_ratecardrate      = @{
         Form = 'Replace'; FormName = 'Information'
@@ -135,7 +135,7 @@ $Spec = [ordered]@{
             @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument'
                 ReadOnly = 'sprk_invoice', 'sprk_document', 'sprk_resubmissionof' }
             @{ Name = 'regarding'; Label = 'Regarding'; Cols = 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingworkassignment' }
-            @{ Name = 'findings'; Label = 'Firm notice'; Cols = 'sprk_firmnoticetext' }  # task 122 (#2235): sprk_findingsjson is BFF-only, never on a form
+            # sprk_findingsjson and sprk_firmnoticetext are BFF-only columns (task 122 #2235; task 132): field-secured, never on a form
         )
         View = 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_vendororg', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_invoice', 'sprk_submitter'
     }

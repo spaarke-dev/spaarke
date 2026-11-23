@@ -216,7 +216,7 @@ public sealed class EventRoutesLiveTests
                 factory.Services.GetRequiredService<ILogger<ExternalDataService>>(),
                 identity: factory.Services.GetRequiredService<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>()); // uac-r2 191h: the operator is internal (its stored flag), so its lists are not narrowed
             var projectTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId);
-            var ext = await external.CreateEventAsync(projectId,
+            var ext = await external.CreateEventAsync(ExternalDataService.TodoRootKind.Project, projectId,
                 new CreateExternalEventRequest { SprkName = "zz-097-test external create", SprkDuedate = "2026-10-21" }, projectTeam,
                 OperatorAsCreator(operatorId)); // R3 task 030 (FR-25): every external create carries its creator stamp
             createdEvents.Add(Guid.Parse(ext.SprkEventid));
@@ -402,7 +402,7 @@ public sealed class EventRoutesLiveTests
             var external = new ExternalDataService(new HttpClient(), factory.LiveConfiguration, credential,
                 factory.Services.GetRequiredService<ILogger<ExternalDataService>>(),
                 identity: factory.Services.GetRequiredService<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>()); // uac-r2 191h: the operator is internal (its stored flag), so its lists are not narrowed
-            var ext = await external.CreateEventAsync(projectId,
+            var ext = await external.CreateEventAsync(ExternalDataService.TodoRootKind.Project, projectId,
                 new CreateExternalEventRequest { SprkName = "zz-098-test external legacy date", SprkDuedate = "2026-10-21T00:00:00.000Z" },
                 await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId),
                 OperatorAsCreator(operatorId)); // R3 task 030 (FR-25)

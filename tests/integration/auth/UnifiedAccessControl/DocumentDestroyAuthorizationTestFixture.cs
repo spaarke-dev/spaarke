@@ -96,6 +96,13 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     public ConcurrentDictionary<Guid, int> FileNotDeletedStatuses { get; } = new();
 
     /// <summary>
+    /// #2271 (spaarke-SPA-external-access-platform-r4 task 002): document ids that are checked out, so C2's double answers
+    /// <see cref="CheckedOutDeleteResult"/> with this lock (the real service refuses before deleting anything). Absent = not
+    /// checked out.
+    /// </summary>
+    public ConcurrentDictionary<Guid, DocumentLockedError> CheckedOutLocks { get; } = new();
+
+    /// <summary>
     /// A document id for which the access check THROWS. ADR-003 requires an errored check to deny;
     /// this is the only way a test can reach that catch block.
     /// </summary>
@@ -117,6 +124,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         RowDeleteFaultCodes.Clear();
         FileNotDeletedStatuses.Clear();
         StoredFileCopyCounts.Clear();
+        CheckedOutLocks.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -161,7 +169,8 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
                 DeletedDocumentIds,
                 ChildDocumentCounts,
                 RowDeleteFaultCodes,
-                FileNotDeletedStatuses));
+                FileNotDeletedStatuses,
+                CheckedOutLocks));
 
             // C3's Stored File copy count (task 094): the base fixture's IDataverseService mock answers every QueryExpression with
             // three matters, so the sprk_storedfiles query is answered from StoredFileCopyCounts; every other call goes to it as before.
@@ -421,6 +430,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         private readonly ConcurrentDictionary<Guid, int> _childCounts;
         private readonly ConcurrentDictionary<Guid, int> _rowDeleteFaults;
         private readonly ConcurrentDictionary<Guid, int> _fileNotDeletedStatuses;
+        private readonly ConcurrentDictionary<Guid, DocumentLockedError> _checkedOut;
 
         public RecordingCheckoutService(
             HttpClient httpClient,
@@ -431,7 +441,8 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             ConcurrentBag<Guid> deleted,
             ConcurrentDictionary<Guid, int> childCounts,
             ConcurrentDictionary<Guid, int> rowDeleteFaults,
-            ConcurrentDictionary<Guid, int> fileNotDeletedStatuses)
+            ConcurrentDictionary<Guid, int> fileNotDeletedStatuses,
+            ConcurrentDictionary<Guid, DocumentLockedError> checkedOut)
             : base(httpClient, speFileStore, configuration, credential, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), logger,
                 // Only DeleteAsync is exercised (overridden); no preview/edit URL is minted.
                 TestRecordContainerResolver.ForBusinessUnitContainers())
@@ -440,11 +451,16 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             _childCounts = childCounts;
             _rowDeleteFaults = rowDeleteFaults;
             _fileNotDeletedStatuses = fileNotDeletedStatuses;
+            _checkedOut = checkedOut;
         }
 
         public override Task<DeleteResult> DeleteAsync(
             Guid documentId, string correlationId, CancellationToken ct = default)
         {
+            // #2271: the real service refuses a checked-out document before deleting anything.
+            if (_checkedOut.TryGetValue(documentId, out var locked))
+                return Task.FromResult(DeleteResult.CheckedOut(locked, correlationId));
+
             // The real service refuses a parent BEFORE deleting anything (task 188 slice D).
             if (_childCounts.TryGetValue(documentId, out var children) && children > 0)
                 return Task.FromResult<DeleteResult>(new HasChildDocumentsDeleteResult(children, correlationId));

@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Tests.Seam.ContentUnderstanding;
 /// <remarks>
 /// Anti-stub: the recorded result's values, confidences and sources are asserted on the returned DTO (so the tests fail
 /// if mapping is skipped), and the request URL, bearer token and body are asserted on the wire (so they fail if the
-/// configured analyzer or api-version does not reach the service). The playbook and model clients are STRICT mocks with
+/// configured analyzer or api-version does not reach the service). The model client is a STRICT mock with
 /// no setups: a read that touched either fails.
 /// </remarks>
 public sealed class InvoiceReadSeamTests
@@ -32,7 +32,6 @@ public sealed class InvoiceReadSeamTests
 
     private static InvoiceAi Sut(ContentUnderstandingOptions options, FakeContentUnderstandingService service, TimeProvider? time = null) =>
         new(
-            new Mock<IPlaybookService>(MockBehavior.Strict).Object,
             new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
             new NullActionResolver(NullLogger<NullActionResolver>.Instance),
             new NullActionRunner(NullLogger<NullActionRunner>.Instance),

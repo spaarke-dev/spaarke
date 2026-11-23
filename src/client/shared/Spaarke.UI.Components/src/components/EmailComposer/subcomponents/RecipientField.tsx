@@ -99,8 +99,9 @@ export interface IRecipientFieldProps {
    * Advanced OOB people lookup (owner UAT 2026-07-24). When supplied, the To/Cc/Bcc label
    * box becomes a button that opens the host's OOB picker and appends the resolved
    * recipient(s). Additive to the typeahead — the user can still type free-text.
+   * Receives the label button so the caller can return focus to it once the lookup settles (task 199).
    */
-  onLookup?: () => Promise<IRecipient[] | null>;
+  onLookup?: (trigger: HTMLElement | null) => Promise<IRecipient[] | null>;
   /** Field-level validation error message (from `IValidationResult`), if any. */
   errorMessage?: string;
 }
@@ -258,6 +259,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   const [showResults, setShowResults] = React.useState(false);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const lookupTriggerRef = React.useRef<HTMLSpanElement>(null);
 
   const commitTokens = React.useCallback(
     (raw: string) => {
@@ -358,7 +360,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   // Advanced OOB people lookup (owner UAT 2026-07-24) — dedup by email against the current set.
   const handleLookup = React.useCallback(() => {
     if (!onLookup || disabled) return;
-    void onLookup()
+    void onLookup(lookupTriggerRef.current)
       .then(picked => {
         if (!picked || picked.length === 0) return;
         const existing = new Set(value.map(r => r.email.toLowerCase()));
@@ -412,6 +414,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
         {onLookup ? (
           <span
             className={mergeClasses(styles.labelBox, styles.labelBoxClickable)}
+            ref={lookupTriggerRef}
             role="button"
             tabIndex={disabled ? -1 : 0}
             aria-label={`Look up ${label} recipients`}

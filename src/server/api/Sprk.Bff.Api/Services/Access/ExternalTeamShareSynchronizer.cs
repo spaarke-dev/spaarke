@@ -211,11 +211,31 @@ public sealed class ExternalTeamShareSynchronizer
     /// <summary>Owner writes (re-own of rows a flagged user owns). Absent, empty or unparseable = off.</summary>
     internal const string ReownWritesEnabledConfigKey = SectionKey + ":ReownWritesEnabled";
 
-    /// <summary>The External Collaborators business unit's name; default <see cref="DefaultBusinessUnitName"/>.</summary>
-    internal const string BusinessUnitNameConfigKey = SectionKey + ":BusinessUnitName";
+    /// <summary>
+    /// uac-r2 task 197b: the REMOVED setting that once named the External Collaborators unit for this engine only. The unit has one
+    /// source, <see cref="Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName"/> (pinned to
+    /// <c>config/external-collaborator-role.json</c>); a leftover value is reported at startup (<see cref="ReportRetiredSettings"/>),
+    /// never read.
+    /// </summary>
+    internal const string RetiredBusinessUnitNameConfigKey = SectionKey + ":BusinessUnitName";
 
-    /// <summary>The name <c>config/external-collaborator-role.json</c> gives the unit (pinned by ExternalShareGrantAllowListTests).</summary>
-    internal const string DefaultBusinessUnitName = "External Collaborators";
+    /// <summary>
+    /// uac-r2 task 197b: one Warning when the retired <see cref="RetiredBusinessUnitNameConfigKey"/> still carries a value in this
+    /// environment, so stale configuration is reported rather than silently ignored. Names the KEY only, never its value. Called once
+    /// by <c>StartupValidationService</c>. Returns whether it warned.
+    /// </summary>
+    internal static bool ReportRetiredSettings(IConfiguration configuration, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+        if (string.IsNullOrWhiteSpace(configuration[RetiredBusinessUnitNameConfigKey]))
+            return false;
+
+        logger.LogWarning("{Tag} The setting {Key} is set but is no longer read: the External Collaborators business unit's name comes " +
+            "only from config/external-collaborator-role.json (uac-r2 task 197b). Remove the setting from this environment.", LogTag,
+            RetiredBusinessUnitNameConfigKey);
+        return true;
+    }
 
     /// <summary>Ids per <c>In</c> condition (far below SQL Server's parameter ceiling).</summary>
     internal const int Chunk = SecureChildShareSynchronizer.DescendantConditionsPerQuery;
@@ -820,7 +840,8 @@ public sealed class ExternalTeamShareSynchronizer
                 // Flagged users' per-user shares on a child the predicate does not show (roots are I-14's; Secure-team-owned rows
                 // the mirror's; Direct-team-owned rows task 198's writer's — reported, never fought). Undecided revokes too, a
                 // transient one included (task constraint: fail closed); the bisecting decision keeps one faulting row from
-                // making the rest of its batch Undecided (F2).
+                // making the rest of its batch Undecided (F2). 197b: except the participant-scoped NoRoot exemption
+                // (RevocableOnNoRootAsync): a Direct pair member keeps a share on a recognized unfiled Direct message.
                 if (!decision.IsVisible && !SecureChildLineage.IsRoot(row.Table) && !(_secureTeam is { } st && fact.OwningTeam == st))
                 {
                     var flaggedHolders = flags is null
@@ -846,7 +867,8 @@ public sealed class ExternalTeamShareSynchronizer
                         }
                         else
                         {
-                            plan.FlaggedRevokes.AddRange(flaggedHolders);
+                            plan.FlaggedRevokes.AddRange(await RevocableOnNoRootAsync(row, visibility, decideFaulted, flaggedHolders)
+                                .ConfigureAwait(false));
                         }
                     }
                 }
@@ -867,6 +889,41 @@ public sealed class ExternalTeamShareSynchronizer
                 await ReownAsync(plans.Where(p => p.ReownFrom is not null).ToList()).ConfigureAwait(false);
 
             return Report(plans, present.Count, shareable, undecided, secureFamily);
+        }
+
+        /// <summary>
+        /// uac-r2 task 197b (limit 3): the flagged holders this pass may revoke on a row the predicate does not show. The
+        /// participant-scoped NoRoot exemption the live grant and the Direct share job apply holds here too, through the same seam
+        /// member (<see cref="ExternalRowVisibility.UndecidedOnlyForNoRoot"/>) and the same recognition
+        /// (<see cref="DirectMessageParticipantShares.NoRootExemptPairForRowAsync"/>): on a row undecided ONLY because its closure
+        /// reaches no root, of a message recognized as an unfiled Direct message (whoever owns it), a holder in that message's
+        /// stamped pair keeps the share. Every other answer (Hidden, any other Undecided, a faulted decision) revokes as before.
+        /// A recognition read that faults revokes nobody on the row and carries it.
+        /// </summary>
+        private async Task<IReadOnlyList<DataversePrincipalRef>> RevocableOnNoRootAsync(
+            (string Table, Guid Id) row, ExternalVisibilityResult visibility, IReadOnlySet<(string Table, Guid Id)> decideFaulted,
+            IReadOnlyList<DataversePrincipalRef> flaggedHolders)
+        {
+            if (decideFaulted.Contains(row) || !new ExternalRowVisibility(visibility).UndecidedOnlyForNoRoot(row.Table, row.Id))
+                return flaggedHolders;
+
+            var pair = await DirectMessageParticipantShares.NoRootExemptPairForRowAsync(owner._dataverse, row.Table, row.Id, Log, ct)
+                .ConfigureAwait(false);
+            if (pair is null)
+            {
+                Carry(row);
+                return [];
+            }
+
+            var kept = flaggedHolders.Count(p => pair.Contains(p.Id));
+            if (kept > 0)
+            {
+                Log.LogInformation("{Tag} {Table} {Id} reaches no root and is an unfiled Direct message (or its content); {Count} " +
+                    "flagged holder(s) in its stamped pair keep their share (the participant-scoped exemption).",
+                    LogTag, row.Table, row.Id, kept);
+            }
+
+            return flaggedHolders.Where(p => !pair.Contains(p.Id)).ToList();
         }
 
         /// <summary>A Secure-team-owned row, a root not stored <c>false</c>, or a row whose closure reaches such a root or a root
@@ -1276,23 +1333,27 @@ public sealed class ExternalTeamShareSynchronizer
             : SecureDesignationRemoval.EntitySetFor(table);
 
     /// <summary>
-    /// The External Collaborators unit's DEFAULT team: the unit by its configured name (TOP 2), then its default team (TOP 2).
-    /// No unit: <c>(null, null)</c> (no team share in this environment yet; flagged-user revokes still run). Two units, or a unit
-    /// with no or two default teams: a refusal. A Dataverse fault propagates.
+    /// The External Collaborators unit's DEFAULT team. The unit is found by the ONE lookup every reader uses (uac-r2 task 197b):
+    /// task 191e's <see cref="Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.ResolveUnitAsync"/> (its compiled
+    /// name, exactly one unit, a direct child of the root), then its default team (TOP 2). No unit: <c>(null, null)</c> (no team
+    /// share in this environment yet; flagged-user revokes still run). Two units, one not under the root, or a unit with no or two
+    /// default teams: a refusal. A Dataverse fault (the root unit not identifiable included) propagates.
     /// </summary>
     internal async Task<(Guid? TeamId, string? Refusal)> ResolveExternalTeamAsync(CancellationToken ct)
     {
-        var name = _configuration[BusinessUnitNameConfigKey]?.Trim() is { Length: > 0 } configured ? configured : DefaultBusinessUnitName;
-        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
-        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, name);
-        var units = (await _dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
-        if (units.Count > 1)
-            return (null, "more than one business unit carries the External Collaborators name");
-        if (units.Count == 0 || units[0].Id == Guid.Empty)
+        var unit = await Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.ResolveUnitAsync(_dataverse, ct)
+            .ConfigureAwait(false);
+        if (unit.State == Sprk.Bff.Api.Services.ExternalAccess.UnitState.Missing)
             return (null, null);
+        if (unit.State != Sprk.Bff.Api.Services.ExternalAccess.UnitState.Found
+            || unit.UnitId is not { } unitId || unitId == Guid.Empty)
+        {
+            return (null, "the External Collaborators business unit is ambiguous (more than one unit carries its name, or it is not a " +
+                "direct child of the root)");
+        }
 
         var teamQuery = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 2, NoLock = true };
-        teamQuery.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, units[0].Id);
+        teamQuery.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, unitId);
         teamQuery.Criteria.AddCondition("isdefault", ConditionOperator.Equal, true);
         var teams = (await _dataverse.RetrieveMultipleAsync(teamQuery, ct).ConfigureAwait(false)).Entities;
         return teams.Count == 1 && teams[0].Id != Guid.Empty

@@ -49,6 +49,7 @@ using Microsoft.Xrm.Sdk.Metadata;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Communication.Access;
 
 namespace Sprk.Bff.Api.Services.Ai.Membership;
 
@@ -741,6 +742,13 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 
     // ── R3 Part 1D — transitive Lookup discovery (task 054) ─────────────────
     /// <inheritdoc/>
+    /// <remarks>
+    /// On <c>sprk_communication</c> the private-context reference columns (<see cref="PrivateContextColumns.All"/>,
+    /// field-mapping-server-write-path-r1 task 056) are never returned, whatever they target. A private message names the core
+    /// record it is about there; the reference decides where the message is shown to its two participants, never who reads it,
+    /// so it is not a relationship a record-scoped read may follow. Every caller that turns these lookups into a read (the
+    /// <c>includeRelated</c> expansion of <see cref="MembershipResolverService"/>) gets only the filing lookups.
+    /// </remarks>
     public async Task<IReadOnlyList<string>> DiscoverLookupsTargetingAsync(
         string sourceEntity,
         string targetEntity,
@@ -774,6 +782,8 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         var lookups = await FetchLookupAttributesAsync(normalizedSource, ct)
             .ConfigureAwait(false);
 
+        var excludesPrivateContext = string.Equals(normalizedSource, "sprk_communication", StringComparison.Ordinal);
+
         var matches = new List<string>();
         foreach (var lookup in lookups)
         {
@@ -782,6 +792,11 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
                 continue;
             }
             if (lookup.Targets is null || lookup.Targets.Count == 0)
+            {
+                continue;
+            }
+            if (excludesPrivateContext
+                && PrivateContextColumns.All.Contains(lookup.LogicalName.Trim(), StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }

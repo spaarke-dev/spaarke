@@ -10,9 +10,12 @@ using Sprk.Bff.Api.Services.Finance.Procedures;
 namespace Sprk.Bff.Api.Api.Finance;
 
 /// <summary>The edit of a rule's working version. Every member is optional; a rule body is a JSON object or a JSON string.</summary>
+/// <param name="FirmDescription">Task 130e-1 (DEF-060): the firm description; absent or null leaves it, a blank text clears it. On a published
+/// version the edit lands on the new draft it creates, never on the published row; refused 422 <c>ruleset.invalid</c> with field <c>firmDescription</c> and
+/// a stable reason when it fails the firm description rules.</param>
 public sealed record RuleEditBody(
     string? RuleType, JsonElement? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence,
-    string? ClauseReference, string? ClauseLocation);
+    string? ClauseReference, string? ClauseLocation, string? FirmDescription = null);
 
 /// <summary>
 /// Accept or reject a rule. <see cref="RowVersion"/> is the token the Rule Review page was shown for the rule (<c>rowVersion</c> on the
@@ -44,7 +47,7 @@ public sealed record RuleSetVisibilityBody(bool? VisibleToFirms);
 /// <c>ruleset.publish_invalid</c> with <c>errors</c> (policyId, rule, field, message, reason); 404 <c>ruleset.not_found</c> /
 /// <c>ruleset.proposal_not_found</c> (an Ontology policy is a 404 here); 409 <c>ruleset.retired</c> / <c>ruleset.proposal_in_force</c> or the
 /// owner reason code; 422 <c>ruleset.result_truncated</c>; 500 <c>ruleset.write_failed</c>.</para>
-/// <para><b>Task 116.</b> The create route (POST <c>/api/finance/rulesets</c>, an upload into the Procedure Library) and the drafting trigger
+/// <para><b>Task 116.</b> The create route (POST <c>/api/finance/rulesets</c>, an upload of a source document) and the drafting trigger
 /// (POST <c>/{ruleSetId}/draft</c>) are retired: rule sets are created only with their Procedure (081) or record-scoped (089), a Procedure
 /// Version's source file is stored through <c>PUT /api/finance/procedures/{id}/versions/{versionId}/file</c>, and drafting is started per
 /// version through <c>POST /api/finance/procedures/{id}/versions/{versionId}/draft</c> (<see cref="ProcedureEndpoints"/>).</para>
@@ -104,6 +107,7 @@ public static class RuleSetEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity) // 130e-1 fix round 2 (F4): a refused firm description
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/accept", AcceptProposal)
@@ -119,6 +123,7 @@ public static class RuleSetEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity) // 130e-1 fix round 2 (F4): a refused firm description
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/reject", RejectProposal)
@@ -151,6 +156,7 @@ public static class RuleSetEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity) // 130e-1 fix round 2 (F4): a refused firm description
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPut("/{ruleSetId:guid}/assignment", AssignRuleSet)
@@ -317,7 +323,7 @@ public static class RuleSetEndpoints
 
         var edit = new ProposalEdit(
             body.RuleType, ruleBody, body.MessageTemplate, body.ShortHeadline, body.Consequence,
-            body.ClauseReference, body.ClauseLocation, CallerOid(http));
+            body.ClauseReference, body.ClauseLocation, CallerOid(http), body.FirmDescription);
         return Map(await service.EditAsync(ruleSetId, policyId, edit, ct), http);
     }
 
@@ -540,16 +546,16 @@ public static class RuleSetEndpoints
         outcome.Kind switch
         {
             RuleSetOutcomeKind.Done => Results.Ok(outcome.Value),
-            RuleSetOutcomeKind.Invalid => InvalidProblem(outcome.ErrorCode!, outcome.Errors),
+            RuleSetOutcomeKind.Invalid => InvalidProblem(outcome.ErrorCode!, outcome.Errors, outcome.StatusCode),
             RuleSetOutcomeKind.OwnerRefused => ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "rule set", http.TraceIdentifier),
             _ => Results.Problem(
                 statusCode: outcome.StatusCode, detail: outcome.Detail,
                 extensions: new Dictionary<string, object?> { ["errorCode"] = outcome.ErrorCode }),
         };
 
-    private static IResult InvalidProblem(string errorCode, IReadOnlyList<RuleSetError> errors) =>
+    private static IResult InvalidProblem(string errorCode, IReadOnlyList<RuleSetError> errors, int statusCode = StatusCodes.Status400BadRequest) =>
         Results.Problem(
-            statusCode: StatusCodes.Status400BadRequest,
+            statusCode: statusCode,
             title: errorCode == RuleSetService.CodePublishInvalid ? "Rule set cannot be published" : "Rule set request is not valid",
             detail: $"{errors.Count} problem(s) found; nothing was written.",
             extensions: new Dictionary<string, object?>

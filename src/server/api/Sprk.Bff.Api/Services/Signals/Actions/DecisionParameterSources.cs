@@ -70,6 +70,13 @@ public class DecisionParameterSources
     /// <summary>The default source: the Default Currency of the core matter's owning business unit (D-198: the customer business unit's, for a secure matter).</summary>
     public const string MatterCurrencyDefault = "matter-business-unit-currency";
 
+    /// <summary>Task 192 (D-224): the default source of the budget inquiry's Subject: "Budget inquiry: {matter number} {matter name}".</summary>
+    public const string BudgetInquirySubjectDefault = "budget-inquiry-subject";
+
+    /// <summary>Task 192 (D-224): the default source of the budget inquiry's Message: the owner-approved standard text, with the matter and
+    /// the caller's full name filled in.</summary>
+    public const string BudgetInquiryBodyDefault = "budget-inquiry-body";
+
     /// <summary>How long a metadata or currency list is reused, so an owner relabel shows up within minutes (ADR-009: Redis, tenant-scoped).</summary>
     public static readonly TimeSpan OptionsTtl = TimeSpan.FromMinutes(5);
 
@@ -433,6 +440,127 @@ public class DecisionParameterSources
             }
         }
 
+        if (matterId is { } inquiryMatter
+            && (defaults.Contains(BudgetInquirySubjectDefault, StringComparer.Ordinal) || defaults.Contains(BudgetInquiryBodyDefault, StringComparer.Ordinal)))
+        {
+            try
+            {
+                if (await BudgetInquiryTextAsync(inquiryMatter, ct).ConfigureAwait(false) is { } text)
+                {
+                    values[BudgetInquirySubjectDefault] = text.Subject;
+                    values[BudgetInquiryBodyDefault] = text.Body;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Decision plan: the budget inquiry's default text could not be built ({ExceptionType}); no default.", ex.GetType().Name);
+            }
+        }
+
         return new DecisionParameterFacts(options, values);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The budget inquiry's default text (task 192, D-224)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The core matter's name and number columns, the ones the inquiry's footer label reads (<c>InquiryRecordFacts</c>).</summary>
+    private const string MatterNameColumn = "sprk_mattername";
+    private const string MatterNumberColumn = "sprk_matternumber";
+
+    /// <summary>
+    /// The budget inquiry's starting Subject and Message for <paramref name="matterId"/> (D-224): the owner-approved standard text with the
+    /// matter's number and name and the caller's full name filled in. Every read is AS THE CALLER (the matter, <c>WhoAmI</c>, the caller's
+    /// <c>systemuser</c>), the same access as the task-160 To pre-fill, so a matter the caller cannot read gives no default and never an
+    /// app-only read. <c>null</c> when the matter cannot be read or carries neither a name nor a number. A caller whose name cannot be read
+    /// still gets the text; its last line is then "Thank you," alone. Never logs a matter or person name.
+    /// </summary>
+    private async Task<(string Subject, string Body)?> BudgetInquiryTextAsync(Guid matterId, CancellationToken ct)
+    {
+        var matter = await _user.GetAsync($"sprk_matters({matterId:D})?$select={MatterNameColumn},{MatterNumberColumn}", ct).ConfigureAwait(false);
+        if (!matter.IsSuccess || matter.Body is not { ValueKind: JsonValueKind.Object } row)
+        {
+            _logger.LogWarning("Decision plan: the caller's read of matter {MatterId} for the budget inquiry's default text failed ({ErrorCode}); no default.",
+                matterId, matter.ErrorCode ?? "no-body");
+            return null;
+        }
+
+        var name = OneLine(StringOf(row, MatterNameColumn));
+        var number = OneLine(StringOf(row, MatterNumberColumn));
+        if (name is null && number is null)
+        {
+            _logger.LogWarning("Decision plan: matter {MatterId} has no name or number for the budget inquiry's default text; no default.", matterId);
+            return null;
+        }
+
+        return (BudgetInquirySubject(name, number), BudgetInquiryBody(name, number, await CallerFullNameAsync(ct).ConfigureAwait(false)));
+    }
+
+    /// <summary>The caller's <c>systemuser.fullname</c>, read AS THE CALLER (WhoAmI, then their own row); <c>null</c> on any failure (logged,
+    /// no name), so the closing line is then "Thank you," with no name.</summary>
+    private async Task<string?> CallerFullNameAsync(CancellationToken ct)
+    {
+        try
+        {
+            var who = await _user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
+            if (!who.IsSuccess || who.Body is not { ValueKind: JsonValueKind.Object } whoBody
+                || StringOf(whoBody, "UserId") is not { } rawId || !Guid.TryParse(rawId, out var callerId) || callerId == Guid.Empty)
+            {
+                _logger.LogWarning("Decision plan: the caller could not be identified for the budget inquiry's default text ({ErrorCode}); the closing line has no name.",
+                    who.ErrorCode ?? "no-user-id");
+                return null;
+            }
+
+            var user = await _user.GetAsync($"systemusers({callerId:D})?$select=fullname", ct).ConfigureAwait(false);
+            if (!user.IsSuccess || user.Body is not { ValueKind: JsonValueKind.Object } userBody)
+            {
+                _logger.LogWarning("Decision plan: the caller's own name could not be read for the budget inquiry's default text ({ErrorCode}); the closing line has no name.",
+                    user.ErrorCode ?? "no-body");
+                return null;
+            }
+
+            return OneLine(StringOf(userBody, "fullname"));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision plan: the caller's name could not be read for the budget inquiry's default text ({ExceptionType}); the closing line has no name.",
+                ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>"Budget inquiry: {matter number} {matter name}" (D-224); a matter with only one of the two shows that one.</summary>
+    internal static string BudgetInquirySubject(string? matterName, string? matterNumber) =>
+        "Budget inquiry: " + string.Join(' ', new[] { matterNumber, matterName }.Where(v => !string.IsNullOrEmpty(v)));
+
+    /// <summary>The owner-approved budget inquiry Message (D-224, 2026-11-14), plain text with line breaks. <paramref name="senderName"/> null
+    /// ends it "Thank you," with no name line. Do not rephrase: the wording is the owner's.</summary>
+    internal static string BudgetInquiryBody(string? matterName, string? matterNumber, string? senderName)
+    {
+        var matter = matterName is not null && matterNumber is not null ? $"{matterName} ({matterNumber})" : matterName ?? matterNumber;
+        var lines = new List<string>
+        {
+            "Hello,",
+            "",
+            $"We received notice of a fee or scope change on {matter}. The matter's budget has not been revised to reflect it.",
+            "",
+            "Please send us a revised budget estimate, or confirm that the change does not affect the current budget.",
+            "",
+            "Thank you,",
+        };
+        if (senderName is not null)
+            lines.Add(senderName);
+        return string.Join('\n', lines);
+    }
+
+    private static string? StringOf(JsonElement row, string column) =>
+        row.TryGetProperty(column, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    /// <summary>A single line: runs of whitespace (a line break in a name) become one space; null when nothing is left. The values go into a
+    /// Subject and into lines of a message, which must not be broken by what a name carries.</summary>
+    private static string? OneLine(string? value)
+    {
+        var line = value is null ? string.Empty : Regex.Replace(value, "\\s+", " ").Trim();
+        return line.Length == 0 ? null : line;
     }
 }

@@ -245,6 +245,61 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
             .Which.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_confirmedby").Id.Should().Be(ApprovalWorld.AliceUser);
     }
 
+    [Theory(DisplayName = "095f-2a: approve with no body, {} or a null note behaves as before - 200 approved, no note in the record, the decision note column unchanged")]
+    [InlineData(null)]
+    [InlineData("{}")]
+    [InlineData("{\"note\":null}")]
+    [InlineData("{\"note\":\"   \"}")]
+    public async Task Approve_WithoutANote_BehavesAsBefore(string? body)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+        host.World.Invoice[InvoiceCorrectionNote.DecisionColumn] = "An older decision's note";
+
+        var response = await host.SendAsync("POST", "approve", jsonBody: body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["outcome"]!.GetValue<string>().Should().Be("approved");
+        var record = host.World.ApproveRecords.Should().ContainSingle().Subject;
+        JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!.AsObject().Should().NotContainKey("note");
+        host.World.Invoice.GetAttributeValue<string>(InvoiceCorrectionNote.DecisionColumn).Should().Be("An older decision's note");
+    }
+
+    [Fact(DisplayName = "095f-2a: approve with a note is 200; the note is in the record's Values and in the internal sprk_decisionnote column")]
+    public async Task Approve_WithANote_RecordsIt()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+
+        var response = await host.SendAsync("POST", "approve", jsonBody: "{\"note\":\"Approved after the call.\"}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var record = host.World.ApproveRecords.Should().ContainSingle().Subject;
+        JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!["steps"]![0]!["values"]!["note"]!.GetValue<string>().Should().Be("Approved after the call.");
+        host.World.Invoice.GetAttributeValue<string>(InvoiceCorrectionNote.DecisionColumn).Should().Be("Approved after the call.");
+    }
+
+    [Theory(DisplayName = "095f-2a: approve with a 2001-character note is 400 ebilling.note_too_long; with a control character 400 ebilling.note_invalid_characters; nothing is read or written")]
+    [InlineData("too-long", "ebilling.note_too_long")]
+    [InlineData("bell", "ebilling.note_invalid_characters")]
+    public async Task Approve_RefusedNote_Is400_AndWritesNothing(string shape, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+        var note = shape == "too-long" ? new string('x', InvoiceCorrectionNote.MaxLength + 1) : "ok\\u0007";
+
+        var response = await host.SendAsync("POST", "approve", jsonBody: $"{{\"note\":\"{note}\"}}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        host.World.Entities.Invocations.Should().BeEmpty("refused before any read");
+        host.World.Transitions.Should().Be(0);
+        host.World.ApproveRecords.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "103 I-2: approve with open lines is 409 lines_open with the counts")]
     public async Task Approve_OpenLines_Is409_WithCounts()
     {
@@ -327,6 +382,51 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
     private static async Task<string?> ReasonCode(HttpResponseMessage response) =>
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]?.GetValue<string>();
 
+    [Fact(DisplayName = "132: an approval enqueues ONE ApprovedWithAdjustments job (the composer decides whether there is anything to tell); a repeat enqueues none")]
+    public async Task Approve_EnqueuesOneNotificationJob_AndARepeatNone()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+
+        var first = await host.SendAsync("POST", "approve");
+        var second = await host.SendAsync("POST", "approve");
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        var job = host.Queued.Should().ContainSingle().Subject;
+        job.IdempotencyKey.Should().Be(EbillingNotificationEnqueuer.IdempotencyKeyFor(EbillingNotificationEvent.ApprovedWithAdjustments, host.World.InvoiceId));
+        EbillingNotificationEnqueuer.ParsePayload(job.Payload)!.HasConfirmedNotice.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "132: a queue that is down does not fail the approval")]
+    public async Task Approve_QueueDown_StillApproves()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Accepted);
+        host.QueueFaults = true;
+
+        var response = await host.SendAsync("POST", "approve");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Queued.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "132: a refused approval (no right, lines still open) enqueues no job")]
+    public async Task Approve_Refused_EnqueuesNothing()
+    {
+        await using var host = await Host.StartAsync();
+        var denied = await host.SendAsync("POST", "approve");
+        host.GrantAll();
+        host.World.AddLine(InvoiceLineStatus.Pending);
+        var open = await host.SendAsync("POST", "approve");
+
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        open.StatusCode.Should().NotBe(HttpStatusCode.OK);
+        host.Queued.Should().BeEmpty();
+    }
+
     private sealed class Host : IAsyncDisposable
     {
         private WebApplication _app = null!;
@@ -334,6 +434,30 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
 
         public StatedCaller StepZero { get; private set; } = null!;
         public ApprovalWorld World { get; } = new();
+
+        /// <summary>The notification jobs the route queued (task 132).</summary>
+        public List<Sprk.Bff.Api.Services.Jobs.JobContract> Queued { get; } = [];
+
+        /// <summary>When set, the queue refuses every job (the approval must still stand).</summary>
+        public bool QueueFaults { get; set; }
+
+        public EbillingNotificationEnqueuer Enqueuer()
+        {
+            var queue = new Moq.Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+                Moq.MockBehavior.Loose,
+                Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions { QueueName = "sdap-jobs" }),
+                Moq.Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+                new Moq.Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+            queue.Setup(q => q.SubmitJobAsync(Moq.It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), Moq.It.IsAny<CancellationToken>()))
+                .Returns((Sprk.Bff.Api.Services.Jobs.JobContract job, CancellationToken _) =>
+                {
+                    if (QueueFaults) { return Task.FromException(new InvalidOperationException("service bus down")); }
+
+                    Queued.Add(job);
+                    return Task.CompletedTask;
+                });
+            return new EbillingNotificationEnqueuer(queue.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<EbillingNotificationEnqueuer>.Instance);
+        }
         public FinAuth.RecordingAccessDataSource Access { get; } = new();
         public FinAuth.RecordingPrivilegeProbe Probe { get; } = new();
 
@@ -365,6 +489,9 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
             builder.Services.AddScoped(sp => host.World.Service(InvoiceApprovalService.DecideCheck(
                 sp.GetRequiredService<AuthorizationService>(), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance)));
 
+            // Task 132: the REAL enqueuer over a recording queue, so the approval's notification job is observed.
+            builder.Services.AddScoped(_ => host.Enqueuer());
+
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
             host._app.UseRouting();
@@ -378,13 +505,19 @@ public sealed class InvoiceApprovalEndpointsAuthorizationContractTests
 
         public void GrantAll() => Access.Grant(InvoiceSet, World.InvoiceId, AccessRights.Read | AccessRights.Write);
 
-        public Task<HttpResponseMessage> SendAsync(string method, string route, bool authenticated = true, string query = "")
+        /// <param name="jsonBody">095f-2a: a JSON body to send (null, the default, sends no body at all, as before).</param>
+        public Task<HttpResponseMessage> SendAsync(string method, string route, bool authenticated = true, string query = "", string? jsonBody = null)
         {
             var request = new HttpRequestMessage(new HttpMethod(method), $"/api/finance/invoices/{World.InvoiceId}/{route}{query}");
             if (authenticated)
             {
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "caller-token");
                 request.Headers.Add(FinanceAuthzTestAuthHandler.CallerHeader, "present");
+            }
+
+            if (jsonBody is not null)
+            {
+                request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
             }
 
             return _client.SendAsync(request);

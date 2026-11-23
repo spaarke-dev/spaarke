@@ -9,7 +9,8 @@
  *                    mapping — smart-todo-r5 task 011 / FR-02)
  *   - Effort        (Dropdown choice; drives `sprk_effortscore` via the shared
  *                    mapping, Option B quick-wins-first — smart-todo-r5 task 011 / FR-03)
- *   - Assignee      (optional, OOB contact lookup → sprk_assignedto)
+ *   - Assignee      (optional, OOB contact lookup → sprk_assignedto; side pane over active contacts
+ *                    when the host supplies a navigationService, owner D-219)
  *                   UAT 2026-06-21: migrated from systemuser to contact
  *   - Notes         (optional, multi-line, sprk_notes)
  *
@@ -33,8 +34,9 @@ import * as React from 'react';
 import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import type { ICreateTodoFormState } from './formTypes';
 import { EMPTY_TODO_FORM } from './formTypes';
-import type { IDataService } from '../../types/serviceInterfaces';
-import { LookupField } from '../LookupField/LookupField';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
+import { DataverseLookupField } from '../LookupField/DataverseLookupField';
+import { ACTIVE_CONTACT_LOOKUP_FILTERS } from '../LookupField/lookupFilters';
 import type { ILookupItem } from '../../types/LookupTypes';
 import {
   TODO_PRIORITY_CHOICES,
@@ -55,6 +57,11 @@ import {
 
 export interface ICreateTodoStepProps {
   dataService: IDataService;
+  /**
+   * Host navigation service. When supplied, Assigned To opens the Dataverse side pane limited to active
+   * contacts (owner D-219); `onSearchUsers` is then only the fallback. Omitted: the inline search field.
+   */
+  navigationService?: INavigationService;
   /**
    * Search callback for the Assignee LookupField. Should return matching
    * OOB `contact` records (UAT 2026-06-21 — `sprk_assignedto` migrated from
@@ -98,6 +105,7 @@ const useStyles = makeStyles({
 
 export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
   dataService: _dataService,
+  navigationService,
   onSearchUsers,
   onValidChange,
   onFormValues,
@@ -189,10 +197,13 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
         <Field label="Due Date">
           <Input type="date" value={formValues.dueDate} onChange={handleDueDateChange} />
         </Field>
-        <LookupField
+        <DataverseLookupField
           label="Assigned To"
+          entityType="contact"
           value={assigneeValue}
           onChange={handleAssigneeChange}
+          navigationService={navigationService}
+          filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
           onSearch={onSearchUsers}
           placeholder="Search contacts..."
         />

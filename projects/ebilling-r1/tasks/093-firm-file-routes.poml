@@ -4,7 +4,7 @@
     <title>Firm file routes GET /api/v1/external/invoices/{id}/files and …/content; the four invoice-document routes retire</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-D</phase>
     <gate>090 and 098 merged; uac-r2 task 188 merged (its guard takes this route's entry); uac-r2 reviews the BFF diff before merge; dev deploy is paired through SPA-r3 (BFF, then SPA) in 079</gate>
-    <status>not-started</status>
+    <status>🔄 built, awaiting review</status>
     <rigor>FULL</rigor>
     <rigor-reason>New external endpoints that stream invoice files to firms (tenant isolation, firm match, uniform answers) and the removal of four external routes.</rigor-reason>
     <model-tier>opus</model-tier>

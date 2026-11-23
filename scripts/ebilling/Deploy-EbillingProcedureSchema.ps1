@@ -69,8 +69,8 @@
         sprk_procedureversion.sprk_procedure   (the only parental relationship on sprk_procedureversion)
         sprk_procedureassignment.sprk_excludedpolicy   (the only parental relationship on sprk_procedureassignment)
     The assignment's core-record lookups (one per FilingCores table) are RemoveLink with Assign, Share, Unshare, Reparent, Merge and
-    RollupView NoCascade: the core-record delete planner (task 117) deletes a record's assignment rows before the record, with the
-    117 sweep as the backstop. A reassign or share of a parent never cascades onto these rows: RecordOwnershipResolver and the
+    RollupView NoCascade: the core-record delete planner (unified-access-control-r2, core-record-delete-design section 14) deletes a
+    record's assignment rows before the record, with the task 117 retire sweep as the backstop. A reassign or share of a parent never cascades onto these rows: RecordOwnershipResolver and the
     secure-child job (task 089) own their owner and shares. Every other lookup is created Assign / Share / Unshare / Reparent
     NoCascade with its listed delete behaviour. The plan refuses (exit 2) a table with two Delete Cascade lookups and any core
     lookup set to Cascade; the verify reads every member back and pins that no other relationship on the two tables is parental.
@@ -95,7 +95,8 @@
     (tasks 081 and 089 own the role rows), so on a first run the check passes by construction; it is the guard for later runs.
 
     NEVER CREATED: a banner column; sprk_isexceptions; any business-unit column or N:N; sprk_ratecard.sprk_scope; sprk_storedfile
-    (task 088). Never deleted or changed: sprk_ruleset.sprk_sourcedocument and the sprk_ratecard core lookups.
+    (task 088). Never deleted or changed BY THIS SCRIPT: sprk_ruleset.sprk_sourcedocument (task 116 removes it) and the sprk_ratecard core
+    lookups (task 193 removes them: scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1; this script names no core table, see its tests).
 
     PROFILES. P9 reuses the existing profile pair of unified-access-control-r2 ("Spaarke BFF-Managed Field Readers" on every
     business unit's default team, "Spaarke BFF-Managed Field Writers" with the BFF application users only), as
@@ -744,7 +745,9 @@ function Test-ProfilePreconditions {
     $problems = [System.Collections.Generic.List[string]]::new()
     $allDefaultTeams = @((Invoke-Dv "teams?`$select=teamid,name,_businessunitid_value&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value)
     # The ontology writer's business unit's default team (scripts/common/OntologyWriterUnit.ps1) is never added to or expected on the reader profile.
-    $dvHeaders = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+    # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+    # come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+    $dvHeaders = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; Consistency = 'Strong' }
     $split = Split-DvDefaultTeamsByOntologyWriterUnit -Api $State.ApiBase -Headers $dvHeaders -DefaultTeams $allDefaultTeams
     $writerUnitTeams = @($split.WriterUnitTeams)
     $defaultTeams = @($split.ReaderTeams | Where-Object { -not $_.businessunitid.isdisabled })

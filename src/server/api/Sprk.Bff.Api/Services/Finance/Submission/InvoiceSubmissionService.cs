@@ -237,6 +237,13 @@ public class InvoiceSubmissionService
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Task 095f-2e2a (EB-D-245): only the internal upload route sends a Correction; the external (SPA) route is New only. A Correction on any
+        // other channel is a caller defect, refused before anything is read or written.
+        if (request.CorrectedInvoice is not null && request.Channel != InvoiceSubmissionChannel.Internal)
+        {
+            throw new ArgumentException("Only the internal channel submits a Correction through the upload entry.", nameof(request));
+        }
+
         // ── 1. The payload: nothing is read or written for a request that is not valid ──
         if (Validate(request) is { } invalid)
         {
@@ -293,8 +300,36 @@ public class InvoiceSubmissionService
                     "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was saved.");
         }
 
-        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, ct);
+        // ── 2c. Task 095f-2e2a (EB-D-245): a Correction's own checks, the SAME check the from-document entry runs (its step 4a), read-only and
+        //        before the first write (the stage), so a refused Correction stages, creates and queues nothing. ──
+        var (correctionRefusal, resubmissionOf) = await CheckRequestedCorrectionAsync(request, number, ct);
+        if (correctionRefusal is not null)
+        {
+            return correctionRefusal;
+        }
+
+        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, resubmissionOf, ct);
     }
+
+    /// <summary>
+    /// Task 095f-2e2a (EB-D-245): the Correction check of an intake entry, shared by <see cref="SubmitAsync"/> (the internal upload) and
+    /// <see cref="SubmitExistingDocumentAsync"/> (from-document) so the two cannot drift: nothing for a New request
+    /// (<see cref="InvoiceSubmissionRequest.CorrectedInvoice"/> null, no read); otherwise <see cref="CheckCorrectionAsync"/> on the request's core
+    /// record, firm and trimmed firm invoice number, whose answer is a refusal (409 <see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/>
+    /// with its reason, or 503) or the submission to record in <see cref="ResubmissionOfColumn"/>. The caller's own Write on the invoice is the
+    /// route's (<c>InvoiceSubmissionEndpoints.PrepareCorrectionAsync</c>), asked before the request reaches here.
+    /// </summary>
+    private async Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> CheckRequestedCorrectionAsync(
+        InvoiceSubmissionRequest request, string number, CancellationToken ct) =>
+        request.CorrectedInvoice is { } correctedInvoice
+            ? await CheckCorrectionAsync(request.CoreRecord, request.FirmId, number, correctedInvoice, ct)
+            : (null, null);
+
+    /// <summary>
+    /// Task 095f-2e1 / 095f-2e2a: the note a request's processing job carries: the Correction's note (the submission row has no column for it;
+    /// the persister writes it on the new invoice), or null for a New request, whose job payload is then exactly what it was.
+    /// </summary>
+    private static string? JobCorrectionNote(InvoiceSubmissionRequest request) => request.CorrectedInvoice is null ? null : request.CorrectionNote;
 
     /// <summary>
     /// ebilling-r1 082c-3 (brief 082c section 3(c), section 7 R4 item 4): the advisory pre-check the external (SPA) route runs on a RECEIVED
@@ -626,17 +661,12 @@ public class InvoiceSubmissionService
         }
 
         // ── 4a. Task 097b: a Correction's own checks (the invoice's firm, core record, status, submission and number), read-only, before
-        //        step A and the create. Only a NEW attempt reaches here: a retry was answered by its earlier submission above. ──
-        Guid? resubmissionOf = null;
-        if (request.CorrectedInvoice is { } correctedInvoice)
+        //        step A and the create. Only a NEW attempt reaches here: a retry was answered by its earlier submission above. Task 095f-2e2a:
+        //        the check is the one the upload entry runs too (CheckRequestedCorrectionAsync). ──
+        var (correctionRefusal, resubmissionOf) = await CheckRequestedCorrectionAsync(request, number, ct);
+        if (correctionRefusal is not null)
         {
-            var (correctionRefusal, target) = await CheckCorrectionAsync(request.CoreRecord, request.FirmId, number, correctedInvoice, ct);
-            if (correctionRefusal is not null)
-            {
-                return correctionRefusal;
-            }
-
-            resubmissionOf = target;
+            return correctionRefusal;
         }
 
         // ── 4a-supporting. Task 118b-2: the supporting documents, read-only, after every other read-only refusal and before step A, so
@@ -754,7 +784,8 @@ public class InvoiceSubmissionService
             return AfterFiling(await AnswerWithEarlierAsync(request, number, concurrent, documentId, jobId, fileSource: null, write), filed);
         }
 
-        if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId))
+        // Task 095f-2e1 (EB-D-237): a Correction's note rides the job (the submission row has no column for it), as on the from-email route.
+        if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId, JobCorrectionNote(request)))
         {
             return AfterFiling(NotQueued(), filed);
         }
@@ -826,7 +857,8 @@ public class InvoiceSubmissionService
         if (earlier.Status == nameof(InvoiceSubmissionStatus.Received))
         {
             ct.ThrowIfCancellationRequested();
-            if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId))
+            // Task 095f-2e1: the retry's own note (the route required one for a Correction), so a re-queued Correction's job carries it.
+            if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId, JobCorrectionNote(request)))
             {
                 return AfterFiling(NotQueued(), filed);
             }
@@ -1498,11 +1530,11 @@ public class InvoiceSubmissionService
 
 
     /// <summary>Submits the job (ADR-004, the submission id as idempotency key); false when the queue refused it (logged).</summary>
-    private async Task<bool> TrySubmitJobAsync(Guid jobId, Guid submissionId, string? correlationId)
+    private async Task<bool> TrySubmitJobAsync(Guid jobId, Guid submissionId, string? correlationId, string? correctionNote = null)
     {
         try
         {
-            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, correlationId), CancellationToken.None);
+            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, correlationId, correctionNote), CancellationToken.None);
             return true;
         }
         catch (Exception ex)
@@ -1565,22 +1597,18 @@ public class InvoiceSubmissionService
     /// order: the firm is active, the core record's fields derive (013), the firm is one of the record's assigned law firms (D-106 / D-110), and
     /// an owner team resolves. Reads only; nothing is written.
     /// </summary>
-    /// <remarks>Task 095c-2: a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null) reaches here only from
-    /// <see cref="DecideForFromEmailAsync"/> (<paramref name="noFirmAllowed"/>; <see cref="ValidateFields"/> refuses it on every other entry).
-    /// It has no firm to check, so the active-firm and firm-link checks are skipped; the record's fields and the owner are decided as for any
-    /// submission. Any other caller with a null firm is a defect and throws before anything is read.</remarks>
+    /// <remarks>EB-D-223 (task 095e): every entry names a firm. <see cref="ValidateFields"/> refuses a null firm first, so a null firm reaching
+    /// here is a defect and throws before anything is read.</remarks>
     private async Task<IntakeDecision> DecideAsync(
-        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null,
-        bool noFirmAllowed = false)
+        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null)
     {
         var core = request.CoreRecord;
-        if (request.FirmId is null && !noFirmAllowed)
+        if (request.FirmId is not { } firm)
         {
-            throw new InvalidOperationException("Only the from-email intake submits without a firm (ValidateFields refuses it on every other entry).");
+            throw new InvalidOperationException("A submission names a firm (ValidateFields refuses a null firm on every entry).");
         }
 
-        // Task 095c-2: no firm (from-email only, above): nothing to check here.
-        switch (request.FirmId is { } firmToCheck ? await IsActiveFirmAsync(firmToCheck, ct) : true)
+        switch (await IsActiveFirmAsync(firm, ct))
         {
             case null:
                 return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
@@ -1609,23 +1637,19 @@ public class InvoiceSubmissionService
         // before the owner is resolved and long before any write; the same codes whichever route called. The order matters: the link reader
         // cannot tell a record that is not returned (deleted, not found) from a fault, so both come back unreadable, and asking it first would
         // answer a deleted record 503 "try again shortly". The detail names no firm and no record.
-        // Task 095c-2: a request with no firm (from-email only, above) has no link to check, so this step is skipped for it.
-        if (request.FirmId is { } firmToLink)
+        switch (await CheckFirmLinkAsync(core, firm, ct))
         {
-            switch (await CheckFirmLinkAsync(core, firmToLink, ct))
-            {
-                case InvoiceFirmLink.Linked:
-                    break;
-                case InvoiceFirmLink.NotLinked:
-                    _logger.LogInformation(
-                        "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
-                        firmToLink, core.EntityLogicalName, core.RecordId, request.Channel);
-                    return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
-                        "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."));
-                default:
-                    return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
-                        "The firm could not be checked right now. Try again shortly."));
-            }
+            case InvoiceFirmLink.Linked:
+                break;
+            case InvoiceFirmLink.NotLinked:
+                _logger.LogInformation(
+                    "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
+                    firm, core.EntityLogicalName, core.RecordId, request.Channel);
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
+                    "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."));
+            default:
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+                    "The firm could not be checked right now. Try again shortly."));
         }
 
         // UAC 194b R3b-2: the submission's question is built from the row as written so far (RecordOwnershipContext.ForChild: its core
@@ -1651,9 +1675,8 @@ public class InvoiceSubmissionService
     /// the firm active, the core record's fields, the firm link D-106, the owner), with the submission's creator person the caller's own
     /// <paramref name="callerSystemUserId"/> (OP-5; every generation, whoever made an earlier one). Reads only. The answer: a refusal, or the
     /// submission row (core lookup, owner and creator person set) and its resolver fields.
-    /// <para>Task 095c-2: the one entry that accepts a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null): the firm checks
-    /// are skipped and the record and owner are decided as usual. Whether a no-firm submission may be numbered at all (the tracking-scope phase)
-    /// is the from-email route's check before anything is saved (<see cref="CanSubmitWithoutFirmAsync"/>), and the allocator's on create.</para>
+    /// <para>EB-D-223 (task 095e): a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null) is refused here like on every
+    /// other entry (<see cref="ValidateFields"/>, 400 firm_invalid); the from-email route refuses it earlier, after the replay of K.</para>
     /// </summary>
     internal async Task<(InvoiceSubmissionOutcome? Refusal, Entity? Row, InvoiceFamilyResolverFields? ResolverFields)> DecideForFromEmailAsync(
         InvoiceSubmissionRequest request, Guid callerSystemUserId, CancellationToken ct)
@@ -1664,21 +1687,14 @@ public class InvoiceSubmissionService
             throw new ArgumentException("A from-email submission is internal and names its caller's systemuser.", nameof(request));
         }
 
-        if (ValidateFields(request, noFirmAllowed: true) is { } invalid)
+        if (ValidateFields(request) is { } invalid)
         {
             return (invalid, null, null);
         }
 
-        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId, noFirmAllowed: true);
+        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId);
         return (decision.Refusal, decision.Row, decision.ResolverFields);
     }
-
-    /// <summary>
-    /// Task 095c-2: whether a submission with no firm may be taken now: only once this environment's tracking-scope key is Active (phase P2,
-    /// <see cref="ITrackingNumberAllocator.NumbersSubmissionsWithoutFirmAsync"/>). The from-email route asks it before it saves or files
-    /// anything, and answers 400 <see cref="InvoiceSubmissionErrors.FirmInvalid"/> "A firm is required." while it is false (P0, P1).
-    /// </summary>
-    internal virtual Task<bool> CanSubmitWithoutFirmAsync(CancellationToken ct) => _allocator.NumbersSubmissionsWithoutFirmAsync(ct);
 
     // ── ebilling-r1 task 097b: a Correction (model 9.1 "Existing invoice", EB-D-179) ──
 
@@ -1940,9 +1956,8 @@ public class InvoiceSubmissionService
 
     /// <summary>The checks of the request's own fields every entry runs first: the number (D-91), its length, the PO, the firm and record ids.</summary>
     /// <param name="request">The request.</param>
-    /// <param name="noFirmAllowed">Task 095c-2: true only for <see cref="DecideForFromEmailAsync"/>, where a null firm means "no firm". Every
-    /// other entry refuses a null firm as it refuses the empty id. The empty id is refused on every entry.</param>
-    private static InvoiceSubmissionOutcome? ValidateFields(InvoiceSubmissionRequest request, bool noFirmAllowed = false)
+    /// <remarks>EB-D-223 (task 095e): a null firm and the empty id are refused on every entry.</remarks>
+    private static InvoiceSubmissionOutcome? ValidateFields(InvoiceSubmissionRequest request)
     {
         // D-91 first: the number is required, so a request without one never costs an upload.
         var number = request.FirmInvoiceNumber?.Trim();
@@ -1964,7 +1979,7 @@ public class InvoiceSubmissionService
                 $"The PO number may be at most {MaxPoNumberLength} characters.");
         }
 
-        if (request.FirmId == Guid.Empty || (request.FirmId is null && !noFirmAllowed))
+        if (request.FirmId is null || request.FirmId == Guid.Empty)
         {
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
         }
@@ -2075,7 +2090,15 @@ public class InvoiceSubmissionService
     /// <see cref="IsActiveFirmAsync"/>); a firm with no name is listed under its id. Returns <see langword="null"/> when any read faulted (a
     /// fault is never "no firm"). Reads only the ids it is given, so the caller's own firms are the only ones that can come back.
     /// </summary>
-    public async Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(IReadOnlyCollection<Guid> firmIds, CancellationToken ct)
+    public Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(IReadOnlyCollection<Guid> firmIds, CancellationToken ct) =>
+        ReadActiveFirmNamesAsync(_entities, _logger, firmIds, ct);
+
+    /// <summary>
+    /// <see cref="ReadActiveFirmNamesAsync(IReadOnlyCollection{Guid}, CancellationToken)"/> over a given app-only entity service: the ONE
+    /// definition, also used by the firm-assign route (ebilling-r1 task 095g) for the record's firm list after its write.
+    /// </summary>
+    internal static async Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(
+        IGenericEntityService entities, ILogger logger, IReadOnlyCollection<Guid> firmIds, CancellationToken ct)
     {
         var wanted = firmIds.Where(id => id != Guid.Empty).Distinct().ToList();
         if (wanted.Count == 0)
@@ -2095,7 +2118,7 @@ public class InvoiceSubmissionService
                 var query = new QueryExpression(OrganizationEntity) { ColumnSet = new ColumnSet("statecode", nameColumn) };
                 query.Criteria.AddCondition("sprk_organizationid", ConditionOperator.In, chunk.Cast<object>().ToArray());
                 query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-                foreach (var firm in (await _entities.RetrieveMultipleAsync(query, ct)).Entities)
+                foreach (var firm in (await entities.RetrieveMultipleAsync(query, ct)).Entities)
                 {
                     var name = firm.GetAttributeValue<string>(nameColumn);
                     found[firm.Id] = string.IsNullOrWhiteSpace(name) ? firm.Id.ToString() : name;
@@ -2104,7 +2127,7 @@ public class InvoiceSubmissionService
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
-            _logger.LogWarning(ex, "Firm list unavailable: the firms could not be read");
+            logger.LogWarning(ex, "Firm list unavailable: the firms could not be read");
             return null;
         }
 
@@ -2116,7 +2139,7 @@ public class InvoiceSubmissionService
 
     private async Task<InvoiceSubmissionOutcome> WriteAsync(
         InvoiceSubmissionRequest request, string number, InvoiceSubmissionFile file, Entity row, InvoiceFamilyResolverFields resolverFields,
-        CancellationToken ct)
+        Guid? resubmissionOf, CancellationToken ct)
     {
         var core = request.CoreRecord;
         var submissionId = Guid.NewGuid();
@@ -2182,6 +2205,12 @@ public class InvoiceSubmissionService
                 row["sprk_submitter"] = new EntityReference("contact", contactId);
             }
 
+            // Task 095f-2e2a: a Correction names the replaced invoice's submission (CheckRequestedCorrectionAsync's answer), as from-document does.
+            if (resubmissionOf is { } earlierSubmission)
+            {
+                row[ResubmissionOfColumn] = new EntityReference(SubmissionEntity, earlierSubmission);
+            }
+
             // The FR-05 guard on the payload exactly as written (one core lookup), the last check before the create.
             if (InvoiceFamilyCoreRecordGuard.Check(row) is { IsRefused: true } refused)
             {
@@ -2199,8 +2228,8 @@ public class InvoiceSubmissionService
                     "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
             }
 
-            // 3. The job (ADR-004): payload { submissionId }, idempotency key = the submission id.
-            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId), write);
+            // 3. The job (ADR-004): payload { submissionId } (and a Correction's note, task 095f-2e2a), idempotency key = the submission id.
+            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, request.CorrelationId, JobCorrectionNote(request)), write);
 
             _logger.LogInformation(
                 "Invoice submission {SubmissionId} received through {Channel} for {Entity} {RecordId}; file {FileId} staged; job {JobId} enqueued",
@@ -2238,15 +2267,23 @@ public class InvoiceSubmissionService
             SubmissionId = submissionId,
         };
 
-    internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId) => new()
+    internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId, string? correctionNote = null) => new()
     {
         JobId = jobId,
         JobType = JobType,
         SubjectId = submissionId.ToString(),
         CorrelationId = correlationId ?? string.Empty,
         IdempotencyKey = submissionId.ToString(),
-        Payload = JsonSerializer.SerializeToDocument(new { submissionId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+        // Task 095f (EB-D-225): a Correction's note (from-email; from-document since 095f-2e1; the internal upload since 095f-2e2a) rides the
+        // payload (the submission row has no column for it); every other job's
+        // payload is exactly what it was.
+        Payload = JsonSerializer.SerializeToDocument(
+            new InvoiceSubmissionJobPayload(submissionId, string.IsNullOrWhiteSpace(correctionNote) ? null : correctionNote),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }),
     };
+
+    /// <summary>The processing job's payload as written (<see cref="BuildJob"/>); the handler reads it as <c>InvoiceSubmissionProcessingPayload</c>.</summary>
+    private sealed record InvoiceSubmissionJobPayload(Guid SubmissionId, string? CorrectionNote);
 
     /// <summary>
     /// The display name of the uploaded PDF (<c>sprk_storedfile.sprk_name</c>): the tracking number when given (the job, which writes the

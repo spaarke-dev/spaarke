@@ -97,7 +97,7 @@ When PCF controls call the BFF API, they MUST use the URL construction pattern f
 
 ```typescript
 import { getBffBaseUrl } from './config/runtimeConfig';
-// getBffBaseUrl() returns HOST ONLY (no /api suffix) — normalizeUrl() in @spaarke/auth strips /api if present
+// getBffBaseUrl() returns HOST ONLY (no /api suffix) — normalizeBffBaseUrl() in @spaarke/auth strips /api if present
 // Callers MUST include /api in path:
 const url = `${getBffBaseUrl()}/api/documents/${documentId}/content`;  // ✅ CORRECT
 const wrong = `${getBffBaseUrl()}/communications/send`;                 // ❌ MISSING /api → 404 from BFF
@@ -105,7 +105,7 @@ const wrong = `${getBffBaseUrl()}/communications/send`;                 // ❌ M
 
 **Discovery context (2026-05-25)**: Phase 5 demo cutover surfaced 3 LegalWorkspace code sites that violated this convention (commit `2561ce37`). The bug was latent in BOTH dev and demo deployed bundles — only manifested when the Email Document feature was exercised. Prevention: code review must verify every `${getBffBaseUrl()}/{path}` includes `/api`; typed wrappers (e.g., `communicationApi.ts`) prevent the bug by design.
 
-**Dataverse env var format**: `sprk_BffApiBaseUrl` can be host-only or include `/api`; both work because `normalizeUrl()` strips the suffix. Maintain consistent format across envs for operator clarity.
+**Dataverse env var format**: `sprk_BffApiBaseUrl` can be host-only or include `/api`; both work because `normalizeBffBaseUrl()` strips the suffix. Maintain consistent format across envs for operator clarity.
 
 ---
 

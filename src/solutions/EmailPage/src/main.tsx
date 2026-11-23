@@ -44,6 +44,8 @@ import {
   getXrm,
   ensureNavigatorSidePane,
   cleanGuid,
+  parseComposeRegarding,
+  type ComposeRegarding,
   type OpenEmailComposeMode,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider, getTelemetryConnectionString } from '@spaarke/auth';
@@ -151,7 +153,7 @@ interface HostFormXrm {
 function resolveEmailLaunch(): {
   initialSelectedId?: string;
   hideList: boolean;
-  compose?: { mode: OpenEmailComposeMode; sourceId?: string };
+  compose?: ComposeLaunch;
 } {
   const normalizeId = (raw: string | null | undefined): string | undefined => {
     const v = cleanGuid(raw ?? '');
@@ -175,7 +177,9 @@ function resolveEmailLaunch(): {
       const valid: OpenEmailComposeMode[] = ['new', 'reply', 'replyAll', 'forward'];
       const mode = (valid as string[]).includes(rawCompose) ? (rawCompose as OpenEmailComposeMode) : 'new';
       const sourceId = normalizeId(top.get('id') ?? dataParams?.get('id'));
-      return { hideList: false, compose: { mode, sourceId } };
+      // "Related to" seed for a New email (#2908): from the same scope the `compose` key came from.
+      const regarding = mode === 'new' ? parseComposeRegarding(top.get('compose') ? top : (dataParams ?? top)) : undefined;
+      return { hideList: false, compose: { mode, sourceId, regarding } };
     }
   } catch {
     /* URL parse failure → fall through to record/list resolution */
@@ -262,8 +266,15 @@ const EmailPageAuthError: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
 };
 EmailPageAuthError.displayName = 'EmailPageAuthError';
 
+/** Compose-mode launch: which composer, its source email, and (New only) the "Related to" record. */
+interface ComposeLaunch {
+  mode: OpenEmailComposeMode;
+  sourceId?: string;
+  regarding?: ComposeRegarding;
+}
+
 interface EmailComposeStandaloneProps {
-  compose: { mode: OpenEmailComposeMode; sourceId?: string };
+  compose: ComposeLaunch;
   bffBaseUrl: string;
   dataService: ReturnType<typeof createXrmDataService>;
   navigationService: ReturnType<typeof createXrmNavigationService>;
@@ -311,7 +322,7 @@ const EmailComposeStandalone: React.FC<EmailComposeStandaloneProps> = ({
     [dataService]
   );
 
-  const { actions, composerDialog } = useEmailComposeActions({
+  const { actions, composerDialog, openComposer } = useEmailComposeActions({
     // Dedicated compose window (target=2 modal) — the composer IS the window.
     composerFullBleed: true,
     authenticatedFetch,
@@ -340,12 +351,13 @@ const EmailComposeStandalone: React.FC<EmailComposeStandaloneProps> = ({
     triggeredRef.current = true;
     // `useEmailComposeActions` always populates all four handlers; the toolbar-actions
     // type marks them optional, so optional-chain the calls (safe no-op if ever absent).
-    const { mode, sourceId } = compose;
+    const { mode, sourceId, regarding } = compose;
     if (mode === 'reply' && sourceId) actions.onReply?.(sourceId);
     else if (mode === 'replyAll' && sourceId) actions.onReplyAll?.(sourceId);
     else if (mode === 'forward' && sourceId) actions.onForward?.(sourceId);
+    else if (regarding) openComposer('compose', undefined, { regarding });
     else actions.onNew?.();
-  }, [actions, compose]);
+  }, [actions, openComposer, compose]);
 
   // A subtle loading state shows behind the dialog during the reply/forward source
   // fetch; the composer dialog's own modal backdrop covers it once it opens.

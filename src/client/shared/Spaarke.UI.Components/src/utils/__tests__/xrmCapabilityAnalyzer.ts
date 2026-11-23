@@ -75,7 +75,8 @@
  * check covers `WebApi.*`, and a WebApi object handed anywhere is a `WebApi.*`
  * use.
  *   webApi → WebApi.* · navigation → Navigation.navigateTo · openForm →
- *   Navigation.openForm · openUrl → Navigation.openUrl · utility, clientUrl →
+ *   Navigation.openForm · openUrl → Navigation.openUrl · openErrorDialog →
+ *   Navigation.openErrorDialog · utility, clientUrl →
  *   Utility.getGlobalContext · lookupObjects → Utility.lookupObjects ·
  *   metadata → Utility.getEntityMetadata · pageContext → Utility.getPageContext
  *   · sidePanes → App.sidePanes · page → Page.* · a list covers the union.
@@ -125,6 +126,7 @@ export const CAPABILITY_COVERAGE: Record<string, string[]> = {
   navigation: ['Navigation.navigateTo'],
   openForm: ['Navigation.openForm'],
   openUrl: ['Navigation.openUrl'],
+  openErrorDialog: ['Navigation.openErrorDialog'],
   utility: ['Utility.getGlobalContext'],
   clientUrl: ['Utility.getGlobalContext'],
   lookupObjects: ['Utility.lookupObjects'],

@@ -23,11 +23,13 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.Api.ExternalAccess;
 using Sprk.Bff.Api.Tests.Api.Finance;
@@ -47,7 +49,7 @@ namespace Sprk.Bff.Api.Tests.Auth.Finance;
 /// <see cref="FirmOutcomeAuthorizationFilter"/> and watched the another-firm tests here fail (task notes). Every refusal is asserted to read
 /// NOTHING through the projection, and every refusal body is the same, so the status says nothing about why.
 /// </remarks>
-public sealed class FirmOutcomeScopeTests : IAsyncLifetime
+public sealed partial class FirmOutcomeScopeTests : IAsyncLifetime
 {
     private static readonly Guid FirmA = Guid.Parse("13000000-0000-4000-8000-0000000000a1");
     private static readonly Guid FirmB = Guid.Parse("13000000-0000-4000-8000-0000000000b1");
@@ -405,6 +407,10 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     };
 
     /// <summary>The stored findings (<c>sprk_findingsjson</c>) of an auto-rejected submission with a line finding (line index 2) and an invoice-level one.</summary>
+    /// <summary>A Signal's <c>sprk_evidencerefs</c> holding one billing.reason entry, the shape BillingFindingSignalMapper writes.</summary>
+    private static string ReasonEvidence(string reasonCode) =>
+        new JsonArray(new JsonObject { ["kind"] = BillingFindingSignalMapper.ReasonEvidenceKind, ["ref"] = reasonCode }).ToJsonString();
+
     private static string RejectedFindingsJson(Guid version) => new JsonObject
     {
         ["schema"] = 1,
@@ -529,6 +535,337 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
     // ═══════════════════════════════════════════════════════════════════════════
     // Invoice: the closed set of refusals (every one the same 403, nothing projected)
     // ═══════════════════════════════════════════════════════════════════════════
+
+    // ── Task 132: the invoice rule asked as a decision, for the notification feed ──
+
+    private int _feedHidingCalls;
+
+    private async Task<IReadOnlyDictionary<Guid, InvoiceFeedDecision>> FeedDecisions(IReadOnlyList<Guid> invoices, CallerPrincipal? caller = null, IReadOnlyList<Guid>? firms = null)
+    {
+        ExternalInvoiceHiding hide = (_, ids, _) =>
+        {
+            _feedHidingCalls++;
+            return Task.FromResult(_invoiceHidingFaults
+                ? InvoiceVisibilityResult.ReadFailed(ids)
+                : new InvoiceVisibilityResult(
+                    ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        };
+        var filter = new FirmOutcomeAuthorizationFilter(
+            FirmOutcomeSubject.Invoice, _participations, _data, _h.Build(), NullLogger<FirmOutcomeAuthorizationFilter>.Instance, hide, null);
+
+        // The rows as the feed's candidate query reads them: the access rule's own scope columns, one row per invoice.
+        var rows = new List<(Guid Id, IReadOnlyDictionary<string, object?> Row)>();
+        foreach (var id in invoices)
+        {
+            rows.Add((id, await _data.GetInvoiceLookupsAsync(id, FirmOutcomeAuthorizationFilter.InvoiceScopeColumnNames, CancellationToken.None)));
+        }
+
+        return await filter.DecideInvoicesForFeedAsync(caller ?? Contact(), firms ?? [FirmA], rows, CancellationToken.None);
+    }
+
+    private async Task<InvoiceFeedDecision> FeedDecision(Guid invoice) => (await FeedDecisions([invoice]))[invoice];
+
+    // ── Task 132 round 4 (uac-r2 F2): the feed's PRODUCTION row conversion, end to end ──
+    //
+    // FeedDecisions above hands the filter rows already in the route's shape, and EbillingFeedSourceTests replaces the decision with a double, so
+    // neither drives the production chain: EbillingFeedSource.CandidateQuery's columns -> the SDK entity the store returns (ONLY those columns, lookups
+    // as EntityReference) -> ScopeRowOf (EntityReference -> Guid) -> FirmOutcomeAuthorizationFilter.DecideInvoicesForFeedAsync. Here the feed is built
+    // through its DI constructor, so its REAL decision runs over this rig, and the store projects the real query's ColumnSet as Dataverse does.
+
+    private static readonly Guid FeedLiveParent = Guid.Parse("13000000-0000-4000-8000-00000000dd01");
+    private static readonly DateTimeOffset FeedCutoff = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+
+    /// <summary>The live-parent lookup columns of an invoice (the lookups whose parents' live roots join the secure-roots rule), one theory case each.</summary>
+    public static IEnumerable<object[]> InvoiceLiveParentColumns() =>
+        ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice").Select(l => new object[] { l.Column });
+
+    /// <summary>
+    /// A stored invoice as the SDK holds it (every lookup an <see cref="EntityReference"/>): the caller's own Rejected invoice of <see cref="FirmA"/>, filed
+    /// under the readable matter, whose ONLY secure root is <see cref="SecureProject"/>, reached through the live-parent lookup <paramref name="liveParentColumn"/>.
+    /// </summary>
+    private Entity StoredInvoiceUnderALiveParent(string liveParentColumn)
+    {
+        var lookup = ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice").Single(l => l.Column == liveParentColumn);
+        _data.LiveRoots[(lookup.Table, FeedLiveParent)] = [(ExternalGrantRootType.Project, SecureProject)];
+
+        return new Entity("sprk_invoice", Guid.NewGuid())
+        {
+            ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.Rejected),
+            ["modifiedon"] = new DateTime(2026, 10, 10, 9, 0, 0, DateTimeKind.Utc),
+            ["sprk_name"] = "INV-1",
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmA),
+            ["sprk_submittedby"] = new EntityReference("contact", ContactId),
+            ["sprk_matter"] = new EntityReference("sprk_matter", SharedMatter),
+            [liveParentColumn] = new EntityReference(lookup.Table, FeedLiveParent),
+        };
+    }
+
+    /// <summary>The feed over this rig through its production constructor: its real firm read, candidate read, decision and projection.</summary>
+    private EbillingFeedSource ProductionFeed(IReadOnlyList<Entity> storedInvoices, List<QueryExpression>? candidateQueries = null)
+    {
+        var store = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        store.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+            {
+                switch (query.EntityName)
+                {
+                    case "sprk_invoice":
+                        candidateQueries?.Add(query);
+
+                        // Dataverse returns only the requested columns: a column the query did not name is absent from the entity.
+                        return new EntityCollection(storedInvoices.Select(r => Requested(r, query.ColumnSet)).ToList());
+                    case "sprk_organization":
+                        return new EntityCollection(); // the caller is the submitter, not a billing contact
+                    default:
+                        throw new InvalidOperationException($"Unexpected read of {query.EntityName}");
+                }
+            });
+
+        ExternalInvoiceHiding hide = (_, ids, _) => Task.FromResult(new InvoiceVisibilityResult(ids, new Dictionary<Guid, InvoiceHiddenReason>(), faulted: false));
+        return new EbillingFeedSource(
+            store.Object, _participations, _data, _h.Build(), Projection(), _h.Monitor,
+            NullLogger<EbillingFeedSource>.Instance, NullLogger<FirmOutcomeAuthorizationFilter>.Instance, hide, null);
+    }
+
+    /// <summary>The caller of the portal: Read on the shared matter, and (when given) Read on the secure project too.</summary>
+    private static CallerPrincipal ContactReadingProject(Guid? project) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = ContactId,
+        ProjectAccess = project is { } id ? [new CallerProjectAccess { ProjectId = id, Rights = AccessRights.Read }] : Array.Empty<CallerProjectAccess>(),
+        MatterAccess = new Dictionary<Guid, AccessRights> { [SharedMatter] = AccessRights.Read },
+    };
+
+    [Theory(DisplayName = "132 round-4 F2 (must-fire): through the PRODUCTION feed, an invoice whose ONLY secure root is reached through a live-parent lookup the caller cannot read is Denied (not an item)")]
+    [MemberData(nameof(InvoiceLiveParentColumns))]
+    public async Task ProductionFeed_InvoiceUnderAnUnreadableSecureRootViaALiveParent_IsNotAnItem(string liveParentColumn)
+    {
+        var invoice = StoredInvoiceUnderALiveParent(liveParentColumn);
+        var feed = ProductionFeed([invoice]);
+
+        var result = await feed.ReadAsync(ContactReadingProject(null), FeedCutoff, CancellationToken.None);
+
+        result.Items.Should().BeEmpty("the secure project behind the live parent is not readable by the caller");
+        result.Truncated.Should().BeFalse("Denied is a settled decision, not an undecidable read");
+        _data.FlagReads.Should().Be(1, "the secure status of the live parent's root was asked, so the refusal came from the live-parent lookup, not from an earlier step");
+    }
+
+    [Theory(DisplayName = "132 round-4 F2 (must-not-fire twin): through the PRODUCTION feed, the same invoice is an item when the caller CAN read that secure root")]
+    [MemberData(nameof(InvoiceLiveParentColumns))]
+    public async Task ProductionFeed_SameInvoice_WhenTheCallerReadsTheSecureRoot_IsAnItem(string liveParentColumn)
+    {
+        var invoice = StoredInvoiceUnderALiveParent(liveParentColumn);
+        var feed = ProductionFeed([invoice]);
+
+        var result = await feed.ReadAsync(ContactReadingProject(SecureProject), FeedCutoff, CancellationToken.None);
+
+        result.Items.Select(i => i.InvoiceId).Should().Equal(invoice.Id);
+        result.Truncated.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "132 round-4 F2: the production candidate read names every scope column of the route's invoice rule (the live-parent lookups included), and the stored invoice is read through them")]
+    public async Task ProductionFeed_CandidateRead_NamesEveryScopeColumnOfTheRoutesRule()
+    {
+        var column = ExternalMultiRootRule.LiveParentLookupsOf("sprk_invoice")[0].Column;
+        var queries = new List<QueryExpression>();
+        var feed = ProductionFeed([StoredInvoiceUnderALiveParent(column)], queries);
+
+        await feed.ReadAsync(ContactReadingProject(SecureProject), FeedCutoff, CancellationToken.None);
+
+        queries.Should().ContainSingle();
+        queries[0].ColumnSet.Columns.Should().Contain(FirmOutcomeAuthorizationFilter.InvoiceScopeColumnNames);
+    }
+
+    // ── Task 132 review round 2 (D-70): the same rule, asked for a firm-notice RECIPIENT, for one subject ──
+
+    private async Task<InvoiceFeedDecision> NoticeDecision(FirmOutcomeSubject subject, Guid subjectId, CallerPrincipal? caller = null, IReadOnlyList<Guid>? firms = null)
+    {
+        ExternalInvoiceHiding hide = (_, ids, _) => Task.FromResult(_invoiceHidingFaults
+            ? InvoiceVisibilityResult.ReadFailed(ids)
+            : new InvoiceVisibilityResult(
+                ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        ExternalInvoiceSubmissionHiding hideSubmissions = (_, submissions, _) =>
+        {
+            var ids = submissions.Select(x => x.SubmissionId).ToList();
+            return Task.FromResult(new InvoiceVisibilityResult(
+                ids, ids.Where(_hiddenSubmissions.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+        };
+        var filter = new FirmOutcomeAuthorizationFilter(
+            subject, _participations, _data, _h.Build(), NullLogger<FirmOutcomeAuthorizationFilter>.Instance, hide, hideSubmissions);
+
+        return await filter.DecideSubjectForNoticeAsync(caller ?? Contact(), firms ?? [FirmA], subjectId, CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "132 D-70 notice decision (must-not-fire): an invoice of the contact's firm, readable core, not hidden, is Visible")]
+    public async Task NoticeDecision_OwnFirmsReadableInvoice_IsVisible() =>
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmA))).Should().Be(InvoiceFeedDecision.Visible);
+
+    [Fact(DisplayName = "132 D-70 notice decision (must-fire): another firm's invoice, a contact WITHOUT Read on the core record, an unreadable secure root and a hidden invoice are Denied; an undecidable one is Unavailable")]
+    public async Task NoticeDecision_EachRefusalOfTheRoute_IsNotVisible()
+    {
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmB))).Should().Be(InvoiceFeedDecision.Denied);
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmA, OtherMatter))).Should().Be(InvoiceFeedDecision.Denied);
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, SeedInvoice(FirmA), Contact(AccessRights.None))).Should().Be(InvoiceFeedDecision.Denied);
+
+        var secure = SeedInvoice(FirmA);
+        _data.Invoices[secure]["sprk_project"] = SecureProject;
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, secure)).Should().Be(InvoiceFeedDecision.Denied, "an unreadable secure root denies, as on the route");
+
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, hidden)).Should().Be(InvoiceFeedDecision.Denied);
+
+        var undecidable = SeedInvoice(FirmA);
+        _invoiceHidingFaults = true;
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, undecidable)).Should().Be(InvoiceFeedDecision.Unavailable, "a fault is never Visible");
+    }
+
+    [Fact(DisplayName = "132 D-70 notice decision: a missing invoice is Denied (the route's uniform refusal), never Visible")]
+    public async Task NoticeDecision_MissingInvoice_IsDenied() =>
+        (await NoticeDecision(FirmOutcomeSubject.Invoice, Guid.NewGuid())).Should().Be(InvoiceFeedDecision.Denied);
+
+    [Fact(DisplayName = "132 D-70 notice decision: a submission of the contact's firm is Visible; another firm's, and a contact with no Read on its core record, are Denied")]
+    public async Task NoticeDecision_Submission_IsTheRoutesSubmissionRule()
+    {
+        (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmA))).Should().Be(InvoiceFeedDecision.Visible);
+        (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmB))).Should().Be(InvoiceFeedDecision.Denied);
+        (await NoticeDecision(FirmOutcomeSubject.Submission, SeedSubmission(FirmA), Contact(AccessRights.None))).Should().Be(InvoiceFeedDecision.Denied);
+    }
+
+    // ── Task 132 review round 3 (F2): the PRODUCTION composition of the recipient rule ──
+
+    private static readonly Guid ContactWithoutGrant = Guid.Parse("13000000-0000-4000-8000-0000000000e2");
+
+    private static AccessibleRecordSet GrantSet(string entity, params Guid[] readable) => new()
+    {
+        PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+        EntityType = entity,
+        Rights = readable.ToDictionary(id => id, _ => AccessRights.Read),
+        Sources = new AccessibleRecordSetSources(false, true, false),
+    };
+
+    /// <summary>The portal's grant composition: <see cref="ContactId"/> holds Read on the shared matter; <see cref="ContactWithoutGrant"/> holds nothing.</summary>
+    private static Mock<IAccessibleRecordSetService> PortalGrants()
+    {
+        var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        foreach (var entity in new[] { AccessibleRecordSetService.ProjectEntity, AccessibleRecordSetService.MatterEntity, AccessibleRecordSetService.WorkAssignmentEntity })
+        {
+            sets.Setup(x => x.ComposeForCiamContactAsync(ContactId, entity, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(GrantSet(entity, entity == AccessibleRecordSetService.MatterEntity ? [SharedMatter] : []));
+            sets.Setup(x => x.ComposeForCiamContactAsync(ContactWithoutGrant, entity, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(GrantSet(entity));
+        }
+
+        return sets;
+    }
+
+    private ExternalInvoiceHiding HidingOfThisRig() => (_, ids, _) => Task.FromResult(
+        new InvoiceVisibilityResult(
+            ids, ids.Where(_hiddenInvoices.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+
+    private ExternalInvoiceSubmissionHiding SubmissionHidingOfThisRig() => (_, submissions, _) =>
+    {
+        var ids = submissions.Select(x => x.SubmissionId).ToList();
+        return Task.FromResult(new InvoiceVisibilityResult(
+            ids, ids.Where(_hiddenSubmissions.Contains).ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden), faulted: false));
+    };
+
+    [Fact(DisplayName = "132 D-70 production wiring (must-fire): the REAL recipient rule (real principal composition, real route filter) tells a contact who holds Read on the invoice's matter and does NOT tell one who holds none")]
+    public async Task TheRealRecipientRule_TellsTheContactWithRead_AndNotTheOneWithout()
+    {
+        var invoice = SeedInvoice(FirmA);
+        var rule = new EbillingRecipientAccessRule(
+            PortalGrants().Object, _participations, _data, _h.Build(),
+            NullLogger<EbillingRecipientAccessRule>.Instance, NullLogger<FirmOutcomeAuthorizationFilter>.Instance,
+            HidingOfThisRig(), SubmissionHidingOfThisRig());
+
+        (await rule.MayBeToldAsync(ContactId, [FirmA], EbillingNotificationSubject.Invoice, invoice, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Told);
+        (await rule.MayBeToldAsync(ContactWithoutGrant, [FirmA], EbillingNotificationSubject.Invoice, invoice, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Denied, "a contact without Read on the invoice's matter cannot open it in the portal, so it is not emailed about it");
+    }
+
+    [Fact(DisplayName = "132 D-70 production wiring: AddFinanceModule's registration builds the rule from the container, with the container's hiding seams, and it decides (a hidden invoice is Denied, a visible one Told)")]
+    public async Task TheRecipientRule_ResolvedFromTheContainer_DecidesThroughTheContainersSeams()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddFinanceModule(new ConfigurationBuilder().AddInMemoryCollection().Build());
+        // What the rule depends on, as AddExternalAccess and the identity modules provide it in production (substituted at Dataverse only).
+        services.AddSingleton(PortalGrants().Object);
+        services.AddSingleton<ExternalParticipationService>(_participations);
+        services.AddSingleton<ExternalDataService>(_data);
+        services.AddSingleton(_h.Build());
+        services.AddScoped(_ => HidingOfThisRig());
+        services.AddScoped(_ => SubmissionHidingOfThisRig());
+        var visible = SeedInvoice(FirmA);
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var rule = scope.ServiceProvider.GetRequiredService<EbillingRecipientAccessRule>();
+
+        (await rule.MayBeToldAsync(ContactId, [FirmA], EbillingNotificationSubject.Invoice, visible, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Told);
+        (await rule.MayBeToldAsync(ContactId, [FirmA], EbillingNotificationSubject.Invoice, hidden, CancellationToken.None))
+            .Should().Be(RecipientAccessDecision.Denied, "the rule must have been given the container's invoice hiding seam");
+    }
+
+    [Fact(DisplayName = "132 feed decision (must-not-fire): an invoice of the caller's firm, readable core, not hidden, is Visible")]
+    public async Task FeedDecision_OwnFirmsReadableInvoice_IsVisible() =>
+        (await FeedDecision(SeedInvoice(FirmA))).Should().Be(InvoiceFeedDecision.Visible);
+
+    [Fact(DisplayName = "132 feed decision (must-fire): another firm's invoice on a SHARED matter is Denied")]
+    public async Task FeedDecision_AnotherFirmsInvoice_IsDenied() =>
+        (await FeedDecision(SeedInvoice(FirmB))).Should().Be(InvoiceFeedDecision.Denied);
+
+    [Fact(DisplayName = "132 feed decision (must-fire): a contact without access to the invoice's core record is Denied")]
+    public async Task FeedDecision_WithoutCoreAccess_IsDenied() =>
+        (await FeedDecision(SeedInvoice(FirmA, OtherMatter))).Should().Be(InvoiceFeedDecision.Denied);
+
+    [Fact(DisplayName = "132 feed decision (must-fire): an invoice the (a') predicate hides is Denied")]
+    public async Task FeedDecision_Hidden_IsDenied()
+    {
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+
+        (await FeedDecision(hidden)).Should().Be(InvoiceFeedDecision.Denied);
+    }
+
+    [Fact(DisplayName = "132 feed decision (must-fire): a visibility decision that cannot be made is Unavailable, never Visible")]
+    public async Task FeedDecision_HidingThatFaults_IsUnavailable()
+    {
+        var invoice = SeedInvoice(FirmA);
+        _invoiceHidingFaults = true;
+
+        (await FeedDecision(invoice)).Should().Be(InvoiceFeedDecision.Unavailable);
+    }
+
+    [Fact(DisplayName = "132 feed F3: a mixed batch is decided per invoice, with ONE hiding call and ONE secure-root flag read for the whole batch")]
+    public async Task FeedDecisions_MixedBatch_AreEachRight_WithOneHidingCall()
+    {
+        var visible = SeedInvoice(FirmA);
+        var otherFirm = SeedInvoice(FirmB);
+        var noCoreAccess = SeedInvoice(FirmA, OtherMatter);
+        var hidden = SeedInvoice(FirmA);
+        _hiddenInvoices.Add(hidden);
+        var secure1 = SeedInvoice(FirmA);
+        var secure2 = SeedInvoice(FirmA);
+        _data.Invoices[secure1]["sprk_project"] = SecureProject;
+        _data.Invoices[secure2]["sprk_project"] = SecureProject;
+
+        var answers = await FeedDecisions([visible, otherFirm, noCoreAccess, hidden, secure1, secure2]);
+
+        answers[visible].Should().Be(InvoiceFeedDecision.Visible);
+        answers[otherFirm].Should().Be(InvoiceFeedDecision.Denied);
+        answers[noCoreAccess].Should().Be(InvoiceFeedDecision.Denied);
+        answers[hidden].Should().Be(InvoiceFeedDecision.Denied);
+        answers[secure1].Should().Be(InvoiceFeedDecision.Denied, "an unreadable secure root denies, as on the route");
+        answers[secure2].Should().Be(InvoiceFeedDecision.Denied);
+        _feedHidingCalls.Should().Be(1, "one hiding decision for the whole batch, not one per invoice");
+        _data.FlagReads.Should().BeLessThanOrEqualTo(1, "the secure-root flag read is one call for the batch");
+    }
 
     [Fact(DisplayName = "130b SEEDING PROOF (firm scope): another firm's invoice on a SHARED matter is 403 with no data, and nothing is projected")]
     public async Task Invoice_OfAnotherFirm_OnASharedMatter_Is403_AndNothingIsProjected()
@@ -992,6 +1329,9 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice),
             ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", InvoiceSubmissionPersister.LineIdFor(own, 2)),
             ["sprk_firmreason"] = "Your rate is above the agreed rate.",
+            // Task 130e-1 (uac-r2 K1): the override is taken only when the Signal's own billing.reason evidence names the finding's code,
+            // as BillingFindingSignalMapper writes it.
+            ["sprk_evidencerefs"] = ReasonEvidence("approved_rate.above_approved"),
             ["createdon"] = new DateTime(2026, 9, 3, 0, 0, 0, DateTimeKind.Utc),
             ["createdby"] = new EntityReference("systemuser", WriterId),
         });
@@ -1001,6 +1341,8 @@ public sealed class FirmOutcomeScopeTests : IAsyncLifetime
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice),
             ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", InvoiceSubmissionPersister.LineIdFor(own, 2)),
             ["sprk_firmreason"] = ForgedReason,
+            // The same evidence as the writer's row, so only the creator check keeps the forged text out.
+            ["sprk_evidencerefs"] = ReasonEvidence("approved_rate.above_approved"),
             ["createdon"] = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc),
             ["createdby"] = new EntityReference("systemuser", UserId),
         });

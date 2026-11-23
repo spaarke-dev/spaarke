@@ -43,6 +43,10 @@ public class SharedPackageCensusTests
     //      AND an entry here as Sanctioned, citing the ADR that defines the package's contract. That ADR
     //      must name the package outside the census table.
     //
+    //      Pattern D feature packages (ADR-012 amendment 2026-11-18) meet a different, closed bar: 2+
+    //      importing surfaces, domain-bound, PCFs deep-import only. The list is PatternDFeaturePackages;
+    //      a new name there needs its own amendment, exactly like a new census entry.
+    //
     //   3. Never add a Grandfathered entry. That status is only for packages that existed when the
     //      census was taken (2026-11-10). To resolve one, either sanction it (step 2) or consolidate it
     //      into a sanctioned package, then delete its folder, its ADR row and its entry here.
@@ -71,35 +75,43 @@ public class SharedPackageCensusTests
         new CensusEntry("@spaarke/ai-widgets", "Spaarke.AI.Widgets", PackageStatus.Sanctioned, "ADR-030",
             "Workspace and context widgets for the three-pane shell, built on the pane event bus (ADR-030) and "
             + "the stage lifecycle (ADR-031)."),
+        // Pattern D feature packages (ADR-012 amendment 2026-11-18; closed list = PatternDFeaturePackages below).
+        new CensusEntry("@spaarke/smart-todo-components", "Spaarke.SmartTodo.Components", PackageStatus.Sanctioned, "ADR-012",
+            "Pattern D feature package for Smart To Do: imported by the SmartTodo code page and the LegalWorkspace "
+            + "section, and domain-bound (sprk_* schema, BFF child-record writes), so ui-components may not hold it."),
+        new CensusEntry("@spaarke/communication-components", "Spaarke.Communication.Components", PackageStatus.Sanctioned, "ADR-012",
+            "Pattern D feature package for Communications: imported by nine surfaces, three of them PCFs through "
+            + "logic/* and components/* sub-paths; domain-bound (sprk_communication schema, filing writes)."),
+        new CensusEntry("@spaarke/daily-briefing-components", "Spaarke.DailyBriefing.Components", PackageStatus.Sanctioned, "ADR-012",
+            "Pattern D feature package for Daily Briefing: imported by the DailyBriefing code page and the "
+            + "LegalWorkspace section, and domain-bound (sprk_* schema), so ui-components may not hold it."),
 
         // ---- Grandfathered — under review (baseline 2026-11-10; may shrink, never grow) ----------
         new CensusEntry("@spaarke/sdap-client", "Spaarke.SdapClient", PackageStatus.Grandfathered, "ADR-012",
             "SDAP API client used by 18 PCF controls and TS apps. Pre-dates the census; whether it overlaps "
             + "the BFF adapters in @spaarke/ui-components has not been assessed."),
-        new CensusEntry("@spaarke/smart-todo-components", "Spaarke.SmartTodo.Components", PackageStatus.Grandfathered, "ADR-012",
-            "Smart To Do components for Pattern D dual-use (section shim and widget). A feature area rather "
-            + "than a distinct contract, so it does not yet meet the three-test bar."),
-        new CensusEntry("@spaarke/communication-components", "Spaarke.Communication.Components", PackageStatus.Grandfathered, "ADR-012",
-            "Communications workspace components for Pattern D dual-use (widget and code page). A feature area "
-            + "rather than a distinct contract, so it does not yet meet the three-test bar."),
-        new CensusEntry("@spaarke/daily-briefing-components", "Spaarke.DailyBriefing.Components", PackageStatus.Grandfathered, "ADR-012",
-            "Daily Briefing components for Pattern D dual-use (code page and widget). A feature area rather "
-            + "than a distinct contract, so it does not yet meet the three-test bar."),
+        // smart-todo, communication and daily-briefing components: sanctioned 2026-11-18 (Pattern D amendment).
         new CensusEntry("@spaarke/compose-components", "Spaarke.Compose.Components", PackageStatus.Grandfathered, "ADR-012",
             "TipTap-based Compose workspace. TipTap may justify quarantine as a heavy dependency, but the "
             + "package has not been assessed against the three tests."),
-        new CensusEntry("@spaarke/document-operations", "Spaarke.DocumentOperations", PackageStatus.Grandfathered, "ADR-012",
-            "Open-in-Word, download, delete and send-to-index hooks. Abstracted I/O is the same contract as "
-            + "@spaarke/ui-components, which makes it a consolidation candidate."),
+        // @spaarke/document-operations: retired 2026-11-13; useDocumentActions moved to @spaarke/ui-components (src/hooks).
         new CensusEntry("@spaarke/ai-outputs", "Spaarke.AI.Outputs", PackageStatus.Grandfathered, "ADR-012",
             "AI output-pane and source-pane widgets and their registries. Its boundary with the sanctioned "
             + "@spaarke/ai-widgets package has not been assessed."),
-        new CensusEntry("@spaarke/ai-context", "Spaarke.AI.Context", PackageStatus.Grandfathered, "ADR-012",
-            "AI context providers, service clients and hooks with a single consumer, so it fails the "
-            + "cross-surface reuse test as it stands."),
-        new CensusEntry("@spaarke/legal-workspace", "Spaarke.LegalWorkspace", PackageStatus.Grandfathered, "ADR-012",
-            "Source-only re-export boundary for the LegalWorkspace section registry (dataset-grid-framework-r2 "
-            + "FR-10), with a single consumer; it exists to break a source-alias trap."),
+        // @spaarke/ai-context: retired 2026-11-13; its types moved to @spaarke/ai-widgets (src/types/aiContext.ts).
+        // @spaarke/legal-workspace: retired 2026-11-13; SpaarkeAi depends on the LegalWorkspace solution directly.
+    };
+
+    /// <summary>
+    /// The closed list of Pattern D feature packages (ADR-012 amendment 2026-11-18). Condition (c) of that
+    /// amendment: a PCF reaches them only through a sub-path, never the barrel. Adding a name here needs the
+    /// same amendment that sanctions the package.
+    /// </summary>
+    private static readonly IReadOnlyList<string> PatternDFeaturePackages = new[]
+    {
+        "@spaarke/smart-todo-components",
+        "@spaarke/communication-components",
+        "@spaarke/daily-briefing-components",
     };
 
     private const string ConciseAdrRelativePath = ".claude/adr/ADR-012-shared-components.md";
@@ -192,9 +204,94 @@ public class SharedPackageCensusTests
             + string.Join("\n", problems));
     }
 
+    [Fact(DisplayName = "ADR-012: no PCF imports a Pattern D feature package through its barrel")]
+    public void NoPcfImportsAPatternDFeaturePackageThroughItsBarrel()
+    {
+        // Pattern D amendment (2026-11-18), condition (c). The barrel of a feature package re-exports its
+        // widgets and code-page components; a PCF that imports it pulls all of that into a React 16 bundle.
+        // PCFs take what they need from a sub-path (@spaarke/communication-components/logic/connections).
+        var pcfRoot = Path.Combine(SourceScan.RepoRoot, "src", "client", "pcf");
+        var violations = PcfSourceFiles(pcfRoot)
+            .SelectMany(f => BarrelImports(File.ReadAllLines(f), PatternDFeaturePackages)
+                .Select(hit => $"{Path.GetRelativePath(SourceScan.RepoRoot, f).Replace('\\', '/')}:{hit.Line} imports {hit.Package}"))
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "A PCF imports a Pattern D feature package through its barrel. ADR-012 (2026-11-18 amendment, condition c) "
+            + "allows only sub-path imports, e.g. '@spaarke/communication-components/logic/connections'. Import the "
+            + "module you need from its sub-path (and map it in the PCF's tsconfig/jest like the existing ones).\n\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact(DisplayName = "ADR-012: every Pattern D feature package is Sanctioned in the census")]
+    public void EveryPatternDFeaturePackageIsSanctioned()
+    {
+        var notSanctioned = PatternDFeaturePackages
+            .Where(p => !Census.Any(e => e.Package == p && e.Status == PackageStatus.Sanctioned))
+            .ToList();
+
+        Assert.True(
+            notSanctioned.Count == 0,
+            "The Pattern D list names a package that is not a Sanctioned census entry. The list and the census are "
+            + "one decision (ADR-012 2026-11-18 amendment): " + string.Join(", ", notSanctioned));
+    }
+
     // =============================================================================================
     // Negative controls: each detector fires on a seeded violation
     // =============================================================================================
+
+    [Fact(DisplayName = "ADR-012: negative control — barrel imports of a Pattern D package are reported in every import form")]
+    public void BarrelImports_NegativeControl_ReportsEveryForm()
+    {
+        var source = new[]
+        {
+            "import { ConnectionsEditor } from '@spaarke/communication-components';",
+            "import type { ITodo } from \"@spaarke/smart-todo-components\";",
+            "export * from '@spaarke/daily-briefing-components';",
+            "const lazy = import('@spaarke/communication-components');",
+            "const old = require(\"@spaarke/smart-todo-components\");",
+            "import {",
+            "  A,",
+            "} from '@spaarke/daily-briefing-components'",
+            "import '@spaarke/communication-components';",
+        };
+
+        var hits = BarrelImports(source, PatternDFeaturePackages);
+
+        Assert.Equal(new[] { 1, 2, 3, 4, 5, 8, 9 }, hits.Select(h => h.Line).ToArray());
+    }
+
+    // =============================================================================================
+    // Positive controls (Pattern D): sub-path imports and other packages stay silent
+    // =============================================================================================
+
+    [Fact(DisplayName = "ADR-012: positive control — sub-path imports, comments and other packages are not barrel imports")]
+    public void BarrelImports_PositiveControl_StaysSilentOnTheSanctionedShape()
+    {
+        var source = new[]
+        {
+            "import { applyRegardingSelection } from '@spaarke/communication-components/logic/connections';",
+            "import { AttachmentList } from '@spaarke/communication-components/components/AttachmentList';",
+            "import { KanbanBoard } from '@spaarke/ui-components';",
+            "import { x } from '@spaarke/communication-components-extra';",
+            "// import { y } from '@spaarke/smart-todo-components';",
+            " * see '@spaarke/daily-briefing-components' for the widget",
+        };
+
+        Assert.Empty(BarrelImports(source, PatternDFeaturePackages));
+    }
+
+    [Fact(DisplayName = "ADR-012: negative control — the PCF scan really reaches the Communication PCFs")]
+    public void PcfSourceFiles_NegativeControl_FindsTheCommunicationPcfs()
+    {
+        // A scan that silently found no files would pass the barrel rule vacuously.
+        var pcfRoot = Path.Combine(SourceScan.RepoRoot, "src", "client", "pcf");
+        var files = PcfSourceFiles(pcfRoot).Select(f => f.Replace('\\', '/')).ToList();
+
+        Assert.Contains(files, f => f.Contains("/CommunicationConnections/", StringComparison.Ordinal));
+        Assert.DoesNotContain(files, f => f.Contains("/node_modules/", StringComparison.Ordinal));
+    }
 
     [Fact(DisplayName = "ADR-012: negative control — an unlisted folder, an absent entry and a renamed package are all reported")]
     public void CompareWithDisk_NegativeControl_ReportsEveryKindOfDrift()
@@ -450,6 +547,52 @@ public class SharedPackageCensusTests
             .Where(Directory.Exists)
             .SelectMany(d => Directory.EnumerateFiles(d, $"{citation}-*.md"))
             .ToList();
+    }
+
+    /// <summary>Hand-written PCF source: <c>.ts</c>/<c>.tsx</c>/<c>.js</c>, skipping installs, build output and generated types.</summary>
+    private static IEnumerable<string> PcfSourceFiles(string pcfRoot)
+    {
+        var skipped = new[] { "node_modules", "out", "dist", "bin", "obj", "generated", "Solution" }
+            .Select(d => $"{Path.DirectorySeparatorChar}{d}{Path.DirectorySeparatorChar}")
+            .ToArray();
+
+        return Directory
+            .EnumerateFiles(pcfRoot, "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".ts", StringComparison.Ordinal)
+                        || f.EndsWith(".tsx", StringComparison.Ordinal)
+                        || f.EndsWith(".js", StringComparison.Ordinal))
+            .Where(f => !skipped.Any(s => f.Contains(s, StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// Lines that import one of <paramref name="packages"/> by its bare name (the barrel): <c>from '…'</c>,
+    /// <c>import '…'</c> (side effect), <c>import('…')</c>, <c>require('…')</c>. A sub-path (<c>'pkg/logic/x'</c>) is not a barrel import.
+    /// Comment lines are skipped; a multi-line import is reported on its <c>from</c> line.
+    /// </summary>
+    private static List<(int Line, string Package)> BarrelImports(IReadOnlyList<string> lines, IReadOnlyList<string> packages)
+    {
+        var names = string.Join("|", packages.Select(Regex.Escape));
+        var pattern = new Regex(
+            $@"(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['""])(?<package>{names})\1",
+            RegexOptions.CultureInvariant);
+
+        var hits = new List<(int, string)>();
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var trimmed = lines[i].TrimStart();
+            if (trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith("*", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var match = pattern.Match(lines[i]);
+            if (match.Success)
+            {
+                hits.Add((i + 1, match.Groups["package"].Value));
+            }
+        }
+
+        return hits;
     }
 
     private static string Pad(string seed) => $"{seed}: a control entry whose reason is long enough to pass the explanation rule.";

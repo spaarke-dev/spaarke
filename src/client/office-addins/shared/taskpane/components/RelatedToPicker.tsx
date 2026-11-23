@@ -12,7 +12,7 @@ import { CreateRecordForm, type CreateRecordInput } from './CreateRecordForm';
  * reconciliation surface (UI feedback, owner 2026-09-02).
  *
  * Layout (UAT round 4, task 095 — no "Related to" label; round 5, task 099 — no icon in the placeholder):
- *   [ Matter ] [ Project ] [ Invoice ]                      [ + New ]  ← left pills, "+ New" right
+ *   [ Matter ] [ Project ]                                  [ + New ]  ← left pills (the host's allowedTypes), "+ New" right
  *   [ Look up related Matter...                          ] [ 🔍 ]     ← lookup box (text only) + search icon button
  *   ┌ recommended auto-match cards ──────────────────────────────┐
  *   │ LITG-763955 : Litigation matter · Matter · 100% match  [✓]  │  ← blue check; green ✓ + × on select
@@ -26,7 +26,8 @@ import { CreateRecordForm, type CreateRecordInput } from './CreateRecordForm';
  *     rest of its form until the record exists (or the create is cancelled).
  * Round 5 item 3 (task 100): the create form is `CreateRecordForm` — per type, the fields the owner listed
  * (Matter: Name, Description, Matter Type, Practice Area, Assigned To Internal; Project: Name, Project Type,
- * Description, Assigned To Internal; Invoice: Name, Description, Assigned To), created by the BFF quick-create.
+ * Description, Assigned To Internal), created by the BFF quick-create. Invoice left Save and "+ New" in task 133
+ * slice C: an invoice is created only by a submission.
  *   - Focus follows the user's action (ADR-021): into the name box on "+ New" / Cancel, onto the selected
  *     record on select / create, back into the lookup box on ×.
  * Single-select chips (gray except selected=blue, default Matter).

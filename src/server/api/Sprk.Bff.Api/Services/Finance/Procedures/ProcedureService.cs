@@ -34,6 +34,9 @@ public static class ProcedureEntity
     public const string StatusColumn = "sprk_status";
     public const string NotesColumn = "sprk_notes";
 
+    /// <summary>statecode Active (the platform state, not the sprk_status choice); a Procedure deactivated in Dataverse reads anything else.</summary>
+    public const int StateActive = 0;
+
     public const int StatusActive = 100000000;
     public const int StatusRetired = 100000001;
 
@@ -71,6 +74,22 @@ public static class ProcedureEntity
         status is VersionStatusActive or VersionStatusSuperseded
         || (hasPublishStamp && status != VersionStatusDraft)
         || (status == VersionStatusRetired && hasPublishedRules);
+
+    /// <summary>
+    /// The ONE definition of a Procedure's firm-facing label (ebilling-r1 tasks 083, 135): its firm-facing name, or its name when that is blank;
+    /// null when the row is missing or has neither. Asked by <c>RuleSetService.GetFirmClauseAsync</c> and the Billing Guidelines view.
+    /// </summary>
+    internal static string? FirmFacingLabelOf(Entity? procedure)
+    {
+        if (procedure is null)
+        {
+            return null;
+        }
+
+        var firmFacing = procedure.GetAttributeValue<string>(FirmFacingNameColumn);
+        var name = string.IsNullOrWhiteSpace(firmFacing) ? procedure.GetAttributeValue<string>(NameColumn) : firmFacing;
+        return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+    }
 
     // sprk_storedfile (088)
     public const string StoredFileProcedureVersionColumn = "sprk_procedureversion";

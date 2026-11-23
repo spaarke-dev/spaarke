@@ -336,7 +336,7 @@ public class InvoiceIndexingPayload
     public Guid InvoiceId { get; set; }
 
     /// <summary>
-    /// Legacy: the document the retired document-centric path sent (InvoiceExtractionJobHandler, retired by 050b). Accepted and ignored; the
+    /// Legacy: the document the retired document-centric path sent (the InvoiceExtractionJobHandler that 050b deleted). Accepted and ignored; the
     /// document id of the index row comes from the invoice's own <c>sprk_document</c> lookup.
     /// </summary>
     public Guid? DocumentId { get; set; }

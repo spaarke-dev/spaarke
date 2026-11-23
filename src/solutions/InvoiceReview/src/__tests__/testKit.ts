@@ -16,7 +16,8 @@ import type {
   ReviewFinding,
   ReviewLine,
 } from '../services/invoiceReviewApi';
-import type { ApprovalState, BlockedSubmission, ContextSection, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
+import type { CorrectionPrefill } from '@spaarke/ui-components';
+import type { ApprovalState, BlockedSubmission, ContextSection, FirmNoticeDraft, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
 import { toFailure } from '../services/invoiceReviewApi';
 
 export const INVOICE_ID = '0d9178d3-9f32-7f46-ed9a-4dec59f66c1a';
@@ -254,8 +255,64 @@ export function blockedSubmission(overrides: Partial<BlockedSubmission> = {}): B
     ],
     override: null,
     return: null,
+    strandedDecision: null,
+    canFinishAsOperator: false,
     ...overrides,
   };
+}
+
+export const STRANDED_RECORD_ID = 'c1c1c1c1-0000-4000-8000-0000000000c1';
+
+/** A blocked submission with another person's unfinished decision that the server says the caller may finish (ISS-034). */
+export function strandedSubmission(verb: 'Override' | 'Return' = 'Override', overrides: Partial<BlockedSubmission> = {}): BlockedSubmission {
+  return blockedSubmission({
+    canOverride: false,
+    canReturn: false,
+    strandedDecision: { verb, recordId: STRANDED_RECORD_ID, callerIsDecider: false },
+    canFinishAsOperator: true,
+    ...overrides,
+  });
+}
+
+/** ISS-032: the approval verb's status words, as the server reports a decided portion. */
+const DECIDED_STATUS: Readonly<Record<'Approve' | 'Reject' | 'Return', { approval: string; header: string }>> = {
+  Approve: { approval: 'Approved', header: 'Approved' },
+  Reject: { approval: 'Rejected', header: 'Rejected' },
+  Return: { approval: 'Returned', header: 'ReturnedToFirm' },
+};
+
+/**
+ * ISS-032: the approval state of a decision whose status moved but whose Decision Record was not written, as the server reports it to the
+ * caller who finishes it (`incompleteDecision`). The portion's status moved (failedStep `record`) unless overridden.
+ */
+export function strandedApproval(verb: 'Approve' | 'Reject' | 'Return' = 'Reject', overrides: Partial<ApprovalState> = {}): ApprovalState {
+  return approval({
+    status: DECIDED_STATUS[verb].approval,
+    canApprove: false,
+    decidedBy: 'Pat Approver',
+    decidedOn: '2026-11-17T09:00:00Z',
+    incompleteDecision: { verb, failedStep: 'record' },
+    ...overrides,
+  });
+}
+
+/** ISS-032: the same decision, finished: its record is written and the server reports no hint. */
+export function decidedApproval(verb: 'Approve' | 'Reject' | 'Return' = 'Reject', overrides: Partial<ApprovalState> = {}): ApprovalState {
+  return approval({
+    status: DECIDED_STATUS[verb].approval,
+    canApprove: false,
+    decidedBy: 'Pat Approver',
+    decidedOn: '2026-11-17T09:00:00Z',
+    decisionRecordId: 'rec-20',
+    incompleteDecision: null,
+    ...overrides,
+  });
+}
+
+/** ISS-032: a review whose invoice's status shows the decision (the transition happened). */
+export function decidedReview(verb: 'Approve' | 'Reject' | 'Return' = 'Reject', lines: ReviewLine[] = [line(1)]): InvoiceReview {
+  const base = review(lines);
+  return { ...base, header: { ...base.header, status: DECIDED_STATUS[verb].header } };
 }
 
 /** A review whose invoice is held by a blocked submission. */
@@ -280,7 +337,37 @@ export function decisionRecord(overrides: Partial<ReviewDecisionRecord> = {}): R
   };
 }
 
+/** The correction prefill (095f-2e2b) of an In Review invoice that can be replaced, unless overridden. */
+export function correctionPrefill(overrides: Partial<CorrectionPrefill> = {}): CorrectionPrefill {
+  return {
+    invoiceId: INVOICE_ID,
+    firm: { id: 'f1f1f1f1-0000-4000-8000-0000000000f1', name: 'Alpha LLP' },
+    coreRecord: { entityType: 'Matter', entityId: MATTER_ID, name: 'Example matter' },
+    invoiceStatus: 'InReview',
+    trackingNumber: 'INV-2025-78232.1',
+    firmInvoiceNumber: 'INV-2025-78232',
+    canCorrect: true,
+    reason: null,
+    ...overrides,
+  };
+}
+
 export type MockDecisionApi = { [K in keyof InvoiceDecisionApi]: jest.Mock };
+
+/** Task 132ui: a `FirmNoticeDraftResponse` as the draft route answers it (the subject carries the code-written tracking suffix). */
+export function firmNoticeDraft(overrides: Partial<FirmNoticeDraft> = {}): FirmNoticeDraft {
+  const rejected = (overrides.kind ?? 'InvoiceRejected') === 'InvoiceRejected';
+  return {
+    kind: 'InvoiceRejected',
+    subject: rejected ? 'Your invoice was rejected (INV-2025-78232.1)' : 'Your invoice is returned for correction (INV-2025-78232.1)',
+    prose: rejected ? 'We reviewed your invoice and cannot pay it. The findings are below.' : 'We reviewed your invoice and need corrections. The findings are below.',
+    html: '<p>preview</p>',
+    source: 'Action',
+    actionVersion: 'INVOICE-FIRM-NOTICE@v1',
+    fallbackReason: null,
+    ...overrides,
+  };
+}
 
 const emptySection = <T>(data: T): ContextSection<T> => ({ status: 'available', data, code: null, message: null });
 
@@ -317,6 +404,7 @@ export function mockDecisionApi(initial: ApprovalState = approval()): MockDecisi
     approve: jest.fn(async () => ok({ outcome: 'approved', decisionId: 'd1', decisionRecordId: 'rec-9', state: approval({ status: 'Approved', canApprove: false, approvedAmount: 5000 }) })),
     reject: jest.fn(async () => ok({ outcome: 'decided', decision: 'Rejected', decisionId: 'd2', decisionRecordId: 'rec-10' })),
     returnToFirm: jest.fn(async () => ok({ outcome: 'decided', decision: 'Returned', decisionId: 'd3', decisionRecordId: 'rec-11' })),
+    getFirmNoticeDraft: jest.fn(async (_i: string, kind: 'InvoiceRejected' | 'ReturnedToFirm') => ok(firmNoticeDraft({ kind }))),
     listAdjustmentRules: jest.fn(async () =>
       ok({
         asOf: null,
@@ -330,6 +418,8 @@ export function mockDecisionApi(initial: ApprovalState = approval()): MockDecisi
     getBlocked: jest.fn(async () => ok(blockedSubmission())),
     overrideBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Overridden', recordId: 'rec-12', alreadyDecided: false })),
     returnBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Returned', recordId: 'rec-13', alreadyDecided: false })),
+    finishStranded: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Overridden', recordId: STRANDED_RECORD_ID, alreadyDecided: false })),
+    getCorrectionPrefill: jest.fn(async () => ok(correctionPrefill())),
     getContext: jest.fn(async () => ok(invoiceContext())),
     getRelatedWork: jest.fn(async (_i: string, id: string) =>
       ok({

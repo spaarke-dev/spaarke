@@ -4,7 +4,7 @@
     <title>Office /api/office/todo and Office document save through the service, with the association set in the create (FR-18)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>019 complete</gate>
-    <status>in-progress (030a done; 030b re-scoped below)</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, office, documents; touches a worker that creates documents (data-mutation); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

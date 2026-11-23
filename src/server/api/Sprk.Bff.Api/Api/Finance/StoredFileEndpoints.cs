@@ -1,7 +1,13 @@
+using System.Globalization;
 using Azure;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
+using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -24,6 +30,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Handler.</b> Opens the blob pinned to the ETag whose verdict the filter read (a blob changed since answers 409), writes
 /// the ONE <see cref="StoredFileAudit.Downloaded"/> event, then streams with the row's content type, <c>nosniff</c>, <c>no-store</c>
 /// and a sandbox CSP. No SAS or storage URL reaches the client.</para>
+/// <para><b>Upload (task 123).</b> <c>POST /api/finance/invoices/{invoiceId}/files</c> adds one supporting file to an Active invoice through
+/// <see cref="StoredFileService.UploadForCallerAsync"/>; see <c>UploadInvoiceFile</c> for its order.</para>
 /// </remarks>
 public static class StoredFileEndpoints
 {
@@ -32,6 +40,27 @@ public static class StoredFileEndpoints
 
     /// <summary>The 503 errorCode when the store (or a read it needs) is unavailable.</summary>
     public const string StoreUnavailableErrorCode = "file_store_unavailable";
+
+    /// <summary>Upload (task 123): 400, no <c>file</c> part, more than one file part, or a body that is not multipart/form-data.</summary>
+    public const string FileRequiredErrorCode = "ebilling.files.file_required";
+
+    /// <summary>Upload (task 123): 400, the file has 0 bytes.</summary>
+    public const string FileEmptyErrorCode = "ebilling.files.file_empty";
+
+    /// <summary>Upload (task 123): 413, over <c>Ebilling:MaxSubmissionFileSizeMb</c> (the submission limit) or the server's body cap.</summary>
+    public const string FileTooLargeErrorCode = "ebilling.files.file_too_large";
+
+    /// <summary>Upload (task 123): 409, the invoice is Inactive (Paid, Rejected, Returned to Firm, Cancelled or Superseded: statecode 1).</summary>
+    public const string InvoiceInactiveErrorCode = "ebilling.invoice.inactive";
+
+    /// <summary>Upload (task 123 fix round 1): 409 with <c>Retry-After</c>, the invoice's own submission is still storing its files (its Invoice PDF is not yet Servable).</summary>
+    public const string FilesPendingErrorCode = "ebilling.invoice.files_pending";
+
+    /// <summary>Upload (task 123 fix round 1): 409, the invoice already holds <see cref="MaxListedFiles"/> files (any status). Not retryable.</summary>
+    public const string FileLimitReachedErrorCode = "ebilling.files.limit_reached";
+
+    /// <summary>The <c>Retry-After</c> (seconds) of the upload's 503 <see cref="StoreUnavailableErrorCode"/>.</summary>
+    internal const int UploadRetryAfterSeconds = 30;
 
     public static IEndpointRouteBuilder MapStoredFileEndpoints(this IEndpointRouteBuilder app)
     {
@@ -74,10 +103,399 @@ public static class StoredFileEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // POST /api/finance/invoices/{invoiceId}/files (ebilling-r1 task 123, EB-D-161; wire contract notes/123-upload-contract.md): an
+        // internal caller adds ONE supporting file to an existing Active invoice. The caller's own Write on the invoice is the filter's
+        // ("ebilling.invoice.decide", as the caller, before the body is read): no Write and an unknown invoice are the uniform 404, a rights
+        // answer Dataverse did not complete is 403 system_failure, step 0 keeps its 403 (FinanceDenial.UniformNotFoundForRecord); then the
+        // kill switch. UploadForCallerAsync asks the caller's Write again (the backstop) and stages, writes and flips the row.
+        group.MapPost("/invoices/{invoiceId:guid}/files", UploadInvoiceFile)
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId", FinanceDenial.UniformNotFoundForRecord)
+            .RequireEbillingEnabled()
+            .DisableAntiforgery() // multipart upload; auth is the JWT + the caller's own Write on the invoice, not a form token
+                                  // No Accepts<IFormFile>("multipart/form-data"): that metadata makes routing answer a non-multipart body 415 before authorization;
+                                  // the contract answers it 400 ebilling.files.file_required, after the caller's checks (the description names the body).
+                                  // The submission routes' body cap (the configurable ceiling plus the envelope), above Kestrel's 30 MB default; the configured
+                                  // limit itself is checked by the handler (413 ebilling.files.file_too_large).
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionHttp.MaxRequestBodyBytes))
+            .WithName("UploadInvoiceSupportingFile")
+            .WithSummary("Add one supporting file to an Active invoice (internal callers)")
+            .WithDescription(
+                "multipart/form-data with exactly one file part named \"file\". Stores it as an Invoice supporting file (not visible to the " +
+                "firm) under the invoice, synchronously: 201 means stored (a download still waits for the malware scan). 400 " +
+                "ebilling.files.file_required / ebilling.files.file_empty; 413 ebilling.files.file_too_large; 404 for an unknown invoice and " +
+                "for one the caller cannot Write; 409 ebilling.invoice.inactive; 409 ebilling.invoice.files_pending (Retry-After) while the " +
+                "invoice's own submission is storing its files; 409 ebilling.files.limit_reached at the per-invoice file limit (also after " +
+                "the file was stored, when concurrent uploads passed the limit: the file is then removed); 503 " +
+                "file_store_unavailable (Retry-After) when nothing could be stored.")
+            .Produces<InvoiceFileUploaded>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         return app;
     }
 
-    /// <summary>The most files one invoice lists. The submission commit refuses an invoice with more (<c>SubmissionCommitGate.MaxFiles</c>), so more rows are a fault, never a truncated list.</summary>
+    /// <summary>
+    /// The upload (task 123), in order, after the filters: (1) the invoice (<see cref="RefuseForInvoiceAsync"/>): gone since the rights
+    /// check → the uniform 404, Inactive (statecode 1) → 409 <see cref="InvoiceInactiveErrorCode"/>, a read fault or no state → 503, its
+    /// Invoice PDF not yet Servable → 409 <see cref="FilesPendingErrorCode"/>, <see cref="MaxListedFiles"/> files already → 409
+    /// <see cref="FileLimitReachedErrorCode"/>; (2) the request: a Content-Length over the limit → 413, the server's cap while it is read →
+    /// 413, not multipart or a malformed multipart body → 400; then (1) again from fresh reads (fix round 1 F1-e: the body may arrive after
+    /// the invoice changed); exactly one file part named <c>file</c> → else 400 <see cref="FileRequiredErrorCode"/>; 0 bytes → 400
+    /// <see cref="FileEmptyErrorCode"/>; over the limit → 413; (3) <see cref="StoredFileService.PrecheckUploadAsync"/> (name, type, size, a
+    /// store that can stage now), no write; (4) <see cref="StoredFileService.UploadForCallerAsync"/>: step 0, the caller's Write again (gate
+    /// variant; a refusal there is 403 system_failure), owner, stage, row, flip. Every refusal before (4) stores nothing; a fault in (4)
+    /// leaves no Servable row (a failed row write deletes the staged blob, a refused flip leaves the row Not yet servable) and answers 503
+    /// with <c>Retry-After</c>; (5) fix round 2 (uac-r2 condition 1, <see cref="RecountAfterUploadAsync"/>): once the row is Servable, the
+    /// invoice's rows are counted again, because (1) counts them before the write and concurrent uploads can all pass it. More than
+    /// <see cref="MaxListedFiles"/> → this file's row and blob are removed (<see cref="StoredFileService.RemoveOwnUploadAsync"/>) and the
+    /// answer is 409 <see cref="FileLimitReachedErrorCode"/>; a faulted count or removal → 503 with <c>Retry-After</c>. Step (5) runs on
+    /// <see cref="CancellationToken.None"/>, so a cancelled request never skips the removal of a row it already wrote.
+    /// </summary>
+    private static async Task<IResult> UploadInvoiceFile(
+        Guid invoiceId, HttpContext httpContext, StoredFileService service, IGenericEntityService entities,
+        IOptionsMonitor<EbillingOptions> ebilling, ILoggerFactory loggerFactory, CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger(typeof(StoredFileEndpoints).FullName!);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, invoiceId);
+
+        // (1) The invoice, before the body is read: its state (an Inactive invoice cannot be changed, owner 2026-10-21, task 097), its own
+        // submission's files all stored, and room for one more file.
+        if (await RefuseForInvoiceAsync(invoiceId, parent, entities, service, logger, httpContext, ct) is { } refusedBefore)
+        {
+            return refusedBefore;
+        }
+
+        // (2) The request: the submission routes' size limit, checked before and while the body is read.
+        var request = httpContext.Request;
+        var maxMb = ebilling.CurrentValue.MaxSubmissionFileSizeMb;
+        var maxBytes = (long)maxMb * 1024 * 1024;
+        if (request.ContentLength > maxBytes + (1024 * 1024)) // the multipart envelope adds a little; the file itself is checked below
+        {
+            return FileTooLarge(maxMb);
+        }
+
+        // A chunked body has no Content-Length: the server stops reading it at the configured limit (the 413 below).
+        if (httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } cap)
+        {
+            cap.MaxRequestBodySize = maxBytes + (1024 * 1024);
+        }
+
+        if (!request.HasFormContentType)
+        {
+            return FileRefused(FileRequiredErrorCode, "The request must be multipart/form-data with one file part named \"file\".");
+        }
+
+        IFormCollection form;
+        try
+        {
+            form = await request.ReadFormAsync(ct);
+        }
+        catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            return FileTooLarge(maxMb);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException)
+        {
+            // The parser's message can echo request content, so it is not returned.
+            return FileRefused(FileRequiredErrorCode, "The request body is not valid multipart/form-data.");
+        }
+        catch (IOException) when (!ct.IsCancellationRequested)
+        {
+            // Fix round 1 (F1-c): a truncated multipart body or part headers, or a body that is not multipart under a multipart content
+            // type, ends the parser's stream early. An IOException of a request the client abandoned (the request's token is cancelled)
+            // is not caught: it passes through like the cancellation it is.
+            return FileRefused(FileRequiredErrorCode, "The request body is not valid multipart/form-data.");
+        }
+
+        // Fix round 1 (F1-e): the body can take a while to arrive; the invoice is read again, so a file is never added to an invoice that
+        // became Inactive, began storing a submission's files or reached the limit while the body was read.
+        if (await RefuseForInvoiceAsync(invoiceId, parent, entities, service, logger, httpContext, ct) is { } refusedAfter)
+        {
+            return refusedAfter;
+        }
+
+        // Exactly one file part, named "file" (EB-D-161: one file per request).
+        if (form.Files.Count != 1 || !string.Equals(form.Files[0].Name, "file", StringComparison.Ordinal))
+        {
+            return FileRefused(FileRequiredErrorCode, "Send exactly one file part named \"file\"; send several files as several requests.");
+        }
+
+        var file = form.Files[0];
+        if (file.Length == 0)
+        {
+            return FileRefused(FileEmptyErrorCode, "The file is empty.");
+        }
+
+        if (file.Length > maxBytes)
+        {
+            return FileTooLarge(maxMb);
+        }
+
+        // Stored as given (contract): the part's file name and content type. A part with no type is stored as an octet stream.
+        var fileName = Path.GetFileName(file.FileName);
+        var contentType = string.IsNullOrWhiteSpace(file.ContentType) ? OctetStream : file.ContentType;
+
+        // (3) What the store would refuse about the request itself, decided with no write.
+        string? early;
+        try
+        {
+            early = await service.PrecheckUploadAsync(StoredFilePurpose.InvoiceSupportingFile, parent, fileName, contentType, file.Length, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Invoice {InvoiceId}: the file store check faulted; no file stored (503)", invoiceId);
+            return UploadUnavailable(httpContext);
+        }
+
+        if (early is not null)
+        {
+            logger.LogWarning("Invoice {InvoiceId}: supporting file refused before anything was written ({Code})", invoiceId, early);
+            return UploadRefused(StoredFileCreateResult.Refused(early), maxMb, httpContext);
+        }
+
+        // (4) Stage → row → flip, as the caller (step 0 and the caller's Write again inside).
+        StoredFileCreateResult stored;
+        try
+        {
+            await using var content = file.OpenReadStream();
+            stored = await service.UploadForCallerAsync(
+                httpContext.User, TokenHelper.ExtractBearerTokenOrNull(httpContext), StoredFilePurpose.InvoiceSupportingFile, parent, fileName,
+                contentType, content, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // A staging or row-write fault: the service deleted the bytes this attempt staged (or left them to the reconcile job); no row
+            // is Servable.
+            logger.LogError(ex, "Invoice {InvoiceId}: the supporting file could not be stored ({ExceptionType}); 503", invoiceId, ex.GetType().Name);
+            return UploadUnavailable(httpContext);
+        }
+
+        if (!stored.IsCreated)
+        {
+            logger.LogWarning("Invoice {InvoiceId}: the supporting file was refused ({Code})", invoiceId, stored.RefusalCode);
+            return UploadRefused(stored, maxMb, httpContext);
+        }
+
+        var fileId = stored.FileId!.Value;
+
+        // (5) Fix round 2 (uac-r2 condition 1): the limit is checked by reads BEFORE the write, so concurrent uploads can all pass it and
+        // push the invoice past MaxListedFiles (the list route then answers 503 for that invoice for good). The invoice's rows are counted
+        // again now that this file's row exists; over the limit, this file is removed and the answer is the limit's 409.
+        if (await RecountAfterUploadAsync(invoiceId, fileId, service, logger, httpContext) is { } overLimit)
+        {
+            return overLimit;
+        }
+
+        logger.LogInformation("Invoice {InvoiceId}: supporting file {FileId} stored ({SizeBytes} bytes)", invoiceId, fileId, file.Length);
+        return TypedResults.Created(
+            $"/api/finance/files/{fileId}/content", new InvoiceFileUploaded(fileId, StoredFileSchema.StoredName(fileName), file.Length));
+    }
+
+    private const string InvoiceStateColumn = "statecode";
+    private const string InvoiceStatusColumn = "statuscode";
+
+    /// <summary>
+    /// The upload's checks of the invoice itself (task 123; fix round 1 F1-a, F1-b, F1-e), run before the body is read and again after it,
+    /// each time from fresh reads. Null when the upload may go on; otherwise the refusal. In order: the invoice's state, read app-only (gone
+    /// since the rights check → the uniform 404; Inactive → 409 <see cref="InvoiceInactiveErrorCode"/>; a read fault or a missing or unknown
+    /// statecode → 503); then the invoice's Stored File rows (<see cref="StoredFileService.ReadRowsForInvoiceAsync"/>, a fault → 503): an
+    /// Invoice PDF row that is not Servable → 409 <see cref="FilesPendingErrorCode"/> with <c>Retry-After</c> (the invoice's own submission
+    /// is still storing its files: the commit gate flips the Invoice PDF last, and a file added before that would be counted, flipped and
+    /// undone as the commit's); <see cref="MaxListedFiles"/> rows or more of any status → 409 <see cref="FileLimitReachedErrorCode"/> (the
+    /// list route cannot show more). An invoice with no Invoice PDF row has no submission pending and is not refused for it.
+    /// </summary>
+    private static async Task<IResult?> RefuseForInvoiceAsync(
+        Guid invoiceId, StoredFileParent parent, IGenericEntityService entities, StoredFileService service, ILogger logger,
+        HttpContext httpContext, CancellationToken ct)
+    {
+        Entity? invoice;
+        try
+        {
+            invoice = await entities.RetrieveAsync(parent.Table, invoiceId, [InvoiceStateColumn, InvoiceStatusColumn], ct);
+        }
+        catch (Exception ex) when (InvoiceSubmissionEndpoints.IsNotFound(ex))
+        {
+            invoice = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Invoice {InvoiceId}: its state could not be read; no file stored (503)", invoiceId);
+            return UploadUnavailable(httpContext);
+        }
+
+        if (invoice is null)
+        {
+            // Gone since the rights check: the same answer as a refusal, so nothing about the invoice is revealed.
+            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
+
+        var state = invoice.GetAttributeValue<OptionSetValue>(InvoiceStateColumn)?.Value;
+        if (state == Services.Finance.InvoiceStatusCodes.StateInactive)
+        {
+            logger.LogInformation("Invoice {InvoiceId}: supporting file refused, the invoice is Inactive (statuscode {Status})",
+                invoiceId, invoice.GetAttributeValue<OptionSetValue>(InvoiceStatusColumn)?.Value);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Invoice is closed",
+                detail: "This invoice is no longer active, so no file can be added to it. Nothing was stored.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = InvoiceInactiveErrorCode });
+        }
+
+        if (state != Services.Finance.InvoiceStatusCodes.StateActive)
+        {
+            // Fail closed: a state this lifecycle does not know is never read as Active.
+            logger.LogError("Invoice {InvoiceId}: unknown statecode {State}; no file stored (503)", invoiceId, state);
+            return UploadUnavailable(httpContext);
+        }
+
+        IReadOnlyList<StoredFileRow> rows;
+        try
+        {
+            rows = await service.ReadRowsForInvoiceAsync(invoiceId, MaxListedFiles + 1, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Invoice {InvoiceId}: its stored files could not be read; no file stored (503)", invoiceId);
+            return UploadUnavailable(httpContext);
+        }
+
+        if (rows.Any(r => r.Purpose == StoredFilePurpose.InvoicePdf && r.Status != StoredFileStatus.Servable))
+        {
+            logger.LogInformation("Invoice {InvoiceId}: supporting file refused, the invoice's submission is still storing its files (409)", invoiceId);
+            httpContext.Response.Headers.RetryAfter = UploadRetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Invoice files are being stored",
+                detail: "The invoice's own submission is still storing its files. Nothing was stored. Try again shortly.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = FilesPendingErrorCode });
+        }
+
+        if (rows.Count >= MaxListedFiles)
+        {
+            logger.LogInformation("Invoice {InvoiceId}: supporting file refused, the invoice has {Max} or more stored files (409)", invoiceId, MaxListedFiles);
+            return FileLimitReached();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Fix round 2 (uac-r2 condition 1): the upload's step (5), after <see cref="StoredFileService.UploadForCallerAsync"/> answered Created.
+    /// <see cref="RefuseForInvoiceAsync"/> counts the rows BEFORE the write, so two uploads at <c>MaxListedFiles - 1</c> rows can both pass
+    /// and leave the invoice over the limit, which the list route reads as a fault (503) from then on. Null when the file may stay. In
+    /// order: the invoice's rows are counted again with the same capped read (<c>MaxListedFiles + 1</c>), now that this file's row exists;
+    /// at most <see cref="MaxListedFiles"/> → null (201); more → this file is removed (<see cref="RemoveUploadedFileAsync"/>) and the answer
+    /// is 409 <see cref="FileLimitReachedErrorCode"/>. Each concurrent upload over the limit removes its own file, so all of them may be
+    /// removed; each can retry. Fail-safe: a faulted count also removes the file (its answer, 503 with <c>Retry-After</c>, says nothing
+    /// was stored); a removal that fails answers 503 and logs the residue (at worst the invoice stays over the limit, the state before
+    /// this check existed). Everything here runs on <see cref="CancellationToken.None"/>: the row already exists, and a cancelled request
+    /// must not skip its removal (as <see cref="StoredFileService.FlipToServableAsync"/> runs its committed step on None).
+    /// </summary>
+    private static async Task<IResult?> RecountAfterUploadAsync(
+        Guid invoiceId, Guid fileId, StoredFileService service, ILogger logger, HttpContext httpContext)
+    {
+        int count;
+        try
+        {
+            count = (await service.ReadRowsForInvoiceAsync(invoiceId, MaxListedFiles + 1, CancellationToken.None)).Count;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Invoice {InvoiceId}: its stored files could not be counted after file {FileId} was stored; removing the file (503)",
+                invoiceId, fileId);
+            await RemoveUploadedFileAsync(invoiceId, fileId, service, logger);
+            return UploadUnavailable(httpContext);
+        }
+
+        if (count <= MaxListedFiles)
+        {
+            return null;
+        }
+
+        logger.LogWarning("Invoice {InvoiceId}: {Count} stored files after file {FileId} was stored (a concurrent upload); removing it (409)",
+            invoiceId, count, fileId);
+        return await RemoveUploadedFileAsync(invoiceId, fileId, service, logger)
+            ? FileLimitReached()
+            : UploadUnavailable(httpContext);
+    }
+
+    /// <summary>
+    /// Fix round 2: removes the file this request just stored, through <see cref="StoredFileService.RemoveOwnUploadAsync"/> (the row's
+    /// writer; the submission undo's order: read, withdraw, blob, row), on <see cref="CancellationToken.None"/>. True when nothing is left;
+    /// false when a step faulted (the service logs the step; a step that failed after the withdraw leaves a Removed row, never a Servable one).
+    /// </summary>
+    private static async Task<bool> RemoveUploadedFileAsync(Guid invoiceId, Guid fileId, StoredFileService service, ILogger logger)
+    {
+        try
+        {
+            await service.RemoveOwnUploadAsync(fileId, CancellationToken.None);
+            logger.LogInformation("Invoice {InvoiceId}: file {FileId} removed (row and blob)", invoiceId, fileId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Invoice {InvoiceId}: file {FileId} could not be removed; it stays under the invoice (Removed once the withdraw has run) and " +
+                "may leave the invoice over the file limit", invoiceId, fileId);
+            return false;
+        }
+    }
+
+    private static IResult FileLimitReached() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status409Conflict,
+            title: "File limit reached",
+            detail: $"An invoice holds at most {MaxListedFiles} files. Nothing was stored.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = FileLimitReachedErrorCode });
+
+    /// <summary>A refusal of the store, as the upload route answers it (also the early refusals of <see cref="StoredFileService.PrecheckUploadAsync"/>).</summary>
+    private static IResult UploadRefused(StoredFileCreateResult stored, int maxMb, HttpContext httpContext) =>
+        stored.RefusalCode switch
+        {
+            // The filter admitted the caller and found Write moments earlier; a second refusal is the rights changing in between, or an
+            // answer that was not had (the gate variant answers no rights for a 429, a 5xx or a token failure). Fix round 1 (F1-d): both are
+            // the filter's answer for rights it could not establish, 403 system_failure (retry), never the uniform 404 ("no such invoice").
+            // The filter proved Write first, so this reveals nothing.
+            StoredFileRefusal.CallerNotInternal or StoredFileRefusal.NoWriteOnParent =>
+                ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: httpContext.TraceIdentifier),
+            StoredFileRefusal.OwnerUnresolved => ProblemDetailsHelper.RecordOwnerRefused(stored.OwnerRefusalCode, null, "file", httpContext.TraceIdentifier),
+            StoredFileRefusal.InvalidRequest => FileRefused(FileRequiredErrorCode, "The file's name or content type is not accepted."),
+            StoredFileRefusal.SizeOutOfRange => FileTooLarge(maxMb),
+            _ => UploadUnavailable(httpContext), // not configured, a refused stage or flip: nothing Servable was left
+        };
+
+    private static IResult FileRefused(string errorCode, string detail) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status400BadRequest, title: "File not accepted", detail: detail,
+            extensions: new Dictionary<string, object?> { ["errorCode"] = errorCode });
+
+    private static IResult FileTooLarge(int maxMb) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status413PayloadTooLarge, title: "File too large", detail: $"The file may be at most {maxMb} MB.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = FileTooLargeErrorCode });
+
+    /// <summary>The upload's 503 <see cref="StoreUnavailableErrorCode"/> with <c>Retry-After</c>: nothing Servable was stored, try again.</summary>
+    private static IResult UploadUnavailable(HttpContext httpContext)
+    {
+        httpContext.Response.Headers.RetryAfter = UploadRetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+        return Results.Problem(
+            title: "File store unavailable",
+            detail: "The file could not be stored right now; nothing was stored. Try again later.",
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = StoreUnavailableErrorCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
+    }
+
+    /// <summary>The most files one invoice lists. The submission commit refuses an invoice with more (<c>SubmissionCommitGate.MaxFiles</c>) and the
+    /// upload route refuses a file at this many (task 123 fix round 1, <see cref="FileLimitReachedErrorCode"/>), so more rows are a fault, never a truncated list.</summary>
     internal const int MaxListedFiles = 50;
 
     /// <summary>The <c>scanState</c> of a file the content route serves.</summary>
@@ -229,11 +647,13 @@ public static class StoredFileEndpoints
     /// hardening headers (<c>nosniff</c>, <c>no-store</c>, sandbox CSP). Shared by this route and the AP export batch download
     /// (<c>ApExportEndpoints</c>, ebilling-r1 task 151a), so the two cannot differ. With <paramref name="downloadName"/> the response is
     /// an attachment of that name (<c>Content-Disposition</c>) and <paramref name="servedType"/> is sent as given; without it the
-    /// allow-list rule applies (<see cref="OctetStream"/> is an attachment).
+    /// allow-list rule applies (<see cref="OctetStream"/> is an attachment). <paramref name="auditCaller"/> names the caller and route the
+    /// audit event records; without it, the internal route's systemuser (<see cref="StoredFileServable.CallerSystemUserId"/>). The firm
+    /// route (ebilling-r1 task 093) passes its caller and <see cref="StoredFileAudit.RouteFirm"/>.
     /// </summary>
     internal static async Task<IResult> StreamServableAsync(
         HttpContext httpContext, StoredFileServable file, StoredFileService service, ILogger logger, string servedType, string? downloadName,
-        CancellationToken ct)
+        CancellationToken ct, (string CallerKind, Guid CallerId, string RouteKind)? auditCaller = null)
     {
         Stream? stream;
         try
@@ -258,8 +678,9 @@ public static class StoredFileEndpoints
         }
 
         // Before the first byte: the one audit event (O-29), ids only.
-        StoredFileAudit.LogDownloaded(
-            logger, file.FileId, file.Parent.Table, file.Parent.Id, StoredFileAudit.CallerSystemUser, file.CallerSystemUserId, StoredFileAudit.RouteInternal);
+        var (callerKind, callerId, routeKind) =
+            auditCaller ?? (StoredFileAudit.CallerSystemUser, file.CallerSystemUserId, StoredFileAudit.RouteInternal);
+        StoredFileAudit.LogDownloaded(logger, file.FileId, file.Parent.Table, file.Parent.Id, callerKind, callerId, routeKind);
 
         var headers = httpContext.Response.Headers;
         headers[HeaderNames.XContentTypeOptions] = "nosniff";

@@ -20,7 +20,7 @@
 import * as React from 'react';
 import * as fs from 'fs';
 import * as path from 'path';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal, describeAccessPermission } from '../AccessGrantModal';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -36,6 +36,8 @@ import type {
   AccessPermissionState,
 } from '../types';
 import { personFromUser } from './personPickDouble';
+// Task 196: the Access Permission explanation is a note behind the header bell.
+import { openAccessNotes } from '../../../__tests__/helpers/accessNotes';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
   render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -167,25 +169,29 @@ describe('AccessGrantModal — Access-Permission sharing gate (task 138)', () =>
       expect(screen.getByRole('button', { name: 'Revoke' })).not.toBeDisabled();
     });
 
-    it('shows ONE "Restricted Access" message bar that agrees with the enabled controls', async () => {
+    it('shows ONE "Restricted Access" note that agrees with the enabled controls', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'restricted' })} />);
       await screen.findByText('Prior Grantee');
+      // Task 196: behind the bell, not in the body.
+      expect(screen.queryByText('Restricted Access')).not.toBeInTheDocument();
 
-      expect(screen.getByText('Restricted Access')).toBeInTheDocument();
-      expect(screen.getByText(/Only internal users can be given access to this record/)).toBeInTheDocument();
-      expect(screen.getByText(/share it with a colleague \(Add person\)/)).toBeInTheDocument();
-      expect(screen.queryByText('Secure – Restricted')).not.toBeInTheDocument();
+      const notes = await openAccessNotes();
+      expect(within(notes).getByText('Restricted Access')).toBeInTheDocument();
+      expect(within(notes).getByText(/Only internal users can be given access to this record/)).toBeInTheDocument();
+      expect(within(notes).getByText(/share it with a colleague \(Add person\)/)).toBeInTheDocument();
+      expect(within(notes).queryByText('Secure – Restricted')).not.toBeInTheDocument();
     });
 
-    it('a SECURE + Restricted record shows "Secure – Restricted" (owner O1 FINAL) — one bar, no duplicate', async () => {
+    it('a SECURE + Restricted record shows "Secure – Restricted" (owner O1 FINAL) — one note, no duplicate', async () => {
       renderWithTheme(
         <AccessGrantModal {...makeProps({ accessPermissionState: 'restricted', isSecureRecord: true })} />
       );
       await screen.findByText('Prior Grantee');
 
-      expect(screen.getByText('Secure – Restricted')).toBeInTheDocument();
-      expect(screen.queryByText('Restricted Access')).not.toBeInTheDocument();
-      expect(screen.queryByText('Secure')).not.toBeInTheDocument();
+      const notes = await openAccessNotes();
+      expect(within(notes).getByText('Secure – Restricted')).toBeInTheDocument();
+      expect(within(notes).queryByText('Restricted Access')).not.toBeInTheDocument();
+      expect(within(notes).queryByText('Secure')).not.toBeInTheDocument();
     });
   });
 
@@ -208,17 +214,19 @@ describe('AccessGrantModal — Access-Permission sharing gate (task 138)', () =>
       renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'limited' })} />);
       await screen.findByText('Gene Gatekeeper');
 
-      expect(screen.getByText('Limited Access')).toBeInTheDocument();
-      expect(screen.getByText(/only through grants made to them by name/)).toBeInTheDocument();
+      const notes = await openAccessNotes();
+      expect(within(notes).getByText('Limited Access')).toBeInTheDocument();
+      expect(within(notes).getByText(/only through grants made to them by name/)).toBeInTheDocument();
     });
 
     it('a SECURE record (passed as limited) shows the "Secure" explanation instead', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'limited', isSecureRecord: true })} />);
       await screen.findByText('Gene Gatekeeper');
 
-      expect(screen.getByText('Secure')).toBeInTheDocument();
-      expect(screen.getByText(/This record is secure/)).toBeInTheDocument();
-      expect(screen.queryByText('Limited Access')).not.toBeInTheDocument();
+      const notes = await openAccessNotes();
+      expect(within(notes).getByText('Secure')).toBeInTheDocument();
+      expect(within(notes).getByText(/This record is secure/)).toBeInTheDocument();
+      expect(within(notes).queryByText('Limited Access')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Add organization' })).not.toBeInTheDocument();
     });
 
@@ -238,15 +246,19 @@ describe('AccessGrantModal — Access-Permission sharing gate (task 138)', () =>
   });
 
   describe('Standard', () => {
-    it('offers every option and shows no permission banner', async () => {
+    it('offers every option and shows no permission note', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'standard' })} />);
       await screen.findByText('Gene Gatekeeper');
 
       expect(screen.getByRole('button', { name: 'Add person' })).not.toBeDisabled();
       expect(screen.getByRole('button', { name: 'Add organization' })).not.toBeDisabled();
+      // Task 196: no note, so the bell counts none and the popover says so.
+      expect(screen.getByRole('button', { name: 'Access notes (0)' })).toBeInTheDocument();
+      const notes = await openAccessNotes();
       for (const title of ['Restricted Access', 'Limited Access', 'Secure', 'Secure – Restricted']) {
         expect(screen.queryByText(title)).not.toBeInTheDocument();
       }
+      expect(notes).toHaveTextContent("There are no notes about this record's access.");
     });
 
     it('defaults to Standard when accessPermissionState is omitted', async () => {
@@ -313,7 +325,7 @@ describe('AccessGrantModal — Access-Permission sharing gate (task 138)', () =>
       await screen.findByText('Prior Grantee');
       expect(screen.getByText('Add Access Permissions')).toBeInTheDocument();
       if (state === 'restricted') {
-        expect(screen.getByText('Restricted Access')).toBeInTheDocument();
+        expect(within(await openAccessNotes()).getByText('Restricted Access')).toBeInTheDocument();
       }
 
       expect(errorSpy).not.toHaveBeenCalled();

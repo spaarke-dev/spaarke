@@ -60,6 +60,7 @@ export function diffProposals(before: ProposalView, after: ProposalView): Change
   add('Consequence', before.consequence, after.consequence);
   add('Headline', before.shortHeadline, after.shortHeadline);
   add('Message', before.messageTemplate, after.messageTemplate);
+  add('Firm description', before.firmDescription ?? null, after.firmDescription ?? null);
   add('Clause quote', before.clauseQuote, after.clauseQuote);
   add('Clause location', before.clauseLocation, after.clauseLocation);
   return lines;

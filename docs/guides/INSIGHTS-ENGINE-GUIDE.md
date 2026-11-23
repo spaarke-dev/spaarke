@@ -178,7 +178,7 @@ For EACH node in the playbook, ensure a corresponding `sprk_analysisaction` row 
 
 Required actions for Insights node types (one-time setup per environment):
 
-| ActionType enum value | Suggested `sprk_actioncode` | Purpose |
+| `ExecutorType` enum value | Suggested `sprk_actioncode` | Purpose |
 |---|---|---|
 | `LiveFact = 80` | `INS-LIVE-FACT` | LiveFactNode dispatch |
 | `IndexRetrieve = 90` | `INS-INDEX-RETRIEVE` | IndexRetrieveNode dispatch |

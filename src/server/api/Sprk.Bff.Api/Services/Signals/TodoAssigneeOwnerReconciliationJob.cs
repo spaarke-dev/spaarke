@@ -413,7 +413,11 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     /// </summary>
     private async Task<RecentWindow> ListRecentToDosAsync(Run run, DateTime runStart, CancellationToken ct)
     {
-        var since = _watermark ?? runStart - InitialLookback;
+        // #2735 (the #2709 pattern): the first run's window start is stored before the listing can fail. A run that keeps the
+        // old watermark (a failed listing, a failed or cancelled run) then leaves the next run listing from here; recomputing
+        // the look-back from each later run's own start would slide the window past what was never listed.
+        _watermark ??= runStart - InitialLookback;
+        var since = _watermark.Value;
         var after = _watermarkAfter;
         try
         {

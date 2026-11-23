@@ -973,10 +973,39 @@ public record LookupNavigationMetadata
 /// <param name="Targets">A lookup column's target tables (logical names); <c>null</c> for any other column, or when not stated.</param>
 /// <param name="OptionValues">A choice column's option values (choice, multi-select choice, state, status); <c>null</c> for any
 /// other column, or when not stated.</param>
+/// <param name="ColumnNumber">The column's number in the table (<c>AttributeMetadata.ColumnNumber</c>), the number an update
+/// audit's <c>attributemask</c> lists for a changed column; <c>null</c> when not stated (field-mapping-server-write-path-r1
+/// task 052d: the repair pass's core-pair report decides from it whether an update changed a pair column).</param>
+/// <param name="IsAuditEnabled">Whether the column's changes are audited (<c>AttributeMetadata.IsAuditEnabled</c>); <c>null</c> when
+/// not stated, which a reader treats as "not audited" (fail closed): the core-pair report reads no change history of a column
+/// that is not audited and would otherwise report "no change".</param>
 public sealed record ColumnMetadata(
     string LogicalName, string? AttributeType, bool? IsValidForUpdate, bool? IsSecured, int? MaxLength,
     decimal? MinValue = null, decimal? MaxValue = null, IReadOnlyList<string>? Targets = null,
-    IReadOnlyList<int>? OptionValues = null);
+    IReadOnlyList<int>? OptionValues = null, int? ColumnNumber = null, bool? IsAuditEnabled = null);
+
+/// <summary>
+/// A table's audit facts as its metadata declares them (<see cref="IGenericEntityService.GetTableAuditMetadataAsync"/>). A
+/// <c>null</c> is a fact the metadata did not state; a reader treats it as unknown and fails closed.
+/// </summary>
+/// <param name="ObjectTypeCode">The table's numeric object type code, the value an <c>audit</c> row's <c>objecttypecode</c> is
+/// filtered by (a custom table's code differs per environment, so it is read, never written into code).</param>
+/// <param name="IsAuditEnabled">Whether auditing is on for the table itself.</param>
+public sealed record TableAuditMetadata(int? ObjectTypeCode, bool? IsAuditEnabled);
+
+/// <summary>
+/// A one-to-many relationship of a table along which an Assign (an <c>ownerid</c> write) cascades to the child rows
+/// (<see cref="IGenericEntityService.GetAssignCascadesAsync"/>).
+/// </summary>
+/// <param name="SchemaName">The relationship's schema name.</param>
+/// <param name="ReferencingEntity">The child table (logical name).</param>
+/// <param name="Assign">The relationship's Assign cascade as its metadata states it (<c>Cascade</c>, <c>Active</c>,
+/// <c>UserOwned</c>, ...); <c>null</c> when the metadata does not state it.</param>
+/// <param name="ReferencingAttribute">The child table's lookup column that holds the parent (logical name), from the same
+/// metadata read; <c>null</c> when the metadata does not state it. Field-mapping-server-write-path-r1 task 052f: Repair reads a
+/// row's children along this column, and a relationship without it is read as unknown, never as "no children".</param>
+public sealed record AssignCascadeRelationship(
+    string SchemaName, string ReferencingEntity, string? Assign, string? ReferencingAttribute = null);
 
 /// <summary>
 /// Analysis entity model (sprk_analysis)
@@ -1387,6 +1416,28 @@ public static class EventStatusCode
 
         return "Unknown";
     }
+}
+
+/// <summary>
+/// The <c>sprk_eventtype_ref</c> rows the BFF writes or compares by id: reference data shared across environments.
+/// </summary>
+/// <remarks>
+/// <para>ONE definition for Signals' <c>assign-task</c> (ontology task 159, D-178) and the external event create and lists
+/// (spaarke-SPA-external-access-platform-r4 task 008; uac-r2 review 2026-11-13, condition B), so the two cannot name
+/// different rows. Verified on spaarkedev1 2026-10-22.</para>
+/// <para>Other private copies of the same id remain in the AI task node, the Daily Briefing collector and the workspace
+/// portfolio service; they are not part of this definition yet.</para>
+/// </remarks>
+public static class EventTypeRef
+{
+    /// <summary>The entity SET name of <c>sprk_eventtype_ref</c> (live metadata "Collection Name").</summary>
+    public const string EntitySet = "sprk_eventtype_refs";
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c>.</summary>
+    public const string TaskId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    /// <summary>The Task row id as a <see cref="Guid"/>.</summary>
+    public static readonly Guid Task = new(TaskId);
 }
 
 /// <summary>

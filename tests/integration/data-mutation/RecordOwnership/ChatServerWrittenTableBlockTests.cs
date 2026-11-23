@@ -133,7 +133,9 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
     {
         var result = await CreateRecord(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
 
-        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter(table).Should().BeFalse();
+        // ISS-028 (EB-D-248): a correction row is now also a writer-only table (RecordTableRule.CreatedOnlyByItsWriter), so the registry flag is
+        // true for it; the chat tool still answers in the invoice-family block's words, which it asks first. The other three are not writer-only.
+        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter(table).Should().Be(table == "sprk_invoicecorrection");
         DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter("sprk_todo").Should().BeFalse();
         DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter("sprk_event").Should().BeFalse();
         result.ErrorMessage.Should().Be(DataverseCreateRecordHandler.ServerWrittenInvoiceFamilyCreateBlockedMessage(table));

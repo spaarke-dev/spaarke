@@ -12,6 +12,9 @@
  *   Task 102  adjustment lines and the stored totals arrive in the read model; adding one is 111's approve wizard.
  *   Task 164  POST /api/finance/invoices/{invoiceId}/lines                                  Add line: a reviewer adds a Fee or Expense line the firm did not bill
  *
+ * Task 095f-2ui: `decideLine`, `decideLines`, `correctLine` and `correctHeader` (a correct and a confirm) take an optional `note`; a blank or
+ * whitespace-only note is left out of the request, never sent as null or "". `acceptClean` never takes one.
+ *
  * The page decides nothing the server owns (ADR-002, I-1): it never computes a total, a status or who may decide. Every outcome is the
  * server's answer. `authenticatedFetch` THROWS on any non-2xx (`ApiError` with the parsed ProblemDetails) and on an exhausted 401
  * (`AuthError`); every outcome is decided in the `catch` through the `@spaarke/auth` guards. Mirrors
@@ -19,6 +22,7 @@
  */
 
 import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from '@spaarke/auth';
+import { noteMember } from './noteModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types (the BFF's JSON, camelCase): InvoiceReviewReadService.cs, InvoiceLineDecisionService.cs, InvoiceCorrectionService.cs
@@ -197,6 +201,17 @@ export interface ReviewDecisionRecord {
   decidedOn: string | null;
   decidedBy: ReviewRef | null;
   reason: string | null;
+  /** ISS-034 iss034d (EB-D-257): who completed a blocked Override or Return that someone else recorded. Absent otherwise. */
+  completedBy?: { name: string } | null;
+}
+
+/** ebilling-r1 task 113: the server's states for the read-time Procedure-change banner (`ProcedureChangeBanner`). */
+export type ProcedureChangeState = 'Changed' | 'NotChanged' | 'NotYetChecked' | 'CouldNotBeChecked';
+
+/** ebilling-r1 task 113: whether the Procedures that apply to the invoice changed since it was judged. `text` is omitted for NotChanged. */
+export interface ProcedureChange {
+  state: ProcedureChangeState | string;
+  text?: string | null;
 }
 
 export interface InvoiceReview {
@@ -209,6 +224,11 @@ export interface InvoiceReview {
   lineCounts: Record<string, number>;
   flags: ReviewFlags;
   invoicePdfFileId: string | null;
+  /**
+   * ebilling-r1 task 113 (113b renders it). Absent when the server does not judge it: the caller is not internal, the invoice is decided,
+   * it has no firm, or no evaluation ran.
+   */
+  procedureChange?: ProcedureChange | null;
 }
 
 export interface DecidedLine {
@@ -257,6 +277,8 @@ export interface SingleDecision {
   reason: string | null;
   /** Reduce only: the approved amount (between 0 and the billed amount; the server checks). */
   approvedAmount: number | null;
+  /** Task 095f-2ui: the optional note on the line's Decision Record. Blank or whitespace-only is left out of the request, never sent as null or "". */
+  note?: string;
 }
 
 export interface MultiDecision {
@@ -264,12 +286,16 @@ export interface MultiDecision {
   action: DecisionAction;
   reason: string | null;
   lines: Array<{ lineId: string; approvedAmount: number | null }>;
+  /** Task 095f-2ui: one note, saved on every selected line's own record. Blank is left out of the request. */
+  note?: string;
 }
 
 export interface CorrectionRequest {
   field: string;
   value: string | null;
   confirm: boolean;
+  /** Task 095f-2ui: the optional note on the correction row (a correct and a confirm both take one). Blank is left out of the request. */
+  note?: string;
 }
 
 /** Body of Add line (task 164, AddLineRequest). No total, status, owner or person: the server takes the decider from the caller's token. */
@@ -451,6 +477,35 @@ export function staysInAddLineForm(f: ApiFailure): boolean {
   );
 }
 
+const CODE_LINE_PENDING = 'ebilling.line.pending';
+const CODE_CORRECTION_CODE_SET_UNAVAILABLE = 'ebilling.correction.code_set_unavailable';
+const CODE_CORRECTION_EXTRACTION_UNAVAILABLE = 'ebilling.correction.extraction_unavailable';
+
+/**
+ * Task 095f-2ui (review round 1): a 409 that a dialog with a typed reason and note (the bulk decision, a correction, Confirm as read) keeps
+ * open with the server's sentence, because sending the same form again can succeed once the cause passes: another change to the invoice is in
+ * progress (`busy`), a line is still processing (`line.pending`), the totals check refused (the form can be changed), the code set or the
+ * extraction is unavailable for now, or a `*.concurrent_change`.
+ *
+ * Every other 409 says the form cannot be fixed from inside the dialog: the dialog closes and the page offers Reload, and the typed reason and
+ * note wait in the page for the next opening of the same dialog. That is the invoice or line no longer being what the form was about
+ * (`not_in_review`, `line.not_decidable`, `line.changed`, `invoice.changed`, `correction.line_not_correctable`, `correction.no_provenance`,
+ * `correction.procedure_gap`, `correction.too_large`), and, from review round 2, the two whose cause lies OUTSIDE the form: corrections are
+ * pending on another line (`line.corrections_pending`: they must be repeated first) and the invoice has no firm
+ * (`correction.firm_missing`: the firm is added elsewhere). Any code not listed closes the dialog too.
+ */
+export function staysInNoteDialog(f: ApiFailure): boolean {
+  if (f.status !== 409 || f.errorCode === null) return false;
+  return (
+    f.errorCode === CODE_BUSY ||
+    f.errorCode === CODE_LINE_PENDING ||
+    f.errorCode === CODE_TOTALS_REFUSED ||
+    f.errorCode === CODE_CORRECTION_CODE_SET_UNAVAILABLE ||
+    f.errorCode === CODE_CORRECTION_EXTRACTION_UNAVAILABLE ||
+    f.errorCode.endsWith('.concurrent_change')
+  );
+}
+
 /**
  * True when a failed REPEAT (the page's Repeat after a 503 incomplete) says nothing final about the change: no answer at all (status 0, a
  * sign-in failure included), any other 5xx, or a 409 `busy` / `line_add.changed`. The earlier send already saved the change, so the reviewer
@@ -611,6 +666,7 @@ export function createInvoiceReviewApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl
         action: d.action,
         reason: d.reason,
         approvedAmount: d.approvedAmount,
+        ...noteMember(d.note),
       });
     },
 
@@ -620,19 +676,21 @@ export function createInvoiceReviewApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl
         action: d.action,
         reason: d.reason,
         lines: d.lines,
+        ...noteMember(d.note),
       });
     },
 
+    // Accept all Clean carries no note, ever (095f-2d1: the lines it accepts are accepted in bulk and each record is written without one).
     acceptClean(invoiceId, decisionId) {
       return post(routes.acceptClean(bffBaseUrl, invoiceId), { decisionId });
     },
 
     correctLine(invoiceId, lineId, r) {
-      return post(routes.correctLine(bffBaseUrl, invoiceId, lineId), { field: r.field, value: r.value, confirm: r.confirm });
+      return post(routes.correctLine(bffBaseUrl, invoiceId, lineId), { field: r.field, value: r.value, confirm: r.confirm, ...noteMember(r.note) });
     },
 
     correctHeader(invoiceId, r) {
-      return post(routes.correctHeader(bffBaseUrl, invoiceId), { field: r.field, value: r.value, confirm: r.confirm });
+      return post(routes.correctHeader(bffBaseUrl, invoiceId), { field: r.field, value: r.value, confirm: r.confirm, ...noteMember(r.note) });
     },
 
     addLine(invoiceId, r) {

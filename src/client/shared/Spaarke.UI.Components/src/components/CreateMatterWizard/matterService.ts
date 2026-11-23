@@ -36,9 +36,12 @@ import type {
 import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
 import { createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
+import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
-// Contact type (used by AssignCounselStep search results)
+// Contact type (used by contact search results)
 // ---------------------------------------------------------------------------
 
 /**
@@ -89,7 +92,8 @@ export interface IDraftSummaryInput {
 export interface IFollowOnActions {
   assignCounsel?: IAssignCounselInput;
   draftSummary?: IDraftSummaryInput;
-  sendEmail?: { to: string; subject: string; body: string };
+  /** Task 182 (D-219): the composed email, sent with `sendComposedEmail` and the new matter as the association. */
+  sendEmail?: { email: IComposedEmail; onResolveShareLink?: (documentId: string) => Promise<string | null> };
 }
 
 // ---------------------------------------------------------------------------
@@ -143,24 +147,7 @@ export class MatterService {
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
-    const webApiAdapter = {
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
-        return { id };
-      },
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
-        return { id };
-      },
-      deleteRecord: async (entityName: string, id: string) => {
-        await dataService.deleteRecord(entityName, id);
-        return { id };
-      },
-    };
+    const webApiAdapter = createWebApiFromDataService(dataService);
     this._entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
   }
 
@@ -373,9 +360,9 @@ export class MatterService {
             uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
-    } else if (uploadedFiles.length > 0 && !this._containerId) {
-      warnings.push('File upload skipped -- no SPE container configured. Files can be added later.');
     }
+    // There is no "upload skipped, no SPE container" branch: since task 076 the upload does not depend on `_containerId`,
+    // so a caller with files always reaches the upload above (the old `else if` was unreachable).
 
     // -- Step 3: Follow-on actions --
     if (followOnActions.assignCounsel) {
@@ -393,14 +380,14 @@ export class MatterService {
     }
 
     if (followOnActions.sendEmail) {
-      const emailResult = await this._entityService.sendEmail({
-        to: followOnActions.sendEmail.to,
-        subject: followOnActions.sendEmail.subject,
-        body: followOnActions.sendEmail.body,
+      const emailResult = await sendComposedEmail(followOnActions.sendEmail.email, {
         associations: [{ entityType: 'sprk_matter', entityId: matterId, entityName: form.matterName.trim() }],
+        authenticatedFetch: this._authenticatedFetch,
+        bffBaseUrl: this._bffBaseUrl,
+        onResolveShareLink: followOnActions.sendEmail.onResolveShareLink,
       });
       if (!emailResult.success) {
-        warnings.push(emailResult.warning ?? 'Failed to create email activity. Please send manually.');
+        warnings.push(emailResult.warning ?? 'The email was not sent. Send it from the matter.');
       }
     }
 
@@ -454,7 +441,7 @@ export class MatterService {
 }
 
 // ---------------------------------------------------------------------------
-// Contact search helper (for AssignCounselStep and lookup fields)
+// Contact search helper (for lookup fields)
 // ---------------------------------------------------------------------------
 
 /**
@@ -491,16 +478,9 @@ export async function searchContacts(dataService: IDataService, nameFilter: stri
   }
 }
 
-/**
- * Search contacts and return as ILookupItem[] (for LookupField compatibility).
- */
-export async function searchContactsAsLookup(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
-  const contacts = await searchContacts(dataService, nameFilter);
-  return contacts.map(c => ({
-    id: c.sprk_contactid,
-    name: c.sprk_name + (c.sprk_email ? ` (${c.sprk_email})` : ''),
-  }));
-}
+// Contact lookup for LookupField: re-exported from the canonical shared implementation
+// (services/userLookup: active contacts only, matches name or email) instead of a second copy (#2866).
+export { searchContactsAsLookup } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Matter Type search helper
@@ -571,7 +551,7 @@ export async function searchPracticeAreas(dataService: IDataService, nameFilter:
 }
 
 // ---------------------------------------------------------------------------
-// AI draft summary helper (for DraftSummaryStep)
+// AI draft summary helper (used by CreateRecordStep; the DraftSummaryStep it was written for was retired by ontology task 184)
 // ---------------------------------------------------------------------------
 
 export interface IAiDraftSummaryResponse {
@@ -718,36 +698,9 @@ export async function searchOrganizationsAsLookup(
 // User search helper (for the Send Email follow-on -- lookup systemuser table)
 // ---------------------------------------------------------------------------
 
-/**
- * Search systemuser records by name fragment.
- * Returns up to 10 active users as ILookupItem.
- * Name format: "Full Name (email)" for disambiguation.
- */
-export async function searchUsersAsLookup(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
-  if (!nameFilter || nameFilter.trim().length < 2) {
-    return [];
-  }
-
-  const safeFilter = nameFilter.trim().replace(/'/g, "''");
-  const query =
-    `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
-    `&$orderby=fullname asc` +
-    `&$top=10`;
-
-  console.info('[MatterService] searchUsers query:', 'systemuser', query);
-  try {
-    const result = await dataService.retrieveMultipleRecords('systemuser', query);
-    console.info('[MatterService] searchUsers results:', result.entities.length);
-    return result.entities.map(e => ({
-      id: e['systemuserid'] as string,
-      name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
-    }));
-  } catch (err) {
-    console.error('[MatterService] searchUsers error:', err);
-    throw err;
-  }
-}
+// Re-exported from the canonical shared implementation (services/userLookup) rather
+// than kept as a second copy here (#2866). Existing imports from this module keep working.
+export { searchUsersAsLookup } from '../../services/userLookup';
 
 function buildFallbackSummary(matterName: string, matterType: string, practiceArea: string): IAiDraftSummaryResponse {
   const type = matterType || 'general';

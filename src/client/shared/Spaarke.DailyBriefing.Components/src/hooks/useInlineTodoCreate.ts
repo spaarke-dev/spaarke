@@ -46,8 +46,8 @@ import { useState, useRef, useCallback } from 'react';
 import {
   applyResolverFields,
   createChildRecordViaBff,
+  discoverNavProps,
   TODO_REGARDING_CATALOG,
-  type INavPropEntry,
   type IPolymorphicWebApi,
 } from '@spaarke/ui-components/services';
 // The package's BFF convention (briefingService, DailyBriefingApp): @spaarke/auth's authenticatedFetch with relative
@@ -139,51 +139,6 @@ function mapPriorityToScore(priority: NotificationPriority): number {
       return 20;
     default:
       return 50;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Nav-prop discovery for sprk_todo (mirrors the shared `todoService.ts` pattern)
-// ---------------------------------------------------------------------------
-
-/** Page-session cache of discovered ManyToOne nav-props, keyed by entity name. */
-const _navPropCache: Record<string, INavPropEntry[]> = {};
-
-async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEntry[]> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[useInlineTodoCreate] Nav-prop discovery failed for ${entityLogicalName}: HTTP ${resp.status}`);
-      return [];
-    }
-
-    const json = (await resp.json()) as {
-      value?: Array<{
-        ReferencingAttribute: string;
-        ReferencingEntityNavigationPropertyName: string;
-        ReferencedEntity: string;
-      }>;
-    };
-
-    const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    _navPropCache[entityLogicalName] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[useInlineTodoCreate] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return [];
   }
 }
 
@@ -312,7 +267,8 @@ export function useInlineTodoCreate(
                 webApi.retrieveMultipleRecords(entityLogicalName, query),
             };
 
-            const navProps = await _discoverNavProps('sprk_todo');
+            // The shared discovery (one metadata query + cache for every writer of sprk_todo).
+            const navProps = await discoverNavProps('sprk_todo');
 
             // Notification carries the parent's display name in `regardingName`.
             await applyResolverFields(

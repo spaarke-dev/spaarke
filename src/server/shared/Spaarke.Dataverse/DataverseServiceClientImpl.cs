@@ -1833,6 +1833,69 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return ColumnMetadataOf(response.EntityMetadata);
     }
 
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (the entity's own properties, published metadata), projected by
+    /// <see cref="TableAuditMetadataOf"/>. A fault propagates: the caller fails closed.</remarks>
+    public async Task<TableAuditMetadata> GetTableAuditMetadataAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Entity,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return TableAuditMetadataOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The audit facts of <paramref name="entity"/>: its object type code and whether auditing is on for the table; a fact the
+    /// metadata does not state is <c>null</c>. Pure, and <c>public static</c> for direct testability (the
+    /// <see cref="ColumnMetadataOf"/> precedent).
+    /// </summary>
+    public static TableAuditMetadata TableAuditMetadataOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity) =>
+        new(entity?.ObjectTypeCode, entity?.IsAuditEnabled?.Value);
+
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (relationships, published metadata), projected by <see cref="AssignCascadesOf"/>.
+    /// A fault propagates, and so does a response without the entity's relationships: the caller fails closed.</remarks>
+    public async Task<IReadOnlyList<AssignCascadeRelationship>> GetAssignCascadesAsync(
+        string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Relationships,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return AssignCascadesOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The one-to-many relationships of <paramref name="entity"/> whose Assign cascade is not <c>NoCascade</c> — one whose
+    /// cascade configuration or Assign value the metadata does not state is included (fail closed) — each with its child table's
+    /// referencing column (task 052f; <c>null</c> when the metadata does not state it). Pure, and
+    /// <c>public static</c> for direct testability (the <see cref="ColumnMetadataOf"/> precedent).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The metadata, or its one-to-many relationships, did not come back: that is a
+    /// fault, never "nothing cascades" (an empty list is the answer "nothing cascades").</exception>
+    public static IReadOnlyList<AssignCascadeRelationship> AssignCascadesOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity) =>
+        (entity?.OneToManyRelationships
+         ?? throw new InvalidOperationException(
+             $"The one-to-many relationships of '{entity?.LogicalName ?? "(no entity)"}' did not come back, so whether an Assign "
+             + "cascades cannot be told."))
+            .Where(r => r is not null
+                        && r.CascadeConfiguration?.Assign != Microsoft.Xrm.Sdk.Metadata.CascadeType.NoCascade)
+            .Select(r => new AssignCascadeRelationship(
+                r.SchemaName ?? string.Empty, r.ReferencingEntity ?? string.Empty, r.CascadeConfiguration?.Assign?.ToString(),
+                string.IsNullOrWhiteSpace(r.ReferencingAttribute) ? null : r.ReferencingAttribute))
+            .ToArray();
+
     /// <summary>
     /// The columns of <paramref name="entity"/> as <see cref="ColumnMetadata"/>, keyed by logical name (case-insensitive): the
     /// type's name, the update and field-security flags as stated, a text or memo column's maximum length, a number or Money
@@ -1871,7 +1934,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 .ToArray();
             columns[attribute.LogicalName] = new ColumnMetadata(
                 attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength,
-                range.Min, range.Max, targets, options);
+                range.Min, range.Max, targets, options, attribute.ColumnNumber, attribute.IsAuditEnabled?.Value);
         }
 
         return columns;

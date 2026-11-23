@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// flag-off rule set never yields clause text. Dataverse and SPE are substituted at their narrow seams; validation, the describer and the
 /// orchestration are real. The fake store evaluates the real query (nested filters, In, Null), so a lost domain filter is observable.
 /// </remarks>
-public sealed class RuleSetServiceTests
+public sealed partial class RuleSetServiceTests
 {
     private static readonly Guid TeamId = Guid.NewGuid();
     private static readonly Guid DocumentId = Guid.NewGuid();
@@ -72,6 +72,9 @@ public sealed class RuleSetServiceTests
         public readonly List<(string Entity, int Size)> BulkCalls = new();
         public Func<string, bool>? FailBulkFor;
         public Func<string, bool>? FailUpdateFor;
+
+        /// <summary>Task 117: faults the single-row updates of the rows it answers true for (table, id); nothing is applied.</summary>
+        public Func<string, Guid, bool>? FailUpdateOf;
 
         /// <summary>The publish claim store the service takes (round 3): the real process-local lease, so a test can hold a claim or watch one released.</summary>
         public Spaarke.Scheduling.IScheduledJobLease Lease = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
@@ -174,7 +177,7 @@ public sealed class RuleSetServiceTests
                 .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken ct) =>
                 {
                     ct.ThrowIfCancellationRequested(); // the real seam honours the caller's token
-                    if (FailUpdateFor?.Invoke(entity) == true)
+                    if (FailUpdateFor?.Invoke(entity) == true || FailUpdateOf?.Invoke(entity, id) == true)
                     {
                         throw new InvalidOperationException("simulated update failure");
                     }
@@ -675,17 +678,24 @@ public sealed class RuleSetServiceTests
             return value switch { OptionSetValue o => o.Value, EntityReference r => r.Id, IComparable c => c, _ => null };
         }
 
-        private static bool Matches(Entity row, FilterExpression filter)
+        /// <summary>Task 117: sets a row's <c>modifiedon</c> as the fake keeps it (a read returns it; a query condition on it sees it).</summary>
+        public void SetModifiedOn(Guid id, DateTime modifiedOn) => _modifiedOn[id] = modifiedOn;
+
+        private bool Matches(Entity row, FilterExpression filter)
         {
             var results = filter.Conditions.Select(c => Matches(row, c)).Concat(filter.Filters.Select(f => Matches(row, f))).ToList();
             return results.Count == 0 || (filter.FilterOperator == LogicalOperator.And ? results.All(x => x) : results.Any(x => x));
         }
 
-        private static bool Matches(Entity row, ConditionExpression c)
+        private bool Matches(Entity row, ConditionExpression c)
         {
             object? actual = c.AttributeName == row.LogicalName + "id"
                 ? row.Id
-                : row.Contains(c.AttributeName) ? row[c.AttributeName] : c.AttributeName == "statecode" ? new OptionSetValue(0) : null;
+                : row.Contains(c.AttributeName) ? row[c.AttributeName]
+                : c.AttributeName == "statecode" ? new OptionSetValue(0)
+                // Task 117: the system column the fake keeps aside, as a read returns it (equal to createdon until the row is written again).
+                : c.AttributeName == "modifiedon" && _createdOn.TryGetValue(row.Id, out var createdOn) ? _modifiedOn.GetValueOrDefault(row.Id, createdOn)
+                : null;
             actual = actual switch { EntityReference r => r.Id, OptionSetValue o => o.Value, _ => actual };
             var wanted = c.Values.Select(v => v is OptionSetValue o ? o.Value : v).ToList();
             return c.Operator switch
@@ -693,6 +703,10 @@ public sealed class RuleSetServiceTests
                 ConditionOperator.Equal => actual is not null && Equals(actual, wanted[0]),
                 ConditionOperator.In => actual is not null && wanted.Any(w => Equals(actual, w)),
                 ConditionOperator.Null => actual is null,
+                // Task 117: SQL semantics (a null never matches), the id cursor (the fake orders ids as Guid.CompareTo, as OrderKey does) and the age floor.
+                ConditionOperator.NotEqual => actual is not null && !Equals(actual, wanted[0]),
+                ConditionOperator.GreaterThan => actual is IComparable gt && wanted[0] is not null && gt.CompareTo(wanted[0]) > 0,
+                ConditionOperator.LessThan => actual is IComparable lt && wanted[0] is not null && lt.CompareTo(wanted[0]) < 0,
                 // 082c C19: Dataverse LIKE (% any run, _ one character, case-insensitive), for the reverse chain read's pair candidates.
                 ConditionOperator.Like => actual is string text && wanted[0] is string pattern && System.Text.RegularExpressions.Regex.IsMatch(text,
                     "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("%", ".*").Replace("_", ".") + "$",
@@ -731,6 +745,24 @@ public sealed class RuleSetServiceTests
     /// <summary>An invoice of the test firm whose snapshot applied exactly <paramref name="versions"/>.</summary>
     private static Guid JudgedInvoice(Harness h, params Guid[] versions) =>
         h.Invoice(FindingsWith(SnapshotOf(versions.Select(AppliedOn).ToArray())));
+
+    /// <summary>
+    /// ISS-038: the findings JSON of an invoice judged on each record rule version in <paramref name="recordRules"/>, applied on the invoice, its
+    /// slot naming the base rule version (as the resolver writes a record rule's slot), plus the plain versions <paramref name="plain"/>. Built by
+    /// the real snapshot builder (082d).
+    /// </summary>
+    internal static string FindingsWithRecordRules(IReadOnlyList<(Guid RecordVersion, Guid BaseVersion)> recordRules, params Guid[] plain)
+    {
+        var procedure = new AppliedProcedure(
+            Guid.NewGuid(), "Base Procedure", Guid.NewGuid(), 1, new ProcedureRank(ProcedureLevel.AllRecords, 0, false), ProcedureSources.AllRecords, false, []);
+        var rules = recordRules.Select(r => new ResolvedRule(
+            new ResolvedPolicyVersion { PolicyId = Guid.NewGuid(), PolicyCode = "BRR-RECORD", PolicyVersionId = r.RecordVersion, RuleSetId = Guid.NewGuid() },
+            procedure,
+            new RecordRuleSlot(Guid.NewGuid(), "BASE", r.BaseVersion, new CoreRecordLink("sprk_matter", Guid.NewGuid(), 0), null))).ToList();
+        var onDate = new ProcedureRulesOnDate(new DateOnly(2026, 11, 5), [procedure], rules, [], [], []);
+        var applications = recordRules.Select(r => r.RecordVersion).Concat(plain).Select(AppliedOn).ToList();
+        return FindingsWith(ProcedureSnapshot.Build(new BillingProcedureBasis([], [onDate], applications)));
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Reads and domain isolation
@@ -2960,7 +2992,7 @@ public sealed class RuleSetServiceTests
             "no Procedure assignment, override or Procedure Version is read: the snapshot is not re-resolved");
     }
 
-    [Fact(DisplayName = "083: a record rule's clause carries the neutral label, never the Procedure's names, and reads no Procedure")]
+    [Fact(DisplayName = "083: a record rule's clause carries the neutral label, never the Procedure's names, and reads no Procedure name")]
     public async Task GetFirmClause_ForARecordRule_CarriesTheNeutralLabel()
     {
         var h = new Harness();
@@ -2969,7 +3001,11 @@ public sealed class RuleSetServiceTests
         var firmRecordSet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: RecordRuleSet.ScopeFirmRecord, firm: FirmId, procedure: procedure);
         var (_, record) = h.Rule(recordSet, "BRR-1", ProposalState.Accepted, current: true);
         var (_, firmRecord) = h.Rule(firmRecordSet, "BRR-2", ProposalState.Accepted, current: true);
-        var invoice = JudgedInvoice(h, record, firmRecord);
+        // ISS-038: a record rule shows only when its base rule's own rule set is visible too (and its Procedure is readable and not Internal Standard), so each slot names such a base.
+        h.Row("sprk_procedure", procedure)["sprk_proceduretype"] = new OptionSetValue((int)ProcedureType.Guideline);
+        var baseSet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, procedure: procedure);
+        var (_, baseVersion) = h.Rule(baseSet, "BASE-1", ProposalState.Accepted, current: true);
+        var invoice = h.Invoice(FindingsWithRecordRules([(record, baseVersion), (firmRecord, baseVersion)]));
 
         var shown = await h.Service().GetFirmClauseAsync(record, invoice, default);
         var shownForFirm = await h.Service().GetFirmClauseAsync(firmRecord, invoice, default);
@@ -2977,7 +3013,8 @@ public sealed class RuleSetServiceTests
         shown.Should().Be(new FirmClauseText(Quote, Section, "Billing instructions for this record"));
         shownForFirm.FirmFacingName.Should().Be("Billing instructions for this record");
         System.Text.Json.JsonSerializer.Serialize(shown).Should().NotContain("BASE-");
-        h.Queries.Should().NotContain(q => q.EntityName == "sprk_procedure", "the neutral label needs no Procedure");
+        h.Queries.Where(q => q.EntityName == "sprk_procedure").Should().OnlyContain(
+            q => q.ColumnSet.Columns.SequenceEqual(new[] { ProcedureEntity.TypeColumn }), "the neutral label needs no Procedure name; the base set's Procedure is read for its type only");
     }
 
     [Fact(DisplayName = "083: a legacy rule set (no Procedure) shows its clause with no label")]
@@ -3083,5 +3120,63 @@ public sealed class RuleSetServiceTests
         await service.SetVisibilityAsync(set, false, default);
 
         (await service.GetFirmClauseAsync(version, invoice, default)).Should().Be(FirmClauseText.None);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 117: RetireUnlinkedRecordSetsAsync (O-17). The job-level contract is RecordRuleSetRetireJobTests; these pin the service's own
+    // re-read before each write and its report-only answer.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly DateTime RetireCutoff = new(2026, 11, 23, 11, 45, 0, DateTimeKind.Utc);
+
+    /// <summary>A Published Billing set of the shape 089's record-set creator writes (its name, a record scope), with no core lookup.</summary>
+    private static Guid RecordSetOf089(Harness h, int scope, Guid? firm = null)
+    {
+        var set = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: scope, firm: firm);
+        h.Row("sprk_ruleset", set)["sprk_name"] = RecordRuleSet.Name;
+        return set;
+    }
+
+    [Fact(DisplayName = "117: a set re-linked between the selection and its write is re-read, skipped and not written")]
+    public async Task RetireUnlinked_ASetReLinkedBeforeItsWrite_IsSkipped()
+    {
+        var h = new Harness();
+        var set = RecordSetOf089(h, RecordRuleSet.ScopeRecord);
+        var (policy, _) = h.Rule(set, "BRR-1", ProposalState.Accepted, current: true);
+        var core = InvoiceFamilyCoreRecordGuard.FilingCoreTables[0];
+        var selections = 0;
+        h.AfterQuery = q =>
+        {
+            // The first page has been read: a delete is undone by a restore that re-links the set before the sweep writes it.
+            if (q.EntityName == "sprk_ruleset" && selections++ == 0)
+            {
+                h.ConcurrentWrite("sprk_ruleset", set, new Dictionary<string, object> { [core] = new EntityReference(core, Guid.NewGuid()) });
+            }
+        };
+
+        var result = await h.Service().RetireUnlinkedRecordSetsAsync(apply: true, RetireCutoff, pageSize: 100, maxPages: 1, default);
+
+        result.Selected.Should().Be(1);
+        result.Skipped.Should().Be(1);
+        result.Retired.Should().Be(0);
+        h.Writes.Should().BeEmpty();
+        h.Row("sprk_ruleset", set).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetPublished);
+        h.Row("sprk_policy", policy).GetAttributeValue<bool>("sprk_enabled").Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "117: report only counts the unlinked sets and sends no write")]
+    public async Task RetireUnlinked_ReportOnly_CountsAndWritesNothing()
+    {
+        var h = new Harness();
+        var record = RecordSetOf089(h, RecordRuleSet.ScopeRecord);
+        var firmRecord = RecordSetOf089(h, RecordRuleSet.ScopeFirmRecord, FirmId);
+        h.Rule(record, "BRR-1", ProposalState.Accepted, current: true);
+        h.Rule(firmRecord, "BRR-2", ProposalState.Accepted, current: true);
+
+        var result = await h.Service().RetireUnlinkedRecordSetsAsync(apply: false, RetireCutoff, pageSize: 100, maxPages: 1, default);
+
+        result.Should().Be(new RuleSetService.UnlinkedRecordSetRetireResult(2, 0, 0, 0, 0, ReadFailed: false, MoreRemain: false));
+        h.Writes.Should().BeEmpty();
+        h.Queries.Should().OnlyContain(q => q.EntityName == "sprk_ruleset", "report only reads the selection and nothing else");
     }
 }

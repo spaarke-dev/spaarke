@@ -69,11 +69,11 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         _fixture.Reset();
     }
 
-    public static TheoryData<string> AllParents => new() { "projects", "matters", "workassignments", "servicerequests", "invoices" };
+    public static TheoryData<string> AllParents => new() { "projects", "matters", "workassignments", "servicerequests" };
 
-    /// <summary>The types whose rights carry an access LEVEL (ViewOnly / Collaborate): the three accessible roots, and an
-    /// invoice, which inherits its parent's level (owner option A).</summary>
-    public static TheoryData<string> RootParents => new() { "projects", "matters", "workassignments", "invoices" };
+    /// <summary>The types whose rights carry an access LEVEL (ViewOnly / Collaborate): the three accessible roots. (The invoice document
+    /// routes, whose invoice inherited its parent's level, retired with ebilling-r1 task 093.)</summary>
+    public static TheoryData<string> RootParents => new() { "projects", "matters", "workassignments" };
 
     // =====================================================================
     // AC 1: a Collaborate caller uploads and downloads the same bytes, on every type
@@ -276,7 +276,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public static TheoryData<string, string, string> ParentsByUnansweredShape()
     {
         var data = new TheoryData<string, string, string>();
-        foreach (var segment in new[] { "projects", "matters", "workassignments", "invoices" })
+        foreach (var segment in new[] { "projects", "matters", "workassignments" })
         {
             foreach (var shape in new[]
                      {
@@ -310,7 +310,6 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
 
     [Theory]
     [InlineData("projects", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
-    [InlineData("invoices", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
     [InlineData("matters", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.NotHeld)]
     public async Task Fr20_Upload_ARealDenial_OverTheWire_StaysA403_AndWritesNothing(string segment, string rights, string privilege)
     {
@@ -373,7 +372,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public static TheoryData<string, AccessRights, bool, bool> Fr20ListCanCreateCases()
     {
         var data = new TheoryData<string, AccessRights, bool, bool>();
-        foreach (var segment in new[] { "projects", "matters", "workassignments", "invoices" })
+        foreach (var segment in new[] { "projects", "matters", "workassignments" })
         {
             data.Add(segment, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, true, true);
             data.Add(segment, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, false, false);
@@ -452,9 +451,6 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     [InlineData("workassignments", ExternalAccessLevel.ViewOnly, false)]
     [InlineData("workassignments", ExternalAccessLevel.Collaborate, true)]
     [InlineData("workassignments", ExternalAccessLevel.FullAccess, true)]
-    [InlineData("invoices", ExternalAccessLevel.ViewOnly, false)]
-    [InlineData("invoices", ExternalAccessLevel.Collaborate, true)]
-    [InlineData("invoices", ExternalAccessLevel.FullAccess, true)]
     public async Task List_ReportsCanCreate_FromTheSameRightsTheUploadRouteChecks(
         string segment, ExternalAccessLevel level, bool expectedCanCreate)
     {
@@ -487,6 +483,35 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             $"/api/v1/external/servicerequests/{RecordA}/documents");
 
         body!.CanCreate.Should().BeTrue("the requester always holds Read and Create on their own request");
+    }
+
+    // R4 task 002 (FR-06): the list's canCreate also carries the upload route's workforce ceiling, so a workforce contact
+    // whose role cannot create documents is not offered an upload the route refuses with the ceiling's 403.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task List_ForAWorkforceContact_CanCreate_FollowsTheUploadRoutesCeiling(bool roleHoldsDocumentCreate)
+    {
+        _fixture.WorkforceCeiling.Reset();
+        _fixture.Principal = CollaborateOn("servicerequests", RecordA);
+        if (!roleHoldsDocumentCreate)
+            _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(Sprk.Bff.Api.Api.ExternalAccess.WorkforceRoleCeilingGate.DocumentTable, AccessRights.Create);
+
+        try
+        {
+            using var client = _fixture.CreateAuthenticatedClient();
+            using var list = await client.GetAsync($"/api/v1/external/servicerequests/{RecordA}/documents");
+            using var upload = await client.PostAsync($"/api/v1/external/servicerequests/{RecordA}/documents", FileForm());
+
+            list.StatusCode.Should().Be(HttpStatusCode.OK, "the list's own ceiling needs Read only");
+            (await list.Content.ReadFromJsonAsync<ExternalDocumentListResponse>())!.CanCreate.Should().Be(roleHoldsDocumentCreate);
+            upload.StatusCode.Should().Be(roleHoldsDocumentCreate ? HttpStatusCode.Created : HttpStatusCode.Forbidden,
+                "canCreate agrees with the upload route for the same caller");
+        }
+        finally
+        {
+            _fixture.WorkforceCeiling.Reset();
+        }
     }
 
     // =====================================================================
@@ -862,348 +887,12 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     // =====================================================================
-    // Owner decision 2026-10-11 (1): invoice documents INHERIT the access held on the invoice's parents (option A)
+    // Owner decision 2026-10-11 (1): invoice documents INHERITED the access held on the invoice's parents (option A). The invoice
+    // document routes retired with ebilling-r1 task 093 (a firm reads an invoice's files through GET /invoices/{id}/files, covered by
+    // ExternalInvoiceFileRoutesTests); what stays here is the invoice rule applied to OTHER records' documents.
     // =====================================================================
 
     private static readonly Guid MatterM = Guid.Parse("c0310000-0000-4000-8000-00000000000d");
-    private static readonly Guid ProjectP = Guid.Parse("c0310000-0000-4000-8000-00000000000e");
-
-    [Fact]
-    public async Task Invoice_UnderTwoParents_TakesTheUnionOfTheCallersRightsOnThem()
-    {
-        // ViewOnly on the matter, Collaborate on the project: Create on EITHER parent admits an upload, as Read on either
-        // admits the list (the invoices module's and the message routes' "any accessible parent" rule). Both parents are
-        // non-secure here: an invoice under TWO secure roots is refused by the container resolver (ambiguous, 409) —
-        // that is the storage rule, not the rights rule this test is about.
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, ProjectP);
-        NonSecure("sprk_matter", MatterM);
-        NonSecure("sprk_project", ProjectP);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = new[] { CallerProjectAccess.FromLevel(ProjectP, ExternalAccessLevel.Collaborate) },
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.ViewOnly) },
-        };
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var list = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/invoices/{RecordA}/documents");
-        using var upload = await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm());
-
-        list!.CanCreate.Should().BeTrue();
-        upload.StatusCode.Should().Be(HttpStatusCode.Created);
-
-        // Control: ViewOnly on both parents reads but cannot upload.
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = new[] { CallerProjectAccess.FromLevel(ProjectP, ExternalAccessLevel.ViewOnly) },
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.ViewOnly) },
-        };
-        (await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/invoices/{RecordA}/documents"))!
-            .CanCreate.Should().BeFalse();
-        (await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm()))
-            .StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        _fixture.Uploads.Should().ContainSingle("only the Collaborate caller's upload reached SPE");
-    }
-
-    [Fact]
-    public async Task Invoice_UnderRecordsTheCallerCannotRead_AndAMissingInvoice_DenyIdentically_AndTouchNothing()
-    {
-        // The caller reads matter M; invoice A is filed under ANOTHER matter, and OutsideRecord is no invoice at all.
-        _fixture.Data.InvoiceParents[RecordA] = (Guid.NewGuid(), null);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = Array.Empty<CallerProjectAccess>(),
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
-        };
-        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
-        _fixture.Data.DocumentReads.Clear();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
-        var foreign = new[]
-        {
-            await client.GetAsync(basePath),
-            await client.GetAsync($"{basePath}/{documentOnA}/content"),
-            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
-            await client.PostAsync(basePath, FileForm()),
-        };
-        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
-
-        foreign.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
-        missing.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await missing.Content.ReadAsStringAsync()).Should().Be(await foreign[0].Content.ReadAsStringAsync(),
-            "a missing invoice and one under records the caller cannot read are indistinguishable");
-        _fixture.Data.DocumentReads.Should().BeEmpty("the parent gate runs before any document read");
-        _fixture.Downloads.Should().BeEmpty();
-        _fixture.Uploads.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task Invoice_ForACallerWhoReadsNoMatterOrProject_IsDeniedBeforeAnyInvoiceRead()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, ProjectP);
-        _fixture.Principal = WorkforceContact();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        (await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm())).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-
-        _fixture.Data.InvoiceReads.Should().Be(0, "the read could not change the answer");
-    }
-
-    [Fact]
-    public async Task Invoice_AParentReadThatFails_Is503_NotA403_AndTouchesNothing()
-    {
-        _fixture.Principal = Principal("invoices", RecordA, ExternalAccessLevel.Collaborate);
-        _fixture.Data.InvoiceFault = new ExternalDataService.DataverseUnavailableException("Dataverse answered 429.");
-        var document = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "i.pdf", "b!c", "item-i");
-        _fixture.Data.DocumentReads.Clear();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
-        var responses = new[]
-        {
-            await client.GetAsync(basePath),
-            await client.GetAsync($"{basePath}/{document}/content"),
-            await client.GetAsync($"{basePath}/{document}/versions"),
-            await client.PostAsync(basePath, FileForm()),
-        };
-
-        responses.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
-        (await responses[3].Content.ReadAsStringAsync()).Should().Contain("sdap.access.invoice_unreadable");
-        _fixture.Data.DocumentReads.Should().BeEmpty();
-        _fixture.Downloads.Should().BeEmpty();
-        _fixture.Uploads.Should().BeEmpty();
-
-        _fixture.Data.InvoiceFault = null;
-        (await client.GetAsync(basePath)).StatusCode.Should().Be(HttpStatusCode.OK);
-    }
-
-    // =====================================================================
-    // unified-access-control-r2 task 187, fix round 2 (F1): an upload to an invoice passes the invoice gate (D4)
-    // =====================================================================
-    //
-    // The caller holds Collaborate on ordinary matter M. Invoice A is filed to M and to project X. Option A still lets the
-    // caller reach A through M, but when X is SECURE and the caller cannot read it, A is behind X's wall (D4): its thread is
-    // refused, its documents are withheld, and an upload is refused too, before SPE or Dataverse is touched. (Without the
-    // gate the upload answered 201 and wrote the file into X's container.)
-
-    // =====================================================================
-    // ebilling-r1 task 098 (model 9.1, (a')): an invoice the predicate hides has no documents for an external caller
-    // =====================================================================
-    //
-    // The invoice's rights are its parents' (option A); the (a') predicate then hides it outright when its Submit Invoice source
-    // is isolated. Every invoice-document route (list, download, versions, upload) answers exactly as for an invoice that does
-    // not exist, before any document, SPE or write is touched; a predicate that cannot decide answers the same (fail closed).
-
-    // Task 130-0 fix round 1 (K1): the "fault" case moved to Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_OnEveryDocumentRoute.
-    [Theory]
-    [InlineData("hidden")]
-    public async Task Task098_AnInvoiceThePredicateHides_DeniesEveryDocumentRoute_AsAMissingInvoice_AndTouchesNothing(string kind)
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
-        NonSecure("sprk_matter", MatterM);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = Array.Empty<CallerProjectAccess>(),
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
-        };
-        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
-        _fixture.Data.DocumentReads.Clear();
-        _fixture.InvoiceHiding = kind == "hidden" ? InvoiceHidingStub.Hiding(RecordA) : InvoiceHidingStub.Faulting();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
-        var hidden = new[]
-        {
-            await client.GetAsync(basePath),
-            await client.GetAsync($"{basePath}/{documentOnA}/content"),
-            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
-            await client.PostAsync(basePath, FileForm()),
-        };
-        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
-
-        hidden.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
-        missing.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await hidden[0].Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(),
-            "a hidden invoice and one that does not exist are indistinguishable");
-        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
-        _fixture.Downloads.Should().BeEmpty();
-        _fixture.Uploads.Should().BeEmpty();
-        _fixture.Data.Documents.Should().ContainSingle("nothing was written");
-        _fixture.InvoiceHiding.Calls.Should().OnlyContain(call => call.SequenceEqual(new[] { RecordA }));
-    }
-
-    // Task 130-0 fix round 1 (K1): a failed invoice decision is "could not check" (the invoice-unreadable 503) on every invoice
-    // document route, but only for a caller who reaches the invoice through one of its parents; a missing invoice and an invoice
-    // under a record the caller cannot read stay the uniform 403. Nothing is read, downloaded or written.
-    [Fact]
-    public async Task Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_OnEveryDocumentRoute()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
-        var elsewhere = Guid.NewGuid();
-        _fixture.Data.InvoiceParents[elsewhere] = (Guid.NewGuid(), null);
-        NonSecure("sprk_matter", MatterM);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = Array.Empty<CallerProjectAccess>(),
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
-        };
-        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
-        _fixture.Data.DocumentReads.Clear();
-        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
-        var faulted = new[]
-        {
-            await client.GetAsync(basePath),
-            await client.GetAsync($"{basePath}/{documentOnA}/content"),
-            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
-            await client.PostAsync(basePath, FileForm()),
-        };
-        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
-        var unreachable = await client.GetAsync($"/api/v1/external/invoices/{elsewhere}/documents");
-
-        faulted.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
-        foreach (var response in faulted)
-            (await response.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
-        missing.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        unreachable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await unreachable.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync());
-        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
-        _fixture.Downloads.Should().BeEmpty();
-        _fixture.Uploads.Should().BeEmpty();
-        _fixture.Data.Documents.Should().ContainSingle("nothing was written");
-        _fixture.InvoiceHiding.Calls.Should().Contain(call => call.SequenceEqual(new[] { RecordA }));
-    }
-
-    // Task 130-0 fix round 2 (K1): a caller who reaches the invoice through NO parent is refused before the invoice decision, so the
-    // seam is never asked (no timing difference between "not yours" and "not visible").
-    [Fact(DisplayName = "130-0 fix2 K1: no Read through any of the invoice's parents is the uniform 403, and the invoice decision is not asked")]
-    public async Task Task130_0_NoReadThroughAnyParent_IsRefused_BeforeTheInvoiceDecision()
-    {
-        var elsewhere = Guid.NewGuid();
-        _fixture.Data.InvoiceParents[elsewhere] = (Guid.NewGuid(), null);
-        _fixture.Principal = CiamOn(matter: MatterM);
-        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        using var unreachable = await client.GetAsync($"/api/v1/external/invoices/{elsewhere}/documents");
-        using var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
-
-        unreachable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await unreachable.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync());
-        _fixture.InvoiceHiding.Calls.Should().BeEmpty("the decision is asked only for a caller who reaches the invoice");
-    }
-
-    // Task 130-0 fix round 2 (K3, D-28): an invoice's core record is exactly one of matter, project or work assignment, so the invoice
-    // routes decide rights through all three. A caller who reaches the invoice only through its work assignment is served; a grant on
-    // another work assignment gives the uniform 403; a faulted decision after Read through the work assignment is the 503.
-    private static readonly Guid AssignmentW = Guid.Parse("c0310000-0000-4000-8000-00000000000f");
-
-    [Fact(DisplayName = "130-0 fix2 K3 documents (must not fire): Read and Create only through the invoice's work assignment list and upload")]
-    public async Task Task130_0_K3_AnInvoiceUnderAWorkAssignment_ListsAndUploads_ThroughIt()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (null, null);
-        _fixture.Data.InvoiceWorkAssignments[RecordA] = AssignmentW;
-        NonSecure("sprk_workassignment", AssignmentW);
-        _fixture.Principal = CiamOn(workAssignment: AssignmentW);
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        using var list = await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents");
-        using var upload = await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm());
-
-        list.StatusCode.Should().Be(HttpStatusCode.OK, await list.Content.ReadAsStringAsync());
-        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
-    }
-
-    [Fact(DisplayName = "130-0 fix2 K3 documents (must fire): a grant on ANOTHER work assignment, or none, is the uniform 403 and touches nothing")]
-    public async Task Task130_0_K3_AGrantOnAnotherWorkAssignment_IsTheUniform403()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (null, null);
-        _fixture.Data.InvoiceWorkAssignments[RecordA] = AssignmentW;
-        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
-        _fixture.Data.DocumentReads.Clear();
-        _fixture.Principal = CiamOn(workAssignment: Guid.NewGuid());
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
-        var refused = new[]
-        {
-            await client.GetAsync(basePath),
-            await client.GetAsync($"{basePath}/{documentOnA}/content"),
-            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
-            await client.PostAsync(basePath, FileForm()),
-        };
-        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
-
-        refused.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
-        (await refused[0].Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync());
-        _fixture.Data.DocumentReads.Should().BeEmpty();
-        _fixture.Uploads.Should().BeEmpty();
-        _fixture.InvoiceHiding.Calls.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "130-0 fix2 K3 documents (fault): a faulted invoice decision after Read through the work assignment is the 503")]
-    public async Task Task130_0_K3_AFaultAfterReadThroughTheWorkAssignment_Is503()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (null, null);
-        _fixture.Data.InvoiceWorkAssignments[RecordA] = AssignmentW;
-        _fixture.Principal = CiamOn(workAssignment: AssignmentW);
-        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        using var response = await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents");
-
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await response.Content.ReadAsStringAsync()).Should().Contain(
-            Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
-    }
-
-    // Task 130-0 fix round 3 (Q2): the invoice's own failed decision (the result not faulted as a whole) is the 503 on every invoice
-    // document route for a caller who reaches the invoice; a decided hidden invoice keeps the uniform 403 (covered above).
-    [Fact(DisplayName = "130-0 fix3 Q2 documents (must fire): a fault deciding this invoice, with the firms known, is the 503 on every invoice document route")]
-    public async Task Task130_0_Q2_APerInvoiceFault_IsThe503_OnEveryInvoiceDocumentRoute()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
-        NonSecure("sprk_matter", MatterM);
-        _fixture.Principal = CiamOn(matter: MatterM);
-        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
-        _fixture.Data.DocumentReads.Clear();
-        _fixture.InvoiceHiding = InvoiceHidingStub.PerInvoiceFault(RecordA);
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
-        var faulted = new[]
-        {
-            await client.GetAsync(basePath),
-            await client.GetAsync($"{basePath}/{documentOnA}/content"),
-            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
-            await client.PostAsync(basePath, FileForm()),
-        };
-
-        faulted.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
-        foreach (var response in faulted)
-            (await response.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
-        _fixture.Data.DocumentReads.Should().BeEmpty();
-        _fixture.Downloads.Should().BeEmpty();
-        _fixture.Uploads.Should().BeEmpty();
-    }
 
     [Fact(DisplayName = "130-0 fix2 K1 (fail closed by type): a list row whose invoice links were never set is hidden, and the list says truncated")]
     public async Task Task130_0_ARowWhoseLinksWereNeverSet_IsHidden()
@@ -1233,239 +922,6 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             ? new Dictionary<Guid, AccessRights> { [w] = Collaborate }
             : new Dictionary<Guid, AccessRights>(),
     };
-
-    [Fact]
-    public async Task Task098_AnInvoiceThePredicateLeavesVisible_ListsAndUploads_AsBefore()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
-        NonSecure("sprk_matter", MatterM);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = Array.Empty<CallerProjectAccess>(),
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
-        };
-        _fixture.InvoiceHiding = InvoiceHidingStub.Hiding(RecordB);
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        (await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents")).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm())).StatusCode
-            .Should().Be(HttpStatusCode.Created);
-    }
-
-    // ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms. Through the REAL caller-aware seam, another
-    // firm's invoice on the caller's matter has no documents for the caller (answered as a missing invoice); the caller's own firm's
-    // invoice on the same matter lists them.
-
-    private static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
-
-    [Fact(DisplayName = "130-0 project-data child reads (must fire / must not fire): another firm's invoice on a shared matter denies its document list, download and versions; the caller's own firm's invoice lists")]
-    public async Task Task130_OwnFirms_AnotherFirmsInvoiceOnASharedMatter_HasNoDocuments_TheCallersOwnInvoiceLists()
-    {
-        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
-        var own = world.OwnedInvoice();
-        var other = world.OwnedInvoice();
-        world.InvoiceFirm(other, OtherFirm);
-        _fixture.Data.InvoiceParents[own] = (MatterM, null);
-        _fixture.Data.InvoiceParents[other] = (MatterM, null);
-        NonSecure("sprk_matter", MatterM);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = Array.Empty<CallerProjectAccess>(),
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
-        };
-        var documentOnOther = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, other, "other.pdf", "b!o", "item-o");
-        _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, own, "own.pdf", "b!w", "item-w");
-        _fixture.Data.DocumentReads.Clear();
-        _fixture.InvoiceHiding = InvoiceHidingStub.Real(world);
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        var otherPath = $"/api/v1/external/invoices/{other}/documents";
-        var hidden = new[]
-        {
-            await client.GetAsync(otherPath),
-            await client.GetAsync($"{otherPath}/{documentOnOther}/content"),
-            await client.GetAsync($"{otherPath}/{documentOnOther}/versions"),
-        };
-        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
-
-        hidden.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
-        (await hidden[0].Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(),
-            "another firm's invoice and one that does not exist are indistinguishable");
-        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
-        _fixture.Downloads.Should().BeEmpty();
-
-        var ownList = await client.GetAsync($"/api/v1/external/invoices/{own}/documents");
-        ownList.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await ownList.Content.ReadAsStringAsync()).Should().Contain("own.pdf");
-    }
-
-    private static readonly Guid ProjectX = Guid.Parse("c0310000-0000-4000-8000-0000000000a7");
-    private static readonly Guid AgreementG = Guid.Parse("c0310000-0000-4000-8000-0000000000a8");
-
-    /// <summary>Invoice <see cref="RecordA"/> under ordinary matter M and project X; a caller with Collaborate on M only.</summary>
-    private void SeedInvoiceUnderMAndX(bool secureX)
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, ProjectX);
-        NonSecure("sprk_matter", MatterM);
-        if (secureX) SecureProject(ProjectX);
-        else NonSecure("sprk_project", ProjectX);
-        _fixture.Data.RootIsSecure[(ExternalGrantRootType.Project, ProjectX)] = secureX;
-        _fixture.Principal = CollaboratorOnMatterM();
-    }
-
-    private static CallerPrincipal CollaboratorOnMatterM(params Guid[] alsoMatters) => new()
-    {
-        Plane = CallerPrincipalPlane.CiamContact,
-        ContactId = CallerContact,
-        Email = "external.user@example.test",
-        ProjectAccess = Array.Empty<CallerProjectAccess>(),
-        MatterAccess = new[] { MatterM }.Concat(alsoMatters).ToDictionary(m => m, _ => Collaborate),
-    };
-
-    private void SecureProject(Guid project) =>
-        _fixture.Rows[("sprk_project", project)] = new Entity("sprk_project", project)
-        {
-            ["sprk_issecure"] = true,
-            ["sprk_containerid"] = SecureMatterContainer,
-            ["owningbusinessunit"] = new EntityReference("businessunit", Fixture.OwningBusinessUnitId),
-        };
-
-    private async Task<HttpResponseMessage> UploadToInvoiceA()
-    {
-        using var client = _fixture.CreateAuthenticatedClient();
-        return await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm());
-    }
-
-    private void NothingWasWritten()
-    {
-        _fixture.Uploads.Should().BeEmpty("nothing reaches SPE");
-        _fixture.Data.Documents.Should().BeEmpty("no sprk_document row is created");
-        _fixture.Ownership.Requests.Should().BeEmpty("the upload stops at the gate, before the owner is resolved");
-    }
-
-    [Fact]
-    public async Task InvoiceUpload_AlsoUnderASecureProjectTheCallerCannotRead_Is403_AndWritesNothing_F1()
-    {
-        SeedInvoiceUnderMAndX(secureX: true);
-
-        using var upload = await UploadToInvoiceA();
-
-        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, await upload.Content.ReadAsStringAsync());
-        NothingWasWritten();
-
-        // The read routes keep D4's own shapes: the list answers (the document walk withholds its documents) and offers no
-        // upload.
-        using var client = _fixture.CreateAuthenticatedClient();
-        var list = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/invoices/{RecordA}/documents");
-        list!.CanCreate.Should().BeFalse("an upload that can only fail is not offered");
-    }
-
-    [Fact]
-    public async Task InvoiceUpload_AlsoUnderAnOrdinaryProject_Is201_OptionA_F1()
-    {
-        SeedInvoiceUnderMAndX(secureX: false);
-
-        using var upload = await UploadToInvoiceA();
-
-        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
-        _fixture.Uploads.Should().ContainSingle().Which.Container.Should().Be(Fixture.BusinessUnitContainer);
-        _fixture.Data.Documents.Should().ContainSingle();
-    }
-
-    [Fact]
-    public async Task InvoiceUpload_AlsoUnderASecureProjectTheCallerReads_Is201_F1()
-    {
-        SeedInvoiceUnderMAndX(secureX: true);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = new[] { CallerProjectAccess.FromLevel(ProjectX, ExternalAccessLevel.ViewOnly) },
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
-        };
-
-        using var upload = await UploadToInvoiceA();
-
-        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
-        _fixture.Uploads.Should().ContainSingle().Which.Container.Should().Be(SecureMatterContainer, "X's own container");
-    }
-
-    [Fact]
-    public async Task InvoiceUpload_WhoseAgreementIsUnderASecureMatterTheCallerCannotRead_Is403_AndWritesNothing_F1()
-    {
-        var secureMatter = Guid.Parse("c0310000-0000-4000-8000-0000000000a9");
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
-        _fixture.Data.InvoiceAgreements[RecordA] = AgreementG;
-        _fixture.Data.LiveRoots[("sprk_agreement", AgreementG)] = new[] { (ExternalGrantRootType.Matter, secureMatter) };
-        _fixture.Data.RootIsSecure[(ExternalGrantRootType.Matter, secureMatter)] = true;
-        NonSecure("sprk_matter", MatterM);
-        _fixture.Principal = CollaboratorOnMatterM();
-
-        using var upload = await UploadToInvoiceA();
-
-        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, await upload.Content.ReadAsStringAsync());
-        NothingWasWritten();
-
-        // Control: the same invoice for a caller who also reads the secure matter.
-        _fixture.Principal = CollaboratorOnMatterM(secureMatter);
-        using var admitted = await UploadToInvoiceA();
-        admitted.StatusCode.Should().Be(HttpStatusCode.Created, await admitted.Content.ReadAsStringAsync());
-    }
-
-    [Fact]
-    public async Task InvoiceUpload_WhenTheSecureFlagReadFails_Is503_AndWritesNothing_F1()
-    {
-        SeedInvoiceUnderMAndX(secureX: false);
-        _fixture.Data.SecureFlagFault = new HttpRequestException("connection reset");
-
-        using var upload = await UploadToInvoiceA();
-
-        upload.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await upload.Content.ReadAsStringAsync()).Should().Contain("sdap.access.invoice_unreadable");
-        NothingWasWritten();
-    }
-
-    [Fact]
-    public async Task InvoiceUpload_WhenTheAgreementWalkFaults_Is503_AndWritesNothing_F1()
-    {
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
-        _fixture.Data.InvoiceAgreements[RecordA] = AgreementG;
-        _fixture.Data.LiveParentFault = true;
-        NonSecure("sprk_matter", MatterM);
-        _fixture.Principal = CollaboratorOnMatterM();
-
-        using var upload = await UploadToInvoiceA();
-
-        upload.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await upload.Content.ReadAsStringAsync()).Should().Contain("sdap.access.invoice_unreadable");
-        NothingWasWritten();
-    }
-
-    [Fact]
-    public async Task InvoiceRights_WithoutCreate_CauseNoGateRead_F1()
-    {
-        SeedInvoiceUnderMAndX(secureX: true);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = Array.Empty<CallerProjectAccess>(),
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.ViewOnly) },
-        };
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        (await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents")).StatusCode.Should().Be(HttpStatusCode.OK);
-
-        _fixture.Data.InvoiceGateReads.Should().Be(0, "a ViewOnly reader has no Create for the gate to decide");
-    }
 
     // =====================================================================
     // Owner decision 2026-10-11 (2): a document of a secure record — or of a record whose chain reaches one — goes into
@@ -1593,42 +1049,13 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     [Fact]
-    public async Task InvoiceDocument_UnderASecureMatter_IsStoredInTheMattersContainer_AndServedFromIt()
-    {
-        // Regression: a document on a CHILD of a secure root (an invoice under a secure matter) takes the root's container.
-        SecureMatter(MatterM);
-        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
-        _fixture.Principal = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = CallerContact,
-            Email = "external.user@example.test",
-            ProjectAccess = Array.Empty<CallerProjectAccess>(),
-            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
-        };
-
-        using var client = _fixture.CreateAuthenticatedClient();
-        using var upload = await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm());
-
-        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
-        _fixture.Uploads.Should().ContainSingle().Which.Container.Should().Be(SecureMatterContainer);
-
-        var documentId = Guid.Parse((await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>())!.SprkDocumentid!);
-        _fixture.VerifyPointers = true;
-        (await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents/{documentId}/content"))
-            .StatusCode.Should().Be(HttpStatusCode.OK);
-    }
-
-    [Fact]
     public async Task NonSecureParents_OfEveryType_ShareTheBusinessUnitsOneContainer_ThereIsNoContainerPerType()
     {
-        // One container per customer business unit; none per record type. A non-secure project, matter, work assignment,
-        // service request and invoice all store into the business unit's container.
+        // One container per customer business unit; none per record type. A non-secure project, matter, work assignment and
+        // service request all store into the business unit's container.
         NonSecure("sprk_project", RecordA);
         NonSecure("sprk_matter", RecordA);
         NonSecure("sprk_workassignment", RecordA);
-        NonSecure("sprk_matter", ParentMatterOf(RecordA));
-        _fixture.Data.InvoiceParents[RecordA] = (ParentMatterOf(RecordA), null);
         _fixture.Data.Requesters[RecordA] = CallerContact;
         _fixture.Principal = new CallerPrincipal
         {
@@ -1641,13 +1068,13 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         };
 
         using var client = _fixture.CreateAuthenticatedClient();
-        foreach (var segment in new[] { "projects", "matters", "workassignments", "servicerequests", "invoices" })
+        foreach (var segment in new[] { "projects", "matters", "workassignments", "servicerequests" })
         {
             using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
             upload.StatusCode.Should().Be(HttpStatusCode.Created, $"{segment}: {await upload.Content.ReadAsStringAsync()}");
         }
 
-        _fixture.Uploads.Select(u => u.Container).Should().HaveCount(5).And.OnlyContain(c => c == Fixture.BusinessUnitContainer);
+        _fixture.Uploads.Select(u => u.Container).Should().HaveCount(4).And.OnlyContain(c => c == Fixture.BusinessUnitContainer);
     }
 
     // =====================================================================

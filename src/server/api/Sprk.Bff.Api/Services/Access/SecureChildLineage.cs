@@ -471,8 +471,7 @@ internal enum ExternalOwnRule
     /// <summary>The thread reads explicitly Open now (<c>CommunicationOpenThreadGate.ReadOpenThreadIdsAsync</c>).</summary>
     ThreadOpen,
 
-    /// <summary>Task 188's document narrowing (<c>ExternalDocumentNarrowing</c>, through the app-only seam), and a legacy
-    /// Procedure Library document (its drive is the Procedure Library container) is never visible.</summary>
+    /// <summary>Task 188's document narrowing (<c>ExternalDocumentNarrowing</c>, through the app-only seam).</summary>
     DocumentNarrowing,
 
     /// <summary>ebilling (a′): the invoice predicate (<c>ExternalInvoiceVisibility.DecideAsync</c>).</summary>

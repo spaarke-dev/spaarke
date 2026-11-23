@@ -4,7 +4,7 @@
     <title>Invoice index from structured records</title>
     <phase>6 Export and index (WP6) — wave W6-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Reshapes an existing indexing job and index schema; tenant filtering is an existing invariant the deploy script verifies; no new endpoint.</rigor-reason>
     <model-tier>sonnet</model-tier>

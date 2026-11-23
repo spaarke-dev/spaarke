@@ -168,7 +168,6 @@ public sealed partial class RecordContainerResolver
         _strictDerivedContainer = StrictDerivedContainerFrom(configuration);
         _itemIdBoundBackfillComplete = ItemIdBoundBackfillCompleteFrom(configuration);
         _unfiledDefaultContainerId = configuration?[UnfiledDefaultContainerKey];
-        _declaredUnfiledHomes = DeclaredUnfiledHomesFrom(configuration);
     }
 
     /// <summary>
@@ -2905,7 +2904,7 @@ public sealed partial class RecordContainerResolver
     /// T-SQL's bracket form escapes all three — <c>_</c> → <c>[_]</c>, <c>%</c> → <c>[%]</c>, and <c>[</c> →
     /// <c>[[]</c> (which must be applied first, or it would re-escape the brackets just introduced).</para>
     /// </summary>
-    private static string EscapeForLike(string value)
+    internal static string EscapeForLike(string value)
         => value
             .Replace("[", "[[]", StringComparison.Ordinal)
             .Replace("%", "[%]", StringComparison.Ordinal)

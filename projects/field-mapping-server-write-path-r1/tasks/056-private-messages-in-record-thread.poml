@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Private messages in a record's thread: readable by the sender and the named recipient only (design with UAC-r2, then build)</title>
+    <phase>6b W6b Direct and private messaging (owner 2026-11-20)</phase>
+    <gate>Part 056a (design note) is reviewed and approved by unified-access-control-r2, and the owner's answers to its questions are recorded in notes/decisions.md, before any code (056b). Live checks run only with the owner's go in fm's session.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A new access rule on communication rows inside record threads; ownership and sharing; security fails closed (.cs, .tsx, bff-api, security).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Access design across record ownership, secure and Restricted paths and the Direct-team model; two adversarial passes (security).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits CommunicationService and ThreadResolver, which 054 edited; runs after 055 for the shared client files.</parallel-reason>
+    <deps>054 (on master), 055 (client files); UAC-r2 design review</deps>
+    <tags>bff-api, security, ownership, communication, react, testing</tags>
+    <estimated-effort>3-5 sessions, as two parts: 056a design note + review, 056b build + live check</estimated-effort>
+    <issue>https://github.com/spaarke-dev/spaarke/issues/2923</issue>
+  </metadata>
+
+  <prompt>Owner requirement 2026-11-20: a user can send a personal/private message to a named user inside a communication thread associated with a record. Only the sender and the named recipient read it. Owner decision: built in this project; supersedes the 2026-11-09 deferral to messages-enhancements-r1 (notes/decisions.md 2026-11-20).</prompt>
+  <role>SPAARKE platform developer, BFF write path, ownership and sharing. Security fails closed. Follow ADRs strictly.</role>
+  <goal>A private message sent in a record's thread is readable by its sender and named recipient only; other readers of the record and the thread do not read its content; the send fails closed when the access cannot be set; UAC-r2 signs off the design and the diff.</goal>
+
+  <context>
+    <background>Today a message filed under a record is readable by whoever can read the record (owner ruling 2026-11-08, part 1). Direct messages with no record are owned by the Direct team and shared with their two stamped participants (054). Participants keep their shares when a Direct message is filed, except on secure or Restricted targets (2026-11-09). This task adds a third case: a private message that lives in a record's thread.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (send path for a private message in a record thread)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectMessageOwnerStep.cs (the Direct-team owner step, to reuse if the design picks it)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectMessageRecipient.cs (participant stamps)</file>
+      <file role="reference-do-not-edit">DirectThreadAccessService.cs, DirectMessageParticipantShares.cs, RecordOwnershipResolver.cs, OwnedChildWrite.cs and the rest of the project's do-not-edit list (UAC-r2's access files; changes there are requested from UAC-r2)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx (a "private to …" option on send)</file>
+      <file role="create">projects/field-mapping-server-write-path-r1/notes/task-056-private-message-design.md (056a)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (the 2026-11-08 to 2026-11-20 Direct entries)</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/task-054-notes.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-056a &lt;tip of work/field-mapping-server-write-path-r1&gt;` (056b: task/fm-056b), then confirm this POML exists on the branch.</constraint>
+    <constraint source="ADR-002">No plugins; one server-side owner for the rule; clients preview only; security fails closed.</constraint>
+    <constraint source="project">Public repo: the design note and all repo text state rules, never holes. Access defects go to UAC-r2 by message only.</constraint>
+    <constraint source="project">Do not edit UAC-r2's access files; changes there are requested from UAC-r2.</constraint>
+    <constraint source="project">Live Dataverse writes need the owner's go in fm's session; no deploys from this session.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; /conflict-check.</step>
+    <step order="1">056a design note answering, with a recommendation for each: (1) what other readers of the thread see (nothing, or a placeholder); (2) secure and Restricted records (allowed or not, and on what terms); (3) a recipient who cannot read the record (refuse, or allow the message alone); (4) ownership (reuse the Direct-team model and the two participant stamps, or another owner); (5) filing a standalone Direct message to a record later; (6) where private messages surface (inline for the two participants; the Messages view).</step>
+    <step order="2">Send the note to UAC-r2 for review (by message); record the owner's answers in notes/decisions.md. STOP until both are in.</step>
+    <step order="3">056b: the BFF send path with the approved rule; integration tests (must fire, must not fire, fail closed) under tests/integration/data-mutation or auth as fits; a source-scan guard if the rule has a single-owner invariant.</step>
+    <step order="4">UI: "private to …" on send in the record's conversation view; the private message renders for its two participants.</step>
+    <step order="5">Build; verify-suites.sh; ArchTests fresh; publish delta; CVE; two adversarial passes (security); UAC-r2 reviews the diff (access-path files listed at the top).</step>
+    <step order="6">Live (owner's go): on dev, sender and recipient read; a third user who reads the record and the thread does not read the content.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (must fire): the sender and the named recipient read the private message in the record's thread.</criterion>
+    <criterion testable="true">AC2 (must not fire): another user who can read the record and the thread cannot read the private message's content.</criterion>
+    <criterion testable="true">AC3 (fail closed): when the access cannot be set (configuration, share or owner failure) the send is refused, or the message is readable by no one but its sender; never more widely.</criterion>
+    <criterion testable="true">AC4: ordinary (non-private) messages in record threads are unchanged.</criterion>
+    <criterion testable="true">AC5: UAC-r2 approves the design (056a) and the diff (056b).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the design needs a change in a UAC-r2 access file, stop and request it from UAC-r2.</trigger>
+    <trigger>If the rule conflicts with an ADR (for example ADR-028 or the 2026-11-08 record-reader rule), raise an ADR Conflict per root CLAUDE.md §6.5.</trigger>
+  </escalation>
+
+  <notes>Added 2026-11-20 from the owner's requirement and the decision that it is not deferred (#2923); supersedes the 2026-11-09 deferral to messages-enhancements-r1.</notes>
+</task>

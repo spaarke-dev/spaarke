@@ -30,6 +30,9 @@ import {
   DataGridBody,
   DataGridCell,
   createTableColumn,
+  MessageBar,
+  MessageBarBody,
+  Button,
   Spinner,
   Text,
   Link,
@@ -50,7 +53,7 @@ import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
-import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
+import type { CommandBarAction, DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
 import { fetchConfigRecord, resolveSource } from './resolveGridSource';
 import {
   DataGridContextProvider,
@@ -58,6 +61,7 @@ import {
   type DataGridParentContext,
 } from '../../hooks/useDataGridContext';
 import { dataGridTokens } from './tokens';
+import { dataGridCellStyle, dataGridHeaderCellStyle } from './cellStyles';
 import {
   resolveConfig,
   resolveEffectiveAvailableViews,
@@ -67,6 +71,9 @@ import {
   type ResolvedColumn,
 } from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
+import { useHostRowSource, type DataGridRowSource, type DataGridRowNoun } from './useHostRowSource';
+import { RowActionsCell, ROW_ACTIONS_COLUMN_ID, rowActionsColumnWidth, type DataGridRowAction } from './RowActionsCell';
+import { TruncatedCellText } from './TruncatedCellText';
 import {
   overlayParentContextFilter,
   overlayHostFilters,
@@ -74,7 +81,7 @@ import {
   type HostFilterCondition,
 } from './fetchXmlOverlay';
 import type { MembershipResolver } from '../../services/membership';
-import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
+import { CommandBar as DataGridCommandBar, type DataGridHostCommand } from './commandBar/CommandBar';
 import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type ChipState } from './filterChips';
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
@@ -168,7 +175,7 @@ export interface DataGridProps {
   /** OPTIONAL — fires when the user clicks the primary-name link on a row. */
   onRecordOpen?: (recordId: string, record: Record<string, unknown>, ctx: DataGridHostContext) => void;
 
-  /** OPTIONAL — fires when the user invokes a per-row secondary action. */
+  /** OPTIONAL — fires when the user invokes a per-row action (see `rowActions`). */
   onRecordAction?: (
     actionId: string,
     recordId: string,
@@ -189,6 +196,78 @@ export interface DataGridProps {
    * first as an observer.
    */
   onCreateNew?: () => void;
+
+  /**
+   * OPTIONAL — commands the HOST adds to the grid's command bar, beyond what the
+   * `sprk_gridconfiguration` record and the built-ins give (for example a "Submit"
+   * action that opens a host-owned dialog). Generic: the host owns the behaviour
+   * (`onInvoke`); the grid only places and renders the button. Placement: first
+   * in the bar, in the order supplied, then the normal inline limit / overflow
+   * rules; an `id` equal to a configured or built-in item is skipped (a host command never replaces one; a console.warn names it).
+   * Absent or empty = the command bar is unchanged for every other grid.
+   * `onCommandInvoke` still fires first as an observer. Pass a stable array
+   * (`useMemo`).
+   *
+   * See {@link DataGridHostCommand}.
+   */
+  hostCommands?: ReadonlyArray<DataGridHostCommand>;
+
+  /**
+   * OPTIONAL — the HOST supplies the rows (spaarke-SPA-external-access-platform-r4 task 023a). A page loader:
+   * `rowSource({ page, pageSize, signal }) → Promise<{ rows, hasMore, truncated? }>`.
+   *
+   * When given, the grid still loads the configuration and entity metadata (`configId`) and takes its columns,
+   * labels and renderers from them, but it runs NO FetchXML query (no `retrieveMultipleRecords`), no filter chips,
+   * no host-filter / parent-context / membership overlay. Paging stays the grid's lazy scroll (ADR-051): page N+1 is
+   * requested while `hasMore` is true. A rejected page shows the grid's error banner; `truncated: true` shows a
+   * notice that the list is incomplete. The in-flight request's `signal` is aborted on unmount and on reload.
+   * Sorting stays inside the grid (over the loaded rows). Data fetching stays with the host (ADR-012).
+   *
+   * The latest callback is read on every request, so an inline function does not reload the grid; change
+   * `rowSourceKey` to reload page 1. Absent = the FetchXML path, unchanged.
+   */
+  rowSource?: DataGridRowSource;
+
+  /** OPTIONAL — with `rowSource`: change it to reload page 1 (e.g. after the host uploads or deletes a row). */
+  rowSourceKey?: string;
+
+  /**
+   * OPTIONAL — with `rowSource`: the noun for the rows in the incomplete-list notice, singular and plural (for
+   * example `{ one: 'document', other: 'documents' }`). Default `row` / `rows`.
+   */
+  rowNoun?: DataGridRowNoun;
+
+  /**
+   * OPTIONAL — what an empty list shows below the column headers, in place of the configuration's
+   * `display.emptyStateMessage` (for example the shared `EmptyState` with a hint that names an action only the host
+   * knows the caller is offered). Shown only when the list is truly empty: never while loading, after a failed
+   * load, or when the host's row source says the list is incomplete. Absent = the configuration's message, unchanged.
+   */
+  emptyState?: React.ReactNode;
+
+  /**
+   * OPTIONAL — per-row actions the HOST adds as the grid's LAST column (fixed width, not resizable, not sortable).
+   * Each is an icon button whose tooltip equals its aria-label; activating it calls
+   * `onRecordAction(action.id, recordId, record, ctx)`. An action whose `isVisible(record)` returns false is NOT
+   * rendered for that row (hide, don't disable). Past an inline limit (3) the rest fold into a "More actions" menu.
+   * Absent or empty = no actions column. Pass a stable array (`useMemo`).
+   *
+   * See {@link DataGridRowAction}.
+   */
+  rowActions?: ReadonlyArray<DataGridRowAction>;
+
+  /**
+   * OPTIONAL — ellipsis + tooltip on truncated text cells (see `DisplayConfig.truncateWithTooltip`). When set, wins
+   * over the configuration's `display.truncateWithTooltip`; when absent, the configuration decides (default off).
+   */
+  truncateWithTooltip?: boolean;
+
+  /**
+   * OPTIONAL — built-in actions this HOST does not offer, whatever the configuration says (e.g. `['create-form']`
+   * when the host adds its own create commands through `hostCommands`). Forwarded to the command bar; see
+   * `CommandBarProps.hiddenBuiltInCommands`. Pass a stable array. Absent = unchanged.
+   */
+  hiddenBuiltInCommands?: ReadonlyArray<CommandBarAction>;
 
   /** OPTIONAL — escape-hatch overrides for column renderers, badge map, filter chip allowlist. */
   overrides?: DataGridOverrides;
@@ -391,34 +470,9 @@ const useStyles = makeStyles({
     height: '1px',
     width: '100%',
   },
-  cell: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    // Power Apps OOB body row height ≈ 38px.
-    minHeight: '38px',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightRegular,
-    color: tokens.colorNeutralForeground1,
-  },
-  headerCell: {
-    // Power Apps OOB header row height ≈ 41px.
-    minHeight: '41px',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    backgroundColor: dataGridTokens.header.background,
-    color: dataGridTokens.header.foreground,
-  },
+  // Shared with SearchResultsGrid (SemanticSearch) via ./cellStyles (#2866).
+  cell: dataGridCellStyle,
+  headerCell: dataGridHeaderCellStyle,
   primaryNameLink: {
     color: dataGridTokens.primaryNameLink.color,
     fontWeight: dataGridTokens.primaryNameLink.fontWeight,
@@ -427,6 +481,28 @@ const useStyles = makeStyles({
     ':hover': {
       textDecorationLine: 'underline',
     },
+  },
+  /** Primary-name link inside a truncate-with-tooltip cell (task 023a): clamp to the cell and ellipsise. */
+  primaryNameLinkTruncate: {
+    display: 'inline-block',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    verticalAlign: 'bottom',
+  },
+  /** Screen-reader-only header label of the row-actions column (task 023a). */
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    overflow: 'hidden',
+    clip: 'rect(0 0 0 0)',
+    whiteSpace: 'nowrap',
+  },
+  /** Host row-source banners (error / truncated notice) above the rows (task 023a). */
+  hostRowsBanner: {
+    flexShrink: 0,
   },
   /**
    * Header CARD — own card with border + matching depth. Holds:
@@ -517,7 +593,14 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     backgroundColor: tokens.colorPaletteRedBackground1,
   },
+  // The configuration-load banner: the sentence and its Try again button side by side.
+  errorBannerWithAction: {
+    columnGap: tokens.spacingHorizontalM,
+  },
 });
+
+/** What the grid says when its configuration could not be loaded (the detail goes to the console, not the page). */
+const CONFIG_LOAD_FAILED_TEXT = 'This list could not be loaded. Try again later.';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper — pretty-print arbitrary cell value into a string
@@ -722,9 +805,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     membershipResolver,
     onRecordsLoaded,
     onRecordOpen,
-    onRecordAction: _onRecordAction,
+    onRecordAction,
     onCommandInvoke,
     onCreateNew,
+    hostCommands,
+    rowSource,
+    rowSourceKey,
+    rowNoun,
+    emptyState: hostEmptyState,
+    rowActions,
+    truncateWithTooltip: truncateWithTooltipProp,
+    hiddenBuiltInCommands,
     overrides,
     pageSize: pageSizeOverride,
     availableViewsAllowlist: availableViewsAllowlistOverride,
@@ -741,6 +832,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // DataGridExternalHost.tsx. Everywhere else `externalHost` is false and the prop behaves as before.
   const externalHost = useDataGridExternalHost();
   const showViewSelector = !externalHost && showViewSelectorProp;
+
+  // Task 023a: a host row source replaces the FetchXML row path (no query, no chips, no overlays). Absent: false,
+  // and every branch below that reads it behaves exactly as before.
+  const hostRowsActive = typeof rowSource === 'function';
+  const hasRowActions = Boolean(rowActions && rowActions.length > 0);
 
   // Stable default: instantiate XrmDataverseClient once if no client passed.
   // XrmDataverseClient throws at first method call if Xrm context is unavailable
@@ -893,6 +989,14 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     externalHost,
   ]);
 
+  // The technical reason the configuration did not load goes to the console, once per failure (the banner says only
+  // CONFIG_LOAD_FAILED_TEXT).
+  React.useEffect(() => {
+    if (!loadState.error) return;
+    // eslint-disable-next-line no-console
+    console.error(`[DataGrid] configuration did not load (configId=${configId}):`, loadState.error);
+  }, [loadState.error, configId]);
+
   // Once we have metadata, resolve the full configuration.
   const resolved: ResolvedConfig | null = React.useMemo(() => {
     if (!loadState.entityMetadata) return null;
@@ -914,7 +1018,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // base query (correct for MDA form-subgrids with no BFF token).
   const membershipFilterCfg = resolved?.behavior?.membershipFilter;
   const membershipEntityName = resolved?.entityName ?? '';
-  const membershipActive = Boolean(membershipFilterCfg && membershipResolver && membershipEntityName);
+  // Task 023a: with a host row source there is no query to scope, so the resolver is never called.
+  const membershipActive =
+    !hostRowsActive && Boolean(membershipFilterCfg && membershipResolver && membershipEntityName);
   // `undefined` = pending resolution OR feature inactive; `null` = resolved-but-
   // failed (fail-soft → base query); `string[]` = resolved ids (empty ⇒
   // impossible-match → empty grid, never everyone's records).
@@ -962,6 +1068,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // a working "Filter by" affordance. The OOB Power Apps grid always offers
   // Filter by, so the user's mental model expects it on every column.
   const chipDescriptors = React.useMemo(() => {
+    // Task 023a: chips filter the FetchXML query; a host row source has none, so no chip is offered.
+    if (hostRowsActive) return [];
     if (!resolved || !loadState.entityMetadata) return [];
     const discovered = discoverChips(resolved.filterChips, resolved.columns, loadState.entityMetadata);
     if (discovered.length > 0) return discovered;
@@ -972,7 +1080,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         attribute: c.name,
         label: c.label,
       }));
-  }, [resolved, loadState.entityMetadata]);
+  }, [resolved, loadState.entityMetadata, hostRowsActive]);
 
   // Lazy load — only kicks off once we have entityName + fetchXml.
   // FetchXML composition order: base savedQuery → parent-context overlay →
@@ -980,6 +1088,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // identical inputs ⇒ identical output (lazy-load reset detector relies on
   // referential stability).
   const fetchXml = React.useMemo(() => {
+    // Task 023a: a host row source runs no FetchXML query (empty fetchXml ⇒ useLazyLoad no-op).
+    if (hostRowsActive) return '';
     let xml = loadState.savedQuery?.fetchXml ?? '';
     const parentFilter = resolved?.behavior?.parentContextFilter;
     if (xml && parentFilter) {
@@ -1030,6 +1140,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     membershipFilterCfg,
     chipDescriptors,
     chipState,
+    hostRowsActive,
   ]);
   const entityNameForLoad = resolved?.entityName ?? '';
   // FR-07 (spaarke-dataset-grid-framework-r2, task 003): framework default 25.
@@ -1046,18 +1157,28 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // preserved as belt-and-suspenders against the pre-resolution render path.
   const pageSize = resolveEffectivePageSize(pageSizeOverride, resolved?.behavior.pageSize) ?? 25;
 
-  const {
-    records,
-    isLoading: isLoadingRows,
-    hasMore,
-    fetchNextPage,
-    reset: resetLazyLoad,
-  } = useLazyLoad<Record<string, unknown>>({
+  const lazy = useLazyLoad<Record<string, unknown>>({
     dataverseClient,
     entityName: entityNameForLoad,
     fetchXml,
     pageSize,
   });
+
+  // Task 023a: host row source. Starts once the configuration has resolved (columns + effective page size known),
+  // like the FetchXML path waits for its entity name. Disabled (and inert) without `rowSource`.
+  const hostRows = useHostRowSource({
+    rowSource,
+    rowSourceKey,
+    pageSize,
+    enabled: hostRowsActive && Boolean(entityNameForLoad),
+  });
+
+  const records = hostRowsActive ? hostRows.records : lazy.records;
+  const isLoadingRows = hostRowsActive ? hostRows.isLoading : lazy.isLoading;
+  const hasMore = hostRowsActive ? hostRows.hasMore : lazy.hasMore;
+  const fetchNextPage = hostRowsActive ? hostRows.fetchNextPage : lazy.fetchNextPage;
+  const resetLazyLoad = hostRowsActive ? hostRows.reset : lazy.reset;
+  const effectiveTruncateWithTooltip = truncateWithTooltipProp ?? resolved?.display.truncateWithTooltip ?? false;
 
   // Selection — preserved across pages per FR-DG-12.
   const [selectedRowIds, setSelectedRowIds] = React.useState<Set<TableRowId>>(new Set());
@@ -1154,7 +1275,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
 
   const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(() => {
     if (!resolved) return [];
-    return visibleColumns.map(col =>
+    const columns = visibleColumns.map(col =>
       createTableColumn<GridItem>({
         columnId: col.name,
         compare: (a, b) => {
@@ -1198,11 +1319,13 @@ export const DataGrid: React.FC<DataGridProps> = props => {
           if (col.isPrimaryName && resolved) {
             const idValue = String(item[resolved.primaryIdAttribute] ?? item._rowId ?? '');
             const label = renderCellValue(value, 'default', formattedLabelOf(item, col.name)) || '(no name)';
-            return React.createElement(
+            const link = React.createElement(
               Link,
               {
                 as: 'button',
-                className: styles.primaryNameLink,
+                className: effectiveTruncateWithTooltip
+                  ? mergeClasses(styles.primaryNameLink, styles.primaryNameLinkTruncate)
+                  : styles.primaryNameLink,
                 onClick: () => {
                   effectiveRecordOpen(idValue, item, {
                     configId,
@@ -1214,6 +1337,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               },
               label
             );
+            return effectiveTruncateWithTooltip ? <TruncatedCellText text={label}>{link}</TruncatedCellText> : link;
           }
 
           // Host-supplied custom renderer wins over derived renderer.
@@ -1221,10 +1345,40 @@ export const DataGrid: React.FC<DataGridProps> = props => {
           if (customRenderer) {
             return customRenderer(value, item) as React.ReactNode;
           }
-          return renderCellValue(value, col.renderer, formattedLabelOf(item, col.name));
+          const text = renderCellValue(value, col.renderer, formattedLabelOf(item, col.name));
+          return effectiveTruncateWithTooltip ? <TruncatedCellText text={text} /> : text;
         },
       })
     );
+    // Task 023a: host row actions — a final column, no `compare` (so Fluent never sorts it).
+    if (rowActions && rowActions.length > 0) {
+      columns.push(
+        createTableColumn<GridItem>({
+          columnId: ROW_ACTIONS_COLUMN_ID,
+          renderHeaderCell: () => <span className={styles.visuallyHidden}>Actions</span>,
+          renderCell: item => {
+            // A row may lack the primary-id column at runtime (index access is not checked), so fall back to _rowId.
+            const primaryId: unknown = item[resolved.primaryIdAttribute];
+            const recordId = String(primaryId ?? item._rowId);
+            return (
+              <RowActionsCell
+                actions={rowActions}
+                record={item}
+                onInvoke={actionId =>
+                  onRecordAction?.(actionId, recordId, item, {
+                    configId,
+                    entityName: resolved.entityName,
+                    parentContext,
+                    selectedIds: Array.from(selectedRowIds).map(String),
+                  })
+                }
+              />
+            );
+          },
+        })
+      );
+    }
+    return columns;
   }, [
     resolved,
     visibleColumns,
@@ -1236,6 +1390,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     chipDescriptorByAttribute,
     chipState,
     theme,
+    effectiveTruncateWithTooltip,
+    styles.primaryNameLinkTruncate,
+    styles.visuallyHidden,
+    rowActions,
+    onRecordAction,
   ]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1299,7 +1458,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     // subtraction is the defensive layer for any future surface that misses
     // it.
     const perColPaddingReserve = visibleColumns.length * 24;
-    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve);
+    // Task 023a: the fixed-width row-actions column (when present) is taken off the shared space first.
+    const actionsWidth = hasRowActions && rowActions ? rowActionsColumnWidth(rowActions) : 0;
+    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve - actionsWidth);
     // Bidirectional scale: when `available` < `baseSum`, scale < 1 shrinks
     // the columns to fit (down to each column's minimum); when `available`
     // > `baseSum`, scale > 1 expands them to fill. Skip the no-op when the
@@ -1345,8 +1506,18 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         idealWidth: targets[i],
       };
     }
+    if (actionsWidth > 0) {
+      options[ROW_ACTIONS_COLUMN_ID] = { defaultWidth: actionsWidth, minWidth: actionsWidth, idealWidth: actionsWidth };
+    }
     return options;
-  }, [visibleColumns, containerWidth, resolved]);
+  }, [visibleColumns, containerWidth, resolved, hasRowActions, rowActions]);
+
+  // Task 023a: the actions column keeps its width whatever Fluent's sizing state does (no resize, no auto-fit).
+  const rowActionsCellStyle: React.CSSProperties | undefined = React.useMemo(() => {
+    if (!hasRowActions || !rowActions) return undefined;
+    const w = `${rowActionsColumnWidth(rowActions)}px`;
+    return { width: w, minWidth: w, maxWidth: w, flexGrow: 0, flexShrink: 0, flexBasis: w };
+  }, [hasRowActions, rowActions]);
 
   // Items with stable row ids (primaryId-derived, so selection survives reorder).
   const items: GridItem[] = React.useMemo(() => {
@@ -1405,10 +1576,15 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   }
 
   if (loadState.error || !loadState.entityMetadata || !resolved) {
+    // End users get one sentence they can act on; the technical detail (a missing source, a server message from a metadata
+    // read) stays in the console (logged once per failure by the effect above), never in the page.
     return (
       <div className={mergeClasses(styles.root, className)} role="alert">
-        <div className={styles.errorBanner}>
-          <Text size={300}>{loadState.error?.message ?? 'DataGrid configuration could not be resolved.'}</Text>
+        <div className={mergeClasses(styles.errorBanner, styles.errorBannerWithAction)}>
+          <Text size={300}>{CONFIG_LOAD_FAILED_TEXT}</Text>
+          <Button size="small" appearance="secondary" onClick={refresh}>
+            Try again
+          </Button>
         </div>
       </div>
     );
@@ -1423,7 +1599,15 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     entityMetadata: loadState.entityMetadata,
   };
 
-  const isEmpty = !isLoadingRows && records.length === 0 && !loadState.isLoading;
+  // Task 023a: host row-source states. Always false/null on the FetchXML path.
+  const hostRowsError = hostRowsActive ? hostRows.error : null;
+  const hostRowsTruncated = hostRowsActive && hostRows.truncated;
+  const rowNounOne = rowNoun?.one || 'row';
+  const rowNounOther = rowNoun?.other || 'rows';
+  // An incomplete list with no rows, or a failed load, is not "no records": the notice / banner says so instead.
+  // (loadState.isLoading is always false here: the configuration-loading state returned above.)
+  const isEmpty = !isLoadingRows && records.length === 0 && !hostRowsError && !hostRowsTruncated;
+  const rowsSelectable = resolved.behavior.selectionMode !== 'none';
   const selectedCount = selectedRowIds.size;
   const totalCount = records.length;
   const visibleTitle = resolved.display.title ?? loadState.savedQuery?.name ?? '';
@@ -1496,6 +1680,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             inlineLimit={3}
             onCommandInvoke={handleCommandInvoke}
             onCreateNew={onCreateNew}
+            hostCommands={hostCommands}
+            hiddenBuiltInCommands={hiddenBuiltInCommands}
           />
         </div>
 
@@ -1508,6 +1694,22 @@ export const DataGrid: React.FC<DataGridProps> = props => {
            * `@spaarke/ui-components` for hosts that want a strip-style filter
            * row instead.
            */}
+
+          {/* Task 023a: host row source — a rejected page (error banner) or an incomplete list (notice). */}
+          {hostRowsError && (
+            <div className={mergeClasses(styles.errorBanner, styles.hostRowsBanner)} role="alert">
+              <Text size={300}>{hostRowsError.message || 'The rows could not be loaded.'}</Text>
+            </div>
+          )}
+          {hostRowsTruncated && (
+            <MessageBar intent="warning" className={styles.hostRowsBanner} data-testid="datagrid-truncated-notice">
+              <MessageBarBody>
+                {totalCount === 0
+                  ? `The ${rowNounOther} could not be loaded just now, so none are shown. This does not mean there are none — please try again.`
+                  : `This list is incomplete: only ${totalCount} ${totalCount === 1 ? rowNounOne : rowNounOther} could be shown. Some ${rowNounOther} are not listed here.`}
+              </MessageBarBody>
+            </MessageBar>
+          )}
 
           <div className={mergeClasses(styles.gridScroll, styles.gridTableOverride)} ref={scrollContainerRef}>
             {/*
@@ -1567,19 +1769,40 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               aria-label={contextValue.currentView}
             >
               <DataGridHeader>
-                <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
-                  {({ renderHeaderCell }) => (
-                    <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
-                  )}
+                <DataGridRow
+                  // Fluent renders an explicitly passed selection cell even when the grid is not selectable, so a
+                  // `selectionMode: 'none'` grid would show dead checkboxes. Pass the slot only when rows can be selected.
+                  selectionCell={
+                    rowsSelectable ? { checkboxIndicator: { 'aria-label': 'Select all rows' } } : undefined
+                  }
+                >
+                  {({ renderHeaderCell, columnId }) =>
+                    columnId === ROW_ACTIONS_COLUMN_ID ? (
+                      // Task 023a: fixed width, no resize handle (`aside`), no sort (no `compare`).
+                      <DataGridHeaderCell className={styles.headerCell} style={rowActionsCellStyle} aside={null}>
+                        {renderHeaderCell()}
+                      </DataGridHeaderCell>
+                    ) : (
+                      <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
+                    )
+                  }
                 </DataGridRow>
               </DataGridHeader>
               <DataGridBody<GridItem>>
                 {({ item, rowId }) => (
                   <DataGridRow<GridItem>
                     key={rowId}
-                    selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
+                    selectionCell={rowsSelectable ? { checkboxIndicator: { 'aria-label': 'Select row' } } : undefined}
                   >
-                    {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
+                    {({ renderCell, columnId }) =>
+                      columnId === ROW_ACTIONS_COLUMN_ID ? (
+                        <DataGridCell className={styles.cell} style={rowActionsCellStyle}>
+                          {renderCell(item)}
+                        </DataGridCell>
+                      ) : (
+                        <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>
+                      )
+                    }
                   </DataGridRow>
                 )}
               </DataGridBody>
@@ -1587,9 +1810,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
 
             {isEmpty && (
               <div className={styles.emptyState}>
-                <Text size={400} weight="semibold">
-                  {resolved.display.emptyStateMessage ?? 'No records to display'}
-                </Text>
+                {hostEmptyState ?? (
+                  <Text size={400} weight="semibold">
+                    {resolved.display.emptyStateMessage ?? 'No records to display'}
+                  </Text>
+                )}
               </div>
             )}
 
