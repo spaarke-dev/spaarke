@@ -22,14 +22,20 @@
     re-runs the census and REFUSES (exit 2, nothing changed) unless
       - -OwnerApproval is given and -Confirm is given,
       - no row of either table holds a value in the column,
+      - the caller can be shown to read EVERY row of the table (the tables are user-owned: a count taken at a lower read depth is
+        silently short; needs the System Administrator role or organization-wide Read, and when it cannot be shown nothing is counted),
       - no form or view mentions the column,
-      - RetrieveDependenciesForDelete lists nothing, and
-      - the relationship behind each lookup is exactly the expected one.
+      - RetrieveDependenciesForDelete lists nothing,
+      - the relationship behind each lookup is exactly the expected one, and
+      - no other pending (unpublished) form or view of the two tables would go live with the publish (D-83), unless
+        -AllowPendingCollateral is given.
     The table row count itself is reported but is not a blocker: a row whose lookup is empty loses nothing.
     Each delete also asks the operator through ShouldProcess; -WhatIf shows the steps without running them.
 
     The delete is the relationship delete (the lookup column and its name companion go with it), as the 011 script does for
-    sprk_timekeeper.sprk_invoicelineitem, then an entity-scoped publish of the two tables. Never sprk_document rows or SPE containers (O-13).
+    sprk_timekeeper.sprk_invoicelineitem, then an entity-scoped publish of the two tables through the shared
+    scripts/lib/Publish-SolutionComponents.ps1 procedure (never tenant-wide; pending collateral is checked again right before it and,
+    if some appeared mid-run, stops as a plain error: exit 1, the deletes are done, re-run). Never sprk_document rows or SPE containers (O-13).
 
     Idempotent: a column that is already gone is reported as such and skipped.
 
@@ -39,6 +45,9 @@
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else the dev environment. Dev only in R1.
 .PARAMETER Delete
     Perform the delete. Without it the script only reports.
+.PARAMETER AllowPendingCollateral
+    With -Delete: go on although other pending (unpublished) forms or views of sprk_ruleset / sprk_ratecard would be published with it
+    (D-83). Give it only after the owner of those changes agrees.
 .PARAMETER OwnerApproval
     Required with -Delete. Free text recorded in the output: the date and who gave the owner's OK.
 
@@ -47,7 +56,8 @@
     pwsh scripts/ebilling/Remove-EbillingSourceDocumentColumns.ps1 -Delete -OwnerApproval '<date and who>' -Confirm -WhatIf
 
 .NOTES
-    Project: ebilling-r1, task 116. Exit codes: 0 = report / done, 1 = error, 2 = refused (blocker, missing approval or confirm).
+    Project: ebilling-r1, task 116. Exit codes: 0 = report / done, 1 = error (including a stop after the first delete), 2 = refused before
+    any write (blocker, missing approval or confirm, pending collateral, a caller who cannot read every row).
 #>
 
 using module .\EbillingSchema.psm1
@@ -56,11 +66,14 @@ using module .\EbillingSchema.psm1
 param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [switch]$Delete,
+    [switch]$AllowPendingCollateral,
     [string]$OwnerApproval
 )
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
+# The shared D-83 procedure: Get-EntityPublishCollateral, Invoke-PublishXml (the only publish call the repo allows), Get-DataverseApiContext.
+. (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
 $DryRun = [bool]$WhatIfPreference
 $Column = 'sprk_sourcedocument'
 
@@ -97,7 +110,7 @@ function Get-ComponentKind([int]$Type) {
 
 function Get-Census($Target) {
     $table = $Target.Table
-    $c = [ordered]@{ Table = $table; ColumnPresent = $false; RowCount = $null; NonNullCount = $null; Forms = @(); Views = @(); PersonalViews = @(); OtherReferences = @(); Relationships = @(); Dependencies = @() }
+    $c = [ordered]@{ Table = $table; ColumnPresent = $false; ReadGap = $null; RowCount = $null; NonNullCount = $null; Forms = @(); Views = @(); PersonalViews = @(); OtherReferences = @(); Relationships = @(); Dependencies = @() }
 
     $attr = Get-Attr $table $Column 'LogicalName,AttributeType,MetadataId,IsCustomAttribute'
     if (-not $attr) { return [pscustomobject]$c }
@@ -105,9 +118,14 @@ function Get-Census($Target) {
     $c.AttributeId = $attr.MetadataId
     $c.AttributeType = $attr.AttributeType
 
-    # Rows: exact counts over all states (Get-RowCountExact retries and returns $null when none could be had).
-    $c.RowCount = Get-RowCountExact $Target.EntitySet $Target.IdColumn
-    $c.NonNullCount = Get-RowCountExact $Target.EntitySet $Target.IdColumn "_${Column}_value ne null"
+    # Rows: exact counts over all states (Get-RowCountExact retries and returns $null when none could be had). The tables are user-owned, so
+    # a count taken as a caller who cannot read every row is silently short: when the caller is not shown to read every row, nothing is
+    # counted (both stay $null = unknown) and Get-ColumnBlockers refuses.
+    $c.ReadGap = Get-ReadAllRowsGap $table
+    if (-not $c.ReadGap) {
+        $c.RowCount = Get-RowCountExact $Target.EntitySet $Target.IdColumn
+        $c.NonNullCount = Get-RowCountExact $Target.EntitySet $Target.IdColumn "_${Column}_value ne null"
+    }
 
     # Forms and views that mention the column. Own table first; then any other table that is not a known other owner.
     $c.Forms = @((Read-Dv "systemforms?`$select=name,formid,type&`$filter=objecttypecode eq '$table' and contains(formxml,'$Column')").value |
@@ -155,7 +173,8 @@ function Get-ColumnBlockers($Census, $Target) {
     $b = [System.Collections.Generic.List[string]]::new()
     if (-not $Census.ColumnPresent) { return $b.ToArray() }
     $t = $Census.Table
-    if ($null -eq $Census.NonNullCount) { $b.Add("$t : the rows holding a value could not be counted") }
+    if ($Census.ReadGap) { $b.Add("$t : $($Census.ReadGap)") }
+    elseif ($null -eq $Census.NonNullCount) { $b.Add("$t : the rows holding a value could not be counted") }
     elseif ($Census.NonNullCount -gt 0) { $b.Add("$($Census.NonNullCount) $t row(s) hold a value in $Column") }
     foreach ($f in @($Census.Forms)) { $b.Add("$t form '$($f.Name)' ($($f.Id)) still mentions $Column") }
     foreach ($v in @($Census.Views)) { $b.Add("$t view '$($v.Name)' still mentions $Column") }
@@ -170,8 +189,12 @@ function Get-ColumnBlockers($Census, $Target) {
 }
 
 # Everything that makes -Delete refuse: the flags, then each column's blockers. Empty = the delete may go on.
-function Get-DeleteRefusals($Census, [string]$OwnerApproval, [bool]$Confirmed, $Targets) {
+function Get-DeleteRefusals($Census, [string]$OwnerApproval, [bool]$Confirmed, $Targets, [string[]]$PendingCollateral = @(), [bool]$AllowPending = $false) {
     $r = [System.Collections.Generic.List[string]]::new()
+    # D-83: the publish carries every pending form and view of the two tables.
+    if (@($PendingCollateral).Count -gt 0 -and -not $AllowPending) {
+        $r.Add("$(@($PendingCollateral).Count) other pending (unpublished) form(s) / view(s) would go live with the publish: $(@($PendingCollateral) -join '; ') (re-run with -AllowPendingCollateral after the owner of those changes agrees)")
+    }
     if ([string]::IsNullOrWhiteSpace($OwnerApproval)) { $r.Add("-OwnerApproval '<date and who>' is required: the owner's explicit OK comes first (project CLAUDE.md section 5)") }
     if (-not $Confirmed) { $r.Add('-Confirm is required') }
     foreach ($t in $Targets) {
@@ -187,6 +210,7 @@ function Write-Census($Census, $Target) {
     Write-Host "$t.$Column" -ForegroundColor Cyan
     if (-not $Census.ColumnPresent) { Write-Host '  column not found (already removed)' -ForegroundColor Yellow; return }
     Write-Host "  type            : $($Census.AttributeType) (MetadataId $($Census.AttributeId))"
+    if ($Census.ReadGap) { Write-Host "  read access     : $($Census.ReadGap)" -ForegroundColor Red }
     Write-Host "  rows            : $(if ($null -eq $Census.RowCount) { 'unknown' } else { $Census.RowCount })"
     Write-Host "  non-null        : $(if ($null -eq $Census.NonNullCount) { 'unknown' } else { $Census.NonNullCount })" -ForegroundColor $(if ($Census.NonNullCount -eq 0) { 'Green' } else { 'Red' })
     Write-Host "  relationship    : $((@($Census.Relationships) | ForEach-Object { $_.SchemaName }) -join ', ')"
@@ -219,10 +243,32 @@ function Remove-SourceDocumentLookup($Census, $Target) {
     Write-Host "  DELETED  $($Census.Table).$Column (relationship $($rel.SchemaName))" -ForegroundColor Green
 }
 
-function Publish-Tables([string[]]$Tables) {
-    if (-not $PSCmdlet.ShouldProcess(($Tables -join ', '), 'PublishXml (entity-scoped, never tenant-wide)')) { return }
+function Confirm-Write([string]$Target, [string]$Action) { return $PSCmdlet.ShouldProcess($Target, $Action) }
+
+# The token context of the shared procedure (az CLI identity), made on first use.
+function Get-PublishContext {
+    if (-not $script:PublishContext) { $script:PublishContext = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl }
+    return $script:PublishContext
+}
+
+# D-83: an entity publish carries EVERY pending form and view of the table, not only the ones this script changed (it changes none).
+# Read only. "table | item" per pending form / view.
+function Get-PendingCollateral([string[]]$Tables) {
+    return @(foreach ($t in $Tables) {
+        foreach ($x in @(Get-EntityPublishCollateral -Context (Get-PublishContext) -Entity $t)) { "$t | $x" }
+    })
+}
+
+# Entity-scoped publish through the shared procedure. Pending collateral was refused up front; one found here appeared during the run, after
+# the deletes: a plain error (exit 1; the deletes are done, re-run to publish).
+function Publish-Tables([string[]]$Tables, [bool]$AllowPending = $false) {
+    if (-not (Confirm-Write ($Tables -join ', ') 'PublishXml (entity-scoped, through scripts/lib/Publish-SolutionComponents.ps1, never tenant-wide)')) { return }
+    $pending = @(Get-PendingCollateral $Tables)
+    if ($pending.Count -gt 0 -and -not $AllowPending) {
+        throw "Refusing to publish: $($pending.Count) other pending form(s) / view(s) appeared and would go live too: $($pending -join '; '). Nothing was published by this step; the column delete is done, so re-run to publish after the owner of those changes agrees (-AllowPendingCollateral)."
+    }
     $ents = ($Tables | ForEach-Object { "<entity>$_</entity>" }) -join ''
-    Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><entities>$ents</entities></importexportxml>" } | Out-Null
+    Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities>$ents</entities></importexportxml>"
     Write-Host "  published $($Tables -join ', ')" -ForegroundColor Green
 }
 
@@ -264,7 +310,9 @@ try {
         exit 0
     }
 
-    $refusals = @(Get-DeleteRefusals $census $OwnerApproval $confirmed $Targets)
+    # D-83, before the first write: the publish carries every pending form and view of the two tables (read only).
+    $pendingCollateral = @(Get-PendingCollateral @($Targets | ForEach-Object { $_.Table }))
+    $refusals = @(Get-DeleteRefusals $census $OwnerApproval $confirmed $Targets $pendingCollateral ([bool]$AllowPendingCollateral))
     if ($refusals.Count -gt 0) {
         throw [EscalationException]::new("Refusing to delete: $($refusals.Count) reason(s): $($refusals -join '; '). Nothing was changed.")
     }
@@ -275,7 +323,7 @@ try {
         Write-Host "Removing $($t.Table).$Column" -ForegroundColor Cyan
         Remove-SourceDocumentLookup (@($census | Where-Object { $_.Table -eq $t.Table })[0]) $t
     }
-    Publish-Tables @($Targets | ForEach-Object { $_.Table })
+    Publish-Tables @($Targets | ForEach-Object { $_.Table }) ([bool]$AllowPendingCollateral)
 }
 catch [EscalationException] {
     Write-Host ''
