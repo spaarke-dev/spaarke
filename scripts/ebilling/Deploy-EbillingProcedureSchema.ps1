@@ -96,7 +96,7 @@
 
     NEVER CREATED: a banner column; sprk_isexceptions; any business-unit column or N:N; sprk_ratecard.sprk_scope; sprk_storedfile
     (task 088). Never deleted or changed BY THIS SCRIPT: sprk_ruleset.sprk_sourcedocument (task 116 removes it) and the sprk_ratecard core
-    lookups sprk_matter, sprk_project and sprk_workassignment (task 193 removes them: scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1).
+    lookups (task 193 removes them: scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1; this script names no core table, see its tests).
 
     PROFILES. P9 reuses the existing profile pair of unified-access-control-r2 ("Spaarke BFF-Managed Field Readers" on every
     business unit's default team, "Spaarke BFF-Managed Field Writers" with the BFF application users only), as
