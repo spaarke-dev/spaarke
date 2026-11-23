@@ -35,7 +35,14 @@ Status values: **KEEP** (stays, has an owner) · **REPLACE** (stays until a name
 | D5 | **Spaarke Dataverse MCP** — appears **twice** in All agents, plus Teams app `fc2412d8…` | Copilot Studio agent (Dataverse MCP), seen in Chat under `/` and `@` | **Unknown** (owner-built in Copilot Studio; no repo source) | Dataverse MCP agent; the accelerator plans to extend it | **DECIDE** ❓ | Owner to name its owner project. Remove the duplicate copy (owner) | accelerator `results.md` L27; mcp-r1 E1/E5 |
 | D6 | **Copilot in Power Apps – Spaarke Platform [Draft]** | Agent created from Power Apps | Unknown | Probably auto-created by the Power Apps Copilot | **DECIDE** ❓ | Owner | accelerator `results.md` L27 |
 
-**Announced, not yet created** (specialist-legal-agents-r1 Phase 0 test G8 = structure test S-3; full rows arrive before creation, R4): `spaarke-legal-g8-ab-test` (Agent Builder agent) and `spaarke-legal-g8-pkg-test` (the same agent packaged). Both throwaway, removed when G8 is recorded. Not scheduled: waits on gate A0, D-A11 and owner approval.
+**Planned — R4 rows received 2026-11-23, not yet created** (specialist-legal-agents-r1 Phase 0 test G8 = structure test S-3; owner approved running G8 early, per specialist-legal-agents-r1; kit `projects/specialist-legal-agents-r1/phase0/g8/README.md` on `work/specialist-legal-agents-r1`, `5595b4ab8f`):
+
+| # | Artifact | Kind | Owner project | Purpose | Status | Removal trigger / who | Evidence |
+|---|---|---|---|---|---|---|---|
+| G8-a | `spaarke-legal-g8-ab-test` | Agent Builder declarative agent, private to its creator, no actions. Knowledge: none (A1 control), then "Spaarke MCP" under Copilot connectors if the picker offers it (A2) | specialist-legal-agents-r1 | G8 / S-3: can an agent use the tenant connector without its own registration? | **PLANNED → REMOVE** | Owner deletes it in Agent Builder the day G8 is recorded, **latest 2026-11-30** | specialist row 2026-11-23 |
+| G8-p | `spaarke-legal-g8-pkg-test` | App package (app id `ac7da782-71bc-4c13-ba90-44eea8ef48b8`), one declarative agent (v1.6) with the GraphConnectors capability; **no `agentConnectors`, no actions** (no second registration, R1) | specialist-legal-agents-r1 | as G8-a | **PLANNED → REMOVE** | Owner removes it from where it was uploaded, same trigger, latest 2026-11-30. Upload scope per R7: owner + test user only | specialist row 2026-11-23 |
+
+While C2 is still installed, any BFF call in G8 is recorded as "tenant registration, C1 probable" (C2's package connectors fail in Chat before reaching the BFF and are not agent actions).
 
 ## 4. Cowork plugins and skills
 
