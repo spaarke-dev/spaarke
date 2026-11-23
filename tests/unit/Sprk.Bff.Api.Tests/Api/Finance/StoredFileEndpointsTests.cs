@@ -477,7 +477,8 @@ public sealed class StoredFileEndpointsTests
             Logs.Entries.Where(e => e.EventId.Id == StoredFileAudit.Downloaded.Id).ToList();
 
         public static async Task<Host> StartAsync(
-            bool ebillingEnabled = true, bool? malwareScanningEnabled = true, bool configured = true, StoredFileRig? rig = null)
+            bool ebillingEnabled = true, bool? malwareScanningEnabled = true, bool configured = true, StoredFileRig? rig = null,
+            int maxSubmissionFileSizeMb = 25)
         {
             // ebilling-r1 task 094: a caller may pass its own rig (the copy-rule end-to-end test serves the copy Submit Invoice committed).
             var host = new Host { Rig = rig ?? new StoredFileRig(malwareScanningEnabled, configured) };
@@ -499,6 +500,10 @@ public sealed class StoredFileEndpointsTests
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton(host.Rig.Service);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Rig.Probe);
+
+            // 123: the upload reads the invoice's state app-only through the same in-memory Dataverse the store writes to.
+            builder.Services.AddSingleton(host.Rig.Dataverse.Service);
+            builder.Services.AddOptions<EbillingOptions>().Configure(o => o.MaxSubmissionFileSizeMb = maxSubmissionFileSizeMb);
 
             // 151e: the invoice file list is authorized on the invoice by the REAL Finance authorization stack, asked what the rig's probe
             // grants (one statement of the caller's rights: GrantParentRead grants the filter's check and the per-file decision alike).
@@ -552,6 +557,19 @@ public sealed class StoredFileEndpointsTests
             return _client.SendAsync(request);
         }
 
+        /// <summary>123: POST <paramref name="content"/> (a multipart body, or anything else) to the invoice's upload route.</summary>
+        public Task<HttpResponseMessage> PostAsync(Guid invoiceId, HttpContent? content, bool authenticated = true)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, $"/api/finance/invoices/{invoiceId}/files") { Content = content };
+            if (authenticated)
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "caller-token");
+                request.Headers.Add(FinanceAuthzTestAuthHandler.CallerHeader, "present");
+            }
+
+            return _client.SendAsync(request);
+        }
+
         public async ValueTask DisposeAsync()
         {
             _client?.Dispose();
@@ -563,7 +581,11 @@ public sealed class StoredFileEndpointsTests
         }
     }
 
-    /// <summary>The Finance authorization stack's access-data seam, answering from the rig's rights (the same grants the probe answers).</summary>
+    /// <summary>
+    /// The Finance authorization stack's access-data seam, answering from the rig's rights (the same grants the probe answers). A record in
+    /// the probe's <c>Unknown</c> set answers as the production source does when Dataverse gave no complete answer: its rights (if any)
+    /// marked <see cref="AccessSnapshot.Faulted"/> (123: the upload's 403 system_failure).
+    /// </summary>
     internal sealed class RigAccessDataSource(StoredFileRig rig) : IAccessDataSource
     {
         public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
@@ -578,6 +600,7 @@ public sealed class StoredFileEndpointsTests
                 UserId = userId,
                 ResourceId = id.ToString(),
                 AccessRights = token is not null && rig.Probe.Rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
+                Faulted = rig.Probe.Unknown.Contains((set, id)),
             });
     }
 

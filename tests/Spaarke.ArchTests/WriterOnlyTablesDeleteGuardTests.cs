@@ -53,6 +53,8 @@ public class WriterOnlyTablesDeleteGuardTests
             "Removes rows of its own junction table (JunctionEntityLogicalName)."),
         (typeof(Sprk.Bff.Api.Services.Finance.Files.StoredFileReconcileJob), "DeleteRowAsync",
             "Removes a stored-file row (StoredFileSchema.Entity)."),
+        (typeof(Sprk.Bff.Api.Services.Finance.Files.StoredFileService), "RemoveOwnUploadAsync",
+            "Removes the stored-file row (StoredFileSchema.Entity) an upload just wrote, when it left its invoice over the file limit (ebilling-r1 task 123 fix round 2)."),
         (typeof(Sprk.Bff.Api.Services.Finance.RateCardImportService), "CompensateAsync",
             "Rolls back rate-card rows this import just created; the tables are the import's own."),
         (typeof(Sprk.Bff.Api.Services.Finance.RuleSetService), "CreateDraftRuleAsync",
