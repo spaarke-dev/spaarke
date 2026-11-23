@@ -10,7 +10,7 @@
 |---|---|
 | **Active work** | Writing **design.md v0.6**. Owner said 2026-11-23: "and then yes write v0.6". It folds in Copilot's Ask/Do/Practice synopsis (with corrections), the G8 result, the build paths, the existing code inventory, the "Spaarke AI" agent's usefulness and an auth-ADR review |
 | **Step** | v0.6 written and committed. Next: the owner reviews it; the owner decides on G8-P2 after v0.6 (coordination says do not create it yet) |
-| **Design version** | design.md v0.5 + G8 interim result (last commit `9c557d7e95`) |
+| **Design version** | design.md **v0.6** (commit `fc0c62c257`, pushed) |
 | **Uncommitted** | none |
 
 ## Next action (exact)
