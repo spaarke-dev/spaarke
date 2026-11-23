@@ -110,6 +110,15 @@ public sealed class PrivateMessageSendGateSeamTests
                 NullLogger<SecureShareNoAccessGuard>.Instance),
             _flags, _entities.Object, _shares.Object, NullLogger<PrivateMessageSendGate>.Instance);
 
+    private PrivateMessageSendGate Gate(TimeProvider clock) =>
+        new(_probe.Object,
+            new SecureShareNoAccessGuard(_wallFlags, _noAccessList, _identities, AssignedAccessTestDoubles.NoFilingRows(),
+                NullLogger<SecureShareNoAccessGuard>.Instance),
+            _flags, _entities.Object, _shares.Object, NullLogger<PrivateMessageSendGate>.Instance)
+        {
+            Clock = clock,
+        };
+
     private Task<PrivateMessageReference> SendAbout(Guid record) =>
         Gate().CheckBeforeSendAsync(
             new SendCommunicationRequest
@@ -243,16 +252,54 @@ public sealed class PrivateMessageSendGateSeamTests
     }
 
     [Fact]
-    public async Task ReferenceColumnsPresentAsync_AMissingColumn_IsAskedAgain_AndSeenOnceTheScriptHasRun()
+    public async Task ReferenceColumnsPresentAsync_AMissingColumn_IsRememberedForTheTtl_ThenAskedAgain_AndSeenOnceTheScriptHasRun()
     {
         _communicationColumns = Columns(PrivateContextColumns.All.Where(c => c != PrivateContextColumns.Project));
-        var gate = Gate();
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.Parse("2026-11-22T10:00:00Z"));
+        var gate = Gate(clock);
 
         (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeFalse();
         _communicationColumns = Columns(PrivateContextColumns.All);
-        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeTrue();
+        clock.Advance(PrivateMessageSendGate.ColumnsMissingRememberedFor - TimeSpan.FromSeconds(1));
+        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeFalse("a definite no is remembered within the TTL");
+        _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeTrue("after the TTL the metadata is asked again");
+        _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ReferenceColumnsPresentAsync_NoAnswer_IsNeverRemembered()
+    {
+        _communicationColumns = null;
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.Parse("2026-11-22T10:00:00Z"));
+        var gate = Gate(clock);
+
+        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeNull();
+        _communicationColumns = Columns(PrivateContextColumns.All);
+        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeTrue("no answer is asked again at once");
 
         _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task CommunicationColumnsPresentAsync_AFault_IsNeverRemembered()
+    {
+        var entities = new Mock<IGenericEntityService>();
+        var faults = true;
+        entities.Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .Returns(() => faults
+                ? Task.FromException<IReadOnlyDictionary<string, ColumnMetadata>>(new TimeoutException("metadata"))
+                : Task.FromResult(Columns(PrivateContextColumns.All)));
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.Parse("2026-11-22T10:00:00Z"));
+
+        var act = () => PrivateMessageSendGate.CommunicationColumnsPresentAsync(
+            entities.Object, PrivateContextColumns.All, CancellationToken.None, clock);
+        await act.Should().ThrowAsync<TimeoutException>();
+        faults = false;
+
+        (await act()).Should().BeTrue("a fault is asked again at once");
     }
 
     [Fact]
