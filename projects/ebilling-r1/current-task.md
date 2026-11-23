@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-22 (050b and 124 complete; 086 live reads done). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-22 (050b, 124 and 086 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,7 +10,7 @@
 
 ## Quick recovery
 
-- **Active task:** 086 (non-live steps). Done 2026-11-22: the pre-deploy count (0 Stored Files on Secure records), role and creator-person -Verify PASS, live NFR-05 census (no sprk_storedfile finding; the pre-existing findings went to uac-r2 by message only). Waiting on: uac-r2 sign-off on 086 (asked 2026-11-22), and the owner confirming that the -Verify records stand in for the missing -Apply outputs (criterion 6). Then 086 closes, and 123 (gated on 086) becomes startable. Other open build: 117.
+- **Active task:** none. 086 closed 2026-11-22 (uac-r2 sign-off; owner accepted the -Verify records for criterion 6). Next startable build: 123 (gate now 090 + 092 + 086 met; uac-r2 reviews before merge). Other open build: 117. `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
 - **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
 - **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
 - **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
@@ -18,6 +18,8 @@
 - **Uncommitted files:** none, after the 134 bookkeeping commit.
 
 ## Recently done (detail in the notes and git)
+
+- **086 ✅** closed 2026-11-22. Pre-deploy count 0, both -Verify PASS, NFR-05 has no sprk_storedfile finding, live dev BFF `c8ab2cba9e` contains it, uac-r2 signed off, owner accepted -Verify for criterion 6. Notes: `notes/086-storedfile-secure-child.md`.
 
 - **124 ✅** merged into work 3b7367bfbf (branch `task/ebilling-124`, tip decb4de05f). Finance:ProcedureLibraryContainerId retired everywhere; the uac-r2 191b library hide step and the #2151 declared-home mechanism removed with uac-r2 agreement; route census ArchTest (whole Ciam call closure) and a Procedure Stored File deny proof added. Two Opus passes + fix round 1; uac-r2 APPROVED decb4de05f. Any dev BFF deploy carrying 124 goes through uac-r2 on the owner naming the exact SHA. #1967 closed, provisioning-r1 told. Notes: `notes/124-retire-procedure-library-key.md`.
 - **050b ✅** merged into work 18b02cbdcf (branch `task/ebilling-050b`, tip b0be013e48). Deleted the legacy extraction path, `OutputOrchestratorService` and the `finance.extraction.*` metrics. One Opus review: no F1/F3, five F2 fixed in round 1. Closed #1918, #1919; reopened #2263 (Optimistic-mode defect, now off every live path). Notes: `notes/050b-retire-legacy-extraction.md`; checklist section P. Send the PR to ontology-r1 at the master PR (POML). The agent worktree has been removed.
@@ -30,7 +32,6 @@
 
 - **Build:** 123, 117, 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
-  - 086.
   - 164: the live `-Apply` needs the owner's go.
   - 089 and 050a: owner questions are in their notes.
 - **Deploy close-outs:** 053, 079, 112, 136, 153. Then 160, 161/162 (live runs need the owner's OK), 163 UAT, 189, 190.

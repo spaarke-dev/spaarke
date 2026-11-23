@@ -292,6 +292,7 @@ Run by the main session. Nothing was written. The dev BFF carries 086 and its re
 - The pre-deploy count is 0, so no backfill is needed.
 - The two adversarial passes are accepted with the 2026-11-03 dispositions. K-P1, K1 and #2560 stay with uac-r2 task 191.
 
-Still open:
-1. Criterion 6: the owner confirms that the 2026-11-03 and 2026-11-22 `-Verify` records stand in for the missing `-Apply` outputs.
-2. `Ebilling:StoredFileReconcileEnabled` stays `false`. Flipping it needs this project's own hard rule (F4 merged and DEF-044 fixed, per FinanceModule) and the owner's explicit go on the app setting, sent through uac-r2. No agent flips it.
+**Owner, 2026-11-22 (criterion 6):** asked whether the 2026-11-03 and 2026-11-22 `-Verify` records stand in for the missing `-Apply` outputs, the owner answered in session: "If the verify is safe then proceed". Both `-Verify` runs are read-only and both passed, so they are accepted as the record of the applied state. No `-Apply` was re-run and nothing was written. **086 is complete.**
+
+Left open after closing (not part of 086):
+- `Ebilling:StoredFileReconcileEnabled` stays `false`. Flipping it needs this project's own hard rule (F4 merged and DEF-044 fixed, per FinanceModule) and the owner's explicit go on the app setting, sent through uac-r2. No agent flips it.
