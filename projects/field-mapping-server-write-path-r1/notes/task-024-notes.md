@@ -99,3 +99,25 @@ Both hosts wrap the data service in `withTodoCreatedBroadcast`, which posts `spr
 - Stale comments in other files that still say `TodoService.createTodo` calls `applyFieldMappings`: `Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx` (:37-38 and the "Field-Mapping-driven internally" comment ~:915) and `CreateReportCardWizard.tsx`. Other wizards' files.
 - `withTodoCreatedBroadcast` is inert for the wizard's own create; remove it from `main.tsx` and `InAppWizardHost.tsx` once nothing else creates a `sprk_todo` through the host data service.
 - `main.tsx` passes `resolvedBffBaseUrl` as `''` when auth init failed; the wizard now posts to the relative route and the fetch fails visibly, where before `withBffChildWrites(..., '' || undefined)` refused with "not connected". Both create nothing; only the message differs.
+
+## Main-session review and gates (2026-11-23)
+
+Merged into the work branch at 869c6cf494 (`--no-ff` of `task/fm-024` fca6adcf22).
+
+- **Code review (Opus, main session): no F-class finding.**
+  - `todoService.ts` follows 023's `eventService.ts`.
+  - `createTodoRegardingChild` callers (Report Card `CreateReportCardWizard.tsx:527`, Analysis `CreateAnalysisWizardWidget.tsx:919`) pass `authenticatedFetch` and `bffBaseUrl`. Without them the parent's own create fails first, so the follow-on refusal is K2 (fails closed).
+  - The broadcast moved from the data-service wrapper to `broadcastTodoCreated` in the dialog. Only the To Do hosts used the wrapper (`main.tsx:66`, `InAppWizardHost.tsx:220`), and the create no longer passes through it, so one create sends one signal.
+- **ADR check:** clean. ADR-012: shared code stays in the library. ADR-021: no styling change. ADR-024: the resolver is unchanged. ADR-038: tests sit beside the component.
+- **Gates here, after the merge:**
+  - CreateTodoWizard + WizardFollowOns jest: 16 suites, 119 tests, all pass;
+  - `tsc --noEmit`: 0 errors;
+  - `client-lint check --package ui-components`: ok.
+- **Follow-ups folded into later tasks, no issue:** the comments in `CreateAnalysisWizardWidget.tsx:37`/`:915` (task 028) and `CreateReportCardWizard.tsx` (task 027) still describe the client mapping. Each of those tasks edits the file anyway.
+
+**Left (AC5):**
+- the master PR (owner's go);
+- the `sprk_createtodowizard` deploy through `code-page-deploy` (owner's go);
+- the live check per the POML ui-tests, including the SmartTodo launch and the To Do widget refetch, with the rollback bundle noted.
+
+The Console's in-app To Do wizard and the Report Card and Analysis follow-ons change only when their own bundles are rebuilt.
