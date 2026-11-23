@@ -100,7 +100,7 @@ public sealed class CommunicationClassificationAi : ICommunicationClassification
     /// Strict JSON schema for structured output. <c>candidateRecordTypes</c> is <c>$choices</c>-constrained to
     /// the ADR-024 regarding family the classifier can reason about (matter / project / invoice / organization
     /// / event). All properties required + <c>additionalProperties:false</c> per the Azure OpenAI
-    /// structured-output contract (matches <c>FinanceJsonSchemas</c>).
+    /// structured-output contract.
     /// </summary>
     private static readonly BinaryData ClassificationSchema = BinaryData.FromString(
         """

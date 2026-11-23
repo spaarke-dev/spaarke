@@ -18,7 +18,6 @@ import { AwaitingApprovers } from './decision/AwaitingApprovers';
 import { BlockedBanner } from './decision/BlockedBanner';
 import { DecideInvoiceAction, IncompleteDecisionBanner } from './decision/DecideInvoiceAction';
 import { SubmitCorrectedInvoiceAction, type OpenCorrectionWizard } from './decision/SubmitCorrectedInvoiceAction';
-import type { NotifyStep } from './decision/InvoiceDecisionWizard';
 import { ContextTab } from './tabs/ContextTab';
 import { HistoryTab } from './tabs/HistoryTab';
 import { RelatedWorkTab } from './tabs/RelatedWorkTab';
@@ -26,8 +25,6 @@ import type { InvoiceDecisionApi } from '../services/decisionApi';
 
 export interface InvoiceReviewWithDecisionsProps extends Pick<InvoiceReviewPageProps, 'invoiceId' | 'initialLineId' | 'api' | 'openRecord' | 'pollIntervalMs'> {
   decisionApi: InvoiceDecisionApi;
-  /** The optional firm-notice step of a reject or return (a slot: nothing is built in it). Absent: the wizard has no notify step. */
-  notifyStep?: NotifyStep;
   /**
    * Task 095f-2e2b: opens the Create Invoice wizard in Correction mode for an invoice and resolves when it closes. Absent: the page has no
    * "Submit corrected invoice" action (as before).
@@ -44,7 +41,7 @@ function ReviewPageWithApproval(props: InvoiceReviewPageProps) {
   return <InvoiceReviewPage {...props} firmNeeded={state?.firmNeeded === true} />;
 }
 
-export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, decisionApi, openRecord, pollIntervalMs, notifyStep, openCorrectionWizard }: InvoiceReviewWithDecisionsProps) {
+export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, decisionApi, openRecord, pollIntervalMs, openCorrectionWizard }: InvoiceReviewWithDecisionsProps) {
   // The plain sentence of a refused "Submit corrected invoice" (shown with the page's banners, not in the footer's one row).
   const [correctionNotice, setCorrectionNotice] = React.useState<string | null>(null);
 
@@ -86,7 +83,7 @@ export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, deci
         )}
         invoiceActions={ctx => (
           <>
-            <DecideInvoiceAction review={ctx.review} canWrite={ctx.canWrite} reload={ctx.reload} notifyStep={notifyStep} />
+            <DecideInvoiceAction review={ctx.review} canWrite={ctx.canWrite} reload={ctx.reload} />
             {openCorrectionWizard && (
               <SubmitCorrectedInvoiceAction
                 review={ctx.review}

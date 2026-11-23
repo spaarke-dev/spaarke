@@ -134,7 +134,7 @@ All Service Bus job types registered in `ServiceBusJobProcessor`:
 | `EmailToDocument` | `EmailToDocumentJobHandler` | Email-to-document conversion |
 | `RagIndexing` | `RagIndexingJobHandler` | RAG document indexing |
 | `AttachmentClassification` | `AttachmentClassificationJobHandler` | Attachment invoice classification |
-| `InvoiceExtraction` | `InvoiceExtractionJobHandler` | Invoice billing fact extraction |
+| `InvoiceSubmissionProcessing` | `InvoiceSubmissionProcessingJobHandler` | Invoice read, evaluation and persistence (replaced the retired `InvoiceExtraction` job, ebilling-r1 050b) |
 | `InvoiceIndexing` | `InvoiceIndexingJobHandler` | Invoice search indexing |
 | `SpendSnapshotGeneration` | `SpendSnapshotGenerationJobHandler` | Spend analytics aggregation |
 

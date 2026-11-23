@@ -61,6 +61,7 @@ import {
   submitInvoice,
 } from '../../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../../auth/bff-client';
+import { renderSubmissionReport } from '../../ebilling/InvoiceOutcomeReport';
 import { useChildDialog } from '../../createAction';
 import { callerFirmIdsOf, invoiceKindOfEntity, submitInvoiceRightOf, type FirmRecordsRead } from '../recordAccess';
 import { recordText } from '../recordTemplates';
@@ -239,6 +240,7 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
           loadFirms={listInvoiceFirms}
           submit={trackedSubmit}
           getStatus={getInvoiceSubmission}
+          renderReport={renderSubmissionReport}
           onSubmitted={handleSubmitted}
           onClose={handleClose}
         />

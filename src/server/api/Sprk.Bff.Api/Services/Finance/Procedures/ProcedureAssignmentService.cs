@@ -194,6 +194,7 @@ public static class RecordRuleSet
     internal const string Name = "Billing instructions for this record";
 
     internal const string ScopeColumn = "sprk_scope";
+    private const string NameColumn = "sprk_name";
     private const string FirmColumn = "sprk_firm";
     private const string ProcedureColumn = "sprk_procedure";
 
@@ -205,6 +206,41 @@ public static class RecordRuleSet
     internal static bool IsRecordScoped(Entity set) =>
         set.GetAttributeValue<OptionSetValue>(ScopeColumn)?.Value is ScopeRecord or ScopeFirmRecord
         || InvoiceFamilyCoreRecordGuard.FilingCoreTables.Any(core => set.GetAttributeValue<EntityReference>(core) is not null);
+
+    /// <summary>
+    /// ebilling-r1 task 117 (model 5.2, O-17): a record-scoped set whose record is gone — a record scope (Record or Firm record), no
+    /// Procedure, and EVERY core-record lookup null (the core record's delete cleared it, RemoveLink). The row must have been read with
+    /// <see cref="ScopeColumn"/>, the Procedure lookup and every <see cref="InvoiceFamilyCoreRecordGuard.FilingCoreTables"/> column. The
+    /// predicate lives here, beside the scope values, for the reason this class does (089a K4: <see cref="RuleSetService"/> may name no record
+    /// scope); the retire itself is <see cref="RuleSetService"/>'s, the one rule-set lifecycle writer.
+    /// <para>Fix round 1 (K2): only a set of the shape 089 creates — its name exactly <see cref="Name"/>, which
+    /// <c>RecordRuleSetCreateAsync</c> always writes (ordinal, fail closed). A set hand-edited in the app to a record scope with no lookup (a
+    /// legacy ClientDefault set, say) keeps its own name and is never taken. The creator person is NOT a condition: 089's creator stamps it
+    /// only when the caller resolves to a person (<c>RecordOwnerResolution.ApplyTo</c>), so a set 089 made can lack it.</para>
+    /// </summary>
+    internal static bool IsUnlinked(Entity set) =>
+        set.GetAttributeValue<OptionSetValue>(ScopeColumn)?.Value is ScopeRecord or ScopeFirmRecord
+        && string.Equals(set.GetAttributeValue<string>(NameColumn), Name, StringComparison.Ordinal)
+        && set.GetAttributeValue<EntityReference>(ProcedureColumn) is null
+        && InvoiceFamilyCoreRecordGuard.FilingCoreTables.All(core => set.GetAttributeValue<EntityReference>(core) is null);
+
+    /// <summary>Task 117: the query form of <see cref="IsUnlinked"/>, added to <paramref name="query"/>'s criteria (AND). The read re-checks
+    /// each row with <see cref="IsUnlinked"/>, so a query that lost a condition still cannot select a linked set.</summary>
+    internal static void AddUnlinkedFilter(QueryExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        query.Criteria.AddCondition(ScopeColumn, ConditionOperator.In, ScopeRecord, ScopeFirmRecord);
+        query.Criteria.AddCondition(NameColumn, ConditionOperator.Equal, Name);
+        query.Criteria.AddCondition(ProcedureColumn, ConditionOperator.Null);
+        foreach (var core in InvoiceFamilyCoreRecordGuard.FilingCoreTables)
+        {
+            query.Criteria.AddCondition(core, ConditionOperator.Null);
+        }
+    }
+
+    /// <summary>Task 117: the columns <see cref="IsUnlinked"/> reads.</summary>
+    internal static IReadOnlyList<string> UnlinkedColumns { get; } =
+        new[] { ScopeColumn, NameColumn, ProcedureColumn }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray();
 
     /// <summary>
     /// ebilling-r1 task 089e: where a record-scoped set lives, for the rule-set by-id routes' authorization. Null for a set that is not
@@ -300,7 +336,9 @@ public static class ProcedureDecisionRecordEvents
 /// deactivated row would block the subject for ever). For a changed rule, the same transaction switches the record rule Off, and its open
 /// findings then close <c>PolicyRetired</c> through 081's shared close. The base rule's open findings are NOT closed by a change (the stop
 /// in POML 089c; see the 089 notes).</para>
-/// <para><b>Not here</b> (POML 089): the resolver that reads these rows (082), the read models (084), the O-17 sweep, delete code.</para>
+/// <para><b>Not here</b> (POML 089): the resolver that reads these rows (082), the read models (084), delete code. Task 117 adds the O-17
+/// sweep's one write on this table, <see cref="DeleteOrphanAssignmentsAsync"/> (rows left with no core record), run by
+/// <see cref="RecordRuleSetRetireJob"/>.</para>
 /// <para>§11: <i>Existing</i> — <see cref="RuleSetService"/> writes rule sets without record scope behind admin routes and
 /// <see cref="ProcedureService"/> writes Procedures; neither writes a row under a core record or is caller-checked against one.
 /// <i>Extension</i> — neither can take these writes: their routes are checked against a Procedure or the admin marker only, and the rows here
@@ -2596,6 +2634,128 @@ public class ProcedureAssignmentService
         var query = new QueryExpression(entity) { ColumnSet = columns, TopCount = 1 };
         query.Criteria.AddCondition(entity + "id", ConditionOperator.Equal, id);
         return (await ReadAsync(entities, query, ct)).Entities.FirstOrDefault(r => r.Id == id);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // Orphan rows (task 117, O-17; uac-r2 core-record-delete design §14)
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// What one orphan-assignment pass did (task 117). <see cref="Selected"/>: rows with no core record; <see cref="Deleted"/>: rows this pass
+    /// deleted; <see cref="Skipped"/>: rows that no longer matched (or were gone) when re-read; <see cref="Faulted"/>: rows whose delete faulted
+    /// (kept; the next pass retries them). <see cref="ReadFailed"/> and <see cref="MoreRemain"/> as the rule-set pass's.
+    /// </summary>
+    internal sealed record OrphanAssignmentDeleteResult(int Selected, int Deleted, int Skipped, int Faulted, bool ReadFailed, bool MoreRemain);
+
+    /// <summary>
+    /// Task 117 (080 parental limit; uac-r2 core-record-delete design §14: "an assignment row left with no core lookup ... is removed by
+    /// ebilling's O-17 sweep"): deletes the <c>sprk_procedureassignment</c> rows whose core lookups
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.FilingCoreTables"/>, RemoveLink) are ALL null, last modified before
+    /// <paramref name="modifiedBefore"/> (the age floor). An orphan applies to nothing (082 ignores it); this removes it. Selected in id order,
+    /// <paramref name="pageSize"/> rows a page, at most <paramref name="maxPages"/> pages; each row read is re-checked in memory.
+    /// <para>With <paramref name="apply"/> false nothing is written. Otherwise each row is RE-READ just before its delete and checked again; a
+    /// row with any live core lookup is kept. A delete that faults is counted and logged, the pass goes on, and the next pass retries the row.
+    /// The delete is the only write: no update, re-own or lookup write. No relationship has this table as its referenced table (080 schema), so
+    /// the delete removes this row only and no Restrict can refuse it.</para>
+    /// </summary>
+    internal async Task<OrphanAssignmentDeleteResult> DeleteOrphanAssignmentsAsync(
+        bool apply, DateTime modifiedBefore, int pageSize, int maxPages, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPages, 1);
+        const string ModifiedOn = "modifiedon";
+        const string IdColumn = AssignmentTable + "id";
+        var columns = InvoiceFamilyCoreRecordGuard.FilingCoreTables.Append(ModifiedOn).ToArray();
+
+        bool Matches(Entity row) =>
+            InvoiceFamilyCoreRecordGuard.FilingCoreTables.All(core => row.GetAttributeValue<EntityReference>(core) is null)
+            && row.GetAttributeValue<DateTime?>(ModifiedOn) is { } modified && modified < modifiedBefore;
+
+        QueryExpression Selection(int? top)
+        {
+            var query = new QueryExpression(AssignmentTable) { ColumnSet = new ColumnSet(columns), TopCount = top };
+            foreach (var core in InvoiceFamilyCoreRecordGuard.FilingCoreTables)
+            {
+                query.Criteria.AddCondition(core, ConditionOperator.Null);
+            }
+
+            query.Criteria.AddCondition(ModifiedOn, ConditionOperator.LessThan, modifiedBefore);
+            return query;
+        }
+
+        int selected = 0, deleted = 0, skipped = 0, faulted = 0;
+        var readFailed = false;
+        var moreRemain = true;
+        Guid? after = null;
+        for (var page = 0; page < maxPages; page++)
+        {
+            var query = Selection(pageSize);
+            if (after is { } cursor)
+            {
+                query.Criteria.AddCondition(IdColumn, ConditionOperator.GreaterThan, cursor);
+            }
+
+            query.Orders.Add(new OrderExpression(IdColumn, OrderType.Ascending));
+            IReadOnlyList<Entity> rows;
+            try
+            {
+                rows = (await _entities.RetrieveMultipleAsync(query, ct)).Entities;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                readFailed = true;
+                _logger.LogError(ex, "Task 117: the orphan assignment rows after {After} could not be read; the pass stops here", after);
+                break;
+            }
+
+            foreach (var row in rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                after = row.Id;
+                if (!Matches(row))
+                {
+                    continue;
+                }
+
+                selected++;
+                if (!apply)
+                {
+                    _logger.LogInformation("Task 117 (report only): assignment row {AssignmentId} has no core record and would be deleted", row.Id);
+                    continue;
+                }
+
+                try
+                {
+                    // Re-read just before the delete, and check again: a row that has a core lookup now, or is gone, is skipped.
+                    var reread = Selection(top: null);
+                    reread.Criteria.AddCondition(IdColumn, ConditionOperator.Equal, row.Id);
+                    var fresh = (await _entities.RetrieveMultipleAsync(reread, ct)).Entities.FirstOrDefault(r => r.Id == row.Id);
+                    if (fresh is null || !Matches(fresh))
+                    {
+                        skipped++;
+                        _logger.LogInformation("Task 117: assignment row {AssignmentId} no longer matches when re-read; kept", row.Id);
+                        continue;
+                    }
+
+                    await _entities.DeleteAsync(AssignmentTable, row.Id, ct);
+                    deleted++;
+                    _logger.LogInformation("Task 117: assignment row {AssignmentId} had no core record and is deleted", row.Id);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    faulted++;
+                    _logger.LogError(ex, "Task 117: assignment row {AssignmentId} could not be deleted; the next pass retries it", row.Id);
+                }
+            }
+
+            if (rows.Count < pageSize)
+            {
+                moreRemain = false;
+                break;
+            }
+        }
+
+        return new OrphanAssignmentDeleteResult(selected, deleted, skipped, faulted, readFailed, readFailed || moreRemain);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────

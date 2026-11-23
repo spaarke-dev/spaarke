@@ -89,6 +89,13 @@ public static class StoredFileSchema
     public const int NameMaxLength = 400, ContentTypeMaxLength = 255, AttachmentIdentityMaxLength = 1000, BlobPathMaxLength = 1024;
 
     /// <summary>
+    /// The display name as <c>sprk_name</c> stores it: at most <see cref="NameMaxLength"/> characters. The ONE copy of the rule, used by the
+    /// row writer (<c>StoredFileService.BuildRow</c>) and by the upload route's 201 <c>fileName</c> (ebilling-r1 task 123 fix round 1), so the
+    /// two cannot drift.
+    /// </summary>
+    public static string StoredName(string name) => name.Length <= NameMaxLength ? name : name[..NameMaxLength];
+
+    /// <summary>
     /// ebilling-r1 task 094 (review round 5, uac K1-a): a value (a tracking number) made safe to stand in a stored file's display name:
     /// path separators (<c>/</c>, <c>\</c>) and control characters removed, then trimmed. <c>null</c> when nothing is left.
     /// </summary>
@@ -612,6 +619,15 @@ public sealed record InvoiceFileListItem(
 
 /// <summary>The email Document a file was copied from (outbound; see <see cref="InvoiceFileListItem"/>).</summary>
 public sealed record InvoiceFileSourceEmail(Guid DocumentId, string? Name);
+
+/// <summary>
+/// The 201 body of <c>POST /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 123, wire contract
+/// <c>projects/ebilling-r1/notes/123-upload-contract.md</c>): the new Stored File, already Servable (a download still waits for its scan).
+/// </summary>
+/// <param name="FileId">The Stored File's id (the <c>Location</c> is its internal content route).</param>
+/// <param name="FileName">The name as stored (the part's file name).</param>
+/// <param name="SizeBytes">The stored length in bytes.</param>
+public sealed record InvoiceFileUploaded(Guid FileId, string FileName, long SizeBytes);
 
 /// <summary>
 /// One row of the firm route <c>GET /api/v1/external/invoices/{id}/files</c> (ebilling-r1 task 093, model 9.3): an OUTBOUND response record

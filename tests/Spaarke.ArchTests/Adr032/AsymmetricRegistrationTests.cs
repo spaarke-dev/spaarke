@@ -54,8 +54,6 @@ public class AsymmetricRegistrationTests
     /// <summary>Confirmed defects (ids and notes: <see cref="GateCombinationConstructibilityTests.DefectNotes"/>).</summary>
     internal static readonly IReadOnlyList<Entry> KnownDefects = new Entry[]
     {
-        new("InvoiceExtractionJobHandler", "IInvoiceAnalysisService", "DEF-FIN", "registered unconditionally; IInvoiceAnalysisService only under DocumentIntelligence:Enabled"),
-        new("InvoiceExtractionJobHandler", "TextExtractorService", "DEF-FIN", "registered unconditionally; the concrete TextExtractorService only under DocumentIntelligence:Enabled (the else branch registers only the ITextExtractor Null-Object)"),
         new("AttachmentClassificationJobHandler", "TextExtractorService", "DEF-FIN", "gated on RecordMatchingEnabled alone; TextExtractorService needs DocumentIntelligence:Enabled"),
 
         new("AppOnlyDocumentAnalysisJobHandler", "IAppOnlyAnalysisService", "DEF-JOBS", "registered unconditionally; IAppOnlyAnalysisService only under analysis && docIntel"),

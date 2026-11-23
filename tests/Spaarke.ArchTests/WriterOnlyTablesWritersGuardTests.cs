@@ -273,7 +273,7 @@ internal sealed class WriterGuardSeededUpdateFixture
 
     internal async Task WriteAsync() =>
         await ((Sprk.Bff.Api.Services.Dataverse.IDataverseUpdateHandler)_handler).UpdateAsync(
-            "sprk_signal", Guid.Empty, new Dictionary<string, object?>(), Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, 1, CancellationToken.None);
+            "sprk_signal", Guid.Empty, new Dictionary<string, object?>(), Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.None, 1, CancellationToken.None);
 }
 
 /// <summary>Must-not-fire fixture: an async writer that never names the general create.</summary>

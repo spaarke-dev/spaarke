@@ -269,7 +269,7 @@ public sealed class StoredFileService
 
         var row = new Entity(StoredFileSchema.Entity, spec.FileId)
         {
-            [StoredFileSchema.Name] = spec.Name.Length <= StoredFileSchema.NameMaxLength ? spec.Name : spec.Name[..StoredFileSchema.NameMaxLength],
+            [StoredFileSchema.Name] = StoredFileSchema.StoredName(spec.Name),
             [StoredFileSchema.Purpose] = new OptionSetValue((int)spec.Purpose),
             [StoredFileSchema.FirmVisible] = spec.FirmVisible,
             [StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.NotYetServable),
@@ -834,8 +834,9 @@ public sealed class StoredFileService
     /// <summary>
     /// ebilling-r1 task 094 (uac-r2 re-check (b); procedure-and-file-model 9.1 undo): withdraws every row of <paramref name="rows"/> that is
     /// not already <see cref="StoredFileStatus.Removed"/> (one write of <c>sprk_filestatus</c> = Removed per row, conditioned on the row
-    /// version that was read), so no row of an invoice being undone is served once its blob is deleted. Only
-    /// <see cref="Submission.SubmissionCommitGate.CompensateAsync"/> calls it, before <see cref="DeleteBlobForUndoAsync"/>. A row changed
+    /// version that was read), so no row of an invoice being undone is served once its blob is deleted. Called before
+    /// <see cref="DeleteBlobForUndoAsync"/> by <see cref="Submission.SubmissionCommitGate.CompensateAsync"/>, by
+    /// <see cref="WithdrawExportFileAsync"/> and (task 123 fix round 2) by <see cref="RemoveOwnUploadAsync"/>. A row changed
     /// since the read or any fault throws (the undo is held and a later delivery re-reads and retries); a row already gone is skipped.
     /// </summary>
     internal Task WithdrawForUndoAsync(IReadOnlyList<StoredFileRow> rows, CancellationToken ct) =>
@@ -922,13 +923,65 @@ public sealed class StoredFileService
     }
 
     /// <summary>
+    /// ebilling-r1 task 123 fix round 2 (uac-r2 condition 1): removes a file the caller's own upload just stored, when the upload route's count
+    /// after the write finds the invoice over its file limit (concurrent uploads passed the check before the write together). The submission
+    /// undo's own order (<see cref="Submission.SubmissionCommitGate.CompensateAsync"/>): the row is read (for its row version), withdrawn
+    /// (<see cref="WithdrawForUndoAsync"/>: Removed, never served again), its blob deleted (<see cref="DeleteBlobForUndoAsync"/>), then the row
+    /// itself deleted, so the invoice's row count drops back. A row already gone is done. Any fault throws, logged with the step that failed (a
+    /// step after the withdraw leaves a Removed row, never a Servable one). The route passes <see cref="CancellationToken.None"/>: the row
+    /// already exists, and a cancelled request must not skip its removal.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="WithdrawExportFileAsync"/> (withdraw, then blob) and the
+    /// undo's compensation. (2) Extension — this composes the same two steps plus the undo's row delete; <see cref="WithdrawExportFileAsync"/>
+    /// keeps its row on purpose (an export file's history), so it is not reused. (3) Cost of doing nothing — the row stays counted and the
+    /// invoice file list answers 503 for that invoice for good (or the route deletes Stored File rows itself, outside the row's writer).</remarks>
+    internal async Task RemoveOwnUploadAsync(Guid fileId, CancellationToken ct)
+    {
+        var step = "read";
+        try
+        {
+            if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is not { } row)
+            {
+                return;
+            }
+
+            step = "withdraw";
+            await WithdrawForUndoAsync([row], ct).ConfigureAwait(false);
+            step = "blob";
+            await DeleteBlobForUndoAsync(row, ct).ConfigureAwait(false);
+            step = "row";
+            try
+            {
+                await _entities.DeleteAsync(StoredFileSchema.Entity, fileId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (StoredFileNotFound.Is(ex))
+            {
+                // Already gone: nothing is left.
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Stored file {FileId}: the removal of an upload over its invoice's file limit failed at step {Step}", fileId, step);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// ebilling-r1 task 094: every Stored File row whose parent is the invoice <paramref name="invoiceId"/>, as the store's rules read them
     /// (whatever their channel: an upload, a Submit Invoice copy or a from-email part). At most <paramref name="max"/>; a fault throws.
+    /// With <paramref name="purpose"/>, only the rows of that purpose, filtered server-side (task 123 fix round 1: the commit gate reads the
+    /// invoice's Invoice PDF rows apart from the capped read of every row, so other rows can never crowd them out of it).
     /// </summary>
-    internal async Task<IReadOnlyList<StoredFileRow>> ReadRowsForInvoiceAsync(Guid invoiceId, int max, CancellationToken ct)
+    internal async Task<IReadOnlyList<StoredFileRow>> ReadRowsForInvoiceAsync(
+        Guid invoiceId, int max, CancellationToken ct, StoredFilePurpose? purpose = null)
     {
         var query = new QueryExpression(StoredFileSchema.Entity) { ColumnSet = new ColumnSet(StoredFileSchema.ReadColumns), TopCount = max };
         query.Criteria.AddCondition(StoredFileSchema.InvoiceTable, ConditionOperator.Equal, invoiceId);
+        if (purpose is { } only)
+        {
+            query.Criteria.AddCondition(StoredFileSchema.Purpose, ConditionOperator.Equal, (int)only);
+        }
+
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return rows.Entities.Select(e => StoredFileRow.From(e, _blobs.TenantId)).ToList();
     }

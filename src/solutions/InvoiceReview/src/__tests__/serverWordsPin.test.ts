@@ -29,6 +29,7 @@ import { staysInNoteDialog } from '../services/invoiceReviewApi';
 import { incompleteOutcome } from '../services/decisionModel';
 import { strandedApproval } from './testKit';
 import { CODE_NOTE_INVALID_CHARACTERS, CODE_NOTE_TOO_LONG, NOTE_ERROR_CODES, NOTE_MAX_CHARS } from '../services/noteModel';
+import { CODE_NOTICE_REFUSED, NOTICE_PROSE_MAX, NOTICE_SUBJECT_MAX, noticeKindOf } from '../services/noticeModel';
 
 const REPO = path.resolve(__dirname, '../../../../..');
 const BFF = 'src/server/api/Sprk.Bff.Api';
@@ -269,6 +270,49 @@ describe('the 409 codes a dialog keeps open for a resend (review round 1)', () =
   it('a "concurrent_change" code of any area is kept open too', () => {
     expect(staysInNoteDialog(conflict('ebilling.blocked.concurrent_change'))).toBe(true);
     expect(staysInNoteDialog(conflict('ebilling.invoice.concurrent_change'))).toBe(true);
+  });
+});
+
+describe('the notice to the firm (task 132ui; 131 draft route, 132 decide routes)', () => {
+  const composer = () => read(`${BFF}/Services/Finance/FirmNoticeComposer.cs`);
+  const endpoint = () => read(`${BFF}/Api/Finance/FirmNoticeEndpoints.cs`);
+
+  it('(control) the scan finds the limits and the refusal code in the server source', () => {
+    expect(intConst(composer(), 'MaxSubjectLength')).toBe(120);
+    expect(stringConsts(read(`${BFF}/Services/Finance/InvoiceRejectReturnService.cs`)).NoticeRefused).toBe('ebilling.notice_refused');
+  });
+
+  it('the limits the page counts are the server\'s FirmNoticeProse caps: the subject (without the tracking suffix) and the prose', () => {
+    expect(NOTICE_SUBJECT_MAX).toBe(intConst(composer(), 'MaxSubjectLength'));
+    expect(NOTICE_PROSE_MAX).toBe(intConst(composer(), 'MaxProseLength'));
+    // The tracking suffix is added by code and removed before the subject is counted, which is why the page does not count it.
+    expect(composer()).toMatch(/cleaned\.EndsWith\(suffix, StringComparison\.Ordinal\)/);
+  });
+
+  it('the refusal code is the server\'s InvoiceRejectReturnCodes.NoticeRefused, answered as a 400 before anything is decided', () => {
+    expect(CODE_NOTICE_REFUSED).toBe(stringConsts(read(`${BFF}/Services/Finance/InvoiceRejectReturnService.cs`)).NoticeRefused);
+    expect(read(`${BFF}/Api/Finance/InvoiceRejectReturnEndpoints.cs`)).toMatch(/StatusCodes\.Status400BadRequest,\s*InvoiceRejectReturnCodes\.NoticeRefused/);
+  });
+
+  it('the page posts to the draft route the server maps, and asks with the kind names the server parses', () => {
+    expect(endpoint()).toMatch(/MapPost\("\/invoices\/\{invoiceId:guid\}\/firm-notice\/draft",\s*Draft\)/);
+    expect(endpoint()).toMatch(/case nameof\(FirmNoticeKind\.ReturnedToFirm\):/);
+    expect(endpoint()).toMatch(/case nameof\(FirmNoticeKind\.InvoiceRejected\):/);
+    const kinds = /public enum FirmNoticeKind\s*\{([^}]*)\}/.exec(composer());
+    expect(kinds).not.toBeNull();
+    const names = kinds![1].split(',').map(k => k.trim()).filter(Boolean);
+    for (const kind of [noticeKindOf('reject'), noticeKindOf('return')]) expect(names).toContain(kind);
+  });
+
+  it('the draft the page reads has the server\'s members: Kind, Subject, Prose, Html, Source, ActionVersion, FallbackReason', () => {
+    const m = /record FirmNoticeDraftResponse\(([^)]*)\)/.exec(endpoint());
+    expect(m).not.toBeNull();
+    const members = m![1].split(',').map(p => p.trim().split(/\s+/).pop());
+    expect(members).toEqual(['Kind', 'Subject', 'Prose', 'Html', 'Source', 'ActionVersion', 'FallbackReason']);
+  });
+
+  it('(must-not-fire) a record that is not there is not found by the draft scan', () => {
+    expect(/record FirmNoticeDraftResponse\(([^)]*)\)/.exec('public sealed record Other(string Kind)')).toBeNull();
   });
 });
 

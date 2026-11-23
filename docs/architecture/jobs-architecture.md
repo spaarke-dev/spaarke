@@ -40,7 +40,7 @@ The system was designed to replace in-process background queues with a durable, 
 | BulkRagIndexingJobHandler | `BulkRagIndexing` | AI/Search | Batch RAG indexing with bounded concurrency (SemaphoreSlim), Dataverse document query, BatchJobStatusStore progress tracking |
 | ProfileSummaryJobHandler | `ProfileSummary` | AI/Office | Office add-in post-save profile extraction; chains to RagIndexing job |
 | AttachmentClassificationJobHandler | `AttachmentClassification` | Finance | AI classification of email attachments as invoice candidates; multi-signal entity matching (reference, vendor, parent, keyword) |
-| InvoiceExtractionJobHandler | `InvoiceExtraction` | Finance | AI fact extraction via OutputOrchestrator; chains to InvoiceIndexing job |
+| InvoiceSubmissionProcessingJobHandler | `InvoiceSubmissionProcessing` | Finance | Reads the invoice (Content Understanding), evaluates it and persists the `sprk_invoice`; its after-steps enqueue InvoiceIndexing (ebilling-r1 049). The legacy `InvoiceExtraction` job and its handler were deleted by ebilling-r1 050b |
 | InvoiceIndexingJobHandler | `InvoiceIndexing` | Finance/Search | Indexes invoice into Azure AI Search with embeddings (text-embedding-3-large, 3072 dims) |
 | SpendSnapshotGenerationJobHandler | `SpendSnapshotGeneration` | Finance | Aggregates BillingEvents into snapshots, evaluates threshold signals, runs finance rollup |
 | IncomingCommunicationJobHandler | `IncomingCommunication` | Communication | Processes webhook notifications; delegates to IncomingCommunicationProcessor for message fetch, record creation, .eml archival |
@@ -64,7 +64,7 @@ The system was designed to replace in-process background queues with a durable, 
 Several handlers chain to downstream jobs upon completion:
 
 - `ProfileSummaryJobHandler` → queues `RagIndexing` job
-- `InvoiceExtractionJobHandler` → queues `InvoiceIndexing` job
+- `InvoiceSubmissionProcessingJobHandler` → queues `InvoiceIndexing` job (after the invoice is accepted; the retired `InvoiceExtractionJobHandler` used to)
 - `UploadFinalizationWorker` → queues profile or indexing stage
 
 ### Queue Isolation

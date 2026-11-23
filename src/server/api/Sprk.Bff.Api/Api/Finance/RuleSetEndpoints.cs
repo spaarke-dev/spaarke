@@ -47,7 +47,7 @@ public sealed record RuleSetVisibilityBody(bool? VisibleToFirms);
 /// <c>ruleset.publish_invalid</c> with <c>errors</c> (policyId, rule, field, message, reason); 404 <c>ruleset.not_found</c> /
 /// <c>ruleset.proposal_not_found</c> (an Ontology policy is a 404 here); 409 <c>ruleset.retired</c> / <c>ruleset.proposal_in_force</c> or the
 /// owner reason code; 422 <c>ruleset.result_truncated</c>; 500 <c>ruleset.write_failed</c>.</para>
-/// <para><b>Task 116.</b> The create route (POST <c>/api/finance/rulesets</c>, an upload into the Procedure Library) and the drafting trigger
+/// <para><b>Task 116.</b> The create route (POST <c>/api/finance/rulesets</c>, an upload of a source document) and the drafting trigger
 /// (POST <c>/{ruleSetId}/draft</c>) are retired: rule sets are created only with their Procedure (081) or record-scoped (089), a Procedure
 /// Version's source file is stored through <c>PUT /api/finance/procedures/{id}/versions/{versionId}/file</c>, and drafting is started per
 /// version through <c>POST /api/finance/procedures/{id}/versions/{versionId}/draft</c> (<see cref="ProcedureEndpoints"/>).</para>

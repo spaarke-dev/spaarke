@@ -353,6 +353,9 @@ internal class EbillingNotificationJobHandler : IJobHandler
         }
     }
 
+    /// <summary>The schema version <see cref="SentNoticeJson"/> writes as <c>v</c>; the firm outcome's reader (<c>FirmFindingsProjection.ScreenStoredNotice</c>) accepts exactly this one.</summary>
+    internal const int SentNoticeVersion = 1;
+
     /// <summary>
     /// The stored shape of the sent notice (EB-D-259: the prose stays recoverable on its own, apart from the HTML, for the SPA's firm-safe reason).
     /// One JSON object in the existing <c>sprk_firmnoticetext</c> column: <c>v</c> (1), <c>source</c> (<see cref="FirmNoticeSource"/> name: Action, Template or
@@ -363,7 +366,7 @@ internal class EbillingNotificationJobHandler : IJobHandler
     {
         string Build(string? html) => JsonSerializer.Serialize(new Dictionary<string, object?>
         {
-            ["v"] = 1,
+            ["v"] = SentNoticeVersion,
             ["source"] = draft.Source.ToString(),
             ["kind"] = draft.Kind.ToString(),
             ["subject"] = draft.Subject,

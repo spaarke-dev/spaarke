@@ -4,7 +4,7 @@
  * (the blocked-submission Override / Return, the adjustment removal confirm) use `FormModal` elsewhere.
  *
  *   Approve:           Decision → Invoice adjustment (skippable) → Confirm
- *   Reject / Return:   Decision → Reason → [Notify: an optional slot, nothing is built in it] → Confirm
+ *   Reject / Return:   Decision → Reason → Notify (the notice to the firm, task 132ui; skippable) → Confirm
  *
  * The same shell reopens read-only on a decided invoice (the recorded decision, its Decision Record, the adjustments and the reason), with a
  * `StatusBar` carrying the eBilling words through task 109's `statusOverride`. Nothing is computed here (ADR-002, I-1): every amount shown is
@@ -30,6 +30,8 @@ import {
   isOutcomeUnknown,
   newAdjustmentId,
   type ApprovalState,
+  type FirmNotice,
+  type FirmNoticeKind,
   type InvoiceDecisionApi,
 } from '../../services/decisionApi';
 import {
@@ -38,10 +40,21 @@ import {
   outcomeOfApproval,
   type InvoiceOutcome,
 } from '../../services/decisionModel';
-import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage, noteToSend } from '../../services/noteModel';
+import {
+  isNoticeRefusal,
+  noticeBlocker,
+  noticeEntryOfLock,
+  noticeKindOf,
+  noticeLockOf,
+  noticeToSend,
+  subjectSuffixOf,
+  type NoticeEntry,
+} from '../../services/noticeModel';
 import { money } from '../../services/reviewModel';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
 import { createDecisionLocks, type DecisionLocks } from './decisionLocks';
+import { NotifyStep } from './NotifyStep';
 import { AdjustStep, ConfirmStep, OutcomeStep, ReasonStep } from './steps';
 import { EMPTY_FORM, WizardContext, adjustmentFormDirty, type WizardCtx, type WizardForm } from './wizardContext';
 
@@ -52,8 +65,8 @@ const useStyles = makeStyles({
 const ORDER = ['outcome', 'adjust', 'reason', 'notify', 'confirm'];
 const FIXED = new Set(['outcome', 'confirm']);
 
-/** The optional firm-notification step: a slot only (131 / 132 fill it). Shown on the reject and return paths, skippable. */
-export type NotifyStep = Omit<IWizardStepConfig, 'id' | 'isSkippable'>;
+/** The step id of the notice to the firm (Reject and Return, editable wizard only; skippable). */
+const NOTIFY_STEP = 'notify';
 
 export interface InvoiceDecisionWizardProps {
   open: boolean;
@@ -66,7 +79,6 @@ export interface InvoiceDecisionWizardProps {
   reload: () => Promise<InvoiceReview | null>;
   /** Re-read the approval state after the decision. */
   refreshApproval: () => Promise<unknown>;
-  notifyStep?: NotifyStep;
   /**
    * The requests locked until they finish, held at page level (the `ApprovalProvider`'s), so reopening the wizard for the same invoice
    * prefills a decision that came back unsure and keeps it locked. Without it the wizard keeps its own (lost on close).
@@ -84,7 +96,7 @@ const STATUS_TONE: Readonly<Record<InvoiceOutcome, ConsoleStatusOverride['tone']
 const STATUS_LABEL: Readonly<Record<InvoiceOutcome, string>> = { approve: 'Approved', reject: 'Rejected', return: 'Returned to firm' };
 
 export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
-  const { open, onClose, review, approval, api, invoiceId, reload, refreshApproval, notifyStep } = props;
+  const { open, onClose, review, approval, api, invoiceId, reload, refreshApproval } = props;
   const s = useStyles();
   const ownLocks = React.useRef<DecisionLocks | null>(null);
   if (!ownLocks.current) ownLocks.current = createDecisionLocks();
@@ -102,14 +114,64 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
     if (a) {
       Object.assign(base, { adjMethod: a.method, adjValue: a.value, adjReason: a.reason, adjRule: a.rule, adjNote: a.note, adjLocked: true });
     }
-    if (w) Object.assign(base, { reason: w.reason, note: w.note, locked: true });
+    if (w) {
+      Object.assign(base, { reason: w.reason, note: w.note, locked: true });
+      // Task 132ui: the notice and the send choice as they were sent (no new draft is asked for; it would differ from what the server may have kept).
+      const lockKind = noticeKindOf(w.outcome);
+      if (lockKind) base.notices = { ...base.notices, [lockKind]: noticeEntryOfLock(w.notice) };
+    }
     return { ...base, outcome: w?.outcome ?? (a ? 'approve' : approval.canApprove ? 'approve' : undefined) };
   });
   const set = React.useCallback((patch: Partial<WizardForm>) => setForm(f => ({ ...f, ...patch })), []);
 
+  // Task 132ui: the notice to the firm, one entry per kind in the form. It is written through `setForm` (a functional update), so a draft that
+  // arrives after the Notify step was left, or after the other outcome was chosen, lands in its own kind's entry and never in another's.
+  const patchNotice = React.useCallback(
+    (kind: FirmNoticeKind, patch: Partial<NoticeEntry>, edited = false) =>
+      setForm(f => ({
+        ...f,
+        notices: { ...f.notices, [kind]: { ...f.notices[kind], ...patch } },
+        noticeError: edited ? null : f.noticeError,
+      })),
+    []
+  );
+  // The kinds already asked for in this opened wizard: a kind is asked for once (the step may mount again, or twice under StrictMode).
+  const noticeAsked = React.useRef<Set<FirmNoticeKind>>(new Set());
+  const loadNotice = React.useCallback(
+    (kind: FirmNoticeKind, retry = false) => {
+      if (!retry && noticeAsked.current.has(kind)) return;
+      noticeAsked.current.add(kind);
+      patchNotice(kind, { status: 'loading', failure: null });
+      // The answer lands only on an entry still waiting for it: a decision that came back unsure has fixed the entry as it was sent, and a late
+      // draft must not change what the repeat will carry.
+      const settle = (patch: Partial<NoticeEntry>) =>
+        setForm(f => (f.notices[kind].status === 'loading' ? { ...f, notices: { ...f.notices, [kind]: { ...f.notices[kind], ...patch } } } : f));
+      void api.getFirmNoticeDraft(invoiceId, kind).then(r => {
+        if (r.ok) {
+          // On by default once a draft has loaded; the reviewer turns it off, or skips the step, to send the decision alone.
+          settle({ status: 'ready', draft: r.value, subjectSuffix: subjectSuffixOf(r.value.subject), subject: r.value.subject, prose: r.value.prose, send: true, failure: null });
+        } else {
+          // Never blocks the decision: the message and code are shown with Retry, and nothing is sent for this kind.
+          // The server's message with its code (the disabled answer is the one sentence that carries no code of its own).
+          const text = decisionFailureMessage(r.failure);
+          const code = r.failure.errorCode;
+          // Review round 1 K2: an answer with no code of its own (a 429 from the rate limiter) shows its HTTP status instead.
+          const tag = code ?? (r.failure.status > 0 && !r.failure.signInFailed ? `HTTP ${r.failure.status}` : null);
+          settle({ status: 'failed', draft: null, send: false, failure: tag && !text.includes(tag) ? `${text} (${tag})` : text });
+        }
+      });
+    },
+    [api, invoiceId, patchNotice]
+  );
+  // The shell's handle as the Confirm step last rendered it: Skip is the shell's own, so whether the Notify step was skipped is read from its state.
+  const shell = React.useRef<IWizardShellHandle | null>(null);
+  const notifySkipped = () => shell.current?.state.steps.some(x => x.id === NOTIFY_STEP && x.status === 'skipped') === true;
+
   const ctx: WizardCtx = {
     form,
     set,
+    loadNotice,
+    patchNotice,
     readOnly,
     review,
     approval,
@@ -121,10 +183,15 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
       // lock entry outlives a change of outcome. The form is editable only while the selected outcome differs from the locked one (the text
       // typed so far stays); coming back to the locked outcome restores what was sent and locks the form again. Only a success, or a reload
       // that shows the decision is done, clears the entry.
+      // Review round 1 F1-b: a refusal of one outcome's notice is not shown under another's (nor on Approve's Confirm).
+      if (outcome !== live.current.form.outcome) set({ noticeError: null });
       const lock = locks.get('wizard');
       if (lock) {
-        if (outcome === lock.outcome) set({ locked: true, reason: lock.reason, note: lock.note });
-        else if (live.current.form.locked) set({ locked: false });
+        if (outcome === lock.outcome) {
+          set({ locked: true, reason: lock.reason, note: lock.note });
+          const lockKind = noticeKindOf(lock.outcome);
+          if (lockKind) patchNotice(lockKind, noticeEntryOfLock(lock.notice));
+        } else if (live.current.form.locked) set({ locked: false });
       }
       syncSteps(outcome, handle);
     },
@@ -132,7 +199,8 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
   };
   const live = React.useRef<WizardCtx>(ctx);
   live.current = ctx;
-  const hasNotify = !!notifyStep && !readOnly;
+  // The Notify step is on the reject and return paths of an editable wizard (not on Approve, never on a decided invoice's read-only view).
+  const hasNotify = !readOnly;
 
   const configFor = React.useCallback(
     (id: string): IWizardStepConfig => {
@@ -161,13 +229,27 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
             canAdvance: () => live.current.readOnly || live.current.form.reason.trim() !== '',
           };
         case 'notify':
-          return { ...(notifyStep as NotifyStep), id, isSkippable: true };
+          // Next is held while the draft loads and for a blank or over-limit notice with sending on; a failed draft, or sending off, holds nothing.
+          return {
+            id,
+            label: 'Notify firm',
+            renderContent: () => <NotifyStep />,
+            canAdvance: () => {
+              const { form: f, readOnly: ro } = live.current;
+              const kind = noticeKindOf(f.outcome);
+              return ro || f.locked || !kind || noticeBlocker(f.notices[kind]) === null;
+            },
+            isSkippable: true,
+          };
         default:
           // A note over the limit holds Finish off (the Note box says why); everything else about the note is the server's to refuse.
           return {
             id: 'confirm',
             label: readOnly ? 'Recorded decision' : 'Confirm',
-            renderContent: () => <ConfirmStep />,
+            renderContent: handle => {
+              shell.current = handle;
+              return <ConfirmStep notifySkipped={notifySkipped()} />;
+            },
             canAdvance: () => live.current.readOnly || noteProblem(live.current.form.note) === null,
           };
       }
@@ -199,12 +281,23 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
     // The note is optional and the same text on every send of this decision (the form keeps it across a failure, and a decision saved in part
     // locks it): blank or whitespace-only sends no key, and a note over the limit never leaves the page (Confirm holds Finish off for it).
     const note = noteArgs(f.note);
+    // Task 132ui: the notice to the firm goes with a reject or return only when the reviewer sent it on purpose: a draft loaded, "Send this
+    // notice" on, the step not skipped. Otherwise neither notice field is in the request (no empty strings) and the firm gets no email.
+    const noticeKind = noticeKindOf(outcome);
+    const entry = noticeKind ? f.notices[noticeKind] : undefined;
+    const skipped = notifySkipped();
+    if (entry && !skipped && !f.locked && noticeBlocker(entry) === 'invalid') {
+      throw new Error('The notice to the firm needs a subject and a message within the limits. Go Back to the Notify step to fix it, or turn it off.');
+    }
+    const notice: FirmNotice | null = noticeKind ? noticeToSend(entry, { skipped, locked: f.locked }) : null;
+    const reason = f.reason.trim();
+    // With no notice the call is exactly the old one (no trailing undefined arguments).
     const result =
       outcome === 'approve'
         ? await a.approve(id, ...note)
         : outcome === 'reject'
-          ? await a.reject(id, f.reason.trim(), ...note)
-          : await a.returnToFirm(id, f.reason.trim(), ...note);
+          ? await (notice ? a.reject(id, reason, noteToSend(f.note), notice) : a.reject(id, reason, ...note))
+          : await (notice ? a.returnToFirm(id, reason, noteToSend(f.note), notice) : a.returnToFirm(id, reason, ...note));
     if (!result.ok) {
       // The server refused the note itself (400): say so under the Note box, and only there (review round 1: the shell's error bar did not
       // repeat it well). The shell stays open on this step because it was given `stayOpenOnFinish` and nothing is returned.
@@ -212,11 +305,30 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
         set({ noteError: noteRefusalMessage(result.failure) });
         return;
       }
+      // Task 132ui: the server refused the notice (400 `ebilling.notice_refused`, before it decided anything): shown under the notice fields,
+      // and on this step, which stays open. The reviewer edits the notice (or turns it off) and finishes again; nothing was decided.
+      if (isNoticeRefusal(result.failure)) {
+        // Review round 2: the route answers this before the service is called, so it proves this request decided nothing. A repeat that was
+        // locked after an unsure answer is therefore not a request to repeat any more: drop the lock (page level and form) so the reviewer can
+        // edit the notice or turn it off. The reason and the note stay as typed, now editable.
+        if (f.locked) locks.clear('wizard');
+        set({ noticeError: decisionFailureMessage(result.failure), ...(f.locked ? { locked: false } : {}) });
+        return;
+      }
       // Saved in part, or no answer at all: the repeat must be the same request, so the reason and the note are locked until it finishes.
       // The lock is also kept at page level, so closing and reopening the wizard does not lose it.
       if (isOutcomeUnknown(result.failure)) {
         set({ locked: true });
-        locks.set('wizard', { outcome, reason: outcome === 'approve' ? '' : f.reason.trim(), note: f.note });
+        const noticeLock = noticeKind ? noticeLockOf(entry, notice) : undefined;
+        locks.set('wizard', {
+          outcome,
+          reason: outcome === 'approve' ? '' : f.reason.trim(),
+          note: f.note,
+          // The notice and the send choice as this request carried them, so the repeat is the same request.
+          ...(noticeLock ? { notice: noticeLock } : {}),
+        });
+        // The form's own entry becomes the same: what was sent (or not, after Skip or a draft that never loaded), whatever Skip says on the repeat.
+        if (noticeKind) patchNotice(noticeKind, noticeEntryOfLock(noticeLock));
       }
       // Part of the change may be saved (503 incomplete, or no answer): show the server's state, then the message tells the user to repeat. A 409
       // (already decided, approval changed, corrections pending) means the page and the approval are out of date: re-read both so

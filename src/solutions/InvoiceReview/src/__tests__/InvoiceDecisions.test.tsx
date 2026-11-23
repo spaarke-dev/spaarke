@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
@@ -32,7 +31,6 @@ import {
 
 interface RenderOpts {
   theme?: typeof webLightTheme;
-  notifyStep?: React.ComponentProps<typeof InvoiceReviewWithDecisions>['notifyStep'];
 }
 
 function renderDecisions(reviews: InvoiceReview | InvoiceReview[], decision: MockDecisionApi, opts: RenderOpts = {}) {
@@ -44,7 +42,6 @@ function renderDecisions(reviews: InvoiceReview | InvoiceReview[], decision: Moc
         api={api as never}
         decisionApi={decision as never}
         pollIntervalMs={60_000}
-        notifyStep={opts.notifyStep}
       />
     </FluentProvider>
   );
@@ -75,12 +72,14 @@ async function openWizard(): Promise<HTMLElement> {
 const next = (d: HTMLElement) => within(d).getByRole('button', { name: 'Next', hidden: true });
 const radio = (d: HTMLElement, name: RegExp) => within(d).getByRole('radio', { name, hidden: true });
 const finishBtn = (d: HTMLElement, name: RegExp) => within(d).getByRole('button', { name, hidden: true });
+const skipNotify = (d: HTMLElement) => within(d).getByRole('button', { name: 'Skip', hidden: true });
 
 async function toConfirmViaReject(d: HTMLElement, reason: string) {
   fireEvent.click(radio(d, /^Reject/));
   fireEvent.click(next(d));
   fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: reason } });
   fireEvent.click(next(d));
+  fireEvent.click(skipNotify(d));
   await within(d).findByTestId('confirm-decision');
 }
 
@@ -679,6 +678,7 @@ describe('Reject and Return to firm', () => {
     expect(next(d)).toBeDisabled();
     fireEvent.change(reason, { target: { value: '  Duplicate of an earlier invoice  ' } });
     fireEvent.click(next(d));
+    fireEvent.click(skipNotify(d));
 
     expect(await within(d).findByTestId('confirm-reason')).toHaveTextContent('Duplicate of an earlier invoice');
     fireEvent.click(finishBtn(d, /^Reject & record$/));
@@ -699,6 +699,7 @@ describe('Reject and Return to firm', () => {
     fireEvent.click(next(d));
     fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: 'Terms missing for June' } });
     fireEvent.click(next(d));
+    fireEvent.click(skipNotify(d));
     await within(d).findByTestId('confirm-decision');
     fireEvent.click(finishBtn(d, /^Return to firm & record$/));
     await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledWith(INVOICE_ID, 'Terms missing for June'));
@@ -719,6 +720,7 @@ describe('Reject and Return to firm', () => {
     expect(within(d).queryByText(/Rejection is final/)).not.toBeInTheDocument();
     fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: 'Please correct the rates' } });
     fireEvent.click(next(d));
+    fireEvent.click(skipNotify(d));
     await within(d).findByTestId('confirm-decision');
     fireEvent.click(finishBtn(d, /^Return to firm & record$/));
     await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledWith(INVOICE_ID, 'Please correct the rates'));
@@ -747,45 +749,39 @@ describe('Reject and Return to firm', () => {
     fireEvent.click(next(d));
     fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: 'Fix it' } });
     fireEvent.click(next(d));
+    fireEvent.click(skipNotify(d));
     await within(d).findByTestId('confirm-decision');
     fireEvent.click(finishBtn(d, /^Return to firm & record$/));
     expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('You do not have permission to do this. (ebilling.approver.not_eligible)');
   });
 
-  it('has no notify step unless one is supplied', async () => {
+  it('task 132ui AC1: Reject and Return each show the Notify step after Reason; Approve never does', async () => {
     renderDecisions(clean(), mockDecisionApi());
     const d = await openWizard();
-    fireEvent.click(radio(d, /^Reject/));
-    expect(within(d).queryByText('Notify firm')).not.toBeInTheDocument();
-    fireEvent.click(next(d));
-    fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: 'No' } });
-    fireEvent.click(next(d));
-    expect(await within(d).findByTestId('confirm-decision')).toBeInTheDocument();
-  });
-
-  it('shows a supplied notify step on the reject and return path only, and it can be skipped', async () => {
-    const notifyStep = {
-      label: 'Notify firm',
-      renderContent: () => <div data-testid="notify-stub">Stub</div>,
-      canAdvance: () => false,
-    };
-    renderDecisions(clean(), mockDecisionApi(), { notifyStep });
-    const d = await openWizard();
-
-    // Approve path: no notify step.
+    // Approve (preselected): no Notify step in the list of steps.
     expect(radio(d, /^Approve/)).toBeChecked();
     expect(within(d).queryByText('Notify firm')).not.toBeInTheDocument();
 
-    fireEvent.click(radio(d, /^Reject/));
-    expect(within(d).getByText('Notify firm')).toBeInTheDocument();
-    fireEvent.click(next(d));
-    fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: 'No' } });
-    fireEvent.click(next(d));
-    expect(await within(d).findByTestId('notify-stub')).toBeInTheDocument();
-    // canAdvance is false, but the slot is skippable.
-    expect(next(d)).toBeDisabled();
-    fireEvent.click(within(d).getByRole('button', { name: 'Skip', hidden: true }));
-    expect(await within(d).findByTestId('confirm-decision')).toBeInTheDocument();
+    for (const outcome of [/^Reject/, /^Return to firm/]) {
+      fireEvent.click(radio(d, outcome));
+      expect(within(d).getByText('Notify firm')).toBeInTheDocument();
+      // Reason comes first, then Notify.
+      const all = within(d).getAllByText(/^(Decision|Reason|Notify firm|Confirm)$/).map(e => e.textContent);
+      expect(all.indexOf('Reason')).toBeLessThan(all.indexOf('Notify firm'));
+      expect(all.indexOf('Notify firm')).toBeLessThan(all.indexOf('Confirm'));
+      fireEvent.click(next(d));
+      fireEvent.change(within(d).getByLabelText('Reason for the decision'), { target: { value: 'No' } });
+      fireEvent.click(next(d));
+      expect(await within(d).findByTestId('notify-step')).toBeInTheDocument();
+      // Back to the Decision step for the next outcome.
+      fireEvent.click(within(d).getByRole('button', { name: 'Back', hidden: true }));
+      fireEvent.click(within(d).getByRole('button', { name: 'Back', hidden: true }));
+    }
+
+    // Back on Approve the step is gone again, and its own steps are the Approve ones.
+    fireEvent.click(radio(d, /^Approve/));
+    expect(within(d).queryByText('Notify firm')).not.toBeInTheDocument();
+    expect(within(d).getByText('Invoice adjustment')).toBeInTheDocument();
   });
 
   it('switching back to Approve drops the reason step again', async () => {
