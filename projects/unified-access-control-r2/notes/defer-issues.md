@@ -1542,6 +1542,14 @@ siblings #2745 and #2746 (PR #2957) and #2750 (PR #2958) are being fixed in scop
 |---|---|---|
 | D-2959 | Direct share pass: a capped listing moves the watermark to its horizon with no overlap, so a row stamped before the horizon but committed after the read waits for the rolling sweep. Not only a late grant: the pass also revokes (Restricted or tainted parent, non-participant shares), so a missed change can also delay a revoke. Proposed fix: bound the capped watermark by `startedAt - DirectOverlap`, the `WatermarkAfter` rule PR #2958 adds to the sibling job, and key it (#2745) only at an instant older than that | https://github.com/spaarke-dev/spaarke/issues/2959 |
 
+### 2026-11-22 — filed from the fm 056b review (private Direct messages)
+
+Accepted as a known limit of fm task 056b (approved at 2967cd5bd8). uac-r2 owns it.
+
+| ID | Title | GitHub Issue |
+|---|---|---|
+| D-2979 | A Direct message's owner is not held: an Assign made outside the BFF widens who reads it and is never reverted | https://github.com/spaarke-dev/spaarke/issues/2979 |
+
 ### 2026-10-28 — filed from the ebilling 086/098 reviews
 
 | ID | Title | GitHub Issue |
