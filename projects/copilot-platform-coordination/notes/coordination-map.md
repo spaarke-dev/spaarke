@@ -8,7 +8,8 @@
 | spaarke-legal-ai-accelerator-r1 | `acclerator-r1` | NDA, Legal Hold and Legal Review agents and skills; the four-tier package; T0/T1 practice content | D2, D3, D4, S1–S6, X1 | Renames skills to `spaarke-*` at next plugin build; owner W-tests pending |
 | specialist-legal-agents-r1 (#3002) | setup session (`set-up-the-specialist-le`) | Persona (archetype) agents per practice area, T2/T3 runtime | none yet | Design phase (v0.5); D-A11 NDA ownership open. Its first tenant artifact goes through R4 |
 | ai-m365-copilot-integration | none live | The April "Spaarke AI" declarative agent and bot | D1, A3 | Owner decision on D1 |
-| unknown | — | "Spaarke Dataverse MCP" Copilot Studio agent; "Copilot in Power Apps – Spaarke Platform [Draft]" | D5, D6 | Owner to name an owner |
+| customer-provisioning-orchestration-r1 | `provisioning-r1` | Per-customer "Spaarke AI" Copilot agent template and render (task 257, `publish-copilot-agent-template.yml`); customer IT uploads it in customer tenants | possibly D1 (asked 2026-11-23) | Added 2026-11-23: a Copilot publisher for customer tenants; R4 applies if it uploads to the dev tenant |
+| unknown | — | "Spaarke Dataverse MCP" Copilot Studio agent (one copy); "Copilot in Power Apps" drafts | D5, D6, D7 | Owner to name an owner |
 | copilot-platform-coordination | this session | The inventory, the registration rules, the removal list, telling projects when a removal trigger passes | all (register only) | Owner approval of rules + removal list |
 
 ## Cross-project decisions this project tracks
