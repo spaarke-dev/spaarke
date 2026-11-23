@@ -150,3 +150,17 @@ Console auto-deployed from master `6311cd0a69` (17:56Z). Checked in the owner's 
 | Ontology admin → Rules → New rule → Cancel | body | **FAIL** |
 
 New rule cause (focusin + MutationObserver trace): `RuleWizard` shows a loading SprkModal, then replaces it with RuleWizardBody's modal about 550 ms later. The loading modal correctly restores to New rule; the new modal then captures focus from New rule but records the loading modal's Close button (still active during its render) as its opener. At close that button is gone, so nothing is restored. Fix: follow-up PR to master (SprkModal hands the opener over when one modal replaces another). The composer Close check waits for the 202 PCF deploy.
+
+### Recheck after the 202 follow-up (#3004 `738648c7fb`, Console auto-deployed 19:44Z)
+
+Main session, owner's Chrome, 2026-11-23. A fresh tab still carried the 17:59Z cache token, so the Console frame was loaded from `/webresources/sprk_spaarkeai` directly; its bundle contains the follow-up code.
+
+| Path | Focus ends on | Result |
+|---|---|---|
+| Ontology admin → New rule → Cancel (nothing typed) | New rule | PASS (was FAIL) |
+| New rule → name typed → Cancel → Discard | New rule | PASS |
+| Decision wizard: amount typed → Cancel → Keep deciding | the wizard's Cancel | PASS (no regression) |
+| → Cancel → Discard and close | Start review | PASS |
+| Classification → Edit / Cancel | Name field / that row's Edit | PASS |
+
+Nothing saved (the typed rule name and budget amount were discarded). Next: the 202 PCF + code-page deploy (owner go 2026-11-23), then the composer Close check.
