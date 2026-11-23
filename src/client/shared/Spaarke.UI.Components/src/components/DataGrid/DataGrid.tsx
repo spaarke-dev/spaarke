@@ -1185,7 +1185,14 @@ export const DataGrid: React.FC<DataGridProps> = props => {
 
   // Sentinel + IntersectionObserver for lazy paging.
   const sentinelRef = React.useRef<HTMLDivElement>(null);
-  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+  // The scroll container only exists once the configuration has loaded (the loading and error states return early,
+  // below), so the width measurement keys on the element itself, not on the first mount (R4 task 028 fix round).
+  const [scrollContainerEl, setScrollContainerEl] = React.useState<HTMLDivElement | null>(null);
+  const setScrollContainer = React.useCallback((el: HTMLDivElement | null) => {
+    scrollContainerRef.current = el;
+    setScrollContainerEl(el);
+  }, []);
 
   React.useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -1412,30 +1419,65 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // scroll appears as a last resort (correct).
   // ─────────────────────────────────────────────────────────────────────────
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
-  // Synchronous initial measurement BEFORE FluentDataGrid's first commit, so
-  // its initial `columnSizingOptions` already reflect the container width
-  // (round 2 feedback found that ResizeObserver firing AFTER mount didn't
-  // re-apply column sizing — Fluent treats `columnSizingOptions` as initial
-  // values, not live-tracked). useLayoutEffect runs synchronously after the
-  // DOM is laid out but before paint, so the column sizes are correct on
-  // the very first visible frame.
+  // Synchronous initial measurement before the first paint, so the columns
+  // are fitted on the very first visible frame. Later measurements (the
+  // ResizeObserver) re-fit the columns live: Fluent re-reads changed
+  // `columnSizingOptions` (`COLUMN_SIZING_OPTIONS_UPDATED` in
+  // @fluentui/react-table's useTableColumnResizeState), so no remount is
+  // needed (review F1-1).
+  // R4 task 028 fix round: both effects key on `scrollContainerEl`. With `[]` they ran at mount, while the grid still
+  // showed its loading placeholder, found no container, and never measured or observed it, so `containerWidth` stayed 0
+  // and none of the fitting above ever applied. Both read `clientWidth` (padding included), which is the width the
+  // sizing math below assumes (it subtracts gridScroll's padding itself); `contentRect.width` would subtract it twice.
   React.useLayoutEffect(() => {
-    const el = scrollContainerRef.current;
-    if (el) {
-      setContainerWidth(el.clientWidth);
+    if (scrollContainerEl) {
+      setContainerWidth(scrollContainerEl.clientWidth);
     }
-  }, []);
+  }, [scrollContainerEl]);
   React.useEffect(() => {
-    const el = scrollContainerRef.current;
+    const el = scrollContainerEl;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
+    const ro = new ResizeObserver(() => {
+      setContainerWidth(el.clientWidth);
     });
     ro.observe(el);
     return () => ro.disconnect();
+  }, [scrollContainerEl]);
+
+  // R4 task 028 fix round (review F1-2): a width the user drags is theirs for the grid's lifetime. Fluent resets a
+  // column to `columnSizingOptions[col].idealWidth` whenever that differs from its own state (`columnDefinitionsToState`),
+  // and it re-reads the options on every change to them or to the column definitions — a 1px container change, a row
+  // selection, chip state, a host's inline callbacks. So the dragged width is recorded here and fed back as that
+  // column's ideal width below; the columns the user has not dragged keep the proportional fit. Ids of columns that no
+  // longer exist are dropped; nothing else clears the map (a "Reset columns" command is later work).
+  const [userColumnWidths, setUserColumnWidths] = React.useState<Readonly<Partial<Record<string, number>>>>({});
+  const handleColumnResize = React.useCallback<NonNullable<FluentDataGridProps['onColumnResize']>>((_ev, data) => {
+    const id = String(data.columnId);
+    // The row-actions column has a fixed width and no resize handle.
+    if (id === ROW_ACTIONS_COLUMN_ID) return;
+    setUserColumnWidths(prev => (prev[id] === data.width ? prev : { ...prev, [id]: data.width }));
   }, []);
+  React.useEffect(() => {
+    // An empty column set is a reload in progress, not a column set without the dragged columns.
+    if (visibleColumns.length === 0) return;
+    const present = new Set(visibleColumns.map(c => c.name));
+    setUserColumnWidths(prev => {
+      const stale = Object.keys(prev).filter(id => !present.has(id));
+      if (stale.length === 0) return prev;
+      const next = { ...prev };
+      for (const id of stale) delete next[id];
+      return next;
+    });
+  }, [visibleColumns]);
+  // Fluent's auto-fit keeps the columns inside the container on every resize step and container change, so a column
+  // grows only by taking width from columns above their minimum, and when the grid is squeezed (every column at its
+  // minimum) it undoes the drag. Auto-fit stays on for the fit-to-container sizing until the user resizes a column;
+  // from then on the dragged column follows the pointer and the grid scrolls sideways if it has to.
+  const hasUserColumnWidths = Object.keys(userColumnWidths).length > 0;
+  const resizableColumnsOptions = React.useMemo(
+    () => ({ autoFitColumns: !hasUserColumnWidths }),
+    [hasUserColumnWidths]
+  );
 
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
@@ -1500,17 +1542,20 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       }
     }
     for (let i = 0; i < visibleColumns.length; i++) {
+      // A column the user dragged keeps the dragged width (F1-2 above); the others take the fit.
+      const userWidth = userColumnWidths[visibleColumns[i].name];
+      const width = userWidth !== undefined ? Math.max(mins[i], userWidth) : targets[i];
       options[visibleColumns[i].name] = {
-        defaultWidth: targets[i],
+        defaultWidth: width,
         minWidth: mins[i],
-        idealWidth: targets[i],
+        idealWidth: width,
       };
     }
     if (actionsWidth > 0) {
       options[ROW_ACTIONS_COLUMN_ID] = { defaultWidth: actionsWidth, minWidth: actionsWidth, idealWidth: actionsWidth };
     }
     return options;
-  }, [visibleColumns, containerWidth, resolved, hasRowActions, rowActions]);
+  }, [visibleColumns, containerWidth, resolved, hasRowActions, rowActions, userColumnWidths]);
 
   // Task 023a: the actions column keeps its width whatever Fluent's sizing state does (no resize, no auto-fit).
   const rowActionsCellStyle: React.CSSProperties | undefined = React.useMemo(() => {
@@ -1711,7 +1756,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             </MessageBar>
           )}
 
-          <div className={mergeClasses(styles.gridScroll, styles.gridTableOverride)} ref={scrollContainerRef}>
+          <div className={mergeClasses(styles.gridScroll, styles.gridTableOverride)} ref={setScrollContainer}>
             {/*
              * The FluentDataGrid is ALWAYS rendered (even when there are zero
              * rows) so the column-header row — which hosts the chevron menus
@@ -1721,24 +1766,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
              * Power Apps OOB pattern: header always visible, body empty,
              * empty-state message sits below the (empty) body.
              *
-             * ai-spaarke-ai-workspace-UI-r1 iter 2 round 4 (2026-06-09):
-             * FluentDataGrid treats `columnSizingOptions` as INITIAL-only —
-             * once mounted, prop changes to those options do not re-flow
-             * the columns. To get responsive sizing in containers whose
-             * width changes (workspace section embeds; window resize), we
-             * use a key bucket (every 50px) so significant width changes
-             * force a remount with fresh column widths. We do NOT gate the
-             * mount on a non-zero width — that would collapse gridScroll's
-             * flex:1 layout (no children) and prevent the initial width
-             * measurement, leaving an empty pane. Instead the grid mounts
-             * immediately with the baseline (containerWidth=0) widths and
-             * remounts ~one frame later when useLayoutEffect measures.
-             * Selection state lives in DataGrid's React state above this
-             * FluentDataGrid, so remount only loses Fluent's internal
-             * sort/filter-popover UI state — acceptable trade-off.
+             * Responsive sizing: FluentDataGrid re-reads `columnSizingOptions`
+             * when they change (@fluentui/react-table 9.19.x handles
+             * `COLUMN_SIZING_OPTIONS_UPDATED` live), so a container-width
+             * change re-fits the columns in place. The grid is NOT keyed on
+             * the width (an earlier 50px-bucket key remounted it on every
+             * width change and lost the sort and focus — R4 task 028 review
+             * F1-1). We do NOT gate the mount on a non-zero width — that
+             * would collapse gridScroll's flex:1 layout (no children) and
+             * prevent the initial width measurement, leaving an empty pane.
              */}
             <FluentDataGrid
-              key={`fg-${Math.floor((containerWidth || 0) / 50)}`}
               items={items}
               columns={tableColumns}
               selectionMode={
@@ -1753,12 +1791,14 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               sortable={resolved.behavior.enableSorting}
               resizableColumns={resolved.behavior.enableColumnResize}
               columnSizingOptions={columnSizingOptions}
+              resizableColumnsOptions={resizableColumnsOptions}
+              onColumnResize={handleColumnResize}
               focusMode="composite"
               size={density}
               getRowId={(item: GridItem) => item._rowId}
               // CSS belt-and-suspenders: maxWidth caps the FluentDataGrid at
               // the container width even if `columnSizingOptions` failed to
-              // apply (Fluent treats it as initial-only). Without this, when
+              // apply. Without this, when
               // sum-of-column-widths > container width, the grid renders past
               // the container's right edge with a permanent horizontal scroll
               // (round 2 testing feedback).
