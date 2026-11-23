@@ -76,7 +76,7 @@ beforeEach(() => clearNarrativeCache());
 describe('buildWorklistNarrativeRequest', () => {
   it("carries the lanes' counts, one category per lane, and nothing else", () => {
     const data = lanes();
-    const request = buildWorklistNarrativeRequest(data, TODAY);
+    const request = buildWorklistNarrativeRequest(data);
     expect(request).not.toBeNull();
 
     const decide = data.Decide.reduce((n, g) => n + g.items.length, 0);
@@ -98,7 +98,7 @@ describe('buildWorklistNarrativeRequest', () => {
 
   it('names no item: no priority item, no channel, no date and no record name, so the narrative cannot name one absent from the list', () => {
     const data = lanes();
-    const request = buildWorklistNarrativeRequest(data, TODAY)!;
+    const request = buildWorklistNarrativeRequest(data)!;
 
     expect(request.priorityItems).toEqual([]);
     expect(request.channels).toEqual([]);
@@ -116,14 +116,14 @@ describe('buildWorklistNarrativeRequest', () => {
   });
 
   it('is null for no list and for an empty list (nothing to say, so no call)', () => {
-    expect(buildWorklistNarrativeRequest(undefined, TODAY)).toBeNull();
-    expect(buildWorklistNarrativeRequest({ set: 'lanes', Decide: [], Do: [] }, TODAY)).toBeNull();
+    expect(buildWorklistNarrativeRequest(undefined)).toBeNull();
+    expect(buildWorklistNarrativeRequest({ set: 'lanes', Decide: [], Do: [] })).toBeNull();
   });
 
   it('has the same two categories when nothing is past due', () => {
     const data = lanes();
     for (const g of data.Do) for (const i of g.items) i.dueDate = '2026-10-30';
-    const names = buildWorklistNarrativeRequest(data, TODAY)!.categories.map(c => c.name);
+    const names = buildWorklistNarrativeRequest(data)!.categories.map(c => c.name);
     expect(names).toEqual([DECIDE_CATEGORY, DO_CATEGORY]);
   });
 });
@@ -223,7 +223,7 @@ describe('acceptNarrative', () => {
 });
 
 describe('createWorklistService.narrate', () => {
-  const request = buildWorklistNarrativeRequest(lanes(), TODAY)!;
+  const request = buildWorklistNarrativeRequest(lanes())!;
   const service = (fetch: jest.Mock) => createWorklistService({ fetch, baseUrl: 'https://bff.test/' });
 
   it('POSTs the counts to the narrate route and returns the accepted text', async () => {

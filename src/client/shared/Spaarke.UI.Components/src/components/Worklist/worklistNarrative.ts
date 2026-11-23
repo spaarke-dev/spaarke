@@ -93,10 +93,7 @@ export function worklistSummaryLine(data: WorklistData | undefined, today: Date)
   return line;
 }
 
-export function buildWorklistNarrativeRequest(
-  data: WorklistData | undefined,
-  today: Date
-): WorklistNarrativeRequest | null {
+export function buildWorklistNarrativeRequest(data: WorklistData | undefined): WorklistNarrativeRequest | null {
   if (!data) return null;
   const decide = data.Decide.reduce((n, g) => n + g.items.length, 0);
   const doItems = data.Do.flatMap(g => g.items);

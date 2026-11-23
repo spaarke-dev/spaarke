@@ -24,8 +24,8 @@ export function useWorklistNarrative(
   enabled: boolean
 ): WorklistNarrativeText | null {
   const request = React.useMemo(
-    () => (enabled && service.narrate ? buildWorklistNarrativeRequest(lanes, today) : null),
-    [enabled, service, lanes, today]
+    () => (enabled && service.narrate ? buildWorklistNarrativeRequest(lanes) : null),
+    [enabled, service, lanes]
   );
   const key = request ? JSON.stringify(request) : null;
   const [answer, setAnswer] = React.useState<{ key: string; text: WorklistNarrativeText } | null>(null);
