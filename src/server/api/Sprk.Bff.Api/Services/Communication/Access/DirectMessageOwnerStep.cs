@@ -842,11 +842,12 @@ public sealed class DirectMessageOwnerStep
         return PrivateFilingClearOutcome.Cleared;
     }
 
-    /// <summary>A <c>sprk_communication</c> row with a non-empty private reference (<see cref="PrivateContextColumns.All"/>).</summary>
+    /// <summary>A <c>sprk_communication</c> row that is a private message (<see cref="PrivateContextColumns.IsPrivate"/>, the one
+    /// predicate).</summary>
     private static bool IsPrivateCommunication(Entity row) =>
         string.Equals(row.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
         && row.Id != Guid.Empty
-        && PrivateContextColumns.All.Any(c => row.GetAttributeValue<EntityReference>(c) is { } reference && reference.Id != Guid.Empty);
+        && PrivateContextColumns.IsPrivate(row);
 
     /// <summary>The <see cref="PrivateFilingColumns"/> <paramref name="row"/> holds a value in: a lookup to a non-empty id,
     /// non-blank text, or any other value.</summary>
