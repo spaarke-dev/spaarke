@@ -25,7 +25,8 @@
                        happens before the first write (exit 2, nothing changed):
                          (a) any sprk_ratecard row (any state) holds a value in any of the three columns, or the count cannot be had,
                              or the caller cannot be shown to read EVERY sprk_ratecard row (the table is user-owned, so a count taken
-                             at a lower read depth is silently short; needs the System Administrator role or organization-wide Read);
+                             at a lower read depth is silently short; needs organization-wide (Global) Read on the table, which a System
+                             Administrator holds; there is no role-name shortcut);
                          (b) the deployed BFF / SPA source selects the columns (the attestation checks, below);
                          (c) anything else depends on a column or relationship (RetrieveDependenciesForDelete), a personal view or
                              grid configuration names a column, a form or view cannot be cleaned, or a relationship is not exactly
@@ -43,9 +44,22 @@
                        names them. Exit 0 = retired, exit 1 = something remains. -Apply ends with the same check.
 
     IDEMPOTENT. A second -Apply after success finds everything gone, does nothing, verifies and exits 0. A run interrupted part way is
-    re-run to continue: every step skips work already done. A run that stopped after it edited the form and view but before it published
-    leaves them pending; the re-run finds them as pending collateral (they no longer name a column, so they are not recognised as this
-    script's own) and refuses until -AllowPendingCollateral is given after the operator has checked that they are those two.
+    re-run to continue: every step skips work already done.
+
+    RESUME AFTER A STOP BEFORE THE PUBLISH. A run that edited the form and view but stopped before it published leaves those two edits
+    unpublished. What a re-run does depends on which layer the plain read of systemforms / savedqueries returns (the census and
+    Get-EntityPublishCollateral both read that way). The shared procedure and Deploy-ExternalShareExpiryViews.ps1 (run live) treat the plain
+    read as the PUBLISHED layer, so that is the expected case: the re-run reads the published text, which still names the lookups, lists the
+    same form and view again, edits them again (the same result) and excludes them from the collateral check as its own, then publishes.
+    It does NOT refuse and needs no -AllowPendingCollateral. This cannot be proved from the source alone; if the plain read returned the
+    pending text instead, the re-run would find the form and view clean, take their pending edit for foreign collateral and refuse (exit 2)
+    until -AllowPendingCollateral is given after the operator has checked that the pending items are those two. Both outcomes are safe
+    (nothing foreign goes live unannounced); the first dev run, if it is ever stopped before its publish, confirms which one holds.
+
+    KNOWN LIMIT: IT EDITS FROM THE PUBLISHED TEXT. The form and view edits are built from the published text and the script's own two ids
+    are excluded from the pending-collateral check, so someone else's UNPUBLISHED edit on that same form or view is overwritten by the
+    PATCH (and its content is lost, not published). Mitigation: run the report (no switches) or -Apply -WhatIf first and tell whoever
+    works on the sprk_ratecard forms and views, which the report names, before -Apply.
 
     EXIT CODES. 0 = done, report or verified. 1 = an error, or a stop AFTER the first write (the retirement is partly applied: re-run to
     resume). 2 = refused BEFORE the first write (nothing changed): a blocker, a missing approval or attestation, the wrong environment, a
@@ -69,7 +83,11 @@
         surface is at or after the attested commit.
     A path that does not exist at the commit is refused (a missing path would pass the scan vacuously).
 
-    Every Dataverse Web API call goes through EbillingSchema.psm1 (Consistency: Strong, #2833).
+    Web API calls: the census, the form and view edits and the relationship deletes go through EbillingSchema.psm1 (Consistency: Strong,
+    #2833). The pending-collateral reads and PublishXml do not: they go through the shared scripts/lib/Publish-SolutionComponents.ps1
+    (Get-EntityPublishCollateral, Invoke-PublishXml), which sends no Consistency header; Invoke-PublishXml has no retry of its own, so this
+    script wraps it in the module's bounded transient retry (Invoke-WithTransientRetry: up to 4 attempts, 5 s / 10 s / 20 s backoff; any
+    other error fails at once).
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else dev. -Apply refuses anything but spaarkedev1.crm.dynamics.com.
@@ -284,10 +302,12 @@ function Get-DependencyList([string]$ObjectId, [int]$ComponentType) {
     })
 }
 
-function Get-State {
+function Get-State([hashtable]$ReadCheck = @{}) {
     # sprk_ratecard is user-owned: a count taken as a caller who cannot read every row is silently short. Checked once, before the first
     # count, and only while a column still exists; when the caller is not shown to read every row, nothing is counted (NonNull stays
-    # $null = unknown) and Get-ApplyBlockers refuses.
+    # $null = unknown) and Get-ApplyBlockers refuses. $ReadCheck is one run's cache (Invoke-Retirement passes the same one to every pass of
+    # its loops): a PASS is remembered and not asked again (two Web API calls and a privilege list per pass otherwise); a GAP is never
+    # remembered, so it is checked again and still refuses. A standalone call gets a fresh cache and checks.
     $readGap = $null; $readChecked = $false
     $columns = @(foreach ($t in $Targets) {
         $c = [ordered]@{
@@ -298,7 +318,10 @@ function Get-State {
         $attr = Get-Attr $Table $t.Column 'LogicalName,AttributeType,MetadataId'
         if ($attr) {
             $c.AttributePresent = $true; $c.AttributeType = $attr.AttributeType; $c.AttributeId = $attr.MetadataId
-            if (-not $readChecked) { $readGap = Get-ReadAllRowsGap $Table; $readChecked = $true }
+            if (-not $readChecked) {
+                if (-not $ReadCheck.Passed) { $readGap = Get-ReadAllRowsGap $Table; if (-not $readGap) { $ReadCheck.Passed = $true } }
+                $readChecked = $true
+            }
             # Rows of every state (no statecode filter). A count only; ids are never read.
             if (-not $readGap) { $c.NonNull = Get-RowCountExact $EntitySet $IdColumn "_$($t.Column)_value ne null" }
             $c.Dependencies = @(Get-DependencyList $attr.MetadataId 2)
@@ -466,7 +489,9 @@ function Publish-RateCard([string[]]$OwnIds, [bool]$AllowPending) {
     if ($pending.Count -gt 0 -and -not $AllowPending) {
         throw "Refusing to publish ${Table}: $($pending.Count) other pending form(s) / view(s) appeared and would go live too: $($pending -join '; '). Nothing was published by this step; the retirement is partly applied, so re-run to resume after the owner of those changes agrees (-AllowPendingCollateral)."
     }
-    Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>"
+    # The shared Invoke-PublishXml has no retry of its own: a publish lock or throttling is retried with the module's transient test and
+    # backoff (bounded); any other error fails at once.
+    Invoke-WithTransientRetry { Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" }
     Write-Host "  published $Table" -ForegroundColor Green
 }
 
@@ -498,7 +523,8 @@ function Wait-ColumnsGone($State) {
 # ---------------------------------------------------------------------------------------------------------------
 
 function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]$DryRunMode, [string]$Approval, [bool]$AllowPending = $false) {
-    $state = Get-State
+    $readCheck = @{}   # one run's cache of a passed read-all-rows check (see Get-State)
+    $state = Get-State $readCheck
     Write-State $state
     $blockers = @(Get-ApplyBlockers $state)
     $retired = Test-AlreadyRetired $state
@@ -537,7 +563,7 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
             Write-Host '2. Nothing may depend on a column or relationship any more' -ForegroundColor Cyan
             $after = $null; $left = @()
             for ($i = 0; $i -lt 6; $i++) {
-                $after = Get-State
+                $after = Get-State $readCheck
                 $left = @(Get-ApplyBlockers $after)
                 if ($left.Count -eq 0) { break }
                 Start-Sleep -Seconds 5
@@ -559,7 +585,7 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
         Write-Host 'Verify' -ForegroundColor Cyan
         $problems = @()
         for ($i = 0; $i -lt 6; $i++) {
-            $problems = @(Get-VerifyProblems (Get-State))
+            $problems = @(Get-VerifyProblems (Get-State $readCheck))
             if ($problems.Count -eq 0) { break }
             Start-Sleep -Seconds 5
         }

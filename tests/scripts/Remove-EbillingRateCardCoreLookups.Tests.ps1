@@ -45,9 +45,12 @@ BeforeAll {
     $script:ModulePath = Join-Path $script:RepoRoot 'scripts' 'ebilling' 'EbillingSchema.psm1'
     $moduleAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ModulePath, [ref]$tokens, [ref]$errors)
     if ($errors.Count -gt 0) { throw "The module does not parse: $($errors[0].Message)" }
-    $gapFunction = @($moduleAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ReadAllRowsGap' }, $true))
-    if ($gapFunction.Count -ne 1) { throw 'Get-ReadAllRowsGap not found in EbillingSchema.psm1' }
-    $pieces.Add($gapFunction[0].Extent.Text)
+    # Also lifted: the bounded transient retry the script wraps Invoke-PublishXml in, with the module's own transient test and error readers.
+    foreach ($moduleFunction in 'Get-ReadAllRowsGap', 'Invoke-WithTransientRetry', 'Test-Transient', 'Get-StatusCode', 'Get-ErrorText') {
+        $hit = @($moduleAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $moduleFunction }, $true))
+        if ($hit.Count -ne 1) { throw "$moduleFunction not found in EbillingSchema.psm1" }
+        $pieces.Add($hit[0].Extent.Text)
+    }
 
     # The module's exception class is not exported by Import-Module: a test double with the same name and shape.
     class EscalationException : System.Exception {
@@ -55,7 +58,7 @@ BeforeAll {
     }
 
     # ---- Test doubles of the module's calls, over a stateful fake of dev. $script:Dev is set per test. ----
-    function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) }
+    function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) if ($null -ne $script:Sleeps) { $script:Sleeps.Add($Seconds) } }
     function Invoke-WhilePropagating { param([scriptblock]$Action) & $Action }
     # -WhatIf is a double that answers no; $script:Allow = $false makes every write refuse.
     function Confirm-Write { param([string]$Target, [string]$Action) $script:Dev.Asked.Add("$Action | $Target"); return [bool]$script:Allow }
@@ -75,6 +78,9 @@ BeforeAll {
     function Invoke-PublishXml {
         param([hashtable]$Context, [string]$ParameterXml)
         if ($ParameterXml -notmatch '^<importexportxml>.+</importexportxml>$') { throw 'ParameterXml must be an <importexportxml> document.' }
+        # PublishErrors: messages thrown by the next calls, one per call (a transient or a hard failure); every call is counted.
+        $script:Dev.PublishAttempts.Add($ParameterXml)
+        if ($script:Dev.PublishErrors.Count -gt 0) { $m = $script:Dev.PublishErrors[0]; $script:Dev.PublishErrors.RemoveAt(0); throw $m }
         $script:Dev.Writes.Add('POST PublishXml'); $script:Dev.Published.Add($ParameterXml)
     }
 
@@ -192,6 +198,8 @@ BeforeAll {
             Gets      = [System.Collections.Generic.List[string]]::new()
             Asked     = [System.Collections.Generic.List[string]]::new()
             Published = [System.Collections.Generic.List[string]]::new()
+            PublishAttempts = [System.Collections.Generic.List[string]]::new()
+            PublishErrors = [System.Collections.Generic.List[object]]::new()
             Collateral = @()
             CollateralAfterEdit = @()
             CollateralCalls = [System.Collections.Generic.List[object]]::new()
@@ -791,6 +799,126 @@ Describe 'Invoke-Retirement (T3, T4, T5)' {
     }
 }
 
+Describe 'the publish retries a transient failure, and only a transient one (fix round 2, item 4)' {
+    BeforeEach { $script:Dev = New-Dev; $script:Allow = $true; $script:Sleeps = [System.Collections.Generic.List[int]]::new() }
+    AfterEach { $script:Sleeps = $null }
+
+    It 'a transient failure (a publish lock) then success: the publish goes through once, after one 5 s wait, and the run completes' {
+        $script:Dev.PublishErrors.Add('Another publish is in progress for this organization')
+        Invoke-Retirement $true $false $false 'owner OK'
+        $script:Dev.Published.Count | Should -Be 2
+        $script:Dev.PublishAttempts.Count | Should -Be 3
+        @($script:Sleeps) | Should -Be @(5)
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 3
+    }
+
+    It 'a timeout, then an HTTP 503 (read from the response status, as Invoke-RestMethod reports it), is retried with doubling waits (5 s, 10 s) and then succeeds' {
+        $script:Dev.PublishErrors.Add('The operation timed out')
+        $script:Dev.PublishErrors.Add([Microsoft.PowerShell.Commands.HttpResponseException]::new('Response status code does not indicate success: 503', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]::ServiceUnavailable)))
+        Publish-RateCard @('f-1', 'v-1') $false
+        $script:Dev.PublishAttempts.Count | Should -Be 3
+        $script:Dev.Published.Count | Should -Be 1
+        @($script:Sleeps) | Should -Be @(5, 10)
+    }
+
+    It 'a non-transient failure fails at once: one attempt, no wait, nothing published' {
+        $script:Dev.PublishErrors.Add('API error (POST PublishXml) HTTP 400: The parameter is invalid')
+        $e = Get-Refusal { Publish-RateCard @('f-1', 'v-1') $false }
+        $e | Should -Not -BeNullOrEmpty
+        $e.Message | Should -BeLike '*HTTP 400*'
+        $script:Dev.PublishAttempts.Count | Should -Be 1
+        $script:Sleeps.Count | Should -Be 0
+        $script:Dev.Published.Count | Should -Be 0
+    }
+
+    It 'exhausted retries fail with a plain error (exit 1, partly applied): 4 attempts, waits of 5, 10 and 20 s, no relationship deleted' {
+        1..8 | ForEach-Object { $script:Dev.PublishErrors.Add('The operation timed out') }
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e | Should -Not -BeNullOrEmpty
+        $e.GetType().Name | Should -Not -Be 'EscalationException'
+        $e.Message | Should -BeLike '*timed out*'
+        $script:Dev.PublishAttempts.Count | Should -Be 4
+        @($script:Sleeps) | Should -Be @(5, 10, 20)
+        $script:Dev.Published.Count | Should -Be 0
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 0
+    }
+
+    It 'resume after a stop before the publish, with the plain read showing the published (old) text: the re-run lists the same form and view, excludes them as its own, publishes, and does not refuse (item 5, the expected case)' {
+        # What the stopped run left: its edit is pending (collateral lists the form and view) while the plain read still shows the old text.
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-1'; Text = 'savedqueries: Active Rate Cards (v-1)' })
+        Invoke-Retirement $true $false $false 'owner OK'
+        @($script:Dev.CollateralCalls[0].ExcludeIds | Sort-Object) | Should -Be @('f-1', 'v-1')
+        $script:Dev.Published.Count | Should -Be 2
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 3
+    }
+
+    It 'resume after a stop before the publish, if the plain read showed the pending (clean) text: the re-run refuses (exit 2) until -AllowPendingCollateral (item 5, the other outcome, also safe)' {
+        $script:Dev.Forms[0].formxml = (ConvertTo-FormWithoutCoreLookups $script:FormXml).Xml
+        $r = ConvertTo-ViewWithoutCoreLookups $script:FetchXml $script:LayoutXml
+        $script:Dev.Views[0].fetchxml = $r.FetchXml; $script:Dev.Views[0].layoutxml = $r.LayoutXml
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-1'; Text = 'savedqueries: Active Rate Cards (v-1)' })
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $e.Message | Should -BeLike '*-AllowPendingCollateral*'
+        $script:Dev.Writes.Count | Should -Be 0
+        Invoke-Retirement $true $false $false 'owner OK' $true
+        $script:Dev.Published.Count | Should -Be 2
+    }
+
+    It 'the publish in Publish-RateCard sits inside Invoke-WithTransientRetry (and the script has no other publish call)' {
+        $calls = @($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-PublishXml' }, $true))
+        $calls.Count | Should -Be 1
+        $p = $calls[0].Parent
+        $inRetry = $false
+        while ($p) { if ($p -is [System.Management.Automation.Language.CommandAst] -and $p.GetCommandName() -eq 'Invoke-WithTransientRetry') { $inRetry = $true }; $p = $p.Parent }
+        $inRetry | Should -BeTrue
+    }
+}
+
+Describe 'the read-all-rows check is asked once per run, not on every pass (fix round 2, item 6)' {
+    BeforeEach { $script:Dev = New-Dev; $script:Allow = $true }
+
+    It 'a run whose step-2 loop takes all 6 passes asks WhoAmI once' {
+        $script:Dev.ExtraDepsAfterEdit = @(@{ dependentcomponenttype = 59; dependentcomponentobjectid = 'chart-late' })
+        $null = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        @($script:Dev.Gets | Where-Object { $_ -eq 'WhoAmI' }).Count | Should -Be 1
+        # the columns were still counted on every pass: the cache skips the rights check only, not the census
+        @($script:Dev.Gets | Where-Object { $_ -like 'count *' }).Count | Should -Be (3 * 7)
+    }
+
+    It 'a full -Apply run asks WhoAmI once' {
+        Invoke-Retirement $true $false $false 'owner OK'
+        @($script:Dev.Gets | Where-Object { $_ -eq 'WhoAmI' }).Count | Should -Be 1
+    }
+
+    It 'a passed check is remembered by the cache Get-State is given; a standalone Get-State checks every time' {
+        $cache = @{}
+        $null = Get-State $cache
+        $null = Get-State $cache
+        @($script:Dev.Gets | Where-Object { $_ -eq 'WhoAmI' }).Count | Should -Be 1
+        $null = Get-State
+        $null = Get-State
+        @($script:Dev.Gets | Where-Object { $_ -eq 'WhoAmI' }).Count | Should -Be 3
+    }
+
+    It 'a gap is never remembered: it is checked again and still refuses, nothing is counted' {
+        $script:Dev.Who.Depth = 'Local'
+        $cache = @{}
+        (Get-State $cache).ReadGap | Should -BeLike '*Local*'
+        (Get-State $cache).ReadGap | Should -BeLike '*Local*'
+        @($script:Dev.Gets | Where-Object { $_ -eq 'WhoAmI' }).Count | Should -Be 2
+        @($script:Dev.Gets | Where-Object { $_ -like 'count *' }).Count | Should -Be 0
+        $cache.Passed | Should -BeNullOrEmpty
+    }
+
+    It '-Apply still refuses before any write when the first check is a gap (the cache changes nothing there)' {
+        $script:Dev.Who.Depth = 'Deep'
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+}
+
 Describe 'the pre-flight (T6)' {
     It 'asks nothing when -Apply is not given' {
         @(Get-PreflightRefusals $false $false '' '' '' 'https://other.crm.dynamics.com').Count | Should -Be 0
@@ -1004,12 +1132,33 @@ Describe 'structure (T7)' {
         $text.LastIndexOf('Initialize-EbillingSchema -EnvironmentUrl') | Should -BeGreaterThan $text.LastIndexOf('Get-PreflightRefusals (')
     }
 
-    It 'sends every Dataverse call through EbillingSchema.psm1 (Consistency: Strong): no direct REST call, the module is loaded' {
+    # What this checks, exactly: the script's own Web API calls are the module's Invoke-Dv (which sends Consistency: Strong), and it makes no
+    # REST call of its own. It does NOT check that every call carries the header: the pending-collateral reads and PublishXml go through the
+    # shared scripts/lib/Publish-SolutionComponents.ps1 (Get-EntityPublishCollateral, Invoke-PublishXml), which does not send it. The help
+    # and the README say so; the next test pins that the script's only calls into the shared lib are those two.
+    It 'makes no REST call of its own: its Web API calls are the module''s Invoke-Dv (Consistency: Strong), and the module is loaded' {
         $text = $script:Ast.Extent.Text
         $text | Should -Match '(?m)^using module \.\\EbillingSchema\.psm1'
         $text | Should -Not -Match 'Invoke-RestMethod|Invoke-WebRequest|Invoke-Dv[^\r\n]*-Headers|\$headers'
         $module = Get-Content -Raw (Join-Path $script:RepoRoot 'scripts' 'ebilling' 'EbillingSchema.psm1')
         $module | Should -Match "Consistency\s*=\s*'Strong'"
+    }
+
+    It 'the only calls into the shared lib (no Consistency header) are Get-EntityPublishCollateral, Invoke-PublishXml and Get-DataverseApiContext, and the help says the header does not cover them' {
+        $lib = @($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in 'Get-EntityPublishCollateral', 'Invoke-PublishXml', 'Get-DataverseApiContext' }, $true) | ForEach-Object { $_.GetCommandName() } | Sort-Object -Unique)
+        $lib | Should -Be @('Get-DataverseApiContext', 'Get-EntityPublishCollateral', 'Invoke-PublishXml')
+        $text = $script:Ast.Extent.Text
+        $text | Should -Not -Match 'Every Dataverse Web API call goes through EbillingSchema\.psm1'
+        $text | Should -Match 'pending-collateral reads and PublishXml do not'
+        (Get-Content -Raw (Join-Path $script:RepoRoot 'scripts' 'README.md')) | Should -Not -Match 'All Web API calls go through `EbillingSchema\.psm1`'
+    }
+
+    It 'the help describes resume after a stop before the publish, and the edit-from-published-text limit (fix round 2, item 5)' {
+        $text = $script:Ast.Extent.Text
+        $text | Should -Match 'RESUME AFTER A STOP BEFORE THE PUBLISH'
+        $text | Should -Match 'It does NOT refuse'
+        $text | Should -Match 'KNOWN LIMIT: IT EDITS FROM THE PUBLISHED TEXT'
+        $text | Should -Not -Match 'the re-run finds them as pending collateral \(they no longer name a column'
     }
 }
 

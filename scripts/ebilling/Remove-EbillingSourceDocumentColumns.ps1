@@ -23,7 +23,8 @@
       - -OwnerApproval is given and -Confirm is given,
       - no row of either table holds a value in the column,
       - the caller can be shown to read EVERY row of the table (the tables are user-owned: a count taken at a lower read depth is
-        silently short; needs the System Administrator role or organization-wide Read, and when it cannot be shown nothing is counted),
+        silently short; needs organization-wide (Global) Read on the table, which a System Administrator holds, and when it cannot be
+        shown nothing is counted),
       - no form or view mentions the column,
       - RetrieveDependenciesForDelete lists nothing,
       - the relationship behind each lookup is exactly the expected one, and
@@ -35,7 +36,10 @@
     The delete is the relationship delete (the lookup column and its name companion go with it), as the 011 script does for
     sprk_timekeeper.sprk_invoicelineitem, then an entity-scoped publish of the two tables through the shared
     scripts/lib/Publish-SolutionComponents.ps1 procedure (never tenant-wide; pending collateral is checked again right before it and,
-    if some appeared mid-run, stops as a plain error: exit 1, the deletes are done, re-run). Never sprk_document rows or SPE containers (O-13).
+    if some appeared mid-run, stops as a plain error: exit 1, the deletes are done, re-run). The shared Invoke-PublishXml has no retry of its
+    own and (like the collateral reads) sends no Consistency header; this script wraps it in the module's bounded transient retry
+    (Invoke-WithTransientRetry: up to 4 attempts, 5 s / 10 s / 20 s backoff; any other error fails at once). Never sprk_document rows or
+    SPE containers (O-13).
 
     Idempotent: a column that is already gone is reported as such and skipped.
 
@@ -268,7 +272,9 @@ function Publish-Tables([string[]]$Tables, [bool]$AllowPending = $false) {
         throw "Refusing to publish: $($pending.Count) other pending form(s) / view(s) appeared and would go live too: $($pending -join '; '). Nothing was published by this step; the column delete is done, so re-run to publish after the owner of those changes agrees (-AllowPendingCollateral)."
     }
     $ents = ($Tables | ForEach-Object { "<entity>$_</entity>" }) -join ''
-    Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities>$ents</entities></importexportxml>"
+    # The shared Invoke-PublishXml has no retry of its own: a publish lock or throttling is retried with the module's transient test and
+    # backoff (bounded); any other error fails at once.
+    Invoke-WithTransientRetry { Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities>$ents</entities></importexportxml>" }
     Write-Host "  published $($Tables -join ', ')" -ForegroundColor Green
 }
 

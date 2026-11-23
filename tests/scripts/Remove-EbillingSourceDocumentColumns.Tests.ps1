@@ -38,9 +38,13 @@ BeforeAll {
     $script:ModulePath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path 'scripts' 'ebilling' 'EbillingSchema.psm1'
     $moduleAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ModulePath, [ref]$tokens, [ref]$errors)
     if ($errors.Count -gt 0) { throw "The module does not parse: $($errors[0].Message)" }
-    $gapFunction = @($moduleAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ReadAllRowsGap' }, $true))
-    if ($gapFunction.Count -ne 1) { throw 'Get-ReadAllRowsGap not found in EbillingSchema.psm1' }
-    $pieces.Add($gapFunction[0].Extent.Text)
+    # Also lifted: the bounded transient retry the script wraps Invoke-PublishXml in, with the module's own transient test and error readers.
+    foreach ($moduleFunction in 'Get-ReadAllRowsGap', 'Invoke-WithTransientRetry', 'Test-Transient', 'Get-StatusCode', 'Get-ErrorText') {
+        $hit = @($moduleAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $moduleFunction }, $true))
+        if ($hit.Count -ne 1) { throw "$moduleFunction not found in EbillingSchema.psm1" }
+        $pieces.Add($hit[0].Extent.Text)
+    }
+    function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) if ($null -ne $script:Sleeps) { $script:Sleeps.Add($Seconds) } }
 
     # Test doubles of the module's calls. $script:Fake is set per test.
     $EnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com'
@@ -55,6 +59,9 @@ BeforeAll {
     function Invoke-PublishXml {
         param([hashtable]$Context, [string]$ParameterXml)
         if ($ParameterXml -notmatch '^<importexportxml>.+</importexportxml>$') { throw 'ParameterXml must be an <importexportxml> document.' }
+        # PublishErrors: messages thrown by the next calls, one per call; every call is counted.
+        $script:Fake.PublishAttempts.Add($ParameterXml)
+        if ($script:Fake.PublishErrors.Count -gt 0) { $m = $script:Fake.PublishErrors[0]; $script:Fake.PublishErrors.RemoveAt(0); throw $m }
         $script:Fake.Published.Add($ParameterXml)
     }
     function Invoke-Dv {
@@ -92,6 +99,8 @@ BeforeAll {
             Allow     = $true
             Asked     = [System.Collections.Generic.List[string]]::new()
             Published = [System.Collections.Generic.List[string]]::new()
+            PublishAttempts = [System.Collections.Generic.List[string]]::new()
+            PublishErrors = [System.Collections.Generic.List[string]]::new()
             Collateral = @{}
             CollateralCalls = [System.Collections.Generic.List[string]]::new()
             Responses = @(
@@ -373,6 +382,57 @@ Describe 'pending collateral (D-83) must not go live with the publish (review pa
         Publish-Tables @('sprk_ruleset', 'sprk_ratecard') $true
         $script:Fake.Published.Count | Should -Be 0
         $script:Fake.CollateralCalls.Count | Should -Be 0
+    }
+}
+
+Describe 'the publish retries a transient failure, and only a transient one (fix round 2, item 4)' {
+    BeforeEach { $script:Fake = New-Fake; $script:Sleeps = [System.Collections.Generic.List[int]]::new() }
+    AfterEach { $script:Sleeps = $null }
+
+    It 'a transient failure (a publish lock) then success: published once, after one 5 s wait' {
+        $script:Fake.PublishErrors.Add('Another publish is in progress for this organization')
+        Publish-Tables @('sprk_ruleset', 'sprk_ratecard') $false
+        $script:Fake.PublishAttempts.Count | Should -Be 2
+        $script:Fake.Published.Count | Should -Be 1
+        @($script:Sleeps) | Should -Be @(5)
+    }
+
+    It 'a non-transient failure fails at once: one attempt, no wait, nothing published' {
+        $script:Fake.PublishErrors.Add('API error (POST PublishXml) HTTP 400: The parameter is invalid')
+        $e = $null
+        try { Publish-Tables @('sprk_ruleset', 'sprk_ratecard') $false } catch { $e = $_.Exception }
+        $e | Should -Not -BeNullOrEmpty
+        $e.Message | Should -BeLike '*HTTP 400*'
+        $script:Fake.PublishAttempts.Count | Should -Be 1
+        $script:Sleeps.Count | Should -Be 0
+        $script:Fake.Published.Count | Should -Be 0
+    }
+
+    It 'exhausted retries fail with a plain error (exit 1: the deletes are done, re-run): 4 attempts, waits of 5, 10 and 20 s' {
+        1..8 | ForEach-Object { $script:Fake.PublishErrors.Add('The operation timed out') }
+        $e = $null
+        try { Publish-Tables @('sprk_ruleset', 'sprk_ratecard') $false } catch { $e = $_.Exception }
+        $e | Should -Not -BeNullOrEmpty
+        $e.GetType().Name | Should -Not -Be 'EscalationException'
+        $e.Message | Should -BeLike '*timed out*'
+        $script:Fake.PublishAttempts.Count | Should -Be 4
+        @($script:Sleeps) | Should -Be @(5, 10, 20)
+        $script:Fake.Published.Count | Should -Be 0
+    }
+
+    It 'the publish sits inside Invoke-WithTransientRetry (and the script has no other publish call)' {
+        $calls = @($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-PublishXml' }, $true))
+        $calls.Count | Should -Be 1
+        $p = $calls[0].Parent
+        $inRetry = $false
+        while ($p) { if ($p -is [System.Management.Automation.Language.CommandAst] -and $p.GetCommandName() -eq 'Invoke-WithTransientRetry') { $inRetry = $true }; $p = $p.Parent }
+        $inRetry | Should -BeTrue
+    }
+
+    It 'the help states that the lib calls send no Consistency header, and no longer claims every call goes through the module' {
+        $text = $script:Ast.Extent.Text
+        $text | Should -Match 'sends no Consistency header'
+        $text | Should -Not -Match 'Every Dataverse Web API call goes through EbillingSchema\.psm1'
     }
 }
 
