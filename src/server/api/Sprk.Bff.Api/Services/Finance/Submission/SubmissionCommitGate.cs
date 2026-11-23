@@ -60,15 +60,18 @@ public sealed record SubmissionCommitGateResult(SubmissionCommitGateStatus Statu
 /// <para><b>The files.</b> Found by their parent, the submission's invoice (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), never by
 /// the channel: an upload has one (no source), a Submit Invoice copy one (its source document), task 095's from-email submission one per
 /// marked part (the .eml's document). None, or more than <see cref="MaxFiles"/>, is <see cref="SubmissionReasonCodes.FileUnservable"/>.</para>
-/// <para><b>Step 6 (never flip twice).</b> When any file is already Servable, a previous run passed step 5 and flipped: step 5 is skipped
-/// and the rest are flipped.</para>
+/// <para><b>Step 6 (never flip twice).</b> Every commit writes exactly one Invoice PDF row (only the commit can: the task 094 writer guard),
+/// and the flip loop flips it LAST. So a Servable Invoice PDF means an earlier run passed this gate: the gate answers Passed at once, before
+/// the count, step 5 and any flip (task 123 fix round 1: rows the internal upload route adds to the invoice after that pass are not the
+/// commit's, and are never counted, flipped or undone here). When the PDF is not yet Servable but another file is, an earlier run passed
+/// step 5 and stopped part-way: step 5 is skipped and the rest are flipped, the PDF last.</para>
 /// <para><b>Step 5.</b> For each distinct source document, the source check runs again
 /// (<see cref="InvoiceSubmissionService.CheckSourceFilingAsync"/>: present, filed under the core record only, its flags readable, its
 /// isolation Allowed), and the source's secure roots must be covered by the copy's (source roots ⊆ file roots). The copy's roots are the
 /// file rows' own: <c>sprk_storedfile</c> is a lineage child of its invoice (task 086, <see cref="SecureChildLineage"/>), so each file row
 /// is walked itself. Any fault, any verdict but Allowed and any root not covered is
 /// <see cref="SubmissionReasonCodes.SourceCheckFailed"/> (uac-r2 condition 1: a check that cannot be made is a failure). Then every file is
-/// flipped; a definitive flip failure is <see cref="SubmissionReasonCodes.FileUnservable"/>. A flip that meets a concurrent change is tried
+/// flipped, the Invoice PDF last; a definitive flip failure is <see cref="SubmissionReasonCodes.FileUnservable"/>. A flip that meets a concurrent change is tried
 /// once more; a second change, or a fault of the flip or of the file read, throws (the job retries, and the resume runs this gate first).</para>
 /// <para><b>The undo (uac-r2 condition 3: complete or held).</b> Failed, the reason code and an "undo pending" administrator note are
 /// written FIRST, in one update (a fault throws: nothing was undone and the job retries). Then the compensation
@@ -150,12 +153,28 @@ public class SubmissionCommitGate
     }
 
     /// <summary>
-    /// Steps 5 and 6 for <paramref name="submissionId"/>, whose invoice is committed (see the class remarks). Throws for a fault the job
-    /// retries (the file read, a flip fault, a second concurrent change, the undo's first write); every other outcome is the result.
+    /// Steps 5 and 6 for <paramref name="submissionId"/>, whose invoice is committed (see the class remarks). A Servable Invoice PDF is
+    /// Passed at once (it is flipped last, so the gate passed before); otherwise the count, step 5 unless a file is already Servable, and the
+    /// flips, the Invoice PDF last. Throws for a fault the job retries (the file read, a flip fault, a second concurrent change, the undo's
+    /// first write); every other outcome is the result.
     /// </summary>
     public virtual async Task<SubmissionCommitGateResult> RunAsync(Guid submissionId, CancellationToken ct)
     {
         var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+
+        // ── Task 123 fix round 1 (F1-a): the Invoice PDF is flipped LAST (below), so a Servable PDF means every file of the commit was
+        // flipped and this gate passed in an earlier run. Any other row under the invoice was added after that pass (the internal upload
+        // route, POST /api/finance/invoices/{invoiceId}/files): it is never counted, flipped, re-checked or undone here. The PDF rows are
+        // read on their own (purpose-filtered), BEFORE the capped read of every row, so added rows can never push them out of the read.
+        // A fault throws, as the file read below does: the job retries ──
+        var pdfs = (await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct, StoredFilePurpose.InvoicePdf).ConfigureAwait(false))
+            .Where(f => f.Purpose == StoredFilePurpose.InvoicePdf)
+            .ToList();
+        if (pdfs.Count > 0 && pdfs.All(f => f.Status == StoredFileStatus.Servable))
+        {
+            return SubmissionCommitGateResult.Passed;
+        }
+
         var files = await _files.ReadRowsForInvoiceAsync(invoiceId, MaxFiles + 1, ct).ConfigureAwait(false);
         if (files.Count is 0 or > MaxFiles)
         {
@@ -191,7 +210,8 @@ public class SubmissionCommitGate
             }
         }
 
-        foreach (var file in files.Where(f => f.Status != StoredFileStatus.Servable))
+        // The Invoice PDF last (task 123 fix round 1): its Servable status is the record that every other file of the commit was flipped.
+        foreach (var file in files.Where(f => f.Status != StoredFileStatus.Servable).OrderBy(f => f.Purpose == StoredFilePurpose.InvoicePdf ? 1 : 0))
         {
             var flip = await _files.FlipToServableAsync(file.FileId, ct).ConfigureAwait(false);
             if (flip.Outcome == StoredFileFlipOutcome.Concurrency)

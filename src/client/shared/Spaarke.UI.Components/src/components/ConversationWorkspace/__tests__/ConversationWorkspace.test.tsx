@@ -124,7 +124,11 @@ describe('ConversationWorkspace — mount-agnostic (FR-01)', () => {
     expect(screen.queryByText('Direct: Alice')).not.toBeInTheDocument();
 
     expect(authenticatedFetch.mock.calls.some(([u]) => u.includes('/by-regarding/sprk_matter/rec1'))).toBe(true);
-    const listCalls = authenticatedFetch.mock.calls.filter(([u]) => /\/api\/communications\/threads(\?|$)/.test(u));
+    // fm task 056: a matter/project/work-assignment record also asks for its private entries (`about=`); the all-mode list
+    // (no `about`) is still never read in record mode.
+    const listCalls = authenticatedFetch.mock.calls.filter(
+      ([u]) => /\/api\/communications\/threads(\?|$)/.test(u) && !u.includes('about=')
+    );
     expect(listCalls).toHaveLength(0);
   });
 });

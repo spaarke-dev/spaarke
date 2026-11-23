@@ -2,7 +2,7 @@
  * The invoice decision wizard's step contents (ebilling-r1 task 111; prototype InvoiceDecisionWizard steps, FR-32, FR-35, D-72).
  *
  *   Approve:           Decision → Invoice adjustment (skippable; 102) → Confirm → POST approve (103)
- *   Reject / Return:   Decision → Reason → (firm notice: a slot for 131 / 132, not built here) → Confirm → POST reject | return (104)
+ *   Reject / Return:   Decision → Reason → Notify (the notice to the firm, `NotifyStep`; skippable; 131 / 132) → Confirm → POST reject | return (104)
  *
  * Nothing is decided here: the adjustment amount and the approved total are the server's (102 / 016); every refusal is shown with the
  * server's detail and its stable code, and nothing changes on the page.
@@ -39,6 +39,7 @@ import {
   type AdjustmentRule,
 } from '../../services/decisionApi';
 import { isNoteRefusal, noteArgs, noteMember, noteProblem, noteRefusalMessage } from '../../services/noteModel';
+import { noticeKindOf, noticeToSend } from '../../services/noticeModel';
 import { NoteField } from '../NoteField';
 import { approveBlocker, firmNeededBlocker, INVOICE_OUTCOME_LABEL, outcomeOfApproval, type InvoiceOutcome } from '../../services/decisionModel';
 import { isAdjustment, isDecided, money, shortDate, signedMoney } from '../../services/reviewModel';
@@ -529,10 +530,19 @@ export function ReasonStep() {
 // Confirm / Summary
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function ConfirmStep() {
+export function ConfirmStep({ notifySkipped }: { notifySkipped: boolean }) {
   const s = useStyles();
   const { form, set, readOnly, review, approval } = useWiz();
   const outcome = form.outcome ?? outcomeOfApproval(approval.status);
+  // Task 132ui: what the firm is told. The same rule the request is built with (`noticeToSend`), so this sentence is what is sent.
+  const noticeKind = readOnly ? undefined : noticeKindOf(form.outcome);
+  const sentNotice = noticeKind ? noticeToSend(form.notices[noticeKind], { skipped: notifySkipped, locked: form.locked }) : null;
+  // Review round 1 F1-b: a notice the server refused is shown only while that notice is the one being sent. Skip, or sending turned off,
+  // leaves nothing to refuse (the stale message is dropped), and so does another outcome.
+  const refusal = !readOnly && sentNotice ? form.noticeError : null;
+  React.useEffect(() => {
+    if (!readOnly && form.noticeError && !sentNotice) set({ noticeError: null });
+  }, [readOnly, form.noticeError, sentNotice, set]);
   const adjustments = review.lines.filter(isAdjustment);
   const changed = review.lines.filter(l => l.status === 'Reduced' || l.status === 'Disallowed').sort((a, b) => a.sequence - b.sequence);
   const c = lineCounts(review.lines);
@@ -565,6 +575,16 @@ export function ConfirmStep() {
             <Text data-testid="confirm-reason">{form.reason || '—'}</Text>
           </>
         )}
+        {noticeKind && (
+          <>
+            <Caption1 className={s.muted}>Email to the firm</Caption1>
+            <Text data-testid="confirm-notice">
+              {sentNotice
+                ? `The firm will be emailed this notice, with the findings table: “${sentNotice.subject}”.`
+                : 'No email is sent to the firm. The decision is still recorded.'}
+            </Text>
+          </>
+        )}
         <Caption1 className={s.muted}>Line decisions</Caption1>
         <Text>
           {c.decided} decided · {c.clean} clean · {c.flagged} to decide
@@ -595,6 +615,13 @@ export function ConfirmStep() {
           ariaLabel="Note for the decision"
           testId="decision-note"
         />
+      )}
+      {refusal && (
+        <MessageBar intent="error" layout="multiline" data-testid="confirm-notice-refused">
+          <MessageBarBody>
+            {refusal} Go Back to the Notify step to edit the notice or turn it off, then finish again.
+          </MessageBarBody>
+        </MessageBar>
       )}
       {!readOnly && form.locked && (
         <Caption1 className={s.muted} data-testid="decision-note-locked">

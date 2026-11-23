@@ -443,6 +443,12 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         var lastChange = new Dictionary<Guid, DateTimeOffset>();
         var cappedAt = new List<(string Table, DateTimeOffset? Horizon, Guid LastId)>();
         string? failure = null;
+
+        // fm task 056: the message reads also select a private message's reference and filing columns (only when they exist), so a
+        // private message filed outside the BFF is found and unfiled below.
+        var privateFilingColumns = await Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep
+            .PrivateFilingSelectionAsync(dataverse, _logger, ct).ConfigureAwait(false);
+        var filedPrivate = new List<Microsoft.Xrm.Sdk.Entity>();
         try
         {
             var listings = new List<(string Table, string? Lookup)> { (DirectMessageParticipantShares.CommunicationTable, null) };
@@ -450,7 +456,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             foreach (var (table, messageLookup) in listings)
             {
                 var (rows, horizon, lastId, capped) = await ListAsync(dataverse, table, messageLookup, team, since,
-                    afterIds.TryGetValue(table, out var afterId) ? afterId : null, ct).ConfigureAwait(false);
+                    afterIds.TryGetValue(table, out var afterId) ? afterId : null, ct,
+                    privateFilingColumns, filedPrivate).ConfigureAwait(false);
                 foreach (var (id, changedAt) in rows)
                 {
                     // A row without modifiedon (Dataverse always returns it) is the earliest change for ordering and the latest
@@ -506,7 +513,9 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         {
             var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(DirectMessageParticipantShares.CommunicationTable)
             {
-                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(false),
+                ColumnSet = privateFilingColumns.Count == 0
+                    ? new Microsoft.Xrm.Sdk.Query.ColumnSet(false)
+                    : new Microsoft.Xrm.Sdk.Query.ColumnSet(privateFilingColumns.ToArray()),
                 TopCount = sweepTake,
                 NoLock = true,
             };
@@ -514,8 +523,9 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             if (sweepAfter is { } after)
                 query.Criteria.AddCondition("sprk_communicationid", Microsoft.Xrm.Sdk.Query.ConditionOperator.GreaterThan, after);
             query.AddOrder("sprk_communicationid", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
-            swept = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
-                .Select(e => e.Id).Where(id => id != Guid.Empty).ToList() ?? [];
+            var sweptRows = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.ToList() ?? [];
+            swept = sweptRows.Select(e => e.Id).Where(id => id != Guid.Empty).ToList();
+            filedPrivate.AddRange(sweptRows.Where(Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.NeedsPrivateFilingClear));
             sweepPassComplete = swept.Count < sweepTake;
             sweepRead = true;
         }
@@ -523,6 +533,14 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         {
             failure ??= "the Direct-message sweep could not be read";
             _logger.LogError(ex, "[DIRECT-SHARES] run={RunId}: the Direct-message sweep could not be read; it resumes next run.", runId);
+        }
+
+        // fm task 056: a private message is never filed; one filed outside the BFF is unfiled before its shares are reconciled. Each
+        // clear never throws, writes nothing on a fault (the listing or the sweep finds the row again), and the run goes on.
+        foreach (var row in filedPrivate.DistinctBy(r => r.Id))
+        {
+            await Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep
+                .ClearPrivateFilingAsync(dataverse, row, _logger, ct).ConfigureAwait(false);
         }
 
         var inWork = work.ToHashSet();
@@ -730,16 +748,18 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     /// <paramref name="afterId"/>, the rows changed AT <paramref name="since"/> are listed only past that row id (this table's
     /// rows up to it were listed by an earlier run). <c>Capped</c> when the cap was reached; <c>Horizon</c> is then the last
     /// listed row's <c>modifiedon</c> (null when it carries none) and <c>LastId</c> its own row id. A fault propagates (the
-    /// caller holds the window).
+    /// caller holds the window). fm task 056: a message listing also selects <paramref name="privateFilingColumns"/> (empty: as
+    /// before) and adds each private message holding a filing column to <paramref name="filedPrivate"/>.
     /// </summary>
     private static async Task<(List<(Guid Id, DateTimeOffset? ChangedAt)> Rows, DateTimeOffset? Horizon, Guid LastId, bool Capped)> ListAsync(
         Spaarke.Dataverse.IGenericEntityService dataverse, string table, string? messageLookup, Guid team, DateTimeOffset since,
-        Guid? afterId, CancellationToken ct)
+        Guid? afterId, CancellationToken ct, IReadOnlyList<string> privateFilingColumns, List<Microsoft.Xrm.Sdk.Entity> filedPrivate)
     {
         var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(table)
         {
             ColumnSet = messageLookup is null
-                ? new Microsoft.Xrm.Sdk.Query.ColumnSet("modifiedon")
+                ? new Microsoft.Xrm.Sdk.Query.ColumnSet(privateFilingColumns.Prepend("modifiedon")
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
                 : new Microsoft.Xrm.Sdk.Query.ColumnSet(messageLookup, "modifiedon"),
             TopCount = MaxDirectListedPerTable,
             NoLock = true,
@@ -760,6 +780,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         query.AddOrder(table + "id", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
         var rows = ((await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
             ?? Enumerable.Empty<Microsoft.Xrm.Sdk.Entity>()).ToList();
+        if (messageLookup is null)
+            filedPrivate.AddRange(rows.Where(Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.NeedsPrivateFilingClear));
         // Null when a row carries no modifiedon; the caller decides what that means.
         static DateTimeOffset? ChangedAt(Microsoft.Xrm.Sdk.Entity e) => e.GetAttributeValue<DateTime?>("modifiedon") is { } at
             ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc))

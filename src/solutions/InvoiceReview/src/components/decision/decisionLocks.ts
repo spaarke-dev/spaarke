@@ -21,6 +21,19 @@ export interface WizardLock {
   reason: string;
   /** The note as typed. */
   note: string;
+  /**
+   * Task 132ui: the firm notice of a reject or return, as the request carried it. `send` is whether the request carried it at all (off, skipped
+   * or a draft that never loaded sends none); `subject` and `prose` are the text as typed (empty when there was none), so the repeat is the same
+   * request and the reopened wizard shows the same notice and choice, locked. Absent for an approve.
+   */
+  notice?: WizardNoticeLock;
+}
+
+/** The firm notice part of a locked reject or return (`WizardLock.notice`). */
+export interface WizardNoticeLock {
+  send: boolean;
+  subject: string;
+  prose: string;
 }
 
 /** An Override, a Return or an operator finish (ISS-034) of the blocked submission that came back unsure. */

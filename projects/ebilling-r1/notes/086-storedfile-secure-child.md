@@ -255,3 +255,44 @@ Branch `fix/ebilling-086-review`, from `work/ebilling-r1` 9c90660252. Test, conf
 - `Spaarke.ArchTests` filtered to `RecordFamilyEdges|RecordOwnerAssignmentCensus|ProcedureRolePrivilege|CreatorPerson|SecureChild|SecureFamilyConsistency`: 95 passed, 0 failed, 0 skipped.
 
 The "Noticed, not changed" bullet in the port review (the dead pre-086 branch of `FileRootsAsync`) is closed by item 5.
+
+## Live reads and census, 2026-11-22 (read only, spaarkedev1)
+
+Run by the main session. Nothing was written. The dev BFF carries 086 and its review fix: the live build is `c8ab2cba9e`, deployed 2026-11-20 with uac-r2's 30-minute gate PASS (`5ae2804884` is uac-r2's rollback); both contain `53f3f6b724` and `af6e1a7de1` (uac-r2 checked by ancestry).
+
+**Pre-deploy count (pending item 1, live step 6).**
+- `sprk_storedfile` has 12 rows with `sprk_invoice` set (all active).
+- Each row's invoice was joined to its core record:
+  - 11 sit under a matter, all with `sprk_issecure` = No;
+  - 1 sits under a project, also with `sprk_issecure` = No.
+- **Stored Files on invoices of Secure records: 0.** So K4's backfill is not needed on dev. This count goes into the deploy request.
+
+**Role and creator-person state (pending item 2).** Both scripts were re-run with `-Verify`:
+- `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify`: "VERIFY PASS: the role holds Read at Basic on all 40 tables." Exit 0. "Outside the file": the four Global SharePoint privileges, as on 2026-11-03.
+- `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` (both BFF ids, ontology writer id): "VERIFY PASS: sprk_createdbyperson is in place on every child table; only the BFF can write it". Exit 0. INFO: `sprk_storedfile` has 4 app-created rows with no person recorded. F3 admits only Full Access holders for those rows, which is the expected behaviour for app-created rows.
+- The original `-Apply` runs happened before 2026-11-03; who ran them and when is still not recorded. uac-r2 accepted the 2026-11-03 `-Verify` as proof of state, and the 2026-11-22 `-Verify` repeats it. The owner is asked to confirm in session that these `-Verify` records stand in for the missing `-Apply` outputs (criterion 6).
+
+**Live NFR-05 census (pending item 3, live step 8).**
+- Command: `SecureBuRoleDepthAssertionTests` with `SPAARKE_NFR05_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com`.
+- The live census test fails on findings that are not 086's:
+  - **No finding names `sprk_storedfile`.** The owner role covers 40 of 40 codified tables at Basic.
+  - The other findings predate 086 (live step 8 already expected them) and are owned by uac-r2.
+  - Per the project rule, their detail went to uac-r2 by message only and is not recorded here.
+- The census's offline unit tests in the same class all pass.
+
+**Reviews (pending item 4).**
+- The port review (one Opus pass, 2026-11-03) and the 089a+086 access review count as the two adversarial passes; their fixes were merged as `53f3f6b724` and `af6e1a7de1`.
+- uac-r2 answered the port and agreed the access-review dispositions on 2026-11-03. Its sign-off on 086 as a whole was requested on 2026-11-22 with these results.
+
+`Ebilling:StoredFileReconcileEnabled` stays `false` (HARD RULE). uac-r2's gate decides when it flips.
+
+**uac-r2 sign-off, 2026-11-22:** 086 as a whole is signed off from the uac-r2 side.
+- Its 2026-11-03 gate items are met: the deploy carrying 089a + 086 (`c8ab2cba9e`) passed uac-r2's gate.
+- NFR-05 is met for 086: the remaining findings are a known dev artifact that uac-r2 owns, they do not arise in production, and none names `sprk_storedfile`.
+- The pre-deploy count is 0, so no backfill is needed.
+- The two adversarial passes are accepted with the 2026-11-03 dispositions. K-P1, K1 and #2560 stay with uac-r2 task 191.
+
+**Owner, 2026-11-22 (criterion 6):** asked whether the 2026-11-03 and 2026-11-22 `-Verify` records stand in for the missing `-Apply` outputs, the owner answered in session: "If the verify is safe then proceed". Both `-Verify` runs are read-only and both passed, so they are accepted as the record of the applied state. No `-Apply` was re-run and nothing was written. **086 is complete.**
+
+Left open after closing (not part of 086):
+- `Ebilling:StoredFileReconcileEnabled` stays `false`. Flipping it needs this project's own hard rule (F4 merged and DEF-044 fixed, per FinanceModule) and the owner's explicit go on the app setting, sent through uac-r2. No agent flips it.

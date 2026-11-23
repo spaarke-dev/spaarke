@@ -533,7 +533,11 @@ public partial class RouteAuthorizationGuardTests
             + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
             + "the app-only row read, the CALLER's own Read on the parent and, for a copy, on its source document (gate variant, uniform 404), "
             + "then StoredFileService.JudgeServableAsync: Servable / own path / scan verdict (404, 409 file_scan_pending, 503). The eBilling kill "
-            + "switch runs after it."),
+            + "switch runs after it. GET /api/finance/invoices/{invoiceId}/files (task 151e) and POST /api/finance/invoices/{invoiceId}/files "
+            + "(task 123, the internal supporting-file upload) are authorized by AddFinanceAuthorizationFilter on the invoice as the caller "
+            + "(finance.read; ebilling.invoice.decide = Write, FinanceDenial.UniformNotFoundForRecord: no Write or no invoice is the uniform "
+            + "404, an unanswered rights read 403 system_failure), then the kill switch; the upload's StoredFileService.UploadForCallerAsync "
+            + "asks the caller's Write again before it stages anything."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,

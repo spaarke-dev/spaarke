@@ -80,7 +80,6 @@ public sealed class FirmNoticeActionSeamTests
             var resolver = new ActionResolver(Routing.Object, Catalog.Object, NullLogger<ActionResolver>.Instance);
             var runner = new ActionRunner(Model.Object, new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance), NullLogger<ActionRunner>.Instance);
             var ai = new InvoiceAi(
-                new Mock<IPlaybookService>(MockBehavior.Strict).Object,
                 new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
                 resolver,
                 runner,

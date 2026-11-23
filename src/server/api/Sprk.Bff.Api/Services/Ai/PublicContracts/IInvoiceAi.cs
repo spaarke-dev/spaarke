@@ -1,12 +1,9 @@
-using OpenAI.Chat;
-using Sprk.Bff.Api.Models.Ai;
-
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 /// <summary>
 /// Public facade for the Finance Intelligence module and the Service Bus invoice
 /// indexing pipeline. Exposes the precise subset of AI primitives that the invoice
-/// classification, extraction, and search flows actually call today.
+/// classification, reading, coding and search flows actually call today.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,64 +12,20 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// directly. See ADR-007 for the canonical facade pattern (<see cref="SpeFileStore"/>).
 /// </para>
 /// <para>
-/// Current consumers (Phase 1 inventory, 2026-05-24):
-/// - <c>Services/Finance/InvoiceAnalysisService.cs</c> — Playbook B (extraction); classification moved to <see cref="ClassifyAsync"/> in task 042
+/// Embeddings (<see cref="GenerateEmbeddingAsync"/>) serve:
 /// - <c>Services/Finance/InvoiceSearchService.cs</c> — query embedding for hybrid invoice search
 /// - <c>Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</c> — document embedding for invoice indexing
 /// </para>
 /// <para>
-/// Surface intentionally narrow (UQ-07 small-focused default). Three methods cover all
-/// observed call sites; <c>ChatMessage</c> is exposed because the Finance models build
-/// structured prompts that the deep AI pipeline expects in that shape — replacing it
-/// with an SDAP-DTO would require duplicating model-specific assemblies callers already
-/// reference.
-/// </para>
-/// <para>
-/// ebilling-r1 task 041 (D-52) added four Action-backed capability methods (<see cref="ClassifyAsync"/>,
-/// <see cref="CodeLinesAsync"/>, <see cref="DraftRulesAsync"/>, <see cref="DraftFirmNoticeAsync"/>) with
-/// SDAP-domain DTOs (<c>InvoiceAiContracts.cs</c>). <see cref="GetPlaybookByNameAsync"/> and
-/// <see cref="GetStructuredCompletionAsync{T}"/> are legacy members kept only until their Finance callers
-/// move (ebilling-r1 task 050; the classification caller moved in task 042); do not add new callers.
+/// ebilling-r1 task 041 (D-52) added the Action-backed capability methods (<see cref="ClassifyAsync"/>,
+/// <see cref="CodeLinesAsync"/>, <see cref="DraftRulesAsync"/>, <see cref="DraftFirmNoticeAsync"/>; later
+/// <see cref="MatchCodeSetAsync"/>) with SDAP-domain DTOs (<c>InvoiceAiContracts.cs</c>), and task 043 added
+/// <see cref="ReadInvoiceAsync"/>. The legacy by-name playbook lookup and C#-schema structured completion were
+/// removed in task 050b: the prompt, output schema and model tier live in the Action / Binding rows (D-52).
 /// </para>
 /// </remarks>
 public interface IInvoiceAi
 {
-    /// <summary>
-    /// Look up an analysis playbook by its system name (e.g.
-    /// <c>FinanceExtraction</c>; the former <c>FinanceClassification</c> playbook was replaced by the <c>invoice-classify</c> Action in task 042). The Finance flows use
-    /// the playbook <c>Description</c> field as the system prompt (ADR-014: prompts
-    /// live in Dataverse, not hard-coded strings).
-    /// </summary>
-    /// <param name="playbookName">Exact playbook name as registered in Dataverse.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The playbook response (includes <see cref="PlaybookResponse.Description"/>
-    /// which the Finance services use as the system prompt).</returns>
-    /// <exception cref="PlaybookNotFoundException">Thrown when the playbook does not exist.</exception>
-    Task<PlaybookResponse> GetPlaybookByNameAsync(
-        string playbookName,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Run a structured (JSON-schema-constrained) chat completion. Used for the
-    /// classification + extraction phases — both require guaranteed-valid JSON output
-    /// matching a known schema.
-    /// </summary>
-    /// <typeparam name="T">DTO that the JSON response deserializes into.</typeparam>
-    /// <param name="messages">Chat messages (system + user). Caller is responsible for
-    /// assembling the system prompt (typically from <see cref="GetPlaybookByNameAsync"/>).</param>
-    /// <param name="jsonSchema">JSON schema the response must conform to.</param>
-    /// <param name="schemaName">Schema name (passed to the OpenAI structured-output API).</param>
-    /// <param name="deploymentName">Azure OpenAI deployment name (e.g. <c>gpt-4o-mini</c>
-    /// for classification, <c>gpt-4o</c> for extraction — Finance picks per use case).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The deserialized response.</returns>
-    Task<T> GetStructuredCompletionAsync<T>(
-        IEnumerable<ChatMessage> messages,
-        BinaryData jsonSchema,
-        string schemaName,
-        string deploymentName,
-        CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Generate a vector embedding for a single text input. Used for the invoice query
     /// (search-time) and individual document indexing (background job). Both call paths

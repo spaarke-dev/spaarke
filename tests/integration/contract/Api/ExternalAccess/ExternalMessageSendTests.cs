@@ -366,7 +366,9 @@ public class ExternalMessageSendTests
             Mock.Of<ICallerSystemUserResolver>(MockBehavior.Strict),
             _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>(),
-            _appOnly.Object);
+            _appOnly.Object,
+            // fm task 056: an environment without the private-message reference columns, so the read is unchanged.
+            entities: CommunicationSchemaDouble.WithoutReferenceColumns());
         // Task 187 x D7 (merge of master into r3): the thread is also a LIVE PARENT of every message, and a read given no
         // live-parent reader resolves nothing and withholds a row that names a parent (fail closed). So the read gets the
         // reader the route passes, over a filing world that holds the shared Open thread (filed under nothing).

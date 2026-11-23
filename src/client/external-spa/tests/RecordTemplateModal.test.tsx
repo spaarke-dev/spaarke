@@ -220,7 +220,7 @@ describe('RECORD_TEMPLATES', () => {
       },
       sprk_invoice: {
         label: 'Invoice',
-        left: ['information', 'files'],
+        left: ['information', 'outcome', 'files'],
         right: ['messages'],
         toolbar: ['refresh', 'copyLink'],
         sectionActions: { messages: ['newMessage'] },

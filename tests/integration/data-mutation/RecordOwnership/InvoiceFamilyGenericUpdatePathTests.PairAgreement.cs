@@ -390,7 +390,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 ["sprk_regardingrecordid"] = Matter.ToString("D"),
                 ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", CatalogRowOf("sprk_matter")),
             },
-            Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
+            Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         NothingWritten();

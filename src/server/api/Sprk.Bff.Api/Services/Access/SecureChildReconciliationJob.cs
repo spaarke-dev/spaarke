@@ -87,8 +87,8 @@ namespace Sprk.Bff.Api.Services.Access;
 /// failed and undecidable rows carried (an undecidable one fails the run). A checked-out document is listed apart
 /// (<c>checkedOut</c>) and left. A re-file never widens: a row still owned by the Secure Record owner team keeps its file in the
 /// secure container while its filing points elsewhere (<c>heldIsolated</c>, released only by an F3 act); an unfiled
-/// document stays in a declared home container (#2151), and one whose file is in no business unit's container and no
-/// declared home is reported (<c>unfiledHomeUnknown</c>) and left. A document the backstop settled or held this run is not
+/// document whose file is in no business unit's container is reported (<c>unfiledHomeUnknown</c>) and left (the declared-home
+/// container of #2151 was removed by ebilling-r1 task 124 with the Procedure Library key). A document the backstop settled or held this run is not
 /// relocated twice. Reported in <c>ResultJson.refileRelocations</c>; a failed or still-owing move makes the run
 /// unsuccessful. Until the pass reaches it, a re-filed document is refused under the strict rule (about two minutes plus
 /// the run). Known limit: its window is per instance and the catch-up does not walk documents, so a move a previous

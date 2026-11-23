@@ -1,7 +1,7 @@
 # Finance Intelligence Architecture
 
-> **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-04-05
+> **Last Updated**: November 22, 2026 (ebilling-r1 050b)
+> **Last Reviewed**: 2026-11-22
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Current
 > **Purpose**: Architecture documentation for the Finance Intelligence module — AI-powered invoice classification and extraction, deterministic spend aggregation, signal evaluation, VisualHost visualization, and semantic invoice search.
@@ -20,17 +20,15 @@ The core design decision is a **sequential pipeline with a human review gate**: 
 
 | Component | Path | Responsibility |
 |-----------|------|---------------|
-| InvoiceAnalysisService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs` | AI extraction (gpt-4o) via structured output. Classification moved to the `invoice-classify` Action behind `IInvoiceAi.ClassifyAsync` (ebilling-r1 task 042) |
-| IInvoiceAnalysisService | `src/server/api/Sprk.Bff.Api/Services/Finance/IInvoiceAnalysisService.cs` | Interface for extraction |
-| InvoiceReviewService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs` | Human review confirmation/rejection workflow; creates `sprk_invoice`, enqueues extraction job |
+| InvoiceReviewService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs` | Human review confirmation/rejection workflow; on confirm it creates an Internal invoice submission and enqueues `InvoiceSubmissionProcessing` (ebilling-r1 050a, D-134); it creates no invoice itself |
 | SpendSnapshotService | `src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs` | Aggregates BillingEvents into Month + ToDate snapshots; upserts via 5-field alternate key |
 | SignalEvaluationService | `src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs` | Threshold-based signal detection (BudgetExceeded, BudgetWarning, VelocitySpike); strategy pattern for extensibility |
 | FinanceSummaryService | `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceSummaryService.cs` | Aggregates snapshots + signals + recent invoices into Redis-cached summary |
 | FinanceRollupService | `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs` | Denormalizes financial fields onto Matter/Project entities for VisualHost |
 | InvoiceSearchService | `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs` | Hybrid semantic search (vector + keyword + reranking) via Azure AI Search |
 | FinancialCalculationToolHandler | `src/server/api/Sprk.Bff.Api/Services/Finance/Tools/FinancialCalculationToolHandler.cs` | AI tool handler for finance calculations (ADR-013) |
-| InvoiceExtractionToolHandler | `src/server/api/Sprk.Bff.Api/Services/Finance/Tools/InvoiceExtractionToolHandler.cs` | AI tool handler for extraction (ADR-013) |
-| Models/ | `src/server/api/Sprk.Bff.Api/Services/Finance/Models/` | DocumentClassification, ExtractionResult, InvoiceHints, InvoiceHeader, BillingEventLine, FinanceJsonSchemas |
+| InvoiceExtractionToolHandler | `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/InvoiceExtractionToolHandler.cs` | AI tool handler for extraction (ADR-013) |
+| Models/ | `src/server/api/Sprk.Bff.Api/Services/Finance/Models/` | DocumentClassification, InvoiceHints (classification hints). The extraction models (`ExtractionResult`, `InvoiceHeader`, `BillingEventLine`) and `FinanceJsonSchemas` were deleted by ebilling-r1 task 050b |
 
 ---
 
@@ -40,9 +38,9 @@ The core design decision is a **sequential pipeline with a human review gate**: 
 
 1. **Classification** (`AttachmentClassification` job, Fast tier): `AttachmentClassificationJobHandler` calls `IInvoiceAi.ClassifyAsync` (Action `invoice-classify`, INVOICE-CLASSIFY@v1, resolved through its `sprk_playbookconsumer` Binding) to classify an email attachment as `InvoiceCandidate`, `NotInvoice`, or `Unknown`. Returns confidence score (0-1) and six hint fields (vendor name, invoice number, invoice date, total amount, currency, matter reference). Feature-flagged trigger from `EmailToDocumentJobHandler`.
 
-2. **Human Review Gate**: Reviewer confirms or rejects via `InvoiceReviewService`. On confirm: updates `sprk_document` status to `ConfirmedInvoice`, creates `sprk_invoice` record linking document/matter/vendor with reviewer-corrected hints, enqueues `InvoiceExtraction` job. On reject: updates document status to `RejectedNotInvoice`.
+2. **Human Review Gate**: Reviewer confirms or rejects via `InvoiceReviewService`. On confirm (ebilling-r1 050a, D-134): marks `sprk_document` `ConfirmedInvoice`, creates one Internal invoice submission for the document through `InvoiceSubmissionService` and enqueues an `InvoiceSubmissionProcessing` job; no confirm path creates `sprk_invoice`. On reject: updates document status to `RejectedNotInvoice`.
 
-3. **Extraction** (`InvoiceExtraction` job, gpt-4o): `InvoiceAnalysisService.ExtractInvoiceFactsAsync` extracts header + line items. Takes reviewer-corrected hints as grounding input. `VisibilityState` is set deterministically to `Invoiced` in the job handler — never inferred by AI.
+3. **Extraction and persistence** (`InvoiceSubmissionProcessing` job, ebilling-r1 049): the submission job reads the invoice through `IInvoiceAi.ReadInvoiceAsync` (a Content Understanding custom analyzer; fail-closed), evaluates it, and its persister is the one writer that creates `sprk_invoice` and its lines. The legacy `InvoiceExtraction` job (`InvoiceExtractionJobHandler`, gpt-4o through a by-name playbook, `InvoiceAnalysisService.ExtractInvoiceFactsAsync`, `FinanceExtraction` / PB-013) was deleted by ebilling-r1 task 050b (D-71): nothing enqueues it, no handler is registered for it, and `FinanceOptions.ExtractionDeploymentName` / `InvoiceExtractionPlaybookId` are gone. A message of that type left on a queue now dead-letters as having no handler.
 
 4. **Aggregation** (`SpendSnapshotGeneration` job): `SpendSnapshotService.GenerateAsync` queries `sprk_billingevent` records where `VisibilityState = Invoiced`, groups by year-month, computes MoM velocity (`(current - prior) / prior * 100`; null when prior = 0), computes budget variance (`budget - invoiced`; positive = under budget). Upserts Month + ToDate snapshots via 5-field composite alternate key.
 
@@ -71,9 +69,9 @@ Finance visualization uses **denormalized fields** on `sprk_matter` / `sprk_proj
 
 **Classification** (Action `invoice-classify`, INVOICE-CLASSIFY@v1; ebilling-r1 task 042): `IInvoiceAi.ClassifyAsync` resolves the Action only through the `invoice-classify` Binding and runs it through `IActionRunner` (ADR-039 / ADR-043); the prompt, output schema and model tier (Fast) live in the `sprk_analysisaction` row, mirrored in `infra/dataverse/actions/invoice-classify.action.json` and `infra/dataverse/outputschemas/invoice-classify.schema.json`. It fails closed (FR-46): a missing Binding, failed completion or invalid output raises `InvoiceAiException` (`ai.invoice.binding_missing` / `completion_failed` / `output_invalid`) and the job retries the first two a bounded number of times, then poisons; it never falls back to a hard-coded prompt. Returns a verdict with confidence score and six hint fields.
 
-**Extraction** (Playbook B, `FinanceExtraction`): Uses `gpt-4o` for structured extraction of invoice header + line items. Reviewer-corrected hints from the confirm step are injected as `<reviewer_hints>` XML block to ground the extraction. Returns `ExtractionResult` with header, line items array, and extraction confidence.
+**Reading** (`IInvoiceAi.ReadInvoiceAsync`, ebilling-r1 task 043): reads the invoice document with the configured Content Understanding custom analyzer, then applies a deterministic completion step; it is called from the submission job (049). It is a document-model call, not a prompt, and fails closed.
 
-**Structured output** (`GetStructuredCompletionAsync<T>`): Uses OpenAI constrained decoding with JSON schemas defined in `FinanceJsonSchemas.cs`. Prevents hallucinated output formats and enables typed deserialization.
+**Retired (ebilling-r1 task 050b, D-71 / D-52):** the legacy Playbook B extraction (`FinanceExtraction`, by-name playbook lookup, `gpt-4o`, `ExtractionResult`) and the C# JSON schemas in `FinanceJsonSchemas.cs`. `IInvoiceAi` no longer has `GetPlaybookByNameAsync` or `GetStructuredCompletionAsync<T>`; every AI capability on it runs an Action through `IActionRunner` (prompt, output schema and model tier in the Action / Binding rows) except embeddings and reading.
 
 ---
 
@@ -171,17 +169,17 @@ Per ADR-009: Redis-first with graceful degradation — cache failures are logged
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
 | Hybrid VisualHost architecture | Denormalized fields + native charts | Avoids PCF lifecycle complexity for read-only visualizations | — |
-| Structured output for AI | `GetStructuredCompletionAsync<T>` | Prevents hallucinated formats; typed deserialization | ADR-013 |
+| Structured output for AI | Action output schema (Dataverse row) run through `IActionRunner` | Prevents hallucinated formats; no C# schema, no by-name playbook (D-52) | ADR-013, ADR-039 |
 | Idempotency via alternate keys | BillingEvent + SpendSnapshot composite keys | Safe re-runs without duplicates | — |
 | Strategy pattern for signals | `ISignalRule` with 3 implementations | Extensible rule evaluation; new rules without modifying existing | — |
 | App-only auth for background jobs | `GraphClientFactory.ForApp()` | No user context in job handlers | ADR-008 |
-| Playbook-driven prompts | Loaded from Dataverse via `IPlaybookService` | Prompts travel with solution imports; not hardcoded | ADR-014 |
+| Action-driven prompts | Loaded from Dataverse Action rows via `IActionResolver` + the Binding | Prompts travel with solution imports; not hardcoded | ADR-014, ADR-039 |
 
 ---
 
 ## Constraints
 
-- **MUST**: Use `GetStructuredCompletionAsync<T>` for all AI analysis (ADR-013)
+- **MUST**: Reach AI only through `IInvoiceAi` (Action-backed methods through `IActionRunner`; no by-name playbook, no C# output schema) (ADR-013, D-52)
 - **MUST**: Set `VisibilityState` deterministically in handler code, never let AI infer it
 - **MUST**: SUM all `sprk_budget` records for budget calculations (1:N relationship)
 - **MUST NOT**: Log document content, extracted text, or prompts (ADR-015)
@@ -199,4 +197,4 @@ Per ADR-009: Redis-first with graceful degradation — cache failures are logged
 
 ---
 
-*Last Updated: April 5, 2026*
+*Last Updated: November 22, 2026*

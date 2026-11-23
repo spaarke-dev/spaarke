@@ -3155,4 +3155,74 @@ public sealed partial class ProcedureAssignmentServiceTests
         decision.Written.Should().Equal(new DecisionRecordRef(Assignment, outcome.Value.Override.Id));
         BillingDecisionRecorder.ToRequest(decision).Facts.Keys.Should().BeEquivalentTo(new[] { "coreTable", "recordId" });
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 117: DeleteOrphanAssignmentsAsync (O-17; uac-r2 core-record-delete design §14). The job-level contract is RecordRuleSetRetireJobTests;
+    // these pin the service's selection, its re-read before each delete and its report-only answer.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly DateTime OrphanCutoff = new(2026, 11, 23, 11, 45, 0, DateTimeKind.Utc);
+
+    private static Guid SeedAssignmentRow(World w, string? core)
+    {
+        var row = new Entity(Assignment, Guid.NewGuid())
+        {
+            [ProcedureAssignmentEntity.NameColumn] = "Acme guidelines",
+            [ProcedureAssignmentEntity.ModeColumn] = new OptionSetValue(ProcedureAssignmentEntity.ModeFollowLatest),
+        };
+        if (core is not null) row[core] = new EntityReference(core, Guid.NewGuid());
+        w.H.Seed(row);
+        return row.Id;
+    }
+
+    [Fact(DisplayName = "117: an orphan assignment row is deleted; a row with a live core lookup is kept")]
+    public async Task DeleteOrphans_DeletesTheOrphan_KeepsEveryRowWithALiveLookup()
+    {
+        var w = new World();
+        var orphan = SeedAssignmentRow(w, core: null);
+        var kept = InvoiceFamilyCoreRecordGuard.FilingCoreTables.Select(core => SeedAssignmentRow(w, core)).ToList();
+
+        var result = await w.Service().DeleteOrphanAssignmentsAsync(apply: true, OrphanCutoff, pageSize: 100, maxPages: 1, default);
+
+        result.Should().Be(new ProcedureAssignmentService.OrphanAssignmentDeleteResult(1, 1, 0, 0, ReadFailed: false, MoreRemain: false));
+        w.H.Rows[Assignment].Select(r => r.Id).Should().BeEquivalentTo(kept);
+        w.H.DeleteAttempts.Should().Equal((Assignment, orphan));
+    }
+
+    [Fact(DisplayName = "117: an orphan re-linked between the selection and its delete is re-read and kept")]
+    public async Task DeleteOrphans_ARowReLinkedBeforeItsDelete_IsKept()
+    {
+        var w = new World();
+        var row = SeedAssignmentRow(w, core: null);
+        var core = InvoiceFamilyCoreRecordGuard.FilingCoreTables[0];
+        var selections = 0;
+        w.H.AfterQuery = q =>
+        {
+            if (q.EntityName == Assignment && selections++ == 0)
+            {
+                w.H.ConcurrentWrite(Assignment, row, new Dictionary<string, object> { [core] = new EntityReference(core, Guid.NewGuid()) });
+            }
+        };
+
+        var result = await w.Service().DeleteOrphanAssignmentsAsync(apply: true, OrphanCutoff, pageSize: 100, maxPages: 1, default);
+
+        result.Skipped.Should().Be(1);
+        w.H.DeleteAttempts.Should().BeEmpty();
+        w.H.Rows[Assignment].Should().ContainSingle(r => r.Id == row);
+    }
+
+    [Fact(DisplayName = "117: report only counts the orphans and deletes nothing")]
+    public async Task DeleteOrphans_ReportOnly_DeletesNothing()
+    {
+        var w = new World();
+        SeedAssignmentRow(w, core: null);
+        SeedAssignmentRow(w, core: null);
+
+        var result = await w.Service().DeleteOrphanAssignmentsAsync(apply: false, OrphanCutoff, pageSize: 100, maxPages: 1, default);
+
+        result.Selected.Should().Be(2);
+        result.Deleted.Should().Be(0);
+        w.H.DeleteAttempts.Should().BeEmpty();
+        w.H.Writes.Should().BeEmpty();
+    }
 }

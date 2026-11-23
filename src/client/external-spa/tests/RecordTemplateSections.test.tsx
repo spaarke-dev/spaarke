@@ -250,6 +250,11 @@ interface Mocks {
   /** Rows the invoices rollup (still the module fetch) returns, keyed by `${parentAttribute}:${parentId}`. */
   invoices: Record<string, Array<Record<string, unknown>>>;
   events: Array<Record<string, unknown>>;
+  /**
+   * The caller's firms on `/me` (ebilling-r1 134, spa-r4 F1). Absent: a caller with no firms, who is not asked for an invoice's
+   * Outcome (the section is not in the invoice's layout for such a caller).
+   */
+  firms?: Array<{ firmId: string; name: string }>;
 }
 
 let mocks: Mocks;
@@ -273,7 +278,14 @@ function detailReadOf(body: { entityName: string; fetchXml: string }): { c: Case
  * and the record's documents (the task 031 routes). `undefined` = not one of them.
  */
 function sideReads(path: string): unknown {
-  if (path === '/api/v1/external/me') return { contactId: guid(7), email: 'me@example.test', projects: [] };
+  if (path === '/api/v1/external/me') {
+    return {
+      contactId: guid(7),
+      email: 'me@example.test',
+      projects: [],
+      ...(mocks.firms ? { firms: mocks.firms } : {}),
+    };
+  }
   if (/^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/[^/]+\/documents$/.test(path)) {
     return { value: [] };
   }
@@ -1077,7 +1089,7 @@ describe('FR-01 template sections', () => {
     sprk_project: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
     sprk_matter: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
     sprk_workassignment: { left: ['information', 'documents'], right: ['messages', 'tasksEvents'] },
-    sprk_invoice: { left: ['information', 'files'], right: ['messages'] },
+    sprk_invoice: { left: ['information', 'outcome', 'files'], right: ['messages'] },
     sprk_servicerequest: { left: ['information', 'documents'], right: ['messages'] },
     sprk_document: { left: ['information', 'preview'], right: [] },
   };
@@ -1090,13 +1102,16 @@ describe('FR-01 template sections', () => {
   it.each(CASES.map(c => [c.entityName, c] as const))(
     '%s: the FR-01 left and right sections, in order',
     async (_e, c) => {
+      // The invoice's Outcome section is shown to a firm member only (spa-r4 F1), so this caller is one.
+      if (c.entityName === 'sprk_invoice') mocks.firms = [{ firmId: guid(500), name: 'Firm A' }];
       renderWidget(c.Body);
       fireEvent.click(gridRow(c, 1));
       const dialog = await screen.findByRole('dialog');
       const left = await within(dialog).findByTestId('record-template-left');
       const want = LAYOUT[c.entityName];
 
-      expect(sectionIds(left)).toEqual(want.left);
+      // `/me` arrives after the record, so the Outcome section appears once the caller context is in.
+      await waitFor(() => expect(sectionIds(left)).toEqual(want.left));
       if (want.right.length === 0) {
         // Document: no right column at all; the left one is full width.
         expect(within(dialog).queryByTestId('record-template-right')).toBeNull();
@@ -1111,6 +1126,19 @@ describe('FR-01 template sections', () => {
       }
     }
   );
+
+  it('sprk_invoice: a caller with no firm (a workforce user, a client-side collaborator) gets no Outcome section and no outcome call', async () => {
+    const c = caseOf('sprk_invoice');
+    mocks.firms = [];
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+    const left = await within(dialog).findByTestId('record-template-left');
+    // Wait for the reads this opening makes (`/me` among them), then assert the absence.
+    await waitFor(() => expect(bffApiCall.mock.calls.some(call => call[0] === '/api/v1/external/me')).toBe(true));
+    await waitFor(() => expect(sectionIds(left)).toEqual(['information', 'files']));
+    expect(bffApiCall.mock.calls.some(call => String(call[0]).endsWith('/outcome'))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

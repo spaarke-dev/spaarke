@@ -19,7 +19,7 @@ Documents the JSON schema contracts for all Dataverse Multiline Text fields that
 
 | Entity | Field | Max Length | Service That Parses |
 |---|---|---|---|
-| `sprk_invoice` | `sprk_extractedjson` | 20,000 | `InvoiceExtractionJobHandler` |
+| `sprk_invoice` | `sprk_extractedjson` | 20,000 | none (legacy; its only writer, `InvoiceExtractionJobHandler`, was deleted by ebilling-r1 050b) |
 | `sprk_analysis` | `sprk_chathistory` | 1,048,576 | `AnalysisResultPersistence`, `WorkingDocumentService`, `SprkChat` component |
 | `sprk_analysis` | `sprk_workingdocument` | 100,000 | `WorkingDocumentTools`, `AnalysisOrchestrationService` |
 | `sprk_analysis` | `sprk_finaloutput` | 100,000 | `AnalysisOrchestrationService` |
@@ -43,7 +43,7 @@ Documents the JSON schema contracts for all Dataverse Multiline Text fields that
 ### 1. Invoice Extracted JSON (`sprk_invoice.sprk_extractedjson`)
 
 **Max Length**: 20,000 chars
-**Written by**: `InvoiceExtractionJobHandler` (AI extraction pipeline)
+**Written by**: nothing now. `InvoiceExtractionJobHandler` (the legacy AI extraction pipeline) was deleted by ebilling-r1 050b; the column is kept as legacy data
 **Read by**: Invoice review UI, BFF finance endpoints
 
 Stores the raw AI-extracted invoice data before human review. Schema:

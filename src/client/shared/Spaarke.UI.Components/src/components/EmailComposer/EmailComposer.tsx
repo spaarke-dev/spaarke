@@ -102,6 +102,7 @@ import type {
 import type { RichTextEditorRef } from '../RichTextEditor';
 import type { InlineAiAction } from '../InlineAiToolbar';
 
+import { useFocusReturn } from '../../utils/focusReturn';
 import { isSafeHref } from './composeOnlyText';
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
@@ -115,10 +116,6 @@ import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 // picks this type and ATTACHES it, so it's intentionally excluded from the record-search
 // catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
 const DOCUMENT_LOGICAL_NAME = 'sprk_document';
-
-/** Bounded retry for returning focus after a host lookup (task 199): up to 10 attempts, 50 ms apart. */
-const LOOKUP_FOCUS_MAX_ATTEMPTS = 10;
-const LOOKUP_FOCUS_RETRY_MS = 50;
 
 // "From:" sender option labels (owner UAT 2026-07-30, item 3). The engine has NO current-user
 // identity data source (context-agnostic, ADR-012), so the "user" option falls back to the
@@ -632,76 +629,37 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   );
 
   const mountedRef = React.useRef(true);
-  // The pending lookup focus-return timer (and the window that owns it), so unmount can cancel it.
-  const lookupFocusTimerRef = React.useRef<{ win: Window; id: number } | null>(null);
   React.useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      const pending = lookupFocusTimerRef.current;
-      if (pending) pending.win.clearTimeout(pending.id);
-      lookupFocusTimerRef.current = null;
     };
   }, []);
 
-  // Focus return after a host lookup (task 199). The platform lookup pane hands focus back to whatever
-  // opened the surrounding dialog (a grid link behind the wizard) when it closes, so a keyboard user
-  // is lost. Once the lookup settles (pick, cancel or failure) take focus back to the button that started
-  // it, with the same deferred check as closeFailureNotice: the host clears its "yielding" state on
-  // resolve, so wait a tick; skip when the composer unmounted or focus is already inside it (a host or
-  // the user put it there on purpose); fall back to the composer root when the trigger is gone/disabled.
-  // Cross-frame: when the composer runs in an iframe (Find Similar -> Document Relationship Viewer -> Email)
-  // the parent PCF may lift `inert` from its yielding modal AFTER the first tick, and focus() on an element
-  // inside an inert frame fails silently. So verify the focus landed and retry on a short bounded schedule
-  // (LOOKUP_FOCUS_MAX_ATTEMPTS x LOOKUP_FOCUS_RETRY_MS), stopping at unmount, as soon as focus is inside the
-  // composer, or when it moved to some other real element since our last attempt (a host that deliberately
-  // focused something is not fought; body/null counts as "nobody has it"). The document and window come from
-  // the composer's own ownerDocument, not the globals, so an iframe-hosted composer uses its own frame.
-  // ONE helper for every lookup path (recipients, Link a record, Link documents, record search).
+  // Focus return after a host lookup (task 199; the shared helper is in utils/focusReturn.ts since task 200). The
+  // platform lookup pane hands focus back to whatever opened the surrounding dialog (a grid link behind the wizard)
+  // when it closes, so a keyboard user is lost. Once the lookup settles (pick, cancel or failure) take focus back to
+  // the button that started it; skip when the composer unmounted or focus is already inside it (a host or the user put
+  // it there on purpose); fall back to the composer root when the trigger is gone or disabled. The document comes from
+  // the composer's own ownerDocument, so an iframe-hosted composer (Find Similar -> Document Relationship Viewer ->
+  // Email) uses its own frame. ONE wrapper for every lookup path (recipients, Link a record, Link documents, record search).
+  const returnFocus = useFocusReturn({
+    getRoot: () => rootRef.current,
+    getFallback: () => rootRef.current,
+  });
   const withLookupFocusReturn = React.useCallback(
-    <T,>(trigger: HTMLElement | null | undefined, run: () => Promise<T>): Promise<T> => {
-      // Captured now: after unmount rootRef.current is null and the owner frame can no longer be derived.
-      const doc = rootRef.current?.ownerDocument ?? document;
-      const win = doc.defaultView ?? window;
-      const restore = () => {
-        let attempts = 0;
-        let seenAfterAttempt: Element | null = null; // what had focus right after our previous attempt
-        const schedule = (delayMs: number) => {
-          const previous = lookupFocusTimerRef.current;
-          if (previous) previous.win.clearTimeout(previous.id);
-          lookupFocusTimerRef.current = { win, id: win.setTimeout(step, delayMs) };
-        };
-        const step = () => {
-          lookupFocusTimerRef.current = null;
-          if (!mountedRef.current) return;
-          const root = rootRef.current;
-          if (!root) return;
-          const active = doc.activeElement;
-          if (root.contains(active)) return;
-          // Retry only: focus is somewhere other than where our last attempt left it, and not "nowhere".
-          if (attempts > 0 && active !== seenAfterAttempt && active && active !== doc.body) return;
-          const usable = trigger && trigger.isConnected && !(trigger as HTMLButtonElement).disabled;
-          const target = usable ? trigger : root;
-          target.focus();
-          attempts += 1;
-          seenAfterAttempt = doc.activeElement;
-          if (seenAfterAttempt === target || root.contains(seenAfterAttempt)) return;
-          if (attempts < LOOKUP_FOCUS_MAX_ATTEMPTS) schedule(LOOKUP_FOCUS_RETRY_MS);
-        };
-        schedule(0);
-      };
-      return run().then(
+    <T,>(trigger: HTMLElement | null | undefined, run: () => Promise<T>): Promise<T> =>
+      run().then(
         value => {
-          restore();
+          returnFocus(trigger);
           return value;
         },
         err => {
-          restore();
+          returnFocus(trigger);
           throw err;
         }
-      );
-    },
-    []
+      ),
+    [returnFocus]
   );
 
   // "Link another record" → pick a record via the host polymorphic picker and APPEND it to the

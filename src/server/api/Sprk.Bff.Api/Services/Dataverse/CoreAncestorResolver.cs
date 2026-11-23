@@ -500,6 +500,17 @@ public sealed class CoreAncestorResolver
             : new StampSourceDecision(StampSourceKind.AmbiguousSource, null, setSources);
     }
 
+    /// <summary>
+    /// fm task 056 (owner 2026-11-22: a private message is never filed; UAC-r2: fail closed wherever a filing is read): whether
+    /// <paramref name="row"/> of <paramref name="entityLogicalName"/> is a private message, which holds NO core ancestor. As a
+    /// target it derives none (<see cref="ResolveStampsAsync"/>), and as a stamped child its copy is planned against no root, so a
+    /// held copy is cleared (<see cref="CoreAncestorRestamper.RestampChildAsync"/>, <see cref="CoreAncestorStampReconciliationJob"/>).
+    /// The row must be read with the reference columns the table has (<c>PrivateContextColumns.PresentColumnsOf</c>).
+    /// </summary>
+    internal static bool IsPrivateMessage(string entityLogicalName, Entity row) =>
+        string.Equals(entityLogicalName, "sprk_communication", StringComparison.OrdinalIgnoreCase)
+        && Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.IsPrivate(row);
+
     /// <summary>True when the entity is a CORE record (direct grants required).</summary>
     public static bool IsCoreRecordEntity(string entityLogicalName) =>
         !string.IsNullOrWhiteSpace(entityLogicalName) && CoreSet.Contains(entityLogicalName);
@@ -686,8 +697,15 @@ public sealed class CoreAncestorResolver
         Entity row;
         try
         {
+            // fm task 056: with the private-message reference columns the target has, so a private message derives no ancestor.
             row = await _entityService
-                .RetrieveAsync(targetEntityLogicalName, targetRecordId, applicable.Select(c => c.Column).ToArray(), ct)
+                .RetrieveAsync(
+                    targetEntityLogicalName,
+                    targetRecordId,
+                    applicable.Select(c => c.Column)
+                        .Concat(Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.PresentColumnsOf(targetEntityLogicalName, columns))
+                        .ToArray(),
+                    ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -707,6 +725,15 @@ public sealed class CoreAncestorResolver
             return CoreAncestorResult.Refused(
                 $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).",
                 CoreAncestorRefusalKind.NotFound);
+        }
+
+        if (IsPrivateMessage(targetEntityLogicalName, row))
+        {
+            // fm task 056: a private message holds no filing, so a record filed under it outside the BFF reaches no core record.
+            _logger.LogWarning(
+                "{Entity}({Id}) is a private message: it is never filed, so it has no core ancestor and nothing is derived from it.",
+                targetEntityLogicalName, targetRecordId);
+            return new CoreAncestorResult(CoreAncestorStatus.NoAncestor, [], null);
         }
 
         var stamps = new List<CoreAncestorStamp>();

@@ -60,7 +60,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 048 | ✅ [done] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
 | 049 | ✅ [done] | `InvoiceSubmissionProcessing` job | FULL | opus / high | none | 014, 016, 043, 044, 046, 047, 072, 073 |
 | 050a | 🟡 [implemented, on master; owner questions in notes §9 items 2–4 open] | Redirect the review-confirm route into the submission operation (D-134) | FULL | opus / high | none | 042, 049 |
-| 050b | 🔲 [open] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
+| 050b | ✅ [done] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
 | 051 | ✅ [done] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | ✅ [done; browser ui-tests deferred to 112, notes/052-createinvoicewizard-rewire.md] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
 | 053 | 🔲 [open; steps 2-3 done on dev 2026-11-03, notes/053-wp2-deploy.md] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
@@ -106,7 +106,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 084h-3 | ✅ [merged into work bb4ad3f578; EB-D-239 Q10; ADR-004 path A pending owner] | ADR-004 repair job RecordProcedureDecisionJob (J1-J5) | FULL | opus / high | none | 084h-2 |
 | 084h-4 | ✅ [merged into work b5740ebd79; fix round 35b574b0c9; deploy after the BFF with 084h-2/3] | RecordProcedures UI: Note box on each change + NotRecorded warning | STANDARD | sonnet / high | none | 084h-2 |
 | 085 | ✅ [merged into work 052307dc0b; one adversarial pass, two fix rounds (publish and create are check-then-use with 409 on a changed version or type; F1-b reverted per ontology ruling (c), durable fix DEF-061); uac-r2 and ontology-r1 approved] | Rate cards keyed to Procedure Version: import, copy-forward, resolver tiers re-keyed to the rank; no scope column | FULL | sonnet / xhigh | P3-E | 080, 082 |
-| 086 | 🔄 [code ported onto work/ebilling-r1 (task/ebill-086-rebased); role -WhatIf/-Verify and creator-person -Verify pass on dev (40 tables). Pending: pre-deploy count of Stored Files on invoices of Secure records, -Apply outputs and owner OK with dates, live NFR-05 census after a dev BFF deploy, second adversarial pass, uac-r2 review; notes/086-storedfile-secure-child.md "Port"] | Invoice Stored Files join the secure family as a leaf child of sprk_invoice: lineage, role row, creator person, census | FULL | opus / high | P3-D (p-safe false) | 088, 090, 089 |
+| 086 | ✅ [done 2026-11-22: uac-r2 signed off; owner accepted the -Verify records for criterion 6; notes/086-storedfile-secure-child.md] | Invoice Stored Files join the secure family as a leaf child of sprk_invoice: lineage, role row, creator person, census | FULL | opus / high | P3-D (p-safe false) | 088, 090, 089 |
 | 087 | ✖ [cancelled] | Secure BU snapshot writer — cancelled 2026-10-21 by EB-D-148 (BU filter dropped, model §12 / O-12) | — | — | — | — |
 | 088 | ✅ [done] | Stored File schema, the sprk_document submission marker (field-secured, app-only refusal) and invoice status Superseded | FULL | opus / high | P3-A | 080 |
 | 089 | 🟡 [wip] | Assignment and override service (pin, exclude, change rule, removal preview); secure-child registration; K-2 pin test — 089a done; 089b done (2 adversarial passes, fixes merged 1848d67bdb); 089c done (2 passes, 2 fix rounds, re-check; merged 593c70f2b5); 089e done (2 passes, 3 fix rounds, uac-r2 approved; merged 6bb7d928a9; dev roles applied 2026-11-04); owner: stale-Signals (a)/(b), deviations 1-2 (notes/089-assignment-override-service.md) | FULL | opus / high | P3-C (p-safe false) | 080, 081 |
@@ -164,7 +164,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 114 | ✅ [done: an Override releases a Procedure hold (gap or unresolved; owner 2026-10-21; firm hold excluded) on Internal and SPA; release = code AND field-secured findings stamp; 2 adversarial passes (F1 forged marker, F4 PS case fixed); merged c4b8d43e8f; 114b (ontology D-201: closes only released Signals; FR-51 on unfiltered set) merged] | Override releases a no-version-in-force gap hold for that invoice only, recorded through WriteBillingDecisionAsync | FULL | sonnet / high | P3-F | 082, 105 |
 | 115 | ✅ [on master b0679c6ce1 + f4874f4f8a; ontology-r1 PASS 12040e2a74; dev options read back 6edfdb6d6b] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
 | 116 | ✅ [merged into work cd9d90aaa0 (fix rounds 1-6, EB-D-211/214/216/216a) and to master in PR #2724; index row was stale until 2026-11-17] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
-| 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
+| 117 | ✅ [done 2026-11-23: merged f4a272136c; 2 Opus passes, fix round 1, scoped re-check K-only; uac-r2 APPROVED becd5b983c; Apply off until 079] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
 | 118b | ✅ [done: 118b-1 (shared document read, contract, caller Read check, sameness) + 118b-2 (staging, SameSource parts list, persister branch); notes/118b-from-document-supporting-files.md] | Submit Invoice from document carries supporting documents (supportingDocumentIds → Supporting Stored Files) | FULL | opus / high | none | 094, 118a |
 | 118 | ✅ [done: notes/118-submit-invoice-email-ui.md] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094, 118a |
 | 118a | ✅ [done] | InvoiceAttachmentMarking shared component, split out of 118 for word-add-in-r1 (EB-D-159) | FULL | sonnet / high | P3-F | none |
@@ -172,8 +172,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 120 | ✅ [done] | Spaarke Billing Administrator role; D-185: Basic/Core User lose prvReadsprk_ruleset; guard test | FULL | opus / high | P3-R (p-safe false) | 081 |
 | 121 | 🔲 [open] | Procedure-table role grants after uac-r2 191: O-6 org Read, Billing Administrator Create/Write on sprk_procedure; flip UntilTask191 | FULL | opus / high | P3-R (p-safe false) | 120 |
 | 122 | ✅ | #2235 fix: field-secure sprk_findingsjson (BFF-only), off the form; Decision Records store the generic Duplicate sentence | FULL | opus / high | P4-A | 119 |
-| 123 | 🔲 [open] | Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files (EB-D-161) | FULL | opus / high | P3-F | 090, 092, 086 |
-| 124 | 🔲 [open] | Retire the Procedure Library container: remove Finance:ProcedureLibraryContainerId, close the per-customer SPE hand-off DEF-013 / #1967 (EB-D-163) | FULL | sonnet / high | P3-F | 116, 092 |
+| 123 | ✅ [done 2026-11-23: merged 72c416e948; uac-r2 approved; word-add-in-r1 agreed the contract; deploy condition open, see notes/123-invoice-supporting-file-upload.md §12] | Internal upload of supporting files to an existing invoice: POST /api/finance/invoices/{invoiceId}/files (EB-D-161) | FULL | opus / high | P3-F | 090, 092, 086 |
+| 124 | ✅ [done] | Retire the Procedure Library container: remove Finance:ProcedureLibraryContainerId, close the per-customer SPE hand-off DEF-013 / #1967 (EB-D-163) | FULL | sonnet / high | P3-F | 116, 092 |
 
 ### Phase 4 — Review and approval (WP4)
 
@@ -206,13 +206,13 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 130e-1 | ✅ [done; merged into work a6f1363070 from 56bf6dce82; Opus review + 2 fix rounds; ontology-r1 O6 PASS; uac-r2 PASS; column live on dev 2026-11-16] | DEF-060 writer: per-rule firm description copied onto the billing Signal firm reason; code-matched projection override | FULL | opus / high | none | 116, 130a-130d |
 | 130e-2 | ✅ [merged into work 58dcc56689; review + 2 fix rounds; server validator: Turkish i fold + default-ignorables refused (ontology-r1 PASS); ISS-033 filed] | Rule Review editor: firm description field with the "firms see this" notice | STANDARD | sonnet / high | none | 130e-1 |
 | 130 | ✅ [delivered by 130-0, 130-0b, 130a, 130b, 130c, 130d, 130e-1, 130e-2 (all merged; EB-D-202 In Review lines covered, notes/130-firm-findings-projection.md)] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
-| 131 | ✅ [merged into work; dev seed (EB-D-256 approved) waits for a dev BFF containing 131] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
+| 131 | ✅ [on master fe51619cfc; dev seeded 2026-11-19 (EB-D-256) on BFF 5ae2804884] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
 | 130f | ✅ | Firm view: Rejected / Returned invoices show their line findings (EB-D-259) | FULL | sonnet / high | none | 130, 131 |
-| 130g | 🔲 [open; after 132] | Firm view: show the reviewer-confirmed notice prose as the firm-safe reason (EB-D-259) | STANDARD | sonnet / high | none | 130f, 132 |
-| 132ui | 🔲 [open; after 132] | Invoice Review notify step: see, edit and confirm the 131 notice before Reject / Return (EB-D-258) | FULL | sonnet / high | none | 132 |
+| 130g | ✅ [merged into work 6b84fb1db1 2026-11-20; server only, the SPA shows it in 134] | Firm view: show the reviewer-confirmed notice prose as the firm-safe reason (EB-D-259) | STANDARD | sonnet / high | none | 130f, 132 |
+| 132ui | ✅ [merged into work 04718b3224; page deploy to dev needs the owner OK] | Invoice Review notify step: see, edit and confirm the 131 notice before Reject / Return (EB-D-258) | FULL | sonnet / high | none | 132 |
 | 132 | ✅ [server half merged into work 42382e6d9f; Opus review + second access review + 4 fix rounds; uac-r2 PASS; firmnoticetext field-security dev apply waits for the owner's OK; K16 accepted] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 024, 103, 104 |
 | 133 | ⏭️ [withdrawn by EB-D-254 (owner option b): no PDF file in R1; on-screen report (134, printable) and the findings table in the notice email (131/132)] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
-| 134 | 🔲 [open] | SPA invoice detail and on-screen report | STANDARD | sonnet / high | P5-B | 130 |
+| 134 | ✅ [merged into work 5f7195b9eb 2026-11-21; spa-r4 review held until the PR to master; UI tests at 136] | SPA invoice detail and on-screen report | FULL | sonnet / high | P5-B | 130 |
 | 135 | ✅ [merged; uac-r2 PASS incl. F2 fail-closed test, spa-r4 PASS; BillingGuidelines 57/0] | SPA Billing Guidelines view | STANDARD | sonnet / high | P5-B | 076, 130 |
 | 136 | 🔲 [open] | Deploy WP5 to dev | STANDARD | sonnet / high | none (deploy) | 130, 131, 132, 133, 134, 135, 112 |
 
@@ -255,6 +255,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 190 | 🔲 [open] | Project wrap-up | FULL | sonnet / high | none | all |
 | 191 | ✅ [done; on work e657bfda4c] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |
 | 192 | ✅ [done; on work 25778a59b7] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
+| 193 | ✅ [done 2026-11-23: merged c21bde55a2; Opus pass, 2 fix rounds, scoped re-check; uac-r2 APPROVED 46a89e55f8; dev -Apply on owner's go, -Verify PASS] | Retire sprk_ratecard core-record lookups (matter, project, work assignment): solution source, schema script, docs, guarded dev delete | FULL | sonnet / high | none (p-safe false, SpaarkeMaster) | 085 |
 
 ## Parallel Execution Plan
 

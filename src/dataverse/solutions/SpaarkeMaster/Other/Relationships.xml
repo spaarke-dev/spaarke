@@ -805,7 +805,6 @@
   <EntityRelationship Name="sprk_matter_MatterType_n1" />
   <EntityRelationship Name="sprk_matter_PracticeArea_r1" />
   <EntityRelationship Name="sprk_matter_procedureassignment_matter" />
-  <EntityRelationship Name="sprk_matter_ratecard_matter" />
   <EntityRelationship Name="sprk_matter_RegardingRecordType_recordtype_n1" />
   <EntityRelationship Name="sprk_matter_ruleset_matter" />
   <EntityRelationship Name="sprk_matter_SecurityBU_businessunit_n1" />
@@ -883,7 +882,6 @@
   <EntityRelationship Name="sprk_project_PracticeArea_n1" />
   <EntityRelationship Name="sprk_project_procedureassignment_project" />
   <EntityRelationship Name="sprk_project_ProjectType_n1" />
-  <EntityRelationship Name="sprk_project_ratecard_project" />
   <EntityRelationship Name="sprk_project_RegardingRecordType_sprk_recordtype_ref" />
   <EntityRelationship Name="sprk_project_ruleset_project" />
   <EntityRelationship Name="sprk_project_SecurityBU_businessunit_n1" />
@@ -1081,7 +1079,6 @@
   <EntityRelationship Name="sprk_workassignment_MatterType_sprk_mattertype_ref" />
   <EntityRelationship Name="sprk_workassignment_PracticeArea_sprk_practicearea_ref" />
   <EntityRelationship Name="sprk_workassignment_procedureassignment_workassignment" />
-  <EntityRelationship Name="sprk_workassignment_ratecard_workassignment" />
   <EntityRelationship Name="sprk_workassignment_RegardingCommunication_sprk_communication_n1" />
   <EntityRelationship Name="sprk_workassignment_RegardingEvent_sprk_event_n1" />
   <EntityRelationship Name="sprk_workassignment_RegardingInvoice_sprk_invoice_n1" />

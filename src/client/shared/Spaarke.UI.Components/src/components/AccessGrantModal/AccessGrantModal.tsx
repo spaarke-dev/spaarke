@@ -225,6 +225,7 @@ import {
   describeEffectiveAccess,
 } from './followsParent';
 import { cleanGuid } from '../../utils/guid';
+import { closestDialogOrSelf, useFocusReturn } from '../../utils/focusReturn';
 import {
   buildNoAccessPath,
   buildVetoIndex,
@@ -2707,6 +2708,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // "Add Access Permissions" list and auto-selected. Works because the modal is
   // `nonBlocking` (no backdrop covering the page-level lookup pane).
 
+  // Focus return (task 200): the pane leaves focus on <body> or on the link behind the modal, and both "+" triggers are
+  // disabled while it is open, so once the lookup settles focus goes back to the button that opened it.
+  const addPersonRef = React.useRef<HTMLButtonElement>(null);
+  const addOrganizationRef = React.useRef<HTMLButtonElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => addPersonRef.current ?? addOrganizationRef.current,
+    getRegion: () => closestDialogOrSelf(addPersonRef.current ?? addOrganizationRef.current),
+  });
+
   /** Task 193 (#2338): the ONE "Add person" lookup over contacts and system users. A picked contact is staged as a
    * contact (Add sends it to `/grant`, where the server decides between a share and a grant); a picked user as a user
    * (Add sends it to `/share-user`). On a Restricted record the lookup offers users only, and none flagged external
@@ -2728,8 +2738,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       }
     } finally {
       setPicking(false);
+      returnFocus(() => addPersonRef.current);
     }
-  }, [pickPerson, contactGrantsOffered, isRestricted]);
+  }, [pickPerson, contactGrantsOffered, isRestricted, returnFocus]);
 
   const openOrgPicker = React.useCallback(async () => {
     if (!pickOrganization) return;
@@ -2741,8 +2752,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSelectedCandidateIds(prev => new Set(prev).add(picked.id));
     } finally {
       setPicking(false);
+      returnFocus(() => addOrganizationRef.current);
     }
-  }, [pickOrganization]);
+  }, [pickOrganization, returnFocus]);
 
   /** Task 142 (owner A3 = prompt): "Grant" on a suggestion writes through the NORMAL path — `/share-user` for a contact
    * that represents an internal user, `/grant` otherwise — at Collaborate (owner rule 5), and the server marks the entry
@@ -3480,6 +3492,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       {pickPerson && (
                         <Tooltip content="Add person" relationship="label">
                           <Button
+                            ref={addPersonRef}
                             appearance="secondary"
                             size="small"
                             icon={<PersonRegular />}
@@ -3494,6 +3507,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       {pickOrganization && organizationGrantsOffered && (
                         <Tooltip content="Add organization" relationship="label">
                           <Button
+                            ref={addOrganizationRef}
                             appearance="secondary"
                             size="small"
                             icon={<BuildingRegular />}

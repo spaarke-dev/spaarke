@@ -332,3 +332,33 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Outside this project (messaging-r3's `CommunicationArrivedProducer`) |
 | **Failure** | The thread read names `RegardingFieldMap.AllRegardingFields`, which includes `sprk_regardingreportcard`, a column the thread table lacks. The read faults, and the fan-out treats every thread as private (narrower, never wider). |
 | **Status** | Filed and reported; fix is `ThreadResolver.ThreadRegardingColumns`, owned by the fan-out's owner. |
+
+## DI-035 — The conversation workspace thread list shows only the first page (no lazy-scroll)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-22, task 055 adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2936 |
+| **Class** | Pre-existing (messaging-r3's `ConversationWorkspace`), not caused by 055 |
+| **Failure** | The all-mode list loads one `listThreads` page (default 50) and ignores `nextPageToken`, in All and now in Messages. ADR-051 requires infinite lazy-scroll. The server already pages, and `kind=direct` fills each page server-side. |
+| **Status** | Filed and reported. |
+
+## DI-036 — Invite-only conversations for private messages about a record (follow-up, not built here)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-22, owner discussion of task 056 filing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2977 |
+| **Class** | Feature follow-up for `messages-enhancements-r1` |
+| **Need** | Participants invite named people into a private conversation about a record; each invitee passes the recipient's record-access check; the conversation widens only by invitation, never by filing. |
+| **Status** | Filed. 056 ships strictly 1:1, never filed (decisions.md 2026-11-22). The Direct access model is pair-only and belongs to UAC-r2, so this needs a design reviewed with UAC-r2 first. |
+
+## DI-037 — Flaky client test: EmailComposer.lookupFocus under full ui-components jest load (found, not ours)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-23, verifying master PR #2984 (full `@spaarke/ui-components` jest at ef2bb76a73) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2990 |
+| **Class** | Pre-existing test flake from master (task 199); this project does not touch EmailComposer |
+| **Need** | Make the focus-return assertion robust to slow jsdom ticks under full-suite load. It passes alone. |
+| **Status** | Filed. The same run's OntologyAdmin Rules failure is already #2597. |

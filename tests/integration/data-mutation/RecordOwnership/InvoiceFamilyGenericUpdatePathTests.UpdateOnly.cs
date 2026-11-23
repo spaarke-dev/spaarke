@@ -97,7 +97,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 await Handler(NoReads()).UpdateAsync(
                     PlainTable, MissingRow,
                     new Dictionary<string, object?> { ["sprk_name"] = "Renamed", ["sprk_matter@odata.bind"] = $"/sprk_matters({Matter:D})" },
-                    Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, actsAs);
+                    Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, actsAs);
                 outcome = new PathOutcome(null, null);
             }
             catch (RecordOwnerUnresolvedException refused)
@@ -163,7 +163,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         await Handler(app.Object).UpdateAsync(
             PlainTable, Event, new Dictionary<string, object?> { ["sprk_name"] = "Renamed" },
-            Sprk.Bff.Api.Services.Ai.ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
+            Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
 
         Sent().Should().ContainSingle().Which.Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
     }

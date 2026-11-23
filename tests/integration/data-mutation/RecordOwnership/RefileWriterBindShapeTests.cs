@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Tests.DataMutation.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -128,6 +129,84 @@ public sealed class RefileWriterBindShapeTests
         errors.Should().BeEmpty();
         (updated, failed).Should().Be((1, 0));
         AssertMovedIntoSecure();
+    }
+
+    // ── fm task 056 (owner, 2026-11-22, Q5): a private message is never filed, by any of these writers ─────────────────────
+
+    /// <summary>The ordinary communication, holding a private-context reference: a private message (the REAL resolver refuses
+    /// its filing, <see cref="RecordOwnerRefusal.PrivateMessageNotFileable"/>).</summary>
+    private void APrivateCommunication()
+    {
+        AnOrdinaryCommunication();
+        _world.Set("sprk_communication", Communication,
+            Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.Matter, new EntityReference("sprk_matter", SecureMatter));
+    }
+
+    private void AssertNothingWrittenOrMoved()
+    {
+        _writes.Should().BeEmpty("the writer's write runs only inside the re-file core's change, which the refusal never reaches");
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(General, "nothing moved");
+        _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_regardingproject").Should().BeNull();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5: an UpdateRecord node filing a private message is refused with the code and writes nothing")]
+    public async Task UpdateRecordActionCore_FilingAPrivateMessage_IsRefused_AndWritesNothing()
+    {
+        APrivateCommunication();
+
+        var act = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { [ProjectBind] = $"/sprk_projects({OrdinaryProject})" }, Lookups: null,
+                ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        AssertNothingWrittenOrMoved();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5: the output orchestrator's update filing a private message is refused with the code and writes nothing")]
+    public async Task DataverseUpdateHandler_FilingAPrivateMessage_IsRefused_AndWritesNothing()
+    {
+        APrivateCommunication();
+        _writesAs = null;
+
+        var act = () => Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { [ProjectBind] = $"/sprk_projects({OrdinaryProject})" },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        AssertNothingWrittenOrMoved();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5: a field-mapping push filing a private message counts it failed with the code and writes nothing")]
+    public async Task FieldMappingPush_FilingAPrivateMessage_IsFailedWithTheCode_AndWritesNothing()
+    {
+        APrivateCommunication();
+
+        var (updated, failed, _, errors, _) = await Push(ProjectBind, $"/sprk_projects({OrdinaryProject})", Scopes());
+
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.Error.Should().Contain(RecordOwnerRefusal.PrivateMessageNotFileable);
+        AssertNothingWrittenOrMoved();
+    }
+
+    [Fact(DisplayName = "fm 056 Q5 must not fire: the same UpdateRecord node filing of an ordinary communication is written")]
+    public async Task UpdateRecordActionCore_FilingAnOrdinaryCommunication_IsWritten()
+    {
+        AnOrdinaryCommunication();
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { [ProjectBind] = $"/sprk_projects({OrdinaryProject})" }, Lookups: null,
+                ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        _writes.Should().ContainSingle();
     }
 
     // ── move OUT of Secure ────────────────────────────────────────────────────────────────────────────────────────
@@ -423,8 +502,11 @@ public sealed class RefileWriterBindShapeTests
         // update planner reads the row's pair once per child whose payload writes an agreement lookup — one more O(1) read, still
         // no pass over anything filed under it (asserted above).
         _world.RowReads.Should().Be(count, "the planner's one row read per child, nothing more");
-        ((double)total / count).Should().BeLessThanOrEqualTo(6,
-            "a no-op child costs its isolation read, its reparent's row read, the pair planner's row read and its write — not a pass");
+        // fm task 056 (owner 2026-11-22, Q5: a private message is never filed): the private-message guard reads each child's
+        // context references once before its write (the column metadata it needs is cached per connection) — one more O(1) read.
+        ((double)total / count).Should().BeLessThanOrEqualTo(7,
+            "a no-op child costs its isolation read, its private-message read, its reparent's row read, the pair planner's row read "
+            + "and its write — not a pass");
     }
 
     [Fact(DisplayName = "#2091 r4: a field-mapping push rule whose planned bind writes a different filing lookup than the rule names is refused, and nothing is written")]
@@ -990,7 +1072,7 @@ public sealed class RefileWriterBindShapeTests
             .AddSingleton<IRecordOwnershipResolver>(Resolver())
             .AddSingleton(_threads.Object)
             .AddSingleton(rights ?? FullAccessRights())
-            .AddSingleton(entities ?? EntitySetNameFixtures.Service())
+            .AddSingleton(entities ?? EntitySetNameFixtures.Mock().AnsweringTheGuardFrom(q => _world.Answer(q)).Object)
             .AddScoped(_ => Reconciler())
             .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true })
             .GetRequiredService<IServiceScopeFactory>();
@@ -1000,7 +1082,7 @@ public sealed class RefileWriterBindShapeTests
 
     private DataverseUpdateHandler Handler(IGenericEntityService? entities = null) =>
         new(
-            _write.Object, entities ?? new Mock<IGenericEntityService>().Object, Restamper(), Resolver(),
+            _write.Object, entities ?? new Mock<IGenericEntityService>().AnsweringTheGuardFrom(q => _world.Answer(q)).Object, Restamper(), Resolver(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance, Reconciler());
 
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
@@ -1058,7 +1140,7 @@ public sealed class RefileWriterBindShapeTests
 
     private Mock<IGenericEntityService> AppOnlyReaderMock()
     {
-        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
+        var entities = SecureChildShareWorld.EntitiesOver(() => _world).WithPrivateContextColumns();
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, CancellationToken _) => $"{table}s");
         return entities;

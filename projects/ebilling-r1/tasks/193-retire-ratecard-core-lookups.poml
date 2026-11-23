@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="193" project="ebilling-r1">
+  <metadata>
+    <title>Retire sprk_ratecard's core-record lookups (sprk_matter, sprk_project, sprk_workassignment): solution source, schema script, docs, and a guarded dev delete</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148) follow-up; added 2026-11-23 (owner decision relayed by uac-r2 during 117)</phase>
+    <gate>Owner's go typed in the ebilling-r1 session before the build starts, and a second one before the dev -Apply; uac-r2 reviews the PR before merge; uac-r2 notices before and after the dev -Apply</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Destructive dev schema change (three relationships and their lookup columns) plus SpaarkeMaster solution source edits.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical removal with an exact reference (015's retirement of sprk_invoicestatus, and 124's key retirement); the safety lives in the script's refusals.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits src/dataverse/solutions/SpaarkeMaster/** (serial only, project CLAUDE.md §3, 2026-10-15 pipeline rule).</parallel-reason>
+    <deps>085</deps>
+    <tags>dataverse, solution, schema, deletion, provisioning, coordination</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Task 085 keyed rate cards to the Procedure Version; no code reads or writes the card's three core-record lookups any more (notes/085-ratecard-procedure-version.md:7). They still exist on dev as RemoveLink relationships (DEF-027, #2132), so uac-r2's core-record delete planner reaches cards through them and has to keep a rate-card row (core-record-delete-design §12). On 2026-11-23 the owner told uac-r2: "Yes do this: Remove those columns as a separate schema task." This task removes them everywhere.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse schema scripts under scripts/ebilling, SpaarkeMaster solution source and Import-SolutionScoped.ps1.</role>
+
+  <goal>No solution source, schema script, doc, test or fixture names sprk_ratecard.sprk_matter, sprk_project or sprk_workassignment or their three relationships; dev has none of them; a new environment does not re-create them; provisioning-r1 knows that other environments lose them only through a SpaarkeMaster upgrade import; uac-r2 can drop the rate-card row from its design §12.</goal>
+
+  <context>
+    <background>uac-r2's read-only inventory (2026-11-23): dev holds 0 sprk_ratecard rows; src/server greps clean. Still naming the columns: SpaarkeMaster sprk_ratecard Entity.xml (3 attributes); the main form {da801593-…} and its _managed copy (3 controls); SavedQuery {de71004e-…} (3 cells, 3 attributes); Other/Relationships.xml and Relationships/sprk_Matter.xml, sprk_Project.xml, sprk_WorkAssignment.xml (sprk_matter_ratecard_matter, sprk_project_ratecard_project, sprk_workassignment_ratecard_workassignment); scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1:431-435 (Add-Lookup; without this edit a new environment re-creates them); scripts/README.md:1858; docs/data-model/sprk_ratecard.md. Re-grep at HEAD, including tests and fixtures. Reference: 015 (notes/015-retire-invoicestatus.md, Remove-EbillingInvoiceStatus.ps1) for the guarded delete script.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner, 2026-11-23">Only these three columns and their three relationships. sprk_firm, sprk_procedureversion and sprk_sourcedocument stay.</constraint>
+    <constraint source="project §5">The dev delete is destructive: the script has -WhatIf (default), -Apply and -Verify. -Apply refuses if any sprk_ratecard row holds a value in any of the three columns, takes the columns off the form and view and publishes, deletes the three relationships (which removes the lookups) and publishes. -Verify confirms the three attributes and relationships are gone. -Apply runs only after the owner's go typed in the ebilling-r1 session, with uac-r2 notices before and after.</constraint>
+    <constraint source="#2833">Every Dataverse Web API call sends Consistency: Strong (route through EbillingSchema.psm1).</constraint>
+    <constraint source="import rule">Never import a solution except with scripts/Import-SolutionScoped.ps1; do not import anything into ACME. Other environments lose the columns only through a SpaarkeMaster upgrade import (an update import leaves managed columns behind): tell provisioning-r1, because it changes how 1.3.2.x is imported.</constraint>
+    <constraint source="015">Before the dev delete, check that every live reader (BFF, SPA, code pages) on dev does not select the columns (content check of the deployed source, not ancestry).</constraint>
+  </constraints>
+
+  <outputs>
+    <output type="code">SpaarkeMaster solution source (Entity.xml, form, _managed form, SavedQuery, Relationships); scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1; new scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1</output>
+    <output type="test">Pester tests for the new script's refusals (rows with values, -WhatIf writes nothing); any test or fixture that names the columns updated</output>
+    <output type="docs">docs/data-model/sprk_ratecard.md; scripts/README.md; notes/193-retire-ratecard-core-lookups.md; DEF-027 updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep over src, scripts, docs, tests and infrastructure for the three relationship names and for sprk_ratecard's three core columns finds nothing (bin/obj excluded; history notes allowed).</criterion>
+    <criterion testable="true">The schema script no longer adds the lookups; a fresh run against a test model adds none.</criterion>
+    <criterion testable="true">The delete script refuses with any row holding a value; -WhatIf writes nothing; -Verify passes on dev after -Apply (recorded).</criterion>
+    <criterion testable="true">uac-r2 reviewed the PR; uac-r2 notices before and after -Apply; provisioning-r1 told; the owner's go recorded.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

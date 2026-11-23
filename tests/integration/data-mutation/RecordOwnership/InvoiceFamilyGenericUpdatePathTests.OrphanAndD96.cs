@@ -71,7 +71,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                     {
                         // Master merge (#2257): a person's run writes its output mapping AS that person (playbookActsAs).
                         await Handler(app!).UpdateAsync(
-                            table, id, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, ct, playbookActsAs);
+                            table, id, fields, Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.None, maxRetries: 1, ct, playbookActsAs);
                         return new PathOutcome(null, null);
                     }
                     catch (RecordOwnerUnresolvedException refused)

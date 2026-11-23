@@ -60,6 +60,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication.Access;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
 
@@ -1747,6 +1748,15 @@ public static class RecordOwnerRefusal
     /// (2) Extension — one more code in the set every create and Repair already render. (3) Cost of doing nothing — a refused
     /// contact would carry a code naming the wrong cause, and the repair pass could not tell it from a refusal it need not retry.</remarks>
     public const string CustomerContactTeamUnresolved = "record_owner_customer_contact_team_unresolved";
+
+    /// <summary>
+    /// fm task 056 (owner, 2026-11-22, Q5): the change would file a private message (a communication holding a context reference)
+    /// or move it to another thread. A private message always stays between its two participants. Nothing was written. HTTP 409.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — the codes above, none of which names this rule.
+    /// (2) Extension — one more code in the set every re-file writer already renders. (3) Cost of doing nothing — a refused filing
+    /// would carry a code naming an owner fault, which a client cannot tell from a retryable one.</remarks>
+    public const string PrivateMessageNotFileable = "sdap.communication.private.not_fileable";
 }
 
 /// <summary>
@@ -2111,7 +2121,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
          // isolation). A rule set is filed under its Procedure or core record only; the document link is provenance, not parentage.
          // ebilling-r1 task 116: the column stays until Remove-EbillingSourceDocumentColumns.ps1 runs with -Delete (after this BFF is
          // deployed); rows can still hold it until then. Remove this entry in the same change as that -Delete run, not before.
-         ("sprk_ruleset", "sprk_sourcedocument")], CitationComparer.Instance);
+         ("sprk_ruleset", "sprk_sourcedocument"),
+         // task 056 (field-mapping-server-write-path-r1). A private message's context reference decides where its two participants
+         // see it, never filing, ownership or secure-if-any. It is deliberately NOT a Secure-only lookup, because both participants
+         // are checked at send.
+         ("sprk_communication", PrivateContextColumns.Matter),
+         ("sprk_communication", PrivateContextColumns.Project),
+         ("sprk_communication", PrivateContextColumns.WorkAssignment)], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
     public static bool IsCitation(string? table, string? column) =>
@@ -2635,6 +2651,42 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         // #2143 round 6: a change that moves the message to a thread filed under other parents changes what it is filed under.
         changesAParent |= !threadBefore.ToHashSet().SetEquals(threadAfter);
+
+        // fm task 056 (owner, 2026-11-22, Q5): a private message — a communication holding a context reference
+        // (PrivateContextColumns) — always stays between its two participants: it is never filed and never moved to another
+        // thread, by any writer. Asked on the row read above, before anything is written. A reference column absent from
+        // metadata is absent from the row (it was read with every column), so no private message exists and the check passes.
+        if (string.Equals(request.EntityLogicalName.Trim(), "sprk_communication", StringComparison.OrdinalIgnoreCase)
+            && Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.IsPrivate(current)
+            && (changesAParent || movesALineageLookup || MovesAFilingLink(request, current)))
+        {
+            _logger.LogWarning(
+                "Refusing to re-file {Entity} {RecordId}: it is a private message, which is never filed or moved to another thread "
+                + "({Code}). The change was NOT written.",
+                request.EntityLogicalName, request.RecordId, RecordOwnerRefusal.PrivateMessageNotFileable);
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.PrivateMessageNotFileable,
+                "a private message stays between its two participants: it is never filed to a record and never moved to another thread");
+        }
+
+        // Any filing link the change sets, moves or clears: a typed regarding lookup (one that files under no ownership parent
+        // included, from ParentChanges or RegardingLinksSet), the ADR-024 pair's type, or the thread. A value equal to the one the
+        // row holds, or a clear of a column the row does not hold, moves nothing.
+        static bool MovesAFilingLink(RecordReparent change, Entity row)
+        {
+            static Guid Held(Entity on, string column) =>
+                on.GetAttributeValue<EntityReference>(
+                    Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(column))?.Id ?? Guid.Empty;
+
+            return change.ChangesARegardingLink(row)
+                || change.RegardingLinksSet.Any(link => link.Value.Id != Held(row, link.Key))
+                || change.ParentChanges.Any(link =>
+                    (RecordReparent.IsRegardingColumn(link.Key)
+                     || RecordReparent.IsThreadFilingColumn(change.EntityLogicalName, link.Key)
+                     || string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(link.Key),
+                         CoreAncestorResolver.RegardingRecordTypeColumn, StringComparison.OrdinalIgnoreCase))
+                    && (link.Value?.Id ?? Guid.Empty) != Held(row, link.Key));
+        }
 
         if (!changesAParent)
         {

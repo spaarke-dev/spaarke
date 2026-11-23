@@ -726,7 +726,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "sprk_communication", RefiledEmail,
             Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter:D})" }),
             _user, _world.Resolver(), Restamper(), Children(ThreadsOverTheDirectory()), HttpContextOfCaller(),
-            NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
+            NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true, appOnlyEntities: GuardReaderOverTheWorld());
 
     /// <summary>
     /// The REAL thread resolver over the resolver's directory: rows are read from it, a matter's default thread is found by its

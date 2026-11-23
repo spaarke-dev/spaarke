@@ -5,9 +5,10 @@
 
 import * as React from 'react';
 import type { IWizardShellHandle } from '@spaarke/ui-components';
-import type { AdjustmentMethod, ApprovalState, InvoiceDecisionApi } from '../../services/decisionApi';
+import type { AdjustmentMethod, ApprovalState, FirmNoticeKind, InvoiceDecisionApi } from '../../services/decisionApi';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
 import type { InvoiceOutcome } from '../../services/decisionModel';
+import { EMPTY_NOTICES, type NoticeEntries, type NoticeEntry } from '../../services/noticeModel';
 import type { DecisionLocks } from './decisionLocks';
 
 export interface WizardForm {
@@ -26,6 +27,10 @@ export interface WizardForm {
   note: string;
   /** The server refused the note (400 `ebilling.note_too_long` / `note_invalid_characters`): its sentence, shown under the Note box until the note is edited. */
   noteError: string | null;
+  /** Task 132ui: the notice to the firm for each kind (Reject asks `InvoiceRejected`, Return `ReturnedToFirm`); each keeps its own draft, edits and send choice. */
+  notices: NoticeEntries;
+  /** Task 132ui: the server refused the notice (400 `ebilling.notice_refused`): its sentence, shown under the notice fields until the notice is edited. */
+  noticeError: string | null;
   /**
    * A decision that was saved in part (503 incomplete), or that got no answer at all (status 0), is repeated with the SAME request: the server
    * keeps the first note (reject and return drop an edited one on a repeat without a word), so the reason and the note are read-only from then
@@ -47,6 +52,8 @@ export const EMPTY_FORM: WizardForm = {
   adjNote: '',
   note: '',
   noteError: null,
+  notices: EMPTY_NOTICES,
+  noticeError: null,
   locked: false,
   // The wizard gives each opening its own id (or the locked one); an id here would be shared by every opening.
   adjId: '',
@@ -65,6 +72,10 @@ export interface WizardCtx {
   /** Re-read the review (after an adjustment is added or removed); resolves with the review now shown, or null when the re-read failed. */
   reload: () => Promise<InvoiceReview | null>;
   onOutcome: (outcome: InvoiceOutcome, handle: IWizardShellHandle) => void;
+  /** Task 132ui: ask for the draft of a kind. Once per kind per opened wizard; `retry` asks again after a failure. */
+  loadNotice: (kind: FirmNoticeKind, retry?: boolean) => void;
+  /** Task 132ui: change one kind's notice. A reviewer's edit (`edited`) also drops the server's refusal of the old text. */
+  patchNotice: (kind: FirmNoticeKind, patch: Partial<NoticeEntry>, edited?: boolean) => void;
   /** The requests locked until they finish (page level: they survive closing and reopening the wizard). */
   locks: DecisionLocks;
 }

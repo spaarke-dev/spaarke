@@ -123,6 +123,47 @@ public class RecordOwnershipResolverDirectUnfileTests
         directory.Assignments.Should().BeEmpty();
     }
 
+    // ── fm task 056: a private message's context reference is a citation ─────────────────────────────────────────────────
+
+    [Fact]
+    public void ARowWithATypedRegardingAndAReferenceToAnotherMatter_HasTheRegardingAsItsOnlyParent()
+    {
+        var row = new Entity("sprk_communication", MessageId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            [PrivateContextColumns.Matter] = new EntityReference("sprk_matter", OtherMatterId),
+        };
+        var onlyTheRegarding = new[] { new RecordOwnershipParent("sprk_matter", MatterId) };
+
+        RecordOwnershipContext.ParentsOf(row).Should().Equal(onlyTheRegarding);
+        RecordOwnershipContext.OrderedParentsOf(row).Should().Equal(onlyTheRegarding);
+        RecordOwnershipContext.SecureOnlyParentsOf(row).Should().BeEmpty();
+        RecordOwnershipResolver.OwnershipParentColumnsOf(row).Keys.Should().Equal("sprk_regardingmatter");
+    }
+
+    /// <summary>Owner 2026-11-22 (Q5) superseded the earlier answer (an unfile to the Direct team): a private message is never
+    /// filed and its filing links are never changed, so the unfile is refused before anything is written and the reference never
+    /// files it under the record it is about (RecordOwnershipResolverPrivateMessageNeverFiledTests).</summary>
+    [Fact]
+    public async Task Unfile_OfAPrivateMessage_IsRefused_AndNeverGoesToTheTeamOfTheRecordItIsAbout()
+    {
+        var directory = World().WithOrdinaryRoot("sprk_matter", OtherMatterId)
+            .WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            [PrivateContextColumns.Matter] = new EntityReference("sprk_matter", OtherMatterId),
+        });
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(Unfile(), Applies(directory, () => applied = true),
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
+        resolution.DirectUnfile.Should().BeNull();
+        applied.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty("the reference never files the message under the record it is about");
+    }
+
     // ── Today's answer ───────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]

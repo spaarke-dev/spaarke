@@ -260,7 +260,7 @@ public class PlaybookRunIdentityTests
     }
 
     // ── Source guard: the System marker is set only by the entries with no person in the run ────────────────────────
-    // Fix round 1 (K4): per call site, not per file. Every place that SETS the marker is one of the four listed entries, each
+    // Fix round 1 (K4): per call site, not per file. Every place that SETS the marker is one of the three listed entries, each
     // exactly once; nothing casts, parses or reflects a value into the enum; and no marker value travels through a variable
     // the guard cannot see (a local, field or parameter of the enum type, or a StartedBy assigned anything but a literal
     // marker or one of the listed copies of an already-decided marker).
@@ -271,7 +271,6 @@ public class PlaybookRunIdentityTests
         ["Services/Ai/PlaybookSchedulerJob.cs"] = "scheduled notification runs",
         ["Services/Ai/AppOnlyAnalysisService.cs"] = "Service Bus document-profile / email-analysis jobs (routed playbook)",
         ["Services/Ai/Insights/InsightsOrchestrator.cs"] = "Service Bus insights-ingest job (routed universal-ingest)",
-        ["Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs"] = "Service Bus invoice-extraction job (configured playbook)",
     };
 
     /// <summary>The enum and THE rule (<see cref="PlaybookRunWriteIdentity"/>): the only file that declares a parameter of the type.</summary>
