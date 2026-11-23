@@ -92,3 +92,7 @@ Known limits:
 - **K3.** The handler repeats (`OfficeEndpoints.cs` save and quick-create) cannot be reached over HTTP, because the filters answer first. They share the same predicate and parse, so they cannot drift.
 - **K4.** The retirement test was renamed to `OfficeSave_ToAnInvoiceTarget_IsRefusedWithOffice023`. "Never queued" is proven by `OfficeInvoiceTargetRefusalContractTests`, whose record of touched boundaries is empty.
 - **K1.** The retirement source scan matches literal shapes only. A create through a constant or a variable would slip past, but only if someone writes it deliberately.
+
+## Peer check (word-add-in-r1, 2026-11-23)
+
+No objection to 98801e9b9f. The live add-in never sends an invoice save target and never calls quickcreate/invoice; slice C removed both, and that has been live since 148ec4dec0. The ribbon's Quick Save drops an Invoice prediction, and any prediction with canFile=false. The pane does not read the OFFICE_002 detail text. word-add-in-r1 range-checks the change once it is on the dev BFF; tell them when it is deployed.
