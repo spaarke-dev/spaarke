@@ -186,3 +186,12 @@ check: dropping the `goneSurfaces` condition makes the last negative case fail.
 Other sites with the same loading-modal -> different-modal swap: `src/solutions/WorkspaceLayoutWizard/src/App.tsx:1019` (a loading or
 error `SprkModal`, then `WizardShell`). Fixed by the same change (SprkModal-level). Not found elsewhere in a pattern search of
 `return <SprkModal|WizardShell` sites; a host that swaps through some other construct would not show in that search.
+
+Retry case (review F1, same PR): in `RuleWizard`'s catalog gate, "Try again" was rendered only while the load had failed, so clicking it
+(status back to loading) unmounted the focused button and focus fell to `<body>`; the wizard modal that then replaced the loading modal
+found no opener to inherit, and Cancel left focus on `<body>`. While a retry loads, the button now stays mounted with `disabledFocusable`
+(same pattern as the classification Save button), so the focused element stays connected and the handover passes the original opener on.
+The first open still shows no "Try again" button. `WorkspaceLayoutWizard/src/App.tsx` (~1015-1027) has the loading to `WizardShell` swap but
+no retry control (the error state is plain text), so it has no unmounting-focused-button case and needed no change. Test:
+`RuleWizardFocusReturn.test.tsx` "catalog fails, Try again (focused), then Cancel" asserts the button stays connected, focused and
+`aria-disabled` during the retry, then focus on "New rule"; it fails on the previous `RuleWizard.tsx` (button disconnected).
