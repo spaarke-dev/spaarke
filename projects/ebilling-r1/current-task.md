@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-23 (050b, 124, 086 and 123 complete). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-23 (117 and 193 complete; master PR next). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,16 +10,13 @@
 
 ## Quick recovery
 
-- **Active task: 193** (FULL, sonnet @ high; owner go to build typed 2026-11-23, "Yes proceed with those items"). Branch `task/ebilling-193` from 7a6c530000.
-  - Done so far: one Opus pass, fix round 1 (9e23998f31), a scoped re-check (one F2 plus K items).
-  - Fix round 2 done (46a89e55f8); sent to uac-r2 for review 2026-11-23.
-  - Next: uac-r2 reviews the branch before merge.
-  - The dev -Apply (live column delete) needs a SECOND owner go, plus uac-r2 notices before and after.
-  - Other environments lose the columns only through a SpaarkeMaster upgrade import: tell provisioning-r1 at merge.
+- **Active: master PR** (owner 2026-11-23: "you can merge when ready").
+  - Steps: merge origin/master into work, run the filtered tests, open the PR (known limits include 134's K2), and send it to ontology-r1.
+  - Merge as a merge commit once Router and Client lint are green.
 - **Exact next actions (checkpoint 2026-11-23):**
-  2. Wait for uac-r2's review of 193 at 46a89e55f8.
-  3. After uac-r2 approves, merge 193 into work and tell provisioning-r1 about the upgrade-import requirement.
-  4. Ask the owner for the dev -Apply go.
+  1. Merge origin/master into work/ebilling-r1, then run the filtered BFF tests, ArchTests and vitest.
+  2. Open the PR and send it to ontology-r1, with the 050b PR owed.
+  3. Merge on green.
 - **117 ✅ just merged (f4a272136c).** Apply stays off until 079 (owner OK). 096 and 121 stay gated.
 - **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
 - `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
@@ -30,6 +27,12 @@
 - **Uncommitted files:** none, after the 134 bookkeeping commit.
 
 ## Recently done (detail in the notes and git)
+
+- **193 ✅** merged into work c21bde55a2 (branch `task/ebilling-193`, tip 46a89e55f8). sprk_ratecard's sprk_matter, sprk_project and sprk_workassignment lookups and their 3 relationships were retired from the source, the schema scripts and the docs.
+  - Reviews: Opus pass and 2 fix rounds; uac-r2 APPROVED.
+  - Dev -Apply ran 2026-11-23 on the owner's typed go, with uac-r2 notices before and after (uac-r2 confirmed it independently). -Verify passed.
+  - provisioning-r1 told: other environments lose the columns only through a SpaarkeMaster MANAGED UPGRADE, with the report mode run first on each target.
+  - Notes: `notes/193-retire-ratecard-core-lookups.md`.
 
 - **117 ✅** merged into work f4a272136c (branch `task/ebilling-117`, tip becd5b983c). RecordRuleSetRetireJob (O-17 sweep):
   - What it does: retires unlinked record-scoped Billing rule sets (policies switched Off first) and deletes orphan assignment rows.
@@ -52,7 +55,7 @@
 
 ## Open work
 
-- **Build:** 193 (in progress), 096 (gated, see above), 121 (waits for uac-r2 191).
+- **Build:** 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
   - 164: the live `-Apply` needs the owner's go.
   - 089 and 050a: owner questions are in their notes.
