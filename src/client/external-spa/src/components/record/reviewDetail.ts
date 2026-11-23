@@ -7,6 +7,11 @@
  * column carries. The gate reads the raw number, never the display label ("In Review" is a label an owner can rename). It is
  * defence in depth: the BFF also returns the column as null unless the row is In Review (`ExternalInvoiceReviewDetail`).
  *
+ * RAW VALUE SHAPE. Rows read through the module fetch seam carry an option-set column as the SDK object
+ * `{ "value": 1, "extensionData": null }`, not a bare number (the typed route DTOs and tests may pass a number or a digit
+ * string). Both the status and the detail are read through `rawWholeNumberOf` (`utils/rawWholeNumber`), which accepts all
+ * three forms and returns null for anything else (a label, a non-integer, another object), so the gate stays fail-closed.
+ *
  * THE MAP (design §7, owner-approved 2026-11-05, verbatim; ebilling's option values are never reused):
  *   659490000  Waiting for billing terms              (+ explanation)
  *   659490001  Billing terms could not be checked     (+ explanation)
@@ -20,6 +25,7 @@
  *
  * Pure: no React, no I/O, no BFF import.
  */
+import { rawWholeNumberOf } from '../../utils/rawWholeNumber';
 import type { DetailFieldDisplay } from '../detail/RecordDetailFields';
 
 /** The column the gate reads (on the invoice module's `ReadableColumns`; ebilling owns that entry). */
@@ -60,23 +66,16 @@ const OPTIONS: Readonly<Record<number, { text: string; explanation: string }>> =
   },
 };
 
-/** An option-set value as a whole number: a number, or a string of digits. Anything else (a label, an object) is not one. */
-function wholeNumberOf(raw: unknown): number | null {
-  if (typeof raw === 'number') return Number.isInteger(raw) ? raw : null;
-  if (typeof raw === 'string' && /^\d{1,12}$/.test(raw.trim())) return Number(raw.trim());
-  return null;
-}
-
 /**
  * The review detail to show for an invoice with this raw `statuscode` and raw `sprk_reviewdetail`, or `null` (blank).
  * Blank for: any status other than 1 (including a missing or unreadable one: fail closed), and an unknown value.
  */
 export function reviewDetailOf(statuscode: unknown, value: unknown): ReviewDetailDisplay | null {
-  if (wholeNumberOf(statuscode) !== IN_REVIEW_STATUSCODE) return null;
+  if (rawWholeNumberOf(statuscode) !== IN_REVIEW_STATUSCODE) return null;
   if (value === null || value === undefined || value === '') {
     return { text: null, explanation: BLANK_IN_REVIEW_EXPLANATION };
   }
-  const option = OPTIONS[wholeNumberOf(value) ?? -1];
+  const option = OPTIONS[rawWholeNumberOf(value) ?? -1];
   return option ? { text: option.text, explanation: option.explanation } : null;
 }
 
