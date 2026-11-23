@@ -269,7 +269,7 @@ public sealed class StoredFileService
 
         var row = new Entity(StoredFileSchema.Entity, spec.FileId)
         {
-            [StoredFileSchema.Name] = spec.Name.Length <= StoredFileSchema.NameMaxLength ? spec.Name : spec.Name[..StoredFileSchema.NameMaxLength],
+            [StoredFileSchema.Name] = StoredFileSchema.StoredName(spec.Name),
             [StoredFileSchema.Purpose] = new OptionSetValue((int)spec.Purpose),
             [StoredFileSchema.FirmVisible] = spec.FirmVisible,
             [StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.NotYetServable),

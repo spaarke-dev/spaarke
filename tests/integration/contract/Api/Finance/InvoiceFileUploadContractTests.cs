@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Xunit;
@@ -97,20 +98,34 @@ public sealed class InvoiceFileUploadContractTests
         ["empty file", 400, "ebilling.files.file_empty", false],
         ["over the limit", 413, "ebilling.files.file_too_large", false],
         ["inactive invoice", 409, "ebilling.invoice.inactive", false],
+        ["submission files pending", 409, "ebilling.invoice.files_pending", true],
+        ["file limit reached", 409, "ebilling.files.limit_reached", false],
         ["store failed", 503, "file_store_unavailable", true],
         ["eBilling off", 503, "ebilling.disabled", false],
     ];
 
-    [Theory(DisplayName = "Contract: the route's own refusals carry errorCode (and Retry-After only on the store's 503)")]
+    [Theory(DisplayName = "Contract: the route's own refusals carry errorCode (and Retry-After only on the store's 503 and files_pending)")]
     [MemberData(nameof(RouteRefusals))]
     public async Task RouteRefusal_Shape(string when, int status, string errorCode, bool retryAfter)
     {
         await using var host = await Host.StartAsync(ebillingEnabled: when != "eBilling off", maxSubmissionFileSizeMb: 1);
         U.SeedInvoice(host, when == "inactive invoice" ? InvoiceLifecycleStatus.Rejected : InvoiceLifecycleStatus.InReview);
         U.GrantWrite(host);
+        var invoice = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId);
         if (when == "store failed")
         {
             host.Rig.Gateway.FailOp["create"] = new Azure.RequestFailedException(500, "storage fault");
+        }
+        else if (when == "submission files pending")
+        {
+            host.Rig.SeedFile(Guid.NewGuid(), invoice, "%PDF-1.7"u8.ToArray(), StoredFileStatus.NotYetServable, StoredFilePurpose.InvoicePdf);
+        }
+        else if (when == "file limit reached")
+        {
+            while (host.Rig.Dataverse.Rows.Count < Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.MaxListedFiles)
+            {
+                host.Rig.SeedFile(Guid.NewGuid(), invoice, Bytes, StoredFileStatus.Servable, StoredFilePurpose.InvoiceSupportingFile);
+            }
         }
 
         HttpContent content = when switch
@@ -128,6 +143,47 @@ public sealed class InvoiceFileUploadContractTests
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
         body["errorCode"]!.GetValue<string>().Should().Be(errorCode, when);
         (response.Headers.RetryAfter is not null).Should().Be(retryAfter, when);
+    }
+
+    public static IEnumerable<object[]> OwnerRefusals =>
+    [
+        [RecordOwnerRefusal.NoOwnerSource, 409],
+        [RecordOwnerRefusal.DirectTeamUnavailable, 503],
+    ];
+
+    [Theory(DisplayName = "Contract (fix round 1): no owner resolves for the file → the platform's owner refusal, reasonCode the refusal code: 409, or 503 for its one transient code; nothing stored")]
+    [MemberData(nameof(OwnerRefusals))]
+    public async Task OwnerRefusal_Shape(string refusalCode, int status)
+    {
+        await using var host = await Host.StartAsync();
+        U.SeedInvoice(host);
+        U.GrantWrite(host);
+        host.Rig.OwnerAnswer = RecordOwnerResolution.Refused(refusalCode, "no owner");
+
+        var response = await host.PostAsync(InvoiceId, U.OneFile(Bytes));
+
+        ((int)response.StatusCode).Should().Be(status, refusalCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        body["reasonCode"]!.GetValue<string>().Should().Be(refusalCode);
+        body["errorCode"].Should().BeNull();
+        host.Rig.Dataverse.Writes.Should().Be(0, "no row");
+    }
+
+    [Fact(DisplayName = "Contract (fix round 1): the filter found Write but the upload's own rights check got no answer → 403 reasonCode system_failure (retry), never the 404")]
+    public async Task BackstopRefusal_Shape()
+    {
+        await using var host = await Host.StartAsync();
+        U.SeedInvoice(host);
+        U.GrantWrite(host);
+        host.Rig.Probe.SingleQuestionAnswersNone.Add(("sprk_invoices", InvoiceId));
+
+        var response = await host.PostAsync(InvoiceId, U.OneFile(Bytes));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        body["reasonCode"]!.GetValue<string>().Should().Be("sdap.access.error.system_failure");
+        body["errorCode"].Should().BeNull();
+        U.AssertNothingStored(host);
     }
 
     public static IEnumerable<object[]> FilterRefusals =>

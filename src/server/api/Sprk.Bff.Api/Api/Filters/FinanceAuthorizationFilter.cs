@@ -201,14 +201,14 @@ public enum FinanceDenial
     UniformNotFoundFailClosed,
 
     /// <summary>
-    /// The uniform 404 for a denial about the RECORD only (the caller holds no such rights on it, it does not exist, no resolvable id),
-    /// and <see cref="Forbidden"/>'s 403 with its <c>reasonCode</c> for a refusal about the CALLER or the system: a step-0 refusal
-    /// (<c>internal_callers_only</c>; <c>system_failure</c> on a step-0 fault) and every system failure, including a record-rights answer
-    /// Dataverse did not complete (<see cref="AccessSnapshot.Faulted"/>) whose rights do not hold the operation. For a route whose wire
-    /// contract tells "no such record" (404, do not retry) apart from "could not decide" (403 <c>system_failure</c>, retry): the internal
-    /// supporting-file upload <c>POST /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 123,
-    /// <c>projects/ebilling-r1/notes/123-upload-contract.md</c>). A table-privilege check in this mode answers as in
-    /// <see cref="Forbidden"/>. Opt-in: every other route keeps its mode.
+    /// <see cref="Forbidden"/>'s 403 with its <c>reasonCode</c> for exactly two reasons, a step-0 refusal (<c>internal_callers_only</c>)
+    /// and a system failure (<c>system_failure</c>: a step-0 fault, a check that threw, a record-rights answer Dataverse did not complete
+    /// (<see cref="AccessSnapshot.Faulted"/>) whose rights do not hold the operation); the uniform 404 for EVERY other denial (the caller
+    /// holds no such rights on the record, it does not exist, no resolvable id, a table privilege, any reason added later). Task 123 fix
+    /// round 1 inverted it to this allow-list of 403s, so a new deny reason can never expose itself. For a route whose wire contract tells
+    /// "no such record" (404, do not retry) apart from "could not decide" (403 <c>system_failure</c>, retry): the internal supporting-file
+    /// upload <c>POST /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 123, <c>projects/ebilling-r1/notes/123-upload-contract.md</c>),
+    /// the only route that uses it. Opt-in: every other route keeps its mode.
     /// </summary>
     UniformNotFoundForRecord,
 }
@@ -793,10 +793,11 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             ? InvoiceSubmissionHttp.ReadFault(InvoiceSubmissionService.ReadUnavailable())
             : UniformRecordNotFound(httpContext),
 
-        // Task 123: only a denial about the record is the uniform 404; a step-0 refusal and a system failure keep their 403 reasonCode.
-        FinanceDenial.UniformNotFoundForRecord => reasonCode is InsufficientRightsReasonCode or NoTargetReasonCode
-            ? UniformRecordNotFound(httpContext)
-            : ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier),
+        // Task 123 (fix round 1, inverted): only a step-0 refusal and a system failure keep their 403 reasonCode; every other denial,
+        // a reason added later included, is the uniform 404, so no new reason can ever expose itself on this route.
+        FinanceDenial.UniformNotFoundForRecord => reasonCode is InternalCallersOnlyReasonCode or SystemFailureReasonCode
+            ? ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier)
+            : UniformRecordNotFound(httpContext),
 
         _ => ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier),
     };

@@ -290,6 +290,13 @@ internal sealed class RecordingRightsProbe : CallerRecordAccessProbe
     /// <summary>Records the probe answers as "unknown" (a 429, a 5xx, an OBO or WhoAmI failure): the gate variant reads it as None, the OrUnknown variant keeps it null.</summary>
     public HashSet<(string Set, Guid Id)> Unknown { get; } = new();
 
+    /// <summary>
+    /// Task 123 fix round 1 (F1-d): records whose single rights question (<see cref="GetCallerRightsAsync"/>, under the gate variant) answers
+    /// <see cref="AccessRights.None"/>, as the production probe does for a 429, a 5xx or a token failure, while the Finance filter's access-data
+    /// seam (<c>StoredFileEndpointsTests.RigAccessDataSource</c>) still reads <see cref="Rights"/>: the filter allows, the backstop refuses.
+    /// </summary>
+    public HashSet<(string Set, Guid Id)> SingleQuestionAnswersNone { get; } = new();
+
     public void Grant(string set, Guid id, AccessRights rights) => Rights[(set, id)] = rights;
 
     /// <summary>Task 116 fix round 4 (K1): when set, the single rights question throws it (a Dataverse fault), after recording the call.</summary>
@@ -301,6 +308,11 @@ internal sealed class RecordingRightsProbe : CallerRecordAccessProbe
         if (Fault is { } fault)
         {
             return Task.FromException<AccessRights>(fault);
+        }
+
+        if (SingleQuestionAnswersNone.Contains((entitySet, recordId)))
+        {
+            return Task.FromResult(AccessRights.None);
         }
 
         return Task.FromResult(callerBearerToken is not null && Rights.TryGetValue((entitySet, recordId), out var r) ? r : AccessRights.None);
@@ -395,9 +407,13 @@ internal sealed class StoredFileDataverse
     public static FaultException<OrganizationServiceFault> NotFound() =>
         new(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217), Message = "Does Not Exist" }, new FaultReason("Does Not Exist"));
 
+    /// <summary>Task 123 fix round 1 (F1-e): runs on every retrieve by id, before it is answered (another writer's slot between two reads).</summary>
+    public Action<string, Guid>? BeforeRetrieve { get; set; }
+
     private Task<Entity> RetrieveAsync(string table, Guid id)
     {
         Calls.Enqueue($"retrieve {table} {id}");
+        BeforeRetrieve?.Invoke(table, id);
         if (RetrieveFault is { } fault)
         {
             return Task.FromException<Entity>(fault);

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using FluentAssertions;
@@ -319,20 +320,27 @@ public sealed class InvoiceFileUploadTests
         (await host.PostAsync(InvoiceId, OneFile(new byte[limit]))).StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
-    [Fact(DisplayName = "A Content-Length far over the limit → 413 before the body is parsed; nothing staged")]
+    [Fact(DisplayName = "A Content-Length far over the limit → 413 before the body is parsed (the declared length alone decides: a small valid body under it would otherwise be stored); nothing staged")]
     public async Task ContentLengthOverLimit_413()
     {
         await using var host = await Host.StartAsync(maxSubmissionFileSizeMb: 1);
         SeedInvoice(host);
         GrantWrite(host);
 
-        var response = await host.PostAsync(InvoiceId, OneFile(new byte[3 * 1024 * 1024]));
+        // Fix round 1 (F2): a VALID one-file body of a few bytes that declares 3 MB. Only the Content-Length pre-check can refuse it: the
+        // body cap and the file-length check never trip on these bytes, so without the pre-check the file is stored (201).
+        var content = OneFile(Csv);
+        await content.LoadIntoBufferAsync();
+        content.Headers.ContentLength = 3 * 1024 * 1024;
+
+        var response = await host.PostAsync(InvoiceId, content);
 
         response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.files.file_too_large");
         AssertNothingStored(host);
     }
 
-    [Fact(DisplayName = "A content type longer than the column → 400 file_required (the store's own name and type rule, decided before any write)")]
+    [Fact(DisplayName = "A content type longer than the column → 400 ebilling.files.file_required (the store's own name and type rule, decided before any write)")]
     public async Task ContentTypeTooLong_400()
     {
         await using var host = await Host.StartAsync();
@@ -342,8 +350,148 @@ public sealed class InvoiceFileUploadTests
         var response = await host.PostAsync(InvoiceId, OneFile(Csv, contentType: "text/" + new string('x', 300)));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.files.file_required");
         AssertNothingStored(host);
     }
+
+    [Fact(DisplayName = "Fix round 1 (F1-c): a multipart body with no closing boundary (truncated) → 400 ebilling.files.file_required, not a 500; nothing staged")]
+    public async Task TruncatedMultipart_400_FileRequired()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+
+        var content = new ByteArrayContent(Encoding.ASCII.GetBytes(
+            "--b0undary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"timesheet.csv\"\r\nContent-Type: text/csv\r\n\r\ndate,hours\n"));
+        content.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data; boundary=b0undary");
+
+        var response = await host.PostAsync(InvoiceId, content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.files.file_required");
+        AssertNothingStored(host);
+    }
+
+    [Fact(DisplayName = "Fix round 1 (F2): the 201 fileName is the name exactly as the row stores it (one truncation rule): a 450-character name answers the row's 400")]
+    public async Task LongName_201FileName_IsTheRowsName()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        var name = new string('n', 446) + ".csv";
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv, name));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var stored = host.Rig.Dataverse.Rows[body["fileId"]!.GetValue<Guid>()].GetAttributeValue<string>(StoredFileSchema.Name);
+        stored.Should().HaveLength(StoredFileSchema.NameMaxLength);
+        body["fileName"]!.GetValue<string>().Should().Be(stored);
+    }
+
+    // =============================================================================================================================
+    // Fix round 1: the invoice's own submission, the per-invoice limit, the post-body re-read and the backstop
+    // =============================================================================================================================
+
+    [Theory(DisplayName = "Fix round 1 (F1-a): an Invoice PDF that is not Servable (its submission still storing its files) → 409 ebilling.invoice.files_pending with Retry-After; nothing staged")]
+    [InlineData(StoredFileStatus.NotYetServable)]
+    [InlineData(StoredFileStatus.Removed)]
+    public async Task PdfNotServable_409FilesPending(StoredFileStatus pdfStatus)
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.Rig.SeedFile(Guid.NewGuid(), Invoice, "%PDF-1.7"u8.ToArray(), pdfStatus, StoredFilePurpose.InvoicePdf);
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        response.Headers.RetryAfter!.Delta.Should().Be(TimeSpan.FromSeconds(StoredFileEndpoints.UploadRetryAfterSeconds));
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.invoice.files_pending");
+        AssertNothingStored(host);
+        host.Rig.Dataverse.Rows.Should().HaveCount(1, "no row added");
+    }
+
+    [Fact(DisplayName = "Fix round 1 (F1-a, must not fire): a Servable Invoice PDF (the submission's files all stored) → 201")]
+    public async Task PdfServable_Created()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.Rig.SeedFile(Guid.NewGuid(), Invoice, "%PDF-1.7"u8.ToArray(), StoredFileStatus.Servable, StoredFilePurpose.InvoicePdf);
+        host.Rig.SeedFile(Guid.NewGuid(), Invoice, Csv, StoredFileStatus.NotYetServable, StoredFilePurpose.InvoiceSupportingFile, contentType: "text/csv");
+
+        (await host.PostAsync(InvoiceId, OneFile(Csv))).StatusCode.Should().Be(HttpStatusCode.Created,
+            "only the Invoice PDF says whether the submission is still storing; an earlier upload's orphan does not block");
+    }
+
+    [Fact(DisplayName = "Fix round 1 (F1-b): 49 files under the invoice → 201; 50 → 409 ebilling.files.limit_reached (no Retry-After), nothing staged")]
+    public async Task FileLimit_49Created_50Refused()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.Rig.SeedFile(Guid.NewGuid(), Invoice, "%PDF-1.7"u8.ToArray(), StoredFileStatus.Servable, StoredFilePurpose.InvoicePdf);
+        while (host.Rig.Dataverse.Rows.Count < StoredFileEndpoints.MaxListedFiles - 1)
+        {
+            host.Rig.SeedFile(Guid.NewGuid(), Invoice, Csv, StoredFileStatus.Removed, StoredFilePurpose.InvoiceSupportingFile, contentType: "text/csv");
+        }
+
+        (await host.PostAsync(InvoiceId, OneFile(Csv))).StatusCode.Should().Be(HttpStatusCode.Created, "49 rows: room for one more");
+        host.Rig.Dataverse.Rows.Should().HaveCount(StoredFileEndpoints.MaxListedFiles);
+        var storage = host.Rig.Gateway.StorageCalls;
+        var writes = host.Rig.Dataverse.Writes;
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        response.Headers.RetryAfter.Should().BeNull("not retryable");
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.files.limit_reached");
+        host.Rig.Gateway.StorageCalls.Should().Be(storage, "nothing staged");
+        host.Rig.Dataverse.Writes.Should().Be(writes, "no row written");
+        host.Rig.Dataverse.Rows.Should().HaveCount(StoredFileEndpoints.MaxListedFiles);
+    }
+
+    [Fact(DisplayName = "Fix round 1 (F1-e): the invoice becomes Inactive while the body is read → 409 ebilling.invoice.inactive from the post-body read; nothing staged")]
+    public async Task InactiveAfterTheBody_409_NothingStaged()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        var invoiceReads = 0;
+        host.Rig.Dataverse.BeforeRetrieve = (table, id) =>
+        {
+            if (table == StoredFileSchema.InvoiceTable && id == InvoiceId && ++invoiceReads == 2)
+            {
+                SeedInvoice(host, InvoiceLifecycleStatus.Rejected); // between the first read and the post-body read
+            }
+        };
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.invoice.inactive");
+        invoiceReads.Should().Be(2, "read before the body and again after it");
+        AssertNothingStored(host);
+    }
+
+    [Fact(DisplayName = "Fix round 1 (F1-d): the filter finds Write but the upload's backstop gets no rights (an unanswered question) → 403 system_failure (retry), not the 404; nothing staged")]
+    public async Task BackstopRefuses_403SystemFailure_NothingStaged()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.Rig.Probe.SingleQuestionAnswersNone.Add(("sprk_invoices", InvoiceId));
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>().Should().Be("sdap.access.error.system_failure");
+        host.Rig.Probe.Calls.Should().ContainSingle(c => c.Set == "sprk_invoices" && c.Id == InvoiceId, "the backstop asked (the filter allowed)");
+        AssertNothingStored(host);
+    }
+
+    private static readonly StoredFileParent Invoice = new(StoredFileParentKind.Invoice, InvoiceId);
 
     // =============================================================================================================================
     // Store failures: 503 with Retry-After, nothing Servable left
