@@ -42,6 +42,20 @@
   -->
 
 
+  <!-- spaarkeai-mcp-bff-api-r1 task 011 (FR-09): the signal worklist golden contract baselines. They live on the KEEP path
+       tests/integration/contract/ but are a part of SignalReadRouteTests (they reuse its World fixture), so they compile here;
+       Sprk.Bff.Api.Tests removes SignalWorklistRouteContractBaselineTests.cs from its contract glob. GoldenContract.cs compiles into both. -->
+  <ItemGroup>
+    <Compile Include="..\contract\Api\Signals\GoldenContract.cs" LinkBase="ContractTests" />
+    <Compile Include="..\contract\Api\Signals\SignalWorklistRouteContractBaselineTests.cs" LinkBase="ContractTests" />
+  </ItemGroup>
+
+  <!-- spaarkeai-mcp-bff-api-r1 task 015 (FR-05): the Decide-lane paging tests, also a part of SignalReadRouteTests (its World fixture). They live on
+       the KEEP path tests/integration/regression/; Sprk.Bff.Api.Tests removes the file from its regression glob. -->
+  <ItemGroup>
+    <Compile Include="..\regression\Signals\DecideLanePagingTests.cs" LinkBase="RegressionTests" />
+  </ItemGroup>
+
   <!-- Shared test helpers (TestSessionOwner, TestHttpContexts, TestTokenCredential).
        Linked rather than copied so every test project sees ONE definition; a second copy is how
        two projects drift into disagreeing about what a test callers oid is. -->

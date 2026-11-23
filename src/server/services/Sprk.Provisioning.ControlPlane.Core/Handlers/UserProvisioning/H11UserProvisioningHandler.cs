@@ -737,11 +737,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[$"h11-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h11-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

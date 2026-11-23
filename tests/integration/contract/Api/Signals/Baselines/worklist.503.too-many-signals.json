@@ -1,0 +1,14 @@
+{
+  "case": "worklist.503.too-many-signals",
+  "status": 503,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.4\",\"title\":\"Service Unavailable\",\"status\":503,\"detail\":\"The worklist could not be read. Try again.\",\"reasonCode\":\"ontology.signal.worklist_unavailable\",\"correlationId\":\"<volatile>\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.6.4",
+    "title": "Service Unavailable",
+    "status": 503,
+    "detail": "The worklist could not be read. Try again.",
+    "reasonCode": "ontology.signal.worklist_unavailable",
+    "correlationId": "<volatile>"
+  }
+}

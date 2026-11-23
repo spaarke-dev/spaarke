@@ -553,11 +553,7 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
 
         // Gate entry — one per failure. Verifier is H7; state is Pending
         // (external precondition to resolve). Parity with H5/H6's FailAsync.
-        run.GateStates[$"h7-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h7-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

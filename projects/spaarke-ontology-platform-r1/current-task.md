@@ -1,9 +1,9 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-11-17 (ebilling reviews + gate-job defect added; rest unchanged from 2026-11-16 checkpoint). State only; history in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-11-23 (199/200/201 done + deployed + dev-checked; 202 in review). State only; history in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-11.md` (previous checkpoint archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..**D-225**). Deferred work: one GitHub issue per item, label `ontology-deferred`,
-> plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-157**). Sub-agents never edit this file.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..**D-226**). Deferred work: one GitHub issue per item, label `ontology-deferred`,
+> plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-164**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -12,8 +12,8 @@
 | **Role** | Main session `ontology-r1`: orchestrate R1; review every PR touching ontology-owned files (`Services/Signals/**`, `Api/Signals/**`, `FinanceBaseValues.cs`, `Services/Signals/Billing/**`, the DecisionWizard UI); answer peers; hold wrap-up 090 until owner UAT done. Peer messages are not owner approvals. |
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
 | **Active** | **185 🔄 [wip]** deployed to dev 2026-11-15 (master `acc96e1927`); owner ran checks A–D 2026-11-16, results + triage in `notes/task-185-notes.md`. Fix tasks (owner "All three") all merged: **193 ✅** #2855 `c0d8a5b74f` (Console auto-deployed 04:32Z); **194 ✅** #2856 `e476e9b61b` (SemanticSearch 1.1.87, RelatedDocumentCount 1.21.7); **195 ✅** #2861 `04f5c943f9` (template render finished text + caller-formatted values; Summary once). 194 + 195 client DEPLOYED to dev 2026-11-16 13:42Z from `04f5c943f9` (SemanticSearch 1.1.87, RelatedDocumentCount 1.21.7, DRV; deploy-log); chore PR #2868 merged (records the SemanticSearch bundle). 195 BFF live in dev BFF `be0420d763`. |
-| **Running** | Nothing. |
-| **Next Action** | (1) Owner rechecks on dev after a hard reload: C1/C2 lookup above the Email documents wizard (Semantic Search, DRV via Find Similar, DRV from a form) + Summary readable once; D1 Console Send Email lookups + Related to; A7 rule wizard. Template render (195 BFF) is live too (dev BFF `be0420d763`): apply a template with placeholders in Email documents and Console Send Email, send to self. (2) Owner open questions: invoice `lockedRecord` fix to ebilling-r1? (`CreateInvoiceWizard.tsx:139`); F12 check during Create Matter repro (A2/B5); section A new requests; retry AI draft on dev BFF `be0420d763`. (3) Close 185 when rechecks pass. |
+| **Running** | **Task 202** (SprkModal returns focus to its opener on close + Classification inline form focus): PR #2996 head `30aeecc653` (branch `fix/ontology-202-sprkmodal-focus-restore`, worktree `C:	198`), auto-merge OFF. Independent Opus review RUNNING (agent resumed after a session restart). 202 bumps CommunicationActions 1.3.26, CommunicationConversationPanel 1.18.7, SemanticSearchControl 1.1.93, TrackingFieldTrio 1.0.68, RelatedDocumentCount 1.21.8, CommunicationAttachments 1.3.5. **Done 2026-11-23:** 199 ✅ (#2955), 200 ✅ (#2988 `973d72b67e`), 201 ✅ (#2954); 199+200 deployed to dev from `973d72b67e` (6 PCFs + 13 code pages, deploy-log), dev focus checks PASS (task-185-notes). Chore PR #2995 (bundles) auto-merge pending; then remove `C:\wtdep200` via Remove-WorktreeSafe. |
+| **Next Action** | (a) On the 202 review: fix F-findings in `C:	198` (implementer), re-check, enable auto-merge, then ASK OWNER for the 202 deploy (owner approved only 199+200; deploy = 6 PCFs + code pages carrying SprkModal, same method as the 2026-11-23 deploy-log entry) and dev-check: Worklist Decision wizard Cancel→Keep deciding, New rule Cancel, Classification Edit→Cancel, composer Close. (b) Owner asked 2026-11-23 about #2580/#2579 (174/175, target `docs/ontology-platform-design`, both CONFLICTING since 11-06): gate = ebilling task 112 (deploy WP4 incl. Invoice Review to dev) still 🔲 and `sprk_invoicereviewpage` is NOT on dev; mcp-r1 #2587 (draft, targets master, carries 174/175) waits on them. Owner decision pending: keep waiting or merge now. (c) Owner items unchanged: budget-inquiry run (176 clean-up), invoice `lockedRecord`, section A requests, delete `C:	191m`/`C:	191p`, 105 UAT, then 090. |
 
 ## Open items
 

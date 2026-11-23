@@ -241,11 +241,7 @@ public sealed class H5DataverseEnvAdoptionHandler : IProvisioningHandler
         CancellationToken cancellationToken)
     {
         run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
-        run.GateStates[$"h5-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h5-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

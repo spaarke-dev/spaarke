@@ -205,6 +205,7 @@ public sealed class ProvisioningRunProductionSerializerTests
             }),
         };
         run.GateStates["admin-consent"] = new GateEntry { Status = GateState.Verified, VerifierHandler = "H0.5" };
+        run.RecordFailureGate("h9-slot-swap-infra-fault", "H9"); // ISS-035: the failure-marker tag must persist (a lost tag = never cleared)
         run.HandlerRetryAttempts["H9"] = 1;
         run.Parameters.NonSecret["tenantId"] = "00000000-1111-2222-3333-444444444444";
         run.Parameters.Secrets["bffClientSecret"] = new KeyVaultSecretRef("kv", "secret-name", "v1");

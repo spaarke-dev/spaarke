@@ -308,7 +308,7 @@ See `notes/defer-issues.md` for the current rollup. Use `gh issue list --label {
 | Situation | Response |
 |---|---|
 | GitHub CLI not authenticated | `gh auth login` and retry |
-| Portfolio board project ID unknown | Fall back to `--project "Spaarke Portfolio"` (default), warn user |
+| Portfolio board project ID unknown | Fall back to `--project "Spaarke Core"` (board #2; there is no board named "Spaarke Portfolio"), warn user |
 | Entry would duplicate an existing entry (same title or anchor) | Show existing entry, ask: update existing or file new? |
 | Project not in `projects/` (ad-hoc work) | Write to `notes/global-defer-issues.md` at repo root; GitHub Issue gets `global` label instead of project label |
 | Description includes "for future flexibility" / "improve testability" / "separation of concerns" without concrete failure mode | Refuse the write. Push back: "Per CLAUDE.md §11, a deferral must name a concrete behavior or contract that fails without it. Can you provide one?" |

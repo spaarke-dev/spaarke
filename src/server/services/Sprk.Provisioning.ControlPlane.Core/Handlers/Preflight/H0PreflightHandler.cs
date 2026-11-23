@@ -634,13 +634,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         // H0; state is Pending (external precondition to resolve). Evidence
         // captures the probe's headroom hashtable so the operator has the
         // raw diagnostic without pulling logs.
-        var gateEntry = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-            Evidence = evidence,
-        };
-        run.GateStates[$"preflight-{rejectionCode}"] = gateEntry;
+        run.RecordFailureGate($"preflight-{rejectionCode}", HandlerIdentifier, evidence);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

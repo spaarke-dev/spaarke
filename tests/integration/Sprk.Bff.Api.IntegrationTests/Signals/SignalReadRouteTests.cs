@@ -36,7 +36,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.IntegrationTests.Signals;
 
-public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.WorklistFactory>
+public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.WorklistFactory>
 {
     private const string Route = "/api/v1/signals/worklist";
     private const int Decide = 100000000;
@@ -1638,8 +1638,10 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         var body = await OkAsync(world, Alice);
         ShouldKeepTheEarlierInvoice(body, kept, storedLines: 5);
         ShouldWithholdTheEarlierInvoice(body, withheld, unreadable.ToString("D"));
-        world.Requests.Should().NotContain(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal) || r.StartsWith(SubmissionRead, StringComparison.Ordinal),
-            "an invoice id needs neither the event nor the submission");
+        world.Requests.Should().NotContain(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal), "an invoice id needs no submission");
+        // Task 174 (D-207): the Duplicate rule still needs no event for an invoice id, but both line items now name their invoice
+        // (invoiceReview), which is the one batched read of the line's invoice (both Signals share the one line).
+        world.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(1, "task 174's one read, for invoiceReview");
     }
 
     [Fact]
@@ -2497,6 +2499,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             [EventType] = ("sprk_event", "Event", "sprk_eventname", null),
             [TodoType] = ("sprk_todo", "To Do", "sprk_name", null),
             [BillingEventType] = ("sprk_billingevent", "Billing Event", "sprk_name", null),
+            // No sprk_communication row, as live (DI-63): a communication subject is an untyped pair (task 018 seeds it with a null type).
         };
 
         public Guid Record(string table, Guid[] readers, Dictionary<string, object?>? columns = null)
@@ -2582,7 +2585,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             string? sentence = null,
             Guid? decisionRecord = null,
             int? status = null,
-            Guid? policy = null)
+            Guid? policy = null,
+            bool privilegeFlagged = false)
         {
             var id = Guid.NewGuid();
             policy ??= Policy(shortName, workType, severity);
@@ -2607,6 +2611,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 ["sprk_resolvedon"] = resolvedOn?.ToString("o"),
                 ["sprk_suppresseduntil"] = suppressedUntil?.ToString("o"),
                 ["_sprk_decisionrecord_value"] = decisionRecord,
+                ["sprk_privilegeflagged"] = privilegeFlagged,
             };
             if (subjectPair.Type is { } st) row["_sprk_regardingrecordtype_value"] = st;
             if (core is { } pair)
@@ -2682,6 +2687,10 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             Records[row.Id] = ("sprk_communication", [Alice, Bob, Carol], []);
             return row.Id;
         }
+
+        /// <summary>Task 018 (FR-04): a communication the readers read as themselves, with its <c>sprk_privilegeclassification</c> (null: none set).</summary>
+        public Guid Communication(Guid[] readers, int? privilege) =>
+            Record("sprk_communication", readers, new() { ["sprk_privilegeclassification"] = privilege });
 
         /// <summary>Only <paramref name="readers"/> read the witness row as themselves (D-142).</summary>
         public void OnlyReadableBy(Guid witness, params Guid[] readers) => Records[witness] = Records[witness] with { Readers = readers };
@@ -3021,6 +3030,12 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             if (!text.Contains("<attribute name=\"sprk_sentence\" />", StringComparison.Ordinal))
             {
                 slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_sentence").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
+            }
+            // Task 015 (FR-04): the privilege flag is returned only when the query selects it (since task 018 no worklist query does: the flag is
+            // derived from communications, and sprk_signal.sprk_privilegeflagged is never written, DI-64).
+            if (!text.Contains("<attribute name=\"sprk_privilegeflagged\" />", StringComparison.Ordinal))
+            {
+                slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_privilegeflagged").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
             }
             // Task 045: the Decision Record lookup is returned only when the query selects it (the route adds it to the closed sets).
             if (!text.Contains("<attribute name=\"sprk_decisionrecord\" />", StringComparison.Ordinal))

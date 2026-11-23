@@ -37,6 +37,16 @@ export interface DecisionWizardHostProps {
   openLookup?: DecisionOpenLookup;
   /** Default open-record-in-a-modal for the subject link (D-182); a launch may bring its own. */
   openRecord?: DecisionOpenRecord;
+  /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: none (the Console). */
+  collectBecause?: boolean;
+  /** Optional seam: an evidence line that names a record offers "Open in Spaarke" (through `openRecord`). Absent or false: none (the Console). */
+  evidenceLinks?: boolean;
+  /** Optional seam: render the wizard in place, with no modal envelope, for a frame too small for a dialog. Absent or false: SprkModal. */
+  embedded?: boolean;
+  /** Optional seam: the Confirm step cannot record until it has been showing this long (`CONFIRM_GUARD_MS`). Absent or 0: no guard. */
+  confirmGuardMs?: number;
+  /** Optional seam: Escape closes the wizard (through the discard check). Absent or false: it never does. */
+  closeOnEscape?: boolean;
 }
 
 interface ActiveLaunch {
@@ -56,12 +66,19 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
   lookup,
   openLookup,
   openRecord,
+  collectBecause,
+  evidenceLinks,
+  embedded,
+  confirmGuardMs,
+  closeOnEscape,
 }) => {
   const [active, setActive] = React.useState<ActiveLaunch | null>(null);
   const activeRef = React.useRef<ActiveLaunch | null>(null);
   const sequence = React.useRef(0);
 
+  const mounted = React.useRef(true);
   React.useEffect(() => {
+    mounted.current = true;
     const unregister = registerDecisionWizardHost(request => {
       if (activeRef.current) return Promise.resolve({ opened: false, reason: 'busy' as const });
       return new Promise<DecisionWizardLaunchResult>(resolve => {
@@ -73,10 +90,16 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
     });
     return () => {
       unregister();
-      // Never leave a launcher awaiting a wizard that can no longer close.
-      activeRef.current?.settle({ opened: true });
-      activeRef.current = null;
-      setActive(null);
+      mounted.current = false;
+      // Never leave a launcher awaiting a wizard that can no longer close. But React's StrictMode (the dev build) runs this cleanup and
+      // the effect again straight away on a host that is still there; that is not an unmount, and settling then closed the wizard the
+      // moment it opened. So the settling waits one microtask: a host that was mounted again by then stays as it is.
+      void Promise.resolve().then(() => {
+        if (mounted.current) return;
+        activeRef.current?.settle({ opened: true });
+        activeRef.current = null;
+        setActive(null);
+      });
     };
   }, []);
 
@@ -108,6 +131,11 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
       onClose={close}
       onRecorded={event => request.onRecorded?.({ signalId: event.signalId, alsoResolved: event.alsoResolved })}
       uiScale={uiScale}
+      collectBecause={collectBecause}
+      evidenceLinks={evidenceLinks}
+      embedded={embedded}
+      confirmGuardMs={confirmGuardMs}
+      closeOnEscape={closeOnEscape}
     />
   );
 };

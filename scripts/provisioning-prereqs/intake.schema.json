@@ -118,6 +118,11 @@
       "enum": ["managed", "unmanaged"],
       "description": "OPTIONAL (T218b). Dataverse package type H6 imports — managed by default; unmanaged ONLY on explicit instruction (ADR-027 §3, amended 2026-10-07, owner D8). Omit it for managed. H6 refuses to switch an environment's type and refuses a downgrade; H13 records the type on the registry row. Same rule as POST /api/runs (intake-invalid-solution-package-type)."
     },
+    "buildId": {
+      "type": "string",
+      "pattern": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9]+$",
+      "description": "OPTIONAL (ISS-036, #2987). The BFF CI build H9 deploys, e.g. 2026.10.16-2 — publish-bff-artifact.yml's buildId, `yyyy.MM.dd-{run_number}`. Omit it and H9 deploys whatever latest.json names. Pin it on an UPGRADE run that changes the Dataverse solution but must not change the BFF: it is the only guard — H9 refuses the run (buildId mismatch, before any swap) when the value is not latest.json's own buildId, because latest.json is a single mutable pointer and H9 holds no verified gate data for any other build. Sent to POST /api/runs as nonSecretParameters.buildId (IntakeParameterCatalog). The format is this schema's own check: H9 and POST /api/runs only require non-blank and, at deploy, an exact match to the manifest's buildId; the schema may be stricter than the API, never looser."
+    },
     "secureRecordSetupDryRun": {
       "type": "boolean",
       "default": false,

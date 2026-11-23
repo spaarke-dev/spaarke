@@ -96,4 +96,16 @@ public sealed class GateEntry
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftJsonElementConverter))]
     public JsonElement? Evidence { get; set; }
+
+    /// <summary>
+    /// Set ONLY on a handler-failure marker (written by <see cref="ProvisioningRun.RecordFailureGate"/>): the id of the
+    /// handler whose failure this entry records. A real operator/manual gate (admin-consent, B2B consent, plan approval,
+    /// the T6 / upgrade-compat gates ...) never carries it. When that handler later succeeds,
+    /// <see cref="ProvisioningRun.MarkPhaseSucceeded"/> moves every still-Pending marker with this id to
+    /// <see cref="GateState.Cleared"/> (ISS-035), so a recovered run does not keep showing failures as owed.
+    /// Null on every other gate and on runs persisted before ISS-035 (those markers are left as they were).
+    /// </summary>
+    [JsonPropertyName("failureOfHandler")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FailureOfHandler { get; set; }
 }
