@@ -1,5 +1,5 @@
 {
-  "$comment": "System workspace layout seed definitions for sprk_workspacelayout (isSystem=true). Consumed by Deploy-SystemWorkspaceLayouts.ps1. Section factory IDs MUST match src/solutions/LegalWorkspace/src/sectionRegistry.ts. Layout template IDs MUST match src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/layoutTemplates.ts.",
+  "$comment": "System workspace layout seed definitions for sprk_workspacelayout (isSystem=true). The single list of system workspaces: embedded in the L2 control plane and seeded on every customer stamp by H12b (DataverseWebApiWorkspaceLayoutSeeder), and read by Deploy-SystemWorkspaceLayouts.ps1. A system workspace that is only seeded by a standalone scripts/seed-*-workspace-layout.ps1 never reaches a customer stamp, so every such script's layout MUST also be listed here (enforced by DataverseWebApiWorkspaceLayoutSeederTests). Section factory IDs MUST match src/solutions/LegalWorkspace/src/sectionRegistry.ts. Layout template IDs MUST match src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/layoutTemplates.ts.",
   "schemaVersion": 1,
   "layouts": [
     {
@@ -43,6 +43,14 @@
       "description": "Round-9 task 115. CalendarWorkspaceWidget from @spaarke/events-components — 3-month strip + date-range filter + EventsPage toolbar + view selector + grid of all events+tasks the user has access to. Event detail opens via Xrm.Navigation.navigateTo modal (NOT Xrm.App.sidePanes)."
     },
     {
+      "name": "Compose",
+      "sectionId": "compose-editor",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 5,
+      "isDefault": false,
+      "description": "spaarkeai-compose-r1. LegalWorkspace compose-editor section (the Compose document editor). The row was created on spaarkedev1 2026-06-29 without being added here, so no customer stamp had it until ISS-037 (2026-11-23)."
+    },
+    {
       "name": "Messages",
       "sectionId": "communications",
       "layoutTemplateId": "single-column",
@@ -57,6 +65,14 @@
       "sortOrder": 7,
       "isDefault": false,
       "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace projects section (Active Projects — sprk_project). Row-click opens Layout 1 (85%×85%)."
+    },
+    {
+      "name": "Reconciliation",
+      "sectionId": "reconciliation",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 7,
+      "isDefault": false,
+      "description": "LegalWorkspace reconciliation section (email reconciliation grid). Same row as scripts/seed-reconciliation-workspace-layout.ps1 (sortOrder 7 shared with Projects, as on spaarkedev1). Added here by ISS-037 (2026-11-23): only the standalone script seeded it, so customer stamps never had it."
     },
     {
       "name": "Invoices",
@@ -97,6 +113,22 @@
       "sortOrder": 12,
       "isDefault": false,
       "description": "Owner request 2026-10-15. LegalWorkspace matters section (Active Matters (Workspace) — sprk_matter). Row-click opens Layout 1 (85%×85%). Skipped in the 2026-07-01 parity seed because a user-authored 'Matters' layout was then visible to all users; #832 (2026-08-27) scoped user layouts to their owner and that record is gone, so Matters had no workspace. sortOrder 12 appends without re-ordering existing records."
+    },
+    {
+      "name": "Worklist",
+      "sectionId": "worklist",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 13,
+      "isDefault": false,
+      "description": "spaarke-ontology-platform-r1 task 156. LegalWorkspace worklist section (Decide / Do lanes over the Signal read route). Same row as scripts/seed-worklist-workspace-layout.ps1. Added here by ISS-037 (2026-11-23): only the standalone script seeded it, so customer stamps never had it."
+    },
+    {
+      "name": "Decision Records",
+      "sectionId": "decisionRecords",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 14,
+      "isDefault": false,
+      "description": "spaarke-ontology-platform-r1. LegalWorkspace decisionRecords section (the Decision Record). Same row as scripts/seed-decision-records-workspace-layout.ps1. Added here by ISS-037 (2026-11-23): only the standalone script seeded it, so customer stamps never had it."
     }
   ]
 }
