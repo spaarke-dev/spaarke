@@ -234,6 +234,21 @@ describe('NewThreadModal — error handling', () => {
     expect(onDismiss).not.toHaveBeenCalled();
     await waitFor(() => expect(onError).toHaveBeenCalled());
   });
+
+  it('after a first-message failure Create is locked (no second thread) and Done dismisses', async () => {
+    const fetchImpl = makeFetch({ sendError: { status: 500, detail: 'Chat backend unavailable.' } });
+    const { authenticatedFetch, onDismiss } = renderModal({ regarding: MATTER }, fetchImpl);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hello there' } });
+    clickCreate();
+    await screen.findByText(/couldn't be sent — try again in the thread/i);
+
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+    clickCreate();
+    expect(createCalls(authenticatedFetch as jest.Mock)).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('NewThreadModal — Dark Mode Compliance (ADR-021)', () => {

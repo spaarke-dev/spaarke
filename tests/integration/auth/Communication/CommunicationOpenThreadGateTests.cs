@@ -130,7 +130,9 @@ public class CommunicationOpenThreadGateTests
         _resolver.Object,
         _identity.Object,
         Mock.Of<ILogger<CommunicationThreadReadService>>(),
-        _appOnly.Object);
+        _appOnly.Object,
+        // fm task 056: an environment without the private-message reference columns, so every read is unchanged.
+        entities: CommunicationSchemaDouble.WithoutReferenceColumns());
 
     private static ClaimsPrincipal Caller() =>
         new(new ClaimsIdentity(new[] { new Claim("oid", Guid.NewGuid().ToString()) }, "test"));

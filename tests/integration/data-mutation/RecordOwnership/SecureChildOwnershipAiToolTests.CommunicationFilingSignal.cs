@@ -29,7 +29,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private Task<IResult> RefileCommunicationWithTrigger(
         Dictionary<string, object?> payload, IGenericEntityService entities, SignalEvaluationTrigger? trigger) =>
         CommunicationEndpoints.RefileCommunicationAsync(
-            FiledCommunication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), entities, trigger,
+            FiledCommunication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), GuardOverTheWorld(entities), trigger,
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static Dictionary<string, object?> FileUnderOrdinaryMatter() =>
@@ -214,6 +214,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var result = await RefileCommunicationWithTrigger(FileUnderOrdinaryMatter(), entities.Object, trigger: null);
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        // fm task 056: without a trigger, the route's only app-only reads are the private-message guard's (its schema, its row).
+        entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+        entities.Verify(e => e.RetrieveMultipleAsync(
+            It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()), Times.Once);
         entities.VerifyNoOtherCalls();
     }
 
@@ -238,7 +242,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance,
                 _world.Resolver(),
                 Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-                scopes)
+                scopes,
+                appOnlyEntities: GuardReaderOverTheWorld())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(
                     toolArgumentsJson: JsonSerializer.Serialize(new

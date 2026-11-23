@@ -433,10 +433,11 @@ public class DirectThreadAccessServiceTests
             && e.Message.Contains(reason, StringComparison.Ordinal));
     }
 
-    [Theory(DisplayName = "198b must-fire: a candidate with a typed regarding, or not confirmed Open, is not reused")]
+    [Theory(DisplayName = "198b must-fire: a candidate with a typed regarding, not confirmed Open, or a per-user master thread, is not reused")]
     [InlineData("typed_regarding")]
     [InlineData("not_open")]
     [InlineData("no_privacy")]
+    [InlineData("default_thread")] // fm task 055: a per-user master thread with a strict-pair shape is not the pair's 1:1 thread
     public async Task F198b_ACandidateThatIsNotAStrictDirectShape_IsNotReused(string variant)
     {
         var candidate = Guid.NewGuid();
@@ -451,6 +452,9 @@ public class DirectThreadAccessServiceTests
                     break;
                 case "not_open":
                     thread["sprk_privacystate"] = new OptionSetValue(PrivacyStateNotOpen);
+                    break;
+                case "default_thread":
+                    thread["sprk_isdefaultthread"] = true;
                     break;
                 default:
                     thread.Attributes.Remove("sprk_privacystate");

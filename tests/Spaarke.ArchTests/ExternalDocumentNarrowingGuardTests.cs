@@ -1434,6 +1434,10 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::WriteDirectTeamOwnerAsync"] =
             "fm 054 piece 3a: writes only ownerid (a typed reference to the resolved Direct message owner team), built in this " +
             "member, conditioned on the row version; never a link value.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::ClearPrivateFilingAsync"] =
+            "fm 056: writes only clears (DBNull) of a private sprk_communication's filing columns (DirectMessageOwnerStep." +
+            "PrivateFilingColumns), built in this member, conditioned on the row version; never a document, a link value or an " +
+            "Access Permission.",
         ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer::ReownAsync"] =
             "uac-r2 task 191c: writes only ownerid (the team a flagged owner's row's own I-6 question gives), conditioned on the " +
             "row version read with the owner check; never a link column.",

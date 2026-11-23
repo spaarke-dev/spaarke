@@ -4,7 +4,7 @@
     <title>Direct messaging UI: a "New direct message" entry point and a Messages view (no record), live check on dev</title>
     <phase>6b W6b Direct and private messaging (owner 2026-11-20)</phase>
     <gate>PR #2916 (the #2919 fix) merged and deployed to dev by UAC-r2 before the live check. The live check runs only with the owner's go in fm's session.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in the shared UI library and may add a filter to an existing BFF endpoint; exercises a security-sensitive send path end to end.</rigor-reason>
     <model-tier>sonnet</model-tier>

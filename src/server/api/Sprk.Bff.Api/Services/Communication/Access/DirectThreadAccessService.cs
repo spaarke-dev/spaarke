@@ -901,12 +901,15 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// <c>true</c> when <paramref name="threadId"/> is a strict 1:1 Direct thread (fm's
     /// <see cref="DirectMessageRecipient.ReadStrictPairShapeAsync"/>) of exactly the pair {<paramref name="first"/>,
     /// <paramref name="second"/>}. A thread that is not a strict pair is logged and skipped; a read fault is logged as a
-    /// Warning and skipped. A strict pair of other people is skipped silently (an ordinary other conversation).
+    /// Warning and skipped. A strict pair of other people is skipped silently (an ordinary other conversation). A per-user
+    /// master thread (<c>IsDefaultThread</c>) is never reused even when it has a strict-pair shape: the send path
+    /// (<c>DirectMessageOwnerStep.IsOneToOneThreadAsync</c>) and the Messages list (fm task 055) do not treat it as 1:1, so
+    /// all three share one rule.
     /// </summary>
     private async Task<bool> IsThePairsStrictThreadAsync(Guid threadId, Guid first, Guid second, CancellationToken ct)
     {
         var shape = await DirectMessageRecipient.ReadStrictPairShapeAsync(_entityService, _accessGrant, threadId, ct);
-        if (shape.IsStrictPair)
+        if (shape.IsStrictPair && !shape.IsDefaultThread)
         {
             return (shape.OwnerId == first && shape.OtherId == second)
                 || (shape.OwnerId == second && shape.OtherId == first);
@@ -924,8 +927,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             // Debug, not Information (fm review): the lookup runs on every routed send, so the same old non-strict threads would
             // log on every message. A read fault stays a Warning.
             _logger.LogDebug(
-                "Direct thread {ThreadId} is not a strict 1:1 thread ({Reason}); it is not reused for the pair lookup.",
-                threadId, shape.Reason);
+                "Direct thread {ThreadId} is not a strict 1:1 thread ({Reason}, default thread: {IsDefaultThread}); it is not reused for the pair lookup.",
+                threadId, shape.Reason, shape.IsDefaultThread);
         }
 
         return false;

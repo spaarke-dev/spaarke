@@ -17,6 +17,7 @@ using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Services.Communication;
+using Sprk.Bff.Api.Tests.DataMutation.Communication;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -658,7 +659,7 @@ public class DirectUnfileGenericPathTests
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             [rule], new Dictionary<string, object?> { ["sprk_mattersource"] = Guid.NewGuid() },
             "sprk_communication", [MessageId], Person, NullLogger.Instance, CancellationToken.None,
-            scopes, rootFiling: null, lookupBinds: plans, appOnlyEntities: Mock.Of<IGenericEntityService>());
+            scopes, rootFiling: null, lookupBinds: plans, appOnlyEntities: PrivateMessageGuardFixtures.NoPrivateMessage());
     }
 
     private static readonly Guid ContactId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c6");
@@ -688,7 +689,7 @@ public class DirectUnfileGenericPathTests
     {
         var writes = new List<Dictionary<string, object?>>();
         var handler = new DataverseUpdateHandler(
-            FieldWrites(world, writes), Mock.Of<IGenericEntityService>(),
+            FieldWrites(world, writes), PrivateMessageGuardFixtures.NoPrivateMessage(),
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             world.Resolver(directMessageOwnerTeam: lookup),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
@@ -705,7 +706,7 @@ public class DirectUnfileGenericPathTests
                 .AddSingleton(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper)
                 .AddSingleton<IRecordOwnershipResolver>(world.Resolver(directMessageOwnerTeam: lookup))
                 .AddSingleton(Step(world, lookup))
-                .AddSingleton(EntitySetNameFixtures.Service())
+                .AddSingleton(EntitySetNameFixtures.Mock().AnsweringNoPrivateMessage().Object)
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);

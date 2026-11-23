@@ -265,6 +265,7 @@ public sealed class RecordProcedureDecisionJobHandler : IJobHandler
             [RecordOwnerRefusal.DirectTeamUnusable] = RecordProcedureRefusalClass.Retryable,
             [RecordOwnerRefusal.DirectTeamUnavailable] = RecordProcedureRefusalClass.Retryable,
             [RecordOwnerRefusal.CustomerContactTeamUnresolved] = RecordProcedureRefusalClass.Retryable,
+            [RecordOwnerRefusal.PrivateMessageNotFileable] = RecordProcedureRefusalClass.Retryable,          // a communication re-file's code; not raised on a create
         };
 
     private static readonly JsonSerializerOptions PayloadOptions = new() { PropertyNameCaseInsensitive = true };

@@ -84,7 +84,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<CallerRecordAccessProbe>(_sourceRights);
-        services.AddSingleton(entities);
+        services.AddSingleton(GuardOverTheWorld(entities)); // fm task 056: the re-file core asks the private-message guard with it
         services.AddSingleton<IDataverseUserClient>(_user);
         services.AddSingleton<IRecordOwnershipResolver>(_world.Resolver());
         services.AddSingleton(Restamper());
