@@ -301,3 +301,11 @@ ebilling found that before 095d-2a-2, an AI observation quote already reached `s
   - evidence text is not logged or indexed;
   - the review read stays internal.
 - **Revisit when:** the narrative becomes field-secured, or a role that reads Signals no longer comes with billing-event Read. The quote then becomes non-citable.
+
+## 2026-11-23: Partners may see a work assignment's parent matter and project names (spa-r4 task 031, FR-18)
+
+The owner accepted (in this session) that the external work-assignments module may return `sprk_regardingmatter`, as it already returns `sprk_regardingproject`. A partner who reads a work assignment sees its parent's id and display name, even without a grant on that parent.
+- **What this discloses:** a work assignment is a core record with its own direct grant. A partner can therefore hold one without reading its matter or project, and sees that parent's name. That includes a **secure** parent: a work assignment filed under a secure parent is itself secure, so the partner holds a named direct grant on that work assignment.
+- **What it does not disclose:** a Restricted parent's name never reaches a partner by this path. Its children are Restricted too, and contacts read no Restricted record. Only the parent's primary name goes out (`@formattedValues`, filtered by `StripToReadableColumns`); no other column of the parent does, and a direct read of the parent is still refused.
+- **Recommendation not taken:** uac-r2 recommended dropping `sprk_regardingmatter` and filing a fix that shows a parent's name only when the caller can read that parent. The owner chose to accept both columns.
+- **Same review:** the other 11 task-031 columns were approved by uac-r2 (see the task-031 notes in the SPA-r4 project).

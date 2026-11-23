@@ -28,6 +28,7 @@
 
 ## Open work (mine)
 - **#2845 latency:** not met (notifications p50 ≈ 2.7 s). Recheck at this gate if external SPA traffic exists. Scratchpad `lat-now.ps1`, `lat-seq.ps1`.
+- **spa-r4 031 FR-18 review 2026-11-23:** 11 columns approved; `sprk_regardingmatter` (+ existing `sprk_regardingproject`) parent-name disclosure ACCEPTED by owner (notes/decisions.md 2026-11-23).
 - **fm 055 AC5 + 056 live check CONFIRMED 2026-11-23 ~22:30Z** (uac-r2 independent RetrievePrincipalAccess: recipient Read, child-BU user None on message + thread and None on the private message despite full matter access; Direct team owner; thread owner = Test User 1 as starter, by design). Filed **#3024** (every outbound message creates a new single-member ACS thread; messaging's). fm's #3023 (409 title) cosmetic.
 - **#3005** (chat commands schema gap, not ours; filed), **#2959**, **#2979**, **#2860** (lenient QueryAsync), **#2903** (re-file gap), **#2912** (load flake), **#2918** (no Direct-message UI; fm 055 adds it).
 - **Gate gotchas:** gate t0 = new process start; KQL: no `first`/`last` aliases. Use the five CI shards (`ci-tier2-advisory.yml`; scratchpad `shards.sh`). ArchTests build separately (not in `Spaarke.sln`). ProvisionProjectIdempotencyTests times out under load; re-run it alone.
