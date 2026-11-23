@@ -213,6 +213,8 @@ export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () =
   opened: false,
   reason: 'no-host',
 });
+// `openInvoiceReview` (ontology task 175): the Worklist's billing-item opener, passed through by `worklist.registration.ts`; inert here.
+export const openInvoiceReview: (...args: unknown[]) => Promise<void> = async () => undefined;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DataGridViewSelector: React.FC<any> = () => null;
 // `EntityCreationService` / `cleanGuid` (task 092, 2026-10-04) —
@@ -490,6 +492,7 @@ const _driftGuard = {
   DecisionRecordsWidget,
   createWorklistService,
   launchDecisionWizard,
+  openInvoiceReview,
   EntityCreationService,
   cleanGuid,
   XrmDataverseClient,
