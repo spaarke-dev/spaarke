@@ -763,6 +763,12 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
     }
     $environmentId = $probe.rows[0].sprk_dataverseenvironmentid
     $script:IsUpgradeRun = $true
+    # ISS-031: the confirmation travels to L2 as intake provisionedOn = the row's CURRENT sprk_provisionedon (every
+    # completed run rewrites it). POST /api/runs (REG-07) admits a run against an existing stamp only with it, moves a
+    # Ready row to InProgress itself (no manual registry reset), and H0/H2a/H4/H9 read it to run in UPGRADE mode
+    # (H2a's drift check). Without it L2 answers 400 registry-upgrade-not-acknowledged, naming the value to send.
+    $script:UpgradeProvisionedOn = ([DateTimeOffset]::Parse("$($probe.rows[0].sprk_provisionedon)", [cultureinfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AssumeUniversal)).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   } else {
     # Prior halt / quarantine / partial (placeholder exists, sprk_provisionedon still null) — recover
     Write-Host "customerId '$customerId' has a prior in-progress row (setupstatus=$($probe.rows[0].sprk_setupstatus)). See Fallback Matrix F1 recovery path."
@@ -770,7 +776,10 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
   ```
 
   Fallback if Dataverse MCP disconnected: `pac data query --entity sprk_dataverseenvironment --filter "sprk_customerid eq '$customerId'"` OR raw Web API GET with operator's `az` token. See Fallback Matrix F1.
-- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
+- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent. The confirmation is sent as
+  `provisionedOn` (Step 4.0); L2 then moves a Ready row to InProgress itself — never PATCH the row by hand (ISS-031).
+  If the MCP rendering drops seconds, L2 refuses with 400 `registry-upgrade-provisioned-on-mismatch` naming the exact
+  value: re-read `sprk_provisionedon` through the Web API (ISO with seconds) and retry.
 - If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
 
 #### 1a-bis. `displayName` (the customer's full name — also its Dataverse business unit)
@@ -1676,6 +1685,11 @@ if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
 # T218b — the package type (Step 1b-quinquies): sent only when the owner instructed unmanaged; absent = managed.
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
   $runRequest.nonSecretParameters.solutionPackageType = "$solutionPackageType"
+}
+# ISS-031 — an UPGRADE run (Step 1a) sends the row's sprk_provisionedon: L2's acknowledgement check, its Ready → InProgress
+# move, and H0/H2a/H4/H9's upgrade mode. A fresh run never sends it (L2 refuses an upgrade claim on a never-provisioned row).
+if ($script:IsUpgradeRun) {
+  $runRequest.nonSecretParameters.provisionedOn = "$script:UpgradeProvisionedOn"
 }
 # T256 — the H7b dry run (Step 1b-sexies): sent only when true; absent = apply. Exact lower case — L2 refuses anything
 # else with 400 secure_setup.dry_run_invalid.

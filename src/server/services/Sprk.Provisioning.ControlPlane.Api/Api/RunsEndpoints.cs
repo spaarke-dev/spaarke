@@ -136,6 +136,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
+using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Sprk.Provisioning.ControlPlane.Rollback;
 
@@ -661,6 +662,7 @@ public static class RunsEndpoints
         // when the registry is degraded — Cosmos write + audit trail are the
         // fallback source of truth. Null-Object registry (P2 fallback per
         // ADR-032) returns null → the strict check is skipped (WARN in logs).
+        string? readyRowToMove = null;
         try
         {
             var snapshot = await registryClient
@@ -683,18 +685,36 @@ public static class RunsEndpoints
                         $"'{snapshot.CustomerId}', not requested customer '{request.CustomerId}' " +
                         "(§4D I1 cross-customer bleed guard).");
                 }
-                if (!string.Equals(snapshot.SetupStatus, "InProgress", StringComparison.OrdinalIgnoreCase))
+                // ISS-031: status + upgrade acknowledgement in one rule (RegistryRunAdmissionRule).
+                request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.ProvisionedOn, out var intakeProvisionedOn);
+                var admission = Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmissionRule.Evaluate(
+                    snapshot.SetupStatus, snapshot.ProvisionedOn, intakeProvisionedOn);
+                if (admission is Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.Admit admit)
+                {
+                    if (admit.MoveToInProgress)
+                    {
+                        readyRowToMove = snapshot.EnvironmentId;
+                    }
+                }
+                else
                 {
                     _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+                    var (errorCode, detail) = admission switch
+                    {
+                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.UpgradeNotAcknowledged u =>
+                            (ControlPlaneErrorCodes.RegistryUpgradeNotAcknowledged, u.Detail),
+                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.UpgradeMismatch m =>
+                            (ControlPlaneErrorCodes.RegistryUpgradeProvisionedOnMismatch, m.Detail),
+                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.NotInProgress n =>
+                            (ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress, n.Detail),
+                        _ => (ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress, $"has setupStatus='{snapshot.SetupStatus}'."),
+                    };
                     logger.LogWarning(
-                        "CreateRun: 400 — REG-07 setupStatus mismatch. RequestedCustomerId={CustomerId} " +
-                        "EnvironmentId={EnvironmentId} SetupStatus={SetupStatus}",
-                        request.CustomerId, request.EnvironmentId, snapshot.SetupStatus);
-                    return BadRequest(httpContext, ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress,
-                        $"REG-07: environmentId '{request.EnvironmentId}' has setupStatus='{snapshot.SetupStatus}' " +
-                        "(expected 'InProgress'). Row is already finalized or in a rollback state; " +
-                        "a new run cannot overwrite it. Use clear-quarantine or an operator-side " +
-                        "registry reset before retrying.");
+                        "CreateRun: 400 — REG-07 registry admission refused. RequestedCustomerId={CustomerId} " +
+                        "EnvironmentId={EnvironmentId} SetupStatus={SetupStatus} ErrorCode={ErrorCode}",
+                        request.CustomerId, request.EnvironmentId, snapshot.SetupStatus, errorCode);
+                    return BadRequest(httpContext, errorCode,
+                        $"REG-07: environmentId '{request.EnvironmentId}' {detail}");
                 }
             }
             else
@@ -725,6 +745,56 @@ public static class RunsEndpoints
             logger.LogWarning(ex,
                 "CreateRun: REG-07 registry lookup infra fault for environmentId={EnvironmentId} — proceeding without strict check.",
                 request.EnvironmentId);
+        }
+
+        // ISS-031: an acknowledged upgrade of a Ready stamp — this endpoint is the one owner of Ready → InProgress
+        // (H13 moves it back to Ready). Fail closed: if the move does not land, refuse rather than run against a row that
+        // still says Ready. Before the Cosmos write, so a refusal leaves nothing behind; if the Cosmos write fails after
+        // it, the row is InProgress with the same provisionedOn and a retry is admitted without another move.
+        if (readyRowToMove is not null)
+        {
+            RegistryUpdateOutcome moveOutcome;
+            try
+            {
+                moveOutcome = await registryClient.UpdateSetupStatusAsync(
+                    new RegistrySetupStatusUpdate(
+                        readyRowToMove,
+                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmissionRule.InProgressStatus,
+                        ClearCurrentRunId: false,
+                        CustomerIdForLog: request.CustomerId,
+                        RunIdForLog: runId),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                moveOutcome = new RegistryUpdateOutcome.Failure($"{ex.GetType().Name}: {ex.Message}");
+            }
+
+            if (moveOutcome is not RegistryUpdateOutcome.Success)
+            {
+                _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+                var why = moveOutcome switch
+                {
+                    RegistryUpdateOutcome.NotFound nf => nf.Diagnostic,
+                    RegistryUpdateOutcome.Failure f => f.Diagnostic,
+                    _ => moveOutcome.GetType().Name,
+                };
+                logger.LogWarning(
+                    "CreateRun: 502 — upgrade could not move the registry row Ready → InProgress. CustomerId={CustomerId} " +
+                    "EnvironmentId={EnvironmentId} Diagnostic={Diagnostic}",
+                    request.CustomerId, readyRowToMove, why);
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status502BadGateway,
+                    ControlPlaneErrorCodes.RegistryUpgradeTransitionFailed,
+                    $"REG-07: the upgrade was acknowledged, but the registry row '{readyRowToMove}' could not be moved " +
+                    $"from Ready to InProgress ({why}). Nothing was started; retry when the registry is reachable.");
+            }
+
+            logger.LogInformation(
+                "CreateRun: upgrade acknowledged — registry row moved Ready → InProgress. CustomerId={CustomerId} " +
+                "EnvironmentId={EnvironmentId} RunId={RunId}",
+                request.CustomerId, readyRowToMove, runId);
         }
 
         var run = new ProvisioningRun

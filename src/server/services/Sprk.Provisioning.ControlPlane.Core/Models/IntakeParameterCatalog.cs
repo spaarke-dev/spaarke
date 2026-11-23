@@ -63,6 +63,13 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string OpenAiMonthlyLimitUsd = "openAiMonthlyLimitUsd";
 
+    /// <summary>
+    /// Upgrade run: the registry row's current <c>sprk_provisionedon</c>. POST /api/runs requires it, equal to the row's,
+    /// whenever the row is an existing stamp, and moves a Ready row to InProgress
+    /// (<see cref="Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmissionRule"/>, ISS-031).
+    /// </summary>
+    public const string ProvisionedOn = "provisionedOn";
+
     /// <summary>The customer stamp's environment segment — <c>customer.bicep</c> <c>environmentName</c>.</summary>
     public const string EnvironmentName = "environmentName";
 
@@ -200,7 +207,7 @@ public static class IntakeParameterCatalog
         new("buildId", "BFF build to deploy (H9 optional — defaults to latest.json). H13 reads the deployed build from H9's output."),
 
         // --- Upgrade mode (an existing stamp) ---------------------------------------
-        new("provisionedOn", "Set on an upgrade run: when the stamp was first provisioned (H0, H2a, H4)."),
+        new(ProvisionedOn, "Upgrade run: the registry row's current sprk_provisionedon. POST /api/runs requires it, equal to the row's, for an existing stamp, and moves a Ready row to InProgress (ISS-031). H0, H2a, H4, H9 run in upgrade mode on it."),
         new("currentBffVersion", "Upgrade run: deployed BFF version (H0 compatibility check)."),
         new("currentSolutionVersion", "Upgrade run: deployed solution version (H0 compatibility check)."),
         new("targetBffVersion", "Upgrade run: target BFF version (H0 compatibility check)."),

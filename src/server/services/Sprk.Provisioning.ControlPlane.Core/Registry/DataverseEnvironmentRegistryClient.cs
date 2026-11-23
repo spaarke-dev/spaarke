@@ -131,6 +131,9 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
     private const string TenantIdColumn = "sprk_tenantid";
     private const string SetupStatusColumn = "sprk_setupstatus";
     private const string CurrentRunIdColumn = "sprk_currentrunid";
+    // ISS-031: when the stamp was (last) provisioned — H13 promotes it on every completed run. POST /api/runs reads it
+    // to recognise an upgrade of an existing stamp.
+    private const string ProvisionedOnColumn = "sprk_provisionedon";
 
     // Row A38a (task 205a, 2026-08-25): positive secret-free migration marker
     // state field. SINGLE-LINE-OF-TEXT column (written as a JSON string —
@@ -175,7 +178,7 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
             $"/api/data/v9.2/{_options.EntitySetName}?" +
             $"$filter={TenantIdColumn} eq '{Uri.EscapeDataString(filterValue)}'" +
             $"&$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
-            $"{SetupStatusColumn},{CurrentRunIdColumn}" +
+            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn}" +
             "&$top=1";
         var requestUri = new Uri(envUri, relative);
 
@@ -250,7 +253,7 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         var relative =
             $"/api/data/v9.2/{_options.EntitySetName}({envRowId})?" +
             $"$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
-            $"{SetupStatusColumn},{CurrentRunIdColumn}";
+            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn}";
         var requestUri = new Uri(envUri, relative);
 
         var httpClient = _httpClientFactory.CreateClient(HttpClientName);
@@ -779,8 +782,9 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         var tenantId = ReadRequiredString(row, TenantIdColumn);
         var setupStatus = ReadSetupStatusAsDisplayName(row) ?? string.Empty;
         var currentRunId = ReadOptionalString(row, CurrentRunIdColumn);
+        var provisionedOn = ReadOptionalTimestamp(row, ProvisionedOnColumn);
         return new DataverseEnvironmentRegistrySnapshot(
-            environmentId, customerId, tenantId, setupStatus, currentRunId);
+            environmentId, customerId, tenantId, setupStatus, currentRunId, provisionedOn);
     }
 
     // Maps a display-name string (as used by RegistrySetupStatusUpdate.SetupStatus
@@ -869,6 +873,20 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         }
         var value = prop.GetString();
         return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    // A Dataverse Date and Time column ships as an ISO 8601 UTC string. Missing, null or unparseable → null (the row is
+    // then treated as never provisioned, which makes POST /api/runs refuse an upgrade claim rather than accept one).
+    private static DateTimeOffset? ReadOptionalTimestamp(JsonElement row, string column)
+    {
+        var value = ReadOptionalString(row, column);
+        return value is not null && DateTimeOffset.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : null;
     }
 
     private static HttpRequestMessage BuildRequest(HttpMethod method, Uri uri, string bearerToken)

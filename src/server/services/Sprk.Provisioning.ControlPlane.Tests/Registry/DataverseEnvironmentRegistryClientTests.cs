@@ -243,6 +243,30 @@ public sealed class DataverseEnvironmentRegistryClientTests
         snapshot.TenantId.Should().Be("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         snapshot.SetupStatus.Should().Be("InProgress");
         snapshot.CurrentRunId.Should().Be("65109e91-5968-4300-933e-9e79dea4109c");
+        snapshot.ProvisionedOn.Should().BeNull("sprk_provisionedon is absent — never provisioned");
+    }
+
+    [Theory]
+    [InlineData("\"2026-11-23T14:01:48Z\"", "2026-11-23T14:01:48Z")]
+    [InlineData("null", null)]
+    [InlineData("\"not-a-date\"", null)]
+    public void ParseSnapshot_Reads_ProvisionedOn_As_Utc(string json, string? expected)
+    {
+        // ISS-031: POST /api/runs recognises an existing stamp by this column.
+        var payload = $$"""
+        {
+          "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
+          "sprk_customerid": "acme",
+          "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "sprk_setupstatus": 2,
+          "sprk_provisionedon": {{json}}
+        }
+        """;
+        using var doc = JsonDocument.Parse(payload);
+
+        var snapshot = DataverseEnvironmentRegistryClient.ParseSnapshot(doc.RootElement);
+
+        snapshot.ProvisionedOn.Should().Be(expected is null ? null : DateTimeOffset.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Theory]
