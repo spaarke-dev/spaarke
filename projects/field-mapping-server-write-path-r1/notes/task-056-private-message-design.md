@@ -311,3 +311,33 @@ code, and it is open.
 | U1 | UAC-r2 | Recipient check | **Answered:** `RetrievePrincipalAccess` accepted, with C1 (the No Access wall) |
 | U2 | UAC-r2 | Reference left as is on filing | **Answered:** agreed, with C3 (impersonated reads). Superseded by Q5 "never": the field security on the columns governs writes only, so the reference stays private because the row is never filed |
 | U3 | UAC-r2 | Guard coverage | **Answered:** covered, with C4 (relationship cascade) and C5 (more selectors) |
+
+## 6. As built (056b): "never filed" enforcement, deploy order, known limits
+
+**One predicate.** `PrivateContextColumns.IsPrivate(row)` (any reference column holds a non-empty lookup) is the only test of "private message". Every site below uses it.
+
+**Where "never filed" is enforced.**
+- **Writes through the BFF.**
+  - `RecordOwnershipResolver.ReparentAsync` refuses a re-file or thread move of a private message (`sdap.communication.private.not_fileable`, 409).
+  - `PrivateMessageWriteGuard` is asked before every generic update of a communication that names a filing column, a typed regarding, the regarding pair, the thread or the owner. Its callers are the filing route (`OwnedChildWrite.RefileAsync`), the update handler, the AI update tool, the field-mapping push, Repair and inbound association.
+  - A read fault refuses with `sdap.communication.private.check_unavailable` (503).
+  - An ArchTest census keeps every generic writer on the guard.
+- **Links set outside the BFF.** The 2-minute Direct-message share reconcile clears any filing columns that exist on a private message, and the pair's display columns, app-only, on a row-version condition.
+- **Until the clear runs, these never act on a private message:**
+  - the secure reconcile (skips the row);
+  - the app-only record reads (excluded in the query);
+  - the core-ancestor stamp (no ancestor; a held stamp is cleared);
+  - the secure-child share mirror (placed under no root).
+- **Column presence.** Every security check asks metadata without remembering a "missing" answer. Only the caller-impersonated thread read, which uses the answer only to decide which columns to select, remembers it for 5 minutes.
+
+**Deploy order, per environment.** Run the schema script (`Set-PrivateContextSchema.ps1`), then field security (`Set-ThreadFlagFieldSecurity.ps1 -Apply`, then `-Verify`), then the BFF. Each step needs the owner's go.
+
+**Known limits.**
+- A refused private send can leave the pair's Direct thread with no message in it.
+- If the message row is created and a later send step fails, a retried echo saves an ordinary Direct message without the reference.
+- With both participants internal, an unreadable Restricted flag does not block the send (Q2, rule 2).
+- After a participant loses access to the record, the reference stays visible to them until the next share reconcile.
+- A failed out-of-band clear is retried on the next reconcile pass that reaches the row.
+- The secure-child share mirror reads the reference columns on rows it reads itself. For rows another job hands it, the secure reconcile's private-row skip applies.
+- Assigning a Direct message to another owner in the model-driven app follows the platform's Assign semantics, for every Direct message. This is tracked in #2979, not in 056.
+- Invite-only conversations are a follow-up: #2977.
