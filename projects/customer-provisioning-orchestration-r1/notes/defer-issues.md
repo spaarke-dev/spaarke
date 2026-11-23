@@ -10,6 +10,28 @@
 
 ## Open (in priority order)
 
+### ISS-037 — H12b never seeded the Worklist, Decision Records, Reconciliation and Compose workspaces
+
+| Field | Value |
+|---|---|
+| **Status** | Fix in PR #2993 (open); ACME seeded live 2026-11-23 |
+| **Urgency** | before the next stamp run (every new stamp lacks the four workspaces) |
+| **Filed** | 2026-11-23 |
+| **Source** | ACME guest-test prep after run `3b6f7b65`: the Console's Manage Workspaces showed 12 system workspaces, dev 16 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2991 |
+
+**Description**
+
+H12b (`DataverseWebApiWorkspaceLayoutSeeder`) seeds only `scripts/system-layouts.json`. Worklist, Decision Records and
+Reconciliation were seeded on dev by standalone `scripts/seed-*-workspace-layout.ps1` scripts, and Compose by hand
+(2026-06-29), so no provisioned stamp had them.
+
+**Done**
+- ACME (owner OK "Fix both"): the three scripts ran after a `-WhatIf`, and Compose was created from dev's row (sort 5, section `compose-editor`). Read-back: 16 system rows, Daily Briefing the only default.
+- PR #2993: the four layouts are added to `system-layouts.json`, plus a guard test (every standalone seed script's layout is listed with the same section; it fails on master's list).
+
+**Remaining**: merge #2993 (owner), then deploy the dev L2 Worker (owner OK) so H12b carries the list.
+
 ### ISS-036 — intake.schema.json lacks `buildId`, so an upgrade run cannot pin the BFF build from a valid intake
 
 | Field | Value |
