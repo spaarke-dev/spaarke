@@ -76,3 +76,5 @@ Owner go in this session ("Yes, run the checks"). Run 22:17–22:19Z against `sp
 | AC3: Messages view (`kind=direct`) as the sender | **PASS**: one thread listed, this one, with `counterpartName` "Test User 1" |
 
 The test message stays on dev; listed with the 056 row for later cleanup. AC1 and AC4 (the picker) are covered by the RTL tests; a UI click-through is the owner's.
+
+UAC-r2 confirmed AC5 and the 056 result on 2026-11-23 by its own read-back. Test User 1's full access on the thread is by design: they started the thread on 2026-10-06, and the starter owns it. Every Message row having its own `sprk_acsthreadid` (the send path creates a new ACS chat thread per send) is a messaging-owner issue, #3024. It does not hold 055 or 056.
