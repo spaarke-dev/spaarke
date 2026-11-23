@@ -606,13 +606,14 @@ public sealed class CommunicationThreadReadService
 
         var regardingValue = $"_{regardingField}_value";
         var select = ExternalSelect(new[] { regardingValue }, includeContent: true);
+        var notPrivate = await NotPrivateAppOnlyClauseAsync(ct);
         // Newest first with one over-fetched row (detects a cut-short list without a COUNT query): when the record has
         // more rows than the bound, the NEWEST ones are kept and the oldest dropped; the page is reversed to oldest→newest
         // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
         // never read for the external plane.
         var odata =
             $"$select={select}&{CreatedByExpand}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
-            $" and {ExternalPrivilegeFilterClause}" +
+            $" and {ExternalPrivilegeFilterClause}{notPrivate}" +
             $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={MaxRegardingScan + 1}";
         var rows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
 
@@ -759,6 +760,21 @@ public sealed class CommunicationThreadReadService
         return (messages, isInternal);
     }
 
+    /// <summary>
+    /// fm task 056 (owner 2026-11-22: a private message is never filed; UAC-r2: fail closed wherever a filing is read): the
+    /// <c>$filter</c> suffix (<c> and (…)</c>) that keeps every private message out of an app-only record read, for every caller
+    /// kind, in the QUERY, so a private message filed under the record outside the BFF is never read, counted or bounded with
+    /// the record's messages. Empty when no reference column exists (the read is unchanged). No entity service, a metadata fault
+    /// or a metadata read with no answer fails the read (<see cref="PrivateContextColumns.NotPrivateODataFilterAsync"/>).
+    /// </summary>
+    private async Task<string> NotPrivateAppOnlyClauseAsync(CancellationToken ct)
+    {
+        var entities = _entities
+            ?? throw new InvalidOperationException(
+                "IGenericEntityService is not registered; an app-only record read cannot keep private messages out (fail closed).");
+        return await PrivateContextColumns.NotPrivateODataFilterAsync(entities, ct) is { } clause ? $" and {clause}" : string.Empty;
+    }
+
     // ── app-only RECENT messages across many records, for the EXTERNAL notification feed (r3 task 037 / FR-08) ──
 
     /// <summary>Records per feed query: one OR-filter over this many regarding ids keeps the GET URL well inside the limit.</summary>
@@ -828,6 +844,7 @@ public sealed class CommunicationThreadReadService
         if (keyed.Count == 0)
             return new AppOnlyRecentReadResult(Array.Empty<RecentRecordMessage>(), truncated);
 
+        var notPrivate = await NotPrivateAppOnlyClauseAsync(ct);
         var rows = new List<Dictionary<string, JsonElement>>();
         foreach (var chunk in keyed.Chunk(RecentRecordChunkSize))
         {
@@ -835,7 +852,7 @@ public sealed class CommunicationThreadReadService
             var idFilter = string.Join(" or ", chunk.Select(r => $"{r.Value} eq {r.RecordId}"));
             var odata =
                 $"$select={ExternalSelect(regardingValues, includeContent: false)}&{CreatedByExpand}" +
-                $"&$filter=({idFilter}) and {ActiveOnlyClause} and {ExternalStatusClause} and {ExternalPrivilegeFilterClause}" +
+                $"&$filter=({idFilter}) and {ActiveOnlyClause} and {ExternalStatusClause} and {ExternalPrivilegeFilterClause}{notPrivate}" +
                 $" and {CreatedOnField} ge {FormatOData(since)}" +
                 $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={max + 1}";
             var chunkRows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
