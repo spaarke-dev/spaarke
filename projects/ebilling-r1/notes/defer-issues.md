@@ -1563,6 +1563,8 @@ Each restamps afterwards, but none refuses any of these:
 
 **UAC context (2026-10-20, also on #2132)**: the UAC delete design D1 keeps RemoveLink deliberately. D6 removes `prvDelete` on the core tables from Core User and replaces the model-driven app's Delete with the BFF flow. After UAC delete task 1 ships, only admins and holders of the named delete role can delete a core record outside the BFF. That narrows the defect but does not close it: a D-120 preview check or a sweep is still worth having, and (b) remains the structural fix.
 
+**Columns retired by task 193 (branch task/ebilling-193)** (not closed: the live dev run and the other environments follow).
+
 ---
 
 ### DEF-028 — Rate-card import does not check AppendTo on the scoped core record

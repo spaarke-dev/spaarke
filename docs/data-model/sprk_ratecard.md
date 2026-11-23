@@ -1,10 +1,11 @@
 # sprk_ratecard and sprk_ratecardrate (rate cards); timekeeper roster additions
 
 > **Project**: ebilling-r1, task 017 (FR-08)
-> **Last Updated**: 2026-10-15 (classification and stub-lookup decisions applied; D-84: `sprk_timekeeperrole` is LEDES-only, user-profile role has its own choice)
+> **Last Updated**: 2026-11-23 (task 193: core-record lookups retired); 2026-10-15 (classification and stub-lookup decisions applied; D-84: `sprk_timekeeperrole` is LEDES-only, user-profile role has its own choice)
 > **Script**: `scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1` (idempotent; `-WhatIf`; `-RemoveStubInvoiceLookup` for the owner-approved delete); D-84 follow-up: `scripts/ebilling/Deploy-EbillingUserProfileRoleChoice.ps1`
 > **Notes**: `projects/ebilling-r1/notes/017-timekeeper-ratecard-schema.md`
 > **Task 080 (2026-10-21)**: adds `sprk_procedureversion` to `sprk_ratecard` (script `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`; run on dev 2026-10-21 and verified).
+> **Task 193 (2026-11-23)**: the card's three core-record lookups (matter, project, work assignment) and their three relationships are retired: gone from the schema script, the forms script and the `SpaarkeMaster` source, and removed from dev by `scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1` (guarded: refuses while any card holds a value; `-Apply`, `-Verify`). A new environment never creates them. Other environments lose them only through a `SpaarkeMaster` upgrade import (an update import leaves managed columns behind). The card's link to a core record is its Procedure Version (EB-D-148).
 
 A **rate card** carries the provenance (source document) and effective period for many **rates**. A rate is the approved hourly rate (and the firm rack rate) for one timekeeper or one classification within an effective period. The ApprovedTimekeeper and ApprovedRate rules (task 071) and roster resolution (task 046) read these tables; the rate import (task 078) writes them and enforces the overlap rule. No plugin, business rule or calculated column (ADR-002). Both tables were created additively in dev on 2026-10-15 and are in the unmanaged `SpaarkeMaster` solution; forms, views and security-role privileges arrive with task 029.
 
@@ -16,11 +17,8 @@ Entity set `sprk_ratecards`. **User / team owned.** Primary name `sprk_name` (Te
 |---|---|---|
 | `sprk_name` | Text (200), primary name | Required. |
 | `sprk_firm` | Lookup -> `sprk_organization` (delete **Restrict**) | The firm the rates apply to. Relationship `sprk_organization_ratecard_firm`. |
-| `sprk_matter` | Lookup -> `sprk_matter` | Optional core-record scope. At most one of `sprk_matter` / `sprk_project` / `sprk_workassignment` is set; the writer (task 078) enforces it. Relationship `sprk_matter_ratecard_matter`. |
-| `sprk_project` | Lookup -> `sprk_project` | Optional core-record scope. Relationship `sprk_project_ratecard_project`. |
-| `sprk_workassignment` | Lookup -> `sprk_workassignment` | Optional core-record scope. Relationship `sprk_workassignment_ratecard_workassignment`. |
 | `sprk_sourcedocument` | Lookup -> `sprk_document` | The rate card document (Procedure Library). Relationship `sprk_document_ratecard_sourcedocument`. |
-| `sprk_procedureversion` | Lookup -> `sprk_procedureversion` (delete **Restrict**, optional) | Task 080 (EB-D-148, model 7.2): the Procedure Version whose published rate card this is; replaces the core-record lookups as the card's link (rate cards are no longer tied to a core record, D-120). Restrict: a Procedure Version with a rate card cannot be deleted. Relationship `sprk_ratecard_procedureversion_procedureversion`. **Field-secured (BFF-only writes).** The three core lookups above and `sprk_firm` stay unchanged; no `sprk_scope` column is added, and no `sprk_createdbyperson` is added to `sprk_ratecard` or `sprk_ratecardrate` (ontology F4-1 limits it to the policy and its version). |
+| `sprk_procedureversion` | Lookup -> `sprk_procedureversion` (delete **Restrict**, optional) | Task 080 (EB-D-148, model 7.2): the Procedure Version whose published rate card this is; replaces the core-record lookups as the card's link (rate cards are no longer tied to a core record, D-120). Restrict: a Procedure Version with a rate card cannot be deleted. Relationship `sprk_ratecard_procedureversion_procedureversion`. **Field-secured (BFF-only writes).** `sprk_firm` is unchanged; the card's three core-record lookups (matter, project, work assignment) are retired (task 193, below); no `sprk_scope` column is added, and no `sprk_createdbyperson` is added to `sprk_ratecard` or `sprk_ratecardrate` (ontology F4-1 limits it to the policy and its version). |
 | `sprk_effectivefrom` | Date only | First day the card is in force. |
 | `sprk_effectiveto` | Date only | Last day; empty = open ended. |
 
