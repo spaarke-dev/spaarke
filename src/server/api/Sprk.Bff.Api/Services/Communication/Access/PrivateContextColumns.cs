@@ -95,9 +95,10 @@ internal static class PrivateContextColumns
     /// with <c>and</c> and parenthesised; <c>null</c> when none exists (no private message can exist, so the read is unchanged).
     /// A metadata read that faults propagates, and one that gives no answer throws: either is a fault of the caller's read.
     /// </summary>
-    internal static async Task<string?> NotPrivateODataFilterAsync(IGenericEntityService entities, CancellationToken ct)
+    internal static async Task<string?> NotPrivateODataFilterAsync(
+        IGenericEntityService entities, CancellationToken ct, bool rememberMissing = false)
     {
-        var present = await PresentColumnsAsync(entities, ct).ConfigureAwait(false);
+        var present = await PresentColumnsAsync(entities, ct, rememberMissing).ConfigureAwait(false);
         return present.Count == 0 ? null : "(" + string.Join(" and ", present.Select(c => $"_{c}_value eq null")) + ")";
     }
 
@@ -107,13 +108,15 @@ internal static class PrivateContextColumns
     /// select exactly those for <see cref="IsPrivate"/>. Empty when none exists (no private message can exist). A metadata read that
     /// faults propagates, and one that gives no answer throws: either is a fault of the caller's read.
     /// </summary>
-    internal static async Task<IReadOnlyList<string>> PresentColumnsAsync(IGenericEntityService entities, CancellationToken ct)
+    internal static async Task<IReadOnlyList<string>> PresentColumnsAsync(
+        IGenericEntityService entities, CancellationToken ct, bool rememberMissing = false)
     {
         ArgumentNullException.ThrowIfNull(entities);
         var present = new List<string>(All.Count);
         foreach (var column in All)
         {
-            switch (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(entities, new[] { column }, ct).ConfigureAwait(false))
+            switch (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(
+                    entities, new[] { column }, ct, rememberMissing: rememberMissing).ConfigureAwait(false))
             {
                 case true:
                     present.Add(column);

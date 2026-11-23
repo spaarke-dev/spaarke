@@ -733,9 +733,10 @@ public sealed class DirectMessageOwnerStep
     /// <summary>
     /// fm task 056: the columns a selection of <c>sprk_communication</c> adds so <see cref="NeedsPrivateFilingClear"/> and
     /// <see cref="ClearPrivateFilingAsync"/> can judge and clear a row it read: the private-reference columns, the
-    /// <see cref="PrivateFilingColumns"/> and the row version. Empty when the reference columns are absent from metadata (no
-    /// private message can exist), when a filing column is absent, or when the metadata cannot be read: a select naming a missing
-    /// column fails the whole read, so the selection then stays as it was. Never throws (cancellation aside).
+    /// <see cref="PrivateFilingColumns"/> and the pair's <see cref="PrivateDisplayColumns"/>, each narrowed to the columns that
+    /// exist in metadata, and the row version. Empty when no reference column exists (no private message can exist) or when the
+    /// metadata cannot be read: the selection then stays as it was. An absent filing column is logged and the others are still
+    /// selected and cleared. Never throws (cancellation aside).
     /// </summary>
     internal static async Task<IReadOnlyList<string>> PrivateFilingSelectionAsync(
         IGenericEntityService dataverse, ILogger logger, CancellationToken ct)
@@ -744,29 +745,38 @@ public sealed class DirectMessageOwnerStep
         ArgumentNullException.ThrowIfNull(logger);
         try
         {
-            if (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(dataverse, PrivateContextColumns.All, ct)
-                    .ConfigureAwait(false) != true)
+            // One metadata read answers every column. Each list is narrowed to the columns that exist (a select naming a missing
+            // column fails the whole read), so one absent filing or display column never stops the others being cleared. The
+            // reference columns follow the rule every other reader of them follows (PrivateContextColumns.PresentColumnsAsync): a
+            // column absent from metadata holds no reference, so the clear runs while at least one reference column exists, and the
+            // row is judged on those present; none present means no private message can exist.
+            var present = await PrivateMessageSendGate.PresentCommunicationColumnsAsync(
+                    dataverse, PrivateContextColumns.All.Concat(PrivateFilingColumns).Concat(PrivateDisplayColumns).ToArray(), ct)
+                .ConfigureAwait(false);
+            if (present is null)
+            {
+                logger.LogDebug("[PRIVATE-FILING] The sprk_communication metadata gave no answer; no private message is checked this time.");
+                return [];
+            }
+
+            var presentSet = new HashSet<string>(present, StringComparer.OrdinalIgnoreCase);
+            var reference = PrivateContextColumns.All.Where(presentSet.Contains).ToArray();
+            if (reference.Length == 0)
             {
                 logger.LogDebug("[PRIVATE-FILING] The private-reference columns are not on sprk_communication; no private message is checked.");
                 return [];
             }
 
-            if (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(dataverse, PrivateFilingColumns.ToArray(), ct)
-                    .ConfigureAwait(false) != true)
+            var filing = PrivateFilingColumns.Where(presentSet.Contains).ToArray();
+            var display = PrivateDisplayColumns.Where(presentSet.Contains).ToArray();
+            if (filing.Length < PrivateFilingColumns.Count)
             {
                 logger.LogWarning(PrivateFilingNotClearedEvent,
-                    "[PRIVATE-FILING] Not every filing column is on sprk_communication; no private message is checked for filing.");
-                return [];
+                    "[PRIVATE-FILING] Filing columns absent from sprk_communication ({Columns}) cannot be cleared; the others are.",
+                    string.Join(",", PrivateFilingColumns.Where(c => !presentSet.Contains(c))));
             }
 
-            // The pair's display columns are selected (and so cleared) only where they all exist: a select naming a missing column
-            // fails the whole read.
-            IReadOnlyList<string> display = await PrivateMessageSendGate.CommunicationColumnsPresentAsync(dataverse, PrivateDisplayColumns.ToArray(), ct)
-                .ConfigureAwait(false) == true
-                ? PrivateDisplayColumns
-                : [];
-
-            return PrivateContextColumns.All.Concat(PrivateFilingColumns).Concat(display).Append(VersionColumn)
+            return reference.Concat(filing).Concat(display).Append(VersionColumn)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

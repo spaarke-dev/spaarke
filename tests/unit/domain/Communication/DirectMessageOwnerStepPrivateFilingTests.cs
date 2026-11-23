@@ -344,14 +344,58 @@ public class DirectMessageOwnerStepPrivateFilingTests
     }
 
     [Fact]
-    public async Task TheSelection_IsEmpty_WhenAFilingColumnIsAbsent()
+    public async Task TheSelection_StillNamesTheOtherFilingColumns_WhenOneFilingColumnIsAbsent()
     {
+        var absent = DirectMessageOwnerStep.PrivateFilingColumns[0];
         var dataverse = new Mock<IGenericEntityService>();
         dataverse.Setup(d => d.GetColumnMetadataAsync(Communication, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Columns(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns.Skip(1))));
 
+        var selection = await DirectMessageOwnerStep.PrivateFilingSelectionAsync(dataverse.Object, _log, CancellationToken.None);
+
+        selection.Should().BeEquivalentTo(
+            PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns.Skip(1)).Append("versionnumber"),
+            "the columns that exist are selected, so they are cleared; the absent one is not named");
+        selection.Should().NotContain(absent);
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains(absent));
+    }
+
+    [Fact]
+    public async Task TheSelection_NamesOnlyTheDisplayColumnsThatExist()
+    {
+        var display = DirectMessageOwnerStep.PrivateDisplayColumns;
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.GetColumnMetadataAsync(Communication, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Columns(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns).Concat(display.Skip(1))));
+
+        var selection = await DirectMessageOwnerStep.PrivateFilingSelectionAsync(dataverse.Object, _log, CancellationToken.None);
+
+        selection.Should().Contain(display.Skip(1)).And.NotContain(display[0]);
+    }
+
+    [Fact]
+    public async Task TheSelection_RunsOnTheReferenceColumnsThatExist_WhenOnlySomeAreThere()
+    {
+        // A column absent from metadata holds no reference (the rule every reader of the reference columns follows), so a private
+        // message that can exist is judged on the columns that do.
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.GetColumnMetadataAsync(Communication, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Columns(new[] { PrivateContextColumns.Matter }.Concat(DirectMessageOwnerStep.PrivateFilingColumns)));
+
+        var selection = await DirectMessageOwnerStep.PrivateFilingSelectionAsync(dataverse.Object, _log, CancellationToken.None);
+
+        selection.Should().BeEquivalentTo(new[] { PrivateContextColumns.Matter }.Concat(DirectMessageOwnerStep.PrivateFilingColumns).Append("versionnumber"));
+    }
+
+    [Fact]
+    public async Task TheSelection_IsEmpty_WhenNoReferenceColumnExists_EvenWithEveryFilingColumn()
+    {
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.GetColumnMetadataAsync(Communication, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Columns(DirectMessageOwnerStep.PrivateFilingColumns.Concat(DirectMessageOwnerStep.PrivateDisplayColumns)));
+
         (await DirectMessageOwnerStep.PrivateFilingSelectionAsync(dataverse.Object, _log, CancellationToken.None)).Should().BeEmpty();
-        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning);
+        _log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
     }
 
     [Fact]

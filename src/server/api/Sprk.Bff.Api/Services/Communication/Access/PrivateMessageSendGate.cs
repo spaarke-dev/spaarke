@@ -396,7 +396,7 @@ internal class PrivateMessageSendGate
 
     /// <summary>
     /// Whether every reference column exists on <c>sprk_communication</c> (published metadata). A yes is remembered for this
-    /// connection; a no for <see cref="ColumnsMissingRememberedFor"/>.
+    /// connection; a no is never remembered (a guard asks the metadata afresh: another instance may have seen the schema land).
     /// </summary>
     internal virtual Task<bool?> ReferenceColumnsPresentAsync(CancellationToken ct) =>
         CommunicationColumnsPresentAsync(_entities, PrivateContextColumns.All, ct, Clock);
@@ -405,9 +405,10 @@ internal class PrivateMessageSendGate
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
     /// <summary>
-    /// How long a definite "columns missing" answer is remembered per connection and column set, so an environment without the
-    /// schema does not pay a metadata read on every thread read, and still sees the columns within this long once the schema
-    /// script has run.
+    /// How long a definite "columns missing" answer is remembered per connection and column set, for the one caller that opts in
+    /// (a caller-impersonated, display-only read: row security decides who reads, the answer only decides whether the columns are
+    /// selected). It still sees the columns within this long once the schema script has run. No guard opts in: the service runs on
+    /// several instances, and a guard that remembered "missing" would pass a private message another instance has just created.
     /// </summary>
     internal static readonly TimeSpan ColumnsMissingRememberedFor = TimeSpan.FromMinutes(5);
 
@@ -418,13 +419,16 @@ internal class PrivateMessageSendGate
     /// <summary>
     /// Whether every one of <paramref name="columns"/> exists on <c>sprk_communication</c> (published metadata, read through
     /// <paramref name="entities"/>): <c>true</c>, <c>false</c>, or <c>null</c> when the metadata gave no answer. A yes is remembered
-    /// per connection and column; a no is remembered per connection and column set for <see cref="ColumnsMissingRememberedFor"/>
-    /// (timed by <paramref name="clock"/>, the system clock when <c>null</c>), so a column added later is seen without a restart. No
-    /// answer and a fault are never remembered. A fault propagates; the caller decides what an unanswered question means. The one
-    /// column-presence check of the private-message send and reads (fm task 056).
+    /// per connection and column. A no is asked afresh every time (the service runs on several instances, so another may have seen
+    /// the schema land): it is remembered, per connection and column set for <see cref="ColumnsMissingRememberedFor"/> (timed by
+    /// <paramref name="clock"/>, the system clock when <c>null</c>), only when the caller passes <paramref name="rememberMissing"/>,
+    /// which only a caller-impersonated display-only read does. No answer and a fault are never remembered. A fault propagates;
+    /// the caller decides what an unanswered question means. The one column-presence check of the private-message send and reads
+    /// (fm task 056).
     /// </summary>
     internal static async Task<bool?> CommunicationColumnsPresentAsync(
-        IGenericEntityService entities, IReadOnlyCollection<string> columns, CancellationToken ct, TimeProvider? clock = null)
+        IGenericEntityService entities, IReadOnlyCollection<string> columns, CancellationToken ct, TimeProvider? clock = null,
+        bool rememberMissing = false)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(columns);
@@ -434,7 +438,8 @@ internal class PrivateMessageSendGate
 
         var now = (clock ?? TimeProvider.System).GetUtcNow();
         var columnSet = string.Join('|', columns.Select(c => c.ToLowerInvariant()).Distinct().Order(StringComparer.Ordinal));
-        if (ColumnsMissingOn.TryGetValue(entities, out var missing)
+        if (rememberMissing
+            && ColumnsMissingOn.TryGetValue(entities, out var missing)
             && missing.TryGetValue(columnSet, out var expires))
         {
             if (now < expires)
@@ -448,9 +453,13 @@ internal class PrivateMessageSendGate
 
         if (!columns.All(metadata.ContainsKey))
         {
-            ColumnsMissingOn.GetValue(
-                    entities, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset>(StringComparer.Ordinal))
-                [columnSet] = now + ColumnsMissingRememberedFor;
+            if (rememberMissing)
+            {
+                ColumnsMissingOn.GetValue(
+                        entities, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset>(StringComparer.Ordinal))
+                    [columnSet] = now + ColumnsMissingRememberedFor;
+            }
+
             return false;
         }
 
@@ -459,6 +468,32 @@ internal class PrivateMessageSendGate
         foreach (var column in columns)
             remembered.TryAdd(column, 0);
         return true;
+    }
+
+    /// <summary>
+    /// Which of <paramref name="columns"/> exist on <c>sprk_communication</c> (published metadata, one read through
+    /// <paramref name="entities"/>), in the order given; <c>null</c> when the metadata gave no answer. Like
+    /// <see cref="CommunicationColumnsPresentAsync"/> a yes is remembered per connection and a no never is. A fault propagates.
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>?> PresentCommunicationColumnsAsync(
+        IGenericEntityService entities, IReadOnlyCollection<string> columns, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (ColumnsConfirmedOn.TryGetValue(entities, out var confirmed) && columns.All(confirmed.ContainsKey))
+            return columns.ToArray();
+
+        var metadata = await entities.GetColumnMetadataAsync(CommunicationTable, ct).ConfigureAwait(false);
+        if (metadata is null)
+            return null;
+
+        var present = columns.Where(metadata.ContainsKey).ToArray();
+        var remembered = ColumnsConfirmedOn.GetValue(
+            entities, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
+        foreach (var column in present)
+            remembered.TryAdd(column, 0);
+        return present;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────────────────────
