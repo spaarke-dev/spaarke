@@ -252,21 +252,80 @@ public sealed class PrivateMessageSendGateSeamTests
     }
 
     [Fact]
-    public async Task ReferenceColumnsPresentAsync_AMissingColumn_IsRememberedForTheTtl_ThenAskedAgain_AndSeenOnceTheScriptHasRun()
+    public async Task ReferenceColumnsPresentAsync_AMissingColumn_IsNeverRemembered_AndSeenAtOnceTheScriptHasRun()
     {
+        // Several BFF instances run side by side: the schema can land while another instance holds a "missing" answer, so the
+        // gate (and every guard) asks the metadata afresh for a "no".
         _communicationColumns = Columns(PrivateContextColumns.All.Where(c => c != PrivateContextColumns.Project));
-        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.Parse("2026-11-22T10:00:00Z"));
-        var gate = Gate(clock);
+        var gate = Gate();
 
         (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeFalse();
         _communicationColumns = Columns(PrivateContextColumns.All);
+        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeTrue("a no is asked again at once");
+
+        _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task CommunicationColumnsPresentAsync_AMissingColumn_IsRememberedForTheTtl_OnlyWhenTheCallerOptsIn()
+    {
+        _communicationColumns = Columns(PrivateContextColumns.All.Where(c => c != PrivateContextColumns.Project));
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.Parse("2026-11-22T10:00:00Z"));
+        Task<bool?> Ask() => PrivateMessageSendGate.CommunicationColumnsPresentAsync(
+            _entities.Object, PrivateContextColumns.All, CancellationToken.None, clock, rememberMissing: true);
+
+        (await Ask()).Should().BeFalse();
+        _communicationColumns = Columns(PrivateContextColumns.All);
         clock.Advance(PrivateMessageSendGate.ColumnsMissingRememberedFor - TimeSpan.FromSeconds(1));
-        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeFalse("a definite no is remembered within the TTL");
+        (await Ask()).Should().BeFalse("a definite no is remembered within the TTL, for the opted-in caller");
         _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
 
         clock.Advance(TimeSpan.FromSeconds(1));
-        (await gate.ReferenceColumnsPresentAsync(CancellationToken.None)).Should().BeTrue("after the TTL the metadata is asked again");
+        (await Ask()).Should().BeTrue("after the TTL the metadata is asked again");
         _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task AGuard_OnAnInstanceThatAnsweredMissing_SeesTheColumnsOnceTheyExist()
+    {
+        // Two entity services stand for two BFF instances over one Dataverse. Instance 1 is asked (the guard, and the display-only
+        // presence check that opts in) while the schema is absent. The schema lands and a private message is created through
+        // instance 2. The write guard on instance 1 must see the reference columns and refuse the filing: it holds no "missing".
+        var communication = Guid.Parse("05605605-6b00-4000-8000-0000000000b1");
+        var columns = Columns(Array.Empty<string>());
+        var rows = new List<Entity>();
+        Mock<IGenericEntityService> Instance()
+        {
+            var instance = new Mock<IGenericEntityService>();
+            instance.Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+                .Returns(() => Task.FromResult(columns));
+            instance.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .Returns(() => Task.FromResult(new EntityCollection(rows.ToList())));
+            return instance;
+        }
+
+        var instance1 = Instance();
+        var instance2 = Instance();
+        Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution?> Guard(Mock<IGenericEntityService> on) =>
+            PrivateMessageWriteGuard.RefuseUpdateAsync(
+                on.Object, "sprk_communication", communication, new[] { "sprk_regardingperson" }, NullLogger.Instance, CancellationToken.None);
+
+        (await PrivateMessageSendGate.CommunicationColumnsPresentAsync(
+            instance1.Object, PrivateContextColumns.All, CancellationToken.None, rememberMissing: true)).Should().BeFalse();
+        (await Guard(instance1)).Should().BeNull("with no reference column on the table no private message can exist");
+
+        columns = Columns(PrivateContextColumns.All);
+        rows.Add(new Entity("sprk_communication", communication)
+        {
+            [PrivateContextColumns.Matter] = new EntityReference("sprk_matter", Matter),
+        });
+
+        foreach (var instance in new[] { instance2, instance1 })
+        {
+            var refusal = await Guard(instance);
+            refusal.Should().NotBeNull("the guard asks the metadata afresh, so the private message created meanwhile is refused");
+            refusal!.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.PrivateMessageNotFileable);
+        }
     }
 
     [Fact]

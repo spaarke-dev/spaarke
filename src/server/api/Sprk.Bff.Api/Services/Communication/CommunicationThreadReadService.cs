@@ -1882,7 +1882,9 @@ public sealed class CommunicationThreadReadService
     /// <summary>
     /// Whether <see cref="PrivateContextReadColumns"/> exist on <c>sprk_communication</c>, through the private-message send gate's
     /// column-presence check (<see cref="PrivateMessageSendGate.CommunicationColumnsPresentAsync"/>; a yes is remembered per
-    /// connection). Anything other than a yes is false, including no entity service, no metadata answer and a fault: a read
+    /// connection, and a no for a short while: this is the one display-only presence check, on a caller-impersonated read where
+    /// row security decides who reads and the answer only decides whether the columns are selected; every guard asks afresh).
+    /// Anything other than a yes is false, including no entity service, no metadata answer and a fault: a read
     /// never fails because of this question, it reads without the columns.
     /// </summary>
     private async Task<bool> PrivateContextColumnsPresentAsync(CancellationToken ct)
@@ -1892,7 +1894,8 @@ public sealed class CommunicationThreadReadService
 
         try
         {
-            return await PrivateMessageSendGate.CommunicationColumnsPresentAsync(_entities, PrivateContextReadColumns, ct) == true;
+            return await PrivateMessageSendGate.CommunicationColumnsPresentAsync(
+                _entities, PrivateContextReadColumns, ct, rememberMissing: true) == true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
