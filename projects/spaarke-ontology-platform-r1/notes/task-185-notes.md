@@ -135,3 +135,18 @@ Deploy: `notes/deploy-log.md` 2026-11-23 (master `973d72b67e`). Nothing was save
 | Not checked | Find Similar → DRV → Email → To, and preview → Email → To (iframe and yielding-modal composer paths); a create-wizard code page lookup |
 
 Gotcha found: a Console tab that stayed open across the deploy kept the web resource URL token from 04:01Z and served the OLD bundle even after Ctrl+Shift+R and a frame reload (the server returns the old content for the old token). A new tab got the new token and the new code. Testers: open a new tab after a Console deploy.
+
+## Dev checks after task 202 reached dev (main session, 2026-11-23)
+
+Console auto-deployed from master `6311cd0a69` (17:56Z). Checked in the owner's Chrome (the built-in browser's dev sign-in failed). Nothing saved: the Decision wizard's typed budget amount was discarded.
+
+| Path | Focus ends on | Result |
+|---|---|---|
+| Worklist → Start review → Cancel (nothing chosen) | Start review | PASS |
+| Decision wizard, amount typed → Cancel → Keep deciding | the wizard's Cancel | PASS |
+| → Cancel → Discard and close | Start review | PASS |
+| Ontology admin → Classification → Edit | the form's Name field | PASS |
+| → Cancel | that row's Edit button | PASS |
+| Ontology admin → Rules → New rule → Cancel | body | **FAIL** |
+
+New rule cause (focusin + MutationObserver trace): `RuleWizard` shows a loading SprkModal, then replaces it with RuleWizardBody's modal about 550 ms later. The loading modal correctly restores to New rule; the new modal then captures focus from New rule but records the loading modal's Close button (still active during its render) as its opener. At close that button is gone, so nothing is restored. Fix: follow-up PR to master (SprkModal hands the opener over when one modal replaces another). The composer Close check waits for the 202 PCF deploy.
