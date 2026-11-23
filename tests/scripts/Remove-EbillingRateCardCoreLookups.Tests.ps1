@@ -23,7 +23,7 @@ BeforeAll {
     $wantedVariables = 'DevHost', 'Table', 'EntitySet', 'IdColumn', 'Targets', 'CoreLookupPattern', 'RelationshipNamesRegex', 'RateCardMentionRegex', 'CoreColumnMentionRegex', 'BffScanPaths', 'SpaScanPaths'
     $wantedFunctions = 'Get-ReaderProblems', 'Get-PreflightRefusals', 'Test-MentionsCoreLookup', 'Get-MentionCount', 'ConvertTo-FormWithoutCoreLookups', 'ConvertTo-ViewWithoutCoreLookups',
         'Read-Dv', 'Read-DvOrNull', 'Get-ComponentKind', 'Get-DependencyList', 'Get-State', 'Write-State', 'Test-AlreadyRetired', 'Get-ApplyBlockers', 'Get-VerifyProblems',
-        'Edit-FormsAndViews', 'Publish-Tables', 'Remove-Relationships', 'Wait-ColumnsGone', 'Invoke-Retirement'
+        'Edit-FormsAndViews', 'Get-PublishContext', 'Get-PendingCollateral', 'Publish-RateCard', 'Remove-Relationships', 'Wait-ColumnsGone', 'Invoke-Retirement'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
     $found = [System.Collections.Generic.List[string]]::new()
@@ -51,6 +51,24 @@ BeforeAll {
     # -WhatIf is a double that answers no; $script:Allow = $false makes every write refuse.
     function Confirm-Write { param([string]$Target, [string]$Action) $script:Dev.Asked.Add("$Action | $Target"); return [bool]$script:Allow }
 
+    # The shared D-83 procedure (scripts/lib/Publish-SolutionComponents.ps1): doubles that apply -ExcludeIds like the real one and record
+    # every call. $script:Dev.Collateral rows are @{ Id; Text }; CollateralAfterEdit rows appear once a form or view was edited.
+    $EnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com'
+    function Get-DataverseApiContext { param([string]$EnvironmentUrl) $script:Dev.ContextUrls.Add($EnvironmentUrl); return @{ Api = 'https://dev.invalid/api/data/v9.2'; Headers = @{} } }
+    function Get-EntityPublishCollateral {
+        param([hashtable]$Context, [string]$Entity, [string[]]$ExcludeIds = @())
+        $d = $script:Dev
+        $d.CollateralCalls.Add([pscustomobject]@{ Entity = $Entity; ExcludeIds = @($ExcludeIds) })
+        $rows = @($d.Collateral)
+        if (@($d.Writes | Where-Object { $_ -like 'PATCH *' }).Count -gt 0) { $rows += @($d.CollateralAfterEdit) }
+        return @($rows | Where-Object { $ExcludeIds -notcontains $_.Id } | ForEach-Object { $_.Text })
+    }
+    function Invoke-PublishXml {
+        param([hashtable]$Context, [string]$ParameterXml)
+        if ($ParameterXml -notmatch '^<importexportxml>.+</importexportxml>$') { throw 'ParameterXml must be an <importexportxml> document.' }
+        $script:Dev.Writes.Add('POST PublishXml'); $script:Dev.Published.Add($ParameterXml)
+    }
+
     function Test-DevMentions($Text, [string]$Column) { return ($Text -match "(?i)(?<![A-Za-z0-9])$Column(?![A-Za-z0-9])") }
 
     function Get-DevRelationship([string]$SchemaName) {
@@ -76,7 +94,6 @@ BeforeAll {
                 foreach ($k in @($d.Rel.Keys)) { if ((Get-DevRelationship $k).MetadataId -eq $Matches.id) { $d.Rel[$k] = $false } }
                 $d.Attr[$col] = $false
             }
-            elseif ($Path -eq 'PublishXml') { $d.Published.Add($Body.ParameterXml) }
             return $null
         }
         $d.Gets.Add($Path)
@@ -90,6 +107,7 @@ BeforeAll {
                 foreach ($f in $d.Forms) { if (Test-DevMentions $f.formxml $col) { $deps.Add([pscustomobject]@{ dependentcomponenttype = 60; dependentcomponentobjectid = $f.formid }) } }
                 foreach ($v in $d.Views) { if ((Test-DevMentions $v.fetchxml $col) -or (Test-DevMentions $v.layoutxml $col)) { $deps.Add([pscustomobject]@{ dependentcomponenttype = 26; dependentcomponentobjectid = $v.savedqueryid }) } }
                 foreach ($x in $d.ExtraDeps) { $deps.Add([pscustomobject]$x) }
+                if (@($d.Writes | Where-Object { $_ -like 'PATCH *' }).Count -gt 0) { foreach ($x in $d.ExtraDepsAfterEdit) { $deps.Add([pscustomobject]$x) } }
             }
             else { foreach ($x in $d.ExtraRelDeps) { $deps.Add([pscustomobject]$x) } }
             return [pscustomobject]@{ value = $deps.ToArray() }
@@ -147,6 +165,11 @@ BeforeAll {
             Gets      = [System.Collections.Generic.List[string]]::new()
             Asked     = [System.Collections.Generic.List[string]]::new()
             Published = [System.Collections.Generic.List[string]]::new()
+            Collateral = @()
+            CollateralAfterEdit = @()
+            CollateralCalls = [System.Collections.Generic.List[object]]::new()
+            ContextUrls = [System.Collections.Generic.List[string]]::new()
+            ExtraDepsAfterEdit = @()
         }
     }
 
@@ -460,7 +483,7 @@ Describe 'Invoke-Retirement (T3, T4, T5)' {
         $script:Dev.Writes.Count | Should -Be 0
     }
 
-    It '-Apply retires: edits the form and view, publishes, deletes the three relationships, publishes the four tables, verifies' {
+    It '-Apply retires: edits the form and view, publishes sprk_ratecard, deletes the three relationships, publishes sprk_ratecard again, verifies' {
         Invoke-Retirement $true $false $false 'owner OK'
         $w = @($script:Dev.Writes)
         $w | Should -Be @(
@@ -472,14 +495,87 @@ Describe 'Invoke-Retirement (T3, T4, T5)' {
             'DELETE RelationshipDefinitions(rel-sprk_workassignment)'
             'POST PublishXml'
         )
+        $script:Dev.Published.Count | Should -Be 2
         $script:Dev.Published[0] | Should -Be '<importexportxml><entities><entity>sprk_ratecard</entity></entities></importexportxml>'
-        $script:Dev.Published[1] | Should -Be '<importexportxml><entities><entity>sprk_ratecard</entity><entity>sprk_matter</entity><entity>sprk_project</entity><entity>sprk_workassignment</entity></entities></importexportxml>'
-        $script:Dev.Published[1] | Should -Not -Match 'PublishAll'
+        $script:Dev.Published[1] | Should -Be '<importexportxml><entities><entity>sprk_ratecard</entity></entities></importexportxml>'
         (Test-MentionsCoreLookup $script:Dev.Forms[0].formxml) | Should -BeFalse
         (Test-MentionsCoreLookup $script:Dev.Views[0].fetchxml) | Should -BeFalse
         (Test-MentionsCoreLookup $script:Dev.Views[0].layoutxml) | Should -BeFalse
         $script:Dev.Attr.Values | Where-Object { $_ } | Should -BeNullOrEmpty
         $script:Dev.Rel.Values | Where-Object { $_ } | Should -BeNullOrEmpty
+    }
+
+    It 'never publishes sprk_matter, sprk_project or sprk_workassignment: deleting a relationship needs no publish of the core tables (F1)' {
+        Invoke-Retirement $true $false $false 'owner OK'
+        $script:Dev.Published.Count | Should -BeGreaterThan 0
+        foreach ($body in $script:Dev.Published) {
+            $body | Should -Not -Match 'sprk_matter|sprk_project|sprk_workassignment'
+            @([regex]::Matches($body, '<entity>([^<]+)</entity>') | ForEach-Object { $_.Groups[1].Value }) | Should -Be @('sprk_ratecard')
+        }
+        # and the shared procedure is the only publish path: its collateral read ran for sprk_ratecard only
+        foreach ($call in $script:Dev.CollateralCalls) { $call.Entity | Should -Be 'sprk_ratecard' }
+    }
+
+    It 'checks pending collateral through the shared procedure before the first write, excluding exactly the form and view it edits (F1)' {
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-1'; Text = 'savedqueries: Active Rate Cards (v-1)' })
+        Invoke-Retirement $true $false $false 'owner OK'
+        $script:Dev.CollateralCalls.Count | Should -BeGreaterThan 0
+        $first = $script:Dev.CollateralCalls[0]
+        @($first.ExcludeIds | Sort-Object) | Should -Be @('f-1', 'v-1')
+        $script:Dev.Writes[0] | Should -Be 'PATCH systemforms(f-1)'
+        $script:Dev.Writes.Count | Should -Be 7
+    }
+
+    It 'refuses when another pending form or view of sprk_ratecard would go live with the publish: exit-2 exception, nothing written or published (F1)' {
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-other'; Text = 'savedqueries: Someone Else''s View (v-other)' })
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e | Should -Not -BeNullOrEmpty
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $e.Message | Should -BeLike "*Someone Else's View (v-other)*"
+        $e.Message | Should -BeLike '*-AllowPendingCollateral*'
+        $e.Message | Should -BeLike '*Nothing was changed*'
+        $e.Message | Should -Not -BeLike '*Information (f-1)*'
+        $script:Dev.Writes.Count | Should -Be 0
+        $script:Dev.Published.Count | Should -Be 0
+    }
+
+    It 'with -AllowPendingCollateral the same pending item does not stop the run (F1)' {
+        $script:Dev.Collateral = @(@{ Id = 'v-other'; Text = 'savedqueries: Someone Else''s View (v-other)' })
+        Invoke-Retirement $true $false $false 'owner OK' $true
+        $script:Dev.Published.Count | Should -Be 2
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 3
+    }
+
+    It 'a pending item that shows up after the edit stops the publish with a plain error (exit 1, partly applied), no relationship deleted (F1)' {
+        $script:Dev.CollateralAfterEdit = @(@{ Id = 'v-late'; Text = 'savedqueries: Late View (v-late)' })
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e | Should -Not -BeNullOrEmpty
+        $e.GetType().Name | Should -Not -Be 'EscalationException'
+        $e.Message | Should -BeLike '*Late View (v-late)*'
+        $e.Message | Should -BeLike '*partly applied*'
+        $script:Dev.Published.Count | Should -Be 0
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 0
+    }
+
+    It '-Apply -WhatIf reads the collateral (read only), refuses the same way, and publishes nothing (F1)' {
+        $script:Allow = $false
+        $script:Dev.Collateral = @(@{ Id = 'v-other'; Text = 'savedqueries: Someone Else''s View (v-other)' })
+        $e = Get-Refusal { Invoke-Retirement $true $false $true '' }
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $script:Dev.Writes.Count | Should -Be 0
+        $script:Dev.Published.Count | Should -Be 0
+    }
+
+    It 'a dependent that appears after the form and view edit stops the run with a plain error (exit 1, partly applied), not exit 2 (K1)' {
+        $script:Dev.ExtraDepsAfterEdit = @(@{ dependentcomponenttype = 59; dependentcomponentobjectid = 'chart-late' })
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e | Should -Not -BeNullOrEmpty
+        $e.GetType().Name | Should -Not -Be 'EscalationException'
+        $e.Message | Should -BeLike '*chart chart-late*'
+        $e.Message | Should -BeLike '*partly applied*'
+        $e.Message | Should -BeLike '*No relationship was deleted*'
+        @($script:Dev.Writes | Where-Object { $_ -like 'PATCH *' }).Count | Should -Be 2
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 0
     }
 
     It 'does not touch any other table: the only deletes are the three named relationships' {
@@ -677,7 +773,7 @@ Describe 'structure (T7)' {
         }
     }
 
-    It 'the only -Method uses are PATCH x2 in Edit-FormsAndViews, POST in Publish-Tables and DELETE in Remove-Relationships' {
+    It 'the only -Method uses are PATCH x2 in Edit-FormsAndViews and DELETE in Remove-Relationships; the publish goes through the shared D-83 procedure, not a hand-rolled POST (F1)' {
         $uses = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandParameterAst] -and $n.ParameterName -eq 'Method' }, $true)
         $seen = foreach ($u in $uses) {
             $cmd = $u.Parent
@@ -686,15 +782,27 @@ Describe 'structure (T7)' {
             $fn | Should -Not -BeNullOrEmpty
             "$($fn.Name):$($cmd.CommandElements[[array]::IndexOf($cmd.CommandElements, $u) + 1].Extent.Text)"
         }
-        @($seen | Sort-Object) | Should -Be @('Edit-FormsAndViews:PATCH', 'Edit-FormsAndViews:PATCH', 'Publish-Tables:POST', 'Remove-Relationships:DELETE')
+        @($seen | Sort-Object) | Should -Be @('Edit-FormsAndViews:PATCH', 'Edit-FormsAndViews:PATCH', 'Remove-Relationships:DELETE')
     }
 
     It 'every writing function asks Confirm-Write before its first -Method (so -WhatIf writes nothing)' {
-        foreach ($name in 'Edit-FormsAndViews', 'Publish-Tables', 'Remove-Relationships') {
+        foreach ($name in 'Edit-FormsAndViews', 'Remove-Relationships') {
             $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)[0]
             $fn.Extent.Text.IndexOf('Confirm-Write') | Should -BeGreaterOrEqual 0
             $fn.Extent.Text.IndexOf('Confirm-Write') | Should -BeLessThan $fn.Extent.Text.IndexOf('-Method')
         }
+    }
+
+    It 'Publish-RateCard publishes only sprk_ratecard, through Invoke-PublishXml, after Confirm-Write and the pending-collateral check; the script loads the shared procedure and names no hand-rolled PublishXml (F1)' {
+        $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Publish-RateCard' }, $true)[0].Extent.Text
+        $fn.IndexOf('Confirm-Write') | Should -BeGreaterOrEqual 0
+        $fn.IndexOf('Get-PendingCollateral') | Should -BeGreaterThan $fn.IndexOf('Confirm-Write')
+        $fn.IndexOf('Invoke-PublishXml') | Should -BeGreaterThan $fn.IndexOf('Get-PendingCollateral')
+        $fn | Should -Match '<entity>\$Table</entity>'
+        $fn | Should -Not -Match 'Referenced|\$Targets'
+        $text = $script:Ast.Extent.Text
+        $text | Should -Match "(?m)^\. \(Join-Path \`$PSScriptRoot '\.\.' 'lib' 'Publish-SolutionComponents\.ps1'\)"
+        $text | Should -Not -Match "Path 'PublishXml'|Publish-Tables"
     }
 
     It 'Confirm-Write is ShouldProcess, so -WhatIf reaches it' {
@@ -707,7 +815,8 @@ Describe 'structure (T7)' {
         $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-Retirement' }, $true)[0].Extent.Text
         $fn.IndexOf('Get-ApplyBlockers $state') | Should -BeGreaterThan 0
         $fn.IndexOf('throw [EscalationException]') | Should -BeGreaterThan $fn.IndexOf('Get-ApplyBlockers $state')
-        $fn.IndexOf('Edit-FormsAndViews') | Should -BeGreaterThan $fn.IndexOf('throw [EscalationException]')
+        $fn.IndexOf('Get-PendingCollateral') | Should -BeGreaterThan $fn.IndexOf('throw [EscalationException]')
+        $fn.IndexOf('Edit-FormsAndViews') | Should -BeGreaterThan $fn.IndexOf('Get-PendingCollateral')
         $fn.IndexOf('Remove-Relationships') | Should -BeGreaterThan $fn.IndexOf('Edit-FormsAndViews')
     }
 

@@ -23,22 +23,33 @@
                        is written without -Apply.
       -Apply           The retirement (needs -OwnerApproval, -BffDeployAttestation, -SpaDeployAttestation; see below). Every refusal
                        happens before the first write (exit 2, nothing changed):
-                         (a) any sprk_ratecard row (any state) holds a value in any of the three columns, or the count cannot be had;
+                         (a) any sprk_ratecard row (any state) holds a value in any of the three columns, or the count cannot be had,
+                             or the caller cannot be shown to read EVERY sprk_ratecard row (the table is user-owned, so a count taken
+                             at a lower read depth is silently short; needs the System Administrator role or organization-wide Read);
                          (b) the deployed BFF / SPA source selects the columns (the attestation checks, below);
                          (c) anything else depends on a column or relationship (RetrieveDependenciesForDelete), a personal view or
                              grid configuration names a column, a form or view cannot be cleaned, or a relationship is not exactly
-                             the expected sprk_ratecard -> core-record one.
+                             the expected sprk_ratecard -> core-record one;
+                         (d) another pending (unpublished) form or view of sprk_ratecard would go live with the publish (D-83), unless
+                             -AllowPendingCollateral is given.
                        Then: take the three controls off the sprk_ratecard forms and the three cells / attributes off its views, publish
-                       sprk_ratecard (entity-scoped, never PublishAll); re-read RetrieveDependenciesForDelete until nothing depends on a
-                       column; delete the three relationships by schema name (that removes the lookup columns and their name
-                       companions); publish sprk_ratecard and the three referenced tables; verify.
+                       sprk_ratecard (entity-scoped, through the shared scripts/lib/Publish-SolutionComponents.ps1 procedure, never
+                       tenant-wide); re-read RetrieveDependenciesForDelete until nothing depends on a column; delete the three
+                       relationships by schema name (that removes the lookup columns and their name companions; deleting a relationship
+                       needs no publish of the core tables, which are never published); publish sprk_ratecard again; verify.
       -Apply -WhatIf   The dry run of the above: the same refusals and the same census (read-only GETs), and "What if:" lines for every
                        write; nothing is written.
       -Verify          READ-ONLY. Confirms the three attributes and the three relationships are gone and no sprk_ratecard form or view
                        names them. Exit 0 = retired, exit 1 = something remains. -Apply ends with the same check.
 
     IDEMPOTENT. A second -Apply after success finds everything gone, does nothing, verifies and exits 0. A run interrupted part way is
-    re-run to continue: every step skips work already done.
+    re-run to continue: every step skips work already done. A run that stopped after it edited the form and view but before it published
+    leaves them pending; the re-run finds them as pending collateral (they no longer name a column, so they are not recognised as this
+    script's own) and refuses until -AllowPendingCollateral is given after the operator has checked that they are those two.
+
+    EXIT CODES. 0 = done, report or verified. 1 = an error, or a stop AFTER the first write (the retirement is partly applied: re-run to
+    resume). 2 = refused BEFORE the first write (nothing changed): a blocker, a missing approval or attestation, the wrong environment, a
+    pending-collateral refusal, or a caller who cannot read every row.
 
     ATTESTATIONS. The dev BFF and external SPA are deployed from other branches and this script cannot see what is live. The operator
     attests the commit each was built from; the script checks THAT commit's source by content (project CLAUDE.md section 6: a squash
@@ -65,6 +76,10 @@
 .PARAMETER Verify
     Check that the retirement is complete (read-only; exit 1 when something remains).
 
+.PARAMETER AllowPendingCollateral
+    With -Apply: go on although other pending (unpublished) forms or views of sprk_ratecard would be published with it (D-83). Give it only
+    after the owner of those changes agrees, or after checking that they are this script's own half-finished edit.
+
 .PARAMETER OwnerApproval
     Required with -Apply (not with -Apply -WhatIf): free text recorded in the output, e.g. the date and who gave the owner's OK. Project
     CLAUDE.md section 5: destructive dev changes need the owner's explicit OK first.
@@ -82,8 +97,9 @@
     pwsh scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1 -Verify
 
 .NOTES
-    Project: ebilling-r1, task 193. Exit codes: 0 = done / report / verified, 1 = error or verification failed, 2 = refused (blocker,
-    missing approval or attestation, wrong environment). Other environments lose the columns only through a SpaarkeMaster upgrade
+    Project: ebilling-r1, task 193. Exit codes: 0 = done / report / verified, 1 = error, verification failed, or stopped after the first
+    write (partly applied: re-run), 2 = refused before the first write (blocker, missing approval or attestation, wrong environment,
+    pending collateral). Other environments lose the columns only through a SpaarkeMaster upgrade
     import (an update import leaves managed columns behind): see notes/193-retire-ratecard-core-lookups.md.
 #>
 
@@ -94,6 +110,7 @@ param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [switch]$Apply,
     [switch]$Verify,
+    [switch]$AllowPendingCollateral,
     [string]$OwnerApproval,
     [string]$BffDeployAttestation,
     [string]$SpaDeployAttestation
@@ -101,6 +118,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
+# The shared D-83 procedure: Get-EntityPublishCollateral, Invoke-PublishXml (the only publish call the repo allows), Get-DataverseApiContext.
+. (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
 $DryRun = [bool]$WhatIfPreference
 $DevHost = 'spaarkedev1.crm.dynamics.com'
 
@@ -414,11 +433,29 @@ function Edit-FormsAndViews($State) {
     return $edited
 }
 
-function Publish-Tables([string[]]$Tables) {
-    if (-not (Confirm-Write ($Tables -join ', ') 'PublishXml (entity-scoped, never tenant-wide)')) { return }
-    $ents = ($Tables | ForEach-Object { "<entity>$_</entity>" }) -join ''
-    Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><entities>$ents</entities></importexportxml>" } | Out-Null
-    Write-Host "  published $($Tables -join ', ')" -ForegroundColor Green
+# The token context of the shared procedure (az CLI identity), made on first use.
+function Get-PublishContext {
+    if (-not $script:PublishContext) { $script:PublishContext = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl }
+    return $script:PublishContext
+}
+
+# D-83: an entity publish carries EVERY pending form and view of the table, not only the ones this script edited. Read only. Returns the
+# pending items other than $OwnIds (the form and view ids this script edits itself).
+function Get-PendingCollateral([string[]]$OwnIds) {
+    return @(Get-EntityPublishCollateral -Context (Get-PublishContext) -Entity $Table -ExcludeIds @($OwnIds | Where-Object { $_ }))
+}
+
+# The only publish: sprk_ratecard, entity-scoped, through the shared procedure. The core tables are never published (deleting a
+# relationship needs no publish of them). Pending collateral is re-read right before the publish; it was refused up front, so one found
+# here appeared during the run: a plain error (exit 1, partly applied), never an exit-2 "nothing changed".
+function Publish-RateCard([string[]]$OwnIds, [bool]$AllowPending) {
+    if (-not (Confirm-Write $Table 'PublishXml (entity-scoped, through scripts/lib/Publish-SolutionComponents.ps1, never tenant-wide)')) { return }
+    $pending = @(Get-PendingCollateral $OwnIds)
+    if ($pending.Count -gt 0 -and -not $AllowPending) {
+        throw "Refusing to publish ${Table}: $($pending.Count) other pending form(s) / view(s) appeared and would go live too: $($pending -join '; '). Nothing was published by this step; the retirement is partly applied, so re-run to resume after the owner of those changes agrees (-AllowPendingCollateral)."
+    }
+    Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>"
+    Write-Host "  published $Table" -ForegroundColor Green
 }
 
 function Remove-Relationships($State) {
@@ -448,7 +485,7 @@ function Wait-ColumnsGone($State) {
 # Run (a function so the Pester tests can drive it against a test double of the Dataverse calls)
 # ---------------------------------------------------------------------------------------------------------------
 
-function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]$DryRunMode, [string]$Approval) {
+function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]$DryRunMode, [string]$Approval, [bool]$AllowPending = $false) {
     $state = Get-State
     Write-State $state
     $blockers = @(Get-ApplyBlockers $state)
@@ -471,10 +508,19 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
         else {
             if ($blockers.Count -gt 0) { throw [EscalationException]::new("Refusing to apply: $($blockers.Count) reason(s): $($blockers -join '; '). Nothing was changed.") }
 
+            # D-83, before the first write: the publish carries every pending form and view of the table. The form and view this script
+            # edits are its own and are excluded.
+            $ownIds = @(@($state.Forms | ForEach-Object { $_.Id }) + @($state.Views | ForEach-Object { $_.Id }))
+            $pending = @(Get-PendingCollateral $ownIds)
+            if ($pending.Count -gt 0 -and -not $AllowPending) {
+                throw [EscalationException]::new("Refusing to apply: $($pending.Count) other pending (unpublished) form(s) / view(s) of $Table would go live with the publish: $($pending -join '; '). Re-run with -AllowPendingCollateral after the owner of those changes agrees. Nothing was changed.")
+            }
+            if ($pending.Count -gt 0) { Write-Host "  -AllowPendingCollateral: publishing $($pending.Count) other pending item(s) of $Table too" -ForegroundColor Yellow }
+
             Write-Host '1. Forms and views of sprk_ratecard' -ForegroundColor Cyan
             $null = Edit-FormsAndViews $state
             # Always publish (an earlier run may have edited and stopped before publishing).
-            Publish-Tables @($Table)
+            Publish-RateCard $ownIds $AllowPending
 
             Write-Host '2. Nothing may depend on a column or relationship any more' -ForegroundColor Cyan
             $after = $null; $left = @()
@@ -484,13 +530,15 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
                 if ($left.Count -eq 0) { break }
                 Start-Sleep -Seconds 5
             }
-            if ($left.Count -gt 0) { throw [EscalationException]::new("After the form and view edit $($left.Count) reason(s) remain: $($left -join '; '). No relationship was deleted.") }
+            # A plain error, not an EscalationException: the form and view were already edited and published, so this is exit 1 (partly
+            # applied; re-run to resume), not the exit-2 "nothing changed".
+            if ($left.Count -gt 0) { throw "After the form and view edit $($left.Count) reason(s) remain: $($left -join '; '). No relationship was deleted. The retirement is partly applied (the form and view are edited and published): fix the reason(s), then re-run to resume." }
             Write-Host '  no dependents remain' -ForegroundColor Green
 
             Write-Host '3. Delete the relationships (the lookup columns go with them)' -ForegroundColor Cyan
             $deleted = Remove-Relationships $after
             if ($deleted -gt 0) { Wait-ColumnsGone $after }
-            Publish-Tables (@($Table) + @($Targets | ForEach-Object { $_.Referenced }))
+            Publish-RateCard $ownIds $AllowPending
         }
     }
 
@@ -523,7 +571,7 @@ try {
     if ($Apply) { Write-Host "Pre-flight (git only, before any Dataverse call) passed: -BffDeployAttestation $BffDeployAttestation (src/server), -SpaDeployAttestation $SpaDeployAttestation (src/client, src/solutions)" -ForegroundColor Green }
 
     $null = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniqueName 'SpaarkeMaster' -DryRun:$DryRun -Entity $Table
-    Invoke-Retirement ([bool]$Apply) ([bool]$Verify) $DryRun $OwnerApproval
+    Invoke-Retirement ([bool]$Apply) ([bool]$Verify) $DryRun $OwnerApproval ([bool]$AllowPendingCollateral)
 }
 catch [EscalationException] {
     Write-Host ''
