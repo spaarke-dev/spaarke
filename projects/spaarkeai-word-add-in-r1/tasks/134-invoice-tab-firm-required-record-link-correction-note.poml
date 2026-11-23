@@ -3,7 +3,7 @@
   <metadata>
     <title>Invoice tab: firm required, "Open in Spaarke" record link, firm on the already-submitted banner, Correction Note, inline firm assign</title>
     <phase>8 — UAT findings and cross-project fixes</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what the pane sends to a finance route and reverses a merged behaviour (#2552's no-firm path); a later slice sets a field that grants external access (through ebilling's route).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -78,5 +78,6 @@ rework: fix-round-1 task 134
   - K4: closing the pending view drops its Retry (the L4 job finishes the pass);
   - K4: the list Retry can double-send (dedup absorbs it).
 - Merge is held until 095g is on the dev BFF and the type code is seeded, then the owner's go.
-2026-11-17: #2829 merged on the owner's go ("Yes, merge #2829") as a68b6e5e6f. 095g has been live on dev BFF aa7d6345f3 since 2026-11-15, and the type code is seeded. Deploy run 44117344761 succeeded. Remaining: the owner's dev check (the testable="false" criterion).</notes>
+2026-11-17: #2829 merged on the owner's go ("Yes, merge #2829") as a68b6e5e6f. 095g has been live on dev BFF aa7d6345f3 since 2026-11-15, and the type code is seeded. Deploy run 44117344761 succeeded. Remaining: the owner's dev check (the testable="false" criterion).
+2026-11-23 COMPLETED: owner dev check passed the already-submitted banner (firm named) and the Correction Note (required; INV-792345.5 accepted; sprk_correctionnote read back on the new invoice). Found on the way: the "this email is filed to X" note read the newest saved .eml copy (an 11-13 re-save filed to another matter) while the server judges the communication, so the note was wrong and the correction rightly accepted. Follow-up raised with the owner.</notes>
 </task>
