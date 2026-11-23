@@ -49,6 +49,7 @@ import type {
   FirmOutcomeItem,
   FirmOutcomeKind,
 } from '../../api/ebilling-client';
+import type { InvoiceSubmissionStatusView } from '@spaarke/ui-components/components/InvoiceSubmission';
 import { SectionCard } from '../SectionCard';
 import { formatDetailValue } from '../detail/RecordDetailFields';
 import { useOutcomePrint } from './outcomePrint';
@@ -760,3 +761,12 @@ export const SubmissionOutcomeReport: React.FC<{ submissionId: string }> = ({ su
     </div>
   );
 };
+
+/**
+ * The `renderReport` slot of the shared `InvoiceSubmissionOutcome` / `InvoiceSubmissionWizard` (FR-18, FR-38): the same report
+ * for a Rejected submission wherever the wizard is hosted (the standalone submission page and the record's modal wizard,
+ * `SubmitInvoiceAction`). One definition, so no host shows the shared placeholder instead.
+ */
+export const renderSubmissionReport = (status: InvoiceSubmissionStatusView): React.ReactNode => (
+  <SubmissionOutcomeReport submissionId={status.submissionId} />
+);

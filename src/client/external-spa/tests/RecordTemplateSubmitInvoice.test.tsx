@@ -532,6 +532,66 @@ async function submitThroughWizard(child: HTMLElement): Promise<void> {
   await within(child).findByText('Invoice received', undefined, { timeout: 20000 });
 }
 
+/** The submission outcome a Rejected submission reads (`FirmOutcome`, camelCase, enums as names). */
+const REJECTED_OUTCOME = {
+  kind: 'SubmissionRejected',
+  trackingNumber: 'TRK-1',
+  statusLabel: 'Rejected',
+  billedTotal: null,
+  approvedTotal: null,
+  degraded: false,
+  items: [
+    {
+      decision: 'RejectionFinding',
+      reason: null,
+      firmReasons: ['The billed rate is above the approved rate.'],
+      citations: [],
+      lineNumber: 4,
+      valuesRead: [{ name: 'Rate', value: '540' }],
+      reasonCode: 'approved_rate.above_approved',
+    },
+  ],
+};
+
+describe('Submit invoice: a Rejected result in the modal wizard (ebilling-r1 134, spa-r4 F4)', () => {
+  it(
+    'shows the same outcome report the standalone page shows, read from the submission route, not the shared placeholder',
+    async () => {
+      installWizard();
+      h.getInvoiceSubmission.mockResolvedValue({
+        submissionId: SUBMISSION_ID,
+        status: 'Rejected',
+        trackingNumber: 'TRK-1',
+        outcomeReasonCode: 'duplicate_invoice',
+      });
+      const { child } = await openWizard();
+      // The record read and firm-records route are the install's; add the submission outcome route to it.
+      const base = h.bffApiCall.getMockImplementation()!;
+      h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) =>
+        /\/ebilling\/submissions\/[^/]+\/outcome$/.test(path) ? REJECTED_OUTCOME : base(path, options)
+      );
+
+      await waitFor(() => expect(fileInputOf(child)).not.toBeNull(), SLOW);
+      fireEvent.change(fileInputOf(child)!, { target: { files: [pdf()] } });
+      const next = await within(child).findByRole('button', { name: /^next$/i });
+      await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false), SLOW);
+      fireEvent.click(next);
+      fireEvent.change(await within(child).findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+      fireEvent.click(within(child).getByRole('button', { name: /^submit invoice$/i }));
+
+      const wrapper = await within(child).findByTestId('submission-outcome-report', undefined, { timeout: 20000 });
+      const report = await within(wrapper).findByTestId('invoice-outcome-report', undefined, WAIT);
+      expect(report.getAttribute('data-kind')).toBe('SubmissionRejected');
+      expect(within(child).getByText('The billed rate is above the approved rate.')).toBeTruthy();
+      expect(within(child).queryByTestId('invoice-report-placeholder')).toBeNull();
+      expect(
+        h.bffApiCall.mock.calls.some(call => String(call[0]).endsWith(`/ebilling/submissions/${SUBMISSION_ID}/outcome`))
+      ).toBe(true);
+    },
+    SLOW
+  );
+});
+
 describe('Submit invoice: the click opens a modal over the record', () => {
   it(
     'a child dialog over the record with this record fixed: no record step, no picker, one close button, nothing navigates and the record stays open',
