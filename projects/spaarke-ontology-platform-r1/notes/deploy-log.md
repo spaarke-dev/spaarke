@@ -1,5 +1,26 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-23 ~15:31–16:04Z — tasks 199 + 200 (lookup focus return) to dev (spaarkedev1), master `973d72b67e`
+
+- **Owner go:** "Wait for 200 - continue working on 200" (2026-11-23, answering "deploy 199's controls now or with 200's").
+- **Source:** detached worktree `C:\wtdep200` at `973d72b67e` (contains 199 `1e6ee676d7` and 200). Shared libs built in the pcf-deploy order; builds one at a time, caches cleared.
+- **Console:** `deploy-spaarke-ai.yml` succeeded for `973d72b67e` (14:55Z push); not touched by hand.
+- **No tenant-wide publish.** PCFs via `Import-SolutionScoped.ps1` (no `--publish-changes`); code pages published by `PublishXml` naming only those web resources. No BFF, data, schema, role or Azure change.
+- **PCFs** (`Invoke-PcfBuildProd.ps1` judged by output; fresh `out/` copied into Solution before `pack.ps1`; every dev old version was a master version, so nothing clobbered). All importjob progress 100; served `cc_…/bundle.js` SHA-256 equals the build:
+  - CommunicationActionsSolution 1.3.23 → **1.3.25** (`d2c1717ae1dd`); one transient DNS failure before import, version re-checked, retried.
+  - TrackingFieldTrioSolution 1.0.65 → **1.0.67** (`f61111983284`).
+  - SpaarkeSemanticSearch 1.1.90 → **1.1.92** (`27f118fb0135`).
+  - RecordHeaderPcf 1.1.12.0 → **1.1.13.0** (`afadcc8f81c3`).
+  - RegardingResolverSolution 1.6.4 → **1.6.5** (`6a0aeb09276a`).
+  - CommunicationConversationPanelSolution 1.18.5 → **1.18.6** (`f11e2f6e6180`).
+- **Code pages (13), D-126 clobber check passed for each** (no live user-facing string missing from the build, except DailyBriefing's "Critical today", removed on purpose by task 062 `94ab2967d4`). Read-back: API content and served `/WebResources/…` equal the build SHA-256 for all 13.
+  - `Deploy-WizardCodePages.ps1`: create matter, project, event, todo, work assignment, report card wizards; `sprk_summarizefileswizard`; `sprk_documentuploadwizard` (+ unchanged `sprk_wizard_commands`).
+  - PATCH by id + `PublishXml` of those ids: `sprk_smarttodo`, `sprk_emailpage`, `sprk_dailyupdate` (live copy dated 2026-10-10, so it also brings ~6 weeks of master changes the Console already runs), `sprk_communicationconversationpage.html`, `sprk_documentrelationshipviewer`.
+  - Not deployed: built but not carrying the changed modules (`sprk_createinvoicewizard`, `sprk_communicationspage.html`, `sprk_communicationreconciliation`, `sprk_findsimilar`, `sprk_recordfamily`, `sprk_eventdetailsidepane.html`, `sprk_speadmin`, `sprk_alldocuments`, `sprk_semanticsearch`); not on dev, not created (RuleReview, InvoiceReview, CommunicationPage).
+- **Bundle record:** chore PR #2995 commits the six rebuilt Solution `bundle.js` files (auto-merge, squash).
+- **Not fixed by this deploy:** the nine triggers outside `@spaarke/ui-components` (DI-163 #2985).
+- **Dev focus checks:** see `notes/task-185-notes.md` (main session, 2026-11-23).
+
 ## 2026-11-07 — ACME upgraded to SpaarkeMaster 1.3.0.0 (owner go given directly in this session)
 
 - **Publish:** SpaarkeMaster 1.3.0.0 published from master `d53d67f604` (`publish-dataverse-solutions-manifest.yml`; dry run first, then publish). The store's `latest` is now 1.3.0.0. ebilling confirmed its pending field-security lock targets 1.3.0.1.

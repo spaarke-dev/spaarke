@@ -109,6 +109,11 @@ builder.Services.AddCommunicationModule(builder.Configuration);
 // in-BFF callers (the predicate compiler / Signal writer / evaluator, tasks 021/030/031/032).
 builder.Services.AddSignalsModule();
 
+// MCP host (spaarkeai-mcp-bff-api-r1 task 020, FR-01, ADR-010): the stateless ModelContextProtocol.AspNetCore transport, the
+// attribute-discovered tool catalog and the Mcp:Enabled kill switch (ADR-032 null object, default off). Registered
+// UNCONDITIONALLY: the /mcp/legal-operations route is mapped in both states. No background work (ADR-052).
+builder.Services.AddMcpModule(builder.Configuration);
+
 // Notification spine Layer-C (spaarke-notification-spine-r1 task 020) — SignalR delivery service +
 // negotiate endpoint. Registered UNCONDITIONALLY (ADR-032): real Serverless impl when Azure SignalR
 // is configured, Null-Object no-op otherwise. Placement Justification (CLAUDE.md §10): the spine is

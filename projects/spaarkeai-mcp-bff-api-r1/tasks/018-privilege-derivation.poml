@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>FR-04 privilege derivation from communications (owner option A widened)</title>
+    <phase>A BFF rework</phase>
+    <gate>after 015; hard gate of 022</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies SignalReadService.cs and the capability (.cs); privacy-sensitive (FR-04, ADR-015)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Confidentiality control: a wrong derivation leaks privileged legal detail to the model through 022; fail-closed semantics across fault, 403 and unreadable rows must be exact</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns SignalReadService.cs, DecideLanePaging.cs, WorklistItemSummary.cs, DecisionCapability.cs and the new WorkItemPrivilege.cs in its wave; 020 and 021 touch none</parallel-reason>
+    <deps>015</deps>
+    <tags>bff-api, api, privacy, unit-test, integration-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Derive the Decide-lane privilege flag at read time from communications, as the caller, per the owner's ruling of 2026-11-08 (option A widened): a Work Item is privilege-flagged when its subject (when the subject is a sprk_communication) or any of its witness or evidence communications has sprk_communication.sprk_privilegeclassification Privileged or Potentially Privileged. Replace task 015's read of sprk_signal.sprk_privilegeflagged (never written, ontology DI-64) with this derivation, in one injectable helper in Services/Signals/ that ontology DI-143 (#2630) can reuse for the Decision Record snapshot.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in caller-scoped Dataverse Web API reads, fail-closed access rules and batched query bounds.</role>
+  <goal>WorklistItemSummary.PrivilegeFlagged on every Decide-lane page equals the derivation rule below, computed with one batched caller read of sprk_communication per page (per 200 distinct communication ids), failing closed; the Console's REST worklist response is unchanged byte for byte; the helper has a public method ontology DI-143 can call.</goal>
+
+  <context>
+    <background>Spec FR-04 as amended 2026-11-08; notes/decisions.md entries 'Task 015', 'Ontology review of 015' and 'Owner ruling FR-04 (2026-11-08)'. Task 015 selects sprk_signal.sprk_privilegeflagged in the Lanes FetchXML and carries it through WorklistItemExtras to the summary; that column has no production writer (ontology DI-64), so every summary reads false today. The D-142 batched witness read (SignalReadService.WitnessesTheCallerReadsAsync, the caller read before SignalSuppressionService.WitnessDetailShownOnReadAsync) and EarlierInvoiceReadability (public helper, caller client passed in, chunks of 200, 403 = verdict, 401/5xx/unparseable/nextLink/exception = fault) are the shapes to copy. Option values (CommunicationPrivilegeClassification): None 100000000, Potentially Privileged 100000001, Privileged 100000002. Owner ruling 2026-07-16: privilege never gates a read on its own; this flag only reduces model-visible text, in task 022.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/WorkItemPrivilege.cs (the injectable helper and its sources record)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (WorklistItemExtras carries the privilege sources instead of the column; the Lanes query stops selecting sprk_privilegeflagged)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecideLanePaging.cs (summaries start flagged: fail closed until derived)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.cs (ListDecidePageAsync derives the page's flags with one batched read)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/WorklistItemSummary.cs (PrivilegeFlagged doc: the derivation, not the column)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs (register WorkItemPrivilege, scoped, unconditional)</file>
+      <file role="new">tests/unit/domain/Signals/WorkItemPrivilegeTests.cs</file>
+      <file role="modify">tests/integration/regression/Signals/DecideLanePagingTests.cs</file>
+      <file role="modify">tests/integration/Sprk.Bff.Api.IntegrationTests/Signals/SignalReadRouteTests.cs (World: a communication with a classification; CommunicationType in the catalog)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (WitnessesTheCallerReadsAsync, D-142: batched caller read, 403 verdict vs 401 fault)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/EarlierInvoiceReadability.cs (public reusable caller-read helper, ShownAsync&lt;TKey&gt;, ReadAsCallerAsync)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessModels.cs (CommunicationPrivilegeClassification values)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="015" status="completed">WorklistItemSummary, WorklistItemExtras, DecideLanePaging and ListDecidePageAsync</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-11-08">A Decide item is privilege-flagged when its subject, when the subject is a sprk_communication, or any of its witness or evidence communications (an evidence line whose ref is sprk_communication:{id}) has sprk_communication.sprk_privilegeclassification = Privileged (100000002) or Potentially Privileged (100000001). None (100000000) and null are NOT flagged.</constraint>
+    <constraint source="owner 2026-11-08">The flag is derived at read time AS THE CALLER through IDataverseUserClient, with no app-only fallback, in one batched read per page (In lists of at most 200 ids, shaped like D-142's batched witness read). A read FAULT (exception, 5xx, 401, throttling, unparseable body, a body with @odata.nextLink) flags every item that needed the read; a communication the caller cannot read (not returned, or a 403 on the table) flags its item (fail closed).</constraint>
+    <constraint source="owner 2026-11-08">sprk_signal.sprk_privilegeflagged is NOT a source (never written, ontology DI-64): the Lanes query stops selecting it and nothing reads it for the flag.</constraint>
+    <constraint source="owner 2026-11-08">The helper lives in Services/Signals/ as an injectable type with a clear public method, and its remarks document the reuse by ontology DI-143 (#2630) for the Decision Record snapshot.</constraint>
+    <constraint source="owner 2026-07-16">Privilege never gates a read on its own: no row is dropped, added or reordered by the flag, and no response other than the slim page changes; the flag only reduces model-visible text, in task 022.</constraint>
+    <constraint source="ADR-015">Minimum text: the derivation reads only the id and the classification of each communication; nothing it reads is returned except the boolean flag.</constraint>
+    <constraint source="ADR-019">The REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision stay byte-for-byte unchanged: task 011's contract baseline tests pass with no golden-file edit (FR-09); the REST worklist adds no request.</constraint>
+    <constraint source="ADR-028">Every read this task adds is the caller's (the IDataverseUserClient the capability already holds); a null or unauthenticated caller stays DataverseUserClientErrorCodes.UserContextRequired before any read (FR-10 option C). No ICallerContext, no app-only client.</constraint>
+    <constraint source="project">Every PR from this task that touches Services/Signals/** is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); the commit body says so.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="CLAUDE.md §11">The new type and its DI registration carry the three-question component justification (existing, extension, cost of doing nothing) in the file header.</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries (IDataverseUserClient), and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/decisions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse $select is all-or-nothing" location=".claude/FAILURE-MODES.md">G-13: a wrong column name fails the whole read; sprk_privilegeclassification on sprk_communication is verified live (messaging-communication-app-r1 schema spec) and read by CommunicationAccessFilter.</pattern>
+      <pattern name="401 is a fault, 403 is a verdict" location="src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs">DataverseUserClient maps 401 and 403 to AccessDenied; only a 403 means "no Read on the table".</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Create WorkItemPrivilege (Services/Signals/): a public static SourcesOf(subjectTable, subjectId, storedEvidence) building WorkItemPrivilegeSources (communication ids; Undetermined when the subject's table is unknown or the evidence cannot be judged), and a public FlaggedAsync&lt;TKey&gt;(IDataverseUserClient caller, items, ct) returning the flagged keys with the fail-closed rules above.</step>
+    <step order="2">SignalReadService: WorklistItemExtras carries the sources (subject table from the catalog, the stored evidence as read) instead of the column; the Lanes query no longer selects sprk_privilegeflagged; nothing else in the pipeline changes.</step>
+    <step order="3">DecideLanePaging builds summaries flagged (fail closed until derived); DecisionCapability.ListDecidePageAsync calls FlaggedAsync once for the page's items with its caller client and sets each summary's flag.</step>
+    <step order="4">Register WorkItemPrivilege in SignalsModule (scoped, unconditional) with the justification comment.</step>
+    <step order="5">Write the tests in the acceptance criteria; update the 015 paging seed to mark privilege through communications.</step>
+    <step order="6">Run the Signals, WorklistItemSummary and ContractBaseline unit filters, the Signal integration filter and ArchTests; measure the publish-size delta from fresh worktrees; run the vulnerable-package check.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_privilegeclassification is not readable as the caller through the sprk_communications entity set (wrong set or column name), STOP and escalate with the evidence (FAILURE-MODES G-13).</trigger>
+    <trigger>If meeting the one-batched-read-per-page bound would require changing the REST worklist's requests or response, STOP and escalate.</trigger>
+    <trigger>If any acceptance criterion would require privilege to drop, add or reorder a row (a read gate), STOP: owner ruling 2026-07-16 wins; escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>WorklistItemExtras.PrivilegeFlagged (task 015) reads sprk_signal.sprk_privilegeflagged, which nothing writes (DI-64); CommunicationAccessFilter reads sprk_privilegeclassification for one communication route's rows, and the D-142 witness read and EarlierInvoiceReadability are batched caller reads of other columns and tables.</existing>
+    <extension>The D-142 read is private, selects only the key and is keyed on lineage tables; EarlierInvoiceReadability judges invoices only; CommunicationAccessFilter decides visibility per thread row, not a flag per Work Item. This adds the one rule (subject + witness communications, fail closed) as a reusable helper in the same shape, so DI-143 does not copy it.</extension>
+    <cost-of-doing-nothing>Every summary's PrivilegeFlagged stays false, so task 022 reduces nothing and privileged communication subjects and titles reach model-visible text (FR-04, ADR-015); 022 is hard-gated on this task.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/WorkItemPrivilege.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.cs</output>
+    <output type="test">tests/unit/domain/Signals/WorkItemPrivilegeTests.cs</output>
+    <output type="test">tests/integration/regression/Signals/DecideLanePagingTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">(a) An item whose subject is a sprk_communication classified Privileged, and one classified Potentially Privileged, are each PrivilegeFlagged = true.</criterion>
+    <criterion testable="true">(b) An item whose subject is not a communication but whose evidence quotes a Privileged (or Potentially Privileged) communication is PrivilegeFlagged = true.</criterion>
+    <criterion testable="true">(c) Negative: an item whose communications (subject and witnesses) are all classified None, or have a null classification, is PrivilegeFlagged = false.</criterion>
+    <criterion testable="true">(d) Negative: when the caller's classification read faults (5xx, 401, throttling, unparseable body, @odata.nextLink, exception), every item with a communication is PrivilegeFlagged = true, items with no communication are false, the page is still returned, and a Warning names the table and the error code only.</criterion>
+    <criterion testable="true">(e) Negative: a communication the caller cannot read (not returned by the read, or a 403 on the table) flags its item.</criterion>
+    <criterion testable="true">(f) Negative: an item whose subject is not a communication and whose evidence quotes no communication is PrivilegeFlagged = false, and a page made only of such items makes no classification read.</criterion>
+    <criterion testable="true">(g) One batched caller read per page: a 50-item page whose items name communications makes exactly one sprk_communications classification read (In list, ids deduplicated); more than 200 distinct ids on one page are read in chunks of 200 (count pinned); the REST worklist makes no classification read.</criterion>
+    <criterion testable="true">(h) FR-04 done-when: an item whose subject is a Privileged communication, seeded with a unique marker in its title and subject name, is PrivilegeFlagged = true on its summary. Asserting that the marker is absent from the model-visible text of spaarke_show_decisions is task 022's test (022 does the reduction).</criterion>
+    <criterion testable="true">Negative: sprk_signal.sprk_privilegeflagged is not a source: the Lanes query does not select it, and a Signal whose stored column is true with a None communication subject is not flagged.</criterion>
+    <criterion testable="true">011's worklist baseline passes with no golden change; the one-batched-BillingEventRead test passes; paging order, page sizes and the stale-cursor tests are unchanged.</criterion>
+    <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE), the adversarial review and the ontology review.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner ruling 2026-11-08: option A widened (notes/decisions.md). Task 022 is hard-gated on this task. Ontology DI-143 (#2630) reuses WorkItemPrivilege for the Decision Record snapshot.
+Completed 2026-11-08 in 6aec16b753: WorkItemPrivilege (SourcesOf, FlaggedAsync), one caller read per page (per 200 distinct ids), fail closed; untyped communication subjects (DI-63) join the read. Tests: 12 fail before, all pass after (unit 4424, integration 167, ArchTests 1998). Publish delta +32,494 B, 191 files each side, no CVE. Adversarial review fixed (F4 untyped subject, F2 x2) and hardened (K1, K4 x2). Known limits in notes/decisions.md 2026-11-08 "Task 018".
+rework: fix-round-1 task 018</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

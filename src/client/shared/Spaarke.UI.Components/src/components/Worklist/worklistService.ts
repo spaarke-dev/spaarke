@@ -14,7 +14,7 @@
 import type { ResponseFetchFn } from '../../utils/fetchTypes';
 import { isApiError, problemOf } from '../../utils/thrownFetchError';
 import type { DecisionOutcome, RecordClass, ResolutionType } from '../ConsoleKit';
-import type { PastDueWording, WorkType, WorklistCore, WorklistItem, WorklistLane } from './types';
+import type { InvoiceReviewTarget, PastDueWording, WorkType, WorklistCore, WorklistItem, WorklistLane } from './types';
 import { acceptNarrative } from './worklistNarrative';
 import type { WorklistNarrativeRequest, WorklistNarrativeText } from './worklistNarrative';
 
@@ -233,11 +233,19 @@ function parseDecision(raw: unknown): WorklistDecision | null {
   };
 }
 
+/** Task 174's `invoiceReview` member (a billing item). An object without an invoice id is not one: the item stays a normal item. */
+function parseInvoiceReview(raw: unknown): InvoiceReviewTarget | null {
+  if (!isObject(raw)) return null;
+  const invoiceId = text(raw.invoiceId);
+  return invoiceId ? { invoiceId, lineId: text(raw.lineId) } : null;
+}
+
 function parseItem(raw: unknown, lane: WorklistLane): WorklistRouteItem | null {
   if (!isObject(raw)) return null;
   const signalId = text(raw.signalId);
   if (!signalId) return null;
   const workType = text(raw.workType);
+  const invoiceReview = parseInvoiceReview(raw.invoiceReview);
   const resolution = typeof raw.resolutionType === 'number' ? RESOLUTION_TYPES[raw.resolutionType] : undefined;
   return {
     signalId,
@@ -259,6 +267,8 @@ function parseItem(raw: unknown, lane: WorklistLane): WorklistRouteItem | null {
     subjectRecordType: text(raw.subjectRecordType),
     subjectRecordId: text(raw.subjectRecordId),
     decision: parseDecision(raw.decision),
+    // Only a billing item carries it; every other item is left exactly as it was.
+    ...(invoiceReview ? { invoiceReview } : {}),
   };
 }
 

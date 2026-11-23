@@ -12,7 +12,7 @@ namespace Spaarke.ArchTests;
 /// deletes a waiver never touches the code that decides what a route key is.</para>
 ///
 /// <para><b>What it resolves, and how it fails.</b> Every <c>Map{Get|Post|Put|Patch|Delete}</c>,
-/// <c>MapMethods</c> and <c>MapHealthChecks</c> call is tied to its receiver; the receiver is resolved
+/// <c>MapMethods</c>, <c>MapHealthChecks</c> and <c>MapMcp</c> call is tied to its receiver; the receiver is resolved
 /// through <c>MapGroup</c> declarations in the same method, then through METHOD PARAMETERS by following
 /// every call site of the enclosing method across the BFF (the extension form <c>group.MapX()</c>, the
 /// static form <c>XEndpoints.MapX(group)</c> and the bare in-file form <c>MapX(group)</c>), until it reaches
@@ -880,9 +880,15 @@ public partial class RouteAuthorizationGuardTests
     // =============================================================================================
 
     /// <summary>The registration vocabulary. The census (<see cref="EndpointFiles"/>) and the scanner use the
-    /// SAME pattern, so a file registering only <c>MapMethods</c> or <c>MapHealthChecks</c> is counted.</summary>
+    /// SAME pattern, so a file registering only <c>MapMethods</c>, <c>MapHealthChecks</c> or <c>MapMcp</c> is counted.
+    /// <para><c>MapMcp</c> (ModelContextProtocol.AspNetCore, SDK-owned; spaarkeai-mcp-bff-api-r1) is read as ONE
+    /// <c>POST</c> route at its explicit path, with no handler argument (like <c>MapHealthChecks</c>): that is what the SDK
+    /// maps with the stateless HTTP transport the BFF configures. A STATEFUL transport would also map GET and DELETE (and
+    /// the legacy SSE routes) under the same call; those would be routes the scanner never keyed, so
+    /// <c>TheScannerAndTheBootedAppAgreeOnEveryRoute</c> fails closed on them until the scanner is taught the verbs. A
+    /// <c>MapMcp()</c> with no path argument is a PROBLEM (no arguments), never a guessed root route.</para></summary>
     private static readonly Regex RegistrationCall = new(
-        @"\.\s*Map(?<verb>Get|Post|Put|Patch|Delete|Methods|HealthChecks)\s*\(",
+        @"\.\s*Map(?<verb>Get|Post|Put|Patch|Delete|Methods|HealthChecks|Mcp)\s*\(",
         RegexOptions.Compiled);
 
     private static readonly Regex GroupDeclaration = new(
@@ -1070,6 +1076,12 @@ public partial class RouteAuthorizationGuardTests
             else if (verbWord == "HealthChecks")
             {
                 verbs = new[] { "GET" };
+                handlerIndex = -1;
+            }
+            else if (verbWord == "Mcp")
+            {
+                // The SDK's stateless Streamable HTTP endpoint: one POST at the path; the handler is the SDK's own.
+                verbs = new[] { "POST" };
                 handlerIndex = -1;
             }
             else

@@ -1,0 +1,16 @@
+{
+  "case": "decision.503.record-refused",
+  "status": 503,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.4\",\"title\":\"Service Unavailable\",\"status\":503,\"detail\":\"The decision's owner could not be checked; nothing was done.\",\"reasonCode\":\"ontology.decision.record_refused\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000038\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.6.4",
+    "title": "Service Unavailable",
+    "status": 503,
+    "detail": "The decision's owner could not be checked; nothing was done.",
+    "reasonCode": "ontology.decision.record_refused",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000038",
+    "actionCode": null
+  }
+}

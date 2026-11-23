@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="200" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Shared side-pane lookup fields return keyboard focus to their button after the Dataverse lookup pane closes</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the shared UI library used by every create wizard, the rule wizard and PCF hosts.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Same defect class and fix shape as task 199, in a different shared component.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs after 199 in the same worktree (C:\t198) to reuse its installs; touches different files.</parallel-reason>
+    <deps>199 (for the shared focus helper, if 199 added one that fits; do not fork it)</deps>
+    <tags>react, fluent-ui, frontend, pcf, testing, a11y</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Found by the main session's browser check on dev, 2026-11-22. Console → Ontology admin → New rule → Scope and noise → "Limit to one matter" (a `DataverseLookupField`, aria-label "Select Limit to one matter"): the side pane opens on top and the pick comes back ("Applies to: MAT-000113") — PASS — but afterwards `document.activeElement` is `&lt;body&gt;` of the Console frame, not the field's button. Same class as task 199 (composer). `DataverseLookupField` is the side-pane lookup in every create wizard (14 files use it), so a keyboard user loses their place after every lookup in every wizard. Owner: "continue testing and fixing".</prompt>
+  <role>SPAARKE frontend developer. Expert in React 16-19, Fluent UI v9, accessibility, and `@spaarke/ui-components`.</role>
+  <goal>After `DataverseLookupField`'s `navigationService.openLookup` settles (pick, cancel or failure), keyboard focus is on the field's own control (the lookup button, or whichever button the field renders for its new value), when focus is not already inside the field's host dialog/form region on purpose (i.e. it is on `&lt;body&gt;`, or outside the closest `[role=dialog]` that contains the field). Same treatment for the other shared side-pane lookup triggers in `@spaarke/ui-components` that await `openLookup`/`lookupObjects` the same way (inventory them: `PolymorphicPicker`, `DecisionWizard/steps/ParameterFields`, `RecordHeader/lookupSearch`, others found by grep), using ONE shared helper — reuse task 199's helper if it fits.</goal>
+  <context>
+    <background>
+- `src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx` ~210-246: `handleOpenLookup` awaits `navigationService.openLookup`, calls `onChange`, and in `finally` resets `opening`/`isOpening`; there is no focus handling. `mounted` ref already exists for the unmount guard.
+- After `onChange` the field may render a different element (empty vs selected state), so focus the field's control AFTER the re-render (container ref + `setTimeout(0)`/rAF, then query the field's button), not a stale element ref.
+- The platform pane runs in the top document; in the Console the field is inside an iframe. Focus must be restored in the field's own document (`element.ownerDocument`); `document.activeElement` there is `&lt;body&gt;` after the pane closes.
+- Task 199 (EmailComposer, branch `fix/ontology-199-composer-lookup-focus`, may be merged by the time you start) solves the same thing for the composer; if it added a helper, reuse it; do not write a second one.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx</file>
+      <file role="modify">the other shared lookup triggers found by the inventory (only those that await a side-pane lookup the same way)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/LookupField/__tests__/ (and each touched component's tests)</file>
+      <file role="modify">PCFs that bundle the touched components (version bump + build:prod only when the bundle changes)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §11">No new prop or component. One shared internal helper at most (reuse 199's if present).</constraint>
+    <constraint source="project">Only focus after the lookup changes; values, onChange, single-flight, cancel/failure behaviour unchanged; existing tests pass unmodified.</constraint>
+    <constraint source="project">PCFs whose bundle changes get a version bump and build:prod (list old → new). Console builds. Code pages that bundle the field (create wizards under src/solutions/*) build; list them for the deploy. No deploy in this task.</constraint>
+    <constraint source="CLAUDE.md project §6">client-lint ratchet before pushing.</constraint>
+    <constraint source="ADR-038">Filtered jest; tests assert where focus ends, and fail on the old code.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Inventory the shared side-pane lookup triggers; record in notes.</step>
+    <step order="2">Failing tests first (pick, cancel, failure; focus starts on body) for DataverseLookupField; show they fail on unchanged code.</step>
+    <step order="3">Implement with one helper; apply to the inventory.</step>
+    <step order="4">Filtered jest, typecheck, client-lint; bump/build PCFs whose bundle changes; build the Console and the create-wizard code pages that bundle the field.</step>
+    <step order="5">Notes in notes/task-200-notes.md (inventory, fail-before evidence, versions, which code pages need redeploy).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test: DataverseLookupField pick while focus is on body → after settle, focus is on the field's control (the one showing the picked value). Fails on origin/master.</criterion>
+    <criterion testable="true">Test: same for cancel (empty result) and for openLookup throwing.</criterion>
+    <criterion testable="true">Negative: focus already inside the host dialog on another control when the lookup settles → not moved. Unmounted before settle → no focus call, no error.</criterion>
+    <criterion testable="true">Each other trigger in the inventory has at least the pick-case test.</criterion>
+    <criterion testable="true">Existing tests unmodified and passing; typecheck; client-lint; builds as stated.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master; PR to master.</protocol>
+  </execution>
+  <completion>Done 2026-11-23: PR #2988 merged to master (973d72b67e) after independent Opus review (merge; K-only: first-attempt takeover outside the region, late async host value, untested retry branch, stale committed bundles). Deployed to dev (deploy-log 2026-11-23): 6 PCFs (CommunicationActions 1.3.25, TrackingFieldTrio 1.0.67, SemanticSearchControl 1.1.92, RecordHeader 1.1.13.0, RegardingResolver 1.6.5, CommunicationConversationPanel 1.18.6) and 13 code pages; bundles recorded in chore PR #2995. Dev check 2026-11-23: rule wizard "Limit to one matter" cancel and pick both return focus to the field's control. Out-of-package triggers filed as DI-163 #2985. Notes: notes/task-200-notes.md.</completion>
+</task>

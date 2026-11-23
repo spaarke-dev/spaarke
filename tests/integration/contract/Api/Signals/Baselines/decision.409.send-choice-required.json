@@ -1,0 +1,95 @@
+{
+  "case": "decision.409.send-choice-required",
+  "status": 409,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"The decision was not recorded\",\"status\":409,\"detail\":\"The inquiry email may have been sent. Check Sent Items, then choose Send again or Record without sending. Nothing was done.\",\"reasonCode\":\"ontology.decision.send_choice_required\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000041\",\"actionCode\":\"send-budget-inquiry\",\"failedStep\":4,\"landed\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"},{\"entity\":\"sprk_todo\",\"id\":\"c0430000-0000-4000-8000-000000000051\"},{\"entity\":\"sprk_servicerequest\",\"id\":\"c0430000-0000-4000-8000-000000000053\"}],\"possiblyLanded\":[],\"steps\":[{\"key\":\"action:revise-budget\",\"code\":\"revise-budget\",\"phase\":2,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null,\"warning\":null},{\"key\":\"next-step:add-todo#0\",\"code\":\"add-todo\",\"phase\":3,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_todo\",\"id\":\"c0430000-0000-4000-8000-000000000051\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null,\"warning\":null},{\"key\":\"action:send-budget-inquiry\",\"code\":\"send-budget-inquiry\",\"phase\":4,\"status\":\"Failed\",\"written\":[{\"entity\":\"sprk_servicerequest\",\"id\":\"c0430000-0000-4000-8000-000000000053\"}],\"possiblyWritten\":[],\"reasonCode\":\"decision.action.write_failed\",\"detail\":\"The service request was created; the email was not sent.\",\"warning\":null}],\"recordMayExist\":false,\"sentButNotRecorded\":false,\"resumable\":true,\"sendChoiceRequired\":true,\"replayed\":true}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+    "title": "The decision was not recorded",
+    "status": 409,
+    "detail": "The inquiry email may have been sent. Check Sent Items, then choose Send again or Record without sending. Nothing was done.",
+    "reasonCode": "ontology.decision.send_choice_required",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000041",
+    "actionCode": "send-budget-inquiry",
+    "failedStep": 4,
+    "landed": [
+      {
+        "entity": "sprk_budgetrevision",
+        "id": "c0430000-0000-4000-8000-000000000052"
+      },
+      {
+        "entity": "sprk_budget",
+        "id": "c0430000-0000-4000-8000-000000000040"
+      },
+      {
+        "entity": "sprk_todo",
+        "id": "c0430000-0000-4000-8000-000000000051"
+      },
+      {
+        "entity": "sprk_servicerequest",
+        "id": "c0430000-0000-4000-8000-000000000053"
+      }
+    ],
+    "possiblyLanded": [],
+    "steps": [
+      {
+        "key": "action:revise-budget",
+        "code": "revise-budget",
+        "phase": 2,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_budgetrevision",
+            "id": "c0430000-0000-4000-8000-000000000052"
+          },
+          {
+            "entity": "sprk_budget",
+            "id": "c0430000-0000-4000-8000-000000000040"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null,
+        "warning": null
+      },
+      {
+        "key": "next-step:add-todo#0",
+        "code": "add-todo",
+        "phase": 3,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_todo",
+            "id": "c0430000-0000-4000-8000-000000000051"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null,
+        "warning": null
+      },
+      {
+        "key": "action:send-budget-inquiry",
+        "code": "send-budget-inquiry",
+        "phase": 4,
+        "status": "Failed",
+        "written": [
+          {
+            "entity": "sprk_servicerequest",
+            "id": "c0430000-0000-4000-8000-000000000053"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": "decision.action.write_failed",
+        "detail": "The service request was created; the email was not sent.",
+        "warning": null
+      }
+    ],
+    "recordMayExist": false,
+    "sentButNotRecorded": false,
+    "resumable": true,
+    "sendChoiceRequired": true,
+    "replayed": true
+  }
+}

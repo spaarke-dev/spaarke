@@ -1,0 +1,54 @@
+{
+  "case": "worklist.200.closed-earlier",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"set\":\"closedEarlier\",\"lanes\":[{\"lane\":\"Decide\",\"groups\":[{\"core\":{\"recordType\":\"sprk_matter\",\"recordId\":\"<guid-1>\",\"typeLabel\":\"Matter\",\"name\":\"Acme v Widget\",\"number\":\"MAT-0042\"},\"notFiled\":false,\"items\":[{\"signalId\":\"<guid-2>\",\"lane\":\"Decide\",\"status\":\"Resolved\",\"title\":\"Closed earlier item\",\"subjectName\":null,\"ruleShortName\":\"Closed rule\",\"workType\":\"askOutsideCounsel\",\"pastDueWording\":\"overdue\",\"raisedOn\":\"2026-10-01T00:00:00+00:00\",\"dueDate\":null,\"evidenceRefs\":null,\"policyVersionId\":\"<guid-3>\",\"resolvedOn\":\"2026-10-12T11:00:00+00:00\",\"resolutionType\":null,\"suppressedUntil\":null,\"sentence\":null,\"subjectRecordType\":null,\"subjectRecordId\":null,\"decision\":null,\"invoiceReview\":null}]}]},{\"lane\":\"Do\",\"groups\":[]}]}",
+  "bodyPretty": {
+    "set": "closedEarlier",
+    "lanes": [
+      {
+        "lane": "Decide",
+        "groups": [
+          {
+            "core": {
+              "recordType": "sprk_matter",
+              "recordId": "<guid-1>",
+              "typeLabel": "Matter",
+              "name": "Acme v Widget",
+              "number": "MAT-0042"
+            },
+            "notFiled": false,
+            "items": [
+              {
+                "signalId": "<guid-2>",
+                "lane": "Decide",
+                "status": "Resolved",
+                "title": "Closed earlier item",
+                "subjectName": null,
+                "ruleShortName": "Closed rule",
+                "workType": "askOutsideCounsel",
+                "pastDueWording": "overdue",
+                "raisedOn": "2026-10-01T00:00:00+00:00",
+                "dueDate": null,
+                "evidenceRefs": null,
+                "policyVersionId": "<guid-3>",
+                "resolvedOn": "2026-10-12T11:00:00+00:00",
+                "resolutionType": null,
+                "suppressedUntil": null,
+                "sentence": null,
+                "subjectRecordType": null,
+                "subjectRecordId": null,
+                "decision": null,
+                "invoiceReview": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "lane": "Do",
+        "groups": []
+      }
+    ]
+  }
+}

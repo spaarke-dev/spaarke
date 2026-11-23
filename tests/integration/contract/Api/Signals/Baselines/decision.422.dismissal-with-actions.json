@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.dismissal-with-actions",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"A decision that takes an action or creates a Next step is not a dismissal.\",\"reasonCode\":\"ontology.decision.dismissal_with_actions\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000024\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "A decision that takes an action or creates a Next step is not a dismissal.",
+    "reasonCode": "ontology.decision.dismissal_with_actions",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000024",
+    "actionCode": null
+  }
+}
