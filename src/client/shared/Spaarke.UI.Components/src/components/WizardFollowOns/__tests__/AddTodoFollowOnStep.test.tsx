@@ -134,7 +134,10 @@ describe('createTodoRegardingChild (AddTodoFollowOnStep create path)', () => {
     // Display name falls back to the picker-provided child name (graceful-blank).
     expect(payload.sprk_regardingrecordname).toBe('INV-2026-0042');
     // UAC-r2 task 147 r1: the create left through the BFF child-record route.
-    expect(childWriteCalls(bff)).toEqual([['POST', '/api/v1/child-records/sprk_todo']]);
+    // Task 024 (FR-16): the to do names the record it is filed under as the mapping source (query string only).
+    expect(childWriteCalls(bff)).toEqual([
+      ['POST', '/api/v1/child-records/sprk_todo?mappingSourceEntity=sprk_invoice&mappingSourceId=abc-123-def'],
+    ]);
   });
 
   it('REFUSES the follow-on to-do when the host wired no BFF connection (UAC-r2 task 147 r1: fail closed)', async () => {
