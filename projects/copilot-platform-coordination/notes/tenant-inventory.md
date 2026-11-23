@@ -35,6 +35,8 @@ Status values: **KEEP** (stays, has an owner) · **REPLACE** (stays until a name
 | D5 | **Spaarke Dataverse MCP** — appears **twice** in All agents, plus Teams app `fc2412d8…` | Copilot Studio agent (Dataverse MCP), seen in Chat under `/` and `@` | **Unknown** (owner-built in Copilot Studio; no repo source) | Dataverse MCP agent; the accelerator plans to extend it | **DECIDE** ❓ | Owner to name its owner project. Remove the duplicate copy (owner) | accelerator `results.md` L27; mcp-r1 E1/E5 |
 | D6 | **Copilot in Power Apps – Spaarke Platform [Draft]** | Agent created from Power Apps | Unknown | Probably auto-created by the Power Apps Copilot | **DECIDE** ❓ | Owner | accelerator `results.md` L27 |
 
+**Announced, not yet created** (specialist-legal-agents-r1 Phase 0 test G8 = structure test S-3; full rows arrive before creation, R4): `spaarke-legal-g8-ab-test` (Agent Builder agent) and `spaarke-legal-g8-pkg-test` (the same agent packaged). Both throwaway, removed when G8 is recorded. Not scheduled: waits on gate A0, D-A11 and owner approval.
+
 ## 4. Cowork plugins and skills
 
 > S1–S5 are **per-user skill folders** in the owner's OneDrive `Documents/Cowork/Skills/` (package v0.1, since 2026-11-10), not tenant uploads; Cowork loads them and lists them under Plugins › Added. Only the owner's account sees them. Whether the owner re-extracted the latest zip is unconfirmed. No accelerator plugin has been uploaded since X1 (acclerator-r1 reply 2026-11-23).
