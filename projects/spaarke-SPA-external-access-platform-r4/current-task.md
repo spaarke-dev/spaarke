@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-22 (task 024 done + committed; master merged; PR next)
+> **Last Updated**: 2026-11-23 (task 024 merged — PR #2976 → master `2dcbe35e34`; waiting on uac-r2 for 028)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -9,15 +9,14 @@
 |-------|-------|
 | **Task** | **024** ✅ — shared EmptyState (FR-17). Notes `notes/task-024-notes.md`. POML completed, TASK-INDEX ✅, drift clean, portfolio synced (#2680: 46 / 23). |
 | **Step** | Committed `65f60cf42f` (024), merged origin/master `ff65c019b2` (conflicts only = our own 023c squash → branch side), fix `eae345869a` (two tests the merge had reverted to 023c text). Verified after merge: lib tsc, DataGrid jest 20/178, client-lint ok, SPA tsc, 9 touched SPA test files green, ArchTest grid guard 231/231. Full SPA vitest 1935/1935 + build ok (pre-merge). |
-| **Status** | Push + PR in progress (body: scratchpad `pr-024.md`). Nothing from 023/024 is deployed. |
-| **Next Action** | Owner's merge go for the 024 PR, with sign-off on its two shared-grid changes (`emptyState` host option; `useHostRowSource` no-empty-flash fix). Arm auto-merge only after that go. Then tell uac-r2 024 is ready (live BFF still lacks #2941) → task 028. |
+| **Status** | **PR #2976 MERGED** 2026-11-23 (squash `2dcbe35e34`; owner "Yes merge", incl. both shared-grid changes; CI 32 pass / 0 fail). uac-r2 told. Nothing from 023/024 is deployed. |
+| **Next Action** | Task 028 — waits on uac-r2's live notice of a dev BFF containing #2941. Then each live step with owner go + rollback (see "Task 028 reminders"). Before 028: merge origin/master into the branch (it is behind by the 024 squash). |
 | **Side** | #1906b → ebilling-r1; #2866 landed on master (duplication sweep). |
 
 ## Merge trap (seen 2026-11-22)
 - Merging master after a squash of our own work: a line 023c changed and 024 changed BACK looks unchanged from the merge base, so git silently takes master's 023c text. After such merges, for files where `origin/master` == the pre-squash branch tip, restore `HEAD^1`'s copy.
 
 ## Owner questions open
-- Merge go for the 024 PR, with sign-off on its two shared-grid changes.
 - Older: show "The client is reviewing this invoice." beyond the Information field?
 - K: add `useHostRowSource` to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval).
 
