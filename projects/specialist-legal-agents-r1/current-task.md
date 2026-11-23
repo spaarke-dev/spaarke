@@ -33,4 +33,5 @@ When the researcher returns: read its note → write design.md §0 "The model in
 ## Standing directives
 - Never `git stash`; never `python3` in Bash; every Agent launch names a model; sub-agents can't write `.claude/`.
 - Don't edit the accelerator or mcp-r1 worktrees; coordinate by message (acclerator-r1 session) only.
+- Copilot tenant artifacts: before uploading ANY agent, plugin, package or connector (Phase 0 tests included), send its inventory row (owner project, removal plan, removal date if throwaway) to the copilot-platform-coordination session (Issue #3006) first. No second connector in our packages (R1). Design §10.
 - Accelerator constraints: never put `answer-key/` or the real NDAs (Corteva, RPX/Helios) anywhere an agent can read; reuse `FORBIDDEN_IN_PACKAGE`.
