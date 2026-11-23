@@ -279,3 +279,25 @@ held SpaarkeMaster **unmanaged**, so H6 would refuse the managed import (D34).
 | 2026-11-07 (import started 14:50Z, ~49 min) | **SpaarkeMaster 1.2.3.1 → 1.3.0.0 (managed, StageAndUpgrade)** — run by ontology-platform under the owner's direct GO; artifact published from master d53d67f604 (publish workflow runs 42382907444 dry, 42383123814 real; ebilling 095a lock deferred to 1.3.0.1). Before: the four components 1.3.0.0 removes held 0 rows. After (ontology + our read-only read-back): only SpaarkeMaster 1.3.0.0 managed, no `_Upgrade` holding solution; `Test-RolePrivilegeExpectations.ps1` (`spaarkemaster-1.3.0.0.json`) 7/7 roles OK; writer is the sole member of both writer profiles (no team); holder sweep: System Customizer / Service Writer / Ontology Service held by application users only; default team untouched (#2618); healthz 200. H7b S24 will find everything present and write nothing. Registry row `sprk_solutionversion` still carries the run's value — a registry update needs the owner's OK | #2605 |
 | 2026-11-10 (~18:15Z) | **Dev L2 control plane redeployed** (owner OK 2026-11-10: "if there is no conflict or collision with dev environment or work, then yes proceed") from branch head `7489f5b6b0` = master `d64a45071b` (S23/S24 + task 266 + business-unit id fix) + H6 user access logging. Pre-checks (read-only): no non-ACME customer row and ACME `Ready` in the registry (no run in flight); `sprk-provisioning-jobs` active 0; no other activity on `rg-spaarke-platform-dev` in 3 days; previous code deploy 2026-10-28; no new required setting. Command: `Deploy-ControlPlane.ps1 -Environment dev -Target Both -Swap -Confirm:$false` (in-process). Result: Api staging healthz → swap → production healthz OK; Worker stop/deploy/start, healthz OK; queue properties and required config keys OK. **ACME itself is unchanged**: the new handlers reach it only through a new run (the Completed run refuses an H4b/H10/H7b re-run) | #2605, #2661 |
 | 2026-11-10 (row `modifiedon` 14:20:13 as returned by the MCP) | **Registry row `acme` (spaarkedev1 `sprk_dataverseenvironment` `721bce03…`): `sprk_solutionversion` "SpaarkeMaster 1.2.3.1 (managed)" → "SpaarkeMaster Managed 1.3.0.0"** (owner OK 2026-11-10; new format: type in the name, version a bare number). Dataverse MCP update, read back. No other column touched | — |
+
+## 6. Upgrade run 3b6f7b65 (2026-11-20 → 2026-11-23)
+
+ACME's first UPGRADE run: SpaarkeMaster managed 1.3.0.0 → **1.3.2.1**, BFF pinned to the build it already ran
+(`buildId = 2026.10.16-2`). Plan: `notes/acme-1.3.2.0-upgrade-plan.md`. Handoff: `runs/3b6f7b65-033d-400b-bba4-59541a0cc340.md`.
+Lessons (9): `provisioning-runs/acme-3b6f7b65-033d-400b-bba4-59541a0cc340/lessons-learned.md`. Result: **Completed**
+2026-11-23 14:01:48Z; registry Ready; secure-record read-only checks pass (probe items await owner OK).
+
+| When (UTC) | Step | Lesson / issue |
+|---|---|---|
+| 11-20 ~18:24 | Prechecks pass except PRQ-C-03 (upgrade names are the stamp's own). First POST → 400 `registry-setup-status-not-in-progress`; registry row 2 → 1 by hand (owner "Yes, reset and run") | U-L01 ISS-030 #2925, U-L02 ISS-031 #2926 |
+| 11-20 18:25 | Run accepted with `buildId` outside the schema | U-L03 ISS-036 #2987 |
+| 11-20 18:27 | **Quarantined at H2b**: index update answered 204 | U-L04 fixed PR #2924 → `aff1133e55` |
+| 11-21 ~21:50 | dev L2 redeployed, quarantine cleared, resumed: H2b, H4, H5, H3, H10 (writer to own unit), H8, H4b ✓ | — |
+| 11-21 22:28 | **Quarantined at H6**: 1.3.2.0 references web resource `sprk_invoicefiles` missing from the package; import rolled back | U-L05 fixed by ebilling PR #2935 (1.3.2.1) |
+| 11-22 16:44 | H6 ✓ 1.3.2.1 InlineUpgrade after 73 min (> 60-min timeout; owner-go resume); H7b ✓ | U-L06 ISS-032 #2942 (open) |
+| 11-22 ~17:04 | **H9 failed**: slot swap ~11 min > 10-min timeout; retry hit 409 "prepared for swap" | U-L07 fixed PR #2956 → `c39114e7c6` |
+| 11-22 19:22 | dev L2 redeployed, resumed: H9 ✓ (4 attempts), H7, H11, H12a/b/c, H14a/m, H14 ✓ | — |
+| 11-22 19:23, 19:34 | **H13 failed twice**: keyless proof no answer in 90 s; S1 plan at 85–97 % CPU after the swap | U-L08 ISS-034 #2970 |
+| 11-23 ~13:50 | PR #2980 merged `c4d7da8d57` (35 pass / 9 skipped; actionlint download flake re-run, filed #2983); dev L2 Worker deployed, healthy | U-L08 fixed |
+| 11-23 14:01:09–14:01:49 | Resumed → **H13 ✓ in 40 s** (14 live checks, T1–T7, I2–I5, ARM keyless ×10, cost $344.62 / −13.8 %, census Isolated, mailbox) → run **Completed** | — |
+| 11-23 14:0x–14:3x | Step 6a: registry already Ready, all columns match (nothing reconciled). Step 6e read-only: items 1, 2, 3, 3b, 4, 5, 5b, 9 (Isolated), 10, 11, 12, 14, 15 PASS; 2b/6/7/8/13 not run (probe writes). Plan step 4: Core User on `sprk_invoicecorrection` = Read/Append/AppendTo only; `/healthz` 200 both slots; guest Console sign-in not run. Completed run still shows 5 `Pending` failure-marker gates | U-L09 ISS-035 #2986 |

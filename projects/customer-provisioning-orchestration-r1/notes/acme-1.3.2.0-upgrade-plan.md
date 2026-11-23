@@ -32,7 +32,7 @@
    environment type it already has; the registry row holds the subscription and resource names). Add `buildId = 2026.10.16-2`, so H9 refuses
    (Resumable, nothing written) instead of upgrading the BFF if a newer artifact is published before or during the run.
    Leave the AI spend limit out (the skill: on an upgrade run, omitting it leaves the setting alone).
-3. **Run `/provision-environment acme` as an UPGRADE run.** Owner go (the skill also asks the operator to confirm upgrade mode).
+3. **DONE 2026-11-23 14:01:48Z — run `3b6f7b65` Completed** (SpaarkeMaster 1.3.2.1; six defects found and fixed or filed on the way — run log §6, handoff `runs/3b6f7b65-033d-400b-bba4-59541a0cc340.md`). Original step: **Run `/provision-environment acme` as an UPGRADE run.** Owner go (the skill also asks the operator to confirm upgrade mode).
    What it should do:
    - H6: managed stage-and-upgrade 1.3.0.0 → 1.3.2.0 (applies ISS028's five Core User removals on `sprk_invoicecorrection`).
    - H10: moves the ontology writer into its own unit (task 267). First live check of task 267 K2 (`businessunitid` PATCH);
@@ -43,7 +43,7 @@
      `AiSearch__AllowedIndexes__N` item).
    - H9 redeploys 2026.10.16-2 (a restart, same code).
    - The rest re-runs idempotently; H13 sets Ready and writes `sprk_solutionversion` "SpaarkeMaster Managed 1.3.2.0".
-4. **Verify.** Solution 1.3.2.0 managed on ACME; registry row updated; `sprk-acme-prod-api` `/healthz`; Core User on
+4. **PARTLY DONE 2026-11-23**: 1.3.2.1 managed on ACME, registry row Ready and current, `/healthz` 200 on both slots, Core User on `sprk_invoicecorrection` = Read/Append/AppendTo only, run recorded in the run log §6. **Open:** the Basic User guest Console sign-in (needs a person) and Step 6e's probe items (owner OK). Original step: **Verify.** Solution 1.3.2.0 managed on ACME; registry row updated; `sprk-acme-prod-api` `/healthz`; Core User on
    `sprk_invoicecorrection` holds only Read/Append/AppendTo (`spaarkemaster-1.3.2.0.json`); a sign-in as a Basic User guest
    opens the Console. Record the run in `notes/t186-acme-run-log.md`.
 

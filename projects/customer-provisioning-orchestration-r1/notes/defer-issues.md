@@ -10,11 +10,58 @@
 
 ## Open (in priority order)
 
-### ISS-034 — H13 keyless-proof times out against a BFF still warming up after H9's swap
+### ISS-036 — intake.schema.json lacks `buildId`, so an upgrade run cannot pin the BFF build from a valid intake
 
 | Field | Value |
 |---|---|
 | **Status** | Open |
+| **Urgency** | before the next upgrade run that must not move the BFF |
+| **Filed** | 2026-11-23 |
+| **Source** | ACME upgrade run `3b6f7b65` (2026-11-20): `buildId = 2026.10.16-2` was added to the POST outside the schema-valid intake — a recorded deviation |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2987 |
+
+**Description**
+
+`IntakeParameterCatalog.cs:200` accepts `buildId` ("BFF build to deploy (H9 optional — defaults to latest.json)"), but
+`scripts/provisioning-prereqs/intake.schema.json` does not list it. Pinning the build is the only guard on an upgrade that
+changes the solution but must not change the BFF (ACME: the BFF upgrade waits on A9 home sign-in). Without it in the schema
+every such run deviates from the skill, or deploys whatever `latest.json` names.
+
+**Suggested fix**: add `buildId` (optional string, H9's pattern) to the schema; mention it in the skill's upgrade-mode
+intake step; add a test that every catalog key has a schema property or is listed as server-only.
+
+**Estimated effort**: 1–2 h with the parity test
+**Related**: ISS-031; `notes/acme-1.3.2.0-upgrade-plan.md` step 2
+
+### ISS-035 — A completed run keeps its handlers' failure-marker gates `Pending`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before any tooling reads `gateStates` (fleet view, provisioning web UI) |
+| **Filed** | 2026-11-23 |
+| **Source** | ACME upgrade run `3b6f7b65` ended `Completed` with five `Pending` gates and H13 in `failedHandlers` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2986 |
+
+**Description**
+
+Failure paths write `run.GateStates[$"{h}-{rejectionCode}"]` as `Pending` (H2a, H2b `H2bAiSearchIndexHandler.cs:516`,
+H4b, H9 `H9BffDeployHandler.cs:884`, H10, H12a, H12b, and H13/H6 alike); a later success never clears them. Run
+`3b6f7b65` shows `h2b-index-provisioning-failed`, `h6-import-timeout`, `h9-slot-swap-infra-fault`,
+`h9-scheduled-jobs-slot-guard-failed` and `h13-h13-extended-validation-inconclusive` (H13's codes already carry the
+`h13-` prefix the key adds). A reader cannot tell from the record whether anything is owed.
+
+**Suggested fix**: on a handler's success, set its own failure-marker gates to `Cleared` (verifier + time), keeping them as
+history; clear or rename `failedHandlers`.
+
+**Estimated effort**: 2–3 h with tests
+**Related**: ISS-034
+
+### ISS-034 — H13 keyless-proof times out against a BFF still warming up after H9's swap
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed — PR #2980 merged `c4d7da8d57` 2026-11-23 (H13 repeats a no-verdict keyless proof with 30 s → 5 min waits for up to 40 min; never a failure, an earlier failed check or a 404); dev L2 Worker deployed; ACME H13 passed on resume (first attempt, 5 s). Stamp sizing (second bullet below) remains an owner decision |
 | **Urgency** | now (every H13 within ~30–45 min of a BFF deploy on S1 fails; workaround: wait for the plan CPU to settle, then resume) |
 | **Filed** | 2026-11-22 |
 | **Source** | ACME upgrade run `3b6f7b65`: H13 failed `h13-extended-validation-inconclusive` (keyless-proof: no answer within 90 s) |
