@@ -17,7 +17,7 @@ Received: Registry "spaarke" (9 rows), Copilot Studio agents, Plugins page, sour
 |---|---|---|---|
 | 1 | **S5 `spaarke-visual-probe`** skill (confirmed present 2026-11-23) | OneDrive › `Documents/Cowork/Skills/spaarke-visual-probe` › delete the folder. Then check it is gone from the skills list (if it is still there: **…** › **Remove**) | Per-user skill folder; only your account sees it. Active Cowork conversations keep it until they end |
 | 2 | ~~D5 duplicate "Spaarke Dataverse MCP"~~ | **Cancelled 2026-11-23**: only one copy exists (Copilot Studio, Registry). Nothing to delete | Still open: which project owns it |
-| 3 | **D1 stale "Spaarke AI" registration** | After the details-pane screenshot, I'll name the row. Then admin center › **Agents › All agents › Registry** › select it › **Uninstall** (if installed) and then **Delete** | Master's manifest is still `1.1.0`. Likely keep the installed v1.1.0 and delete the uploaded-but-not-installed v1.5.0. provisioning-r1 is asked whether its task 257 uploaded one. **Whether "Spaarke AI" stays at all is still your decision** |
+| 3 | **D1 stale "Spaarke AI" registration** | After the details-pane screenshot, I'll name the row. Then admin center › **Agents › All agents › Registry** › select it › **Uninstall** (if installed) and then **Delete** | Master's manifest is still `1.1.0`. Likely keep the installed v1.1.0 and delete the uploaded-but-not-installed v1.5.0. provisioning-r1 confirmed neither row is theirs (2026-11-23). **Whether "Spaarke AI" stays at all is still your decision** |
 
 ## On a trigger
 
