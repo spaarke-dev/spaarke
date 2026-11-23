@@ -331,6 +331,7 @@ code, and it is open.
 - **Column presence.** Every security check asks metadata without remembering a "missing" answer. Only the caller-impersonated thread read, which uses the answer only to decide which columns to select, remembers it for 5 minutes.
 
 **Deploy order, per environment.** Run the schema script (`Set-PrivateContextSchema.ps1`), then field security (`Set-ThreadFlagFieldSecurity.ps1 -Apply`, then `-Verify`), then the BFF. Each step needs the owner's go.
+After `-Verify` passes and before the BFF goes live, run a read-only count of `sprk_communication` rows that hold any `sprk_privatecontext*` value. It must be 0, because no deployed BFF writes those columns yet. Send the count to unified-access-control-r2. A nonzero count holds the deploy (UAC-r2 approval of 056b, 2026-11-23).
 
 **Known limits.**
 - A refused private send can leave the pair's Direct thread with no message in it.
@@ -341,3 +342,4 @@ code, and it is open.
 - The secure-child share mirror reads the reference columns on rows it reads itself. For rows another job hands it, the secure reconcile's private-row skip applies.
 - Assigning a Direct message to another owner in the model-driven app follows the platform's Assign semantics, for every Direct message. This is tracked in #2979, not in 056.
 - Invite-only conversations are a follow-up: #2977.
+- On a private message, a write that clears a filing link is refused too. The out-of-band clear removes it instead. Filing links decide nothing for a private message.
