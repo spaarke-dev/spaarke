@@ -5,17 +5,17 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-23 ~12:35Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-23 ~19:25Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). `uac-r2` is authoritative, reviews peers, runs EVERY dev deploy. Live actions need the owner's go IN THIS SESSION; a BFF deploy needs the owner to name the exact SHA here ("BFF deploy <sha>"); a go relayed by another session is not a go. ≤ 2 agents at once. |
-| **Dev BFF** | **`a48398746d` LIVE since ~18:43Z 2026-11-23** (`C:wtdep18`, ledger 160; owner go "BFF deploy a48398746d"; hash 4/4, healthz 200, signed-in 403, bogus 404; 30-min gate running, ends ~19:13Z; rollback `9df4e5c819` `C:wtdep17`). PREVIOUS: **`9df4e5c819` LIVE since ~12:30Z 2026-11-23** (`C:\wtdep17`, ledger 159; owner go "BFF deploy 9df4e5c819" in this session). = live `c8ab2cba9e` + master `2dcbe35e34` (#2941 R4 grid, #2957, #2958, #2968, #2956, #2924) + spike-v2 `973776a5a6`. Hash verify 4/4, `/healthz` 200, signed-in route 403 (registered), unknown route 404. **30-min gate PASS 13:01Z** (12:32–12:59Z: 0 5xx, 0 exceptions, no new warning class vs the prior build; jobs heartbeating; only 5 requests, no external traffic). Notices sent (mcp-r1, spa-r4, fm-r1). Rollback `c8ab2cba9e` (`C:\wtdep16`), then `5ae2804884` (`C:\wtdep15`). No web resources this deploy (fm 055 not on master yet). `RecordRepair:Pass:GoLive` UNSET. |
-| **Master** | `2dcbe35e34` (#2957 and #2958 merged). |
+| **Dev BFF** | **`a48398746d` LIVE since ~18:43Z 2026-11-23** (`C:wtdep18`, ledger 160; owner go "BFF deploy a48398746d"; hash 4/4, healthz 200, signed-in 403, bogus 404). **30-min gate PASS 19:11Z** (18:43–19:11Z: 15 requests, 0 5xx, SECURE-CENSUS heartbeating, no external traffic; new warning classes are only the deploy's own signed-in checks and one owner chat session; 2 `OrganizationServiceFault`s come from `DynamicCommandResolver`'s dev schema gap (`sprk_triggerphrases`, `sprk_scope`), present since 2026-10-28 and resolver unchanged since June → **#3005** filed). Notices sent after the PASS (mcp-r1 SHA, spa-r4, fm-r1, ebilling-r1). Rollback `9df4e5c819` (`C:\wtdep17`), then `c8ab2cba9e` (`C:\wtdep16`). `RecordRepair:Pass:GoLive` UNSET. |
+| **Master** | `ca1684dd2f` or later (#2984, #2992, #2993, #2995 merged). |
 | **Agents running** | None. |
-| **Next action** | (1) **Owner go pending: "BFF deploy a48398746d"** (`C:\wtdep18`, green 18:05Z). On the go: ping mcp-r1 + spa-r4 → `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev` from `C:\wtdep18` (background) → hash/health/signed-in route (preview-url 403, bogus 404, token `api://1e40baad-…`) → live notices (mcp-r1 SHA, spa-r4, fm-r1, ebilling-r1) → 30-min gate `gate-now.ps1 <t0>` → fm deploys its 2 web resources, ebilling runs 123 K1 check. (2) **spa-r4 E2E** on 9df4e5c819 open since 14:59Z (SPA `2dcbe35e34` live 13:04:40Z; grid config 3ff4102c PATCHed 14:58Z): when spa-r4 sends the end time run scratchpad `e2e-ext.ps1 2026-11-23T14:59:00Z <end>` (403s by route on /documents, /invoices, /invoices/{id}/files, grid config; DV_FETCHXML_COLUMN_NOT_PERMITTED; latency #2845) and reply. If the deploy lands first, the E2E window ends at the swap. (3) ebilling 194 (invoice form extraction controls) in flight on dev; AFTER notice should confirm onLoad handlers unchanged. |
+| **Next action** | (1) **fm-r1** deploys web resources `sprk_communicationconversationpage` + `sprk_spaarkeai` (owner go in fm's session) and sends hashes → spot-read back. (2) **spa-r4:** PR #3000 merge + SPA redeploy are its owner's go; E2E round 2 on a48398746d → when it sends start/end, run scratchpad `e2e-ext.ps1 <start> <end>` and reply. (3) ebilling 123 K1 **CLOSED** (19:14Z count 0, baseline 18:45Z 0). (4) ebilling 194 in flight on dev; AFTER notice should confirm onLoad handlers unchanged. |
 
 ## Reviews done 2026-11-22/23
 - **fm 055** (PR #2943): PASS at `434958a0ca`; on fm work branch as `46a0e1c236`. Not on master yet; when it lands, the deploy after it also ships web resources `sprk_communicationconversationpage` + `sprk_spaarkeai`, and run `CommunicationWorkspaceReadSeamTests` by name.
@@ -27,7 +27,7 @@
 
 ## Open work (mine)
 - **#2845 latency:** not met (notifications p50 ≈ 2.7 s). Recheck at this gate if external SPA traffic exists. Scratchpad `lat-now.ps1`, `lat-seq.ps1`.
-- **#2959**, **#2979**, **#2860** (lenient QueryAsync), **#2903** (re-file gap), **#2912** (load flake), **#2918** (no Direct-message UI; fm 055 adds it).
+- **#3005** (chat commands schema gap, not ours; filed), **#2959**, **#2979**, **#2860** (lenient QueryAsync), **#2903** (re-file gap), **#2912** (load flake), **#2918** (no Direct-message UI; fm 055 adds it).
 - **Gate gotchas:** gate t0 = new process start; KQL: no `first`/`last` aliases. Use the five CI shards (`ci-tier2-advisory.yml`; scratchpad `shards.sh`). ArchTests build separately (not in `Spaarke.sln`). ProvisionProjectIdempotencyTests times out under load; re-run it alone.
 
 ## Peer state
@@ -40,7 +40,7 @@
 - **Next candidate `a48398746d`** (`C:\wtdep18`, ledger 160; local merge, never pushed) = live `9df4e5c819` + master `ca1684dd2f` (#2984 merged `889b0ea94d`, #2992 merged `2d83b246ae`, #2993, #2995). Ancestry verified (9df4e5c819, spike-v2, #2941, #2984, #2992). **GREEN 18:05Z:** sln 0 warnings / 0 errors; shards 571 + 3908 + 6716 + 3974 + 38064 passed (1 ProvisionProjectIdempotencyTests load timeout, class re-run 55/55 ×3); seam 18/18; ArchTests 2776/2776. WAITING on owner "BFF deploy a48398746d"; after it: fm web resources `sprk_communicationconversationpage` + `sprk_spaarkeai` (fm's step), ebilling 123 K1 read-only check, notices to mcp-r1 / spa-r4 / fm-r1 / ebilling-r1. 056b dev condition already met (count 0, field security on).
 - **mcp-r1:** told `9df4e5c819` live (records the SHA). Dev deploys = master + spike-v2 `973776a5a6`; never deploy `work/spaarkeai-mcp-bff-api-r1`; ping before a swap, live notice after.
 - **provisioning-r1:** 1.3.2.0 published; ACME catch-up runs through them.
-- **ontology-r1:** owner items (185 rechecks, budget-inquiry + 176 cleanup choice, lockedRecord fix routing, UAT 105 then 090).
+- **ontology-r1:** 174 (#2580, BFF: Console decision route refuses billing Signals 409 `ontology.decision.decided_in_invoice_review`; worklist names the invoice) at `6b69bc7e71` and 175 (#2579, client) at `ad86343230` merged into `docs/ontology-platform-design` 2026-11-23, NOT on master; they reach a dev candidate via the project branch or mcp-r1's #2587. Owner items (185 rechecks, budget-inquiry + 176 cleanup choice, lockedRecord fix routing, UAT 105 then 090).
 
 ## Waiting on the owner
 - SpaarkeMaster 1.3.2.0 imports (published, not imported anywhere).
@@ -48,6 +48,6 @@
 - Quality alerts #1906, #2067, #2866: mention only.
 
 ## Scratch
-- Keep: `C:\wtdep17` (live), `C:\wtdep16`, `C:\wtdep15` (rollbacks). Can go (only via `scripts/worktree/Remove-WorktreeSafe.ps1`): `C:\wtdep14`, `C:\wt056b`, `C:\wt117`, `C:\wt193`, `C:\wtd2`, `C:\wtdep8`–`C:\wtdep13`, `C:\wtcew`, `C:\wt2845b`, `C:\wt2845`, `C:\wtm16`, `C:\wt2859`, `C:\wt2869`, `C:\wt2852`, `C:\wt130e`, `C:\wt2833`.
+- Keep: `C:\wtdep18` (live), `C:\wtdep17`, `C:\wtdep16` (rollbacks). `C:\wtdep15` can go now. Can go (only via `scripts/worktree/Remove-WorktreeSafe.ps1`): `C:\wtdep14`, `C:\wt056b`, `C:\wt117`, `C:\wt193`, `C:\wtd2`, `C:\wtdep8`–`C:\wtdep13`, `C:\wtcew`, `C:\wt2845b`, `C:\wt2845`, `C:\wtm16`, `C:\wt2859`, `C:\wt2869`, `C:\wt2852`, `C:\wt130e`, `C:\wt2833`.
 - Gate script: scratchpad `gate-now.ps1 <t0>`; AI Search `-VerifyOnly` only if `AiSearch__ManagedIdentity__Enabled` is true.
 - The untracked 0-byte `tests/integration/data-mutation/ExternalAccess/DirectMessageParticipantSharesTests.cs`: leave it alone.
