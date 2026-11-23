@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -75,13 +76,14 @@ internal static class PrivateMessageWriteGuard
     /// and nothing may be written. An update that does not <see cref="Triggers"/> reads nothing. Otherwise the reference columns that
     /// exist in metadata (<see cref="PrivateContextColumns.PresentColumnsAsync"/>, cached) are read through
     /// <paramref name="appOnlyEntities"/>, the app-only service, so a caller's own read rights decide nothing: none exists → passes;
+    /// the row does not exist → passes (nothing can be written; the caller's write answers not-found);
     /// a set reference → <see cref="RecordOwnerRefusal.PrivateMessageNotFileable"/>; a fault of either read →
-    /// <see cref="CheckUnavailable"/>. Logs name the row and the column names, never a value. The caller's cancellation propagates.
+    /// <see cref="CheckUnavailable"/>, as is a triggering update with no service to read through (<c>null</c>). Logs name the row
+    /// and the column names, never a value. The caller's cancellation propagates.
     /// </summary>
     internal static async Task<RecordOwnerResolution?> RefuseUpdateAsync(
-        IGenericEntityService appOnlyEntities, string table, Guid recordId, IEnumerable<string> columns, ILogger logger, CancellationToken ct)
+        IGenericEntityService? appOnlyEntities, string table, Guid recordId, IEnumerable<string> columns, ILogger logger, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(appOnlyEntities);
         ArgumentNullException.ThrowIfNull(columns);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -89,14 +91,24 @@ internal static class PrivateMessageWriteGuard
         if (!Triggers(table, written))
             return null;
 
-        Entity row;
+        Entity? row;
         try
         {
+            // A host without the app-only service cannot ask the rule, so a triggering update is refused (fail closed).
+            if (appOnlyEntities is null)
+                throw new InvalidOperationException("No app-only entity service is available to read whether the row is a private message.");
+
             var present = await PrivateContextColumns.PresentColumnsAsync(appOnlyEntities, ct).ConfigureAwait(false);
             if (present.Count == 0)
                 return null;
 
-            row = await appOnlyEntities.RetrieveAsync(CommunicationTable, recordId, present.ToArray(), ct).ConfigureAwait(false);
+            // A query, not a retrieve by id: a row that does not exist comes back as no row (it cannot be written, so the update
+            // passes here and the caller's own write answers its usual not-found), and every fault is a fault.
+            var query = new QueryExpression(CommunicationTable) { ColumnSet = new ColumnSet(present.ToArray()), TopCount = 1 };
+            query.Criteria.AddCondition(CommunicationTable + "id", ConditionOperator.Equal, recordId);
+            var answer = await appOnlyEntities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"The read of {CommunicationTable} {recordId:D} gave no answer.");
+            row = answer.Entities.FirstOrDefault();
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -45,9 +46,26 @@ public class PrivateMessageWriteGuardTests
         var row = new Entity(Communication, MessageId);
         foreach (var (column, value) in values)
             row[column] = value;
-        _entities.Setup(e => e.RetrieveAsync(Communication, MessageId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(row);
+        Rows(row);
     }
+
+    /// <summary>The guard's row read (a query for the one id) answers <paramref name="rows"/>; the selected columns are kept.</summary>
+    private void Rows(params Entity[] rows) =>
+        _entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsTheRowRead(q)), It.IsAny<CancellationToken>()))
+            .Callback((QueryExpression q, CancellationToken _) => _selected = q.ColumnSet.Columns.ToArray())
+            .ReturnsAsync(new EntityCollection(rows.ToList()));
+
+    private string[]? _selected;
+
+    private static bool IsTheRowRead(QueryExpression query) =>
+        query.EntityName == Communication
+        && query.Criteria.Conditions.Count == 1
+        && query.Criteria.Conditions[0].AttributeName == Communication + "id"
+        && query.Criteria.Conditions[0].Operator == ConditionOperator.Equal
+        && query.Criteria.Conditions[0].Values.Single() is Guid id && id == MessageId;
+
+    private void VerifyNoRowRead() =>
+        _entities.Verify(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
 
     // ── the trigger list ──
 
@@ -105,8 +123,7 @@ public class PrivateMessageWriteGuardTests
         Metadata(Array.Empty<string>());
 
         (await GuardAsync(Communication, "sprk_regardingperson@odata.bind")).Should().BeNull();
-        _entities.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        VerifyNoRowRead();
     }
 
     // ── a private message is refused ──
@@ -150,17 +167,21 @@ public class PrivateMessageWriteGuardTests
     public async Task OnlyTheReferenceColumnsThatExist_AreRead()
     {
         Metadata(new[] { PrivateContextColumns.WorkAssignment });
-        string[]? selected = null;
-        _entities.Setup(e => e.RetrieveAsync(Communication, MessageId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .Callback((string _, Guid _, string[] columns, CancellationToken _) => selected = columns)
-            .ReturnsAsync(new Entity(Communication, MessageId)
-            {
-                [PrivateContextColumns.WorkAssignment] = new EntityReference("sprk_workassignment", Matter),
-            });
+        Row((PrivateContextColumns.WorkAssignment, new EntityReference("sprk_workassignment", Matter)));
 
         (await GuardAsync(Communication, "sprk_regardingperson@odata.bind"))!.RefusalCode
             .Should().Be(RecordOwnerRefusal.PrivateMessageNotFileable);
-        selected.Should().Equal(PrivateContextColumns.WorkAssignment);
+        _selected.Should().Equal(PrivateContextColumns.WorkAssignment);
+    }
+
+    [Fact]
+    public async Task ARowThatDoesNotExist_Passes_SoTheCallersWriteAnswersNotFound()
+    {
+        Metadata(PrivateContextColumns.All);
+        Rows();
+
+        (await GuardAsync(Communication, "sprk_regardingperson@odata.bind")).Should().BeNull(
+            "a row that is not there cannot be written; the caller's own write gives its usual not-found");
     }
 
     // ── an ordinary message passes ──
@@ -193,8 +214,7 @@ public class PrivateMessageWriteGuardTests
 
         (await GuardAsync(Communication, "sprk_regardingperson@odata.bind"))!.RefusalCode
             .Should().Be(PrivateMessageWriteGuard.CheckUnavailable);
-        _entities.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        VerifyNoRowRead();
     }
 
     [Fact]
@@ -211,8 +231,19 @@ public class PrivateMessageWriteGuardTests
     public async Task ARowReadFault_RefusesAsUnavailable()
     {
         Metadata(PrivateContextColumns.All);
-        _entities.Setup(e => e.RetrieveAsync(Communication, MessageId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+        _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test: Dataverse unavailable."));
+
+        (await GuardAsync(Communication, "sprk_regardingperson@odata.bind"))!.RefusalCode
+            .Should().Be(PrivateMessageWriteGuard.CheckUnavailable);
+    }
+
+    [Fact]
+    public async Task ARowReadWithNoAnswer_RefusesAsUnavailable()
+    {
+        Metadata(PrivateContextColumns.All);
+        _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((EntityCollection)null!);
 
         (await GuardAsync(Communication, "sprk_regardingperson@odata.bind"))!.RefusalCode
             .Should().Be(PrivateMessageWriteGuard.CheckUnavailable);
