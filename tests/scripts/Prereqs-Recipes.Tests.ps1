@@ -356,6 +356,83 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
+    Context 'PRQ-C-03 global resource-name availability (ISS-030: checkNameAvailability reports the stamp''s OWN resources unavailable, so an upgrade run failed)' {
+        $rgPath = 'resourceGroups/rg-spaarke-acme-prod/providers'
+        $ownIds = @(
+            "$rgPath/Microsoft.ServiceBus/namespaces/spaarke-acme-prod-sbus?api-version=2022-10-01-preview"
+            "$rgPath/Microsoft.Storage/storageAccounts/sprkacmeprodsa?api-version=2023-01-01"
+            "$rgPath/Microsoft.CognitiveServices/accounts/sprk-acme-prod-openai?api-version=2024-10-01"
+            "$rgPath/Microsoft.CognitiveServices/accounts/sprk-acme-prod-docintel?api-version=2024-10-01"
+            "$rgPath/Microsoft.CognitiveServices/accounts/sprk-acme-prod-contentsafety?api-version=2024-10-01"
+        )
+        # Every name reported by the check APIs: $true = available, $false = unavailable (the state of an existing stamp).
+        function Set-C03Rules {
+            param([string]$Dir, [bool]$Available, [hashtable]$OwnershipStatus = @{})
+            Set-Rules $Dir az @(, @('get-access-token', '0', 'tok\n'))
+            $nameBody = if ($Available) { '{"nameAvailable": true}' } else { '{"nameAvailable": false, "reason": "AlreadyExists", "message": "name taken"}' }
+            $domBody = if ($Available) { '{"isSubdomainAvailable": true}' } else { '{"isSubdomainAvailable": false, "reason": "SubdomainAlreadyExists"}' }
+            $rules = @(
+                , @('providers/Microsoft.ServiceBus/checkNameAvailability', '0', $nameBody)
+                , @('providers/Microsoft.Storage/checkNameAvailability', '0', $nameBody)
+                , @('providers/Microsoft.CognitiveServices/checkDomainAvailability', '0', $domBody)
+            )
+            # Ownership GETs: matched by resource ID substring; default 200. $OwnershipStatus maps an ID fragment to a status line.
+            foreach ($id in $ownIds) {
+                $status = '200'
+                foreach ($k in $OwnershipStatus.Keys) { if ($id -like "*$k*") { $status = $OwnershipStatus[$k] } }
+                $rules += , @($id, '0', "HTTP/2 $status\r\n\r\n")
+            }
+            Set-Rules $Dir curl $rules
+        }
+
+        It 'exits 0 and makes no ownership read when every name is available (first deploy)' {
+            Set-C03Rules $script:Dir $true
+            $r = Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir
+            $r.Exit | Should Be 0
+            $r.Output | Should Match 'ok'
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Not Match 'resourceGroups'
+        }
+        It 'exits 0 and prints OWNED for each name when all are unavailable but exist in the stamp resource group (upgrade run)' {
+            Set-C03Rules $script:Dir $false
+            $r = Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir
+            $r.Exit | Should Be 0
+            foreach ($label in 'spaarke-acme-prod-sbus', 'sprkacmeprodsa', 'sprk-acme-prod-openai', 'sprk-acme-prod-docintel', 'sprk-acme-prod-contentsafety') {
+                $r.Output | Should Match "OWNED .*$label"
+            }
+            $r.Output | Should Not Match 'UNAVAILABLE'
+        }
+        It 'reads each unavailable name at its expected resource ID with the bicep api-versions' {
+            Set-C03Rules $script:Dir $false
+            Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir | Out-Null
+            $calls = Get-Content (Join-Path $script:Dir 'calls.log') -Raw
+            foreach ($id in $ownIds) { $calls | Should Match ([regex]::Escape("subscriptions/44444444-4444-4444-4444-444444444444/$id")) }
+        }
+        It 'exits 1 naming the Service Bus namespace when it is unavailable and absent from the stamp resource group (404)' {
+            Set-C03Rules $script:Dir $false @{ 'namespaces/spaarke-acme-prod-sbus' = '404' }
+            $r = Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'UNAVAILABLE Service Bus namespace spaarke-acme-prod-sbus'
+            $r.Output | Should Match 'OWNED Storage account sprkacmeprodsa'
+        }
+        It 'exits 1 when a Cognitive Services subdomain is held elsewhere (404)' {
+            Set-C03Rules $script:Dir $false @{ 'accounts/sprk-acme-prod-docintel' = '404' }
+            $r = Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'UNAVAILABLE Cognitive Services subdomain sprk-acme-prod-docintel'
+        }
+        It 'exits 1 and prints the status when the ownership read returns anything but 200 or 404' {
+            Set-C03Rules $script:Dir $false @{ 'storageAccounts/sprkacmeprodsa' = '403' }
+            $r = Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match "Storage account sprkacmeprodsa.*HTTP '403'"
+        }
+        It 'exits 1 when the check API itself cannot be reached' {
+            Set-Rules $script:Dir curl @(, @('nothing-matches-this', '0', ''))
+            Set-Rules $script:Dir az @(, @('get-access-token', '0', 'tok\n'))
+            (Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir).Exit | Should Be 1
+        }
+    }
+
     # PRQ-C-06 (maxuploadfilesize >= 25 MB) retired by T186 (2026-10-14): H6 applies the org-settings contract itself before the
     # import (H6SolutionImportHandler step 7.6; the 'retired entries' Context below proves the entry carries no recipe).
     # PRQ-C-07 (required applications) retired by T253 (2026-10-08): H6 installs no application;
