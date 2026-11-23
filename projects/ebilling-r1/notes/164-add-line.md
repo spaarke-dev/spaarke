@@ -82,3 +82,14 @@ P1 is met in the inverse direction: the script refuses when dev carries rows the
 uac-r2 approved adding the three further rows of the same SecureChild New button, and confirmed against master's `sprk_BillingEvent/RibbonDiff.xml` that the SecureChild footprint on this table is exactly: the CustomAction `sprk.SecureChild.sprk_billingevent.SubGrid.New.CustomAction`, the CommandDefinitions `sprk.SecureChild.sprk_billingevent.New.Command` and `Mscrm.AddNewRecordFromSubGridStandard`, the EnableRules `...NativeNewAllowed.EnableRule` and `...NewAvailable.EnableRule`, the LocLabels `...New.LabelText` and `...New.ToolTipDescription`, plus the Button `sprk.SecureChild.sprk_billingevent.SubGrid.New` if dev stores it as its own row. `$ReplacedByQ6` now holds exactly those eight ids (exact, case-sensitive; no prefix, no wildcard); any other id still refuses. The "four ids" wording above is superseded.
 
 `-Verify` now also requires every hide in the diff (11) to be a stored `ribbondiffs` row on the table (uac-r2 condition 2), besides the effective-ribbon absence and the sibling `Save` control.
+
+## Dev ribbon state (2026-11-23, owner's go "yes proceed with these", typed in the ebilling-r1 session; uac-r2 notices before and after)
+
+- **Dry run (read-only, exit 0):**
+  - All 11 controls report "already hidden".
+  - All 9 Q6 allow-list ids report "not on dev (nothing to replace)".
+  - 11 stored diff rows, 0 commands, 0 rules; 0 drift outside the allow-list.
+  - The run ends "would hide 0 control(s)". Dev already held the target state, most likely from an earlier SpaarkeMaster 1.3.2.x import that carries the 11 HideCustomAction rows.
+- **`-Apply` was not run**, since the import would have changed nothing. uac-r2 agreed.
+- **`-Verify` (exit 0):** VERIFY PASS. None of the 11 controls is in the effective ribbon, all 11 hides are stored `ribbondiffs` rows, and the sibling `Mscrm.Form.sprk_billingevent.Save` is present.
+- **uac-r2's `scripts/Deploy-SecureChildNewCommands.ps1 -Verify` (exit 0):** "All checks passed" on sprk_todo, sprk_event, sprk_invoice, sprk_reportcard, sprk_document, sprk_communication, sprk_budget and sprk_kpiassessment. uac-r2 acked: nothing more needed.

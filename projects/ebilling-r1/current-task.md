@@ -53,7 +53,7 @@
 
 - **Build:** 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
-  - 164: the live `-Apply` needs the owner's go.
+  - 164 ✅ 2026-11-23 (dev already in the target state; -Verify PASS).
   - 089 and 050a: owner questions are in their notes.
 - **Deploy close-outs:** 053, 079, 112, 136, 153. Then 160, 161/162 (live runs need the owner's OK), 163 UAT, 189, 190.
 - **Index tidy-up:** the drift check lists 028, 040, 050a, 084d, 093, 113 and 161. These are pre-existing; resolve each from evidence.
