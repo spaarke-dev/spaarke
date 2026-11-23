@@ -26,7 +26,7 @@
 
 ## Waiting on other sessions
 
-- mcp-r1: agreed R1 rationale; R8 already met by `spaarke_complete_decision`. S-1 needs the owner or test user (mcp-r1 puts it to the owner, before runbook step 5). Still waiting: T10 result, 040 ship date.
+- mcp-r1: agreed R1 rationale; R8 already met by `spaarke_complete_decision`. S-1 approved by the owner (per mcp-r1, 2026-11-23): runs after 040, before C2 is deleted. Still waiting: 040 ship date, T10 + S-1 results (mcp-r1 sends both).
 - acclerator-r1: P1 Word probe upload/removal.
 - specialist-legal-agents-r1: S-3 adopted as Phase 0 G8 (two throwaway test agents announced; rows before creation; needs owner approval to run); D-A11.
 
