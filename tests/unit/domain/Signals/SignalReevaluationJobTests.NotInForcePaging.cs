@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
@@ -101,7 +102,7 @@ public partial class SignalReevaluationJobTests
         signals.Take(2).Should().OnlyContain(s => !IsOpen(h, s));
         signals.Skip(2).Should().OnlyContain(s => IsOpen(h, s), "the rest stay open and are reported, to be closed by a run that reads them");
         h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
-            && e.Exception is TimeoutException && e.Message.Contains("on page 2") && e.Message.Contains("2 policies were read"));
+            && e.Exception is TimeoutException && e.Message.Contains("on page 2") && e.Message.Contains("2 were read in all"));
         h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("were not all read: 2 were read"));
     }
 
@@ -132,7 +133,7 @@ public partial class SignalReevaluationJobTests
         signals.Take(4).Should().OnlyContain(s => !IsOpen(h, s));
         signals.Skip(4).Should().OnlyContain(s => IsOpen(h, s));
         h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
-            && e.Message.Contains("More than 2 pages of 2 Off policies") && e.Message.Contains("4 policies were read"));
+            && e.Message.Contains("More than 2 pages of 2 Off policies") && e.Message.Contains("4 were read in all"));
 
         // The same policies, within the bound: complete.
         (await h.Closure.ClosePoliciesNotInForceAsync(default, pageSize: 2, maxPages: 4)).Should().Be(new SignalClosureOutcome(3, 0, 0));
@@ -181,5 +182,98 @@ public partial class SignalReevaluationJobTests
         failed.ResultJson.Should().Contain("\"outcome\":\"failed\"");
         IsOpen(again, stranded).Should().BeTrue("its policy was never read: reported, not closed");
         again.Log.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("were not all read"));
+    }
+
+    // =====================================================================================
+    // The job's enabled-policies read (#2982): the same unpaged-read defect, in the read of the policies to EVALUATE.
+    // =====================================================================================
+
+    private static List<(string Code, Guid Id)> AddEnabledPolicies(Harness h, int count)
+    {
+        var added = new List<(string, Guid)>();
+        for (var i = 0; i < count; i++)
+        {
+            var code = $"POL-EN-{i:D5}";
+            h.Sysadmin.AddPolicy(code, SignalWriter.LaneDecide, enabled: true, PathBBody, PathBTemplate);
+            added.Add((code, h.Sysadmin.PolicyIdOf(code)));
+        }
+
+        return added.OrderBy(p => p.Item2).ToList();
+    }
+
+    private static int PoliciesEvaluatedOf(JobRunResult result)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(result.ResultJson!);
+        return doc.RootElement.GetProperty("policiesEvaluated").GetInt32();
+    }
+
+    [Fact]
+    public async Task Run_EnabledPoliciesPastTheFirstPage_AreAllEvaluated()
+    {
+        // 5,001 enabled policies: the unpaged read evaluated the first 5,000 (by code) and the run still reported success.
+        var h = new Harness();
+        AddEnabledPolicies(h, 5001);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        PoliciesEvaluatedOf(result).Should().Be(5001, "the policy past Dataverse's first 5,000 rows is evaluated too");
+    }
+
+    [Fact]
+    public async Task ReadEnabledPolicies_ReadsEveryPageOnce_InCodeOrder_AndReportsAPageFaultOrTheBound()
+    {
+        var h = new Harness();
+        var added = AddEnabledPolicies(h, 5);
+        h.Sysadmin.AddPolicy("POL-OFF", SignalWriter.LaneDecide, enabled: false, PathBBody, PathBTemplate); // never read: not enabled
+
+        var whole = await h.Job.ReadEnabledPoliciesAsync(default, pageSize: 2);
+        whole.IsComplete.Should().BeTrue();
+        whole.Policies.Select(p => p.Code).Should().Equal(added.Select(a => a.Code).OrderBy(c => c, StringComparer.OrdinalIgnoreCase),
+            "every enabled policy once, in the code order the evaluation always had");
+
+        // A fault on the second page: the first page is kept, the read says it is incomplete, the cause is logged with the counts.
+        var pages = 0;
+        h.Sysadmin.FaultOn = q => IsPolicyCursorRead(q) && ++pages == 1 ? new TimeoutException("Dataverse timed out.") : null;
+        var faulted = await h.Job.ReadEnabledPoliciesAsync(default, pageSize: 2);
+        faulted.IsComplete.Should().BeFalse();
+        faulted.Policies.Should().HaveCount(2);
+        h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
+            && e.Exception is TimeoutException && e.Message.Contains("enabled policies could not be read on page 2") && e.Message.Contains("2 were read in all"));
+
+        // More full pages than the bound: reported truncated, not returned as the whole list.
+        h.Sysadmin.FaultOn = null;
+        var bounded = await h.Job.ReadEnabledPoliciesAsync(default, pageSize: 2, maxPages: 2);
+        bounded.IsComplete.Should().BeFalse();
+        bounded.Policies.Should().HaveCount(4);
+        h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("More than 2 pages of 2 enabled policies") && e.Message.Contains("4 were read in all"));
+    }
+
+    [Fact]
+    public async Task Run_AnEnabledPoliciesPageThatFails_FailsTheRun_AndTheCutShortListIsStillEvaluated()
+    {
+        var h = new Harness();
+        AddEnabledPolicies(h, 5001);
+        h.Sysadmin.FaultOn = q => IsPolicyCursorRead(q) ? new TimeoutException("Dataverse timed out.") : null;
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse("the policy past the first page was never read: a failed run, not a clean one");
+        result.ErrorMessage.Should().Contain("policyFailures=1");
+        result.ResultJson.Should().Contain("\"outcome\":\"failed\"");
+        PoliciesEvaluatedOf(result).Should().Be(5000, "the policies that WERE read are evaluated: a retry has only the rest to do");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("enabled policies could not be read on page 2"));
+    }
+
+    [Fact]
+    public async Task EvaluateSubject_AnEnabledPoliciesPageThatFails_IsReportedInThePolicyFailures()
+    {
+        var h = new Harness();
+        AddEnabledPolicies(h, 5001);
+        h.Sysadmin.FaultOn = q => IsPolicyCursorRead(q) ? new TimeoutException("Dataverse timed out.") : null;
+
+        var result = await h.Job.EvaluateSubjectAsync("sprk_matter", MatterId, default);
+
+        result.PolicyFailures.Should().Be(1, "the trigger is told its list of policies was cut short");
     }
 }
