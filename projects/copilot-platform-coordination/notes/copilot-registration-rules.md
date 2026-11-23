@@ -32,7 +32,7 @@ As approved on 2026-11-06 in `projects/spaarkeai-mcp-bff-api-r1/notes/coordinati
 | Declarative agent | "Spaarke AI" for the core agent; practice agents "Spaarke {Practice}" |
 | Test artifacts | Must contain `spike`, `probe` or `test` in the display name so they cannot be mistaken for product |
 
-Existing skills `nda-review`, `legal-hold-review` and `accelerator-setup` predate the gate; the accelerator renames them at its next plugin build.
+Existing skills `nda-review`, `legal-hold-review`, `accelerator-setup` and `nda-library-review` predate the gate. mcp-r1's note records the accelerator agreeing to rename them at its next build, but the accelerator reports (2026-11-23) that the convention is still an open owner decision on its side (OD-20/OD-42). **Owner to confirm** that the skill rule binds the accelerator's skills.
 
 ## R4. Inventory first
 

@@ -24,5 +24,5 @@
 | Session | Sent | Reply |
 |---|---|---|
 | mcp-r1 | 2026-11-23 | **Ack 2026-11-23:** rows C1/C2/A1/A2 correct. Order: #2587 → master; uac-r2 dev deploy from master without the spike, `Mcp:Enabled` on (task 041, owner per-SHA go); 040 builds the skills-only package (slug `spaarke`, skill `spaarke-decisions`, no `agentConnectors`, owner + test user, KEEP); T10 runs on it. Inventory row comes before upload |
-| acclerator-r1 | 2026-11-23 | pending (asked: S6 installed now, D4 installed?, S4 still used?) |
+| acclerator-r1 | 2026-11-23 | **Reply 2026-11-23:** skills are OneDrive per-user folders, not tenant uploads; no plugin upload since X1. D2–D4 are the owner's Copilot Studio agents (instruction version unconfirmed); the D4 zip was never uploaded. S4 still needed. S5 remove agreed. Skill renaming is an open owner decision on their side (OD-20/OD-42). First R4 row: P1 "Spaarke Word Probe" plugin. Agrees to R4/R5/R7 as working practice |
 | specialist-legal-agents-r1 setup session | 2026-11-23 | **Ack 2026-11-23:** adopts R1–R5 (design.md §10, commit `c88ef768e5`; standing directive in its current-task.md). No tenant artifacts yet. First will be a Phase 0 G1 test agent, which waits on gate A0 and D-A11; its row comes before creation. Will report when the owner decides D-A11 (drives D2–D4) |
