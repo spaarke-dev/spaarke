@@ -73,6 +73,9 @@ public sealed partial class RuleSetServiceTests
         public Func<string, bool>? FailBulkFor;
         public Func<string, bool>? FailUpdateFor;
 
+        /// <summary>Task 117: faults the single-row updates of the rows it answers true for (table, id); nothing is applied.</summary>
+        public Func<string, Guid, bool>? FailUpdateOf;
+
         /// <summary>The publish claim store the service takes (round 3): the real process-local lease, so a test can hold a claim or watch one released.</summary>
         public Spaarke.Scheduling.IScheduledJobLease Lease = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
 
@@ -174,7 +177,7 @@ public sealed partial class RuleSetServiceTests
                 .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken ct) =>
                 {
                     ct.ThrowIfCancellationRequested(); // the real seam honours the caller's token
-                    if (FailUpdateFor?.Invoke(entity) == true)
+                    if (FailUpdateFor?.Invoke(entity) == true || FailUpdateOf?.Invoke(entity, id) == true)
                     {
                         throw new InvalidOperationException("simulated update failure");
                     }
@@ -675,17 +678,24 @@ public sealed partial class RuleSetServiceTests
             return value switch { OptionSetValue o => o.Value, EntityReference r => r.Id, IComparable c => c, _ => null };
         }
 
-        private static bool Matches(Entity row, FilterExpression filter)
+        /// <summary>Task 117: sets a row's <c>modifiedon</c> as the fake keeps it (a read returns it; a query condition on it sees it).</summary>
+        public void SetModifiedOn(Guid id, DateTime modifiedOn) => _modifiedOn[id] = modifiedOn;
+
+        private bool Matches(Entity row, FilterExpression filter)
         {
             var results = filter.Conditions.Select(c => Matches(row, c)).Concat(filter.Filters.Select(f => Matches(row, f))).ToList();
             return results.Count == 0 || (filter.FilterOperator == LogicalOperator.And ? results.All(x => x) : results.Any(x => x));
         }
 
-        private static bool Matches(Entity row, ConditionExpression c)
+        private bool Matches(Entity row, ConditionExpression c)
         {
             object? actual = c.AttributeName == row.LogicalName + "id"
                 ? row.Id
-                : row.Contains(c.AttributeName) ? row[c.AttributeName] : c.AttributeName == "statecode" ? new OptionSetValue(0) : null;
+                : row.Contains(c.AttributeName) ? row[c.AttributeName]
+                : c.AttributeName == "statecode" ? new OptionSetValue(0)
+                // Task 117: the system column the fake keeps aside, as a read returns it (equal to createdon until the row is written again).
+                : c.AttributeName == "modifiedon" && _createdOn.TryGetValue(row.Id, out var createdOn) ? _modifiedOn.GetValueOrDefault(row.Id, createdOn)
+                : null;
             actual = actual switch { EntityReference r => r.Id, OptionSetValue o => o.Value, _ => actual };
             var wanted = c.Values.Select(v => v is OptionSetValue o ? o.Value : v).ToList();
             return c.Operator switch
@@ -693,6 +703,10 @@ public sealed partial class RuleSetServiceTests
                 ConditionOperator.Equal => actual is not null && Equals(actual, wanted[0]),
                 ConditionOperator.In => actual is not null && wanted.Any(w => Equals(actual, w)),
                 ConditionOperator.Null => actual is null,
+                // Task 117: SQL semantics (a null never matches), the id cursor (the fake orders ids as Guid.CompareTo, as OrderKey does) and the age floor.
+                ConditionOperator.NotEqual => actual is not null && !Equals(actual, wanted[0]),
+                ConditionOperator.GreaterThan => actual is IComparable gt && wanted[0] is not null && gt.CompareTo(wanted[0]) > 0,
+                ConditionOperator.LessThan => actual is IComparable lt && wanted[0] is not null && lt.CompareTo(wanted[0]) < 0,
                 // 082c C19: Dataverse LIKE (% any run, _ one character, case-insensitive), for the reverse chain read's pair candidates.
                 ConditionOperator.Like => actual is string text && wanted[0] is string pattern && System.Text.RegularExpressions.Regex.IsMatch(text,
                     "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("%", ".*").Replace("_", ".") + "$",
@@ -3106,5 +3120,55 @@ public sealed partial class RuleSetServiceTests
         await service.SetVisibilityAsync(set, false, default);
 
         (await service.GetFirmClauseAsync(version, invoice, default)).Should().Be(FirmClauseText.None);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 117: RetireUnlinkedRecordSetsAsync (O-17). The job-level contract is RecordRuleSetRetireJobTests; these pin the service's own
+    // re-read before each write and its report-only answer.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly DateTime RetireCutoff = new(2026, 11, 23, 11, 45, 0, DateTimeKind.Utc);
+
+    [Fact(DisplayName = "117: a set re-linked between the selection and its write is re-read, skipped and not written")]
+    public async Task RetireUnlinked_ASetReLinkedBeforeItsWrite_IsSkipped()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeRecord);
+        var (policy, _) = h.Rule(set, "BRR-1", ProposalState.Accepted, current: true);
+        var core = InvoiceFamilyCoreRecordGuard.FilingCoreTables[0];
+        var selections = 0;
+        h.AfterQuery = q =>
+        {
+            // The first page has been read: a delete is undone by a restore that re-links the set before the sweep writes it.
+            if (q.EntityName == "sprk_ruleset" && selections++ == 0)
+            {
+                h.ConcurrentWrite("sprk_ruleset", set, new Dictionary<string, object> { [core] = new EntityReference(core, Guid.NewGuid()) });
+            }
+        };
+
+        var result = await h.Service().RetireUnlinkedRecordSetsAsync(apply: true, RetireCutoff, pageSize: 100, maxPages: 1, default);
+
+        result.Selected.Should().Be(1);
+        result.Skipped.Should().Be(1);
+        result.Retired.Should().Be(0);
+        h.Writes.Should().BeEmpty();
+        h.Row("sprk_ruleset", set).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetPublished);
+        h.Row("sprk_policy", policy).GetAttributeValue<bool>("sprk_enabled").Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "117: report only counts the unlinked sets and sends no write")]
+    public async Task RetireUnlinked_ReportOnly_CountsAndWritesNothing()
+    {
+        var h = new Harness();
+        var record = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeRecord);
+        var firmRecord = h.RuleSet(status: RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeFirmRecord, firm: FirmId);
+        h.Rule(record, "BRR-1", ProposalState.Accepted, current: true);
+        h.Rule(firmRecord, "BRR-2", ProposalState.Accepted, current: true);
+
+        var result = await h.Service().RetireUnlinkedRecordSetsAsync(apply: false, RetireCutoff, pageSize: 100, maxPages: 1, default);
+
+        result.Should().Be(new RuleSetService.UnlinkedRecordSetRetireResult(2, 0, 0, 0, 0, ReadFailed: false, MoreRemain: false));
+        h.Writes.Should().BeEmpty();
+        h.Queries.Should().OnlyContain(q => q.EntityName == "sprk_ruleset", "report only reads the selection and nothing else");
     }
 }
