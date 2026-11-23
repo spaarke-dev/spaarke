@@ -2439,3 +2439,29 @@ A rejected submission's firm outcome (130c) carries each rejecting finding's `va
 **Estimated effort**: half a day
 **Blockers**: none
 **Related**: tasks 130c and 134, #2933. Not a security issue.
+
+### ISS-043 — Multipart upload routes answer a malformed body with 500 instead of 400
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | Task 123 adversarial review, pass B (found in passing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2978 |
+
+**Description**
+
+Three existing multipart routes catch only `InvalidDataException` and `BadHttpRequestException` around `ReadFormAsync`. A malformed multipart body makes `ReadFormAsync` throw `System.IO.IOException`. The three inputs are a body with no closing boundary, truncated part headers, and a non-multipart body with a multipart content type. The exception reaches the global handler. The client gets 500 `server_error`, logged at Error, instead of the route's 400. Task 123's new upload route handles it (fix round 1).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionHttp.cs:60`
+- `src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureEndpoints.cs:543`
+- `src/server/api/Sprk.Bff.Api/Api/Finance/RateCardImportEndpoints.cs:385`
+
+**Suggested fix**: add `IOException` to each route's 400 mapping, keeping the pass-through for a cancelled request. Add one regression test per route with a body that has no closing boundary.
+
+**Estimated effort**: 1–2 hours
+**Blockers**: none
+**Related**: task 123 (`notes/123-invoice-supporting-file-upload.md`)
