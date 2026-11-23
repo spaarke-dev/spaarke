@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-15 (mcp-r1, after task 025 close and the master merge)
+> **Last Updated**: 2026-11-23 (mcp-r1, mid-merge of ontology ad86343230)
 > **Recovery**: Read "Quick Recovery" first. History: commit messages and `notes/wave{6,7,8}-review.md`, `notes/merge-review-2026-11-15.md`.
 
 ---
@@ -14,6 +14,13 @@
 - **Master merged in** (448 commits; ontology task 191, #2792): `387f6bf88b` merge + `39c993c58c` MCP mapping (sendChoice pass-through, 409 stored failure, 422, `plan.unfinished`); Fable review (REST byte-equal to master; 5 F) → fix round `a66e9b5509..66060a8f40` → Sonnet re-check clean → `288f558ff4`; merged into the branch `f9d1061111`. Record: `notes/merge-review-2026-11-15.md`. Ontology reviewed it: PASS-WITH-CHANGES; F4 fixed `efa348273f` (`spaarke_complete_decision` no longer idempotent: a send-again retry can send again). Client-lint fix `850451d189`. **PR #2587 must not merge to master before ontology's #2580 and #2579** (the branch carries their 174/175 code; held until ebilling Invoice Review is on dev) — ontology tells us when they land.
 
 **2026-11-20:** master merged in again (`418ea742cb`, 566 commits; only conflict the ledger count → 157; ArchTests 2732 ✅, Bff unit Signals|Mcp 5550 ✅; PR #2587 MERGEABLE; ontology-r1 told). T2/T14 spike package (from `d7369fecf1`) re-checked against the post-Ignite 1.30 schema: valid; zips built in the spike worktree's `src/solutions/CopilotPlugins/spike-phase0/` (gitignored). Researcher note: `.claude/agent-memory/researcher/agentconnectors-plugin-package-2026-11-20.md` (install path, `agentSkills` field for 040, Cowork client-id whitespace risk).
+
+**2026-11-23 (IN PROGRESS at checkpoint):**
+- Plugin package uploaded by owner. Results in `notes/phase0-results.md`: Cowork ✅ for T2/T13/T14 (one plugin name; A+B share one sign-in); Chat ❌/⚠️ (B fails before reaching the BFF; A ambiguous because the Dev Portal "Spaarke MCP" shares the URL). Rule for 040: register the server ONCE (package for Cowork, Dev Portal connector for Chat; never both in one surface). Open owner question: build a tagged A package (`?via=package`, v1.0.1) or accept the B result.
+- ontology-r1: #2580/#2579 merged into `docs/ontology-platform-design` (NOT master). It asked us to merge `ad86343230` into our branch; then condition 3 holds whichever PR reaches master first. DONE locally: merge commit `a363c18b50` (NOT yet pushed). One conflict, `DecisionCommitEndpoints.cs` description, took their side. 18/24 of their files equal `ad86343230`; 6 differ only where our MCP work changed them (DailyBriefing mock, DecisionCommitEndpoints, SignalReadService, SignalReadRouteTests, DecisionCommitServiceTests(.InvoiceReview)).
+- **Exact next action:** build; run full `dotnet test tests/Spaarke.ArchTests` + filtered `SignalReadRouteTests` and `DecisionCommitServiceTests`; push; send ontology-r1 the merged SHA with `git diff ad86343230 a363c18b50 -- <the 6 files>`. Then, for the master go: tell the owner that a master merge auto-deploys the Console to dev, and billing Work Items will then open an empty Invoice Review dialog until ebilling 112 ships (owner accepted this for 174/175). #2587 → master still needs the owner's go.
+- Dev BFF: see Active Lanes (`a48398746d` live 18:43Z).
+- New project `specialist-legal-agents-r1` (#3002) runs in its own session (`local_a9bd8869…`); design.md v0.4, waiting on owner decisions.
 
 **Next (nothing is workable without the owner or a gate):**
 - 040 (plugin package + skill) — HELD on the owner's batch D results T2/T14/T10 → record in `notes/phase0-results.md` first.
