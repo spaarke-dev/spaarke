@@ -7,7 +7,7 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
-**State:** 20/29 tasks ✅ (003 closed 2026-11-23, owner waived the remaining owner-only checks; T10 moved to 040). Branch `work/spaarkeai-mcp-bff-api-r1`. Draft PR #2587: next is ready-for-review → CI (Tier 1 `Router` is the verdict, Tier 2 advisory) → owner master go. Coordinator session proposed (card `task_c499ae81`, "Copilot coordination and tenant tidy-up").
+**State:** 21/29 tasks ✅ (003 closed 2026-11-23; 040 package built `b19410d9b7`, skills only, gate + 12 tests, schema-valid; T10 still to run live after 041). Local commits since `98a77c690a` are NOT pushed: hold the push until #2587 merges (a push restarts its CI); then push and open a follow-up PR for the post-#2587 commits. Branch `work/spaarkeai-mcp-bff-api-r1`. Draft PR #2587: next is ready-for-review → CI (Tier 1 `Router` is the verdict, Tier 2 advisory) → owner master go. Coordinator session proposed (card `task_c499ae81`, "Copilot coordination and tenant tidy-up").
 
 **Done 2026-11-15:**
 - **025 ✅** — owner chose Tier 1 ("Use tier 1"): job 8 `mcp-conformance` in `.github/workflows/ci-tier1-blocking.yml`, BLOCKING, owner-approved §6.5 Path-A exception (header entry, job comment, PR #2587 body). Node 22 required (suite imports `fs.globSync`; `run-conformance.sh` now stops below 22). Passing run 43736976687: 92 passed, 38 baselined, 5 min (< Arch Tests 7 min).
@@ -23,7 +23,7 @@
 - New project `specialist-legal-agents-r1` (#3002) runs in its own session (`local_a9bd8869…`); design.md v0.4, waiting on owner decisions.
 
 **Next (nothing is workable without the owner or a gate):**
-- 040 (plugin package + skill) — option (a): skills only, no `agentConnectors`; run T10 on the real skill. Starts after the dev deploy without the spike (041), so it isn't tested against a duplicate registration.
+- 040 ✅ built (`src/solutions/CopilotPlugins/spaarke/`, `npm run build` → `dist/spaarke-plugin.zip`). Live part, after 041: (1) send the inventory row to copilot-platform-coordination; (2) owner uploads it, installed for owner + test user; (3) T10 = does the packaged skill call `spaarke_show_decisions` via "Spaarke MCP"; (4) S-1; (5) owner deletes the spike plugin. Record the results in `notes/phase0-results.md` and send them to the coordinator.
 - 041 (dev BFF deploy from this branch, `Mcp:Enabled` on) — gated on ontology's #2580/#2579 deploy + owner per-SHA go (through uac-r2). Never deploy this branch with the spike (both map `/mcp/legal-operations`).
 - 042 (live E2E) after 040+041; 050/051/052 docs all gate on 042 (050/051 main session only: they write `.claude/` / root CLAUDE.md); 090 wrap-up last. 003 waits on owner-only items.
 

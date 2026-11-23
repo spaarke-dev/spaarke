@@ -4,7 +4,7 @@
     <title>Plugin package and spaarke-decisions skill</title>
     <phase>D Registration, deploy and live E2E</phase>
     <gate>after 003 and 030</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates new manifest, skill and script files with explicit constraints; no .cs/.ts code</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -107,7 +107,21 @@
   </acceptance-criteria>
 
   <notes>Deployment of the package to the dev tenant (upload and admin approval) is part of 042, run by the owner.
-Amended 2026-11-23 (owner option (a), notes/decisions.md): skills only, no agentConnectors. The package build is completed here. T10 (does the packaged skill call spaarke_show_decisions through "Spaarke MCP"?) runs live once 041 has deployed the real tools. Then S-1 runs (the owner approved the tool-list check with the spike still connected), and the owner deletes the spike plugin. Before any upload, send the package's inventory row to copilot-platform-coordination (Issue #3006) and install it for the owner and the test user only (R7).</notes>
+Amended 2026-11-23 (owner option (a), notes/decisions.md): skills only, no agentConnectors. The package build is completed here. T10 (does the packaged skill call spaarke_show_decisions through "Spaarke MCP"?) runs live once 041 has deployed the real tools. Then S-1 runs (the owner approved the tool-list check with the spike still connected), and the owner deletes the spike plugin. Before any upload, send the package's inventory row to copilot-platform-coordination (Issue #3006) and install it for the owner and the test user only (R7).
+Completion (2026-11-23, session mcp-r1; built by a Sonnet implementer agent, reviewed in the main session): commit b19410d9b7 created src/solutions/CopilotPlugins/spaarke/.
+- Manifest 1.30 with agentSkills [{folder: skills/spaarke-decisions}] and no agentConnectors. It is VALID against the official 1.30 schema (draft-04, checked with a throwaway ajv-draft-04 run; the control check rejected an extra key).
+- The spaarke-decisions skill. Its category values come from DecideLaneCategories.cs, and its claims match DecisionsTextSummary (top 5 plus Console links) and the FR-04 privileged line.
+- validate-plugin.mjs with 12 node:test tests: the five bad names and the good name, version 1.29, an agentConnectors entry, an agentSkills/folder mismatch, a tenant id, and the real package. Each check was weakened once to prove its test fails.
+- build-plugin.mjs: a pure-Node zip with 4 entries.
+- client-tests.yml: `node --test` packages skip the jest flags. That workflow runs on schedule and dispatch only. `npm test` was verified with the CI-appended `--passWithNoTests=false`.
+Deviation: the agentSkills folder is "skills/spaarke-decisions" (the schema's "path within the app package"; Microsoft's sample uses ./skills/&lt;name&gt;), not the bare name.
+Extra test, justified: the tenant-id rejection proves the "no tenant id" criterion.
+Known limit (K4): the narrow secret check has no must-fire test beyond the tenant id.
+Review: no F-class findings. ADR-028: no secret or tenant id; the only GUID is the manifest id. No out-of-scope defect was filed.
+Still open, outside this task's acceptance criteria:
+- T10 runs live after 041. If a packaged skill cannot call "Spaarke MCP", the core-package fallback needs the owner's go.
+- Send the inventory row to copilot-platform-coordination before upload (042).
+rework: none task 040</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
