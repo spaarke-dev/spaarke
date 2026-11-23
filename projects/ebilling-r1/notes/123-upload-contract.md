@@ -21,17 +21,27 @@ The request stages the bytes, writes the Stored File row and flips it to Servabl
 The file is purpose Invoice supporting file, Firm-visible No, parent the invoice. It is never a `sprk_document`.
 
 ## Errors
+Final codes as built by task 123 (2026-11-22). The field is `errorCode` for the route's own refusals and `reasonCode` for the filter's (403, 404); read `errorCode ?? reasonCode`.
+
 | Status | Code | When | Retry |
 |---|---|---|---|
-| 400 | `ebilling.files.file_required` | no `file` part, or more than one file part | no |
+| 400 | `ebilling.files.file_required` | no `file` part, more than one file part, a single file part not named `file`, a body that is not multipart/form-data (or no body), or a name or content type the store refuses (a content type over 255 characters) | no |
 | 400 | `ebilling.files.file_empty` | the file has 0 bytes | no |
 | 413 | `ebilling.files.file_too_large` | over the size limit (also the server's request-size limit) | no |
 | 401 | (none) | not authenticated | no |
-| 403 | `sdap.access.deny.internal_callers_only` | step 0: flagged-external caller | no |
-| 403 | `sdap.access.error.system_failure` | step 0 or the rights question could not be answered | yes |
-| 404 | `sdap.access.deny.record_unavailable` | the invoice does not exist, or the caller has no Write on it (one body for both) | no |
-| 409 | `ebilling.invoice.inactive` | the invoice is Rejected, Returned to Firm, Cancelled or Superseded | no |
-| 503 | `ebilling.files.store_unavailable` (`Retry-After`) | staging, the row write or the flip failed; nothing servable was left | yes |
+| 403 | `sdap.access.deny.internal_callers_only` (reasonCode) | step 0: flagged-external caller, or no systemuser | no |
+| 403 | `sdap.access.error.system_failure` (reasonCode) | step 0 or the rights question could not be answered | yes |
+| 404 | `sdap.access.deny.record_unavailable` (reasonCode) | the invoice does not exist, or the caller has no Write on it (one body for both); also an invoice removed between the rights check and the upload | no |
+| 409 | `ebilling.invoice.inactive` | the invoice is Inactive: Rejected, Returned to Firm, Cancelled, Superseded **or Paid** (statecode Inactive; see task 123 notes) | no |
+| 409 | the owner refusal code (reasonCode) | no owner could be resolved for the file (the platform's one owner-refusal answer, `ProblemDetailsHelper.RecordOwnerRefused`; 503 for its one transient code) | no |
+| 503 | `file_store_unavailable` (`Retry-After: 30`) | staging, the row write or the flip failed, the store is not configured, or the invoice's state could not be read; nothing servable was left | yes |
 | 503 | `ebilling.disabled` | eBilling is off | no |
 
 The final codes follow the code's existing constants where they exist (task 123 reuses them verbatim and reports any rename here before it merges).
+
+**Differences from the version pinned 2026-10-27 (task 123, for word-add-in-r1's agreement before merge):**
+- 503 store code: `file_store_unavailable`, the existing `StoredFileEndpoints.StoreUnavailableErrorCode` (the same file's download and list routes answer it for the same condition), not `ebilling.files.store_unavailable`.
+- 409 `ebilling.invoice.inactive` also covers Paid: the code's own Active/Inactive definition is statecode, and Paid is statecode Inactive.
+- Added row: 409 owner refusal (the platform's one answer for it; the pinned table had no row for this case).
+- 400 `file_required` and 404 cover the extra cases named in their rows. A file part with no content type is stored as `application/octet-stream`.
+- `ebilling.files.file_required`, `ebilling.files.file_empty`, `ebilling.files.file_too_large` and `ebilling.invoice.inactive` are new constants (no existing constant has the same meaning; the submission and Procedure routes' size and file codes are scoped to those routes).
