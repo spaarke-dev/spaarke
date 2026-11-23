@@ -12,7 +12,7 @@ import * as React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { ClassificationArea } from '..';
+import { ClassificationArea, ClassificationRequestError } from '..';
 import type { ClassificationCategory, ClassificationList, ClassificationService } from '..';
 
 const FEE = '8b62dd84-1fbc-f111-aaaf-3833c5e9614d';
@@ -161,5 +161,107 @@ describe('ClassificationArea focus around the category form (task 202)', () => {
     await act(() => new Promise<void>(resolve => setTimeout(resolve, 300)));
 
     expect(active()).toBe(other);
+  });
+});
+
+describe('ClassificationArea category form: a failed save keeps focus in the form (task 202 review F1, fix round 1)', () => {
+  it('while saving the Save button is focusable (aria-disabled, not natively disabled); after a 409 focus is still on it, inside the open form', async () => {
+    const user = userEvent.setup();
+    const service = fakeService(list([category(FEE, 'Fee / rate change')]));
+    let reject: (reason: unknown) => void = () => undefined;
+    service.update.mockImplementation(
+      () =>
+        new Promise((_resolve, rej) => {
+          reject = rej;
+        })
+    );
+    renderArea(service);
+    await user.click(await screen.findByTestId(`classification-edit-${FEE}`));
+    await user.type(await screen.findByTestId('classification-form-name'), ' v2');
+    const save = screen.getByTestId('classification-form-save');
+
+    await user.click(save);
+
+    await waitFor(() => expect(service.update).toHaveBeenCalled());
+    // A natively disabled button that has focus loses it to <body> in a real browser (jsdom does not model that), so the
+    // button must stay focusable while it reads as disabled.
+    expect(save).not.toHaveAttribute('disabled');
+    expect(save).toHaveAttribute('aria-disabled', 'true');
+    expect(active()).toBe(save);
+
+    await act(async () => {
+      reject(new ClassificationRequestError('Another triage category already has this name.', 409));
+    });
+
+    await screen.findByTestId('classification-form-error');
+    const form = screen.getByTestId('classification-form');
+    expect(form.contains(active())).toBe(true);
+    expect(active()).toBe(screen.getByTestId('classification-form-save'));
+    expect(screen.getByTestId('classification-form-save')).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('classification-form-save')).toBeEnabled();
+  });
+
+  it('a second press while saving does not send a second request', async () => {
+    const user = userEvent.setup();
+    const service = fakeService(list([category(FEE, 'Fee / rate change')]));
+    service.update.mockImplementation(() => new Promise(() => undefined));
+    renderArea(service);
+    await user.click(await screen.findByTestId(`classification-edit-${FEE}`));
+    await user.type(await screen.findByTestId('classification-form-name'), ' v2');
+    const save = screen.getByTestId('classification-form-save');
+
+    await user.click(save);
+    await waitFor(() => expect(service.update).toHaveBeenCalledTimes(1));
+    await user.click(save);
+    await user.type(screen.getByTestId('classification-form-name'), '{Enter}');
+
+    expect(service.update).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ClassificationArea: the edited row disappears while its form is open (task 202 review, fix round 1)', () => {
+  it('a reload without the row clears the form: New category is back and focus goes to the table', async () => {
+    const user = userEvent.setup();
+    const service = fakeService(list([category(FEE, 'Fee / rate change'), category(INVOICE, 'Invoice / Billing')]));
+    renderArea(service);
+    await user.click(await screen.findByTestId(`classification-edit-${FEE}`));
+    await screen.findByTestId('classification-form');
+    expect(screen.queryByTestId('classification-new')).toBeNull(); // hidden while a form is open
+
+    // Another administrator removes the category; toggling another row reloads the list.
+    service.list.mockImplementation(async () => list([category(INVOICE, 'Invoice / Billing')]));
+    let finish: () => void = () => undefined;
+    service.setEnabled.mockImplementation(
+      (id, enabled, version) =>
+        new Promise(resolve => {
+          finish = () => resolve({ id, name: 'x', guidance: null, enabled, version: version + 1 });
+        })
+    );
+    await user.click(screen.getByTestId(`classification-toggle-${INVOICE}`));
+    // The person is typing in the form's Name field when the reload lands; the field goes away with the form.
+    act(() => screen.getByTestId('classification-form-name').focus());
+    expect(active()).toBe(screen.getByTestId('classification-form-name'));
+    await act(async () => finish());
+
+    await waitFor(() => expect(screen.queryByTestId(`classification-edit-${FEE}`)).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('classification-form')).toBeNull());
+    expect(screen.getByTestId('classification-new')).toBeInTheDocument();
+    await waitFor(() => expect(active()).toBe(screen.getByTestId('classification-table')));
+  });
+
+  it('focus the person is holding on another control when the row disappears stays there', async () => {
+    const user = userEvent.setup();
+    const service = fakeService(list([category(FEE, 'Fee / rate change'), category(INVOICE, 'Invoice / Billing')]));
+    renderArea(service);
+    await user.click(await screen.findByTestId(`classification-edit-${FEE}`));
+    await screen.findByTestId('classification-form');
+
+    service.list.mockImplementation(async () => list([category(INVOICE, 'Invoice / Billing')]));
+    await user.click(screen.getByTestId(`classification-toggle-${INVOICE}`));
+
+    await waitFor(() => expect(screen.queryByTestId('classification-form')).toBeNull());
+    await act(() => new Promise<void>(resolve => setTimeout(resolve, 300)));
+    expect(active()).toBe(screen.getByTestId(`classification-toggle-${INVOICE}`));
+    expect(screen.getByTestId('classification-new')).toBeInTheDocument();
   });
 });

@@ -121,3 +121,37 @@ SpeAdminApp, RuleReview, RecordProcedures, InvoiceReview, FindSimilarCodePage, A
 not by building each page; a page whose bundle tree-shakes SprkModal away needs nothing.
 
 rework: none task 202
+
+## Fix round 1 (review verdict: merge; three in-scope fixes)
+
+Files all under `src/client/shared/Spaarke.UI.Components/src/components/`.
+
+1. F1 (pre-existing, adjacent) `OntologyAdmin/Classification/CategoryForm.tsx` Save button. It was `disabled={!canSave}`, and `canSave`
+   includes `!saving`, so the focused Save button went natively disabled while saving and a browser drops focus to `<body>`; when the save
+   then failed (409, refused rename, 5xx) the form stayed open with focus lost. Now `disabled={!saving && !canSave}` plus
+   `disabledFocusable={saving}`: the not-valid / unchanged state is natively disabled exactly as before; the saving state is `aria-disabled`
+   and keeps focus. A second press or Enter while saving is still refused (Fluent swallows the click; `submit` returns on `!canSave`).
+   Tests (`ClassificationFocus.test.tsx`): a pending save leaves Save not natively disabled with `aria-disabled=true` and focused; after a
+   409 the form is open, focus is on Save inside the form, Save is enabled again; and a second press / Enter sends one request.
+   Fail-before: with the old `CategoryForm.tsx` the first test fails (the button has `disabled`).
+2. Test gap: "closing and reopening quickly" passed with the reopen cancel removed, because focus was inside the reopened modal at the
+   0 ms tick and a stale restore treats that as "kept". Kept that test; added "a pending restore is cancelled by a reopen: with focus on
+   <body> at the restore tick, the old opener is not focused" (`SprkModal/__tests__/focusRestore.test.tsx`): close, reopen in the same
+   tick, blur synchronously so focus is on `<body>` when the timer runs, then assert focus is still `<body>` and not the old opener.
+   Fail-before: with `cancelRestoreRef.current?.(); // reopened before a pending restore ran` (SprkModal.tsx, the `open` branch of the
+   layout effect) replaced by a comment, the new test fails (Expected: not Toggle) and the other 17 pass. `SprkModal.tsx` restored,
+   unchanged by this round, so the 202 PCF bumps stand.
+3. Pre-existing, same feature: `OntologyAdmin/Classification/ClassificationArea.tsx`. When the row being edited left the list on a reload,
+   `editing` was undefined so the form vanished, but `form` state stayed `{mode:'edit'}` and "New category" stayed hidden. New effect
+   (after the focus-return effect, before the early returns): if `form.mode === 'edit'` and the loaded list has no such id, `setForm(null)`;
+   that open -> closed transition is what runs the existing return-focus rule (row gone -> the table). Tests: the row disappears while the
+   form is open and the person is typing in Name -> form gone, New category back, focus on the table; and focus held on another control
+   (the switch the person used) is left there. Fail-before (old `ClassificationArea.tsx`): both fail (New category absent / focus lost).
+
+Results: filtered jest `src/components/SprkModal src/components/OntologyAdmin` 24 suites, 382 tests, 0 failed (was 378 before: +4 here
+counting the three Classification tests above plus the SprkModal test; the second-press test is the fourth). Package `tsc --noEmit`
+clean. `client-lint check`: `ui-components` ok (the touched surface); `ai-widgets`, `compose-components`, `daily-briefing-components`,
+`legal-workspace-app`, `reporting` report errors in files this round does not touch (e.g. `PinnedMemoryEditDialog.tsx:463`,
+`AISummaryDialog.tsx:455`) and a stale-suppression warning; not caused by this change.
+PCF: CategoryForm / ClassificationArea are not imported by any PCF (grep over `src/client/pcf` and `src/solutions`: only the Console
+web resource and `Spaarke.AI.Widgets` OntologyAdminWorkspaceWidget); no PCF bundle changed, no further bump.

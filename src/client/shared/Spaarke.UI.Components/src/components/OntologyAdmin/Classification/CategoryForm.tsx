@@ -192,7 +192,15 @@ export const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSubmit, 
       </Field>
 
       <div className={styles.actions}>
-        <Button type="submit" appearance="primary" disabled={!canSave} data-testid="classification-form-save">
+        {/* While saving the button is `disabledFocusable`, not natively disabled: a natively disabled focused button
+            drops focus to <body>, and a save that fails leaves the form open with focus lost (task 202 review F1). */}
+        <Button
+          type="submit"
+          appearance="primary"
+          disabled={!saving && !canSave}
+          disabledFocusable={saving}
+          data-testid="classification-form-save"
+        >
           {saving ? 'Saving...' : category ? 'Save' : 'Create (Off)'}
         </Button>
         <Button type="button" onClick={onCancel} disabled={saving} data-testid="classification-form-cancel">

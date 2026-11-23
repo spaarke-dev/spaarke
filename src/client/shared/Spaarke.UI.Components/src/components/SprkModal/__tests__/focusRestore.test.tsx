@@ -617,4 +617,40 @@ describe('SprkModal focus restore: negative cases (task 202)', () => {
     await settle();
     expect(screen.getByRole('dialog', { hidden: true }).contains(active())).toBe(true);
   });
+
+  it('a pending restore is cancelled by a reopen: with focus on <body> at the restore tick, the old opener is not focused', async () => {
+    // Discriminating form of the test above. There, focus is inside the reopened modal at the tick, so even a stale
+    // (uncancelled) restore sees "focus is kept" and does nothing. Here focus is on <body> when the 0 ms tick runs
+    // (the state a stale restore acts on), so only the cancel at reopen keeps the old opener from being focused.
+    const Host: React.FC = () => {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <Provider>
+          <button type="button" onClick={() => setOpen(o => !o)}>
+            Toggle
+          </button>
+          <SprkModal open={open} onClose={() => setOpen(false)} title="T">
+            <button type="button">In modal</button>
+          </SprkModal>
+        </Provider>
+      );
+    };
+    render(<Host />);
+    const toggle = screen.getByRole('button', { name: 'Toggle' });
+    openWithClick(toggle);
+    await screen.findByRole('dialog');
+    act(() => {
+      toggle.click(); // close: schedules the restore to `toggle` (0 ms timer)
+    });
+    act(() => {
+      toggle.focus();
+      toggle.click(); // reopen before the timer fires: must cancel the pending restore
+    });
+    // Synchronously, before the timer: nobody has focus.
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(active()).toBe(document.body);
+    await settle();
+    expect(active()).not.toBe(toggle);
+    expect(active()).toBe(document.body);
+  });
 });

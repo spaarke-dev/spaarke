@@ -142,6 +142,14 @@ export const ClassificationArea: React.FC<ClassificationAreaProps> = ({ service 
     returnFocus(was.mode === 'edit' ? () => editButtons.current.get(was.id) ?? null : () => newButtonRef.current);
   }, [form, returnFocus]);
 
+  // The row being edited disappears from the list (another administrator removed it; the next reload no longer has it):
+  // the form is not rendered any more (`editing` is undefined), so `form` is cleared too. Left set, it would keep "New
+  // category" hidden for good. Clearing it is also what makes the effect above return focus (to the table: the row is gone).
+  const loadedCategories = state.status === 'ready' ? state.data.categories : null;
+  React.useEffect(() => {
+    if (form?.mode === 'edit' && loadedCategories && !loadedCategories.some(c => c.id === form.id)) setForm(null);
+  }, [form, loadedCategories]);
+
   /** Reads the list; an answer that is no longer the latest request is ignored. Keeps the last good list on screen while reloading. */
   const load = React.useCallback(async () => {
     requests.current += 1;
