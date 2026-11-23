@@ -10,7 +10,15 @@
 
 ## Quick recovery
 
-- **Active task:** none. 086 closed 2026-11-22 (uac-r2 sign-off; owner accepted the -Verify records for criterion 6). Next startable build: 123 (gate now 090 + 092 + 086 met; uac-r2 reviews before merge). Other open build: 117. `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
+- **Active task:** 123 (`tasks/123-invoice-supporting-file-upload.poml`), in progress since 2026-11-22. FULL, opus/high, directional; tags bff-api, api, auth, testing.
+  - Step 8: an implementer agent (Opus) works on branch `task/ebilling-123` from base `134f7a15cf`.
+  - Then two Opus adversarial reviews (auth), a fix round, code-review and adr-check.
+  - Then uac-r2 reviews before the `--no-ff` merge into work.
+  - Then word-add-in-r1 gets the final route shape plus any error-code differences from `notes/123-upload-contract.md`.
+  - Escalation trigger checked: `UploadForCallerAsync` already takes an invoice parent with purpose InvoiceSupportingFile (`StoredFileContracts.cs:177`).
+  - Conflict check: soft pass. No open PR or master change touches the 123 files.
+  - Delegated because the work is one coupled change (route, tests, contract test, notes) best done in an isolated worktree, as for 124 and 050b.
+- 086 closed 2026-11-22 (uac-r2 sign-off; owner accepted the -Verify records for criterion 6). Other open build: 117. `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
 - **Held for the PR to master:** spa-r4 reviews 134's external-spa diff (`git diff 19866f6606 5f7195b9eb -- src/client/external-spa`). Owner chose "Merge, review later" on 2026-11-21. spa-r4's session is not running; send it the diff when it is.
 - **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
 - **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
