@@ -277,6 +277,19 @@ public class DecisionActionCatalogTests
     }
 
     [Fact]
+    public void NoPersonEffectLine_SaysThePersonAbove_ReassignSaysThePersonYouChoose_DI159()
+    {
+        // The wizard shows "What it does" BEFORE the fields, so "the person above" points at nothing.
+        DecisionActionCatalog.TryGet("reassign", out var reassign).Should().BeTrue();
+        reassign.EffectLines.Should().Equal("Assigns the item to the person you choose");
+
+        DecisionActionCatalog.All.Concat(DecisionActionCatalog.BillingActions)
+            .SelectMany(a => a.EffectLines.Select(line => (a.Code, line)))
+            .Where(x => x.line.Contains("person above", StringComparison.OrdinalIgnoreCase))
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void AssignTask_IsADecideLaneActionNotANextStep_WithTheD178Shape()
     {
         DecisionActionCatalog.TryGet("assign-task", out var action).Should().BeTrue();

@@ -292,7 +292,7 @@ public static class DecisionActionCatalog
                 new("assignee", "Reassign to", DecisionParameterKind.Person, Required: true),
                 new("note", "Note to them", DecisionParameterKind.TextArea, Required: false),
             ],
-            ["Assigns the item to the person above"],
+            ["Assigns the item to the person you choose"],
             Excludes: [],
             DecisionRecordClass.Routine)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },

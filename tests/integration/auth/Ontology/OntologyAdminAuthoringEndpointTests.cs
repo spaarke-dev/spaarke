@@ -382,7 +382,9 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         var save = await Save(draft: draft);
 
         validate.GetProperty("valid").GetBoolean().Should().BeFalse();
-        ValidateErrors(validate)["decisionPlan"].Single().Should().Contain("action_not_allowed").And.Contain("Decide lane's catalog");
+        ValidateErrors(validate)["decisionPlan"].Single().Should().Be(
+            "This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the Decide lane.");
+        ValidateErrors(validate)["decisionPlan"].Single().Should().NotContain("action_not_allowed").And.NotContain("refused").And.NotContain("(");
         save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(ValidateErrors(validate)["decisionPlan"].Single());
         _fixture.World.Writes.Should().BeEmpty();
@@ -418,14 +420,15 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         validate.GetProperty("valid").GetBoolean().Should().BeFalse();
         validate.GetProperty("reasonCode").GetString().Should().Be("ontology.admin.duplicate_action");
         var message = ValidateErrors(validate)["decisionPlan"].Single();
-        message.Should().Contain("duplicate_action").And.Contain("never in both").And.NotContain("lane's catalog");
+        message.Should().Be("Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.");
+        message.Should().NotContain("duplicate_action").And.NotContain("refused").And.NotContain("lane");
         save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ReasonOf(save)).Should().Be("ontology.admin.duplicate_action");
         (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(message);
 
         // A code outside the lane keeps the catalog message and carries no code.
         var outside = await Json(await Validate(Draft(plan: """{"actions":["mark-complete"]}""")));
-        ValidateErrors(outside)["decisionPlan"].Single().Should().Contain("Decide lane's catalog");
+        ValidateErrors(outside)["decisionPlan"].Single().Should().Contain("for the Decide lane").And.NotContain("action_not_allowed");
         outside.GetProperty("reasonCode").ValueKind.Should().Be(JsonValueKind.Null);
         _fixture.World.Writes.Should().BeEmpty();
     }

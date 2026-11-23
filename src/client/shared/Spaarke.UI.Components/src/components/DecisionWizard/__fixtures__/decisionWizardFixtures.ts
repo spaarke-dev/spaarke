@@ -199,7 +199,7 @@ export const reassign: DecisionAction = {
     { code: 'assignee', label: 'Reassign to', kind: 'Person', required: true },
     { code: 'note', label: 'Note to them', kind: 'TextArea', required: false },
   ],
-  effectLines: ['Assigns the item to the person above'],
+  effectLines: ['Assigns the item to the person you choose'],
   excludes: ['mark-complete'],
 };
 
