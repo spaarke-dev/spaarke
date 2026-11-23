@@ -4,7 +4,7 @@
     <title>Run and record Phase 0 tests T0–T14, E1–E5</title>
     <phase>0 Platform spike</phase>
     <gate>after 001 and 002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Testing tags; creates a new results file; live test execution in the dev tenant</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -119,7 +119,12 @@
     <criterion testable="true">The owner's review of the results is recorded with a date.</criterion>
   </acceptance-criteria>
 
-  <notes>design.md §12 says 'T1–T12' for live tests; §13 is the authoritative list (T0–T14, E1–E5, Size). Ignite (17–20 Nov 2026) may change Chat widget support for connectors (R1): re-check T1 after Ignite if it failed, and record the re-check.</notes>
+  <notes>design.md §12 says 'T1–T12' for live tests; §13 is the authoritative list (T0–T14, E1–E5, Size). Ignite (17–20 Nov 2026) may change Chat widget support for connectors (R1): re-check T1 after Ignite if it failed, and record the re-check.
+
+Completion (2026-11-23, session mcp-r1): every row of notes/phase0-results.md is dated. The gates were applied: T5 and T0 passed 2026-11-12. T1 passed, so 043 is cancelled. Size sets 030's budget (aim under 1 MB, fail over 3 MB). T3/T4 mean the wizard owns confirmation. T13 keeps the `/mcp/{area}` routes. T2/T13/T14 (plugin package, 2026-11-23) passed in Cowork and failed in Chat. They also showed that one server registered twice runs every call twice, so 040 uses option (a): one tenant registration, and packages carry skills only.
+Owner review 2026-11-23: the owner accepted the results and waived the remaining owner-only items. T10 moves to 040, on the real skill. The T5 consent-screen question, "Always allow" persistence and the post-Ignite T1 re-check are not run separately. There is no tagged A package. The owner deletes the spike plugin after 040.
+Quality gates: the change is notes and status only, with no code or tests. A self-review checked that the evidence holds no tokens, claim values or privileged text (ADR-015) and that test-user results name the non-admin user. Nothing out of scope was filed.
+rework: none task 003</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -5,7 +5,7 @@
 > **Spike deployed:** results before 2026-11-12 20:30Z ran on spike `755987b385` (dev BFF `6dbe69b9e2`). From 2026-11-12 ~20:30Z the dev BFF is `4e64670ea0` (uac-r2 local merge of master `350ca3da66` + spike `755987b385` + spike `d7369fecf1`, owner per-SHA go); verified 20:34Z: `tools/list` has all seven legal-operations tools and `initialize` returns the T7 instructions. Route `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations`; second route `/mcp/spike-area-b` (T13).
 > **Connector:** federated connector "Spaarke MCP" (dev tenant), OAuth registration and client in `phase0-registration-facts.md`.
 > **Test user (consent and approval tests):** `demo@…` (licensed non-admin; Microsoft 365 Copilot licence; no Entra roles; verified 2026-11-12, `phase0-registration-facts.md` §d). The owner's admin account is not used for user-behaviour results.
-> **Owner review:** _pending_ (step 7).
+> **Owner review:** 2026-11-23. The owner accepted these results and closed Phase 0 with the remaining owner-only items waived: T10 moves to task 040 and runs on the real `spaarke-decisions` skill; the T5 consent-screen question, "Always allow" persistence and the post-Ignite T1 re-check are not run separately. No tagged A package (`?via=package`): the Spike B result stands for T2/T13 Chat. The real Chat widget is exercised again in 042's live E2E.
 
 ## Gate summary
 
@@ -13,8 +13,8 @@
 |---|---|---|---|
 | Gates everything | T5 | ✅ passed 2026-11-12 | Project continues |
 | Gates Phase A (020+) | T0 | ✅ passed 2026-11-12 | 020+ may start |
-| Spaarke AI fallback (043) | T1 (Chat) | ✅ widget renders in Chat 2026-11-12 | 043 cancelled; re-check after Ignite (17–20 Nov) |
-| Route mechanism (020) | T13 | 🔲 local pass only; live pending | — |
+| Spaarke AI fallback (043) | T1 (Chat) | ✅ widget renders in Chat 2026-11-12 | 043 cancelled; separate post-Ignite re-check waived by the owner 2026-11-23 (Chat widget rendered again on 2026-11-23 via "Spaarke MCP", T2 row 18:02Z) |
+| Route mechanism (020) | T13 | ✅ local 2026-11-10; ✅ live Cowork 2026-11-23; ❌ live Chat 2026-11-23 (package connector fails before reaching the BFF) | `/mcp/{area}` routes kept (020 as built). Tenant registration: ONE registration of the server ("Spaarke MCP", task 002); packages carry skills only (040 option (a), owner 2026-11-23); T10 in 040 confirms a packaged skill can call it |
 | Widget budget (030) | Size | ✅ Chat 2026-11-13 (1/3/6 MB render; init ≤ 80 ms; 6 MB paints ~8 s later); ✅ Cowork 2026-11-13 (6 MB renders, init 9 ms) | Keep < 1 MB aim, 3 MB fail |
 | Wizard copy (032) | T3 / T4 | ✅ Chat 2026-11-13: no host card for widget writes; per-call card with raw params for model writes; ✅ Cowork 2026-11-13: same (card relabels fields, e.g. `title` → "Subject") | Wizard owns confirmation |
 
@@ -37,7 +37,7 @@
 | **T7** MCP `instructions` honoured | 2026-11-13 (Chat) | Chat | ❌ **Chat: not honoured.** "Echo 'instructions check' with the spike echo tool" → tool received `instructions check`, no `SPK-T7:` prefix. **Cowork: not honoured either** — same prompt, tool received `instructions check` (22:53:12Z). | Widget tool result, `mcp-r1` 21:26:43Z | informational: do not rely on server `instructions`; put guidance in tool descriptions |
 | **T8** Cowork elicitation | 2026-11-13 | Cowork | ⏭️ Not testable with this spike: no spike tool requests elicitation. | — | informational; v1 does not use elicitation (wizard confirms in the widget) |
 | **T9** Work IQ plus our tool in the same turn | 2026-11-13 | Chat | ✅ One answer ran both: mail search (no contract email found) and `spike_echo` (21:40:27Z), "Reasoned for 16s". | Browser-pane observation, `mcp-r1` | informational: Work IQ and Spaarke MCP compose in one turn |
-| **T10** A skill naming a connector tool | | Cowork | 🔲 | | informational |
+| **T10** A skill naming a connector tool | 2026-11-23 (moved) | Cowork | ⏭️ **Not run in Phase 0; moved to task 040** (owner, 2026-11-23). It runs on the real `spaarke-decisions` skill instead of a throwaway test skill, so no extra test artefact is left in the tenant. | — | 040 option (a): the package carries the skill only; T10 there decides whether a packaged skill can call the single "Spaarke MCP" registration. If not, the fallback is one core package carrying the single connector, and other packages carry skills only. |
 | **T11** Behaviour without a Copilot licence | 2026-11-12 | Copilot Chat (Basic), test user before licence | ⚠️ Observed, informal: with only Copilot Chat (Basic) the connector is not offered in Sources; after the licence and a new chat it is. | `phase0-registration-facts.md` licence-precondition notes | informational: user-setup docs (042) state the licence requirement |
 | **T12** Cowork treating unannotated tools as destructive | 2026-11-13 (Chat side-observation) | Chat | Chat: `spike_unannotated` (no annotations) got the same per-call confirmation card as a write (seen in T6 #16). **Cowork: same** — `spike_unannotated` got the Approve / Cancel card (field "Message"); cancelled, "Skipped 1 action". Read-only `spike_echo` / `spike_echo_6mb` ran with no card. | `mcp-r1` 21:37Z | informational: always set `readOnlyHint` explicitly (FR-03) or reads will prompt |
 | **T13** Two tool sets on two routes; display name in Sources and on the approval card | local: 2026-11-10; live: 2026-11-23 | `/mcp/legal-operations`, `/mcp/spike-area-b` | Local in-process pass (each route lists only its own tools). **Live, Cowork: ✅** after the owner turned the Dev Portal connector "Spaarke MCP" off, a new task ran `spike_echo_b` on `spike-area-b` ("T13 check", BFF request 18:10:50Z, 200). Display name: Cowork shows the **plugin** name ("Used Spaarke MCP spike"), not the connector name; Skills & Plugins lists the plugin, with A and B as connections inside it. Earlier (17:59Z, "Spaarke MCP" still on) Copilot had connected to B and listed its tools but said no B tool was available — not explained. **Live, Chat: ❌** with "Spaarke MCP" off, "use spike echo b" → "Spike Echo B was called … but the tool execution was unsuccessful"; **no request reached the BFF** after 18:10:50Z (App Insights `requests` + `exceptions` checked at 18:19Z). | `notes/spikes/phase0-spike-measurements.md` §4; owner screenshots; App Insights | Cowork: two routes work, users see one plugin name. Chat: package connector call fails before reaching us — see T2. |
@@ -51,5 +51,8 @@
 
 ## Open items for the owner
 
-- What did the test user see at **Connect**: sign-in only, or a consent screen too? (T5 follow-up; record here.)
-- Save the T1 Chat screenshot to `notes/spikes/evidence/` if you want a file path rather than "shared in session".
+Closed 2026-11-23: the owner waived both items when closing Phase 0.
+- ~~What did the test user see at **Connect**: sign-in only, or a consent screen too? (T5 follow-up)~~ Waived.
+- ~~Save the T1 Chat screenshot to `notes/spikes/evidence/`~~ Waived; the evidence stays "shared in session" plus App Insights.
+
+Tenant clean-up after 040: the owner deletes the "Spaarke MCP spike" plugin (connectors A and B) in admin center Agents > Tools > Registry. A tenant-wide Copilot tidy-up and cross-project coordination are proposed as one coordinating project/session.
