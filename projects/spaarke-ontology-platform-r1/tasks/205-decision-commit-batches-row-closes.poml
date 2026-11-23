@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="205" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A row decision closes its items in batches: one Signal read per page, one access check per subject record, one matter read per commit, bounded-parallel closes (DI-146)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the core decision commit write path (.cs) in BFF Signals; concurrency and per-item safety outcomes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius: the commit route every Console decision uses; per-item row-version, D-120, ledger resume and caller-rights semantics must survive the batching.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No file overlap with 203 (describer, catalog, authoring, Worklist UI) or 204 (SignalClosureService, SignalReevaluationJob).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, performance, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-23: "in parallel where possible continue with other tasks so we can make progress in this project". Issue #2650 (DI-146; read it in full with gh issue view 2650). A Console row decision (`POST /api/signals/{id}/decision`) closes every Work Item in the decided row one at a time with several sequential Dataverse round trips each: 18 items took 41.7 s and 315 Dataverse calls on dev (about 18 calls and 1.3 s per extra item). A row of about 100 items would pass the App Service 230 s front-end limit.
+
+Entry points on origin/master (line numbers drift; search by name): `src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs` `CommitCoreAsync` (~1197; per-id `ReadSignalAsync` loop and the close loop), `CloseAllAsync` (~984), `CallerMayDecideAsync` (~1870), `ReadSignalAsync` (~1902), `CloseSignalAsync` (~2484), and the existing paged id read at `ResolvedSignalReadPage` (~2032, the pattern to copy). Also `DecisionCommitFollowUps.cs` `AfterRecordedAsync` (per-policy reads for suppression).</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse SDK (RetrieveMultiple, ExecuteMultiple, row-version updates), the ontology decision commit path.</role>
+  <goal>The same 18-item row decision does at most about 3 extra Dataverse calls per extra item (from about 18) and finishes in about 10 s on dev, with every per-item outcome and safety rule unchanged.</goal>
+  <context>
+    <background>Read `git log -10` on DecisionCommitService.cs and DecisionCommitFollowUps.cs first; other projects (mcp-r1, ebilling-r1) merge into this file, so run /conflict-check. Fix directions from the issue (a hypothesis; review each before using it): (1) read the row's Signals with one paged RetrieveMultiple (id in, copy the ResolvedSignalReadPage loop) instead of one Retrieve per id; (2) check caller access once per distinct subject record, not per item; (3) read the matter once per commit; (4) close with bounded parallelism (for example 4) or ExecuteMultiple, keeping each item's own row-version check. Choose ExecuteMultiple only if each item's own failure and version-mismatch outcome survive it (ContinueOnError, per-response mapping); otherwise bounded parallelism. Measure on the unit-test fake by counting calls, not wall time.</background>
+  </context>
+  <constraints>
+    <constraint source="project">Per-item semantics unchanged: D-120 (resolvedon = lastevaluated in the same update), row-version concurrency per item, `signal_changed` / `closed_during_review` and every other per-item outcome code, one item's failure never stops another, the ledger resume (Decision Record append-only) and replay, D-214 (a row decision may close the row's other items), task 170 (at most 2 WhoAmI per commit).</constraint>
+    <constraint source="project">Caller rights: an access check reused across items only when the items share the same subject record and the same right; never widen what the caller may close. Security fails closed: a failed or missing access read denies that item.</constraint>
+    <constraint source="project">No API contract or reason-code change; the response shape and outcome codes stay byte-for-byte the same for the same inputs.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR; prefer private helpers in DecisionCommitService.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="ADR-038">Tests: call-count test for an N-item row (reads and access checks do not grow per item beyond the target; fails on origin/master); one item's version mismatch does not stop the others closing; an access denial on one subject denies only that subject's items; existing DecisionCommitService tests pass unmodified.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue and the current code; map every Dataverse call the commit makes per item (a counting fake). Record the before counts in notes/task-205-notes.md.</step>
+    <step order="2">Failing tests first: call-count bound for an N-item row; per-item isolation (version mismatch, access denial per subject).</step>
+    <step order="3">Batch the reads (Signals paged, access per subject, matter once), then the closes; keep each item's outcome.</step>
+    <step order="4">Filtered tests (DecisionCommit*, Signals), full ArchTests, BFF build, publish-size delta; record the after counts.</step>
+    <step order="5">PR to master; notes in notes/task-205-notes.md. The main session measures on dev after the next uac-r2 dev BFF build.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">For an 18-item row with one subject record, Dataverse calls per extra item are at most 3 (counted on the fake); the test fails on origin/master.</criterion>
+    <criterion testable="true">One item's row-version mismatch yields its own outcome and the other items still close; an access denial on one subject denies only that subject's items.</criterion>
+    <criterion testable="true">Response shapes, outcome codes, D-120 stamping, ledger entries and WhoAmI count (at most 2) unchanged; existing DecisionCommitService tests pass unmodified.</criterion>
+    <criterion testable="true">Build, filtered tests and full ArchTests pass; publish-size delta reported.</criterion>
+    <criterion testable="false">Main session measures the commit on dev after the next uac-r2 dev BFF build (target at most about 10 s for 18 items).</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs an API contract or reason-code change, a schema change, a new service/package, or changes which items a caller may close: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt205); PR to master.</protocol>
+  </execution>
+</task>
