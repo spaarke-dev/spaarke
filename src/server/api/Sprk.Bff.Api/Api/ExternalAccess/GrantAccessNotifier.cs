@@ -37,8 +37,8 @@ public enum GrantNotificationOutcome
 /// <c>appnotification</c> owned by the recipient, with the same record link (<c>/main.aspx?etn=…&amp;id=…&amp;pagetype=entityrecord</c>).
 /// Who a contact represents is the Assigned-To materializer's rule (task 142 over task 141): the users whose
 /// <c>sprk_primarycontact</c> names it, or who have no link and whose oid the contact's binding carries
-/// (<see cref="AssignedLinkCandidate.Represents"/>, read through <see cref="AssignedAccessStore.ReadLinkCandidatesAsync"/>
-/// and the status-first <see cref="IContactIdentityStore"/>) — the same users the read path gives the contact's grants to.
+/// (<see cref="ContactUserRepresentation"/>, task 193's one copy of that rule, over the status-first
+/// <see cref="IContactIdentityStore"/>) — the same users the read path gives the contact's grants to.
 /// Who is a person is <see cref="InternalShareEndpoints.ClassifyEligibility"/>, the one share-eligibility rule; whether a
 /// user is walled off a secure record is <see cref="SecureShareNoAccessGuard"/>, the check <c>/share-user</c> runs.</para>
 /// <para><b>Best effort.</b> Nothing here throws. A failed read or write is logged and answered
@@ -71,14 +71,16 @@ public sealed class GrantAccessNotifier
 
     private readonly NotificationService _notifications;
     private readonly DataverseWebApiClient _dataverse;
+
+    /// <summary>r3 task 079 (#2458): the stored home link of a WorkforceHome contact (<see cref="HomeLinkBarsExternalEmailAsync"/>).
+    /// Who a contact represents is read through <see cref="_representation"/> (task 193), over this same store.</summary>
     private readonly IContactIdentityStore _identities;
-    private readonly AssignedAccessStore _links;
     private readonly SecureShareNoAccessGuard _noAccessGuard;
-    private readonly ExternalParticipationService _participations;
     private readonly RegistrationEmailService _emails;
     private readonly CustomerIdentity _customer;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GrantAccessNotifier> _logger;
+    private readonly ContactUserRepresentation _representation;
 
     /// <summary>The bound on one external email send; <see cref="DefaultSendTimeout"/> unless a test shortens it.</summary>
     internal TimeSpan SendTimeout { get; init; } = DefaultSendTimeout;
@@ -98,13 +100,15 @@ public sealed class GrantAccessNotifier
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _identities = identities ?? throw new ArgumentNullException(nameof(identities));
-        _links = links ?? throw new ArgumentNullException(nameof(links));
+        ArgumentNullException.ThrowIfNull(links);
         _noAccessGuard = noAccessGuard ?? throw new ArgumentNullException(nameof(noAccessGuard));
-        _participations = participations ?? throw new ArgumentNullException(nameof(participations));
+        ArgumentNullException.ThrowIfNull(participations);
         _emails = emails ?? throw new ArgumentNullException(nameof(emails));
         _customer = customer ?? throw new ArgumentNullException(nameof(customer));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Task 193: the ONE contact -> user rule, over the stores this class already holds (no new dependency).
+        _representation = new ContactUserRepresentation(identities, links, participations);
     }
 
     /// <summary>
@@ -116,92 +120,50 @@ public sealed class GrantAccessNotifier
     public async Task<GrantNotificationOutcome> NotifyContactGrantAsync(
         ExternalGrantRootType rootType, Guid rootId, Guid contactId, ExternalAccessLevel? level, ClaimsPrincipal caller)
     {
-        IReadOnlyList<AssignedLinkCandidate> candidates;
-        Guid? boundOid = null;
-        var oidResolvesHere = false;
-        ContactBindingRow? readContact = null;
+        // Task 193: the ONE contact -> user rule (ContactUserRepresentation): status-first — a contact read that failed is
+        // "could not tell", never "represents nobody"; an inactive (or missing) contact is nobody's (ADR-003); a binding
+        // column not provisioned here means no contact carries an oid, so only the link counts once the contact's state is
+        // read (DecideOnLink); a user with no link counts through the oid only where the binder's oid decision resolves it
+        // here alone. A contact grant reaches only a record that is not Restricted (the grant policy refuses it otherwise),
+        // so the external flag bars nobody here (rootIsRestricted: false); the person test is the share rule's.
+        ContactRepresentation representation;
         try
         {
-            // Status-first: a contact read that failed is "could not tell", never "represents nobody". A binding column
-            // not provisioned here means no contact carries an oid, so only the link counts.
-            var contact = await _identities.GetContactAsync(contactId, CancellationToken.None);
-            if (contact.Status == LookupStatus.Read)
-            {
-                // An inactive (or missing) contact is nobody's: it resolves for no one on the read path (ADR-003).
-                if (contact.Rows.FirstOrDefault(r => r.ContactId == contactId) is not { IsActive: true } row)
-                {
-                    _logger.LogInformation(
-                        "[GRANT-NOTIFY] Contact {ContactId} is not active; nobody is told about the grant on {RootType} {RootId}.",
-                        contactId, rootType, rootId);
-                    return GrantNotificationOutcome.NotApplicable;
-                }
-
-                readContact = row;
-                var raw = row.RawOid?.Trim();
-                boundOid = Guid.TryParse(raw, out var oid) && oid != Guid.Empty ? oid : null;
-            }
-            else if (contact.Status == LookupStatus.ColumnMissing)
-            {
-                // No binding column here, so no oid — but the contact must still be active. Read its state the read
-                // path's way (statecode only): inactive tells nobody; unreadable is a failure (could not tell).
-                switch (await _participations.ReadContactStateAsync(contactId, CancellationToken.None))
-                {
-                    case ContactRecordState.Active:
-                        break;
-                    case ContactRecordState.Inactive:
-                        _logger.LogInformation(
-                            "[GRANT-NOTIFY] Contact {ContactId} is not active; nobody is told about the grant on {RootType} {RootId}.",
-                            contactId, rootType, rootId);
-                        return GrantNotificationOutcome.NotApplicable;
-                    default:
-                        throw new InvalidOperationException($"Contact {contactId}'s state could not be read.");
-                }
-            }
-            else
-            {
-                throw new InvalidOperationException($"Contact {contactId}'s binding could not be read ({contact.Status}).");
-            }
-
-            candidates = await _links.ReadLinkCandidatesAsync(contactId, boundOid, CancellationToken.None)
-                         ?? Array.Empty<AssignedLinkCandidate>();
-
-            // A user with NO link is represented through the oid binding only where the READ path would resolve it:
-            // the binder's own oid decision (ContactBindingDecision.DecideBoundContact, as IdentityNormalizationService
-            // asks it) must answer "exactly one active contact carries the oid, and it is this one". Two contacts on
-            // the oid, or an inactive one, resolve to no contact there, so nobody is told here either.
-            if (boundOid is { } bound && candidates.Any(c => c.PrimaryContactId is null && c.Oid == bound))
-            {
-                var byOid = await _identities.FindContactsByOidAsync(bound, CancellationToken.None);
-                if (byOid.Status != LookupStatus.Read)
-                    throw new InvalidOperationException($"The contacts bound to oid {bound} could not be read ({byOid.Status}).");
-
-                var decision = ContactBindingDecision.DecideBoundContact(byOid);
-                oidResolvesHere = decision is { Action: BindingAction.ResolveByOid } && decision.ContactId == contactId;
-                if (!oidResolvesHere)
-                {
-                    _logger.LogInformation(
-                        "[GRANT-NOTIFY] Contact {ContactId}'s oid binding does not resolve to it alone ({DenyCode}); a user " +
-                        "known only by that oid is not told.", contactId, decision?.DenyCode ?? "no contact");
-                }
-            }
+            representation = await _representation.ResolveAsync(
+                contactId, rootIsRestricted: false, BindingColumnMissingPolicy.DecideOnLink, CancellationToken.None);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "[GRANT-NOTIFY] Could not read who contact {ContactId} represents after a grant on {RootType} {RootId}; " +
-                "nobody was notified. The grant stands.", contactId, rootType, rootId);
-            return GrantNotificationOutcome.Failed;
+            representation = ContactRepresentation.Failed(ex, $"Contact {contactId}'s binding could not be read.");
         }
 
-        // A contact grant reaches only a record that is not Restricted (the grant policy refuses it otherwise), so the
-        // external flag bars nobody here; the person test is the share rule's.
-        // The link is honoured as it is (the read path's primary rule); the oid only where it resolves here alone.
-        var people = candidates
-            .Where(u => u.SystemUserId != Guid.Empty
-                        && u.Represents(contactId, oidResolvesHere ? boundOid : null)
-                        && InternalShareEndpoints.ClassifyEligibility(
-                               u.IsDisabled, u.AccessMode, u.ApplicationId, u.IsExternal, rootIsRestricted: false)
-                           == InternalShareEndpoints.ShareEligibility.Eligible)
+        switch (representation.Status)
+        {
+            case ContactRepresentationStatus.NotFound:
+            case ContactRepresentationStatus.Inactive:
+                _logger.LogInformation(
+                    "[GRANT-NOTIFY] Contact {ContactId} is not active; nobody is told about the grant on {RootType} {RootId}.",
+                    contactId, rootType, rootId);
+                return GrantNotificationOutcome.NotApplicable;
+            case ContactRepresentationStatus.Read:
+            case ContactRepresentationStatus.ColumnMissing:
+                break;
+            default:
+                _logger.LogWarning(representation.Fault,
+                    "[GRANT-NOTIFY] Could not read who contact {ContactId} represents after a grant on {RootType} {RootId}; " +
+                    "nobody was notified. The grant stands.", contactId, rootType, rootId);
+                return GrantNotificationOutcome.Failed;
+        }
+
+        if (representation.OidUnconfirmed is { } denyCode)
+        {
+            _logger.LogInformation(
+                "[GRANT-NOTIFY] Contact {ContactId}'s oid binding does not resolve to it alone ({DenyCode}); a user " +
+                "known only by that oid is not told.", contactId, denyCode);
+        }
+
+        var people = representation.Users
+            .Where(u => u.Eligibility == InternalShareEndpoints.ShareEligibility.Eligible)
             .Select(u => u.SystemUserId)
             .Distinct()
             .ToList();
@@ -210,8 +172,8 @@ public sealed class GrantAccessNotifier
         {
             // Task 036: a contact that no internal user can be said to represent (not by link, not by its oid, even where the
             // oid does not resolve to it alone) is an external contact. Nobody else is told, so the email is the only notice.
-            if (readContact is not null
-                && !candidates.Any(u => u.SystemUserId != Guid.Empty && u.Represents(contactId, boundOid)))
+            if (representation is { Status: ContactRepresentationStatus.Read, Contact: { } readContact }
+                && representation.Users.Count == 0 && representation.OidUnconfirmed is null)
             {
                 return await EmailExternalContactGrantAsync(rootType, rootId, readContact, caller);
             }
@@ -268,6 +230,79 @@ public sealed class GrantAccessNotifier
     // =========================================================================
 
     /// <summary>
+    /// r3 task 079 (#2458): whether the stored home link bars the external email for <paramref name="contact"/>, and the
+    /// outcome if it does; <c>null</c> to go on to the email. Only a binding that reads Bound on plane WorkforceHome is asked
+    /// (every other contact is decided exactly as before, and nothing is read for it). The portal's home sign-in asks the
+    /// stored link first (<c>WorkforcePrincipalResolver.ResolveHomeAsync</c>), over the STORED pair: the home directory
+    /// (<see cref="IContactIdentityStore.ReadHomeTenantAsync"/>; the contact row carries none) and the bound oid.
+    /// <list type="bullet">
+    ///   <item>No licensed user carries the pair (<see cref="HomeLinkOutcome.NotLinked"/>): <c>null</c>, emailed as today.</item>
+    ///   <item>Exactly one enabled user carries it (<see cref="HomeLinkOutcome.Enabled"/>): that sign-in is the user's, whose
+    ///   own rights apply in the portal, so nobody is told about the contact grant: <see cref="GrantNotificationOutcome.NotApplicable"/>.
+    ///   Never routed to the internal notice either.</item>
+    ///   <item>Only disabled users carry it (<see cref="HomeLinkOutcome.Disabled"/>): the portal admits that sign-in nowhere:
+    ///   <see cref="GrantNotificationOutcome.NotApplicable"/>.</item>
+    ///   <item>Could not tell — no readable stored tenant, a missing column, an ambiguous or failed link read, a read that
+    ///   throws: no email, <see cref="GrantNotificationOutcome.Failed"/> (fail closed; the grant stands).</item>
+    /// </list>
+    /// </summary>
+    private async Task<GrantNotificationOutcome?> HomeLinkBarsExternalEmailAsync(
+        ExternalGrantRootType rootType, Guid rootId, ContactBindingRow contact)
+    {
+        var binding = contact.Binding;
+        if (binding is not { Kind: BindingKind.Bound, Plane: IdentityPlaneMarker.WorkforceHome })
+            return null;
+
+        try
+        {
+            var tenant = binding.Oid is null
+                ? HomeTenantLookup.Failed
+                : await _identities.ReadHomeTenantAsync(contact.ContactId, CancellationToken.None);
+            if (binding.Oid is not { } homeOid || tenant.HomeTenantId is not { } homeTenant)
+            {
+                _logger.LogWarning(
+                    "[GRANT-NOTIFY] WorkforceHome contact {ContactId} carries no readable home pair ({Status}); no email for the " +
+                    "grant on {RootType} {RootId} (fail closed). The grant stands.",
+                    contact.ContactId, tenant.Status, rootType, rootId);
+                return GrantNotificationOutcome.Failed;
+            }
+
+            var link = ContactBindingDecision.DecideHomeLink(
+                await _identities.FindHomeLinkedSystemUsersAsync(homeTenant, homeOid, CancellationToken.None), homeTenant, homeOid);
+            switch (link.Outcome)
+            {
+                case HomeLinkOutcome.NotLinked:
+                    return null;
+                case HomeLinkOutcome.Enabled:
+                    _logger.LogInformation(
+                        "[GRANT-NOTIFY] WorkforceHome contact {ContactId}'s home sign-in resolves in the portal as user " +
+                        "{SystemUserId}, whose own rights apply there; no email for the grant on {RootType} {RootId}.",
+                        contact.ContactId, link.SystemUserId, rootType, rootId);
+                    return GrantNotificationOutcome.NotApplicable;
+                case HomeLinkOutcome.Disabled:
+                    _logger.LogInformation(
+                        "[GRANT-NOTIFY] WorkforceHome contact {ContactId}'s home sign-in is linked to a disabled user, so the " +
+                        "portal admits it nowhere; no email for the grant on {RootType} {RootId}.", contact.ContactId, rootType, rootId);
+                    return GrantNotificationOutcome.NotApplicable;
+                default:
+                    _logger.LogWarning(
+                        "[GRANT-NOTIFY] Whether a licensed user carries WorkforceHome contact {ContactId}'s home sign-in could not " +
+                        "be read ({DenyCode}); no email for the grant on {RootType} {RootId} (fail closed). The grant stands.",
+                        contact.ContactId, link.DenyCode ?? "denied", rootType, rootId);
+                    return GrantNotificationOutcome.Failed;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[GRANT-NOTIFY] The home link of WorkforceHome contact {ContactId} could not be read ({ExceptionType}); no email " +
+                "for the grant on {RootType} {RootId} (fail closed). The grant stands.",
+                contact.ContactId, ex.GetType().Name, rootType, rootId);
+            return GrantNotificationOutcome.Failed;
+        }
+    }
+
+    /// <summary>
     /// The grant gave the already-read, active, ONLY-external contact <paramref name="contact"/> access to a record: emails
     /// it, once, when it is already onboarded (a readable identity binding) and has an email address. Never the granter
     /// (a grantee whose sign-in oid is the caller's own is skipped). Best effort: nothing throws.
@@ -295,6 +330,13 @@ public sealed class GrantAccessNotifier
                     contact.ContactId, rootType, rootId);
                 return GrantNotificationOutcome.NotApplicable;
             }
+
+            // r3 task 079 (#2458): asked only now, after the checks above that already decide nobody is emailed (so a contact
+            // that is never emailed costs no extra read and keeps its outcome), and before the link is built or anything sent.
+            // A WorkforceHome contact's home sign-in resolves in the portal as the licensed user who carries its home pair,
+            // when one does; that user's own rights apply there, not this grant.
+            if (await HomeLinkBarsExternalEmailAsync(rootType, rootId, contact) is { } barred)
+                return barred;
 
             var link = TryBuildLink(rootType, rootId);
             if (link is null)
@@ -334,8 +376,9 @@ public sealed class GrantAccessNotifier
     /// <remarks>
     /// A binding on the WORKFORCE plane is an employee's work identity, not an external contact's CIAM account: it is never
     /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
-    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) IS emailed: that contact registered through, and signs in to, the
-    /// same external portal the email links to.
+    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) is emailed only when no licensed user carries its home pair (r3 task
+    /// 079, <see cref="HomeLinkBarsExternalEmailAsync"/>, asked after this test): that contact registered through, and signs in
+    /// to, the same external portal the email links to.
     /// Ontology task 168 (D-199) asks the same test before an Assign Task email to an external contact (<c>AssignTaskRecipientGate</c>).
     /// </remarks>
     internal static bool IsOnboardedWithEmail(ContactBindingRow contact)

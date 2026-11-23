@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="192" project="ebilling-r1">
+  <metadata>
+    <title>The from-email 409 "filed under another record" names that record, when the caller can open it</title>
+    <phase>3 Rules — intake hardening (found in the first dev UAT, word-add-in-r1)</phase>
+    <gate>startable after 191 (same files)</gate>
+    <status>complete</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A disclosure rule on a BFF route: the answer may name a record only for a caller who can open it. Tags include bff-api and auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One optional response field following 097e's replacedBy (the Read check and the name read) as the reference; the 409 and the secure-record test already exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>095, 097e, 191</deps>
+    <tags>bff-api, auth, ebilling</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>When the from-email route refuses with 409 document_core_record_mismatch because the email's communication is already filed under another core record, the user cannot tell which record the email belongs to. Add an optional extension filedUnder { entityType, entityId, name } to that 409, present only when the caller can open that record. Owner-approved 2026-10-31, asked for by word-add-in-r1 after the first dev UAT.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Minimal API, the Finance authorization seam and the ebilling intake contracts.</role>
+
+  <goal>The from-email 409 for "filed under another core record" carries filedUnder { entityType: "Matter" | "Project" | "WorkAssignment", entityId, name } when, and only when, the record is not a secure record and the caller has Read on it; in every other case (a secure record, no Read, a fault reading the rights or the name, an unknown record type) the body, status, code and detail are exactly what they are today; the step-A "held under a secure record" 409 is untouched; the 095 contract documents the field.</goal>
+
+  <context>
+    <background>
+      Read first: projects/ebilling-r1/notes/095-from-email-contract.md section 6 (the document_core_record_mismatch rows, including the step-A one), projects/ebilling-r1/notes/097e-correction-prefill.md (how replacedBy checks Read and reads a name).
+      The 409 is built in FromEmailSubmissionService.CheckCommunicationFilingAsync (called twice: the main path and the duplicate path). The route renders it in InvoiceSubmissionFromEmailHttp.SubmitFromEmailAsync.
+      The Read check is FinanceAuthorizationFilter.CallerHoldsRightsAsync (operation finance.read, the caller's own token), as FindReplacementAsync does. The name read is ReadNameAsync (the record's primary name column, app-only, only after the Read check passed).
+      The secure-record test is the one step A uses: ExistingDocumentIsolationCheck.CheckCommunicationForFilingAsync (any verdict but Allowed, a fault included, leaves the field out).
+    </background>
+    <relevant-files>
+      <file role="reference">Api/Finance/InvoiceSubmissionFromEmailHttp.cs (FindReplacementAsync, ReadNameAsync)</file>
+      <file role="reference">Services/Finance/Submission/ExistingDocumentIsolationCheck.cs (CheckCommunicationForFilingAsync)</file>
+      <file role="modify">Services/Finance/Submission/FromEmailSubmissionService.cs (the candidate; the outcome carries it)</file>
+      <file role="modify">Api/Finance/InvoiceSubmissionFromEmailHttp.cs (the Read check, the name, the extension)</file>
+      <file role="modify">Services/Finance/Submission/FromEmailSubmissionContracts.cs (FromEmailFiledUnder)</file>
+      <file role="modify">tests/integration/contract/Api/Finance/InvoiceSubmissionFromEmailContractTests.cs; tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/FromEmailWorld.cs</file>
+      <file role="modify">projects/ebilling-r1/notes/095-from-email-contract.md (section 6, the 409 row, and a changes line)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">The new field and type answer the three justification questions in notes/192-filed-under.md. No new endpoint, service, DI registration, package or column.</constraint>
+    <constraint source="disclosure">The field names a record only for a caller who can open it. The Read is the caller's own, through the same seam as the route's gate; the record is read app-only for its name only after that check passed. A secure record is never named, whatever the caller's rights.</constraint>
+    <constraint source="unchanged">Without the field the 409's code, detail and status are byte-for-byte what they are today. A fault gives a Warning and no field, never a 503 and never a different 409. The step-A secure 409 and every other route and reason are unchanged.</constraint>
+    <constraint source="vocabulary">entityType uses the intake vocabulary (InvoiceCoreRecordKind: Matter, Project, WorkAssignment), never a logical name.</constraint>
+    <constraint source="wording">Neutral wording in the contract, code comments and notes: say the record is named only when the caller can open it; do not describe the mechanism beyond that.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
+    <constraint source="scope">Do not edit TASK-INDEX.md, current-task.md or .claude/. Do not touch ApExport* (another agent's).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>FromEmailSubmissionService.CheckCommunicationFilingAsync: when the communication is filed under another record, compute the candidate (exactly one other record and the secure-record test says Allowed) and put it on the outcome (FromEmailSubmissionOutcome.FiledUnder). The detail and code do not change.</step>
+    <step>InvoiceSubmissionFromEmailHttp.SubmitFromEmailAsync: for a candidate, check the caller's Read through CallerHoldsRightsAsync, read the name with ReadNameAsync, and add filedUnder to the problem's extensions. Any refusal or fault leaves it out (a Warning for a fault).</step>
+    <step>Contract: 095 section 6, the 409 row, and a changes line; write notes/192-filed-under.md (the §11 answers, the size delta, the seed proof).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Filed under another Matter, the caller can Read it: the 409 carries filedUnder with entityType "Matter", the id and the record's name; its other members equal the body without the field.</criterion>
+    <criterion>Filed under a Work Assignment, the caller can Read it: entityType is "WorkAssignment" (the vocabulary, not sprk_workassignment).</criterion>
+    <criterion>The caller cannot Read the record: no filedUnder, the record is neither named nor read; the body is the same as before.</criterion>
+    <criterion>The record is a secure record: no filedUnder, even for a caller who can Read it.</criterion>
+    <criterion>A fault reading the caller's rights, or the record's name: no filedUnder, the same 409 (not a 503), a Warning in the log.</criterion>
+    <criterion>The step-A "unfiled communication held under a secure record" 409 is unchanged: same code, detail and members, no filedUnder.</criterion>
+    <criterion>Test scope: the cases above and nothing beyond (the fault case is a theory of its two faults); any extra test needs a one-line justification in the notes. Seed-proof the Read check only (a disclosure guard): one mutation, the test red, the mutation reverted.</criterion>
+    <criterion>Gate: the 5 test projects build (Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests); the full ArchTests (ISS-005 is flaky, #2469: re-run it alone), the unit filter Submission|Invoice|Finance|FromEmail and the integration tests pass; publish-size delta measured against a fresh master at short paths (C:\w192m, C:\w192b; Compress-Archive, matching file counts; folders deleted); CVE check run.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the secure-record test cannot be shared with step A's (the two would disagree), or the Read check would have to run app-only, STOP and escalate (root CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+      <file>projects/ebilling-r1/notes/095-from-email-contract.md</file>
+      <file>projects/ebilling-r1/notes/097e-correction-prefill.md</file>
+    </files>
+  </knowledge>
+</task>

@@ -311,6 +311,24 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // it, so a record made secure while a slow listing ran (paging, throttling) is still inside the next run's window.
         var startedAt = _timeProvider.GetUtcNow();
 
+        // #2735 (the #2709 pattern): every pass's first window is stored HERE, before anything can fail — before the secure
+        // records are listed (a Dataverse fault or the page bound throws there) and before the secure reconcile loop, which
+        // a lost lease, MaxRunDuration or shutdown can cancel before the later passes run. A run that holds a pass's
+        // watermark, or never reaches the pass, then leaves the next run listing from here; recomputing the look-back from
+        // each later run's own start would slide the window past what was never listed. A report-only run stores it too
+        // (owner, option A), except the ordinary-move pass's, which only a writing run stores (see that pass).
+        var ordinaryWrites = recentWrites
+                             && bool.TryParse(_configuration[OrdinaryMovesWritesEnabledConfigKey], out var ordinaryEnabled)
+                             && ordinaryEnabled;
+        lock (_cursorGate)
+        {
+            _recentChangesWatermark ??= startedAt - InitialRecentChangesLookback;
+            _accessPermissionWatermark ??= startedAt - InitialRecentChangesLookback;
+            _refileWatermark ??= startedAt - InitialRecentChangesLookback;
+            if (ordinaryWrites)
+                _ordinaryMovesWatermark ??= startedAt - InitialRecentChangesLookback;
+        }
+
         // The secure records, in a fixed order. A listing that cannot complete decides nothing: ADR-036 A1 rule 4.
         var listing = await ListSecureRootsAsync(dataverse, cancellationToken).ConfigureAwait(false);
         var roots = listing.Roots;
@@ -325,7 +343,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         IReadOnlyList<(string Table, Guid Id)> retryRows;
         lock (_cursorGate)
         {
-            since = _recentChangesWatermark ?? startedAt - InitialRecentChangesLookback;
+            // #2735: the first window was stored above, before the secure records were listed.
+            since = _recentChangesWatermark!.Value;
             // Task 147 r1 (verifier item 4): what the previous runs could not finish is looked at again in EVERY run until
             // it is finished — never reported once and then left to the capped sweep (or, for a row the walk could not
             // place, never revisited at all).
@@ -524,7 +543,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         // Round 46 item 2: the Make Secure file backstop, after the children (each document's container derives from its
         // now-secure parents). Its writes follow the recent-changes pass.
-        var relocations =await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
+        var relocations = await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
             .ConfigureAwait(false);
 
 
@@ -537,8 +556,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
             // The watermark moves only past a listing that COMPLETED, in a run that WROTE. After a failed listing, the
             // next run looks at the same window again. A report-only run corrects nothing, so it must not move the
-            // watermark either: the first run with writes on then still sees the changes the report-only runs listed
-            // (back to the initial lookback). A record whose pass was incomplete is carried (below).
+            // watermark either: the first run with writes on then still sees the changes the report-only runs listed, back
+            // to the FIRST run's window start, which that run stored (#2735, owner option A). A record whose pass was
+            // incomplete is carried (below).
             if (recent.Failure is null && recentWrites && !recent.PendingOverflow)
                 _recentChangesWatermark = startedAt - RecentChangesOverlap;
 
@@ -867,6 +887,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         problems = apRun.Problems,
                         changes = apRun.Changes.Select(c => new { table = c.Table, id = c.Id, from = c.From, to = c.To }).ToArray(),
                         carriedRows = accessPermission.CarriedRows,
+                        // uac-r2 198 pass 2 (F2): undecided or failed rows not carried because the carry was full (counted;
+                        // the watermark holds, the sweep stays before them or starts again).
+                        carryOverflow = apRun.CarryOverflow,
                         tablesWithoutColumn = apRun.TablesWithoutColumn,
                         // Task 189 (D7 T7a): documents' own-narrowing records written, documents held above their parents by
                         // their own narrowing, and documents that changed between read and write (nothing written, carried).
@@ -879,6 +902,16 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         // Owner round 122 fix round 2 (K2): save-time Restricted documents not released because the
                         // document link columns are not field-secured. Not carried, so they never hold the window.
                         releaseRefusedLinkColumnsNotSecured = apRun.ReleaseRefusedLinkColumnsNotSecured,
+                        // uac-r2 task 198 R3: the Restricted filing bar on every Restricted communication examined (capped at
+                        // the write cap; capped rows carried, or left for their next listing or the sweep).
+                        restrictedBar = new
+                        {
+                            ran = apRun.RestrictedBarRan,
+                            incomplete = apRun.RestrictedBarIncomplete,
+                            capped = apRun.RestrictedBarCapped,
+                            left = apRun.RestrictedBarLeft,
+                            capReached = apRun.RestrictedBarCapReached,
+                        },
                         failure = apRun.Failure,
                         sweep = new
                         {
@@ -992,7 +1025,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// ahead of it. A report-only run, which keeps no carry, resumes after the last listed root the previous report-only run
     /// reached and wraps around (the report-only cursor, per instance: a restart starts its window from the first root).</para>
     /// <para><b>Window and carry</b> (the secure pass's rule): the watermark moves only in a run that WROTE and listed
-    /// completely, so a report-only run looks back <see cref="InitialRecentChangesLookback"/> every time. With writes on, a
+    /// completely, and only a writing run stores its first window (#2735). So a report-only run looks back
+    /// <see cref="InitialRecentChangesLookback"/> from its own start until a writing run has stored the watermark, and reads
+    /// that held watermark after (without moving it). With writes on, a
     /// root left incomplete, stopped by the write cap, or past the root cap is carried and looked at first next run (at most
     /// <see cref="MaxCarriedRows"/>; beyond that the watermark stays). Per instance, like every window of this job: a restart
     /// looks back <see cref="InitialRecentChangesLookback"/>.</para>
@@ -1030,6 +1065,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         (DateTime ModifiedOn, string Table, Guid Id)? reportAfter;
         lock (_cursorGate)
         {
+            // #2735: a WRITING run stored the first window in ExecuteAsync, before anything could fail, so one that holds the
+            // watermark (a failed listing, a carry past MaxCarriedRows, a run that never got here) leaves the next run listing
+            // from there. A report-only run does not store it (pending owner sign-off; not covered by option A): this pass is
+            // report-only by default and only a writing run moves its watermark, so a start a report-only run stored would
+            // never move and its window would grow without bound. Until a writing run has stored the watermark, a report-only
+            // run looks back from its own start; after that it reads the held watermark (and does not move it). A switch to
+            // writes starts the catch-up sweep over (F4-a), which walks every ordinary root.
             since = _ordinaryMovesWatermark ?? startedAt - InitialRecentChangesLookback;
             runNumber = ++_ordinaryRunNumber;
 
@@ -1409,16 +1451,25 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         (string Table, Guid Id)? sweepAfter;
         lock (_cursorGate)
         {
-            since = _accessPermissionWatermark ?? startedAt - InitialRecentChangesLookback;
+            // #2735: the first window was stored in ExecuteAsync, before anything could fail.
+            since = _accessPermissionWatermark!.Value;
             carried = _accessPermissionPending.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
             sweepAfter = _accessPermissionSweepComplete
                 ? null
                 : _accessPermissionSweepCursor ?? ChildAccessPermissionReconciler.SweepFromStart;
         }
 
+        // uac-r2 task 198 Part D (R3: every Restricted communication the pass examines, not only a value change): its external-
+        // flagged shares are removed through the ONE bar (the same one every re-file runs). Its share seam and user reader are
+        // registered unconditionally.
+        var restrictedBar = new RestrictedFilingShareBar(
+            dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token),
+            services.GetService<IDataverseRecordShareService>(), services.GetService<DataverseWebApiClient>(), _logger);
         var reconciler = new ChildAccessPermissionReconciler(
             dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token), _logger,
-            token => DocumentLinkColumnsSecuredAsync(services, token));
+            token => DocumentLinkColumnsSecuredAsync(services, token),
+            async (communicationId, token) => (await restrictedBar.RemoveBarredSharesAsync(communicationId, token).ConfigureAwait(false)).Complete,
+            AccessPermissionCarryCap);
         ChildAccessPermissionRun run;
         try
         {
@@ -1437,24 +1488,47 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         {
             // The window moves only past a pass that listed completely, wrote, and did not stop at the write cap (F3): a
             // capped run's unwritten rows are listed again from the same watermark next run.
-            var overflow = run.Carry.Count > MaxCarriedRows;
+            // 198 pass 2 (F2): the reconciler keeps the carry within the cap and counts the undecided or failed rows past it
+            // (CarryOverflow); those hold the watermark, as before. Rows the Restricted bar leaves never hold it (§7.3).
+            var overflow = run.CarryOverflow > 0 || run.Carry.Count > AccessPermissionCarryCap;
             if (run.Failure is null && writes && !overflow && !run.WriteCapReached)
                 _accessPermissionWatermark = startedAt - RecentChangesOverlap;
 
             _accessPermissionPending.Clear();
-            _accessPermissionPending.UnionWith(run.Carry.Take(MaxCarriedRows));
+            _accessPermissionPending.UnionWith(run.Carry.Take(AccessPermissionCarryCap));
 
-            // The sweep advances only in a run that listed completely and wrote (a report-only run corrected nothing).
+            // The sweep advances only in a run that listed completely and wrote (a report-only run corrected nothing). F2: its
+            // resume position never passes a row the run neither handled nor carried (the reconciler holds it before one).
             if (sweepAfter is not null && run.Failure is null && writes && !run.WriteCapReached)
             {
-                if (run.SweepReachedEnd)
+                if (run.SweepReachedEnd && !_accessPermissionResweepPending)
                 {
                     _accessPermissionSweepComplete = true;
+                    _accessPermissionSweepCursor = null;
+                }
+                else if (run.SweepReachedEnd)
+                {
+                    _accessPermissionResweepPending = false; // F2: a row was lost behind the cursor: start again
                     _accessPermissionSweepCursor = null;
                 }
                 else if (run.SweepResumeAfter is { } resume)
                 {
                     _accessPermissionSweepCursor = resume;
+                }
+            }
+
+            // F2: a row neither handled nor carried outside the sweep window is found by the sweep: start it again now when it
+            // is complete, otherwise when the current one reaches its end (so the rows already behind the cursor are seen).
+            if (run.Failure is null && run.ResweepNeeded)
+            {
+                if (_accessPermissionSweepComplete)
+                {
+                    _accessPermissionSweepComplete = false;
+                    _accessPermissionSweepCursor = null;
+                }
+                else
+                {
+                    _accessPermissionResweepPending = true;
                 }
             }
 
@@ -1466,13 +1540,17 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "[CHILD-ACCESS-PERMISSION] run={RunId} mode={Mode} since={Since:o} rowsChanged={RowsChanged} examined={Examined} " +
             "alreadyCorrect={AlreadyCorrect} changed={Changed} wouldChange={WouldChange} parentless={Parentless} " +
             "undetermined={Undetermined} failed={Failed} deferred={Deferred} writeCapReached={WriteCapReached} carried={Carried} " +
+            "carryOverflow={CarryOverflow} resweep={Resweep} " +
             "sweepRows={SweepRows} sweepComplete={SweepComplete} recordsWritten={RecordsWritten} ownKept={OwnKept} " +
             "changedConcurrently={ChangedConcurrently} raisedOnly={RaisedOnly} " +
-            "releaseRefusedLinkColumnsNotSecured={ReleaseRefusedLinkColumnsNotSecured} failure={Failure}",
+            "releaseRefusedLinkColumnsNotSecured={ReleaseRefusedLinkColumnsNotSecured} restrictedBarRan={RestrictedBarRan} " +
+            "restrictedBarIncomplete={RestrictedBarIncomplete} restrictedBarCapped={RestrictedBarCapped} " +
+            "restrictedBarLeft={RestrictedBarLeft} failure={Failure}",
             runId, mode, since, run.RowsChanged, run.Examined, run.AlreadyCorrect, run.Changed, run.WouldChange, run.Parentless,
-            run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.SweepRows, sweepComplete,
+            run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.CarryOverflow, run.ResweepNeeded,
+            run.SweepRows, sweepComplete,
             run.RecordsWritten, run.OwnKept, run.ChangedConcurrently, run.RaisedOnly, run.ReleaseRefusedLinkColumnsNotSecured,
-            run.Failure);
+            run.RestrictedBarRan, run.RestrictedBarIncomplete, run.RestrictedBarCapped, run.RestrictedBarLeft, run.Failure);
 
         return new AccessPermissionRunReport(mode, run, since, carriedRows, sweepAfter is not null, sweepComplete);
     }
@@ -1772,7 +1850,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         Dictionary<Guid, int> undecidableRuns;
         lock (_cursorGate)
         {
-            since = _refileWatermark ?? startedAt - InitialRecentChangesLookback;
+            // #2735: the first window was stored in ExecuteAsync, before anything could fail (nothing else walks documents, so
+            // a slid window would leave a re-filed document's file where it was).
+            since = _refileWatermark!.Value;
             // F1-a: the ordinary pass's hand-offs are carried rows too (read by id whatever their modifiedon).
             carried = _refilePending.Union(_ordinaryHandOffs).OrderBy(id => id).ToList();
             after = _refileCursor;
@@ -2213,14 +2293,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             if (team.TeamId is not { } secureTeamId)
                 return new RecentChanges(0, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null); // no record can be secure
 
-            // Each changed row comes back with its lineage lookups and owner, so the upward walk starts from it with no
-            // second read of the row.
+            // Each changed row comes back with its lineage columns (its lookups and, on a Signal or Decision Record, its core
+            // record pair) and owner, so the upward walk starts from it with no second read of the row.
             var changed = new List<Entity>();
             foreach (var table in SecureChildLineage.Children.Values.OrderBy(t => t.LogicalName, StringComparer.Ordinal))
             {
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append("owningteam").Append("owninguser").ToArray()),
                     NoLock = true,
                     PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 },
                 };
@@ -2255,7 +2335,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     continue;
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append("owningteam").Append("owninguser").ToArray()),
                     NoLock = true,
                 };
                 query.Criteria.AddCondition(table.IdColumn, ConditionOperator.In, group.Select(r => (object)r.Id).ToArray());
@@ -2277,7 +2357,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     RetriedRows = retried,
                 },
                 SecureChildShareSyncStatus.NotApplicable => new RecentChanges(
-                    rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null) { RetriedRows = retried },
+                    rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null)
+                { RetriedRows = retried },
                 // Failed (an ambiguous Secure team) or anything else: nothing is decided, and the window stays.
                 _ => FailedRecentChanges(above.Detail ?? "the records above the changed related records could not be determined"),
             };
@@ -2468,6 +2549,16 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private readonly HashSet<(string Table, Guid Id)> _accessPermissionPending = new();
     private bool _accessPermissionSweepComplete;
     private (string Table, Guid Id)? _accessPermissionSweepCursor;
+
+    /// <summary>
+    /// uac-r2 task 198 pass 2 (F2): the most rows the inherited Access Permission pass carries between runs. Production:
+    /// <see cref="MaxCarriedRows"/>; settable only so tests can reach the cap with a few rows.
+    /// </summary>
+    internal int AccessPermissionCarryCap { get; init; } = MaxCarriedRows;
+
+    // uac-r2 task 198 pass 2 (F2): a run lost a row (neither handled nor carried) that the current sweep may already be past:
+    // the sweep starts again when it reaches its end.
+    private bool _accessPermissionResweepPending;
 
     // Owner round 122 fix round 1 (K1): both document link columns were found field-secured. Cached for the process once
     // true (this job is a singleton); a "not secured" answer or a failed read is asked again on the next run that needs it,

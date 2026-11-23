@@ -1,4 +1,9 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
+using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 
@@ -11,13 +16,36 @@ internal sealed class InvoiceHidingStub
 {
     private readonly HashSet<Guid> _hidden;
     private readonly bool _fault;
+    private readonly ExternalInvoiceHiding? _real;
     private readonly List<Guid[]> _calls = new();
 
-    private InvoiceHidingStub(IEnumerable<Guid> hidden, bool fault)
+    private readonly HashSet<Guid> _perInvoiceFault = new();
+
+    private InvoiceHidingStub(IEnumerable<Guid> hidden, bool fault, ExternalInvoiceHiding? real = null)
     {
         _hidden = hidden.ToHashSet();
         _fault = fault;
+        _real = real;
     }
+
+    /// <summary>
+    /// Task 130-0 fix round 3: the decision was read but could not be made for exactly <paramref name="invoices"/> (a per-invoice
+    /// <see cref="InvoiceHiddenReason.ReadFailed"/> with the result not faulted as a whole); every other asked invoice is visible.
+    /// </summary>
+    public static InvoiceHidingStub PerInvoiceFault(params Guid[] invoices)
+    {
+        var stub = new InvoiceHidingStub(Array.Empty<Guid>(), fault: false);
+        stub._perInvoiceFault.UnionWith(invoices);
+        return stub;
+    }
+
+    /// <summary>
+    /// Task 130-0: the REAL caller-aware seam over <paramref name="world"/> (<see cref="Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld.Seam"/>:
+    /// <see cref="ExternalDataService.HideInvoicesForAsync"/> with the world's caller firms), recording each call. For surface tests that
+    /// must prove the own-firms rule reaches them.
+    /// </summary>
+    public static InvoiceHidingStub Real(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld world) =>
+        new(Array.Empty<Guid>(), fault: false, world.Seam);
 
     /// <summary>Hides nothing (every asked invoice is visible).</summary>
     public static InvoiceHidingStub NoneHidden() => new(Array.Empty<Guid>(), fault: false);
@@ -36,9 +64,13 @@ internal sealed class InvoiceHidingStub
     {
         var asked = invoiceIds.ToArray();
         lock (_calls) _calls.Add(asked);
+        if (_real is not null)
+            return _real(caller, asked, ct);
         if (_fault)
             return Task.FromResult(InvoiceVisibilityResult.ReadFailed(asked));
         var hidden = asked.Where(_hidden.Contains).Distinct().ToDictionary(id => id, _ => InvoiceHiddenReason.SourceHidden);
+        foreach (var id in asked.Where(_perInvoiceFault.Contains).Distinct())
+            hidden[id] = InvoiceHiddenReason.ReadFailed;
         return Task.FromResult(new InvoiceVisibilityResult(asked, hidden, faulted: false));
     };
 }
@@ -47,14 +79,26 @@ internal sealed class InvoiceHidingStub
 internal static class InvoiceFamilyHidingStubs
 {
     /// <summary>For a handler a test never lets reach the seam (an internal caller, a non-family table): any call fails.</summary>
-    public static AppOnlyInvoiceFamilyHiding NeverCalled { get; } = (_, _, _) =>
+    public static AppOnlyInvoiceFamilyHiding NeverCalled { get; } = (_, _, _, _) =>
         throw new InvalidOperationException("The invoice-family hiding was not expected to run (test).");
+
+    /// <summary>
+    /// Task 130-0b step 2: the handler tests' default. An invoice-family table may not reach the seam (any call fails, as
+    /// <see cref="NeverCalled"/>); a CHILD table with an invoice link (<see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>)
+    /// now does for every external caller, and here hides nothing, so a test about another guard on a document, analysis or
+    /// communication is unchanged. The step 2 tests set the real seam (<see cref="InvoiceFamilyFirmWorld.Seam"/>) or
+    /// <see cref="NeverCalled"/> explicitly.
+    /// </summary>
+    public static AppOnlyInvoiceFamilyHiding ChildTablesShown { get; } = (_, table, _, _) =>
+        ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(table)
+            ? Task.FromResult<IReadOnlySet<Guid>>(new HashSet<Guid>())
+            : throw new InvalidOperationException("The invoice-family hiding was not expected to run (test).");
 
     /// <summary>Hides exactly <paramref name="rows"/> (of any table); records each call as "table:count".</summary>
     public static AppOnlyInvoiceFamilyHiding Hiding(List<string>? calls, params Guid[] rows)
     {
         var hidden = rows.ToHashSet();
-        return (table, rowIds, _) =>
+        return (_, table, rowIds, _) =>
         {
             lock (hidden) calls?.Add($"{table}:{rowIds.Count}");
             return Task.FromResult<IReadOnlySet<Guid>>(rowIds.Where(hidden.Contains).ToHashSet());
@@ -63,12 +107,331 @@ internal static class InvoiceFamilyHidingStubs
 
     /// <summary>
     /// Review round 5: the REAL seam, <see cref="ExternalDataService.HideInvoiceFamilyRowsAsync"/> over the app-only Web API double
-    /// <paramref name="world"/> (as <c>AddExternalAccess</c> binds it), for tool tests that must prove the decision itself.
+    /// <paramref name="world"/>, for tool tests that must prove the decision itself. Task 130-0b: the caller's firms are the world's
+    /// (<see cref="InvoiceWorld.CallerFirmsAnswer"/>, its firm by default). <see cref="InvoiceFamilyFirmWorld"/> drives the seam as
+    /// <c>AddExternalAccess</c> registers it.
     /// </summary>
-    public static AppOnlyInvoiceFamilyHiding Real(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld world) =>
-        (table, rowIds, ct) => world.NewService(identity: null).HideInvoiceFamilyRowsAsync(table, rowIds, world.RootFlags, ct);
+    public static AppOnlyInvoiceFamilyHiding Real(InvoiceWorld world) =>
+        (caller, table, rowIds, ct) => world.NewService(identity: null).HideInvoiceFamilyRowsAsync(
+            caller, table, rowIds, world.RootFlags, world.SystemUserFirms, ct);
 
     /// <summary>A read fault: the seam throws, so the tool call fails with no data.</summary>
-    public static AppOnlyInvoiceFamilyHiding Throwing { get; } = (_, _, _) =>
+    public static AppOnlyInvoiceFamilyHiding Throwing { get; } = (_, _, _, _) =>
         throw new ExternalDataService.DataverseUnavailableException("The invoice-family read failed (test).");
+}
+
+/// <summary>
+/// ebilling-r1 task 130-0b: the assistant tools' family seam AS <c>AddExternalAccess</c> REGISTERS IT (the real
+/// <see cref="ExternalDataService.HideInvoiceFamilyRowsAsync"/>, with the caller's firms read through
+/// <c>ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync</c>), over an <see cref="InvoiceWorld"/>. The caller is one
+/// systemuser; <see cref="CallerIs"/> decides what its identity resolution and its contact answer. Every identity read is counted.
+/// </summary>
+internal sealed class InvoiceFamilyFirmWorld : IAsyncDisposable
+{
+    /// <summary>A firm that is not the caller's.</summary>
+    public static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    /// <summary>The caller kinds known to be a member of NO firm: no linked contact, an inactive linked contact. They see no invoice.</summary>
+    public static TheoryData<string> CallersWithNoFirm => new() { "no-contact", "inactive-contact" };
+
+    /// <summary>F3b: the caller kinds whose firms are UNKNOWN (the contact-binding read failed). The call fails (a tool error) instead
+    /// of answering "no invoice": an unknown firm read is not a caller with no firm.</summary>
+    public static TheoryData<string> CallersWithUnknownFirm => new() { "contact-binding-fault" };
+
+    private readonly Guid _systemUser;
+    private readonly Guid _contact = Guid.NewGuid();
+    private ContactRecordState _contactState = ContactRecordState.Active;
+    private Microsoft.Extensions.DependencyInjection.ServiceProvider? _provider;
+    private Microsoft.Extensions.DependencyInjection.AsyncServiceScope? _scope;
+
+    public InvoiceFamilyFirmWorld(Guid systemUser)
+    {
+        _systemUser = systemUser;
+        Participations = new Mock<ExternalParticipationService>(
+            new HttpClient(), Mock.Of<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection().Build(), Mock.Of<Azure.Core.TokenCredential>(),
+            Mock.Of<Microsoft.AspNetCore.Http.IHttpContextAccessor>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalParticipationService>.Instance, null!);
+        Participations.Setup(p => p.QueryContactStateAsync(_contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _contactState);
+        Participations.Setup(p => p.ReadOrganizationMembershipsAsync(_contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ActiveOrgMemberships(new[] { InvoiceWorld.Firm }, Array.Empty<Guid>(), Unreadable: false));
+        CallerIs("own-firm");
+    }
+
+    /// <summary>The app-only Web API and firm-hold double the seam reads.</summary>
+    public InvoiceWorld World { get; } = new();
+
+    /// <summary>The identity resolution (systemuser to contact), strict: only the caller's systemuser is answered.</summary>
+    public Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService> Identity { get; } = new(MockBehavior.Strict);
+
+    /// <summary>The contact's state and memberships (the one firm definition's reads).</summary>
+    public Mock<ExternalParticipationService> Participations { get; }
+
+    /// <summary>
+    /// The caller: "own-firm" (a linked Active contact, member of <see cref="InvoiceWorld.Firm"/>), "no-contact", "contact-binding-fault"
+    /// (the contact-binding read failed) or "inactive-contact" (a linked contact that is not Active).
+    /// </summary>
+    public void CallerIs(string kind)
+    {
+        var person = kind switch
+        {
+            "own-firm" or "inactive-contact" => new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(_systemUser, ContactId: _contact),
+            "no-contact" => new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(_systemUser),
+            "contact-binding-fault" => new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(_systemUser, ContactId: _contact)
+            {
+                Faults = Sprk.Bff.Api.Services.Ai.Membership.Models.IdentityReadFaults.ContactBinding,
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown caller kind (test)."),
+        };
+        _contactState = kind == "inactive-contact" ? ContactRecordState.Inactive : ContactRecordState.Active;
+        Identity.Setup(i => i.ResolveAsync(_systemUser, It.IsAny<CancellationToken>())).ReturnsAsync(person);
+    }
+
+    /// <summary>How many times the caller's firms were read (each read starts with one identity resolution).</summary>
+    public int FirmReads => Identity.Invocations.Count(i =>
+        i.Method.Name == nameof(Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService.ResolveAsync));
+
+    /// <summary>How many times any contact membership was read.</summary>
+    public int MembershipReads => Participations.Invocations.Count(i =>
+        i.Method.Name == nameof(ExternalParticipationService.ReadOrganizationMembershipsAsync));
+
+    /// <summary>An invoice of <paramref name="firm"/> that is otherwise visible (its own submission on the Spa channel, no source).</summary>
+    public Guid InvoiceOfFirm(Guid firm)
+    {
+        var invoice = World.OwnedInvoice();
+        World.InvoiceFirm(invoice, firm);
+        return invoice;
+    }
+
+    /// <summary>
+    /// An invoice of the caller's firm (so the invoice itself is visible), and its own submission on the Spa channel with no document,
+    /// whose own firm (<c>sprk_vendororg</c>) is <paramref name="firm"/>; returns the submission's id.
+    /// </summary>
+    public Guid SubmissionOfFirm(Guid firm)
+    {
+        var invoice = World.NewInvoice();
+        var submission = World.Submission(invoice, document: null, channel: InvoiceWorld.SpaChannel);
+        World.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", submission, "_sprk_vendororg_value", firm.ToString());
+        return submission;
+    }
+
+    // ── Task 130-0b step 2: child rows with an invoice link ────────────────────────────────────────────────────────────
+
+    /// <summary>A row of <paramref name="linked"/>'s table whose link column names <paramref name="invoice"/> (a GUID, or raw text).</summary>
+    public Guid LinkedRow(InvoiceLinkedCase linked, object invoice) =>
+        World.LinkedChildRow(linked.Table, (linked.LinkColumn, invoice));
+
+    /// <summary>A row of <paramref name="linked"/>'s table with no invoice link.</summary>
+    public Guid UnlinkedRow(InvoiceLinkedCase linked) => World.LinkedChildRow(linked.Table);
+
+    /// <summary>
+    /// The fault <paramref name="kind"/>: "link-read" (the app-only read of the table's invoice links fails) or "decision" (the invoice
+    /// decision's Stored File read fails, after the links and the firm hold are read).
+    /// </summary>
+    public void Fail(InvoiceLinkedCase linked, string kind) =>
+        World.Faults[kind switch
+        {
+            "link-read" => linked.EntitySet,
+            "decision" => "sprk_storedfiles",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown fault (test)."),
+        }] = System.Net.HttpStatusCode.InternalServerError;
+
+    /// <summary>The seam <c>AddExternalAccess</c> registers, resolved from one provider over this world.</summary>
+    public AppOnlyInvoiceFamilyHiding Seam
+    {
+        get
+        {
+            if (_scope is null)
+            {
+                var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+                Microsoft.Extensions.DependencyInjection.LoggingServiceCollectionExtensions.AddLogging(services);
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(
+                    services, new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                        .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                        .Build());
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Azure.Core.TokenCredential>(
+                    services, new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential());
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(
+                    services, new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache());
+                Microsoft.Extensions.DependencyInjection.HttpServiceCollectionExtensions.AddHttpContextAccessor(services);
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, World.FilingReader);
+                Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule.AddExternalAccess(services);
+                Microsoft.Extensions.DependencyInjection.HttpClientFactoryServiceCollectionExtensions.AddHttpClient<ExternalDataService>(services)
+                    .ConfigurePrimaryHttpMessageHandler(() => World);
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, Participations.Object);
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, Identity.Object);
+                _provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+                _scope = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.CreateAsyncScope(_provider);
+            }
+
+            return Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<AppOnlyInvoiceFamilyHiding>(_scope.Value.ServiceProvider);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_scope is { } scope)
+            await scope.DisposeAsync();
+        if (_provider is not null)
+            await _provider.DisposeAsync();
+    }
+}
+
+/// <summary>
+/// ebilling-r1 task 130-0b F3b fix round 1, step 2: ONE service request case, run on both planes (the REST routes under a request and
+/// the assistant tools read_query / search_data), so each plane is held to the same answer for the same request: linked to another
+/// firm's invoice is hidden; linked to the caller's own firm's invoice, or to none, is shown. The invoice is made in the world the plane's
+/// real seam reads (<see cref="InvoiceWorld"/>), with the same firms.
+/// </summary>
+internal static class ServiceRequestParityCase
+{
+    /// <summary>The kinds of request: "other-firm", "own-firm", "unlinked".</summary>
+    public static TheoryData<string> Kinds => new() { "other-firm", "own-firm", "unlinked" };
+
+    /// <summary>Whether a request of <paramref name="kind"/> is hidden (the same on every plane).</summary>
+    public static bool Hidden(string kind) => kind == "other-firm";
+
+    /// <summary>The invoice a request of <paramref name="kind"/> links to, made in <paramref name="world"/>; null for "unlinked".</summary>
+    public static Guid? InvoiceFor(InvoiceWorld world, string kind)
+    {
+        switch (kind)
+        {
+            case "other-firm":
+                var other = world.OwnedInvoice();
+                world.InvoiceFirm(other, InvoiceFamilyFirmWorld.OtherFirm);
+                return other;
+            case "own-firm":
+                return world.OwnedInvoice();
+            case "unlinked":
+                return null;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind (test).");
+        }
+    }
+}
+
+/// <summary>
+/// ebilling-r1 task 130-0b F3b fix round 1, step 2 (F1): the families whose rows have an invoice link of their own (null here) and are
+/// filed under an invoice-linked row, for the assistant tools' handler tests (the REST plane: <c>ExternalInvoiceLinkedFamilyRouteTests</c>).
+/// Rows are made in the <see cref="InvoiceWorld"/> the tools' real seam reads.
+/// </summary>
+internal static class InvoiceLinkedFamilyCase
+{
+    /// <summary>The hop bound the invoice walk reads (<see cref="InvoiceLinks"/>); every bound test builds its chain from this.</summary>
+    public static int WalkBound => InvoiceLinks.MaxWalkHops;
+
+    /// <summary>Each family: "child-parent".</summary>
+    public static TheoryData<string> Keys => new()
+    {
+        "analysis-document", "event-event", "todo-event", "document-communication", "todo-servicerequest",
+    };
+
+    /// <summary>The child (its own link column named, left null), the edge column and the parent table of <paramref name="key"/>.</summary>
+    public static (InvoiceLinkedCase Child, string Column, string ParentTable) Of(string key) => key switch
+    {
+        "analysis-document" => (InvoiceLinkedCase.Of("analysis"), "sprk_documentid", "sprk_document"),
+        "event-event" => (InvoiceLinkedCase.Of("event"), "sprk_regardingevent", "sprk_event"),
+        "todo-event" => (InvoiceLinkedCase.Of("todo"), "sprk_regardingevent", "sprk_event"),
+        "document-communication" => (InvoiceLinkedCase.Of("document-invoice"), "sprk_relatedcommunication", "sprk_communication"),
+        "todo-servicerequest" => (InvoiceLinkedCase.Of("todo"), "sprk_regardingservicerequest", "sprk_servicerequest"),
+        _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unknown family (test)."),
+    };
+
+    /// <summary>A row of <paramref name="table"/> linked to <paramref name="invoice"/> (none: unlinked).</summary>
+    public static Guid Row(InvoiceWorld world, string table, Guid? invoice) => invoice is { } i
+        ? world.LinkedChildRow(table, (InvoiceLinks.LinkColumnsOf(table)[0], i))
+        : world.LinkedChildRow(table);
+
+    /// <summary>A child of <paramref name="key"/> (its own link null) under a parent linked to <paramref name="invoice"/>.</summary>
+    public static Guid ChildUnder(InvoiceWorld world, string key, Guid? invoice)
+    {
+        var (child, column, parentTable) = Of(key);
+        return world.LinkedChildRow(child.Table, (column, Row(world, parentTable, invoice)));
+    }
+
+    /// <summary>A to-do under a chain of <paramref name="length"/> events (each regarding the next); the TOP one links to
+    /// <paramref name="topInvoice"/>.</summary>
+    public static Guid TodoUnderEventChain(InvoiceWorld world, int length, Guid? topInvoice)
+    {
+        var above = Row(world, "sprk_event", topInvoice);
+        for (var i = 1; i < length; i++)
+            above = world.LinkedChildRow("sprk_event", ("sprk_regardingevent", above));
+        return world.LinkedChildRow("sprk_todo", ("sprk_regardingevent", above));
+    }
+}
+
+/// <summary>
+/// Task 130-0b step 2: one class of CHILD row with an invoice link, as the handler tests name it: its table and the one link column
+/// the test sets (a document twice: through <c>sprk_invoice</c> and through <c>sprk_relatedinvoice</c>). The read shape comes from
+/// <see cref="InvoiceLinks.Tables"/>, never from the test.
+/// </summary>
+internal sealed record InvoiceLinkedCase(string Key, string Table, string LinkColumn)
+{
+    /// <summary>Every class: to-do, event, document (both links), communication, analysis, memo.</summary>
+    public static IReadOnlyList<InvoiceLinkedCase> All { get; } = new InvoiceLinkedCase[]
+    {
+        new("todo", "sprk_todo", "sprk_regardinginvoice"),
+        new("event", "sprk_event", "sprk_regardinginvoice"),
+        new("document-invoice", "sprk_document", "sprk_invoice"),
+        new("document-relatedinvoice", "sprk_document", "sprk_relatedinvoice"),
+        new("communication", "sprk_communication", "sprk_regardinginvoice"),
+        new("analysis", "sprk_analysis", "sprk_regardinginvoice"),
+        new("memo", "sprk_memo", "sprk_regardinginvoice"),
+    };
+
+    /// <summary>
+    /// Task 130-0b step 3: the ROOT with an invoice link (the work assignment through <c>sprk_regardinginvoice</c>). Not in
+    /// <see cref="All"/>: a root row is never hidden; its invoice link is blanked when that invoice is not visible.
+    /// </summary>
+    public static InvoiceLinkedCase Root { get; } = new("workassignment", "sprk_workassignment", "sprk_regardinginvoice");
+
+    /// <summary>The class named <paramref name="key"/>.</summary>
+    public static InvoiceLinkedCase Of(string key) => All.Single(c => c.Key == key);
+
+    /// <summary>Every class's key (the tools that can return every class: read_query and describe).</summary>
+    public static TheoryData<string> Keys => Data(All);
+
+    /// <summary>
+    /// Every class but the communication: search_data drops every communication-family hit for an external caller (ISS-010) before any
+    /// invoice rule, so it never returns one.
+    /// </summary>
+    public static TheoryData<string> SearchableKeys => Data(All.Where(c => c.Table != "sprk_communication"));
+
+    /// <summary>Every class crossed with each fault ("link-read", "decision").</summary>
+    public static TheoryData<string, string> KeysAndFaults => Faults(All);
+
+    /// <summary><see cref="SearchableKeys"/> crossed with each fault.</summary>
+    public static TheoryData<string, string> SearchableKeysAndFaults => Faults(All.Where(c => c.Table != "sprk_communication"));
+
+    /// <summary>
+    /// F3b fix round 1, step 2: the service request (<see cref="InvoiceLinks.Supplemental"/>), for the REST / assistant parity tests. Not in
+    /// <see cref="All"/>: the step 2 theories predate its rule.
+    /// </summary>
+    public static InvoiceLinkedCase ServiceRequest { get; } = new("servicerequest", "sprk_servicerequest", "sprk_regardinginvoice");
+
+    public string EntitySet => InvoiceLinks.Tables[Table].EntitySet!;
+
+    public string IdColumn => InvoiceLinks.Tables[Table].IdColumn;
+
+    private static TheoryData<string> Data(IEnumerable<InvoiceLinkedCase> cases)
+    {
+        var data = new TheoryData<string>();
+        foreach (var c in cases)
+            data.Add(c.Key);
+        return data;
+    }
+
+    private static TheoryData<string, string> Faults(IEnumerable<InvoiceLinkedCase> cases)
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var c in cases)
+        {
+            data.Add(c.Key, "link-read");
+            data.Add(c.Key, "decision");
+        }
+
+        return data;
+    }
 }

@@ -718,7 +718,7 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
     {
         var shareId = Guid.Parse("77777777-7777-7777-7777-777777777777");
         _fixture.Dataverse.ContactQueryResult =
-            $$"""[{"sprk_externalrecordaccessid":"{{shareId}}","_sprk_contact_value":"{{GranteeContactId}}","statecode":0}]""";
+            $$"""[{"sprk_externalrecordaccessid":"{{shareId}}","_sprk_contact_value":"{{GranteeContactId}}","_sprk_organization_value":null,"_sprk_project_value":"{{ProjectA}}","_sprk_matter_value":null,"_sprk_workassignment_value":null,"_sprk_grantedby_value":null,"_sprk_grantedbycontact_value":null,"statecode":0}]""";
         var expiry = FixtureToday.AddDays(91);
         using var client = _fixture.CreateAdminClient();
 
@@ -1527,6 +1527,10 @@ internal sealed class StubExternalDataService : ExternalDataService
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto> { Truncated = TruncatedRequested });
     }
 
+    // R4 task 014b: the event lists offer the creatable types; here, the Task row (the rules are ExternalEventFormsContractTests').
+    public override Task<IReadOnlyList<EventTypeOption>> GetEventTypesAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<EventTypeOption>>(new[] { new EventTypeOption(Spaarke.Dataverse.EventTypeRef.Task, "Task", false, true) });
+
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>> GetContactsAsync(
         Guid projectId, CancellationToken ct = default)
     {
@@ -1547,7 +1551,7 @@ internal sealed class StubExternalDataService : ExternalDataService
         var raw = _accessor.HttpContext?.Request.Headers.TryGetValue("X-Test-DocProject", out var v) == true ? v.ToString() : null;
         // A single-root document (no other root link), so the every-root rule has nothing further to refuse.
         return Guid.TryParse(raw, out var projectId)
-            ? Task.FromResult(new DocumentScopeRead(projectId, "external-doc.bin", default))
+            ? Task.FromResult(new DocumentScopeRead(projectId, "external-doc.bin", ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.NoLinks))
             : Task.FromResult(DocumentScopeRead.Absent);
     }
 }
@@ -1698,6 +1702,11 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
         Creates.Clear();
     }
 
+    /// <summary>The grant core's strict root-row read (#2852) answers from the same data as every other read.</summary>
+    public override Task<List<T>> QueryStrictAsync<T>(string entitySetName, string? filter = null, string? select = null,
+        int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+        => QueryAsync<T>(entitySetName, filter, select, top, skip, cancellationToken);
+
     public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
         int? top = null, int? skip = null, CancellationToken cancellationToken = default)
     {
@@ -1777,6 +1786,7 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct) => _inner.FindSystemUsersByGuestObjectIdAsync(guestObjectId, ct);
     public Task<StoreWriteResult> WriteHomeLinkAsync(Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.WriteHomeLinkAsync(systemUserId, etag, homeTenantId, homeObjectId, ct);
     public Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeContactsAsync(homeTenantId, homeObjectId, ct);
+    public Task<HomeTenantLookup> ReadHomeTenantAsync(Guid contactId, CancellationToken ct) => _inner.ReadHomeTenantAsync(contactId, ct);
     public Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct) => _inner.FindEnabledSystemUsersByEmailAsync(email, ct);
     public Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct) => _inner.FindDefaultOwnerTeamsAsync(businessUnitId, ct);
     public Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct) => _inner.FindBusinessUnitsByNameAsync(name, ct);

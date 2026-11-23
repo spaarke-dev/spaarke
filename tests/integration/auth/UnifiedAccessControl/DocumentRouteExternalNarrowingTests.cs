@@ -94,8 +94,8 @@ public class DocumentRouteExternalNarrowingTests : IClassFixture<DocumentRouteNa
     {
         var data = new TheoryData<string, string>();
         foreach (var route in new[] { "read", "download", "versions", "preview", "delete", "checkout" })
-        foreach (var kind in new[] { "own-restricted", "internal-only-communication", "restricted-parent" })
-            data.Add(route, kind);
+            foreach (var kind in new[] { "own-restricted", "internal-only-communication", "restricted-parent" })
+                data.Add(route, kind);
         return data;
     }
 

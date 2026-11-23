@@ -5,7 +5,7 @@
 
 # Canonical KV Secret Reference
 
-**Authority**: spec.md FR-36 + §7.9 R1-R4 · [AZURE-RESOURCE-NAMING-CONVENTION.md](../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) · [naming-exception-registry.md](../../projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md)
+**Authority**: spec.md FR-36 + §7.9 R1-R4 · [AZURE-RESOURCE-NAMING-CONVENTION.md](../../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) · [naming-exception-registry.md](../../../projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md)
 
 This document is **generated** from `scripts/canonical-secret-catalog/manifest.yaml`. Do NOT edit by hand — any local edit is destroyed by the next generator run.
 

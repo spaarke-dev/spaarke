@@ -67,5 +67,5 @@ failed: read the reason before calling it a pass. 50393 `BellNotCreated` on A is
 | B | | | |
 | C | | | |
 | D (optional) | | | |
-| 170 | | | |
-| BUD- | | | |
+| 170 | 2026-11-06 21:15:21Z; 2026-11-09 03:57:57Z | **PASS** (done-when: at most 2 WhoAmI): 1 WhoAmI per commit, both 200. Wall time 18.6 s (one decision; 135 Dataverse calls) and 41.7 s (Create budget + assign task that also closed the row's 17 billing items, D-214; 315 Dataverse calls). Wall time scales with items closed, roughly 18 sequential Dataverse calls per item. | Log Analytics `spe-logs-dev-67e2xz` AppRequests/AppDependencies by OperationId (telemetry sampled at 25%; App Insights query returns only the current day), read 2026-11-09 |
+| BUD- | 2026-11-09 03:58:19Z | **PASS**: `BUD-001003` on budget `06f59cc0-b45b-43bb-81d5-b891e3f6b9ef` ("Budget 2026-11-09", MAT-34929-0040) | Dataverse read 2026-11-09 (MCP shows createdon in local time UTC-5: 22:58:19) |

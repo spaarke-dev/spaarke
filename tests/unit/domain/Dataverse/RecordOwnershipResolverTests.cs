@@ -325,6 +325,119 @@ public class RecordOwnershipResolverTests
         resolution.OwningTeamId.Should().BeNull();
     }
 
+    // uac-r2 task 191c (#2179 §3.5): a user flagged external (stored sprk_isexternal = true) whom 191e has placed in the External
+    // Collaborators unit, whose default team every external user is a member of — an unfiled record of theirs is owned in the
+    // CUSTOMER's unit. A flagged user not (yet) in that unit keeps today's rule (#2723 review F2: ships before 191i safely).
+
+    [Theory]
+    [InlineData(false)] // by systemuserid (the interactive path)
+    [InlineData(true)]  // by Entra oid (the background path)
+    public async Task ResolveOwner_WhenTheActingUserIsFlaggedExternalInTheExternalUnit_OwnsTheUnfiledRecordInTheCustomerBusinessUnit(bool byObjectId)
+    {
+        var directory = Directory().WithExternalFlag(CallerUserId, flagged: true).WithUserInExternalCollaborators(CallerUserId);
+        directory.CustomerBusinessUnitSetting = ChildBu.ToString();
+        var context = byObjectId
+            ? new RecordOwnershipContext { CallerObjectId = CallerOid }
+            : new RecordOwnershipContext { CallerSystemUserId = CallerUserId };
+
+        var resolution = await Build(directory).ResolveOwnerAsync(context, CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the customer's unit owns it, never the user's own (external) unit");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenTheActingUserIsFlaggedExternalInTheExternalUnitAndNoCustomerUnitIsSet_Refuses()
+    {
+        // Must fire: in the unit, setting unset — refused, never the External Collaborators default team.
+        var directory = Directory().WithExternalFlag(CallerUserId, flagged: true).WithUserInExternalCollaborators(CallerUserId);
+        directory.CustomerBusinessUnitSetting = null;
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerSystemUserId = CallerUserId }, CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("the external users' unit's team must never own the record");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ActingUserUnresolved);
+        resolution.OwningTeamId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(true)]  // the External Collaborators unit exists; the creator is not in it
+    [InlineData(false)] // the unit does not exist yet (before 191d runs)
+    public async Task ResolveOwner_WhenTheActingUserIsFlaggedExternalOutsideTheExternalUnitAndNoCustomerUnitIsSet_KeepsTheirOwnBusinessUnit(
+        bool unitExists)
+    {
+        // Must not fire (#2723 review F2): before 191i moves anyone, a flagged creator in their original unit keeps today's
+        // owner — an unset customer-unit setting must not break their unfiled creates on deploy.
+        var directory = Directory().WithExternalFlag(CallerUserId, flagged: true);
+        if (unitExists)
+        {
+            var someoneElse = Guid.NewGuid();
+            directory.WithUser(someoneElse, Guid.NewGuid(), GeneralBu).WithUserInExternalCollaborators(someoneElse);
+        }
+
+        directory.CustomerBusinessUnitSetting = null;
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerSystemUserId = CallerUserId }, CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse();
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "the creator's own unit owns it, as before 191c");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenTheActingUserIsFlaggedAndInAMisplacedSecondExternalUnit_StillUsesTheCustomerRule()
+    {
+        // Two units of the name (191e: Ambiguous) — which one isolates external users is undecided, so a creator in either
+        // never gets the shared unit's team (fail closed).
+        var directory = Directory().WithExternalFlag(CallerUserId, flagged: true);
+        var second = Guid.NewGuid();
+        directory
+            .WithBusinessUnit(second, Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName, parent: ChildBu)
+            .WithTeam(Guid.NewGuid(), second, isDefault: true, teamType: 0);
+        var other = Guid.NewGuid();
+        directory.WithUser(other, Guid.NewGuid(), GeneralBu).WithUserInExternalCollaborators(other); // the first one, under the root
+        var inSecond = Guid.NewGuid();
+        directory.WithUser(inSecond, Guid.NewGuid(), second).WithExternalFlag(inSecond, flagged: true);
+        directory.CustomerBusinessUnitSetting = null;
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerSystemUserId = inSecond }, CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("a unit of the External Collaborators name never owns a flagged user's record");
+        resolution.OwningTeamId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenTheExternalUnitCannotBeRead_PropagatesTheFaultRatherThanUsingTheCreatorsUnit()
+    {
+        // A failed read of the External Collaborators unit is never "not in the unit": it surfaces as the caller's
+        // retryable 5xx and nothing is created.
+        var directory = Directory().WithExternalFlag(CallerUserId, flagged: true).WithUserInExternalCollaborators(CallerUserId)
+            .WithoutColumn("businessunit", "name");
+        directory.CustomerBusinessUnitSetting = null;
+
+        var act = () => Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerSystemUserId = CallerUserId }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<System.ServiceModel.FaultException<OrganizationServiceFault>>();
+    }
+
+    [Theory]
+    [InlineData(false)] // stored false
+    [InlineData(null)]  // blank: internal (owner round 67) — never inferred from a UPN or domain
+    public async Task ResolveOwner_WhenTheActingUserIsNotFlaggedExternal_KeepsTheirOwnBusinessUnit(bool? flag)
+    {
+        var directory = Directory();
+        if (flag is { } stored)
+            directory.WithExternalFlag(CallerUserId, stored);
+        directory.CustomerBusinessUnitSetting = ChildBu.ToString();
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerSystemUserId = CallerUserId }, CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam);
+    }
+
     // =====================================================================================
     // Refuse branch 2 — nothing to resolve from, or an ambiguous answer
     // =====================================================================================
@@ -3484,16 +3597,16 @@ public class RecordOwnershipResolverTests
     /// <summary>Out of the secure project, onto the ordinary matter.</summary>
     private static RecordReparent MoveToOrdinaryMatter(
         Guid documentId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? caller) => new()
-    {
-        EntityLogicalName = "sprk_document",
-        RecordId = documentId,
-        ParentChanges = new Dictionary<string, EntityReference?>
         {
-            ["sprk_project"] = null,
-            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
-        },
-        SecureExitCaller = caller,
-    };
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_project"] = null,
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            },
+            SecureExitCaller = caller,
+        };
 
     [Fact]
     public async Task Reparent_OutOfASecureRoot_ByAFullAccessHolderOnThatRoot_IsApplied_AndReassigned()
@@ -3566,7 +3679,8 @@ public class RecordOwnershipResolverTests
     }
 
     private static RecordReparent MoveUnstampedChildToOrdinaryMatter(Guid rowId) => MoveToOrdinaryMatter(rowId, CallerHolding(Collaborate))
-        with { EntityLogicalName = UnstampedChildTable };
+        with
+    { EntityLogicalName = UnstampedChildTable };
 
     [Fact]
     public async Task Reparent_OutOfASecureRoot_OnATableTheBffDoesNotStamp_AForgedCreatorPerson_IsNotAdmitted()
@@ -4093,15 +4207,15 @@ public class RecordOwnershipResolverTests
 
     private static RecordReparent MoveMessageTo(
         Guid messageId, Guid matterId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller caller) => new()
-    {
-        EntityLogicalName = "sprk_communication",
-        RecordId = messageId,
-        ParentChanges = new Dictionary<string, EntityReference?>
         {
-            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
-        },
-        SecureExitCaller = caller,
-    };
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+            },
+            SecureExitCaller = caller,
+        };
 
     [Fact]
     public async Task Reparent_OfASecureBuRowWhoseSecureRootCannotBeNamed_ByAFullAccessNonCreator_IsRefusedUnverifiable()
@@ -4233,7 +4347,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(SomeoneElse) },
+                with
+            { RequestedBy = RecordRequester.Of(SomeoneElse) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
@@ -4248,7 +4363,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
             CancellationToken.None);
 
         resolution.CreatedByPerson.Should().Be(CallerUserId);
@@ -4266,7 +4382,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: disabledOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: disabledOid) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
@@ -4287,7 +4404,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: unknownOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: unknownOid) },
             CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam, "an unknown person is not a reason to refuse the row");
@@ -4301,7 +4419,8 @@ public class RecordOwnershipResolverTests
 
         var resolution = await Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
-                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+                with
+            { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
             CancellationToken.None);
 
         resolution.IsRefused.Should().BeTrue();
@@ -4516,11 +4635,13 @@ public class RecordOwnershipResolverTests
             .WithRecord("sprk_matter", secureMatter, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
             .WithRecord(tableA, a, GeneralBu, owningTeam: null, extra: new()
             {
-                [aToB] = new EntityReference(tableB, b), [aMatter] = new EntityReference("sprk_matter", secureMatter),
+                [aToB] = new EntityReference(tableB, b),
+                [aMatter] = new EntityReference("sprk_matter", secureMatter),
             })
             .WithRecord(tableB, b, GeneralBu, owningTeam: null, extra: new()
             {
-                [bToA] = new EntityReference(tableA, a), [bMatter] = new EntityReference("sprk_matter", secureMatter),
+                [bToA] = new EntityReference(tableA, a),
+                [bMatter] = new EntityReference("sprk_matter", secureMatter),
             });
 
         foreach (var primary in new[] { new RecordOwnershipParent(tableA, a), new RecordOwnershipParent(tableB, b) })
@@ -4591,7 +4712,8 @@ public class RecordOwnershipResolverTests
     private static Task<RecordOwnerResolution> AskAboutTheProject(FakeDirectory directory, Guid projectId, bool asContent) =>
         Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_project", projectId) })
-                with { KeepCreatorUnlessTargetIsTeamOwned = asContent },
+                with
+            { KeepCreatorUnlessTargetIsTeamOwned = asContent },
             CancellationToken.None);
 
     [Theory(DisplayName = "Owner amendment 2026-10-29 must fire: a person-owned project filed by its pair answers with the unit of the matter the pair names — as a plain parent and on the content path")]
@@ -4725,7 +4847,8 @@ public class RecordOwnershipResolverTests
     private static Task<RecordOwnerResolution> AskAboutTheWorkAssignment(FakeDirectory directory, bool asContent) =>
         Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_workassignment", WorkAssignmentId) })
-                with { KeepCreatorUnlessTargetIsTeamOwned = asContent },
+                with
+            { KeepCreatorUnlessTargetIsTeamOwned = asContent },
             CancellationToken.None);
 
     [Theory(DisplayName = "Owner decision 2026-10-29 must fire: a filed person-owned work assignment answers with its matter's unit — as a plain parent and on the content (gate) path")]
@@ -4977,7 +5100,7 @@ public class RecordOwnershipResolverTests
                 var request = FileTheEventUnderTheWorkAssignment(eventId);
                 return Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
             }
-            : () => AskAboutTheWorkAssignment(directory, asContent: false);
+        : () => AskAboutTheWorkAssignment(directory, asContent: false);
 
         await act.Should().ThrowAsync<InvalidOperationException>("a throttled or failed read is retried, not reported refused");
     }

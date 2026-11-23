@@ -73,6 +73,12 @@ public sealed record ChannelSendRequest
     /// Optional + additive (see <see cref="SenderParticipant"/>).
     /// </summary>
     public string? AcsThreadId { get; init; }
+
+    /// <summary>
+    /// Email channel only (ebilling-r1 task 151c-1a): the signed <see cref="Sprk.Bff.Api.Services.Communication.ServerSendMarker"/> value of a server-only send, sent as the
+    /// <see cref="Sprk.Bff.Api.Services.Communication.ServerSendMarker.HeaderName"/> header. Null on every other send (no header; byte-unchanged).
+    /// </summary>
+    public string? ServerSendMarker { get; init; }
 }
 
 /// <summary>Channel-neutral attachment payload for a send.</summary>

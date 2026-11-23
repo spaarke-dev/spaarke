@@ -459,7 +459,7 @@ public class OfficeQuickCreateAdapterContractTests
             .ReturnsAsync(AccessRights.Read);
         factory.Entities
             .Setup(e => e.RetrieveAsync("sprk_project", SourceProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(source);
+            .ReturnsAsync(source.WithGate());
     }
 
     /// <summary>A host whose identity service gives every user <paramref name="contactId"/> as their linked contact (null = none).</summary>

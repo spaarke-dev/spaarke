@@ -58,6 +58,8 @@ export interface InvoiceRefusalLike {
   retryAfterSeconds?: number;
   /** §6 "After step A": the server filed the email under the record before it refused, and the filing is kept. */
   filingKept?: boolean;
+  /** §6 (ebilling task 192): on `document_core_record_mismatch`, the record the email is filed under, when readable. */
+  filedUnder?: { name: string };
 }
 
 type Facts = InvoiceRefusalLike & InvoiceMessageContext;
@@ -73,6 +75,50 @@ export const GENERIC_FAILED_OUTCOME_MESSAGE = "Spaarke couldn't process the invo
  */
 export const HELD_FOR_REVIEW_MESSAGE =
   'Spaarke accepted it and is holding it for review. You can follow it in Spaarke with the tracking number.';
+
+/**
+ * §3 / §9 (ebilling 097f, EB-D-180): an Accepted submission whose invoice a correction has superseded. It is NOT a hold;
+ * the status read may also carry `replacedBy.trackingNumber` (absent when the caller can't read the correcting one).
+ */
+export const REPLACED_BY_CORRECTION_CODE = 'ebilling.submission.replaced_by_correction';
+
+/**
+ * §9 (ebilling EB-D-185): an Accepted submission made without a firm. The invoice is accepted and then held until a
+ * reviewer sets a firm.
+ */
+export const FIRM_MISSING_CODE = 'ebilling.submission.firm_missing';
+/** The sentence for {@link FIRM_MISSING_CODE} (the contract's wording). */
+export const FIRM_MISSING_MESSAGE = 'Submitted without a firm. A reviewer will add the firm before approval.';
+
+/**
+ * Owner ruling 2026-11-13: an invoice is never submitted without a firm (the server refuses it, `firm_invalid`). When the
+ * chosen record has no linked firm the Firm field says so and how to fix it; the pane does not offer a submit.
+ */
+export const NO_FIRM_LINKED_MESSAGE =
+  'No firm is linked to this record. Add a firm to the record in Spaarke, then submit.';
+
+/** A correction of an invoice that has no firm cannot be sent from the pane (a correction keeps the invoice's firm). */
+export const CORRECTION_NO_FIRM_MESSAGE =
+  'This invoice has no firm. Set its firm in Spaarke, then submit the correction.';
+
+/**
+ * The sentence for an Accepted submission: none without a code, the replaced-by-correction sentence for
+ * {@link REPLACED_BY_CORRECTION_CODE}, {@link FIRM_MISSING_MESSAGE} for {@link FIRM_MISSING_CODE}, and
+ * {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
+ */
+export function describeAcceptedOutcome(
+  code: string | null | undefined,
+  replacedByTrackingNumber?: string
+): string | undefined {
+  if (!code) return undefined;
+  if (code === REPLACED_BY_CORRECTION_CODE) {
+    return replacedByTrackingNumber
+      ? `This invoice was replaced by a correction (tracking ${replacedByTrackingNumber}).`
+      : 'This invoice was replaced by a correction.';
+  }
+  if (code === FIRM_MISSING_CODE) return FIRM_MISSING_MESSAGE;
+  return HELD_FOR_REVIEW_MESSAGE;
+}
 
 const NOTHING = 'Nothing was submitted.';
 
@@ -119,13 +165,59 @@ export const EMAIL_UNIDENTIFIABLE_REASON_MESSAGES: Readonly<Record<string, Entry
 };
 const EMAIL_UNIDENTIFIABLE_FALLBACK = "Spaarke couldn't identify this email, so it can't be submitted from Outlook.";
 
-/** §6 / OP-7 `correction_not_allowed` reasons. */
+/**
+ * An invoice status as the contract spells it (§6 `invoiceStatus`, §10 `invoiceStatus`), in words. A status not listed
+ * here is not named: the sentence says "in its current state". `Superseded` has its own sentence.
+ */
+export const INVOICE_STATUS_WORDS: Readonly<Record<string, string>> = {
+  InReview: 'In Review',
+  Approved: 'Approved',
+  SentToAp: 'Sent to AP',
+  Paid: 'Paid',
+  Rejected: 'Rejected',
+  ReturnedToFirm: 'Returned to Firm',
+  Cancelled: 'Cancelled',
+};
+
+/** A Superseded invoice (§10, agreed 2026-10-31): the correction belongs on the newer invoice. */
+export const SUPERSEDED_INVOICE_MESSAGE =
+  'This invoice has already been replaced by a correction. Correct the newer invoice instead.';
+
+/** Why an invoice can't be corrected because of its status (§6 reason `invoice_status`, §10 `reason`). */
+export function describeUncorrectableStatus(invoiceStatus: string | null | undefined): string {
+  if (invoiceStatus === 'Superseded') return SUPERSEDED_INVOICE_MESSAGE;
+  const words = invoiceStatus ? INVOICE_STATUS_WORDS[invoiceStatus] : undefined;
+  return `This invoice can't be corrected ${words ? `while it is ${words}` : 'in its current state'}.`;
+}
+
+/**
+ * Why the correction prefill (§10) says an invoice can't be corrected, before anything is submitted. `reason` is the
+ * intake's: `invoice_status`, `no_submission`, `submission_in_progress`; a newer one gets the plain sentence.
+ */
+export function describeCorrectionBlock(prefill: { reason: string | null; invoiceStatus: string | null }): string {
+  switch (prefill.reason) {
+    case 'invoice_status':
+      return describeUncorrectableStatus(prefill.invoiceStatus);
+    case 'no_submission':
+      return 'This invoice has no submission in Spaarke to correct.';
+    case 'submission_in_progress':
+      return 'The original invoice is still being processed. Wait until it has finished, then try again.';
+    default:
+      return prefill.invoiceStatus === 'Superseded' ? SUPERSEDED_INVOICE_MESSAGE : "This invoice can't be corrected.";
+  }
+}
+
+/**
+ * §6 `correction_not_allowed` reasons (097b, 2026-10-30). `not_available` (OP-7) is no longer sent; an unknown reason
+ * gets the fallback.
+ */
 export const CORRECTION_REASON_MESSAGES: Readonly<Record<string, Entry>> = {
-  not_available: `Corrections from Outlook are not available yet. ${NOTHING}`,
-  invoice_status: f =>
-    `This invoice can't be corrected${f.invoiceStatus ? ` while it is ${f.invoiceStatus}` : ' in its current state'}. ${NOTHING}`,
+  invoice_status: f => `${describeUncorrectableStatus(f.invoiceStatus)} ${NOTHING}`,
   different_firm: `A correction must come from the same firm as the original invoice. ${NOTHING}`,
   different_core_record: `A correction must be for the same matter, project or work assignment as the original invoice. ${NOTHING}`,
+  different_invoice_number: `A correction must keep the original invoice's number. ${NOTHING}`,
+  no_submission: `This invoice has no submission in Spaarke to correct. ${NOTHING}`,
+  submission_in_progress: `The original invoice is still being processed. ${NOTHING} Wait until it has finished, then submit the correction again.`,
 };
 const CORRECTION_FALLBACK = `This invoice can't be corrected. ${NOTHING}`;
 
@@ -162,9 +254,12 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   OFFICE_015: f => `Too many saves in a short time. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.disabled': `Invoice submission is turned off in Spaarke. ${NOTHING}`,
   // §2 firm fields
-  'ebilling.submission.firm_invalid': `The chosen firm isn't an active firm in Spaarke. ${NOTHING}`,
+  // 095e (2026-11-13): covers both "a firm is required" and "the firm is not active".
+  'ebilling.submission.firm_invalid': `Spaarke didn't accept the firm for this invoice. Choose an active firm linked to this record. ${NOTHING}`,
   'ebilling.submission.firm_not_linked': `The chosen firm isn't linked to this record. ${NOTHING}`,
   'ebilling.submission.firm_invoice_number_required': `Enter the firm's invoice number. ${NOTHING}`,
+  // 095f (2026-11-13, EB-D-225): a Correction needs a note saying why (also a still-Received retry that carries none).
+  'ebilling.submission.correction_note_required': `Enter a correction note saying why the invoice is corrected. ${NOTHING}`,
   // §6 handler refusals
   'ebilling.submission.marks_invalid': fromReasons(
     MARKS_INVALID_REASON_MESSAGES,
@@ -179,11 +274,17 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
     `Spaarke couldn't reach the record right now. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.failed': f => `The submission couldn't be queued. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.attachment_not_preserved': `One of the marked files couldn't be saved exactly as attached. ${NOTHING}`,
-  // Filed under another core record, or (task 094 step A) unfiled but held under a restricted record; the body does
-  // not say which, so the sentence is true for both and names no record to submit to.
-  'ebilling.submission.document_core_record_mismatch': `This email belongs to a different matter, project or work assignment, so it can't be submitted to this record. ${NOTHING}`,
+  // Filed under another core record, or (task 094 step A) unfiled but held under a restricted record. Task 192: the
+  // body names the record (`filedUnder`) only when it is the one readable, non-secure record the email is filed under;
+  // without it the sentence is true for both cases and names no record to submit to.
+  'ebilling.submission.document_core_record_mismatch': ({ filedUnder }) =>
+    filedUnder
+      ? `This email is filed under ${filedUnder.name}, so its invoice can only be submitted to that record. ${NOTHING}`
+      : `This email belongs to a different matter, project or work assignment, so it can't be submitted to this record. ${NOTHING}`,
   'ebilling.submission.correction_not_allowed': fromReasons(CORRECTION_REASON_MESSAGES, CORRECTION_FALLBACK),
-  'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING}`,
+  // Correction: the uniform 404 for an invoice the caller can't Write or that doesn't exist; a transient fault of the
+  // rights check gives the same answer (§6), so the sentence suggests trying again.
+  'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING} If you can open this invoice in Spaarke, try again.`,
   // §6 task 094 (2026-10-28): step 1 reads the saved .eml and its communication, step A files an unfiled communication
   'ebilling.submission.source_forbidden': `You can't open this email's saved copy in Spaarke, so it can't be submitted. ${NOTHING}`,
   'ebilling.submission.document_not_found': `This email's saved copy is no longer in Spaarke. ${NOTHING}`,
@@ -191,6 +292,8 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
     "This email's saved copy in Spaarke doesn't belong to its email record, so it can't be submitted from Outlook.",
   COMMUNICATION_REFILE_FORBIDDEN: `This email isn't filed yet, and you don't have permission to file it under this record. ${NOTHING}`,
   'ebilling.submission.storage_not_configured': `Invoice file storage isn't set up in Spaarke. ${NOTHING} Ask an administrator.`,
+  // ebilling task 191 (2026-11-01): checked before anything is written or filed, after the storage check.
+  'ebilling.submission.reader_not_configured': `Invoice reading isn't set up in Spaarke yet. ${NOTHING} Ask an administrator.`,
   'ebilling.tracking.unavailable': f =>
     `Spaarke couldn't give the invoice a tracking number right now. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.email_save_failed':
@@ -208,6 +311,70 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   OFFICE_012: f => `The email couldn't be uploaded to Spaarke. ${NOTHING} ${tryAgain(f)}`,
   OFFICE_INTERNAL: `Spaarke had a problem saving the email. ${NOTHING}`,
 };
+
+/** ebilling 095g: the refusal that says the record already holds two firms (the view also offers "Open in Spaarke"). */
+export const FIRM_ASSIGN_SLOTS_FULL_CODE = 'ebilling.firm_assign.slots_full';
+
+/** A 400, a 404 with no code (the route is not deployed), a 4xx code this build does not know, or no readable answer. */
+export const FIRM_ASSIGN_GENERIC_MESSAGE = "Spaarke couldn't add the firm right now. Nothing was changed.";
+
+/**
+ * An add that failed with a 5xx the pane has no sentence for (or none at all): the server may have written the firm
+ * before it failed, so this never says nothing was changed. A repeat of the same add changes nothing, so it is safe.
+ */
+export const FIRM_ASSIGN_UNCONFIRMED_MESSAGE =
+  "Spaarke couldn't confirm the firm was added. Try again; adding the same firm again is safe.";
+
+/** The same, for the law-firm list (a search is not an add, so it does not say "add the firm"). */
+export const FIRM_LIST_GENERIC_MESSAGE = "Spaarke couldn't list the law firms right now. Try again.";
+
+/** The list's uniform 404 (an external caller, no user row, or no Read on organizations): not about a record or a firm. */
+export const FIRM_LIST_DENIED_MESSAGE = "You can't list law firms in Spaarke.";
+
+const FIRM_ASSIGN_RECORD_CHANGED_MESSAGE = 'The firms on this record changed. Check them and try again.';
+
+/**
+ * ebilling 095g, `POST /api/finance/core-records/{type}/{id}/firms` and `GET /api/finance/firms` (contract "Contract
+ * for word-add-in-r1 (as built)" in `projects/ebilling-r1/notes/095g-assign-firm.md`). Keyed on `errorCode ?? reasonCode`
+ * ONLY, never on `detail`: one code can carry different `detail` texts (the route's 503 and the filter's 503 do), and
+ * the same code also appears in {@link SUBMISSION_ERROR_MESSAGES} with a submission sentence, so this is its own table.
+ * The pane only ever adds a firm, so `revoke_confirmation_required` can't happen; it gets the "changed" sentence.
+ */
+export const FIRM_ASSIGN_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
+  'sdap.access.deny.record_unavailable': "This record or firm isn't available to you, or you can't change this record.",
+  'ebilling.firm_assign.record_restricted':
+    'This record is Restricted to internal users, so no firm can be given access to it.',
+  'ebilling.firm_assign.record_secure':
+    'This record is secure, so assigning a firm would give it no access. Use Manage Access to add named people.',
+  'ebilling.firm_assign.record_limited':
+    'This record is limited, so assigning a firm would give it no access. Use Manage Access to add named people.',
+  'ebilling.firm_assign.firm_inactive': 'This firm is inactive. Choose another firm.',
+  'ebilling.firm_assign.not_a_law_firm': 'This organization is not a law firm. Choose a law firm.',
+  'ebilling.firm_assign.firm_no_access': "This firm can't be given access to this record.",
+  [FIRM_ASSIGN_SLOTS_FULL_CODE]: 'Two firms are already assigned. Replace one of them in Spaarke.',
+  'ebilling.firm_assign.firm_already_assigned': 'That firm is already assigned to this record.',
+  'ebilling.firm_assign.record_changed': FIRM_ASSIGN_RECORD_CHANGED_MESSAGE,
+  'ebilling.firm_assign.revoke_confirmation_required': FIRM_ASSIGN_RECORD_CHANGED_MESSAGE,
+  'ebilling.submission.record_unavailable': "Spaarke couldn't do this right now. Try again.",
+  'ebilling.disabled': 'Invoice submission is turned off in Spaarke.',
+};
+
+/** The sentence for a refused or failed firm list / add-a-firm request; unknown or absent codes get the generic one. */
+export function describeFirmAssignRefusal(
+  refusal: { status: number; code: string | undefined },
+  purpose: 'add' | 'list' = 'add'
+): string {
+  const entry =
+    refusal.code !== undefined && Object.prototype.hasOwnProperty.call(FIRM_ASSIGN_ERROR_MESSAGES, refusal.code)
+      ? FIRM_ASSIGN_ERROR_MESSAGES[refusal.code]
+      : undefined;
+  // The list's uniform 404 is not about a record or a firm, so it does not use the add sentence for the same code.
+  if (purpose === 'list' && refusal.code === 'sdap.access.deny.record_unavailable') return FIRM_LIST_DENIED_MESSAGE;
+  if (entry !== undefined) return render(entry, { kind: 'refused', status: refusal.status, code: refusal.code });
+  if (purpose === 'list') return FIRM_LIST_GENERIC_MESSAGE;
+  // A 5xx with no code this build knows: the write may have happened. Only a 4xx can say nothing was changed.
+  return refusal.status >= 500 ? FIRM_ASSIGN_UNCONFIRMED_MESSAGE : FIRM_ASSIGN_GENERIC_MESSAGE;
+}
 
 /** §6 "RecordOwnerRefused reasonCode": the `record_owner_*` family (ProblemDetailsHelper.RecordOwnerRefused). */
 const RECORD_OWNER_PREFIX = 'record_owner_';
@@ -243,6 +410,48 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   // Task 094 (2026-10-28): a re-attempt is allowed (EB-D-160).
   'ebilling.submission.source_changed':
     "The email's saved copy in Spaarke changed while the invoice was being processed, so it was not processed. Submit it again.",
+  // 095c-4 (2026-11-03): the job retries these and stores the code on its last attempt; a re-attempt is allowed.
+  'ebilling.submission.core_record_changed':
+    'The matter, project or work assignment changed while the invoice was being processed, so it was not processed. ' +
+    'Submit it again.',
+  'ebilling.submission.firm_changed':
+    'The firm was set or cleared while the invoice was being processed, so it was not processed. Submit it again.',
+  'ebilling.submission.changed':
+    'The submission changed in Spaarke while the invoice was being processed, so it was not processed. Submit it again.',
+  'ebilling.submission.row_version_missing':
+    "Spaarke couldn't confirm the submission's latest version, so the invoice was not processed. Submit it again.",
+  // 095e (2026-11-13, EB-D-226): the firm record's name couldn't be read to name the invoice. The job retries, then
+  // stores this on the last attempt; nothing was written; a re-attempt is allowed (EB-D-160).
+  'ebilling.submission.firm_name_unreadable':
+    "Spaarke couldn't read the firm's name, so the invoice was not processed. Submit it again.",
+  // ebilling task 191 (2026-11-01): the AI reading and line coding. The first two are permanent; the job retries the
+  // other three and stores the code on its last attempt, so a later re-submission can work.
+  'ai.invoice.read.not_configured':
+    "Invoice reading isn't set up in Spaarke yet, so the invoice was not processed. Ask an administrator.",
+  'ai.invoice.disabled':
+    'Invoice reading is turned off in Spaarke, so the invoice was not processed. Ask an administrator.',
+  'ai.invoice.binding_missing':
+    "Spaarke's invoice line coding isn't fully set up, so the invoice was not processed. Ask an administrator.",
+  'ai.invoice.completion_failed':
+    "Spaarke's AI service failed while coding the invoice lines, so the invoice was not processed. Submit it again later.",
+  'ai.invoice.output_invalid':
+    "Spaarke couldn't code the invoice lines, so the invoice was not processed. Submit it again later.",
+  // 097c (2026-10-30): the job re-checks a correction before it replaces the original invoice. A refusal there ends the
+  // submission Failed with one of these; the original invoice is unchanged, and the same request is a new attempt.
+  'ebilling.submission.correction_not_allowed.invoice_status':
+    "The original invoice's status changed before the correction was processed, so the correction was not processed.",
+  'ebilling.submission.correction_not_allowed.different_firm':
+    "The original invoice's firm changed before the correction was processed, so the correction was not processed.",
+  'ebilling.submission.correction_not_allowed.different_core_record':
+    "The original invoice's matter, project or work assignment changed before the correction was processed, so the " +
+    'correction was not processed.',
+  'ebilling.submission.correction_not_allowed.different_invoice_number':
+    "The original invoice's number changed before the correction was processed, so the correction was not processed.",
+  'ebilling.submission.correction_not_allowed.submission_in_progress':
+    'The original invoice was still being processed, so the correction was not processed. Submit the correction again ' +
+    'once it has finished.',
+  'ebilling.submission.correction_target_unavailable':
+    'The original invoice was no longer available when the correction was processed, so the correction was not processed.',
   'ebilling.submission.blocked': 'The invoice was rejected by a billing rule.',
   'ebilling.submission.returned': 'The invoice was returned to the firm.',
 };

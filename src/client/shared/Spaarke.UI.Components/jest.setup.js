@@ -1,6 +1,13 @@
 // Jest setup file
 require('@testing-library/jest-dom');
 
+// Async queries (`findBy*`, `waitFor`) wait up to 3 s instead of Testing Library's 1 s default. The nightly client run uses
+// 2 workers on a shared CI runner, where a file's first (cold) Fluent render plus one async re-render can take over 1 s:
+// worklistNarrative.test.tsx failed that way on 2026-11-03 (run 41593552436) and passes in ~185 ms when the runner is idle.
+// A passing query returns as soon as it matches, so this costs nothing unless a test fails; it stays under Jest's 5 s test
+// timeout so a real failure still reports Testing Library's message. No test here awaits a rejected query.
+require('@testing-library/react').configure({ asyncUtilTimeout: 3000 });
+
 // Mock window.matchMedia (required for Fluent UI components)
 Object.defineProperty(window, 'matchMedia', {
   writable: true,

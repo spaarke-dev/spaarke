@@ -60,10 +60,16 @@ public class CommunicationServiceTests
             .Setup(f => f.ForApp())
             .Returns(CreateMockGraphClient());
 
+        // Issue #2033: a send as user needs the caller's enabled systemuser; every caller here resolves to one.
+        var communicationDataverse = new Mock<ICommunicationDataverseService>();
+        communicationDataverse
+            .Setup(c => c.QuerySystemUserByAzureAdOidAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EnabledSenderSystemUserId);
+
         _sut = new CommunicationService(
             CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object),
             senderValidator,
-            Mock.Of<ICommunicationDataverseService>(),
+            communicationDataverse.Object,
             Mock.Of<IGenericEntityService>(),
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not tested here
@@ -133,7 +139,10 @@ public class CommunicationServiceTests
     /// <summary>
     /// Creates a CommunicationService with a custom options configuration (e.g., no senders).
     /// </summary>
-    private CommunicationService CreateServiceWithOptions(CommunicationOptions options)
+    private CommunicationService CreateServiceWithOptions(
+        CommunicationOptions options,
+        ICommunicationDataverseService? communicationDataverse = null,
+        IGenericEntityService? genericEntityService = null)
     {
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(),
@@ -148,8 +157,8 @@ public class CommunicationServiceTests
         return new CommunicationService(
             CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object),
             senderValidator,
-            Mock.Of<ICommunicationDataverseService>(),
-            Mock.Of<IGenericEntityService>(),
+            communicationDataverse ?? Mock.Of<ICommunicationDataverseService>(),
+            genericEntityService ?? Mock.Of<IGenericEntityService>(),
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
@@ -365,7 +374,7 @@ public class CommunicationServiceTests
 
     #region Phase 7: Individual Send (User Mode)
 
-    private static HttpContext CreateMockHttpContext(string email = "user@contoso.com", string? oid = null)
+    private static HttpContext CreateMockHttpContext(string email = "user@contoso.com", string? oid = SenderOid)
     {
         var claims = new List<Claim>
         {
@@ -615,6 +624,122 @@ public class CommunicationServiceTests
         var ex = await act.Should().ThrowAsync<SdapProblemException>();
         ex.Which.Code.Should().Be("GRAPH_SEND_FAILED");
         ex.Which.Title.Should().Be("Email Send Failed");
+    }
+
+    #endregion
+
+    #region Issue #2033: a send-as-user email needs the caller's ENABLED Dataverse user (fail closed)
+
+    // Owner decision: a user disabled in Dataverse but still active in Entra is REFUSED, not allowed-and-recorded. The read is
+    // the existing oid -> systemuserid resolution, which excludes a disabled user (#1576), so "no enabled systemuser" refuses.
+
+    private const string SenderOid = "20330000-0000-0000-0000-000000000001";
+    private static readonly Guid EnabledSenderSystemUserId = Guid.Parse("20330000-0000-0000-0000-000000000002");
+
+    private static SendCommunicationRequest UserModeEmail() => CreateValidRequest() with { SendMode = SendMode.User };
+
+    private (CommunicationService Service, Mock<ICommunicationDataverseService> Comm, Mock<IGenericEntityService> Writes) UserModeService(
+        Action<Mock<ICommunicationDataverseService>> configureSenderRead)
+    {
+        _graphClientFactoryMock
+            .Setup(f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateMockGraphClient());
+
+        var comm = new Mock<ICommunicationDataverseService>();
+        configureSenderRead(comm);
+        var writes = new Mock<IGenericEntityService>();
+        return (CreateServiceWithOptions(CreateDefaultOptions(), comm.Object, writes.Object), comm, writes);
+    }
+
+    private void AssertNothingSentOrWritten(Mock<ICommunicationDataverseService> comm, Mock<IGenericEntityService> writes)
+    {
+        _graphClientFactoryMock.Verify(
+            f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Never, "no mail is sent");
+        _graphClientFactoryMock.Verify(f => f.ForApp(), Times.Never, "no mail is sent");
+        writes.Invocations.Should().BeEmpty("no record is read for, or written by, a refused send");
+        comm.Invocations.Where(i => i.Method.Name != nameof(ICommunicationDataverseService.QuerySystemUserByAzureAdOidAsync))
+            .Should().BeEmpty("the sender read is the only Dataverse call before the refusal");
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_CallerDisabledInDataverse_Refuses403AndSendsAndWritesNothing()
+    {
+        // The existing resolution answers null for a disabled systemuser (isdisabled = false filter).
+        var (service, comm, writes) = UserModeService(c => c
+            .Setup(x => x.QuerySystemUserByAzureAdOidAsync(SenderOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null));
+
+        var act = () => service.SendAsync(UserModeEmail(), CreateMockHttpContext(oid: SenderOid));
+
+        var ex = await act.Should().ThrowAsync<SdapProblemException>();
+        ex.Which.StatusCode.Should().Be(403);
+        ex.Which.Code.Should().Be("sdap.communication.sender_disabled");
+        AssertNothingSentOrWritten(comm, writes);
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_SenderReadFaults_Refuses503AndSendsAndWritesNothing()
+    {
+        var (service, comm, writes) = UserModeService(c => c
+            .Setup(x => x.QuerySystemUserByAzureAdOidAsync(SenderOid, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable")));
+
+        var act = () => service.SendAsync(UserModeEmail(), CreateMockHttpContext(oid: SenderOid));
+
+        var ex = await act.Should().ThrowAsync<SdapProblemException>();
+        ex.Which.StatusCode.Should().Be(503);
+        ex.Which.Code.Should().Be("sdap.communication.sender_status_unavailable");
+        AssertNothingSentOrWritten(comm, writes);
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_CallerWithoutObjectId_Refuses401AndSendsAndWritesNothing()
+    {
+        // No oid: the sender's Dataverse user cannot be read, so it cannot be confirmed enabled (CallerResolution: null is 401).
+        var (service, comm, writes) = UserModeService(_ => { });
+
+        var act = () => service.SendAsync(UserModeEmail(), CreateMockHttpContext(oid: null));
+
+        var ex = await act.Should().ThrowAsync<SdapProblemException>();
+        ex.Which.StatusCode.Should().Be(401);
+        ex.Which.Code.Should().Be("sdap.communication.sender_unidentified");
+        AssertNothingSentOrWritten(comm, writes);
+        comm.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SendAsync_UserMode_CallerEnabled_SendsAsBeforeAndStampsSentBy()
+    {
+        // Must-not-fire: an enabled caller sends, and the record names them in sprk_sentby.
+        var (service, _, writes) = UserModeService(c => c
+            .Setup(x => x.QuerySystemUserByAzureAdOidAsync(SenderOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EnabledSenderSystemUserId));
+        Microsoft.Xrm.Sdk.Entity? created = null;
+        writes.Setup(w => w.CreateAsync(It.IsAny<Microsoft.Xrm.Sdk.Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Microsoft.Xrm.Sdk.Entity, CancellationToken>((e, _) => created = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        var response = await service.SendAsync(UserModeEmail(), CreateMockHttpContext(oid: SenderOid));
+
+        response.Status.Should().Be(CommunicationStatus.Send);
+        _graphClientFactoryMock.Verify(
+            f => f.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        created.Should().NotBeNull();
+        created!.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_sentby")!.Id.Should().Be(EnabledSenderSystemUserId);
+    }
+
+    [Fact]
+    public async Task SendAsync_SharedMailbox_CallerDisabledInDataverse_IsUnchanged()
+    {
+        // Out of scope by decision: a shared-mailbox send is not the caller sending as themselves. It still goes out, unstamped.
+        var (service, _, _) = UserModeService(c => c
+            .Setup(x => x.QuerySystemUserByAzureAdOidAsync(SenderOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null));
+
+        var response = await service.SendAsync(CreateValidRequest(), CreateMockHttpContext(oid: SenderOid));
+
+        response.Status.Should().Be(CommunicationStatus.Send);
+        _graphClientFactoryMock.Verify(f => f.ForApp(), Times.AtLeastOnce);
     }
 
     #endregion

@@ -161,7 +161,7 @@ public class EventReadPathTests
     public void ExternalCreateEventBody_WritesTheLiveColumns_AndDefaultsToOpen()
     {
         var projectId = Guid.NewGuid();
-        var body = ExternalDataService.BuildEventCreatePayload(projectId,
+        var body = ExternalDataService.BuildEventCreatePayload(ExternalDataService.TodoRootKind.Project, projectId,
             new CreateExternalEventRequest { SprkName = "Kick-off", SprkDuedate = "2026-10-20" }, TeamId);
 
         body["sprk_eventname"].Should().Be("Kick-off");
@@ -179,7 +179,7 @@ public class EventReadPathTests
     [InlineData(659490001)]  // Open — allowed
     public void ExternalCreateEventBody_AcceptsDraftOrOpen(int status)
     {
-        var body = ExternalDataService.BuildEventCreatePayload(Guid.NewGuid(),
+        var body = ExternalDataService.BuildEventCreatePayload(ExternalDataService.TodoRootKind.Project, Guid.NewGuid(),
             new CreateExternalEventRequest { SprkName = "Kick-off", SprkStatus = status }, TeamId);
 
         body["statuscode"].Should().Be(status);
@@ -194,7 +194,7 @@ public class EventReadPathTests
     public void ExternalCreateEventBody_RefusesAnyOtherStatus(int status)
     {
         // Review F9: an external caller must not be able to write an arbitrary status integer.
-        var act = () => ExternalDataService.BuildEventCreatePayload(Guid.NewGuid(),
+        var act = () => ExternalDataService.BuildEventCreatePayload(ExternalDataService.TodoRootKind.Project, Guid.NewGuid(),
             new CreateExternalEventRequest { SprkName = "Kick-off", SprkStatus = status }, TeamId);
 
         act.Should().Throw<ArgumentOutOfRangeException>();
@@ -258,8 +258,11 @@ public class EventReadPathTests
 
         documented.Should().BeEquivalentTo(new Dictionary<string, int>
         {
-            ["Created"] = EventLogAction.Created, ["Updated"] = EventLogAction.Updated, ["Completed"] = EventLogAction.Completed,
-            ["Cancelled"] = EventLogAction.Cancelled, ["Deleted"] = EventLogAction.Deleted,
+            ["Created"] = EventLogAction.Created,
+            ["Updated"] = EventLogAction.Updated,
+            ["Completed"] = EventLogAction.Completed,
+            ["Cancelled"] = EventLogAction.Cancelled,
+            ["Deleted"] = EventLogAction.Deleted,
         });
     }
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────

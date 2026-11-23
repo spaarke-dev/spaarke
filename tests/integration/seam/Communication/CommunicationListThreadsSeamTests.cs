@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
@@ -125,6 +126,91 @@ public class CommunicationListThreadsSeamTests
             "sprk_regardingreportcard is not a column on sprk_communicationthread — selecting it 400s the query");
         threadQuery!.Should().Contain("_sprk_regardingmatter_value",
             "the thread projection must still carry the valid typed regarding lookups for the open-record affordance");
+    }
+
+    // ── Fix round 3e: a regarding column the read did not return leaves the anchor UNKNOWN: the thread is withheld ───────────
+    // Existing fail-closed path of this list: a row that cannot be read (no thread id) is dropped from the list (never a 500).
+
+    [Fact]
+    public async Task ListThreadsAsync_EveryRegardingColumn_IsSelected()
+    {
+        string? threadQuery = null;
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => threadQuery = odata)
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+
+        await Sut().ListThreadsAsync(Caller(), search: null, top: null, pageToken: null, CancellationToken.None);
+
+        var select = threadQuery!.Split("$select=")[1].Split('&')[0].Split(',');
+        select.Should().Contain(ThreadRegardingColumns());
+    }
+
+    // Fix round 3g: the single read behind the send route's thread anchor (ReadVisibleThreadRegardingAsync) is pinned on its own, with the
+    // same expected set as the list: a column it does not select reaches ResolveRegardingFromRow as ABSENT, which is an unknown anchor.
+    [Fact]
+    public async Task ReadVisibleThreadRegardingAsync_EveryRegardingColumn_IsSelected()
+    {
+        string? threadQuery = null;
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => threadQuery = odata)
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+
+        var target = await Sut().ReadVisibleThreadRegardingAsync(Guid.NewGuid(), Caller(), CancellationToken.None);
+
+        target.Should().BeNull("a thread the caller cannot see (no row) has no anchor");
+        threadQuery.Should().NotBeNull();
+        var select = threadQuery!.Split("$select=")[1].Split('&')[0].Split(',');
+        select.Should().Contain(ThreadRegardingColumns());
+        select.Should().NotContain("_sprk_regardingreportcard_value", "that column is not on sprk_communicationthread");
+    }
+
+    [Fact]
+    public async Task ListThreadsAsync_ARowThatDidNotCarryARegardingColumn_IsWithheld_NotListedAsRecordLess()
+    {
+        var kept = Guid.NewGuid();
+        var withheld = Guid.NewGuid();
+        var row = ThreadRow(withheld, "Anchor unknown", ThreadTypeRecordAnchored, "2026-07-19T12:00:00.000Z");
+        row.Remove("_sprk_regardingmatter_value"); // the read did not return it
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { row, ThreadRow(kept, "Known", ThreadTypeDirect, "2026-07-18T12:00:00.000Z") });
+
+        var result = await Sut().ListThreadsAsync(Caller(), search: null, top: null, pageToken: null, CancellationToken.None);
+
+        result.Threads.Should().ContainSingle(t => t.ThreadId == kept);
+        result.Threads.Should().NotContain(t => t.ThreadId == withheld, "an unknown anchor is withheld, never a record-less thread");
+    }
+
+    [Fact]
+    public async Task ListThreadsAsync_ARowWithANonGuidRegardingValue_IsWithheld()
+    {
+        var withheld = Guid.NewGuid();
+        var row = ThreadRow(withheld, "Malformed", ThreadTypeRecordAnchored, "2026-07-19T12:00:00.000Z");
+        row["_sprk_regardingmatter_value"] = El("not-a-guid");
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { row });
+
+        var result = await Sut().ListThreadsAsync(Caller(), search: null, top: null, pageToken: null, CancellationToken.None);
+
+        result.Threads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListThreadsAsync_AWithheldRowAtThePageEnd_NeverHidesAFurtherPage()
+    {
+        // pageSize 2: rows a, b (withheld), c (the over-fetch row). The page is a and b, so a further page exists, and the cursor
+        // is taken from the last row read (b), not from the last row kept.
+        var a = ThreadRow(Guid.NewGuid(), "a", ThreadTypeDirect, "2026-07-19T12:00:00.000Z");
+        var b = ThreadRow(Guid.NewGuid(), "b", ThreadTypeRecordAnchored, "2026-07-18T12:00:00.000Z");
+        b.Remove("_sprk_regardingmatter_value");
+        var c = ThreadRow(Guid.NewGuid(), "c", ThreadTypeDirect, "2026-07-17T12:00:00.000Z");
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { a, b, c });
+
+        var result = await Sut().ListThreadsAsync(Caller(), search: null, top: 2, pageToken: null, CancellationToken.None);
+
+        result.Threads.Should().ContainSingle();
+        result.HasMore.Should().BeTrue("the over-fetch row proves a further page, whatever was withheld from this one");
+        result.NextPageToken.Should().NotBeNull();
     }
 
     [Fact]
@@ -402,13 +488,25 @@ public class CommunicationListThreadsSeamTests
     // Row builder + paging helpers (OData JSON shape — mirrors the sibling read seam builders)
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
-    private static Dictionary<string, JsonElement> ThreadRow(Guid id, string name, int threadType, string createdOnIso) => new()
+    /// <summary>Fix round 3e: every typed regarding column of a thread row (the list projects each of them).</summary>
+    private static IEnumerable<string> ThreadRegardingColumns() => RegardingFieldMap.All
+        .Where(x => x.RegardingField != "sprk_regardingreportcard")
+        .Select(x => $"_{x.RegardingField}_value");
+
+    // A Web API row lists an empty lookup as an explicit null, so the double returns every selected regarding column.
+    private static Dictionary<string, JsonElement> ThreadRow(Guid id, string name, int threadType, string createdOnIso)
     {
-        ["sprk_communicationthreadid"] = El(id.ToString()),
-        ["sprk_name"] = El(name),
-        ["sprk_threadtype"] = El(threadType),
-        ["createdon"] = El(createdOnIso),
-    };
+        var row = new Dictionary<string, JsonElement>
+        {
+            ["sprk_communicationthreadid"] = El(id.ToString()),
+            ["sprk_name"] = El(name),
+            ["sprk_threadtype"] = El(threadType),
+            ["createdon"] = El(createdOnIso),
+        };
+        foreach (var column in ThreadRegardingColumns())
+            row[column] = JsonSerializer.SerializeToElement<string?>(null);
+        return row;
+    }
 
     private static DateTimeOffset CreatedOn(Dictionary<string, JsonElement> row)
         => DateTimeOffset.Parse(row["createdon"].GetString()!, System.Globalization.CultureInfo.InvariantCulture,

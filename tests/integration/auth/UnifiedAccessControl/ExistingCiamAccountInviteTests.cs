@@ -94,12 +94,15 @@ public class ExistingCiamAccountInviteTests
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             Request() with
             {
-                RecordId = _matter, InvitedTenantId = invitedTenantId, Email = email, SendAsPortalAccount = sendAsPortalAccount,
+                RecordId = _matter,
+                InvitedTenantId = invitedTenantId,
+                Email = email,
+                SendAsPortalAccount = sendAsPortalAccount,
             },
             _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             ciam ?? _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), organizations ?? InviteOrganizationTestKit.PortalOnly(),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
-            _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
     /// <summary>The /invite core, as the route runs it.</summary>
     private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(
@@ -589,6 +592,56 @@ public class ExistingCiamAccountInviteTests
     }
 
     /// <summary>
+    /// Task 193 (V-fix item 4): no invite log line names the invitee's email — it names the contact id and the trace id
+    /// instead — on the new-account and ExistingAccount paths, with the invite email sent or failed, and through
+    /// /invite-and-grant. MUTATION: putting {Email} back into any of these templates fails its row.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account", false)]
+    [InlineData("existing-account", false)]
+    [InlineData("new-account", true)]
+    [InlineData("existing-account", true)]
+    [InlineData("invite-and-grant", false)]
+    public async Task NoInviteLogLine_CarriesTheInviteeEmail(string path, bool emailFails)
+    {
+        var log = new BindingLogCapture<Program>();
+        var contact = ContactOnBranch(path == "invite-and-grant" ? "new-account" : path);
+        if (emailFails)
+        {
+            _h.Emails.InviteEmailFailure = MailboxThrottled();
+        }
+
+        if (path == "invite-and-grant")
+        {
+            (await InviteAndGrant(log)).Should().BeOfType<Ok<InviteAndGrantResponse>>();
+        }
+        else
+        {
+            await Invite(logger: log);
+        }
+
+        log.Messages.Should().NotBeEmpty("the invite logs its steps");
+        log.Messages.Should().NotContain(m => m.Contains(Email, StringComparison.OrdinalIgnoreCase));
+        log.Messages.Should().Contain(m => m.Contains("[EXT-INVITE]") && m.Contains(contact.ToString()),
+            "the contact id identifies the invite in place of the email");
+    }
+
+    /// <summary>
+    /// Task 193 (V-fix item 4): the failed-oid-write exception (it reaches the 500 handler's log) names the contact, never
+    /// the invitee's email. MUTATION: putting the email back into the message fails this test.
+    /// </summary>
+    [Fact]
+    public async Task AFailedOidWrite_ItsExceptionMessage_NamesTheContact_NotTheEmail()
+    {
+        var contact = UnboundContact();
+        _h.Identities.FailBind = true;
+
+        var thrown = await FluentActions.Invoking(() => Invite()).Should().ThrowAsync<InvalidOperationException>();
+
+        thrown.Which.Message.Should().NotContainEquivalentOf(Email).And.Contain(contact.ToString("D"));
+    }
+
+    /// <summary>
     /// Owner Q6: a failed oid write after the marker landed keeps the 500, and its reason now says "retry the invite"
     /// (no email was sent, so nobody holds a code; the first sign-in no longer repairs it).
     /// </summary>
@@ -768,14 +821,16 @@ public class ExistingCiamAccountInviteTests
     /// </summary>
     [Theory]
     [InlineData("workforce-bound", ContactBindingDecision.InviteWorkforceBoundContact)]
+    [InlineData("workforce-home-bound", ContactBindingDecision.InviteWorkforceHomeContact)]
     [InlineData("linked-to-internal-user", ContactBindingDecision.InviteContactLinkedToInternalUser)]
     public async Task AContactBoundBeforeItsMark_IsNotMarked_AndTheInviteIsRefusedAsForABoundContact(string how, string reasonCode)
     {
         var contact = Guid.NewGuid();
         var workforceOid = Guid.NewGuid();
-        if (how == "workforce-bound")
+        if (how is "workforce-bound" or "workforce-home-bound")
         {
-            _h.Identities.AddContact(contact, email: Email, oid: workforceOid.ToString("D"), plane: IdentityPlaneMarker.Workforce);
+            _h.Identities.AddContact(contact, email: Email, oid: workforceOid.ToString("D"),
+                plane: how == "workforce-bound" ? IdentityPlaneMarker.Workforce : IdentityPlaneMarker.WorkforceHome);
         }
         else
         {
@@ -789,9 +844,17 @@ public class ExistingCiamAccountInviteTests
         outcome.Refusal!.ReasonCode.Should().Be(reasonCode);
         outcome.Failure.Should().BeNull();
         ShouldBeUnmarked(contact);
-        _h.Identities.Contacts[contact].Flag.Should().NotBeNull("the collision is flagged for an operator, as today");
-        _h.Identities.Contacts[contact].Flag!.Reason.Should().Be(IdentityCollisionReason.InviteMatchesWorkforceContact);
-        if (how == "workforce-bound")
+        if (how == "workforce-home-bound")
+        {
+            _h.Identities.Contacts[contact].Flag.Should().BeNull("a WorkforceHome contact is not a collision; nothing is flagged");
+        }
+        else
+        {
+            _h.Identities.Contacts[contact].Flag.Should().NotBeNull("the collision is flagged for an operator, as today");
+            _h.Identities.Contacts[contact].Flag!.Reason.Should().Be(IdentityCollisionReason.InviteMatchesWorkforceContact);
+        }
+
+        if (how is "workforce-bound" or "workforce-home-bound")
         {
             _h.Identities.Contacts[contact].Oid.Should().Be(workforceOid.ToString("D"), "the workforce binding is untouched");
         }
@@ -1704,6 +1767,77 @@ public class ExistingCiamAccountInviteTests
 
         problem.StatusCode.Should().Be(409);
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteWorkforceBoundContact);
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
+    }
+
+    /// <summary>
+    /// MUST FIRE: /invite and /invite-and-grant to a contact bound on the WorkforceHome plane (a workforce contact who
+    /// self-registered with their company account) is a 409 that is NOT an identity collision: its own reason code, the
+    /// "Already signs in with a work account" title, no collision flag on the healthy contact, and nothing created, written,
+    /// granted or sent. Staff use Grant access.
+    /// </summary>
+    [Fact]
+    public async Task AnInvite_ToAWorkforceHomeBoundContact_Is409_NotACollision_NothingFlagged_NothingWritten()
+    {
+        var contact = Guid.NewGuid();
+        var homeOid = Guid.NewGuid().ToString("D");
+        _h.Identities.AddContact(contact, email: Email, oid: homeOid, plane: IdentityPlaneMarker.WorkforceHome);
+
+        foreach (var result in new[] { await InviteRoute(), await InviteAndGrant() })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(409);
+            problem.ProblemDetails.Title.Should().Be("Already signs in with a work account");
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteWorkforceHomeContact);
+            problem.ProblemDetails.Detail.Should().Contain("Grant access");
+        }
+
+        _h.Identities.Contacts[contact].Flag.Should().BeNull("a healthy WorkforceHome contact is not flagged as a collision");
+        _h.Identities.Contacts[contact].Oid.Should().Be(homeOid, "the home binding is untouched");
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
+        _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
+        _h.Identities.Writes.Should().BeEmpty("nothing is flagged, marked or bound");
+        _h.Grants.Rows.Should().BeEmpty("invite-and-grant writes no grant");
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>MUST NOT FIRE: the Spaarke-tenant Workforce plane keeps the "Identity collision" refusal and its flag.</summary>
+    [Fact]
+    public async Task AnInvite_ToAWorkforceBoundContact_StaysAnIdentityCollision_AndIsFlagged()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.Workforce);
+
+        foreach (var result in new[] { await InviteRoute(), await InviteAndGrant() })
+        {
+            var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+            problem.StatusCode.Should().Be(409);
+            problem.ProblemDetails.Title.Should().Be("Identity collision");
+            problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteWorkforceBoundContact);
+        }
+
+        _h.Identities.Contacts[contact].Flag.Should().NotBeNull("the collision is flagged for an operator, as before");
+        _h.Identities.Contacts[contact].Flag!.Reason.Should().Be(IdentityCollisionReason.InviteMatchesWorkforceContact);
+        _h.Grants.Rows.Should().BeEmpty();
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>A work-account invite to a WorkforceHome-bound contact is refused with the new, non-collision code.</summary>
+    [Fact]
+    public async Task AWorkAccountInvite_ToAWorkforceHomeBoundContact_IsRefused_NotAsACollision()
+    {
+        var contact = Guid.NewGuid();
+        _h.Identities.AddContact(contact, email: Email, oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.WorkforceHome);
+        var handler = new InviteOrganizationTestKit.DiscoveryHandler()
+            .Answer(HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(PartnerTenant));
+
+        var problem = (await InviteRoute(organizations: Organizations(handler))).Should().BeOfType<ProblemHttpResult>().Subject;
+
+        problem.StatusCode.Should().Be(409);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteWorkforceHomeContact);
+        _h.Identities.Contacts[contact].Flag.Should().BeNull();
         _h.Identities.Contacts[contact].InvitedEmailHash.Should().BeNull();
     }
 

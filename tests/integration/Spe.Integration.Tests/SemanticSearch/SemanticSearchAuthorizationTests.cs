@@ -487,6 +487,8 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
         InternalSystemUser(),
         // Task 188 round 3: the caller is an internal systemuser, so the external document narrowing never runs.
         (_, _) => throw new InvalidOperationException("The document narrowing was not expected to run (internal caller)."),
+        // uac-r2 task 191h: likewise the external visibility predicate never runs for an internal caller.
+        (_, _) => throw new InvalidOperationException("The external visibility predicate was not expected to run (internal caller)."),
         Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim>.Instance);
 
     private static readonly Guid InternalSystemUserId = Guid.Parse("0a0a0a0a-0000-0000-0000-0000000001a8");

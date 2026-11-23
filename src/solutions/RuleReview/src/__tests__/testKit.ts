@@ -57,7 +57,7 @@ export function summary(overrides: Partial<RuleSetSummary> = {}): RuleSetSummary
 }
 
 export function detail(proposals: ProposalView[] = [proposal()], overrides: Partial<RuleSetDetail> = {}): RuleSetDetail {
-  return { ruleSet: summary(), sourceDocumentId: null, notConverted: [], proposals, ...overrides };
+  return { ruleSet: summary(), notConverted: [], proposals, ...overrides };
 }
 
 export const ok = <T>(value: T): ApiResult<T> => ({ ok: true, value });
@@ -76,8 +76,6 @@ export function mockApi(): MockApi {
   return {
     list: never('list'),
     get: never('get'),
-    create: never('create'),
-    draft: never('draft'),
     edit: never('edit'),
     accept: never('accept'),
     reject: never('reject'),

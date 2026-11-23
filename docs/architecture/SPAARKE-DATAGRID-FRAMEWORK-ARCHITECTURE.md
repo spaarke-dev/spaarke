@@ -200,6 +200,38 @@ When to choose host filters vs. configjson chips:
 | **`hostFilters` prop** | The filter UI lives outside the grid (e.g. the Calendar widget's filter row + the calendar strip). Host-owned, prop-driven. |
 | **`behavior.membershipFilter`** | "Records the caller is on" (owner + assigned-person roles), broader than `ownerid eq-userid`. Declarative in the config record; resolved at query time via the shared membership service. See §6.6. |
 
+### Host commands (command bar slot, added 2026-11-13 by spaarke-SPA-external-access-platform-r4 task 010)
+
+The command bar's items come from the configuration record's `commandBar.primary` / `secondary` plus the built-ins (`showDefaultCommands`). A host that needs one more action in the toolbar, whose behaviour it owns (for example "Submit invoice", which opens a host dialog or navigates), passes it with `hostCommands` instead of editing a live configuration record or rendering a button beside the grid. The grid places and renders the button; the host owns what it does. Generic by design: no entity names, no Xrm, no data access.
+
+```tsx
+<DataGrid
+  configId="…"
+  hostCommands={useMemo(
+    () => [{ id: 'submit-invoice', label: 'Submit invoice', icon: <AddRegular />, onInvoke: openSubmit }],
+    [openSubmit]
+  )}
+/>
+```
+
+| Property | Type | Purpose |
+|---|---|---|
+| `hostCommands` | `ReadonlyArray<DataGridHostCommand>` | Host-supplied command bar items. Absent or empty: the bar is exactly what the configuration and built-ins give (no change for any other grid). |
+| `DataGridHostCommand.id` | `string` | Stable unique id; reported to `onCommandInvoke(commandId, selectedIds, ctx)` and used as the React key. |
+| `DataGridHostCommand.label` | `string` | Visible label, accessible name and tooltip. |
+| `DataGridHostCommand.icon` | `React.ReactElement` (optional) | Icon element, for example a Fluent icon. |
+| `DataGridHostCommand.onInvoke` | `() => void \| Promise<void>` | Runs on activation. A thrown error is logged (`console.error`), not rethrown. |
+| `DataGridHostCommand.disabled` | `boolean` (optional) | Render disabled. |
+
+Rules (the placement and collision behaviour is fixed, not configurable):
+
+- **Placement.** Host commands come FIRST in the effective item list, in the order supplied, ahead of the configured and built-in items. The grid mounts the bar with `inlineLimit={3}`, so the first three items are inline subtle buttons and the rest are in the `⋯` overflow menu; supplying many host commands therefore pushes the built-ins (Refresh, Delete, New …) into the overflow menu.
+- **Collisions.** A host command NEVER replaces a configured or built-in item: a built-in such as `delete-selected` carries its own confirmation and selection gating, which a host must not bypass. A host command whose `id` equals the `id` of a configured item, or of ANY built-in action (`refresh`, `delete-selected`, `create-form`, `export-excel`, `edit-columns`, `edit-filters`, whether or not that built-in is shown), is SKIPPED (not rendered) and a `console.warn` names the id. Choose an id of your own. Among host commands with the same `id`, the first wins.
+- **Appearance.** Subtle buttons only: there is no primary call-to-action in the grid bar (the same rule as every other item).
+- **Observer.** `onCommandInvoke` fires first for a host command, as for every command; no built-in handler runs for it.
+- **Identity.** Pass a referentially stable array (`useMemo`); the item list is rebuilt when its identity changes.
+- Not a substitute for `onCreateNew` (which re-routes the built-in New) or the handler registry (which gives a configured `custom` item its behaviour): use those when the item is authored in the configuration record.
+
 ---
 
 ## 6.6. Membership filter — `behavior.membershipFilter` (added 2026-07-22 by spaarkeai-assistant-enhancements-r1 task 050)

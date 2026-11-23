@@ -227,6 +227,121 @@ public class AssignedAccessReconciliationJobTests
         _h.Grants.ActiveRowsOf(recent).Should().ContainSingle("a grid edit is picked up on the next tick");
     }
 
+    /// <summary>Fix round 3 (K2): the ranking window IS the recent-change scans' window, not a separate literal.</summary>
+    [Fact]
+    public void TheRankingWindow_IsTheRecentScanWindow()
+    {
+        AssignedAccessReconciliationJob.RecentChangeWindow.Should().Be(AssignedAccessReconciliationJob.RecentScanWindow);
+        AssignedAccessReconciliationJob.RecentChangeWindow.Should().Be(TimeSpan.FromMinutes(20));
+    }
+
+    /// <summary>The last root in the rotation's order (it sorts after every random id), so only the ranking can reach it.</summary>
+    private static readonly Guid LastInRotation = Guid.Parse("ffffffff-ffff-4fff-bfff-ffffffffffff");
+
+    /// <summary>
+    /// Fix round 3 (K2): a root changed 18 minutes ago (inside the scan window, outside the old 15-minute ranking window) is
+    /// taken first when the run rotates. It is the LAST root in the rotation's own order (each run here is a new job, so the
+    /// rotation starts at the first root), so only the ranking reaches it.
+    /// </summary>
+    [Fact]
+    public async Task ARootChangedEighteenMinutesAgo_IsTakenFirst_WhenTheRunRotates()
+    {
+        for (var i = 0; i < AssignedAccessReconciliationJob.MaxRootsPerRun + 5; i++)
+            AssignedMatter();
+        _h.Store.Assign(ExternalGrantRootType.Matter, LastInRotation, Attorney1, _h.Contact());
+        _h.Store.Modified[LastInRotation] = _h.Time.GetUtcNow().AddMinutes(-18);
+
+        await RunAsync();
+
+        _h.Grants.ActiveRowsOf(LastInRotation).Should().ContainSingle("ranked by its change time, ahead of the rotation");
+    }
+
+    /// <summary>
+    /// Fix round 3 (K2): a root known only through its LEDGER row ranks by that row's change time too. Its assignment was
+    /// cleared (so no scan of the columns names it) and it is last in the rotation's order.
+    /// </summary>
+    [Fact]
+    public async Task ALedgerOnlyRootWhoseRowChangedRecently_IsTakenFirst_WhenTheRunRotates()
+    {
+        var contact = _h.Contact();
+        _h.Store.Assign(ExternalGrantRootType.Matter, LastInRotation, Attorney1, contact);
+        await RunAsync(revokeOnChange: true); // the only root: granted, a live ledger row exists
+        _h.Grants.ActiveRowsOf(LastInRotation, contact).Should().ContainSingle();
+        for (var i = 0; i < AssignedAccessReconciliationJob.MaxRootsPerRun + 5; i++)
+            AssignedMatter();
+        _h.Store.Assign(ExternalGrantRootType.Matter, LastInRotation, Attorney1, null); // a grid edit
+        _h.Store.Modified[LastInRotation] = _h.Time.GetUtcNow().AddMinutes(-3);
+
+        await RunAsync(revokeOnChange: true);
+
+        _h.Grants.ActiveRowsOf(LastInRotation, contact).Should().BeEmpty("its ledger row's change time ranked it into this run");
+    }
+
+    /// <summary>
+    /// Task 049 (F2): a root changed within the recent window is a candidate even when the full scan's page does not reach
+    /// it — the backstop for a create whose queued grant did not complete.
+    /// </summary>
+    [Fact]
+    public async Task ARecentRootPastTheFullScansBound_IsStillACandidate_AndIsGranted()
+    {
+        AssignedMatter();
+        var recent = AssignedMatter();
+        _h.Store.Modified[recent] = _h.Time.GetUtcNow().AddMinutes(-1);
+        _h.Store.PastScanBound[recent] = true;
+
+        var result = await RunAsync();
+
+        _h.Grants.ActiveRowsOf(recent).Should().ContainSingle("the recent-change scan names it, whatever the full scan kept");
+        Result(result).GetProperty("candidates").GetInt32().Should().Be(2);
+        Result(result).GetProperty("truncated").GetBoolean().Should().BeTrue("the full scan still reports its own bound");
+    }
+
+    /// <summary>Task 049 (F2): a root changed before the recent window and past the full scan's bound waits for the rotation.</summary>
+    [Fact]
+    public async Task ARootChangedBeforeTheRecentWindow_AndPastTheFullScansBound_IsNotACandidateThisRun()
+    {
+        var stale = AssignedMatter();
+        _h.Store.Modified[stale] = _h.Time.GetUtcNow() - AssignedAccessReconciliationJob.RecentScanWindow - TimeSpan.FromMinutes(1);
+        _h.Store.PastScanBound[stale] = true;
+
+        var result = await RunAsync();
+
+        _h.Grants.ActiveRowsOf(stale).Should().BeEmpty();
+        Result(result).GetProperty("candidates").GetInt32().Should().Be(0);
+    }
+
+    /// <summary>Task 049 (F2): a root both scans return is ONE candidate, materialized once.</summary>
+    [Fact]
+    public async Task ARootBothScansReturn_IsOneCandidate_MaterializedOnce()
+    {
+        var matter = AssignedMatter();
+        _h.Store.Modified[matter] = _h.Time.GetUtcNow().AddMinutes(-1);
+
+        var result = await RunAsync();
+
+        _h.Store.RecentScanCalls.Should().Be(3, "one recent-change scan per root type");
+        Result(result).GetProperty("candidates").GetInt32().Should().Be(1);
+        Result(result).GetProperty("materialized").GetInt32().Should().Be(1);
+        _h.Grants.ActiveRowsOf(matter).Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Task 049 (F2): the recent window is sized from the tick (the cron), with a margin of three more ticks, never a bare
+    /// literal; the run reads back exactly that far.
+    /// </summary>
+    [Fact]
+    public async Task TheRecentChangeScan_ReadsBackOneTickPlusThreeTicksOfMargin_AndTheTickIsTheCrons()
+    {
+        AssignedAccessReconciliationJob.DefaultCronSchedule.Should().StartWith(
+            $"*/{AssignedAccessReconciliationJob.TickInterval.TotalMinutes:0} ", "the tick the window is sized from is the cron's");
+        AssignedAccessReconciliationJob.RecentScanWindow.Should().BeGreaterThanOrEqualTo(
+            AssignedAccessReconciliationJob.TickInterval * 4, "at least 3 ticks of margin beyond the tick");
+
+        await RunAsync();
+
+        _h.Store.RecentScanSince.Should().Be(_h.Time.GetUtcNow() - AssignedAccessReconciliationJob.RecentScanWindow);
+    }
+
     [Fact]
     public async Task AShareWrittenByTheJob_ClearsTheUsersRootSet_UnderTheDeploymentTenant_NeverAnonymous()
     {
@@ -393,6 +508,105 @@ public class AssignedAccessReconciliationJobTests
         Result(result).GetProperty("rootlessLedger").GetProperty("recordExists").GetInt32().Should().Be(1);
     }
 
+    /// <summary>One job over this test's doubles, so its cursors persist across the runs of a test.</summary>
+    private (AssignedAccessReconciliationJob Job, ServiceProvider Provider) SharedJob()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<AssignedAccessStore>(_h.Store);
+        services.AddScoped(_ => _h.Materializer);
+        services.AddScoped(_ => _h.RestrictedRemover);
+        services.AddSingleton(_ => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => _filing).Object);
+        var provider = services.BuildServiceProvider();
+        return (new AssignedAccessReconciliationJob(
+            provider.GetRequiredService<IServiceScopeFactory>(), _h.Time,
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["AzureAd:TenantId"] = DeploymentTenant }).Build(),
+            NullLogger<AssignedAccessReconciliationJob>.Instance), provider);
+    }
+
+    /// <summary>A rootless live ledger row at a chosen position in id order; its record exists unless <paramref name="deleted"/>.</summary>
+    private AssignedAccessLedgerRow RootlessRow(int position, bool deleted)
+    {
+        var matter = Guid.NewGuid();
+        var contact = _h.Contact();
+        var row = _h.Store.SeedRow(ExternalGrantRootType.Matter, matter, Attorney1, new AssignedSubject(AssignedSubjectKind.Contact, contact),
+            AssignedAccessState.Granted);
+        row.Id = new Guid(position, 0, 0, new byte[8]);
+        if (deleted)
+        {
+            _h.Store.DeleteRoot(ExternalGrantRootType.Matter, matter);
+        }
+        else
+        {
+            _h.Store.Root(ExternalGrantRootType.Matter, matter);
+            _h.Store.ClearRootLookup(matter);
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    /// Fix round 3 (K4): more rows the job leaves live than one page holds, with a deletable row behind them, no longer stall
+    /// the scan: each run reads after the last row the previous one reached, so the deletable row is reached on the second run.
+    /// </summary>
+    [Fact]
+    public async Task MoreStuckRootlessRowsThanOnePage_WithADeletableRowBehindThem_ReachesItOnTheSecondRun()
+    {
+        _h.Store.RootlessScanCap = 3;
+        var stuck = Enumerable.Range(1, 4).Select(i => RootlessRow(i, deleted: false)).ToList();
+        var deletable = RootlessRow(5, deleted: true);
+        var (job, provider) = SharedJob();
+        using var _ = provider;
+
+        var first = await RunAsync(job: job);
+        var afterFirst = _h.Store.Ledger.Single(r => r.Id == deletable.Id).State;
+        var second = await RunAsync(job: job);
+
+        afterFirst.Should().NotBe(AssignedAccessState.Revoked, "the first page held only stuck rows");
+        Result(first).GetProperty("rootlessLedger").GetProperty("truncated").GetBoolean().Should().BeTrue();
+        _h.Store.Ledger.Single(r => r.Id == deletable.Id).State.Should().Be(AssignedAccessState.Revoked, "the second run reads after the first page");
+        _h.Store.Ledger.Single(r => r.Id == deletable.Id).Reason.Should().Be(AssignedAccessReason.RootDeleted);
+        stuck.Should().OnlyContain(r => _h.Store.Ledger.Single(x => x.Id == r.Id).State == AssignedAccessState.Granted,
+            "rows whose record still exists are left as they are");
+        _h.Store.RootlessScanAfter.Should().Equal(new Guid?[] { null, stuck[2].Id }, "run 2 started after the last row run 1 reached");
+        Result(second).GetProperty("rootlessLedger").GetProperty("revoked").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>
+    /// Fix round 3 (K4): more stuck rows (distinct records) than a run reads records for no longer stall either: the cursor stops
+    /// before the first row deferred, so the next run starts there.
+    /// </summary>
+    [Fact]
+    public async Task MoreStuckRootlessRecordsThanARunReads_WithADeletableRowBehindThem_ReachesItOnTheSecondRun()
+    {
+        var stuckCount = AssignedAccessReconciliationJob.MaxRootsPerRun + 5;
+        var stuck = Enumerable.Range(1, stuckCount).Select(i => RootlessRow(i, deleted: false)).ToList();
+        var deletable = RootlessRow(stuckCount + 1, deleted: true);
+        var (job, provider) = SharedJob();
+        using var _ = provider;
+
+        await RunAsync(job: job);
+        var afterFirst = _h.Store.Ledger.Single(r => r.Id == deletable.Id).State;
+        await RunAsync(job: job);
+
+        afterFirst.Should().NotBe(AssignedAccessState.Revoked, "the first run read records for the first MaxRootsPerRun rows only");
+        _h.Store.Ledger.Single(r => r.Id == deletable.Id).State.Should().Be(AssignedAccessState.Revoked);
+        _h.Store.RootlessScanAfter.Should().Equal(new Guid?[] { null, stuck[AssignedAccessReconciliationJob.MaxRootsPerRun - 1].Id });
+    }
+
+    /// <summary>Fix round 3 (K4): a scan that reaches the end starts again at the first row on the next run.</summary>
+    [Fact]
+    public async Task TheRootlessCursor_WrapsToTheStart_OnceTheEndIsReached()
+    {
+        RootlessRow(1, deleted: false);
+        var (job, provider) = SharedJob();
+        using var _ = provider;
+
+        await RunAsync(job: job);
+        await RunAsync(job: job);
+
+        _h.Store.RootlessScanAfter.Should().Equal(new Guid?[] { null, null });
+    }
+
     /// <summary>A read of the record that FAILS is never read as "deleted": nothing is written and the run is not clean.</summary>
     [Fact]
     public async Task ALedgerRowWhoseRecordCannotBeRead_IsLeftUnchanged_AndTheRunIsNotClean()
@@ -471,6 +685,99 @@ public class AssignedAccessReconciliationJobTests
         json.GetProperty("restrictedCandidates").GetInt32().Should().Be(1);
         json.GetProperty("externalSharesRemoved").GetInt32().Should().Be(1);
         json.GetProperty("materialized").GetInt32().Should().Be(0, "a Restricted root with no Assigned column is not materialized");
+    }
+
+    /// <summary>
+    /// Task 049 (fix round 2): a Restricted root changed within the recent window is a candidate even when the full
+    /// Restricted scan's page does not reach it, so the rule reaches it on the next tick. The run still reports the full scan's
+    /// bound as truncated.
+    /// </summary>
+    [Fact]
+    public async Task ARecentRestrictedRootPastTheFullScansBound_IsStillACandidate_AndItsExternalShareIsRemoved()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Store.Modified[matter] = _h.Time.GetUtcNow().AddMinutes(-1);
+        _h.Store.PastScanBound[matter] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var external = _h.SystemUser(isExternal: true);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(external), 1);
+
+        var result = await RunAsync();
+
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(external)).Should().BeNull(
+            "the recent-change scan names it, whatever the full scan kept");
+        Result(result).GetProperty("restrictedCandidates").GetInt32().Should().Be(1);
+        Result(result).GetProperty("truncated").GetBoolean().Should().BeTrue("the full scan still reports its own bound");
+    }
+
+    /// <summary>Task 049 (fix round 2): a Restricted root changed before the window and past the full scan's bound waits for the rotation.</summary>
+    [Fact]
+    public async Task ARestrictedRootChangedBeforeTheRecentWindow_AndPastTheFullScansBound_IsNotACandidateThisRun()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Store.Modified[matter] = _h.Time.GetUtcNow() - AssignedAccessReconciliationJob.RecentScanWindow - TimeSpan.FromMinutes(1);
+        _h.Store.PastScanBound[matter] = true;
+
+        var result = await RunAsync();
+
+        Result(result).GetProperty("restrictedCandidates").GetInt32().Should().Be(0);
+    }
+
+    /// <summary>Task 049 (fix round 2): a Restricted root both scans return is ONE candidate; each scan runs once per root type.</summary>
+    [Fact]
+    public async Task ARestrictedRootBothScansReturn_IsOneCandidate_AndEachRecentScanRunsOncePerRootType()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Store.Modified[matter] = _h.Time.GetUtcNow().AddMinutes(-1);
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var result = await RunAsync();
+
+        Result(result).GetProperty("restrictedCandidates").GetInt32().Should().Be(1);
+        Result(result).GetProperty("candidates").GetInt32().Should().Be(1);
+        _h.Store.RecentRestrictedScanCalls.Should().Be(3, "one Restricted recent-change scan per root type");
+        _h.Store.RecentLedgerScanCalls.Should().Be(1, "one ledger recent-change scan per run");
+    }
+
+    /// <summary>
+    /// Task 049 (fix round 2): a root whose live ledger row changed within the recent window is a candidate even when the
+    /// full ledger scan's page does not reach it, so an assignment cleared outside the product is revisited and removed (the
+    /// switch on) on the next tick.
+    /// </summary>
+    [Fact]
+    public async Task ARecentLedgerRootPastTheFullLedgerScansBound_IsStillACandidate_AndItsClearedAssignmentIsRevoked()
+    {
+        var contact = _h.Contact();
+        var matter = AssignedMatter(contact);
+        await RunAsync();
+        _h.Store.Assign(ExternalGrantRootType.Matter, matter, Attorney1, null); // a grid edit
+        _h.Store.Modified[matter] = _h.Time.GetUtcNow().AddMinutes(-1);
+        _h.Store.PastScanBound[matter] = true;
+
+        var result = await RunAsync(revokeOnChange: true);
+
+        _h.Grants.ActiveRowsOf(matter, contact).Should().BeEmpty("the ledger recent-change scan names it, whatever the full scan kept");
+        Result(result).GetProperty("truncated").GetBoolean().Should().BeTrue("the full ledger scan still reports its own bound");
+    }
+
+    /// <summary>Task 049 (fix round 2): a ledger root changed before the window and past the full scan's bound waits for the rotation.</summary>
+    [Fact]
+    public async Task ALedgerRootChangedBeforeTheRecentWindow_AndPastTheFullLedgerScansBound_IsNotACandidateThisRun()
+    {
+        var contact = _h.Contact();
+        var matter = AssignedMatter(contact);
+        await RunAsync();
+        _h.Store.Assign(ExternalGrantRootType.Matter, matter, Attorney1, null);
+        _h.Store.Modified[matter] = _h.Time.GetUtcNow() - AssignedAccessReconciliationJob.RecentScanWindow - TimeSpan.FromMinutes(1);
+        _h.Store.PastScanBound[matter] = true;
+
+        var result = await RunAsync(revokeOnChange: true);
+
+        _h.Grants.ActiveRowsOf(matter, contact).Should().ContainSingle("not a candidate this run; the rotation reaches it");
+        Result(result).GetProperty("candidates").GetInt32().Should().Be(0);
     }
 
     /// <summary>

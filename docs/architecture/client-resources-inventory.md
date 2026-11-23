@@ -1,6 +1,7 @@
 # Client Resources Inventory — Definitive Reference
 
 > **Last Updated**: 2026-07-10 (added §0 orphaned-PCF determination — supersedes scattered "verify usage" rows below for those controls)
+> **Last Reviewed**: 2026-11-12 (the Power Pages deploy references only, repointed to the archived skill; the rest of the inventory was not re-reviewed)
 > **Purpose**: Single source of truth for "what client-side components do we have, what's their status, when were they last updated, and ARE THEY ACTUALLY USED on forms?"
 
 ---
@@ -258,9 +259,9 @@ Static Web App-deployed Microsoft 365 add-ins.
 
 | App | Purpose | Build |
 |---|---|---|
-| **secure-project-workspace** (`@spaarke/secure-project-workspace`) | Power Pages Code Page SPA for external user access to secure projects | Vite (`vite.config.ts` + `powerpages.config.json`) |
+| **secure-project-workspace** (`@spaarke/secure-project-workspace`) | SPA for external user access to secure projects, hosted on Azure Static Web Apps | Vite (`vite.config.ts`) |
 
-Deployment via `power-page-deploy` skill (not `code-page-deploy`).
+Deployment via `.github/workflows/deploy-external-spa.yml` (manual `workflow_dispatch`; not `code-page-deploy`). The Power Pages Code Site deploy is retired (2026-11-12).
 
 ## 10. Shared libraries (NOT independently deployable — referenced by the above)
 

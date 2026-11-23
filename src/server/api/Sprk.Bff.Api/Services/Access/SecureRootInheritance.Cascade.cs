@@ -157,6 +157,20 @@ public sealed record FollowParentsRootOwners
     public int GrantsUnread { get; init; }
     public IReadOnlyList<object> Changes { get; init; } = Array.Empty<object>();
 
+    /// <summary>Task 195 (report only): projects linked to a matter through the Project ↔ Matter N:N
+    /// (<c>sprk_project_sprk_matter</c>) that have no regarding pair, so no filing. Null when the census could not be
+    /// read this run (a problem line says why).</summary>
+    public int? ProjectsWithMatterLinkButNoPair { get; init; }
+
+    /// <summary>Task 195 (report only): projects whose regarding pair names a matter with which they have no N:N row.
+    /// Null when the census could not be read this run (a problem line says why).</summary>
+    public int? ProjectsWhosePairMatterHasNoLink { get; init; }
+
+    /// <summary>Task 195 (report only): projects with a regarding id whose record type is missing or not in the ADR-024
+    /// catalog, so the census cannot tell what they are filed under (a problem line names the count). Null when the census
+    /// could not be read this run.</summary>
+    public int? ProjectsWhosePairTypeIsUnknown { get; init; }
+
     /// <summary>Fix round (B-F2): the last root this run reached when a bound stopped it — the next run continues after it
     /// (and wraps round); null when the run reached every root.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -392,7 +406,8 @@ internal sealed record AccessInheritance(
                 || (stored.OwnPermission is { } own && SecureRootInheritance.RankOf(own) < 0))
                 return (null, true);
             return (new AccessInheritance(stored.Parents, stored.FloorSecure, stored.FloorPermission, stored.OwnSecure,
-                stored.OwnPermission) { OwnProvisional = stored.OwnProvisional }, false);
+                stored.OwnPermission)
+            { OwnProvisional = stored.OwnProvisional }, false);
         }
         catch (JsonException)
         {
@@ -690,8 +705,10 @@ public sealed partial class SecureRootInheritance
         {
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Undetermined, ReasonCode = ReasonMarkerUnreadable,
-                Detail = $"its {AccessInheritance.Column} could not be read", Parents = parentStates,
+                Stop = FollowParentsOutcome.Undetermined,
+                ReasonCode = ReasonMarkerUnreadable,
+                Detail = $"its {AccessInheritance.Column} could not be read",
+                Parents = parentStates,
             };
         }
 
@@ -700,8 +717,10 @@ public sealed partial class SecureRootInheritance
         {
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Undetermined, ReasonCode = ReasonPermissionUnknown,
-                Detail = "it holds an Access Permission that is not Standard, Limited or Restricted", Parents = parentStates,
+                Stop = FollowParentsOutcome.Undetermined,
+                ReasonCode = ReasonPermissionUnknown,
+                Detail = "it holds an Access Permission that is not Standard, Limited or Restricted",
+                Parents = parentStates,
             };
         }
 
@@ -751,8 +770,11 @@ public sealed partial class SecureRootInheritance
                 storedSecure == true, storedRank > 0 ? storedPermission : null);
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Parentless, Marker = parentless, MarkerChanged = !parentless.SameAs(marker),
-                TargetSecure = storedSecure == true, TargetPermission = PermissionOf(storedRank),
+                Stop = FollowParentsOutcome.Parentless,
+                Marker = parentless,
+                MarkerChanged = !parentless.SameAs(marker),
+                TargetSecure = storedSecure == true,
+                TargetPermission = PermissionOf(storedRank),
             };
         }
 
@@ -762,8 +784,10 @@ public sealed partial class SecureRootInheritance
         {
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Undetermined, ReasonCode = ReasonOwnFlagEmpty,
-                Detail = "its own secure flag is empty (empty is never read as either value)", Parents = parentStates,
+                Stop = FollowParentsOutcome.Undetermined,
+                ReasonCode = ReasonOwnFlagEmpty,
+                Detail = "its own secure flag is empty (empty is never read as either value)",
+                Parents = parentStates,
             };
         }
 
@@ -813,7 +837,9 @@ public sealed partial class SecureRootInheritance
             _logger.LogWarning(ex, "[FOLLOW-PARENT] {Table} {RecordId} could not be read; nothing was changed.", logical, recordId);
             return new FollowParentsResult(logical, recordId, FollowParentsOutcome.Undetermined)
             {
-                ReasonCode = ReasonRecordUnreadable, Detail = "the record could not be read", IsSecureAfter = true,
+                ReasonCode = ReasonRecordUnreadable,
+                Detail = "the record could not be read",
+                IsSecureAfter = true,
             };
         }
 
@@ -829,7 +855,10 @@ public sealed partial class SecureRootInheritance
                 logical, recordId, distrust.Detail, distrust.Code);
             return new FollowParentsResult(logical, recordId, FollowParentsOutcome.Undetermined)
             {
-                ReasonCode = distrust.Code, Detail = distrust.Detail, PermissionFrom = own.Permission, IsSecureAfter = own.Secure != false,
+                ReasonCode = distrust.Code,
+                Detail = distrust.Detail,
+                PermissionFrom = own.Permission,
+                IsSecureAfter = own.Secure != false,
             };
         }
 
@@ -1129,6 +1158,15 @@ public sealed partial class SecureRootInheritance
         var rootOwners = await FollowFamilyOwnersAsync(listed, familyAnswers, changedParents, rootOwnerResumeAfter, Problem, ct)
             .ConfigureAwait(false);
 
+        // Task 195: how far the project filing (the pair) and the Project ↔ Matter N:N disagree. Report only.
+        var (linkNoPair, pairNoLink, unknownType) = await ProjectFilingCensusAsync(listed, Problem, ct).ConfigureAwait(false);
+        rootOwners = rootOwners with
+        {
+            ProjectsWithMatterLinkButNoPair = linkNoPair,
+            ProjectsWhosePairMatterHasNoLink = pairNoLink,
+            ProjectsWhosePairTypeIsUnknown = unknownType,
+        };
+
         // Later rounds: what is filed under a project changed in this run, decided again now (its values just moved).
         for (var round = 2; changedParents.Count > 0 && round <= MaxFilingDepth + 1; round++)
         {
@@ -1376,12 +1414,14 @@ public sealed partial class SecureRootInheritance
         {
             ColumnWrite.ChangedConcurrently => result with
             {
-                Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonChangedConcurrently,
+                Outcome = FollowParentsOutcome.Incomplete,
+                ReasonCode = ReasonChangedConcurrently,
                 Detail = $"{what} changed while it was being decided; nothing was written (the next run decides again)",
             },
             ColumnWrite.ReadsBackEmpty => result with
             {
-                Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonMarkerHidden,
+                Outcome = FollowParentsOutcome.Incomplete,
+                ReasonCode = ReasonMarkerHidden,
                 Detail = $"{what} was written but reads back empty: field-level security hides {AccessInheritance.Column} from the BFF",
             },
             _ => result with
@@ -1740,6 +1780,10 @@ public sealed partial class SecureRootInheritance
         public Guid? OwningTeam { get; init; }
         public Guid? OwningUser { get; init; }
         public Guid? OwningBusinessUnit { get; init; }
+
+        /// <summary>Task 195: a project's regarding pair as listed (projects only; null on work assignments).</summary>
+        public string? PairId { get; init; }
+        public Guid? PairType { get; init; }
     }
 
     /// <summary>
@@ -1759,6 +1803,8 @@ public sealed partial class SecureRootInheritance
                 NoLock = true,
                 PageInfo = new PagingInfo { Count = FiledListPageSize, PageNumber = 1 },
             };
+            if (table == Project)
+                query.ColumnSet.AddColumns(PairIdColumn, PairTypeColumn); // task 195: the filing census
 
             for (var page = 1; ; page++)
             {
@@ -1774,6 +1820,8 @@ public sealed partial class SecureRootInheritance
                     OwningTeam = IdOf(e, OwningTeamColumn),
                     OwningUser = IdOf(e, OwningUserColumn),
                     OwningBusinessUnit = IdOf(e, OwningBusinessUnitColumn),
+                    PairId = table == Project ? e.GetAttributeValue<string>(PairIdColumn) : null,
+                    PairType = table == Project ? IdOf(e, PairTypeColumn) : null,
                 }));
                 if (!result.MoreRecords)
                     break;
@@ -1786,6 +1834,124 @@ public sealed partial class SecureRootInheritance
 
         static Guid? IdOf(Entity e, string column) =>
             e.GetAttributeValue<EntityReference>(column)?.Id is { } id && id != Guid.Empty ? id : null;
+    }
+
+    /// <summary>Task 195: the Project ↔ Matter N:N's intersect table and its two columns.</summary>
+    internal const string ProjectMatterLinkEntity = "sprk_project_sprk_matter";
+    private const string ProjectMatterLinkProjectColumn = "sprk_projectid";
+    private const string ProjectMatterLinkMatterColumn = "sprk_matterid";
+
+    /// <summary>
+    /// Task 195 (#2352), report only: a project's one filing is its regarding pair; the Project ↔ Matter N:N is an
+    /// association that confers nothing. This counts where the two disagree, so the backfill and any later drift are seen:
+    /// projects with an N:N matter but no pair, and projects whose pair names a matter they have no N:N row with. It writes
+    /// nothing and reads the N:N paged under the listing's own bound (<see cref="FiledListPageSize"/> ×
+    /// <see cref="FiledListMaxPages"/>). Never throws (cancellation aside): what cannot be read is null, with a problem line.
+    /// </summary>
+    private async Task<(int? LinkButNoPair, int? PairButNoLink, int? UnknownType)> ProjectFilingCensusAsync(
+        IReadOnlyList<ListedRecord> listed, Action<string> problem, CancellationToken ct)
+    {
+        HashSet<(Guid Project, Guid Matter)> links;
+        try
+        {
+            links = new HashSet<(Guid, Guid)>();
+            var query = new QueryExpression(ProjectMatterLinkEntity)
+            {
+                ColumnSet = new ColumnSet(ProjectMatterLinkProjectColumn, ProjectMatterLinkMatterColumn),
+                NoLock = true,
+                PageInfo = new PagingInfo { Count = FiledListPageSize, PageNumber = 1 },
+            };
+            for (var page = 1; ; page++)
+            {
+                if (page > FiledListMaxPages)
+                    throw new InvalidOperationException($"{ProjectMatterLinkEntity} still had rows after {FiledListMaxPages} pages.");
+
+                var result = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var e in result.Entities)
+                {
+                    if (GuidOf(e, ProjectMatterLinkProjectColumn) is { } p && GuidOf(e, ProjectMatterLinkMatterColumn) is { } m)
+                        links.Add((p, m));
+                }
+
+                if (!result.MoreRecords)
+                    break;
+                query.PageInfo.PageNumber++;
+                query.PageInfo.PagingCookie = result.PagingCookie;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[ROOT-OWNER] The project filing census could not read {Table}; its counts are not reported this run.",
+                ProjectMatterLinkEntity);
+            problem($"the project filing census could not read {ProjectMatterLinkEntity}");
+            return (null, null, null);
+        }
+
+        var projects = listed.Where(r => r.Table == Project).ToList();
+        var linkedProjects = links.Select(l => l.Project).ToHashSet();
+        var linkButNoPair = projects.Count(p =>
+            linkedProjects.Contains(p.Id) && (string.IsNullOrWhiteSpace(p.PairId) || p.PairType is null));
+
+        int? pairButNoLink = 0;
+        int? unknownType = 0;
+        foreach (var p in projects)
+        {
+            if (string.IsNullOrWhiteSpace(p.PairId))
+                continue;
+            if (p.PairType is not { } typeRef)
+            {
+                unknownType++; // an id with no record type: never skipped silently
+                continue;
+            }
+
+            string? pairTable;
+            try
+            {
+                pairTable = await ReadRecordTypeAsync(_dataverse, _recordTypes, typeRef, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ROOT-OWNER] The project filing census could not read the regarding type {TypeRef}.", typeRef);
+                problem("the project filing census could not read a project's regarding type");
+                pairButNoLink = null;
+                unknownType = null;
+                break;
+            }
+
+            if (pairTable is null)
+            {
+                unknownType++; // a record type the catalog does not have: never skipped silently
+                continue;
+            }
+
+            if (pairTable != Matter)
+                continue;
+            if (!Guid.TryParse(p.PairId, out var matterId) || !links.Contains((p.Id, matterId)))
+                pairButNoLink++;
+        }
+
+        if (unknownType > 0)
+        {
+            problem($"the project filing census found {unknownType} project(s) whose regarding record type is missing or not in " +
+                    "the record-type catalog; what they are filed under cannot be told");
+        }
+
+        if (linkButNoPair > 0 || pairButNoLink > 0)
+        {
+            _logger.LogInformation("[ROOT-OWNER] Project filing census: {LinkButNoPair} project(s) linked to a matter with no " +
+                "filing pair; {PairButNoLink} project(s) filed under a matter with no link row.", linkButNoPair, pairButNoLink);
+        }
+
+        return (linkButNoPair, pairButNoLink, unknownType);
+
+        static Guid? GuidOf(Entity e, string column) => e.Attributes.TryGetValue(column, out var value)
+            ? value switch
+            {
+                Guid g when g != Guid.Empty => g,
+                EntityReference r when r.Id != Guid.Empty => r.Id,
+                _ => null,
+            }
+            : null;
     }
 
     // ── Owner decision 2026-10-29: a root follows its family's ownership ─────────────────────────────────────────────────
@@ -1877,9 +2043,18 @@ public sealed partial class SecureRootInheritance
         var lines = new List<object>();
         FollowParentsRootOwners Summary() => new()
         {
-            WritesEnabled = writes, Planned = planned, Written = written, Refused = refused, Reported = reported,
-            Deferred = deferred, CrossUnit = crossUnit, WithGrants = withGrants, GrantsUnread = grantsUnread,
-            Resolved = resolves, Cursor = cursor, Changes = lines,
+            WritesEnabled = writes,
+            Planned = planned,
+            Written = written,
+            Refused = refused,
+            Reported = reported,
+            Deferred = deferred,
+            CrossUnit = crossUnit,
+            WithGrants = withGrants,
+            GrantsUnread = grantsUnread,
+            Resolved = resolves,
+            Cursor = cursor,
+            Changes = lines,
         };
 
         var ordinary = listed.Where(r => r.Secure == false)
@@ -1965,7 +2140,8 @@ public sealed partial class SecureRootInheritance
                     continue; // an unfiled root owned by a team is left alone
 
                 var question = (filed ? asked.Question : RecordOwnershipContext.ForUserTeam(row.OwningUser!.Value))
-                    with { LookupCache = lookupCache };
+                    with
+                { LookupCache = lookupCache };
                 if (!writes && plannedTeams.Count > 0)
                     question = question with { PlannedOwningTeams = new Dictionary<RecordOwnershipParent, Guid>(plannedTeams) };
                 owner = await _ownership.ResolveOwnerAsync(question, ct).ConfigureAwait(false);

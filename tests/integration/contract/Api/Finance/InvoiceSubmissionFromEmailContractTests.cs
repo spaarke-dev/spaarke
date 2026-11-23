@@ -52,6 +52,8 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
 
     private readonly W _world = new();
     private readonly RecordingAccessDataSource _access = new();
+    private readonly HashSet<Guid> _throwFor = new();
+    private readonly LogSink _logs = new();
     private readonly RecordProbe _probe = new();
     private readonly RateLimits _rateLimits = new();
     private readonly InMemoryTenantCache _cache = new();
@@ -71,6 +73,7 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(_logs);
         builder.Services
             .AddAuthentication(o =>
             {
@@ -82,7 +85,7 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         StepZero = StatedCaller.Register(builder.Services);
         builder.Services.AddRateLimiter(opt => opt.AddPolicy("dataverse-query", _ => RateLimitPartition.GetNoLimiter("dataverse-query-test")));
 
-        builder.Services.AddSingleton<IAccessDataSource>(_access);
+        builder.Services.AddSingleton<IAccessDataSource>(new ThrowingAccess(_access, _throwFor));
         builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
         builder.Services.AddScoped<AuthorizationService>();
         builder.Services.AddSingleton<CallerRecordAccessProbe>(_probe);
@@ -93,6 +96,8 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         builder.Services.AddSingleton(_world.Intake.Build());
         builder.Services.AddSingleton(_world.Intake.Participations);
         builder.Services.AddSingleton(_world.Build());
+        // Task 097b: a Correction's invoice read (app-only, after the caller's own Write), through the intake harness's Dataverse.
+        builder.Services.AddSingleton(_world.Intake.Entities.Object);
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
@@ -115,18 +120,22 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
 
     // ── Helpers ──
 
+    /// <summary>Task 095f: the note every Correction request carries unless a test says otherwise (a Correction without one is refused).</summary>
+    private const string CorrectionNoteText = "The firm re-issued the invoice with the corrected rate.";
+
     private static FromEmailSubmissionRequest Request(
         EmailMetadata? email = null, List<FromEmailMark>? marks = null, Guid? firm = null, string? number = "1001",
-        string mode = "New", Guid? invoiceId = null) => new()
-    {
-        TargetEntity = new FromEmailTargetEntity { EntityType = "Matter", EntityId = W.MatterId },
-        Email = email ?? W.Email(),
-        Marks = marks ?? new List<FromEmailMark> { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting") },
-        FirmId = firm ?? W.FirmId,
-        FirmInvoiceNumber = number,
-        Mode = mode,
-        InvoiceId = invoiceId,
-    };
+        string mode = "New", Guid? invoiceId = null, string? correctionNote = null) => new()
+        {
+            CorrectionNote = correctionNote ?? (mode == "Correction" ? CorrectionNoteText : null),
+            TargetEntity = new FromEmailTargetEntity { EntityType = "Matter", EntityId = W.MatterId },
+            Email = email ?? W.Email(),
+            Marks = marks ?? new List<FromEmailMark> { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting") },
+            FirmId = firm ?? W.FirmId,
+            FirmInvoiceNumber = number,
+            Mode = mode,
+            InvoiceId = invoiceId,
+        };
 
     private static string K(FromEmailSubmissionRequest? request = null) =>
         FromEmailSubmissionKey.Of(InvoiceSubmissionFromEmailHttp.ToInput(request ?? Request()));
@@ -333,11 +342,16 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         { Mutate(r => r with { Email = r.Email! with { InternetMessageId = null } }), "email.internetMessageId" },
         { Mutate(r => r with { Marks = null }), "marks" },
         { Mutate(r => r with { Marks = new List<FromEmailMark> { new() { FileName = "Invoice 1001.pdf", Size = 1, ContentType = "application/pdf" } } }), "marks[0].mark" },
-        { Mutate(r => r with { FirmId = null }), "firmId" },
         { Mutate(r => r with { FirmInvoiceNumber = new string('9', 101) }), "firmInvoiceNumber" },
         { Mutate(r => r with { Mode = "new" }), "mode" },
         { Mutate(r => r with { InvoiceId = Guid.NewGuid() }), "invoiceId" },
         { Mutate(r => r with { Mode = "Correction" }), "invoiceId" },
+        // 095f (EB-D-225): a New submission carries no note; a Correction's note is at most 2000 characters and has no control character.
+        { Mutate(r => r with { CorrectionNote = "why" }), "correctionNote" },
+        { Mutate(r => r with { CorrectionNote = "" }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = new string('n', 2001) }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = "bell\u0007here" }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = "nul\u0000here" }), "correctionNote" },
         // 095 review F4: a null attachment entry is the body-shape 400, never a 500.
         { Mutate(r => r with { Email = r.Email! with { Attachments = new List<AttachmentReference> { W.Invoice, null!, W.Timesheet } } }), "email.attachments[1]" },
         // 095 review F1: an attached email (message/*) marked to be saved cannot be kept byte-for-byte in the .eml.
@@ -556,15 +570,214 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    [Fact]
-    public async Task Correction_BeforeTask097_Is409CorrectionNotAllowed_NotAvailable()
+    // ── no firm (task 095c-2, owner 2026-11-03; contract sections 2 and 4) ──
+
+    /// <summary>The default request with <c>firmId</c> sent as JSON null (<paramref name="absent"/> false) or left out of the body.</summary>
+    private static string NoFirmJson(bool absent, FromEmailSubmissionRequest? request = null)
     {
-        var response = await PostAsync(Request(mode: "Correction", invoiceId: Guid.NewGuid()));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize((request ?? Request()) with { FirmId = null }, Json))!.AsObject();
+        node.ContainsKey("firmId").Should().BeTrue("the null is serialized, so the absent case below really removes it");
+        if (absent)
+        {
+            node.Remove("firmId");
+        }
+
+        return node.ToJsonString();
+    }
+
+    [Theory(DisplayName = "095e (EB-D-223, seed-proof): mode New with firmId null or absent is 400 firm_invalid 'A firm is required.' in every tracking-scope phase; no firm right is asked and nothing is written")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task NoFirm_Is400FirmInvalid_InEveryPhase(bool absent, bool scopeKeyActive)
+    {
+        if (scopeKeyActive)
+        {
+            _world.ScopeKeyActive();
+        }
+
+        var response = await PostAsync(NoFirmJson(absent));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.firm_invalid");
+        body.GetProperty("detail").GetString().Should().Be("A firm is required.");
+        _access.Calls.Should().NotContain(c => c.Set == FinanceAuthorizationFilter.VendorOrganizationEntitySet,
+            "with no firm there is no firm record to authorize");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095e (must-not-fire): the same request with a firm is accepted (202) as before, in the phase where no firm is refused")]
+    public async Task WithAFirm_Is202_AsBefore()
+    {
+        _world.ScopeKeyActive();
+
+        var body = await Accepted(await PostAsync(Request()));
+
+        body.GetProperty("submissionId").GetGuid().Should().Be(FromEmailSubmissionKey.SubmissionIdFor(K(), 1));
+        _world.Operation.Submits.Should().ContainSingle().Which.FirmId.Should().Be(W.FirmId);
+    }
+
+    [Fact(DisplayName = "095e (idempotency): with one X-Idempotency-Key, firmId null and firmId absent are both the 400 firm_invalid; the refusal is not cached and writes nothing")]
+    public async Task NoFirm_NullAndAbsent_AreBothRefused_AndNotCached()
+    {
+        _world.ScopeKeyActive();
+        var first = await PostAsync(NoFirmJson(absent: false), idempotencyKey: "no-firm-1");
+        var second = await PostAsync(NoFirmJson(absent: true), idempotencyKey: "no-firm-1");
+
+        (first.StatusCode, second.StatusCode).Should().Be((HttpStatusCode.BadRequest, HttpStatusCode.BadRequest));
+        (await CodeAsync(first)).Should().Be("ebilling.submission.firm_invalid");
+        (await CodeAsync(second)).Should().Be("ebilling.submission.firm_invalid");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095e (idempotency, must-not-fire): a refused no-firm request does not poison its header; the same header with a firm is accepted")]
+    public async Task NoFirm_TheSameHeaderWithAFirm_IsAccepted_AfterTheRefusal()
+    {
+        _world.ScopeKeyActive();
+        (await PostAsync(NoFirmJson(absent: false), idempotencyKey: "no-firm-2")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var second = await PostAsync(Request(), idempotencyKey: "no-firm-2");
+
+        await Accepted(second);
+        _world.Operation.Submits.Should().ContainSingle().Which.FirmId.Should().Be(W.FirmId);
+    }
+
+    [Fact(DisplayName = "095e (EB-D-223): a Correction of a no-firm invoice sent with no firm is 400 firm_invalid; nothing is written (a held invoice is cleared by Set firm, not by a no-firm correction)")]
+    public async Task NoFirm_CorrectionOfANoFirmInvoice_Is400FirmInvalid()
+    {
+        CorrectionSeed.Seed(_world.Intake, CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()), CorrectionSeed.WithoutFirm(CorrectionSeed.Submission()));
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+        _world.ScopeKeyActive();
+
+        var response = await PostAsync(NoFirmJson(absent: true,
+            Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await CodeAsync(response)).Should().Be("ebilling.submission.firm_invalid");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095c-2 (must fire): a Correction of a no-firm invoice that sends a firm is 409 correction_not_allowed, reason different_firm")]
+    public async Task NoFirm_CorrectionOfANoFirmInvoice_SendingAFirm_Is409DifferentFirm()
+    {
+        CorrectionSeed.Seed(_world.Intake, CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()), CorrectionSeed.WithoutFirm(CorrectionSeed.Submission()));
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+        _world.ScopeKeyActive();
+
+        var response = await PostAsync(Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         var body = await BodyAsync(response);
         body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
-        body.GetProperty("reason").GetString().Should().Be("not_available");
+        body.GetProperty("reason").GetString().Should().Be("different_firm");
+        NothingWritten();
+    }
+
+    // ── the correction note (task 095f, EB-D-225; contract section 2) ──
+
+    private string CorrectionJson(string? note, bool omit = false)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(
+            Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId) with { CorrectionNote = note }, Json))!.AsObject();
+        if (omit)
+        {
+            node.Remove("correctionNote");
+        }
+
+        return node.ToJsonString();
+    }
+
+    [Theory(DisplayName = "095f (EB-D-225, seed-proof): a Correction with no note (absent, null, empty or blank) is 400 ebilling.submission.correction_note_required; nothing is written")]
+    [InlineData(null, true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("  \t\r\n ", false)]
+    public async Task Correction_WithoutANote_Is400CorrectionNoteRequired(string? note, bool omit)
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var response = await PostAsync(CorrectionJson(note, omit));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_note_required");
+        body.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095f (must-not-fire): a Correction with a note is 202 and the operation is handed the trimmed note")]
+    public async Task Correction_WithANote_Is202_AndTheOperationGetsTheTrimmedNote()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        await Accepted(await PostAsync(CorrectionJson("  Rate corrected after the firm's credit note.\r\nSee email.  ")));
+
+        _world.Operation.Submits.Should().ContainSingle().Which.CorrectionNote.Should().Be("Rate corrected after the firm's credit note.\r\nSee email.");
+    }
+
+    [Fact(DisplayName = "095f (idempotency): an X-Idempotency-Key reused with another note is not answered from the first request's cached 202")]
+    public async Task Correction_SameKeyAnotherNote_ReachesTheHandler()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var first = await PostAsync(CorrectionJson("first note"), idempotencyKey: "note-1");
+        var second = await PostAsync(CorrectionJson("second note"), idempotencyKey: "note-1");
+
+        first.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        second.StatusCode.Should().Be(HttpStatusCode.Accepted, "the handler answers it from the attempt of K (the note is not compared)");
+        second.Headers.GetValues("X-Idempotency-Status").Should().NotContain("cached", "the binding differs, so the cached answer is not used");
+        _world.Operation.Submits.Should().ContainSingle("the second request is a replay of K, never a second attempt");
+    }
+
+    // ── a Correction (task 097b, EB-D-179; contract section 6, changed 2026-10-30) ──
+
+    [Fact(DisplayName = "097b (seed-proof, the Write guard): a Correction of an invoice the caller cannot Write is the uniform 404, byte-for-byte the answer for an unknown invoice; nothing written")]
+    public async Task Correction_WithoutWrite_IsTheUniform404_SameAsAnUnknownInvoice()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read;
+
+        var denied = await PostAsync(Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId));
+        var unknown = await PostAsync(Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: Guid.NewGuid()));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await CodeAsync(denied)).Should().Be("sdap.access.deny.record_unavailable");
+        var normalise = (string body) => System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"x\"");
+        var deniedBody = await denied.Content.ReadAsStringAsync();
+        normalise(await unknown.Content.ReadAsStringAsync()).Should().Be(normalise(deniedBody), "the answer reveals nothing about the invoice");
+        deniedBody.Should().NotContain(CorrectionSeed.OldInvoiceId.ToString());
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "097b: an allowed Correction from an email is 202, submitted naming the replaced invoice's submission")]
+    public async Task Correction_Allowed_Is202_WithTheTarget()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        await Accepted(await PostAsync(Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId)));
+
+        _world.Operation.Submits.Should().ContainSingle().Which.ResubmissionOf.Should().Be(CorrectionSeed.OldSubmissionId);
+    }
+
+    [Fact(DisplayName = "097b (D3, must fire): a Correction under another firm invoice number is 409 correction_not_allowed, reason different_invoice_number; nothing written")]
+    public async Task Correction_AnotherNumber_Is409CorrectionNotAllowed()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var response = await PostAsync(Request(number: "INV-8", mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
+        body.GetProperty("reason").GetString().Should().Be("different_invoice_number");
         NothingWritten();
     }
 
@@ -583,6 +796,156 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await CodeAsync(response)).Should().Be("ebilling.submission.document_core_record_mismatch");
         NothingWritten();
+    }
+
+    // ── Task 192: the optional `filedUnder` of the "filed under another core record" 409 ───────────────────────
+
+    private const string FiledElsewhereDetail =
+        "The email is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.";
+
+    /// <summary>
+    /// Files the email's communication under ANOTHER ordinary record of <paramref name="table"/> (through the lookup <paramref name="column"/>),
+    /// in both the filing chain and the isolation world the secure-record test reads. Returns that record's id.
+    /// </summary>
+    private Guid FiledElsewhere(string table, string column)
+    {
+        var communication = Guid.NewGuid();
+        var record = Guid.NewGuid();
+        _world.Communication = new Entity("sprk_communication", communication);
+        _world.Intake.Communications[communication] = new Entity("sprk_communication", communication) { [column] = new EntityReference(table, record) };
+        _world.Intake.Isolation
+            .OrdinaryRoot(table, record)
+            .OrdinaryChild("sprk_communication", communication, (column, table, record));
+        return record;
+    }
+
+    private static Dictionary<string, string> Props(JsonElement body, params string[] skip) =>
+        body.EnumerateObject().Where(p => !skip.Contains(p.Name)).ToDictionary(p => p.Name, p => p.Value.GetRawText());
+
+    private async Task<JsonElement> RefusedFiledElsewhereAsync()
+    {
+        var response = await PostAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.document_core_record_mismatch");
+        body.GetProperty("detail").GetString().Should().Be(FiledElsewhereDetail);
+        NothingWritten();
+        return body;
+    }
+
+    [Fact(DisplayName = "192 (must fire): filed under another Matter the caller can Read: the 409 names it as filedUnder; everything else is exactly what it is without the field")]
+    public async Task FiledUnderAnotherMatter_CallerCanRead_NamesIt_AndNothingElseChanges()
+    {
+        var record = FiledElsewhere("sprk_matter", "sprk_regardingmatter");
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, record, AccessRights.Read);
+
+        var named = await RefusedFiledElsewhereAsync();
+
+        var filedUnder = named.GetProperty("filedUnder");
+        filedUnder.GetProperty("entityType").GetString().Should().Be("Matter");
+        filedUnder.GetProperty("entityId").GetGuid().Should().Be(record);
+        filedUnder.GetProperty("name").GetString().Should().Be("Acme v. Roe");
+        filedUnder.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo("entityType", "entityId", "name");
+
+        // The same request without the caller's Read: the body is the named one minus filedUnder, member for member.
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, record, AccessRights.None);
+        var unnamed = await RefusedFiledElsewhereAsync();
+        unnamed.TryGetProperty("filedUnder", out _).Should().BeFalse();
+        Props(unnamed, "traceId").Should().BeEquivalentTo(Props(named, "filedUnder", "traceId"));
+    }
+
+    [Fact(DisplayName = "192: filed under a Work Assignment the caller can Read: entityType is the intake vocabulary 'WorkAssignment', never a logical name")]
+    public async Task FiledUnderAWorkAssignment_CallerCanRead_UsesTheIntakeVocabulary()
+    {
+        var record = FiledElsewhere("sprk_workassignment", "sprk_regardingworkassignment");
+        _access.Grant(FinanceAuthorizationFilter.WorkAssignmentEntitySet, record, AccessRights.Read);
+
+        var body = await RefusedFiledElsewhereAsync();
+
+        var filedUnder = body.GetProperty("filedUnder");
+        filedUnder.GetProperty("entityType").GetString().Should().Be("WorkAssignment");
+        filedUnder.GetProperty("entityId").GetGuid().Should().Be(record);
+        filedUnder.GetProperty("name").GetString().Should().Be("Core record");
+        body.GetRawText().Should().NotContain("sprk_workassignment");
+    }
+
+    [Fact(DisplayName = "192 (disclosure guard, must fire): the caller cannot Read the record the email is filed under: the 409 has no filedUnder and the record is neither named nor read")]
+    public async Task FiledUnderAnotherMatter_CallerCannotRead_LeavesTheFieldOut()
+    {
+        var record = FiledElsewhere("sprk_matter", "sprk_regardingmatter");
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, record, AccessRights.Append | AccessRights.AppendTo);
+
+        var body = await RefusedFiledElsewhereAsync();
+
+        body.TryGetProperty("filedUnder", out _).Should().BeFalse();
+        body.GetRawText().Should().NotContain(record.ToString()).And.NotContain("Acme v. Roe");
+        _logs.Warnings.Should().BeEmpty("a refusal is not a fault");
+        _world.Intake.Entities.Verify(
+            e => e.RetrieveAsync("sprk_matter", record, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the record's name is not read for a caller who cannot open it");
+    }
+
+    [Fact(DisplayName = "192 (must fire): the record the email is filed under is a secure record: no filedUnder, even for a caller who can Read it")]
+    public async Task FiledUnderASecureRecord_LeavesTheFieldOut_EvenWithRead()
+    {
+        var communication = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        _world.Communication = new Entity("sprk_communication", communication);
+        _world.Intake.Communications[communication] = new Entity("sprk_communication", communication)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", secure),
+        };
+        _world.Intake.Isolation
+            .SecureRoot("sprk_matter", secure)
+            .SecureChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", secure));
+        _access.Grant(FinanceAuthorizationFilter.MatterEntitySet, secure, AccessRights.Read);
+
+        var body = await RefusedFiledElsewhereAsync();
+
+        body.TryGetProperty("filedUnder", out _).Should().BeFalse();
+        body.GetRawText().Should().NotContain(secure.ToString());
+    }
+
+    [Theory(DisplayName = "192 (must fire): a fault reading the caller's rights, or the record's name, leaves filedUnder out: still the same 409 (never a 503), with a Warning")]
+    [InlineData("rights")]
+    [InlineData("name")]
+    public async Task AFaultReadingTheRightsOrTheName_LeavesTheFieldOut_AsTheSame409(string fault)
+    {
+        var record = FiledElsewhere("sprk_workassignment", "sprk_regardingworkassignment");
+        _access.Grant(FinanceAuthorizationFilter.WorkAssignmentEntitySet, record, AccessRights.Read);
+        if (fault == "rights")
+        {
+            _throwFor.Add(record);
+        }
+        else
+        {
+            _world.Intake.Entities
+                .Setup(e => e.RetrieveAsync("sprk_workassignment", record, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("name read faulted"));
+        }
+
+        var body = await RefusedFiledElsewhereAsync();
+
+        body.TryGetProperty("filedUnder", out _).Should().BeFalse();
+        _logs.Warnings.Should().NotBeEmpty("a fault is a Warning");
+    }
+
+    [Fact(DisplayName = "192: the step-A secure case (the unfiled communication is held under a secure record) is unchanged: same 409, same detail, no filedUnder")]
+    public async Task StepASecureRefusal_IsUnchanged_NoFiledUnder()
+    {
+        const string stepADetail = "The document's communication belongs to a restricted record, so it cannot be filed or submitted for this record. Nothing was saved.";
+        _world.Operation.Answer = _ => FromEmailSubmitResult.Refused(409, "ebilling.submission.document_core_record_mismatch", stepADetail);
+
+        var response = await PostAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.document_core_record_mismatch");
+        body.GetProperty("detail").GetString().Should().Be(stepADetail);
+        body.GetProperty("status").GetInt32().Should().Be(409);
+        body.TryGetProperty("filedUnder", out _).Should().BeFalse();
+        Props(body, "traceId").Keys.Should().BeEquivalentTo("type", "title", "status", "detail", "errorCode");
     }
 
     [Fact]
@@ -947,6 +1310,48 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
 
     // ── Doubles ──
 
+    /// <summary>The recording access source, but a rights read of a listed record THROWS (a real rights-read fault, not a denial).</summary>
+    private sealed class ThrowingAccess(IAccessDataSource inner, HashSet<Guid> throwFor) : IAccessDataSource
+    {
+        public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+            inner.GetUserAccessAsync(userId, resourceId, userAccessToken, ct);
+
+        public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
+            throwFor.Contains(recordId)
+                ? Task.FromException<AccessSnapshot>(new TimeoutException("rights read faulted"))
+                : inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+    }
+
+    /// <summary>Collects the Warning-and-above messages the host logs (a fault is a Warning; a refusal logs nothing).</summary>
+    private sealed class LogSink : ILoggerProvider
+    {
+        public List<string> Warnings { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new Sink(this);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Sink(LogSink owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (logLevel >= LogLevel.Warning)
+                {
+                    lock (owner.Warnings)
+                    {
+                        owner.Warnings.Add(formatter(state, exception));
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary><see cref="CallerRecordAccessProbe"/> at its virtual seam, as EntityAccessFilter asks it: rights by record id.</summary>
     private sealed class RecordProbe : CallerRecordAccessProbe
     {
@@ -985,7 +1390,11 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
 
             return Task.FromResult(new RateLimitResult
             {
-                IsAllowed = Allowed, Limit = 10, Remaining = Allowed ? 9 : 0, ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30), RetryAfterSeconds = 30,
+                IsAllowed = Allowed,
+                Limit = 10,
+                Remaining = Allowed ? 9 : 0,
+                ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30),
+                RetryAfterSeconds = 30,
             });
         }
     }

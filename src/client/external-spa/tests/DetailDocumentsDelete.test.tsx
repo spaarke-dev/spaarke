@@ -1,7 +1,8 @@
 /**
  * R3 task 054 (FR-24 documents on the detail view, FR-26 delete own) - what the SPA shows and does.
  *
- * What runs for real: `DocumentLibrary`, `SmartTodo`, `EventsCalendar`, `RecordDetailModal` and the six widget bodies,
+ * What runs for real: `DocumentLibrary`, `EventsCalendar`, `RecordTemplateModal` (R4 task 005; was R3's
+ * `RecordDetailModal`) and the six widget bodies,
  * the shared `SprkModal` / `ConfirmModal`, `RecordMessages`, `delete-own` (the creator rule and the failure messages),
  * `web-api-client` (routes) and Fluent v9. What is substituted: the network seam (`bffApiCall` / `bffApiBlob`, answering
  * the external routes and throwing `ApiError` exactly as bff-client builds it: the raw ProblemDetails body is the
@@ -44,7 +45,7 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
 }));
 vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
 
-// The shared grid, as in RecordDetailModal.test.tsx: reports its rows and opens one through `onRecordOpen`.
+// The shared grid, as in RecordTemplateSections.test.tsx: reports its rows and opens one through `onRecordOpen`.
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
   return {
@@ -89,10 +90,10 @@ vi.mock('../src/widgets/ExternalDataGrid', async () => {
 
 import { AccessLevel, ApiError } from '../src/types';
 import { DocumentLibrary } from '../src/components/DocumentLibrary';
-import { SmartTodo } from '../src/components/SmartTodo';
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { RecordMessages } from '../src/components/detail/RecordMessages';
-import { RecordDetailModal } from '../src/components/detail/RecordDetailModal';
+import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
+import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
 import {
   callerIdentityOf,
   deleteFailureOf,
@@ -674,104 +675,8 @@ describe('delete own document', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Delete own to-do / event (FR-26)
+// Delete own event (FR-26; R4 task 009: the SPA has no to-do list)
 // ---------------------------------------------------------------------------
-
-describe('delete own to-do', () => {
-  const todo = (n: number, name: string, stamps: Record<string, string> = {}) => ({
-    sprk_todoid: guid(700 + n),
-    sprk_name: name,
-    statuscode: 1,
-    ...stamps,
-  });
-
-  function install(onDelete?: () => unknown): void {
-    bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-      if (options?.method === 'DELETE') return onDelete ? onDelete() : undefined;
-      if (path === `/api/v1/external/projects/${PROJECT}/todos`) {
-        return {
-          value: [
-            todo(1, 'My task', { _sprk_createdbycontact_value: ME }),
-            todo(2, 'Their task', { _sprk_createdbycontact_value: SOMEONE }),
-            todo(3, 'Unstamped task'),
-          ],
-        };
-      }
-      throw new Error(`unexpected BFF call ${path}`);
-    });
-  }
-
-  const renderTodos = (caller: CallerIdentity | null = asContact) =>
-    renderInTheme(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.ViewOnly} caller={caller} />);
-
-  it(
-    'a read-only (ViewOnly) caller still gets Delete on their own tasks, and only theirs',
-    async () => {
-      install();
-      renderTodos();
-      await screen.findByText('My task');
-
-      expect(screen.getAllByRole('button', { name: /^Delete task / })).toHaveLength(1);
-      expect(deleteButton('Delete task My task')).not.toBeNull();
-      // No create / toggle affordance appears for ViewOnly: Delete does not widen the read-only view.
-      expect(screen.queryByRole('button', { name: /Create new task/ })).toBeNull();
-      expect(screen.queryByRole('button', { name: /Mark task complete/ })).toBeNull();
-    },
-    SLOW
-  );
-
-  it(
-    'no caller, no Delete',
-    async () => {
-      install();
-      renderTodos(null);
-      await screen.findByText('My task');
-      expect(screen.queryAllByRole('button', { name: /^Delete task / })).toHaveLength(0);
-    },
-    SLOW
-  );
-
-  it(
-    'asks, then a 204 removes it; Cancel does nothing',
-    async () => {
-      install();
-      renderTodos();
-      await screen.findByText('My task');
-
-      fireEvent.click(deleteButton('Delete task My task')!);
-      let dialog = await confirmDialog();
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-      await waitFor(() => expect(screen.queryByText(/^Delete task$/)).toBeNull());
-      expect(deleteCalls()).toHaveLength(0);
-
-      fireEvent.click(await reachableButton('Delete task My task'));
-      dialog = await confirmDialog();
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
-      await waitFor(() => expect(screen.queryByText('My task')).toBeNull());
-      expect(deleteCalls()).toEqual([[`/api/v1/external/todos/${guid(701)}`, { method: 'DELETE' }]]);
-      expect(screen.getByText('Their task')).toBeTruthy();
-    },
-    SLOW
-  );
-
-  it(
-    'a 403 shows an error and the task stays',
-    async () => {
-      install(() => {
-        throw new ApiError(403, problem(403, { reasonCode: 'sdap.access.deny.delete_own' }));
-      });
-      renderTodos();
-      await screen.findByText('My task');
-
-      fireEvent.click(deleteButton('Delete task My task')!);
-      fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
-
-      expect((await screen.findByTestId('delete-own-error')).textContent).toMatch(/cannot delete this task/);
-      expect(screen.getByText('My task')).toBeTruthy();
-    },
-    SLOW
-  );
-});
 
 describe('delete own event', () => {
   const event = (n: number, name: string, stamps: Record<string, string> = {}) => ({
@@ -968,7 +873,6 @@ interface DetailNet {
   documents: DocRow[];
   /** The BFF's `canCreate` on the document list; `undefined` omits the member (a BFF that does not say). */
   documentsCanCreate?: boolean;
-  todos: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
   messages: Array<Record<string, unknown>>;
   onDelete?: (path: string) => unknown;
@@ -997,7 +901,6 @@ function installDetailNet(key: GridKey, net: DetailNet): void {
         ? { value: net.documents }
         : { value: net.documents, canCreate: net.documentsCanCreate };
     }
-    if (/\/todos$/.test(path)) return { value: net.todos };
     if (/\/events$/.test(path)) return { value: net.events };
     if (/\/messages$/.test(path)) {
       if (options?.method === 'POST') {
@@ -1015,7 +918,6 @@ function emptyNet(over: Partial<DetailNet> = {}): DetailNet {
     me: { contactId: ME, projects: [{ projectId: PROJECT, accessLevel: 'Collaborate' }] },
     documents: [],
     documentsCanCreate: true,
-    todos: [],
     events: [],
     messages: [],
     ...over,
@@ -1040,16 +942,12 @@ async function openDetail(key: GridKey): Promise<HTMLElement> {
 
 describe('the record detail view', () => {
   it(
-    "Project, Collaborate: Upload is offered; Delete only on the caller's own document, task and event",
+    "Project, Collaborate: Upload is offered; Delete only on the caller's own document and event",
     async () => {
       installDetailNet(
         'project',
         emptyNet({
           documents: mixedDocs(),
-          todos: [
-            { sprk_todoid: guid(701), sprk_name: 'My task', statuscode: 1, _sprk_createdbycontact_value: ME },
-            { sprk_todoid: guid(702), sprk_name: 'Their task', statuscode: 1, _sprk_createdbycontact_value: SOMEONE },
-          ],
           events: [
             { sprk_eventid: guid(801), sprk_name: 'My call', _sprk_createdbycontact_value: ME },
             { sprk_eventid: guid(802), sprk_name: 'Their call', _sprk_createdbycontact_value: SOMEONE },
@@ -1064,17 +962,15 @@ describe('the record detail view', () => {
       await within(docs).findByText('Mine.pdf');
       const events = within(dialog).getByTestId('record-detail-events');
       await within(events).findByText('My call');
-      await within(events).findByText('My task');
 
-      expect(within(docs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+      expect(await within(dialog).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
       // Delete appears exactly on the caller's rows - once the identity read (/me) has returned.
-      await waitFor(() => expect(within(dialog).getAllByRole('button', { name: /^Delete / })).toHaveLength(3));
+      await waitFor(() => expect(within(dialog).getAllByRole('button', { name: /^Delete / })).toHaveLength(2));
       expect(within(dialog).getByRole('button', { name: 'Delete Mine.pdf' })).toBeTruthy();
-      expect(within(dialog).getByRole('button', { name: 'Delete task My task' })).toBeTruthy();
       expect(within(dialog).getByRole('button', { name: 'Delete event My call' })).toBeTruthy();
       expect(
         within(dialog).queryAllByRole('button', {
-          name: /^Delete (task |event )?(Their task|Their call|Theirs\.pdf|ByStaff\.pdf|Unstamped\.pdf)$/,
+          name: /^Delete (event )?(Their call|Theirs\.pdf|ByStaff\.pdf|Unstamped\.pdf)$/,
         })
       ).toHaveLength(0);
 
@@ -1101,7 +997,7 @@ describe('the record detail view', () => {
       await within(docs).findByText('Mine.pdf');
 
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
     },
     SLOW
@@ -1117,7 +1013,7 @@ describe('the record detail view', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(within(dialog).queryAllByRole('button', { name: /^Delete / })).toHaveLength(0);
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1130,7 +1026,7 @@ describe('the record detail view', () => {
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
 
-      expect(within(docs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+      expect(await within(dialog).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
       expect(bffApiCall.mock.calls.map(c => String(c[0]))).toContain(`/api/v1/external/matters/${MATTER}/documents`);
     },
@@ -1145,7 +1041,7 @@ describe('the record detail view', () => {
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
 
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
     },
@@ -1159,14 +1055,14 @@ describe('the record detail view', () => {
       const viewOnly = await openDetail('wa');
       const docs = await within(viewOnly).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(viewOnly).queryByRole('button', { name: 'Upload documents' })).toBeNull();
       cleanup();
 
       installDetailNet('wa', emptyNet({ documents: mixedDocs(), documentsCanCreate: true }));
       const collaborate = await openDetail('wa');
       const docs2 = await within(collaborate).findByTestId('record-detail-documents');
       await within(docs2).findByText('Mine.pdf');
-      expect(within(docs2).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+      expect(await within(collaborate).findByRole('button', { name: 'Upload documents' })).toBeTruthy();
     },
     SLOW
   );
@@ -1178,7 +1074,7 @@ describe('the record detail view', () => {
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText(/No documents have been uploaded to this matter yet\.$/);
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1190,7 +1086,7 @@ describe('the record detail view', () => {
       const dialog = await openDetail('matter');
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1210,7 +1106,7 @@ describe('the record detail view', () => {
       const docs = await within(dialog).findByTestId('record-detail-documents');
       await within(docs).findByText('Mine.pdf');
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' })).toBeNull();
     },
     SLOW
   );
@@ -1239,7 +1135,7 @@ describe('the record detail view', () => {
       // /me has returned once the caller's own Delete shows.
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
 
-      expect(within(docs).queryByRole('button', { name: /Upload Document/ }) !== null).toBe(offered);
+      expect(within(dialog).queryByRole('button', { name: 'Upload documents' }) !== null).toBe(offered);
       expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
     },
     SLOW
@@ -1416,10 +1312,10 @@ describe('the record detail view', () => {
       const Host: React.FC = () => {
         const [index, setIndex] = React.useState(0);
         return (
-          <RecordDetailModal
+          <RecordTemplateModal
             open
             onClose={() => undefined}
-            entityName="sprk_matter"
+            config={RECORD_TEMPLATES.sprk_matter}
             recordIds={[MATTER, NEXT]}
             index={index}
             onIndexChange={setIndex}
@@ -1446,7 +1342,7 @@ describe('the record detail view', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Owner decisions 2026-10-11: delete a service request (the requester), recall when it has activity, invoice documents
+// Owner decisions 2026-10-11: delete a service request (the requester), recall when it has activity
 // ---------------------------------------------------------------------------
 
 const SR_ROUTE = `/api/v1/external/servicerequests/${SERVICE_REQUEST}`;
@@ -1959,118 +1855,6 @@ describe('service request: 409 has_related_records and the recall request', () =
   );
 });
 
-describe('invoice documents on the detail view', () => {
-  it(
-    'list: read from the invoices documents route, with download through the invoice content route',
-    async () => {
-      installDetailNet('invoice', emptyNet({ documents: [doc(1, 'Invoice.pdf')], documentsCanCreate: false }));
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Invoice.pdf');
-      expect(bffApiCall.mock.calls.map(c => String(c[0]))).toContain(`/api/v1/external/invoices/${INVOICE}/documents`);
-
-      const createObjectURL = vi.fn(() => 'blob:test');
-      Object.assign(window.URL, { createObjectURL, revokeObjectURL: vi.fn() });
-      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
-      bffApiBlob.mockResolvedValue(new Blob(['bytes']));
-      fireEvent.click(within(docs).getByRole('button', { name: 'Download Invoice.pdf' }));
-      await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
-      expect(bffApiBlob).toHaveBeenCalledWith(`/api/v1/external/invoices/${INVOICE}/documents/${guid(901)}/content`);
-    },
-    SLOW
-  );
-
-  it.each([
-    [true, true],
-    [false, false],
-    [undefined, false],
-  ])(
-    "upload follows the list's canCreate (%s): Upload shown = %s",
-    async (canCreate, shown) => {
-      installDetailNet('invoice', emptyNet({ documents: [doc(1, 'Invoice.pdf')], documentsCanCreate: canCreate }));
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Invoice.pdf');
-      if (shown) {
-        expect(within(docs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
-      } else {
-        expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
-      }
-    },
-    SLOW
-  );
-
-  it(
-    'no Create (empty list): no Upload in the empty state either; with Create the empty state offers it',
-    async () => {
-      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: false }));
-      const denied = await openDetail('invoice');
-      const deniedDocs = await within(denied).findByTestId('record-detail-documents');
-      await within(deniedDocs).findByText(/No documents have been uploaded to this invoice yet\.$/);
-      expect(within(deniedDocs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
-      cleanup();
-
-      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: true }));
-      const allowed = await openDetail('invoice');
-      const allowedDocs = await within(allowed).findByTestId('record-detail-documents');
-      await within(allowedDocs).findByText(/No documents have been uploaded to this invoice yet\./);
-      expect(within(allowedDocs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
-    },
-    SLOW
-  );
-
-  it(
-    'upload with Create posts multipart to the invoice documents route (the id is the route, never the body)',
-    async () => {
-      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: true }));
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (options?.method === 'POST') return { sprk_documentid: guid(999) };
-        if (/\/documents$/.test(path)) return { value: [], canCreate: true };
-        if (path === '/api/v1/external/me') return { contactId: ME, projects: [] };
-        if (/\/messages$/.test(path)) return { value: [] };
-        throw new Error(`unexpected BFF call ${path}`);
-      });
-      fireEvent.click(await within(docs).findByRole('button', { name: /Upload Document/ }));
-      const input = await waitFor(() => {
-        const el = document.querySelector('input[type="file"]');
-        if (!el) throw new Error('no file input yet');
-        return el as HTMLInputElement;
-      });
-      fireEvent.change(input, { target: { files: [new File(['%PDF'], 'inv.pdf', { type: 'application/pdf' })] } });
-      fireEvent.click(await screen.findByRole('button', { name: 'Upload' }));
-      await waitFor(() => {
-        const post = bffApiCall.mock.calls.find(
-          c => (c[1] as RequestInit | undefined)?.method === 'POST' && /\/documents$/.test(String(c[0]))
-        );
-        expect(post?.[0]).toBe(`/api/v1/external/invoices/${INVOICE}/documents`);
-        expect((post?.[1] as RequestInit).body).toBeInstanceOf(FormData);
-      });
-    },
-    SLOW
-  );
-
-  it(
-    "an invoice document is deletable like any other when the caller created it (the document's own delete route)",
-    async () => {
-      installDetailNet(
-        'invoice',
-        emptyNet({ documents: mixedDocs(), documentsCanCreate: true, onDelete: () => undefined })
-      );
-      const dialog = await openDetail('invoice');
-      const docs = await within(dialog).findByTestId('record-detail-documents');
-      await within(docs).findByText('Mine.pdf');
-      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
-      fireEvent.click(within(docs).getByRole('button', { name: 'Delete Mine.pdf' }));
-      fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
-      await waitFor(() => expect(within(docs).queryByText('Mine.pdf')).toBeNull());
-      expect(deleteCalls().map(c => c[0])).toEqual([`/api/v1/external/documents/${guid(901)}`]);
-    },
-    SLOW
-  );
-});
-
 // ---------------------------------------------------------------------------
 // Review fixes (2026-10-12): a deleted request stays deleted when paged back to; the grid re-reads after a delete
 // ---------------------------------------------------------------------------
@@ -2110,10 +1894,10 @@ describe('service request: after a delete (review fixes 2026-10-12)', () => {
       const Host: React.FC = () => {
         const [index, setIndex] = React.useState(1);
         return (
-          <RecordDetailModal
+          <RecordTemplateModal
             open
             onClose={() => undefined}
-            entityName="sprk_servicerequest"
+            config={RECORD_TEMPLATES.sprk_servicerequest}
             recordIds={[SERVICE_REQUEST, SR_2, SR_3]}
             index={index}
             onIndexChange={setIndex}
@@ -2164,10 +1948,10 @@ describe('service request: after a delete (review fixes 2026-10-12)', () => {
       );
       const onRecordDeleted = vi.fn();
       renderInTheme(
-        <RecordDetailModal
+        <RecordTemplateModal
           open
           onClose={() => undefined}
-          entityName="sprk_servicerequest"
+          config={RECORD_TEMPLATES.sprk_servicerequest}
           recordIds={[SERVICE_REQUEST]}
           index={0}
           onIndexChange={() => undefined}

@@ -150,7 +150,8 @@ public static class InviteExternalUserEndpoint
         if (organizationProblem is not null)
             return organizationProblem;
 
-        logger.LogInformation("[EXT-INVITE] Onboarding external user {Email}", request.Email);
+        logger.LogInformation("[EXT-INVITE] Onboarding an external user on {RootType} {RootId} (trace {TraceId})",
+            root.Type, root.Id, httpContext.TraceIdentifier);
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
@@ -200,7 +201,8 @@ public static class InviteExternalUserEndpoint
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[EXT-INVITE] Failed to onboard external user {Email}", request.Email);
+            logger.LogError(ex, "[EXT-INVITE] Failed to onboard an external user on {RootType} {RootId} (trace {TraceId})",
+                root.Type, root.Id, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -304,7 +306,7 @@ public static class InviteExternalUserEndpoint
     /// sign-in. A contact bound on a workforce plane is already refused by the invite decision itself. <c>null</c> when the
     /// resolution may receive a work-account invite.
     /// </summary>
-    internal static ProvisionOutcome? WorkAccountNotProvisionable(InviteContactResolution resolution, string email, ILogger logger)
+    internal static ProvisionOutcome? WorkAccountNotProvisionable(InviteContactResolution resolution, ILogger logger)
     {
         // A contact carrying the removed marker never reaches here: the invite decision refused it
         // (ContactBindingDecision.InviteContactRemovedAdminReinstate, through NotProvisionable).
@@ -466,14 +468,14 @@ public static class InviteExternalUserEndpoint
     /// provision (or to create). The ONE mapping, used by <see cref="ProvisionAsync"/> and by <c>/invite-and-grant</c>'s
     /// pre-onboarding check, so both answer a refusal and a lookup failure with the same code and message.
     /// </summary>
-    internal static ProvisionOutcome? NotProvisionable(InviteContactResolution resolution, string email, ILogger logger)
+    internal static ProvisionOutcome? NotProvisionable(InviteContactResolution resolution, ILogger logger)
     {
         switch (resolution.Action)
         {
             case InviteContactAction.Refuse:
                 logger.LogWarning(
-                    "[EXT-INVITE] Refused invite for {Email} ({ReasonCode}) — no CIAM account created",
-                    email, resolution.ReasonCode);
+                    "[EXT-INVITE] Refused the invite for contact {ContactId} ({ReasonCode}) — no CIAM account created",
+                    resolution.ContactId, resolution.ReasonCode);
                 return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "Refused",
                     new InviteRefusal(resolution.ReasonCode!, resolution.Message ?? "The invite was refused."));
 
@@ -483,8 +485,8 @@ public static class InviteExternalUserEndpoint
                 // "Failed to onboard" 500, and never read as "no such contact".
                 var code = resolution.ReasonCode ?? ContactBindingDecision.InviteContactLookupFailed;
                 logger.LogWarning(
-                    "[EXT-INVITE] Contact lookup for {Email} could not be read ({ReasonCode}) — nothing created",
-                    email, code);
+                    "[EXT-INVITE] The invite email's contact lookup could not be read ({ReasonCode}) — nothing created",
+                    code);
                 // The last fallback is deliberately NOT the decision's wording, so a test can tell which one reached
                 // the client (third fix round, verifier INFO finding).
                 return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "LookupFailed",
@@ -500,13 +502,17 @@ public static class InviteExternalUserEndpoint
     /// <summary>
     /// The 409 ProblemDetails for a refused invite (both <c>/invite</c> and <c>/invite-and-grant</c>). C5: titled by reason
     /// code, as the grant core titles its refusals: a person whose external access an administrator removed is "External
-    /// access removed", never an identity collision; every other refusal keeps "Identity collision".
+    /// access removed", never an identity collision; a contact that already signs in with its organization's work account
+    /// (WorkforceHome plane) is "Already signs in with a work account", also not a collision; every other refusal keeps
+    /// "Identity collision".
     /// </summary>
     internal static IResult RefusalResult(InviteRefusal refusal, HttpContext httpContext)
         => Results.Problem(
             statusCode: StatusCodes.Status409Conflict,
             title: refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedAdminReinstate
                 ? "External access removed"
+                : refusal.ReasonCode == ContactBindingDecision.InviteWorkforceHomeContact
+                ? "Already signs in with a work account"
                 : "Identity collision",
             detail: refusal.Message,
             extensions: new Dictionary<string, object?>

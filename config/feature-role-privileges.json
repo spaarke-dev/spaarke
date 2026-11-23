@@ -1,0 +1,771 @@
+{
+  "schemaVersion": 1,
+  "description": "The owner's role rulings on task 046's gaps (2026-11-05; projects/field-mapping-server-write-path-r1/notes/decisions.md, 'Role rulings on task 046's gaps'): the privileges each role is given or raised to so the feature named works for its users. This file is the ONE declared list of those changes. The role files under src/dataverse/solutions/SpaarkeMaster/Roles hold each one at exactly 'depth' (tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs checks it, and checks that putting any one back to 'from' fails the feature permission guard); scripts/Set-FeatureRolePrivileges.ps1 applies it to an environment.",
+  "howToExtend": [
+    "Add an entry only for a role change the owner ruled (cite the gap or decision in 'gap'). Gaps the owner has not ruled on stay in the guard's ratchet baseline, not here.",
+    "'privilege' is the name from metadata (EntityDefinitions(LogicalName='x')/Privileges); 'table' is the logical name the script reads it from.",
+    "'depth' is the depth the role holds after the change; 'from' is the role file's depth before it ('None' when the role held none). The script only adds or raises to 'depth'; it never lowers and never removes.",
+    "'removals' is a separate block for the owner's removals: role, table, privilege and 'expectedDepth', the depth the role file held before the removal. Only `-Remove` reads it, and it removes exactly these privileges (RemovePrivilegeRole on the root role) and nothing else. The role files must NOT hold a listed privilege (the ArchTests check it). `-Restore` is the rollback: it adds back exactly these privileges at 'expectedDepth' where the role holds none, and changes nothing else. `-Gap` limits `-Remove` and `-Restore` to the entries of the named gaps (for example `-Gap R3`).",
+    "Basic User is read-only on Spaarke tables (owner, 2026-11-06; task 046c): its file holds Read and nothing else on sprk_* tables. The R3 removals take every other Spaarke-table privilege off it; the guard's BasicUserIsReadOnlyOnSpaarkeTables pins the rule."
+  ],
+  "changes": [
+    {
+      "gap": "G1",
+      "role": "Spaarke Core User",
+      "table": "sprk_reportcard",
+      "privilege": "prvCreatesprk_ReportCard",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Report Card wizard (create)"
+    },
+    {
+      "gap": "G1",
+      "role": "Spaarke Core User",
+      "table": "sprk_reportcard",
+      "privilege": "prvAppendsprk_ReportCard",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Report Card wizard (lookups on the created row)"
+    },
+    {
+      "gap": "G1",
+      "role": "Spaarke Core User",
+      "table": "sprk_reportcard",
+      "privilege": "prvAppendTosprk_ReportCard",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "KPI assessment filed under a report card"
+    },
+    {
+      "gap": "G2",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_eventtype_ref",
+      "privilege": "prvAppendTosprk_EventType_Ref",
+      "depth": "Global",
+      "from": "Deep",
+      "feature": "Event (typed route): the event type"
+    },
+    {
+      "gap": "G4, G7",
+      "role": "Spaarke Office Add In User",
+      "table": "contact",
+      "privilege": "prvAppendToContact",
+      "depth": "Deep",
+      "from": "Basic",
+      "feature": "Office quick create with an assignee; Event (typed route) regarding a contact"
+    },
+    {
+      "gap": "G5",
+      "role": "Spaarke Billing Administrator",
+      "table": "sprk_procedure",
+      "privilege": "prvReadsprk_procedure",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Billing: Procedure override remove / preview (ebilling-r1 089e adds the same line)"
+    },
+    {
+      "gap": "G6",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_document",
+      "privilege": "prvWritesprk_Document",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Office version save (Word)"
+    },
+    {
+      "gap": "G7",
+      "role": "Spaarke Office Add In User",
+      "table": "account",
+      "privilege": "prvAppendToAccount",
+      "depth": "Deep",
+      "from": "Basic",
+      "feature": "Event (typed route) regarding an account"
+    },
+    {
+      "gap": "G8",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_budget",
+      "privilege": "prvAppendTosprk_Budget",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Event (typed route) regarding a budget"
+    },
+    {
+      "gap": "G17",
+      "role": "Spaarke Core User",
+      "table": "sprk_agreementtype",
+      "privilege": "prvAppendTosprk_AgreementType",
+      "depth": "Global",
+      "from": "None",
+      "feature": "Agreement type on an analysis (Create Analysis wizard; Console classifier); Core User holds it before Basic User loses it (owner 2026-11-06, task 046c)"
+    },
+    {
+      "gap": "G17",
+      "role": "Spaarke Core User",
+      "table": "sprk_organizationtype_ref",
+      "privilege": "prvAppendTosprk_OrganizationType_Ref",
+      "depth": "Global",
+      "from": "None",
+      "feature": "Organization type on an organization (model-driven form); Core User holds it before Basic User loses it (owner 2026-11-06, task 046c)"
+    },
+    {
+      "gap": "G17",
+      "role": "Spaarke Core User",
+      "table": "sprk_documenttype_ref",
+      "privilege": "prvAppendTosprk_documenttype_ref",
+      "depth": "Global",
+      "from": "None",
+      "feature": "Document type on a practice area matrix row (model-driven form); Core User holds it before Basic User loses it (owner 2026-11-06, task 046c)"
+    }
+  ],
+  "removals": [
+    {
+      "gap": "R1",
+      "role": "Spaarke Ontology Administrator",
+      "table": "sprk_budgetrevision",
+      "privilege": "prvCreatesprk_BudgetRevision",
+      "expectedDepth": "Deep",
+      "feature": "Budget Revision create: only the writer creates one (owner ruling 2026-11-05); the role keeps Write and Delete"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_accounttype_ref",
+      "privilege": "prvAppendTosprk_AccountType_Ref",
+      "expectedDepth": "Global",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreement",
+      "privilege": "prvAppendTosprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreement",
+      "privilege": "prvAppendsprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreement",
+      "privilege": "prvCreatesprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreement",
+      "privilege": "prvWritesprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreement",
+      "privilege": "prvDeletesprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreement",
+      "privilege": "prvAssignsprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreement",
+      "privilege": "prvSharesprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_agreementtype",
+      "privilege": "prvAppendTosprk_AgreementType",
+      "expectedDepth": "Global",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_analysis",
+      "privilege": "prvAppendTosprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_analysis",
+      "privilege": "prvAppendsprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_analysis",
+      "privilege": "prvCreatesprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_analysis",
+      "privilege": "prvWritesprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_analysis",
+      "privilege": "prvDeletesprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_analysis",
+      "privilege": "prvAssignsprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_analysis",
+      "privilege": "prvSharesprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_billingexport",
+      "privilege": "prvAppendTosprk_billingexport",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communication",
+      "privilege": "prvAppendTosprk_Communication",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communication",
+      "privilege": "prvAppendsprk_Communication",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communication",
+      "privilege": "prvCreatesprk_Communication",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communication",
+      "privilege": "prvWritesprk_Communication",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communication",
+      "privilege": "prvDeletesprk_Communication",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communication",
+      "privilege": "prvAssignsprk_Communication",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communication",
+      "privilege": "prvSharesprk_Communication",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvAppendTosprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvAppendsprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvCreatesprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvWritesprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvDeletesprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvAssignsprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvSharesprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvAppendTosprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvAppendsprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvCreatesprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvWritesprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvDeletesprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvAssignsprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvSharesprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvAppendTosprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvAppendsprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvCreatesprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvWritesprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvDeletesprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvAssignsprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvSharesprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvAppendTosprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvAppendsprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvCreatesprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvWritesprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvDeletesprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvAssignsprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvSharesprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvAppendTosprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvAppendsprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvCreatesprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvWritesprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvDeletesprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvAssignsprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvSharesprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_contactorganization",
+      "privilege": "prvSharesprk_ContactOrganization",
+      "expectedDepth": "Global",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_document",
+      "privilege": "prvAppendTosprk_Document",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_documenttype",
+      "privilege": "prvAppendTosprk_DocumentType",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_documenttype_ref",
+      "privilege": "prvAppendTosprk_documenttype_ref",
+      "expectedDepth": "Global",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_event",
+      "privilege": "prvAppendTosprk_Event",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_externalidentifier",
+      "privilege": "prvAppendTosprk_externalidentifier",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_invoice",
+      "privilege": "prvAppendTosprk_Invoice",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_invoiceapproval",
+      "privilege": "prvAppendTosprk_invoiceapproval",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvAppendTosprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_invoicesubmission",
+      "privilege": "prvAppendTosprk_invoicesubmission",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_matter",
+      "privilege": "prvAppendTosprk_Matter",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_memo",
+      "privilege": "prvAppendTosprk_Memo",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_navitem",
+      "privilege": "prvAppendTosprk_NavItem",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_organization",
+      "privilege": "prvAppendTosprk_Organization",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_organizationtype_ref",
+      "privilege": "prvAppendTosprk_OrganizationType_Ref",
+      "expectedDepth": "Global",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_project",
+      "privilege": "prvAppendTosprk_Project",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_recordtype_ref",
+      "privilege": "prvAppendTosprk_RecordType_Ref",
+      "expectedDepth": "Global",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_report",
+      "privilege": "prvAppendTosprk_Report",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_reportcard",
+      "privilege": "prvAppendTosprk_ReportCard",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_todo",
+      "privilege": "prvAppendTosprk_Todo",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "R3",
+      "role": "Spaarke Basic User",
+      "table": "sprk_workassignment",
+      "privilege": "prvAppendTosprk_WorkAssignment",
+      "expectedDepth": "Deep",
+      "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    }
+  ]
+}

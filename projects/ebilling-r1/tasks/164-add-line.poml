@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="164" project="ebilling-r1">
+  <metadata>
+    <title>Add line: a reviewer adds a line the firm did not bill (BFF route, Invoice Review form, New Billing Event hidden)</title>
+    <phase>4 Review (EB-D-188; the number 160 is taken by the end-to-end seam tests)</phase>
+    <gate>164a: Q1-Q4 answered in the decisions log, and 095d-0 (InvoiceFirmGate) merged into work. 164c -Apply: Q6 answered and the owner's live go.
+      (notes/add-line-brief.md section 4)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A new write path for invoice lines (app identity, caller rights on the invoice); it changes totals (I-1) and the Decision Record catalog; it writes Signals and the field-secured findings JSON.</rigor-reason>
+    <model-tier>opus (164a); sonnet (164b, 164c)</model-tier>
+    <model-tier-reason>164a combines access, a totals invariant, 101's findings diff, the Signal episode rules and concurrency. 164b and 164c copy existing patterns.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>164a edits InvoiceCorrectionReevaluation.cs (extraction only), InvoiceTotalsCalculator.cs, DecisionActionCatalog.cs and InvoiceLineReviewEndpoints.cs (095d-0 edits it too). InvoiceSubmissionPersister.cs is NOT edited, which avoids overlap with 082d and 095d-2a. 164c can run beside 164a.</parallel-reason>
+    <deps>095d-0 (InvoiceFirmGate); 100, 101, 102, 103 (merged)</deps>
+    <tags>bff-api, ebilling, auth, code-page, ribbon, signals, decision-record</tags>
+    <estimated-effort>3 days: 164a 2 days, 164b 0.5 days, 164c 0.5 days; one agent each</estimated-effort>
+  </metadata>
+
+  <prompt>Binding brief, read it first; it is not restated here: projects/ebilling-r1/notes/add-line-brief.md.
+    - Section 2 is the closed requirement set (R1-R19, each with its source).
+    - Section 3 is the design and the order of writes.
+    - Section 4 holds the open questions and their recommendations.
+    - Sections 5-11 give the files, the justification, the ADRs, the tests, the limits, the rigor and the split.
+    If the brief and a source disagree, the source wins: stop and say which.
+    The uac-r2 access conditions (A1-A5) and the ontology-r1 conditions (O1-O3) are binding and appear below as acceptance criteria.</prompt>
+
+  <role>SPAARKE platform developer: Finance write paths (line decisions, adjustments, the corrections re-evaluation), the billing Decision Record, Signals, and the Invoice Review code page.</role>
+
+  <goal>POST /api/finance/invoices/{invoiceId}/lines adds one Fee or Expense line to an invoice that is In Review and has a firm.
+    - Rights: the caller's Write on the invoice is asked as the caller.
+    - The write: the app identity creates the line.
+    - The line: Flagged, marked reviewer-added, and outside the firm's billed total.
+    - Checks: its rules and the invoice-level total rules run through 101's before/after diff, and the Signals follow D-201.
+    - The record: one add-line Decision Record names the caller and the reason.
+    The Invoice Review page gets an Add line form. A script hides the model-driven New Billing Event.</goal>
+
+  <scope>
+    <in>The route and its DTO; InvoiceLineAddService; the extraction of CRE's request builder and patch helpers; the totals change for Q1; the add-line code (Q3); provenance.source and ReviewLineDto.ReviewerAdded; the DI line; the guard and ledger texts; the client form, button and badge; the ribbon shell, the hides and the script; tests per brief section 8; task notes notes/164-add-line.md.</in>
+    <out>Any new Dataverse column or table; any edit to the persister; an AI call (Q4); any external route or projection (Q5, task 130); any edit to uac-r2's child-record route or SecureChild ribbon (Q6); running the ribbon script with -Apply; live writes; bulk add.</out>
+  </scope>
+
+  <constraints>
+    <constraint source="brief R1, R2, R17; uac A2, A4">
+      - The route goes in the existing /api/finance group (RequireAuthorization, RequireInternalFinanceCaller) with AddFinanceAuthorizationFilter("ebilling.invoice.decide", InvoiceEntitySet, "invoiceId") and RequireEbillingEnabled.
+      - The caller's rights are asked on the INVOICE as the caller, fail closed.
+      - The line is written by the app identity.
+      - The decider is ResolveCallerSystemUserIdAsync of the caller's own token. Nothing in the body names a person, a total or a status.</constraint>
+    <constraint source="brief R3; EB-D-185; uac A3; ont O1">Order: the shape checks (400) come first, before any read. In Review and InvoiceFirmGate are checked BEFORE any write and before any SignalWriter, recorder or set-store call.</constraint>
+    <constraint source="brief R6, R15; CRE remarks">
+      - Rules run only through the extracted CRE builder and the pure Evaluate, never a copy. The existing correction suites pass unchanged; that is the refactor proof.
+      - A stored Blocked entry and the override stamp are never changed.
+      - No 073 runs; nothing rejects or holds.
+      - A new Procedure gap is 409.</constraint>
+    <constraint source="brief R8; D-100; ont O3; uac A5">
+      - The Decision Record is written only through BillingDecisionRecorder.RecordAsync (WriteBillingDecisionAsync), after the line write.
+      - Preflight runs before any write.
+      - The reason is required, at most 2000 characters.
+      - ResolvedSignalIds is empty.
+      - Facts hold ids and codes only: no description, no name, no free text.</constraint>
+    <constraint source="brief R7, R9; ont O2, O3; D-201 Q2">
+      - Signals are written through SignalEpisodeLifecycle and SignalWriter with the D-13 key.
+      - A changed reason set is Superseded, record-free, followed by episode n+1. An unchanged set refreshes sprk_lastevaluated only.
+      - LinkConditionClearedRecordAsync (resolvedBy = the caller) is used only when this decision removed the last open hold reason (InvoiceOpenHolds non-empty before, empty after).</constraint>
+    <constraint source="brief R13, R14">
+      - The line id and decision id are derived from (invoice, requestId).
+      - The per-invoice lock LockKeyFor is taken.
+      - ONE commit transaction: the create, plus the submission findings update, plus an invoice update, both IfRowVersionMatches.
+      - From the commit on, CancellationToken.None.
+      - Every later step is idempotent.</constraint>
+    <constraint source="Q2; CLAUDE.md 11">The marker is provenance.source = "reviewer" inside the existing sprk_extractionconfidence (if the owner confirms Q2). Never a new column without escalation.</constraint>
+    <constraint source="CLAUDE.md 10; bff-extensions">
+      - Placement: the BFF; request-scoped, no job (ADR-052). One AddScoped in FinanceModule. No package.
+      - Measure the publish delta against a fresh master build.
+      - Logs carry ids and counts only (ADR-015).</constraint>
+    <constraint source="ribbon-edit skill; Deploy-EbillingBillingExportRibbon.ps1">
+      - The script is a dry run by default. -Apply runs a scoped PublishXml (never PublishAllXml), then the -Verify check. -Verify is read-only.
+      - The import replaces the table's RibbonDiffXml, so the dry run refuses when the checked-in diff carries ids that are not live, which includes uac 147's sprk.SecureChild.* (Q6).</constraint>
+    <constraint source="project">No live writes. Access defects: the defect and its location only. Wording in commits, the PR and notes describes the change.</constraint>
+  </constraints>
+
+  <relevant-files>
+    <file role="create">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineAddService.cs</file>
+    <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceLineReviewEndpoints.cs (route, AddLineRequest, result mapping)</file>
+    <file role="modify">Services/Finance/InvoiceCorrectionReevaluation.cs (extract RequestBasis, PatchFindings, PatchPlan, SubjectsOf; no behaviour change)</file>
+    <file role="modify">Services/Finance/InvoiceTotalsCalculator.cs, InvoiceTotalsService.cs (Q1); Submission/ExtractionProvenance.cs; InvoiceReviewReadService.cs (ReviewLineDto.ReviewerAdded)</file>
+    <file role="modify">Services/Signals/Actions/DecisionActionCatalog.cs; Services/Signals/DecisionRecordWriter.cs:1256 (Q3, ontology sign-off); Submission/SignalEpisodeLifecycle.cs (SignalLogContext.AddLine); Infrastructure/DI/FinanceModule.cs; Services/Dataverse/ParentLineage.cs (text)</file>
+    <file role="modify">src/solutions/InvoiceReview/src/components/Dialogs.tsx, InvoiceReviewPage.tsx, LinesGrid.tsx; src/services/invoiceReviewApi.ts, reviewModel.ts</file>
+    <file role="create">scripts/ebilling/Deploy-EbillingBillingEventRibbon.ps1; infrastructure/dataverse/ribbon/BillingEventRibbons/ (Other/Solution.xml, Other/Customizations.xml, Entities/sprk_billingevent/Entity.xml)</file>
+    <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_BillingEvent/RibbonDiff.xml (HideCustomActions)</file>
+    <file role="reference">InvoiceAdjustmentService.ApplyAddAsync (:451-582); InvoiceLineDecisionService RunAsync/ApplyAsync (:274-318, :617-704); InvoiceCorrectionService.RederiveAsync (:568-660); scripts/ebilling/Deploy-EbillingBillingExportRibbon.ps1; Dialogs.tsx CorrectValueModal</file>
+    <file role="modify">tests: tests/integration/contract/Api/Finance/InvoiceLineReviewEndpointsAuthorizationContractTests.cs; new tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceLineAddServiceTests.cs; InvoiceTotalsCalculatorTests; tests/Spaarke.ArchTests RouteAuthorizationGuardTests.Ledger.cs, FindingsJsonAppOnlyReadGuardTests, RecordOwnerAssignmentCensusTests; tests/unit/domain/Signals/DecisionActionCatalogTests.cs; DecisionRecordWriterTests.Billing.cs; src/solutions/InvoiceReview/src/__tests__</file>
+  </relevant-files>
+
+  <steps mode="directional">
+    <step id="164a-0">Confirm that Q1-Q4 are answered in the decisions log and that 095d-0 is merged. Otherwise STOP.</step>
+    <step id="164a">Build the BFF per brief section 3: extraction, service, route, totals, code, marker, guards, and tests T, N, S and G.
+      - Run code-review and adr-check.
+      - Two adversarial passes.
+      - uac-r2 reviews the route (A1-A5); ontology-r1 reviews R7-R9.
+      - Measure the publish delta.</step>
+    <step id="164b">The client per brief section 3 and R19: AddLineModal on FormModal, the Add line button in the lines toolbar, the reviewer-added badge, and addLine with one requestId kept across Repeat. Then C1-C4, code-review and the npm build.</step>
+    <step id="164c">The ribbon shell, the five hides and the script with dry run, -Apply and -Verify. Then P1-P2 and a dry run against dev (read-only). -Apply waits for Q6 and the owner's go.</step>
+    <step>Write notes/164-add-line.md: what landed, deviations, the answers Q1-Q7, known limits K1-K6, and the publish delta.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Happy path, Fee and Expense (T1, T2):
+      - one sprk_billingevent row, created by the app identity, owner from IRecordOwnershipResolver;
+      - sprk_createdbyperson = the caller;
+      - the invoice's core and resolver fields, its confirmed firm and currency;
+      - sequence = the maximum over all lines + 1;
+      - status Flagged, the line finding line.reviewer_added, provenance.source = "reviewer";
+      - totals stored per Q1;
+      - 200 with lineId, decisionId and totals.</criterion>
+    <criterion>The Decision Record (uac A5, ont O3):
+      - exactly one record: action add-line, subject the new line;
+      - the decider is the caller (BillingDecider.Human), and the reason is stored;
+      - ResolvedSignalIds is empty;
+      - its facts contain ids and codes only;
+      - it is written only through BillingDecisionRecorder, and only after the line write.</criterion>
+    <criterion>Rules and Signals (ont O2):
+      - a rule on the new line raises a Signal keyed {policy}|sprk_billingevent|{lineId}|1;
+      - a changed invoice-level reason set gives Superseded (no sprk_decisionrecord) and then episode n+1;
+      - must-not-fire: an unchanged set keeps the same Signal and refreshes only sprk_lastevaluated;
+      - a cleared non-hold group is closed ConditionCleared and record-free.</criterion>
+    <criterion>The hold link (ont Q7 ruling): in R1 Add line cannot clear the last hold reason (EB-D-185/190; only Override or the re-run releases a Procedure hold), so NO link code is written. Must-not-fire test: an Add line on a held invoice never calls LinkConditionClearedRecordAsync and never closes a Signal ConditionCleared; a stored Blocked entry and the override stamp are byte-identical after any add. Trigger: a later change that gives Add line a hold-clearing path applies O3 then, under ontology's Q1 conditions.</criterion>
+    <criterion>The add-line code (ont Q3 ruling): required reason, Tier2b, Judgement, Reversible, RecordOfTruthImpact, subject = the new line (D-75). (1) Added to the line literal at DecisionRecordWriter.cs ~:1256 and to the exact-set test Billing_C2_* in the SAME commit. (2) In BillingActions only, never the commit-route catalog; a test proves POST /api/v1/signals/{id}/decision refuses add-line like the other billing codes. (3) Line creation is idempotent on the decision id (deterministic line id, or a lookup by decision id before create); a retry test asserts exactly one line and one record. (4) Excludes empty; reversing an added line is a later disallow-line with its own record.</criterion>
+    <criterion>One owner of a NEW line (uac-r2 Q6; CLAUDE.md §17). CREATE-ONLY refusal, NOT the full D-204 writer-only rule: D-96's supported detach / move / re-attach sequence (InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint; AccessTableReaderScanTests.cs:73 on master) updates sprk_billingevent through the playbook Update Record node and the output orchestrator, so generic UPDATE must keep working (subject to uac-r2 confirming the create-only form). PRECONDITION: origin/master merged into work/ebilling-r1. (1) A create-only table rule refuses a generic create of sprk_billingevent with record_creation.table_unsupported (the code D-204 uses), at every create enforcement point D-204 uses (RecordCreationService, the chat create tool validate and execute); generic update keeps today's guards (InvoiceFamilyCoreRecordGuard, MappingProtectedColumns). (2) Remove sprk_billingevent from ChildRecordEndpoints CreateTables (:71) and fix the comment (:62-67); expect a textual conflict with fm 049b (secure=true on the same route): whoever merges second resolves. (3) Remove only the "New Billing Event" create from src/client/webresources/js/sprk_secure_child_ribbon.js and its test (secureChildRibbonScript.test.ts:248), keeping every other SecureChild control. (4) Grep every other RecordCreationService caller (chat create tool, decision follow-ons, budget inquiry, Office quick-create) and report none creates a billing event. (5) Tests (uac-r2): a generic create of sprk_billingevent through each create path returns the code with nothing written; must-not-fire: the D-96 re-attach update still succeeds, and a typed writer (a line decision, Add line itself) still writes. (6) Update the guards that name the table as needed (fm list: CoreRecordPairUpdateCheckGuardTests:46,52; ExternalDocumentNarrowingGuardTests:1110; WriterOnlyTablesDeleteGuardTests; FeatureRolePrivilegeGuardTests) and the Repair.cs:674 comment; run the D-204 guard and ArchTests. Dev field-mapping profiles checked 2026-11-06: none targets sprk_billingevent. RecordTableRules and ChildRecordEndpoints are field-mapping code: fm copied on the diff; uac-r2 reviews the PR.</criterion>
+    <criterion>uac-r2 conditions on the create-only refusal (2026-11-06, approved): (1) Do NOT set CreatedOnlyByItsWriter on sprk_billingevent (since 048 it also drives the update/delete refusals: DataverseUpdateHandler:114, UpdateRecordActionCore:225, DataverseUpdateRecordHandler:237, DataverseDeleteRecordHandler:117, FieldMappingEndpoints:702/1107). Add a separate create-only flag and one derived property on RecordTableRule (e.g. GenericCreateRefused => CreatedOnlyByItsWriter || the new flag); every create site reads the derived property: RecordCreationService:182, DataverseCreateRecordHandler:158/309/392, ChildRecordEndpoints:670, WorkProductRecordPersister:189 if it creates. Classify every reader of CreatedOnlyByItsWriter as create or update/delete in the PR body; OwnedChildWrite:775 (re-file) is not a create and keeps the old flag. (2) Tests: each create path refuses with record_creation.table_unsupported and writes nothing; must-not-fire: the D-96 re-attach update succeeds, and the typed writers (line decision, Add line, extraction) still create and are shown not to go through RecordCreationService; the existing signal / decision record / budget revision update and delete refusals stay green. (3) Delete unchanged; the PR says so and why (D-96 doesn't need it; out of scope). (4) Update the guard text at AccessTableReaderScanTests.cs:73 and the RecordTableRules.cs:36 remark: "generic create refused; update and delete as before". (5) The PR lists the refusal's log fields (does the log line carry the table name?) so ontology's deploy check can filter record_creation.table_unsupported by table.</criterion>
+    <criterion>Coding (EB-D-192): reviewer-typed codes go through the SAME code validation and guideline rules as an imported line; a line with an invalid code raises the same finding and Signal an imported line would (test).</criterion>
+    <criterion>I-2: approve is refused while the added line is Flagged and succeeds once the line is decided. Accept all Clean leaves the added line untouched.</criterion>
+    <criterion>Totals (Q1): the billed total never changes. Accept, reduce and disallow on an added line give the Q1 approved total (T8). Disallowing an added line never subtracts from the firm's billed lines.</criterion>
+    <criterion>uac A1: RouteAuthorizationGuardTests.Ledger.cs names the new route in the InvoiceLineReviewEndpoints.cs GovernedFile entry, with its filter and right. OperationAccessPolicy's ebilling.invoice.decide comment lists it. The census test passes.</criterion>
+    <criterion>uac A2 (G5): the right is ebilling.invoice.decide = Write on the INVOICE, asked as the caller (D-77). No caller-token write reaches sprk_billingevent. A caller without Write gets 403 and nothing is read or written (strict mock). A right on another invoice does not count, and a failed rights check is denied (N1).</criterion>
+    <criterion>uac A3: NoFirm, HeldForFirm and RerunPending each give 409 ebilling.line_add.firm_missing with nothing written and no SignalWriter or recorder call (N3). Each closed status (Approved, Rejected, Returned to Firm, Superseded, Sent to AP, Paid) gives 409 ebilling.invoice.not_in_review (N4). The 403 and 404 are the uniform ones, and every refusal carries errorCode.</criterion>
+    <criterion>uac A4: internal only. Callers with FlagTrue, with NoSystemUserRow, and on the CiamContact plane are refused before any rights call or read (N2). Seed S4 shows that removing RequireInternalFinanceCaller fails that test.</criterion>
+    <criterion>uac A5: a missing, blank or too-long reason gives 400 before any read (N5). The record names the caller.</criterion>
+    <criterion>Input checks: every other 400 code in brief section 3 (N6); an out-of-set code is refused and never stored; an unresolvable code set gives 409.</criterion>
+    <criterion>Idempotency (N7): repeating the same requestId with the same content gives 200 alreadyApplied with one row, one record and no new Signal episode. The same requestId with different content gives 409 id_reused.</criterion>
+    <criterion>Concurrency (N8): a submission or invoice version changed between the read and the commit gives 409 ebilling.line_add.changed with no row, no record and no Signal. A held lock gives 409 busy. A test proves that the version-only invoice condition is honoured.</criterion>
+    <criterion>Refusals (N9, N11): a new Procedure gap gives 409 procedure_gap; an unapplied correction gives 409 corrections_pending; an unresolved owner gives 500. Each writes nothing.</criterion>
+    <criterion>Recovery (N10): a fault at totals, record or signals gives 503 ebilling.decision.incomplete with failedStep. The repeat completes it, and exactly one record exists.</criterion>
+    <criterion>Seeds S1-S4 (brief section 8) are recorded in the notes. Only access and fail-open guards are seeded.</criterion>
+    <criterion>Guards G1-G5 pass, including the unchanged correction suites, the FindingsJson reviewed list with its notes/122 row, the ParentLineage text, and the census entry.</criterion>
+    <criterion>Client: C1-C4 pass. The form is FormModal (ADR-050). The client validates nothing the server owns. The button shows only when canDecide is true and the invoice is In Review.</criterion>
+    <criterion>Ribbon: the dry run lists the hides (Mscrm.HomepageGrid.sprk_billingevent.NewRecord, Mscrm.SubGrid.sprk_billingevent.AddNewStandard, Mscrm.Form.sprk_billingevent.NewRecord and .SaveAndNew, plus any SubGrid NewRecord present) and writes nothing. It refuses while non-live sprk.SecureChild.* ids are in the diff (P1). -Verify exits 0 or 1 (P2). -Apply is not run.</criterion>
+    <criterion>Test scope: exactly brief section 8 (T1-T8, N1-N11, S1-S4, G1-G5, C1-C4, P1-P2). Anything beyond needs a one-line reason in notes/164-add-line.md.</criterion>
+    <criterion>Gate:
+      - the test projects build;
+      - ArchTests and the filtered suites (Finance, Signals, InvoiceReview, Corrections) pass;
+      - npm build:prod and vitest pass for InvoiceReview;
+      - the publish delta is measured against a fresh master build;
+      - the PR states the placement and the §11 answers (brief sections 6, 7).</criterion>
+    <criterion>Moved to task 165 (165b, item 1): approval refuses a line of unknown origin. 164a-4a creates every added row with `AddedLineIdFor(decisionId)` and writes `ForReviewerAddedLine(decisionId)` with the same id, so 165b's check can use it.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A new column or table is needed (for example, the owner rejects Q2's JSON marker), or any schema change. STOP.</trigger>
+    <trigger>An ADR conflict, for example a second owner of a line invariant (ADR-002) or a job being needed (ADR-052). Stop and use root CLAUDE.md 6.5.</trigger>
+    <trigger>The rule evaluator cannot be run for the new line through the whole-invoice before/after diff: a fact the new line needs cannot be built without an AI read, or the diff cannot isolate the new line's and the total rules' findings. STOP and list it.</trigger>
+    <trigger>Dataverse does not honour the version-only conditional invoice update. STOP and propose an alternative.</trigger>
+    <trigger>The design needs a persister edit, an AI call, an external route, a SignalWriter contract change, or a new Decision Record writer entry point beyond the Q3 line-code addition. STOP.</trigger>
+    <trigger>Q1-Q4 are unanswered when 164a starts, or Q6 is unanswered before -Apply. STOP.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/add-line-brief.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>

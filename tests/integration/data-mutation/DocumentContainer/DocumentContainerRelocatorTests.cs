@@ -1644,7 +1644,8 @@ public class DocumentContainerRelocatorTests
     {
         DocumentRelocationBatchResult.IsSettledState(state).Should().Be(settled);
         DocumentRelocationBatchResult.IsSettled(DocumentRelocationOutcome.Of(DocumentId, state, null, null, null, null, "x")
-            with { Pending = ["index-pending: x"] }).Should().BeFalse("a row that still owes anything is never settled");
+            with
+        { Pending = ["index-pending: x"] }).Should().BeFalse("a row that still owes anything is never settled");
     }
 
     [Fact]

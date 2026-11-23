@@ -159,6 +159,25 @@ type EmailDialogState =
   | { mode: 'item'; item: HighPriorityItemResult; defaultSubject: string; defaultBody: string };
 
 /**
+ * A modal's content, whether it is open, and a key per opening (#2658). A Fluent Dialog unmounted while open leaves
+ * tabster's aria-hidden on the rest of the page for good, and so does changing the key of an open one. So the modal is
+ * closed with `open={false}` and keeps its content, and `seq` changes only when it opens from closed.
+ */
+interface ModalSlot<T> {
+  value: T;
+  open: boolean;
+  seq: number;
+}
+
+function openModalSlot<T>(prev: ModalSlot<T> | null, value: T): ModalSlot<T> {
+  return prev?.open ? { ...prev, value } : { value, open: true, seq: (prev?.seq ?? 0) + 1 };
+}
+
+function closeModalSlot<T>(prev: ModalSlot<T> | null): ModalSlot<T> | null {
+  return prev ? { ...prev, open: false } : prev;
+}
+
+/**
  * Build a Dataverse record deep link from the record's STRUCTURED identity
  * (entityType + entityId) — never from narrative/display text. Returns '' when
  * the client URL OR either identity part is missing, so callers omit the link
@@ -604,16 +623,23 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // (client-composed draft email activity). Reuses the shared SendEmailDialog.
   // ---------------------------------------------------------------------------
 
-  const [emailDialog, setEmailDialog] = React.useState<EmailDialogState | null>(null);
+  // Both modals below keep their content after they close (a ModalSlot): they are closed with `open={false}`, never
+  // unmounted while open, which would leave the briefing aria-hidden (#2658).
+  const [emailSlot, setEmailSlot] = React.useState<ModalSlot<EmailDialogState> | null>(null);
+  const emailDialog = emailSlot?.value ?? null;
 
   // Operator UAT (2026-07-09, item D) — file-preview modal state. Set by a
   // Documents-channel row's open-document icon / menu; drives the shared
   // RichFilePreviewDialog below.
-  const [previewDoc, setPreviewDoc] = React.useState<{ documentId: string; documentName: string } | null>(null);
+  const [previewSlot, setPreviewSlot] = React.useState<ModalSlot<{ documentId: string; documentName: string }> | null>(
+    null
+  );
+  const previewDoc = previewSlot?.value ?? null;
   const handlePreviewDocument = React.useCallback((documentId: string, documentName: string) => {
     if (!documentId) return;
-    setPreviewDoc({ documentId, documentName });
+    setPreviewSlot(prev => openModalSlot(prev, { documentId, documentName }));
   }, []);
+  const closePreview = React.useCallback(() => setPreviewSlot(closeModalSlot), []);
 
   // Dataverse client URL for deep links (e.g. https://org.crm.dynamics.com).
   const clientUrl = React.useMemo<string>(() => {
@@ -654,20 +680,20 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const handleEmailBriefing = React.useCallback(() => {
     const subject = `Daily Briefing — ${new Date().toLocaleDateString()}`;
     const body = buildBriefingEmailHtml(clientUrl, renderData?.tldr ?? null, renderData?.channelNarratives ?? []);
-    setEmailDialog({ mode: 'briefing', defaultSubject: subject, defaultBody: body });
+    setEmailSlot(prev => openModalSlot(prev, { mode: 'briefing', defaultSubject: subject, defaultBody: body }));
   }, [clientUrl, renderData]);
 
   const handleEmailItem = React.useCallback(
     (item: HighPriorityItemResult) => {
       const { subject, body } = buildItemEmailDraft(item, clientUrl);
-      setEmailDialog({ mode: 'item', item, defaultSubject: subject, defaultBody: body });
+      setEmailSlot(prev => openModalSlot(prev, { mode: 'item', item, defaultSubject: subject, defaultBody: body }));
     },
     [clientUrl]
   );
 
   // Owner UAT 2026-08-04: both share modes open the canonical composer prefilled
   // (see EmailDialogState docblock) — no host-owned send remains.
-  const closeEmailDialog = React.useCallback(() => setEmailDialog(null), []);
+  const closeEmailDialog = React.useCallback(() => setEmailSlot(closeModalSlot), []);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -843,9 +869,10 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         </div>
         <CaughtUpFooter channelLabels={[]} />
       </div>
-      {emailDialog && (
+      {emailSlot && emailDialog && (
         <SendEmailDialog
-          open={true}
+          key={emailSlot.seq}
+          open={emailSlot.open}
           onClose={closeEmailDialog}
           titleOverride={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
           initialSubject={emailDialog.defaultSubject}
@@ -882,12 +909,13 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           }}
         />
       )}
-      {previewDoc && (
+      {previewSlot && previewDoc && (
         <RichFilePreviewDialog
-          open={true}
+          key={previewSlot.seq}
+          open={previewSlot.open}
           documentId={previewDoc.documentId}
           documentName={previewDoc.documentName}
-          onClose={() => setPreviewDoc(null)}
+          onClose={closePreview}
           // Same BFF endpoint the Semantic Search PCF uses — SPE preview embed URL.
           fetchPreviewUrl={() => getDocumentPreviewUrl(previewDoc.documentId)}
           // "Open file": open the SPE preview URL in a new tab (both modes).

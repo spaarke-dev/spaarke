@@ -376,7 +376,7 @@ This skill is called in **Step 9.7** after deployment tasks complete:
 task-execute workflow:
   ...
   Step 9.5: Quality Gates (code-review, adr-check, lint)
-  Step 9.6: Conflict Sync Check
+  Step 9.6: Portfolio Sync
   Step 9.7: UI Testing (this skill) ← NEW
   Step 10: Update Task Status
 ```

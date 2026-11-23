@@ -612,10 +612,10 @@ public class SecureChildOwnershipTests
         var writes = new List<Dictionary<string, object?>>();
         var fields = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         fields
-            .Setup(f => f.UpdateRecordFieldsAsync(
+            .Setup(f => f.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) =>
+                It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((t, id, f, _, _) =>
             {
                 writes.Add(f);
                 world?.ApplyPatch(t, id, f); // #2143: the PATCH lands — the resolver reads the row after it
@@ -649,10 +649,10 @@ public class SecureChildOwnershipTests
         var writes = new List<(Guid? As, Dictionary<string, object?> Fields)>();
         var fields = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         fields
-            .Setup(f => f.UpdateRecordFieldsAsync(
+            .Setup(f => f.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, impersonate) =>
+                It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((t, id, f, impersonate, _) =>
             {
                 writes.Add((impersonate, f));
                 world?.ApplyPatch(t, id, f); // #2143: the PATCH lands — the resolver reads the row after it

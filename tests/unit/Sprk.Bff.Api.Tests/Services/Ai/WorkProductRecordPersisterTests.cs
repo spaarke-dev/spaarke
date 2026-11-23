@@ -169,6 +169,40 @@ public class WorkProductRecordPersisterTests
             Times.Never);
     }
 
+    // ─── 165d fix round (EB-D-207): the registry row is configuration, so it is asked the writer-only column refusal ──────
+
+    [Fact]
+    public async Task PersistAsync_RegistryRowTargetingTheApExportClaim_IsRefusedBeforeAnyWrite()
+    {
+        const string targetField = "sprk_billingexport";
+        // MUST FIRE: the AP export claim (sprk_invoice.sprk_billingexport) is set and cleared only by AP export.
+        SetupEntitySet(TopicRegistryWorkProductPersister.RegistryLogicalName, "sprk_aitopicregistries");
+        SetupRegistryRows("matter-summary", ("sprk_invoice", targetField));
+
+        var act = () => CreateSut().PersistAsync(BuildEntry(), BuildBinding(), new ChatHostContext("invoice", HostRecordId.ToString("D")));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("Fix the registry row").And.Contain("changed only by Spaarke itself")
+            .And.Contain("record_update.changed_only_by_its_writer.column");
+        _dataverse.Verify(
+            d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task PersistAsync_RegistryRowTargetingAnOrdinaryInvoiceColumn_IsStillWritten()
+    {
+        // MUST NOT FIRE: an ordinary column of the same table persists as before.
+        SetupEntitySet(TopicRegistryWorkProductPersister.RegistryLogicalName, "sprk_aitopicregistries");
+        SetupRegistryRows("matter-summary", ("sprk_invoice", "sprk_description"));
+        SetupEntitySet("sprk_invoice", "sprk_invoices");
+        var patches = CapturePatches();
+
+        await CreateSut().PersistAsync(BuildEntry(), BuildBinding(), new ChatHostContext("invoice", HostRecordId.ToString("D")));
+
+        patches.Should().ContainSingle().Which.Path.Should().Be($"sprk_invoices({HostRecordId:D})");
+    }
+
     [Fact]
     public async Task PersistAsync_InvalidHostRecordId_ThrowsLoud()
     {

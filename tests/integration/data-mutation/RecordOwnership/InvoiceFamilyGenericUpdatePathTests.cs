@@ -73,6 +73,139 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
 
+    /// <summary>
+    /// Task 045d: the reads the app-only resolver-field derive makes, answered for every world (registered when a path runs,
+    /// after the world's own setups; each matches only the derive's own query): the core table's active
+    /// <c>sprk_recordtype_ref</c> row (<see cref="CatalogRowOf"/>, naming <c>{table}number</c>), and a core record read for its
+    /// name and number (<c>Record {id}</c>, <c>N-{id}</c>). A test scripts another answer with <see cref="_catalogAnswer"/> or
+    /// <see cref="_recordAnswer"/>; <see cref="_deriveReads"/> journals each derive read.
+    /// </summary>
+    private void AnswerDeriveReads(IGenericEntityService app)
+    {
+        if (app is not IMocked<IGenericEntityService> mocked)
+            return;
+        var mock = mocked.Mock;
+        mock.Setup(a => a.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) =>
+            {
+                var table = (string)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_recordlogicalname").Values[0];
+                _deriveReads.Add("catalog:" + table);
+                return Task.FromResult(new EntityCollection(_catalogAnswer(table) is { } row ? [row] : []));
+            });
+        mock.Setup(a => a.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.Is<string[]>(c => c.Length == 2 && c[1].EndsWith("number", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            {
+                _deriveReads.Add($"record:{table}");
+                return Task.FromResult(_recordAnswer(table, id, columns)!);
+            });
+    }
+
+    private readonly List<string> _deriveReads = [];
+
+    private Func<string, Entity?> _catalogAnswer = table =>
+        new Entity("sprk_recordtype_ref", CatalogRowOf(table)) { [RegardingRecordType.RecordNumberFieldColumn] = table + "number" };
+
+    private Func<string, Guid, string[], Entity?> _recordAnswer = (table, id, columns) => new Entity(table, id)
+    {
+        [columns[0]] = $"Record {id.ToString("N")[..6]}",
+        [columns[1]] = $"N-{id.ToString("N")[..6]}",
+    };
+
+    /// <summary>
+    /// Task 045d fix rounds 3-4: the person's query — the push's caller, or the person a playbook run acts as on the two
+    /// handlers (their display read of the record the row will name). It answers the selected columns of
+    /// <see cref="_recordAnswer"/> (journalled as that record's read), no row when that answers null, 403 when
+    /// <see cref="_callerMayNotRead"/>, or <see cref="_callerFault"/>. Null when <see cref="_noCallerQuery"/>.
+    /// </summary>
+    private Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? CallerQuery()
+    {
+        if (_noCallerQuery)
+            return null;
+        var query = new Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(MockBehavior.Strict);
+        query.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, string? odata, Guid _, CancellationToken _) =>
+            {
+                var select = Regex.Match(odata!, @"\$select=([^&]+)").Groups[1].Value.Split(',');
+                var filter = Regex.Match(odata!, @"\$filter=(\w+)id eq ([0-9a-fA-F-]{36})");
+                var table = filter.Groups[1].Value;
+                if ((_personRows is not null || _personReadsAsTheApp is not null)
+                    && select.All(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
+                    return Task.FromResult(PersonRowAnswer(table, Guid.Parse(filter.Groups[2].Value), select));
+                _deriveReads.Add($"record:{table}");
+                if (_callerFault is { } fault)
+                    throw fault;
+                if (_callerMayNotRead)
+                    throw new HttpRequestException("denied", null, System.Net.HttpStatusCode.Forbidden);
+                IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> rows =
+                    (_personAnswer ?? _recordAnswer)(table, Guid.Parse(filter.Groups[2].Value), select) is { } row
+                        ? [select.ToDictionary(c => c, c => System.Text.Json.JsonSerializer.SerializeToElement(row.GetAttributeValue<string>(c)))]
+                        : [];
+                return Task.FromResult(rows);
+            });
+        return query.Object;
+    }
+
+    private bool _callerMayNotRead;
+
+    private Exception? _callerFault;
+
+    private bool _noCallerQuery;
+
+    /// <summary>What the person's query answers, when it differs from the app's read (<see cref="_recordAnswer"/>).</summary>
+    private Func<string, Guid, string[], Entity?>? _personAnswer;
+
+    /// <summary>
+    /// Task 045g: a row's lookups as the person reads them (the guard's re-decision on a person's run): the row, or null when
+    /// the person cannot read it. A throw is the read's fault. Unset, a lookup read is answered as any other person read.
+    /// </summary>
+    private Func<string, Guid, Entity?>? _personRows;
+
+    /// <summary>
+    /// Task 045g fix round 1: on the field-mapping push (which writes as its caller), with <see cref="_personRows"/> unset, the
+    /// caller reads each row's lookups as the app reads them (this reader; a row it does not find is one the caller cannot read).
+    /// </summary>
+    private IGenericEntityService? _personReadsAsTheApp;
+
+    /// <summary>The person's lookup read: each selected <c>_{column}_value</c> as the row's reference id (null when unset).</summary>
+    private IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> PersonRowAnswer(string table, Guid id, string[] select)
+    {
+        _personRowReads.Add($"{table}:{id:D}");
+        var found = _personRows is not null ? _personRows(table, id) : RowAsTheAppReadsIt(table, id, select);
+        if (found is not { } row)
+            return [];
+        return
+        [
+            select.ToDictionary(c => c, c =>
+            {
+                var column = c[1..^"_value".Length];
+                return System.Text.Json.JsonSerializer.SerializeToElement(
+                    row.Attributes.TryGetValue(column, out var value) && value is EntityReference reference ? reference.Id.ToString("D") : null);
+            }),
+        ];
+    }
+
+    /// <summary>The row's lookups as <see cref="_personReadsAsTheApp"/> reads them; null when it does not find the row.</summary>
+    private Entity? RowAsTheAppReadsIt(string table, Guid id, string[] select)
+    {
+        try
+        {
+            return _personReadsAsTheApp!.RetrieveAsync(table, id, select.Select(c => c[1..^"_value".Length]).ToArray(), CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch (System.ServiceModel.FaultException<OrganizationServiceFault>)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Each row the person's lookup read asked for (<c>table:id</c>).</summary>
+    private readonly List<string> _personRowReads = [];
+
+    /// <summary>Task 045d: the harness catalog's fixed row id for a core table.</summary>
+    private static Guid CatalogRowOf(string table) =>
+        new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("catalog:" + table)));
+
     /// <summary>The app-only reader: a stored invoice filed under a matter (with no lines).</summary>
     private static Mock<IGenericEntityService> InvoiceUnderAMatter()
     {
@@ -96,23 +229,65 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <summary>Neither the upsert nor the update-only write was sent: nothing was created or changed.</summary>
     private void NothingWritten() => Sent().Should().BeEmpty();
 
-    /// <summary>One write of the row. An invoice or line goes UPDATE-ONLY (If-Match: *, #2081); any other table keeps the upsert.</summary>
+    /// <summary>
+    /// One write of the row, UPDATE-ONLY (If-Match: *), never the upsert. The guard's update-only branch (a family table,
+    /// <c>InvoiceFamilyCoreRecordGuard.UpdateExistingAsync</c>) and the generic one send the same call; they differ in how a row
+    /// gone by then is answered, which <c>AFamilyRowDeletedAfterTheGuard_IsRefusedByTheUpdateOnlyWrite_WithTheGuardsCode</c> pins.
+    /// </summary>
+    /// <remarks>#2799 (uac-r2): on a person's run, a write that carries a locked invoice-family column is ONE logical write sent
+    /// as at most two requests — the other columns as the person, then the locked ones as the application (no impersonation),
+    /// which <see cref="LockedColumnsWrittenOnlyByTheApp"/> pins.</remarks>
     private void WrittenOnce(string table, Guid id)
     {
         var sent = Sent().Where(w => w.Table == table && w.Id == id).ToList();
-        sent.Should().ContainSingle();
-        sent[0].Method.Should().Be(InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table)
-            ? nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
-            : nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync));
-        Sent().Should().ContainSingle("only that one write");
+        sent.Should().NotBeEmpty().And.HaveCountLessThanOrEqualTo(2);
+        sent.Should().OnlyContain(w => w.Method == nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
+        Sent().Should().HaveCount(sent.Count, "only that one write");
+        LockedColumnsWrittenOnlyByTheApp(table, id);
+    }
+
+    /// <summary>
+    /// #2799: every write of the row that carries a locked invoice-family column carries ONLY locked columns and is sent by the
+    /// application (no impersonation); the person's write, if any, carries none and comes first.
+    /// </summary>
+    private void LockedColumnsWrittenOnlyByTheApp(string table, Guid id)
+    {
+        var locked = InvoiceFamilyLockedWrite.LockedColumnsOf(table);
+        var writes = _writes.Invocations
+            .Where(i => i.Method.Name == nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
+                        && (string)i.Arguments[0] == table && (Guid)i.Arguments[1] == id)
+            .Select(i => (Fields: (Dictionary<string, object?>)i.Arguments[2], As: i.Arguments.Count > 4 ? (Guid?)i.Arguments[3] : null))
+            .ToList();
+        foreach (var (fields, asWho) in writes)
+        {
+            var lockedKeys = fields.Keys.Where(k => locked.ContainsKey(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k))).ToList();
+            if (lockedKeys.Count > 0 && writes.Count == 2)
+            {
+                asWho.Should().BeNull("a locked invoice-family column is written by the application");
+                fields.Keys.Should().BeEquivalentTo(lockedKeys, "the application's write carries only the locked columns");
+            }
+        }
+
+        if (writes.Count == 2)
+            writes[1].As.Should().BeNull("the person's write of the other columns comes first, then the application's");
     }
 
     // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
 
-    private DataverseUpdateHandler Handler(IGenericEntityService app) =>
-        new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
+    private DataverseUpdateHandler Handler(IGenericEntityService app)
+    {
+        AnswerDeriveReads(app);
+        // Fix round 5: a run as a person reads the derived name and number with the person's query, which names the record's
+        // entity set from metadata through this same service.
+        if (app is IMocked<IGenericEntityService> mocked)
+        {
+            mocked.Mock.Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string t, CancellationToken _) => EntitySetNameFixtures.SetOf(t));
+        }
+        return new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            SecureChildReconcilerFixtures.OverEmptyWorld());
+            SecureChildReconcilerFixtures.OverEmptyWorld(), readAsPerson: CallerQuery(), lockedWriteProbe: LockedProbe());
+    }
 
     [Fact]
     public async Task DataverseUpdateHandler_AnInvoiceGivenASecondCoreRecord_IsRefusedWithTheGuardsCode_AndNothingIsWritten()
@@ -122,7 +297,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
         CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which,
-            InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+            InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         NothingWritten();
     }
 
@@ -161,11 +336,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         Mock.Get(app)
             .Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, CancellationToken _) => EntitySetNameFixtures.SetOf(table));
+        AnswerDeriveReads(app);
         return new(_writes.Object,
             new ServiceCollection()
                 .AddSingleton(app)
                 .AddSingleton(new StampWorld().Restamper)
                 .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+                .AddSingleton(LockedProbe())
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
@@ -180,7 +357,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             CancellationToken.None);
 
         CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which,
-            InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+            InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         NothingWritten();
     }
 
@@ -219,13 +396,24 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private static readonly FieldMappingRuleDto ProjectRule = new()
     {
-        SourceField = "sprk_project", TargetField = "sprk_project", SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+        SourceField = "sprk_project",
+        TargetField = "sprk_project",
+        SourceFieldType = "Lookup",
+        TargetFieldType = "Lookup",
+        Priority = 1,
     };
 
     [Fact]
     public async Task FieldMappingPush_AnInvoiceGivenASecondCoreRecord_IsRefusedByCodeOnly_AndNothingIsWritten()
     {
+        // Task 045g fix round 1: the push writes as its caller, so the refusal is decided again on the rows as the caller reads
+        // them (here, as the app reads them).
+        var app = InvoiceUnderAMatter();
+        app.Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string t, CancellationToken _) => EntitySetNameFixtures.SetOf(t));
+        _personReadsAsTheApp = app.Object;
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, new StampWorld().Restamper, [ProjectRule],
             new Dictionary<string, object?> { ["sprk_project"] = Project },
             "sprk_invoice", [Invoice], Caller, NullLogger.Instance, CancellationToken.None,
@@ -233,12 +421,12 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             {
                 [ProjectRule] = new("sprk_Project@odata.bind", $"/sprk_projects({Project:D})", null),
             },
-            appOnlyEntities: InvoiceUnderAMatter().Object);
+            appOnlyEntities: app.Object, callerQuery: CallerQuery());
 
         updated.Should().Be(0);
         failed.Should().Be(1);
         var error = errors.Should().ContainSingle().Subject.Error;
-        error.Should().Contain(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        error.Should().Contain(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         AnyGuid.IsMatch(error).Should().BeFalse("the reason can name records the caller has not read: code only");
         NothingWritten();
     }
@@ -249,11 +437,15 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var world = new StampWorld().Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", Matter)]);
         var rule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_regardingmatter", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_regardingmatter",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [rule], new Dictionary<string, object?> { ["sprk_regardingmatter"] = Matter },
             "sprk_event", [Event], Caller, NullLogger.Instance, CancellationToken.None,
             appOnlyEntities: new Mock<IGenericEntityService>(MockBehavior.Strict).Object);

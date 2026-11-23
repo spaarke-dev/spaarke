@@ -24,11 +24,13 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
+using ProcedureBannerWorld = Sprk.Bff.Api.Tests.Services.Finance.Procedures.ProcedureBannerWorld;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 
 namespace Sprk.Bff.Api.Tests.Api.Finance;
@@ -64,6 +66,20 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
 
     private static string Clean => $"/api/finance/invoices/{InvoiceId}/lines/accept-clean";
 
+    private static string Add => $"/api/finance/invoices/{InvoiceId}/lines";
+
+    /// <summary>A well-formed Add line body (task 164): an Expense line, so no timekeeper resolution.</summary>
+    private static object AddBody(string? reason = "Missing from the bill", string? costType = "expense") => new
+    {
+        requestId = Guid.NewGuid(),
+        costType,
+        date = "2026-10-01",
+        amount = 50m,
+        expenseCode = "E101",
+        description = "Courier",
+        reason,
+    };
+
     /// <summary>One request per route, with a body that is valid for it.</summary>
     public static IEnumerable<object[]> Routes() =>
     [
@@ -71,6 +87,7 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         ["POST", Single(), new { decisionId = Guid.NewGuid(), action = "accept" }],
         ["POST", Multi, new { decisionId = Guid.NewGuid(), action = "accept", lines = new[] { new { lineId = LineId } } }],
         ["POST", Clean, new { decisionId = Guid.NewGuid() }],
+        ["POST", Add, AddBody()],
     ];
 
     public static IEnumerable<object[]> DecideRoutes() => Routes().Skip(1);
@@ -332,6 +349,36 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         host.Entities.VerifyNoOtherCalls();
     }
 
+    [Theory(DisplayName = "Task 164: Add line refuses a malformed body with 400 and its stable code before any read or the decider lookup")]
+    [InlineData(null, "expense", "ebilling.line.reason_required")]
+    [InlineData("Missing from the bill", "settlement", "ebilling.line_add.invalid")]
+    public async Task AddLine_InvalidRequests_Return400_BeforeAnyRead(string? reason, string? costType, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        var response = await host.SendAsync(Request("POST", Add, AddBody(reason, costType)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        host.Entities.VerifyNoOtherCalls();
+        host.Probe.SystemUserIdCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 164: Add line with an unproven identity is 403 and reads nothing")]
+    public async Task AddLine_WithAnUnprovenIdentity_Returns403_AndReadsNothing()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.Probe.CallerSystemUserId = null;
+
+        var response = await host.SendAsync(Request("POST", Add, AddBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>().Should().Be("ebilling.decider.unresolved");
+        host.Entities.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task Decide_TheDeciderIsTheCallersOwnSystemUser_NeverTheBody()
     {
@@ -384,6 +431,67 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         var body = await response.Content.ReadAsStringAsync();
         body.Should().NotContain(InvoiceId.ToString());
         JsonNode.Parse(body)!["reasonCode"]!.GetValue<string>().Should().Be("sdap.access.deny.record_unavailable");
+    }
+
+    [Theory(DisplayName = "Task 113 route wiring: an admitted internal caller of an open invoice with a firm and stored findings gets procedureChange in the JSON; the same invoice decided gets none")]
+    [InlineData(StepZeroCallerKind.FlagFalse)]
+    [InlineData(StepZeroCallerKind.FlagBlank)]
+    public async Task Read_InternalCaller_OpenInvoiceWithAFirmAndFindings_CarriesTheProcedureChange(StepZeroCallerKind kind)
+    {
+        // The route passes step 0's verdict to the service; a route that passed none (null) would omit the member.
+        var (host, invoiceId) = await BannerHostAsync(kind, InvoiceStatusCodes.InReview);
+        await using var _ = host;
+
+        var response = await host.SendAsync(Request("GET", $"/api/finance/invoices/{invoiceId}/review", null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["procedureChange"]!.ToJsonString().Should().Be(
+            """{"state":"Changed","text":"The procedures that apply to this invoice have changed; re-check to apply them."}""");
+
+        // Must-not-fire control: the same rows on a decided invoice carry no member, so the member above is the banner's, not a default.
+        var (decided, decidedId) = await BannerHostAsync(kind, InvoiceStatusCodes.Approved);
+        await using var _2 = decided;
+        var control = await decided.SendAsync(Request("GET", $"/api/finance/invoices/{decidedId}/review", null));
+        control.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await control.Content.ReadAsStringAsync())!.AsObject().ContainsKey("procedureChange").Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A host whose invoice (id derived from its own submission, so the review reads that submission) has a firm, one matter, two dated Fee lines and
+    /// stored findings that carry the snapshot of the Procedure rows as they stood; a rule was switched off since, so the banner reads Changed.
+    /// </summary>
+    private static async Task<(Host Host, Guid InvoiceId)> BannerHostAsync(StepZeroCallerKind kind, int status)
+    {
+        var banner = new ProcedureBannerWorld();
+        var (_, _, rule, _) = banner.Simple("RATE-1");
+        var findings = await banner.StoredFindingsAsync();
+        banner.ExcludeRule(ProcedureBannerWorld.M, rule);
+
+        var submissionId = Guid.Parse("20000000-0000-4000-8000-0000000000d1");
+        var invoiceId = Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+        var host = await Host.StartAsync();
+        host.StepZero.Kind = kind;
+        host.BannerEntities = banner.Entities.Object;
+        host.Access.Grant(InvoiceSet, invoiceId, AccessRights.Read);
+        host.Invoice = new Entity("sprk_invoice", invoiceId)
+        {
+            ["statuscode"] = new OptionSetValue(status),
+            ["sprk_totalamount"] = new Money(100m),
+            ["sprk_invoicedate"] = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc),
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", ProcedureBannerWorld.F),
+            ["sprk_matter"] = new EntityReference("sprk_matter", ProcedureBannerWorld.M),
+        };
+        foreach (var (sequence, date) in new[] { (1, new DateTime(2026, 2, 15, 0, 0, 0, DateTimeKind.Utc)), (2, new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc)) })
+        {
+            var line = LineRow(Guid.NewGuid(), InvoiceLineStatus.Flagged);
+            line["sprk_linesequence"] = sequence;
+            line["sprk_eventdate"] = date;
+            host.Lines.Add(line);
+        }
+
+        host.Submission = new Entity("sprk_invoicesubmission", submissionId) { ["sprk_findingsjson"] = findings, ["sprk_trackingnumber"] = "TRK-1" };
+        return (host, invoiceId);
     }
 
     // =========================================================================================
@@ -442,6 +550,12 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         public Entity? Invoice { get; set; }
         public List<Entity> Lines { get; } = [];
 
+        /// <summary>The invoice's own submission row (task 113: its stored findings are what the Procedure-change banner compares); none by default.</summary>
+        public Entity? Submission { get; set; }
+
+        /// <summary>Task 113: the Dataverse the banner's Procedure resolver reads (an in-memory double that evaluates queries); the strict one above by default.</summary>
+        public IGenericEntityService? BannerEntities { get; set; }
+
         /// <summary>How many writes (line updates, transactions) reached Dataverse.</summary>
         public int Writes => _writes;
 
@@ -474,6 +588,7 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
                 {
                     "sprk_invoice" => new EntityCollection(host.Invoice is null ? [] : [host.Invoice]),
                     "sprk_billingevent" => new EntityCollection(host.Lines.ToList()),
+                    "sprk_invoicesubmission" => new EntityCollection(host.Submission is null ? [] : [host.Submission]),
                     _ => new EntityCollection(),
                 }));
             host.Entities
@@ -490,7 +605,10 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
             builder.Services.AddScoped(sp => new InvoiceReviewReadService(
                 host.Entities.Object, sp.GetRequiredService<AuthorizationService>(), settings.Object,
                 new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(MockBehavior.Strict).Object,
-                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance), NullLogger<InvoiceReviewReadService>.Instance));
+                new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
+                new Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner(
+                    host.BannerEntities ?? host.Entities.Object, NullLogger<Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner>.Instance),
+                NullLogger<InvoiceReviewReadService>.Instance));
 
             var locks = new Mock<IIdempotencyService>();
             locks.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
@@ -498,6 +616,18 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
             identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid u, CancellationToken _) => new PersonIdentity(u));
             var recorder = new BillingDecisionRecorder(
                 DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness()).Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
+            // Task 164: the REAL Add line service. Its rules, resolution and fact load are never reached here (every route test is refused before them).
+            builder.Services.AddScoped(_ => new InvoiceLineAddService(
+                host.Entities.Object,
+                new CodeSetResolver(host.Entities.Object, settings.Object, Mock.Of<ICodeSetSuggestionProvider>(), NullLogger<CodeSetResolver>.Instance),
+                (_, _) => throw new InvalidOperationException("The resolution is not reached by a route test."),
+                (_, _) => throw new InvalidOperationException("The fact load is not reached by a route test."),
+                (_, _) => throw new InvalidOperationException("The evaluation is not reached by a route test."),
+                recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(),
+                (_, _) => throw new InvalidOperationException("The totals step is not reached by a route test."),
+                (_, _) => throw new InvalidOperationException("The Signal write is not reached by a route test."),
+                (_, _, _, _, _) => throw new InvalidOperationException("The Signal close is not reached by a route test."),
+                NullLogger<InvoiceLineAddService>.Instance));
             builder.Services.AddScoped(_ => new InvoiceLineDecisionService(
                 host.Entities.Object, Mock.Of<IInvoiceTotalsService>(), recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(),
                 host.Probe,

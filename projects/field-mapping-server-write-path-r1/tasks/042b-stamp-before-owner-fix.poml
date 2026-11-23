@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042b" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>FR-41: derive the I-1 stamp before the owner decision, so a create's owner sees the root (#2483, DI-009)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>042a merged to master; 019 complete; owner approval of this task (requested 2026-11-02)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api (RecordCreationService create and Repair); changes the owner decision on secure families (tags security, bff-api); NFR-01 lists FR-41 as security-sensitive.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive owner decision on Secure families (task-create 3.5.5b: tags include security), with a parity theory that may expose further create/reconciler differences to fix or file. The design (§15) is complete, so effort is high. Design §15.10 proposed sonnet/xhigh; raised for the security trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService.cs and RecordCreationService.Repair.cs, which 041 also edits; whichever lands second rebases.</parallel-reason>
+    <deps>042a, 019</deps>
+    <tags>bff-api, security, ownership, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement design.md §15.3: split `StampBeforeCreateAsync` into a plan half run at a new step 6½ (before the owner) and a bind/I-16 half kept at step 10, and make step 7 ask the owner over the item's lookups plus the derived stamp column → its root through the same `OwnerQuestionOf` / `ForRow`. Apply the same order in Repair. Invert 042a's three tests and add the §15.6 must-fire tests. Meet every UAC-r2 condition in §15.11.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse record ownership and Secure Record isolation. Security fails closed. Follow ADRs strictly.</role>
+  <goal>For every stamped table, a create (route, chat, decision, system) and a Repair get the owner the secure-child reconciler gives the written row; the #2483 window is closed; single-condition refusals, AppendTo probes, email.draft and Office codes are unchanged.</goal>
+
+  <context>
+    <background>design.md §15 (moved from the addendum 2026-11-02) and §15.11 UAC-r2 review (OK with conditions); spec FR-41, FR-06/FR-09/FR-14 amendment notes, NFR-07 note; owner decision notes/decisions.md 2026-11-02 item 3 (change 1 accepted); notes/decisions.md "UAC-r2: #2483 addendum (§15) OK with conditions"; DI-009; #2483. Line numbers in §15 are at 4fdb0a5c99; re-grep.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (DecideAsync ~:730-777; StampBeforeCreateAsync ~:806-911 split; ResolveOwnerOverAsync ~:1030-1067; OwnerQuestionOf ~:1074-1082; Repair keyed ~:1183-1187)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (~:119-133: plan before RepairOwnerAsync; RepairStampAsync ~:709 takes the planned result)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/RouteCreatePreCreateStampTests.cs (invert A1, A2; row-5 tests; order test)</file>
+      <file role="modify">tests/integration/seam/RecordCreation/RecordCreationServicePipelineSeamTests.PreCreateStamp.cs (invert A3)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/ChatCreatedChildStampTests.cs (chat twin; rewrite the comment at ~:108-110)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/WriterBuilderOwnershipParityTests.cs (parity theory; copy its style)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/RecordRepairModeTests.cs (Repair reorder and the planning-fault skip)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (~:3030-3060, ~:3105-3119: stamps first, then ForChild with the stamps — the shape to copy)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (InPrimaryOrder ~:515-572; ForExistingRowAsync ~:437; SecureParentNotIsolated ~:3876-3889) — read only unless AC9 requires the thread-filing change</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs (~:3040-3051 thread filing) — read only</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationProblemMap.cs (~:33-41; unchanged)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042a" status="required">The characterization is on master; this task inverts it.</dependency>
+      <dependency task="019" status="required">The W2 review set is closed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-042b &lt;tip of work/field-mapping-server-write-path-r1&gt;` (385e060e67 when written; use the current tip, which must contain 042a), then confirm this POML exists on the branch.</constraint>
+    <constraint source="design §15.3, §15.7">Scope: the two RecordCreationService files and the tests listed. No new type, enum member, interface, registration, endpoint or package; the derived dictionary passes through DecideAsync's locals.</constraint>
+    <constraint source="UAC-r2 condition (b)">Refusal words unchanged: 409 SecureParentNotIsolated keeps "re-run Make Secure on it, then retry". No "SecuringRoot" (or any mid-Make-Secure) exemption. A friendlier transient message is a client mapping and is out of scope.</constraint>
+    <constraint source="ADR-008 path A">Step 5's AppendTo set is unchanged: the derived root is never asked as the caller. The derivation stays app-only (PlanMissingStampAsync) and its answers are never exposed before step 5's AppendTo on the intermediate. CallerWriteAuthorization and the route filters are unchanged. Cite path A in the PR.</constraint>
+    <constraint source="NFR-07">Every single-condition refusal keeps its code, status and words on the route, chat, email.draft and Office. Only compound-failure ORDER changes (§15.4 rows 1-4).</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/integration/data-mutation/**, tests/integration/seam/**); no new file under tests/unit/Sprk.Bff.Api.Tests/**; no Mock&lt;HttpMessageHandler&gt;. 042a's tests are inverted, never deleted.</constraint>
+    <constraint source="CLAUDE.md §10">Placement and publish delta: see notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§15 incl. §15.11; §14.12 for the step-8 interaction)</file>
+      <file>projects/field-mapping-server-write-path-r1/spec.md (FR-41, FR-06, FR-09, NFR-07)</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-1, I-6, I-16)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Branch (constraint 1); declare FULL rigor; rebase on master; /conflict-check for RecordCreationService.cs (041 and UAC-r2).</step>
+    <step order="1">Invert A1-A3 and write the must-fire tests of §15.6 and AC4-AC9 failing first.</step>
+    <step order="2">Split StampBeforeCreateAsync; step 6½ plans; step 7 asks over lookups ∪ derived; step 10 binds and sets I-16 with no second derivation.</step>
+    <step order="3">Repair: plan once before RepairOwnerAsync, add to keyed, hand the result to RepairStampAsync; planning fault keeps the owner (AC8).</step>
+    <step order="4">Run the parity theory; fix or file each difference it finds (AC9, AC10).</step>
+    <step order="5">Reconcile §15.5's step-8 bullet with 041 (AC13). Build; filtered suites and ArchTests; publish delta; CVE.</step>
+    <step order="6">Two adversarial passes (security tag); then send the diff to UAC-r2 for the full pass (AC15). Fix every finding. Record in notes/task-042b-notes.md.</step>
+    <step order="7">After merge: close DI-009 and #2483 with the PR link; update TASK-INDEX to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the parity theory shows a difference that can be closed only by changing the reconciler or RecordOwnershipResolver outside OwnerQuestionOf / ForRow, STOP: file it as its own issue with a DI entry (per /project-defer-issue-tracking) and escalate before widening scope.</trigger>
+    <trigger>If any single-condition refusal code, status or word would change, or a new AppendTo probe would be needed, STOP and escalate to UAC-r2 (NFR-07, ADR-008 path A).</trigger>
+    <trigger>If the reconciler does NOT refuse row 7 (report-card child whose root's BU has no default team) the way the create does, fix it here only if the fix stays inside OwnerQuestionOf / ForRow; otherwise STOP and escalate.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs</output>
+    <output type="test">The test files in relevant-files</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-042b-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: the create order is design §15.3: 6½ plans the missing stamp (same codes, words and trace step StampAndInheritance: 400 stamp_underivable, 503 stamp_unavailable) for every principal; step 7 asks over LookupsOf(item) ∪ {derived column → RecordOwnershipParent(root)} through OwnerQuestionOf / ForRow; step 10 binds and sets I-16 from the 6½ result with no second PlanMissingStampAsync call (asserted by call count); the bind refusals (500 no_decision, 503) stay at step 10; the system principal still binds after the create (DI-007).</criterion>
+    <criterion testable="true">AC2: A1-A3 are inverted: A1 and A3 are owned by SecureNamedTeam with the sharee mirror written at create; A2 agrees with the create; a chat twin in ChatCreatedChildStampTests passes.</criterion>
+    <criterion testable="true">AC3 (change 1): a to-do with no pair under a team-owned report card in BU X, whose matter is in BU Y, is owned by Y's team; the same with the to-do's pair set is owned by X.</criterion>
+    <criterion testable="true">AC4 (UAC-r2 condition (a), row 5): two tests, one for the transient Make Secure interval (sprk_issecure set, Secure team not yet assigned) and one for the lasting compensated state, each refuse 409 SecureParentNotIsolated and create nothing.</criterion>
+    <criterion testable="true">AC5 (UAC-r2 condition (b)): the row-5 refusal's code, status and detail text equal the existing direct-child C11 refusal's ("re-run Make Secure on it, then retry"), asserted verbatim; grep finds no SecuringRoot (or equivalent) exemption in src.</criterion>
+    <criterion testable="true">AC6 (row 2 order): a root read fault combined with an owner world that refuses gives 503 stamp_unavailable.</criterion>
+    <criterion testable="true">AC7 (creator visibility, UAC-r2): a caller who is not a sharee of the Secure matter gets the normal 201 for the A1 create; the response body contains no secure-family id (matter, team or BU) beyond the ids the caller sent.</criterion>
+    <criterion testable="true">AC8 (Repair, UAC-r2 condition (c)): a user-owned to-do missing its stamp under a team-owned invoice of a Secure matter is re-owned to Secure and stamped in one update. If planning faults, the owner is kept (never re-owned over the lookups alone), the repair result reports the owner part Skipped with record_repair.stamp_unavailable, and a log line carries the row id and the reason; a test asserts the report entry and the log.</criterion>
+    <criterion testable="true">AC9 (parity theory): for every RecordTableRules table with IsStampedChildEntity (to-do, event, memo, analysis, communication, Signal, Decision Record), in a secure world and an ordinary world, the create's owner equals ResolveOwnerAsync(ForExistingRowAsync(written row)). The theory includes a communication carrying sprk_communicationthread.</criterion>
+    <criterion testable="true">AC10 (thread filing, UAC-r2 Q3): if AC9 shows a create can carry sprk_communicationthread and the owners differ, the record-thread filing is added inside OwnerQuestionOf / ForRow the way RecordCreationService.cs ~:1183-1187 handles Repair, and AC9 passes; only if it needs a different seam is it filed as its own issue with a DI entry in notes/defer-issues.md, and the theory case is marked with that issue.</criterion>
+    <criterion testable="true">AC11 (row 7 parity, UAC-r2): the parity test shows the reconciler refuses the report-card child whose root's BU has no default team the same way the create does (409); a disagreement is fixed here.</criterion>
+    <criterion testable="true">AC12 (negative): ChatCreatedChildStampTests ~:106 stays green and its comment at ~:108-110 is rewritten; step 5's AppendTo probes are identical (no new probe; the derived root is never asked as the caller); EmailDraftRecordCreationTests' owner and AppendTo calls are unchanged; a browser-sent stamp derives nothing and leaves the question unchanged; a document (seam ~:229) and a work assignment (seam ~:64) derive nothing; RouteCreatePreCreateStampTests ~:64, ~:81, seam ~:84-148, ChildRecordCreateRefusalContractTests, CrossSurfaceOwnerTests ~:78-144, OfficeRecordOwnershipTests and SecureRootCreateRouteTests.Office* pass with unchanged assertions.</criterion>
+    <criterion testable="true">AC13 (§15.5 with 041): if 041 merged first, there is no step-8 index assertion (step 8 is NoOp) and §15.5's step-8 bullet in design.md is updated to say so; if 041 has not merged, the A1/A3 must-fire asserts "the event's index is empty and search_index_unset_for_owner_bu is logged" and the notes record that 041 updates it.</criterion>
+    <criterion testable="true">AC14: the PR records design §15.4 rows 1-7 as K lines (rows 2 and 5 covered by AC6 and AC4); BFF build 0 errors; filtered suites (SecureChildOwnershipAiToolTests*, RecordCreationServicePipelineSeamTests*, ChatCreatedChildStampTests, WriterBuilderOwnershipParityTests, RecordRepairModeTests, EmailDraftRecordCreationTests, CrossSurfaceOwnerTests, ChildRecordCreateRefusalContractTests, Office* ownership suites) and ArchTests pass; publish-size delta against a fresh master build (both sizes, file counts, zip tool) and the CVE result are recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">AC15 (UAC-r2): UAC-r2 receives the diff before merge and does a full pass; its verdict line is in the PR and every finding is fixed or filed. DI-009 and #2483 close on merge with the PR link.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract (AC1-AC13) and the §15.6 must-fire and must-not-fire lists. Anything beyond that needs a one-line justification in the task notes. One seeding proof: break the step-7 inclusion of the derived root once and show A1 fails (recorded, reverted).</criterion>
+  </acceptance-criteria>
+
+  <notes>Placement Justification (CLAUDE.md §10, bff-extensions.md): a modification inside RecordCreationService (and .Repair.cs) in the BFF, where the synchronous write path that owns I-1 and I-6 lives; no new endpoint, service, package or background work; expected publish delta ≈ 0, measured against a fresh master build (§10 bullet 4); CVE check run.
+§11: no new surface. Two private halves of an existing method and one extra argument to a private method are a pure modification (design §15.7).
+ADR-008 path A: step 5 unchanged; derivation app-only behind the caller's AppendTo on the intermediate. ADR-002: create and reconciler ask one question, built by ForRow.
+Release note: during Make Secure, a create under a root flagged secure but not yet isolated now refuses 409 (UAC-r2 accepted).
+Added 2026-11-02 by the scope path (design §15 → UAC-r2 review → spec FR-41 → this task → TASK-INDEX → owner approval). Awaiting owner approval.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

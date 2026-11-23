@@ -2,9 +2,9 @@
 
 > **Portfolio**: [Project #1734](https://github.com/spaarke-dev/spaarke/issues/1734) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Epic [#2099 EXTERNAL ACCESS SPA](https://github.com/spaarke-dev/spaarke/issues/2099) — _registered 2026-10-12; Epic linked 2026-10-18_
 
-> **Last Updated**: 2026-10-10
+> **Last Updated**: 2026-11-03
 >
-> **Status**: In Progress (initialized by `/project-pipeline` 2026-10-10; execution not started)
+> **Status**: Complete (2026-11-03). Production go-live (task 073) moved to customer-provisioning-orchestration-r1 (#2532).
 
 ## Overview
 
@@ -25,10 +25,10 @@ R3 turns the external SPA (`external.spaarke.com`, also the Teams tab) from a re
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development (not started) |
-| **Progress** | 0% — see `tasks/TASK-INDEX.md` |
+| **Phase** | Complete |
+| **Progress** | 100% of R3 tasks (073 handed to provisioning; 060 cancelled) — see `tasks/TASK-INDEX.md` |
 | **Target Date** | — |
-| **Completed Date** | — |
+| **Completed Date** | 2026-11-03 |
 | **Owner** | Ralph Schroeder |
 
 ## Problem Statement
@@ -59,19 +59,21 @@ Every new endpoint is Tier-2 authorized and fail-closed. External-plane data acc
 
 The project is **complete** when (spec §Success Criteria):
 
-- [ ] 1. A partner (browser) and a workforce user (browser and Teams) open a granted record into the detail view with fields, docs/invoices, messages and events/tasks; an ungranted record is denied (E2E + negative test).
-- [ ] 2. Each quick-start card opens its wizard; submitting creates a visible `sprk_servicerequest`; a CIAM caller is refused while the partner switch is off (E2E + server test).
-- [ ] 3. A grant to an onboarded contact sends one email whose link opens the record, and the grant appears in the in-portal feed (E2E + email capture).
-- [ ] 4. Grid columns match the owner's list (owner review).
-- [ ] 5. A message send on an accessible record appears in the thread; a send outside the set returns 403 (server negative test + E2E).
-- [ ] 6. A new employee of an allow-listed company self-registers from the join link and lands signed in; a non-listed tenant is refused (E2E with a test tenant) — or FR-14 is handed to R4 with a written path and the join page ships behind a flag.
-- [ ] 7. Workforce sign-in (browser and Teams) uses the A9 multitenant client at the customer's home directory with `user_impersonation`; licensed users resolve through the stored link; CIAM partners unchanged (token diagnostics + FR-21 live check).
-- [ ] 8. One SPA build reaches two different backends by run-time selection (dev test with two entries).
-- [ ] 9. No SPA page leaves the external plane; no mock identity in production (code test + E2E).
-- [ ] 10. Documents upload/download on Project, Matter, Work Assignment, Invoice and Service Request; ViewOnly cannot upload (server tests + E2E).
-- [ ] 11. A user deletes a record they created; another user (even FullAccess) gets 403 (server negative tests).
-- [ ] 12. With the partner switch off, partners cannot submit service requests; with it on, they see only their own (server tests both ways).
-- [ ] Quality: all BFF and SPA tests pass; BFF publish ≤ 60 MB; no new HIGH CVE; code-review + adr-check clean at wrap-up.
+- [x] 1. A partner (browser) and a workforce user (browser and Teams) open a granted record into the detail view with fields, docs/invoices, messages and events/tasks; an ungranted record is denied (E2E + negative test).
+- [x] 2. Each quick-start card opens its wizard; submitting creates a visible `sprk_servicerequest`; a CIAM caller is refused while the partner switch is off (E2E + server test).
+- [x] 3. A grant to an onboarded contact sends one email whose link opens the record, and the grant appears in the in-portal feed (E2E + email capture).
+- [x] 4. Grid columns match the owner's list (owner review).
+- [x] 5. A message send on an accessible record appears in the thread; a send outside the set returns 403 (server negative test + E2E).
+- [x] 6. A new employee of an allow-listed company self-registers from the join link and lands signed in; a non-listed tenant is refused (E2E with a test tenant) — or FR-14 is handed to R4 with a written path and the join page ships behind a flag.
+- [x] 7. Workforce sign-in (browser and Teams) uses the A9 multitenant client at the customer's home directory with `user_impersonation`; licensed users resolve through the stored link; CIAM partners unchanged (token diagnostics + FR-21 live check).
+- [x] 8. One SPA build reaches two different backends by run-time selection (dev test with two entries).
+- [x] 9. No SPA page leaves the external plane; no mock identity in production (code test + E2E).
+- [x] 10. Documents upload/download on Project, Matter, Work Assignment, Invoice and Service Request; ViewOnly cannot upload (server tests + E2E).
+- [x] 11. A user deletes a record they created; another user (even FullAccess) gets 403 (server negative tests).
+- [x] 12. With the partner switch off, partners cannot submit service requests; with it on, they see only their own (server tests both ways).
+- [x] Quality: all BFF and SPA tests pass; BFF publish ≤ 60 MB; no new HIGH CVE; code-review + adr-check clean at wrap-up.
+
+Evidence for criteria 1–12: `notes/task-072-e2e-record.md` (the owner's both-plane E2E on 2026-10-31, plus the server tests each row cites). Criterion 6 was met in full, not handed to R4: tasks 047, 058 and 074, with the unlisted-directory refusal in task 071. Quality: `notes/task-090-notes.md`.
 
 ## Scope
 
@@ -79,8 +81,40 @@ The project is **complete** when (spec §Success Criteria):
 
 **Out of scope:** Ask Legal assistant; e-signature; editing core records; new identity planes; CIAM partners in Teams; Model 2 auth; outbound email on message send; message attachments. Built elsewhere and consumed here: T240c directory and T240d CIAM-on-stamps (provisioning), ADR-028 A5 impersonated record set (UAC-r2 #1567).
 
+## Hand-off: open issues
+
+R3 closes with these filed issues still open. Each has a home:
+
+| Issue | Home |
+|---|---|
+| #1623 Copilot audience merge applied once per process | R4 backlog |
+| #1633 Chat streaming contract test flaky under load | SpaarkeAi chat owners (test reliability) |
+| #1636 Shared email HTML sanitizer | R4 backlog (shared UI) |
+| #1650 Internal document delete can orphan the SPE file | R4 backlog (documents) |
+| #1673 Binder-created contacts have no BU-team owner | R4 backlog, with provisioning (BU configuration) |
+| #1736 Generate and send the standard NDA from intake | A future intake/NDA project |
+| #1737 Incident alerting for Policy Questions | R4 backlog |
+| #1829 External SPA create invoice | spaarke-ontology-platform-r1 (invoice intake) |
+| #1830 Dev SPE JIT-grant revocation sweep failing | unified-access-control-r2 |
+| #1839 Service-request documents indexed with no parent | R4 backlog (documents/search) |
+| #1840 Unused `sprk_communication_send` web resource | R4 backlog (cleanup) |
+| #1864 Internal Only enforced by BFF reads, not Dataverse security | unified-access-control-r2 (task 191) |
+| #1886 Document lists show rows with no file | R4 backlog (documents) |
+| #1930 WorkforceHome scheme tests order-dependent | R4 backlog (test hygiene) |
+| #2125 Grid overview tool and external-flagged callers | unified-access-control-r2 |
+| #2415 Removal sweep telemetry on an empty pass | unified-access-control-r2 (removal sweep) |
+| #2499 Contact identity store in-memory double | R4 backlog (test debt) |
+| #2534 Auth architecture doc predates ADR-028 A9 | spaarke-auth-system-of-record-r1, else R4 |
+| #2543 Provisioning timeout test flaky under load | unified-access-control-r2 (test owner) |
+
+Already in R4's `design.md` §7: #2446, #2447, #2489, #2490, #2508.
+
 ## Changelog
 
 | Date | Change |
 |------|--------|
 | 2026-10-10 | Initialized by `/project-pipeline` from `spec.md` |
+| 2026-10-13 | ADR-028 A9: workforce contacts sign in with their home directory; re-plan of C7 |
+| 2026-10-31 | Owner both-plane E2E passed (task 072); grids approved (task 002) |
+| 2026-11-01 | Task 079 (#2458 shared home-tenant read) merged and deployed to dev |
+| 2026-11-03 | Task 073 moved to customer-provisioning-orchestration-r1 (#2532). Wrap-up (task 090): review fixes, test diet, close-out |

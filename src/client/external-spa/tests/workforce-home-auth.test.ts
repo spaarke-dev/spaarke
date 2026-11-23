@@ -1241,8 +1241,8 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
   });
 
   it.each([
-    ['registration_owner_unconfigured (500)', problem(500, 'sdap.access.registration_owner_unconfigured')],
     ['registration_unavailable (503)', problem(503, 'sdap.access.registration_unavailable')],
+    ['a plain 500 with another code', problem(500, 'sdap.access.some_other_failure')],
     ['a bare 502', { status: 502, text: 'bad gateway' } as Reply],
   ])('%s: a generic error with a retry that submits again', async (_label, failure) => {
     h.script = { [ME]: [REG_REQUIRED, ME_OK], [REGISTRATION]: [failure, REGISTERED] };
@@ -1255,6 +1255,26 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
     expect(await g.screen.findByTestId('workspace')).toBeTruthy();
     expect(calls()).toEqual([ME, REGISTRATION, REGISTRATION, ME]);
   });
+
+  it.each([
+    ['registration_owner_unconfigured', 'sdap.access.registration_owner_unconfigured'],
+    ['registration_environment', 'sdap.access.registration_environment'],
+  ])(
+    '%s (500): an operator fix - the not-set-up screen with no Try again, and no further request',
+    async (_label, code) => {
+      h.script = { [ME]: [REG_REQUIRED], [REGISTRATION]: [problem(500, code)] };
+      const g = await renderGate();
+      await fillAndSubmit(g, { first: 'Jane', last: 'Doe' });
+      expect(
+        await g.screen.findByText(/not configured for this organization\. contact your administrator/i)
+      ).toBeTruthy();
+      expect(g.screen.queryByText(/something went wrong/i)).toBeNull();
+      expect(g.screen.queryByRole('button', { name: /try again/i })).toBeNull();
+      expect(g.screen.queryByText(/sdap\.access/)).toBeNull();
+      expect(g.screen.queryByTestId('workspace')).toBeNull();
+      expect(calls()).toEqual([ME, REGISTRATION]);
+    }
+  );
 
   it('a link refused because the guest has no systemuser falls through to the profile form (not licensed)', async () => {
     h.script = { [ME]: [REG_REQUIRED], [LINK]: [problem(403, 'sdap.access.link.no_systemuser')] };

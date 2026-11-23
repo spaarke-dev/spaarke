@@ -321,7 +321,8 @@ public class ChatSessionLedgerRoundTripTests
                     ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     SizeBytes: 6_789, SearchDocumentIdsCsv: "d-3", UploadedAt: t0.AddMinutes(3))
             })
-        { OwnerOid = TestSessionOwner.Oid,
+        {
+            OwnerOid = TestSessionOwner.Oid,
             Outputs = new List<SessionOutput>
             {
                 new()

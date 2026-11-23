@@ -441,6 +441,71 @@ describe('Save to SharePoint: attachments the archive refused (PR #2248)', () =>
   });
 });
 
+describe('Submit Invoice entry points (ebilling-r1 task 118)', () => {
+  const DOC_ID = 'dddddddd-0000-0000-0000-000000000001';
+
+  /** Attachment rows for the reading pane and the flow: one flagged PDF. */
+  function dataServiceWithPdf(): IDataService {
+    const ds = makeDataService();
+    (ds.retrieveMultipleRecords as jest.Mock).mockImplementation(async (entity: string) => {
+      if (entity === 'sprk_communicationattachment') {
+        return {
+          entities: [
+            {
+              sprk_communicationattachmentid: 'aaaaaaaa-0000-0000-0000-000000000001',
+              sprk_name: 'invoice-2026.pdf',
+              sprk_attachmenttype: 100000000,
+              _sprk_document_value: DOC_ID,
+            },
+          ],
+        };
+      }
+      if (entity === 'sprk_document') {
+        // sprk_documenttype 100000001 = Invoice (the profile's flag).
+        return {
+          entities: [
+            { sprk_documentid: DOC_ID, sprk_hasfile: true, sprk_graphitemid: 'item-1', sprk_documenttype: 100000001 },
+          ],
+        };
+      }
+      return { entities: [] };
+    });
+    return ds;
+  }
+
+  it('the toolbar says "Submit Invoice" (no "Link Invoice") and opens the flow dialog; no sprk_invoice is created from the UI', async () => {
+    const dataService = dataServiceWithPdf();
+    renderWorkspace({ hideList: true, initialSelectedId: COMMUNICATION_ID, dataService });
+
+    expect(screen.queryByRole('button', { name: 'Link Invoice' })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit Invoice' }));
+
+    // The shared flow mounts inside the modal (jsdom marks the surface aria-hidden: query by test id).
+    expect(await screen.findByTestId('submit-invoice-flow')).toBeInTheDocument();
+    // The flow's marking list names the PDF (a text span; the reading pane lists it as a link button).
+    await waitFor(() =>
+      expect(screen.getAllByText('invoice-2026.pdf', { selector: 'span' }).length).toBeGreaterThanOrEqual(1)
+    );
+    expect(dataService.createRecord).not.toHaveBeenCalledWith('sprk_invoice', expect.anything());
+  });
+
+  it('a flagged attachment shows the Invoice badge and "Submit as invoice" opens the flow with that PDF marked Invoice', async () => {
+    renderWorkspace({ hideList: true, initialSelectedId: COMMUNICATION_ID, dataService: dataServiceWithPdf() });
+
+    expect(await screen.findByTestId('attachment-invoice-badge')).toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId('attachment-submit-as-invoice'));
+
+    await screen.findByTestId('submit-invoice-flow');
+    await waitFor(() => {
+      const group = screen.getAllByRole('radiogroup', { name: 'invoice-2026.pdf', hidden: true });
+      const invoice = group[group.length - 1].querySelector(
+        'input[type="radio"][value="invoice"]'
+      ) as HTMLInputElement | null;
+      expect(invoice?.checked).toBe(true);
+    });
+  });
+});
+
 describe('Negative: dual-mount parity + NFR-05 + no self-mounted FluentProvider', () => {
   it('contains no mount-specific branch and mounts no FluentProvider of its own', () => {
     const src = fs.readFileSync(path.join(__dirname, '../EmailWorkspace.tsx'), 'utf8');

@@ -254,33 +254,33 @@ public class TodoGenerationRecipientTodayTests
         switch (q.EntityName)
         {
             case "systemuser":
-            {
-                var condition = q.Criteria.Conditions.Single(c => c.AttributeName != "isdisabled");
-                var value = (Guid)condition.Values[0];
-                if (condition.AttributeName == "sprk_primarycontact")
-                    _contactToUserQueries.Add(value);
-                if (_contactsThatFailToRead.Contains(value))
-                    throw new InvalidOperationException("systemuser read failed");
-                if (_contactsOfSeveralUsers.Contains(value))
-                    return new EntityCollection(new List<Entity> { new("systemuser", Guid.NewGuid()), new("systemuser", Guid.NewGuid()) });
-                var user = condition.AttributeName switch
                 {
-                    "sprk_primarycontact" => _userByPrimaryContact.TryGetValue(value, out var u) ? u : (Guid?)null,
-                    "azureactivedirectoryobjectid" => _userByOid.TryGetValue(value, out var u) ? u : null,
-                    _ => null,
-                };
-                return user is { } found
-                    ? new EntityCollection(new List<Entity> { new("systemuser", found) })
-                    : new EntityCollection();
-            }
+                    var condition = q.Criteria.Conditions.Single(c => c.AttributeName != "isdisabled");
+                    var value = (Guid)condition.Values[0];
+                    if (condition.AttributeName == "sprk_primarycontact")
+                        _contactToUserQueries.Add(value);
+                    if (_contactsThatFailToRead.Contains(value))
+                        throw new InvalidOperationException("systemuser read failed");
+                    if (_contactsOfSeveralUsers.Contains(value))
+                        return new EntityCollection(new List<Entity> { new("systemuser", Guid.NewGuid()), new("systemuser", Guid.NewGuid()) });
+                    var user = condition.AttributeName switch
+                    {
+                        "sprk_primarycontact" => _userByPrimaryContact.TryGetValue(value, out var u) ? u : (Guid?)null,
+                        "azureactivedirectoryobjectid" => _userByOid.TryGetValue(value, out var u) ? u : null,
+                        _ => null,
+                    };
+                    return user is { } found
+                        ? new EntityCollection(new List<Entity> { new("systemuser", found) })
+                        : new EntityCollection();
+                }
 
             case "timezonedefinition":
-            {
-                var code = Convert.ToInt32(q.Criteria.Conditions.Single().Values[0]);
-                return ZoneNames.TryGetValue(code, out var name)
-                    ? new EntityCollection(new List<Entity> { new("timezonedefinition") { ["standardname"] = name } })
-                    : new EntityCollection();
-            }
+                {
+                    var code = Convert.ToInt32(q.Criteria.Conditions.Single().Values[0]);
+                    return ZoneNames.TryGetValue(code, out var name)
+                        ? new EntityCollection(new List<Entity> { new("timezonedefinition") { ["standardname"] = name } })
+                        : new EntityCollection();
+                }
 
             default:
                 return new EntityCollection(); // sprk_todo dedupe: nothing exists yet

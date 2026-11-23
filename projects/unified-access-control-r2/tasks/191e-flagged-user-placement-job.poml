@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191e" project="unified-access-control-r2">
+  <metadata>
+    <title>T191e: a scheduled BFF job moves newly flagged users into the External Collaborators unit, and the census reports placement drift (#2179)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>blocked: 191d merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Identity writes: changes a systemuser's business unit and roles at run time.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive identity code (CLAUDE.md §6); one-way, fail-closed, never touching application users or administrators.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New job file, SecureRecordIsolationCensusJob and one registration line in ExternalAccessModule; no other 191 task edits these.</parallel-reason>
+    <deps>191d</deps>
+    <tags>bff-api, security, access-control, tenant-isolation, background-jobs, dataverse, testing</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement owner round 115 Q5: a scheduled BFF job that moves each systemuser whose sprk_isexternal is definitely true into the External Collaborators business unit, re-assigns the external role, reads both back and alerts only on failure; and extend the isolation census to report placement drift.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ADR-036 scheduled jobs and Dataverse business-unit changes under matrix BUs.</role>
+  <goal>`FlaggedUserPlacementJob` runs every 2 minutes behind a setting that is off by default; the census raises CRITICAL for every drift kind in design §3.8.</goal>
+
+  <context>
+    <background>Design §3.13 (placement job), §3.8 (fail closed), §3.15 (census), Appendix A.4 spike S2 (a move strips direct roles and swaps the default team; owned rows do not move). Q7 = a: the job never moves application users, administrators or disabled users. Round 115: one-way; un-flagging stays an operator step.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/FlaggedUserPlacementJob.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (AddScheduledJob registration only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/SecureRecordIsolationCensusJob.cs (drift checks)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/AssignedAccessReconciliationJob.cs (IScheduledJob, heartbeat, setting-gated writes)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs (role depth per assignment BU)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/FlaggedUserPlacementJobTests.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureRecordIsolationCensusJobTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191d" status="pending">The BU and role names (config).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-036">An IScheduledJob on the existing scheduler; no BackgroundService, no new package.</constraint>
+    <constraint source="ADR-028">The BFF application user's existing rights; no new Entra or Dataverse permission.</constraint>
+    <constraint source="project">Acts only on a stored sprk_isexternal = true read in the same run; unreadable or blank never moves anyone. Skips application users, disabled users, System Administrators and the BFF's own users.</constraint>
+    <constraint source="project">One-way: never moves a user out of the External BU and never acts on un-flagging.</constraint>
+    <constraint source="project">After the move: assign Spaarke External Collaborator from the External BU, read back BU and role; any mismatch raises the alert and is retried next run.</constraint>
+    <constraint source="project">Writes behind a setting (for example ExternalAccess:FlaggedUserPlacement:WritesEnabled), default false; report-only lists the ids it would move.</constraint>
+    <constraint source="project">Logs ids and counts only; never names, emails or UPNs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="scheduled reconciliation job" location="src/server/api/Sprk.Bff.Api/Services/ExternalAccess/AssignedAccessReconciliationJob.cs">Cron plus tick interval pinned by a test; one heartbeat per attempt; report-only mode.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write the job: read flagged users outside the External BU; filter per the constraints; move (PATCH businessunitid); assign the role; read back; alert on failure.</step>
+    <step order="2">Census: CRITICAL per finding for a flagged user outside the External BU, a role assigned from another BU, non-Basic depth on a lineage table, a lineage row owned by a flagged user or by the External team, membership of another owner team, prvWriteUser, and hierarchy security on with a flagged manager.</step>
+    <step order="3">Tests (must-fire perturbation-checked): moves a definite-true user; never moves blank, unreadable, disabled, application or administrator users; never moves out; re-assigns the role; alert on a failed read-back; setting off writes nothing.</step>
+    <step order="4">Build, targeted tests, full ArchTests, both integration suites, publish-size delta. PR with two adversarial passes (auth, security).</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="6">Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE / OWNER GO: turning the placement writes on moves real users and strips their roles. It is step 7 of the design's §3.19 and needs an owner go in the uac-r2 session; never in this task.</trigger>
+    <trigger>LIVE / OWNER GO: the BFF deploy carrying this job (via R3) ships with writes off and needs the owner's deploy go.</trigger>
+    <trigger>If a business-unit change under matrix behaves differently from spike S2 (roles kept, records moved), STOP and escalate.</trigger>
+    <trigger>If the job would need any right the BFF application user lacks, STOP and escalate per CLAUDE.md §6 (security-sensitive).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>scripts/Set-ExternalFlagForB2BGuests.ps1 sets the flag only; SecureRecordIsolationCensusJob reports isolation drift.</existing>
+    <extension>The script cannot run unattended; the census is extended, not duplicated. The job is one IScheduledJob on the existing scheduler.</extension>
+    <cost-of-doing-nothing>A newly flagged user keeps depth access to every internal row in their unit until someone moves them by hand.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/FlaggedUserPlacementJob.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/FlaggedUserPlacementJobTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a user with stored sprk_isexternal = true outside the External BU, the job moves them, assigns only the external role and reads both back within one run.</criterion>
+    <criterion testable="true">Negative: blank, false or unreadable flags, disabled users, application users and System Administrators are never moved.</criterion>
+    <criterion testable="true">Negative: a user inside the External BU is never moved out, flag or no flag.</criterion>
+    <criterion testable="true">A failed move or read-back raises one alert and is retried next run; a successful run raises none.</criterion>
+    <criterion testable="true">With writes off, nothing is written and the report lists the ids it would move.</criterion>
+    <criterion testable="true">The census raises CRITICAL for each drift kind in step 2 and zero findings on a clean fixture.</criterion>
+    <criterion testable="true">BFF 0 errors; targeted tests, full ArchTests and both integration suites green; publish-size delta recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spike S2 (Appendix A.4) is the reference for move behaviour.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -227,7 +227,7 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 
 ### Per-Customer Resources
 
-Each customer gets its own resource group — and per [ADR-027](../adr/ADR-027-azure-subscription-topology.md)
+Each customer gets its own resource group — and per [ADR-027](../adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md)
 as amended, its own **subscription**. Patterns below are taken from the deploying Bicep, not from intent.
 `infrastructure/bicep/customer.bicep` is the **only** customer-stamp template (owner decision D19,
 2026-10-02), deployed by the L2 control plane's handler H2a; the "Source" column names its variable/param:

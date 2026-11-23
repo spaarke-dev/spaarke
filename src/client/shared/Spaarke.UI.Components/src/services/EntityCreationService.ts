@@ -4,7 +4,8 @@
  *
  * Responsibilities:
  *   1. Upload files to SPE via BFF OBO endpoint
- *   2. Create Dataverse entity records via WebApi
+ *   2. Create Dataverse entity records: a table the BFF creates (`BFF_CHILD_CREATE_TABLES` — the child tables, work
+ *      assignment, matter and project) through `POST /api/v1/child-records/{table}`; any other table via WebApi
  *   3. Create sprk_document records linking uploaded files to the parent entity
  *   4. Trigger Document Profile analysis via BFF Service Bus
  *
@@ -25,7 +26,8 @@
  * const service = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
  *
  * // Create the record FIRST — the upload is keyed on it, and the server resolves the storage
- * // container from that same record (task 076). There is no container parameter.
+ * // container from that same record (task 076). There is no container parameter. A matter is created through the
+ * // BFF (POST /api/v1/child-records/sprk_matter): the server decides its owner and applies field mapping.
  * const matterId = await service.createEntityRecord('sprk_matter', matterData);
  * const uploadResult = await service.uploadFilesToSpe('sprk_matter', matterId, files);
  * await service.createDocumentRecords('sprk_matters', matterId, 'sprk_Matter', uploadResult.uploadedFiles);
@@ -619,7 +621,7 @@ export class EntityCreationService {
   }
 
   /**
-   * Create a Dataverse entity record via WebApi.
+   * Create a Dataverse entity record: through the BFF for a table it creates (`isBffChildCreateTable`), else via WebApi.
    *
    * @param entityName Dataverse logical name (e.g., 'sprk_matter', 'sprk_project')
    * @param entityData Entity payload with field values and @odata.bind lookups
@@ -627,7 +629,8 @@ export class EntityCreationService {
    */
   async createEntityRecord(entityName: string, entityData: Record<string, unknown>): Promise<string> {
     // UAC-r2 task 147 r1 (owner round 28 item 1): a CHILD record is created through the BFF (G5) — the server decides its
-    // owner. Roots (matter, project, work assignment) are unchanged here.
+    // owner. So are the roots in the same set (work assignment; matter and project since field-mapping-server-write-path-r1
+    // task 020): the server decides the owner, applies field mapping and creates a project under a secure record secure.
     if (isBffChildCreateTable(entityName)) {
       return createChildRecordViaBff(this._authenticatedFetch, this._bffBaseUrl, entityName, entityData);
     }

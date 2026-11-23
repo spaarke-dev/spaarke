@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/quality/post-edit-lint.sh"
+            "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bash scripts/quality/post-edit-lint.sh"
           }
         ]
       },
@@ -70,7 +70,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/quality/task-quality-gate.sh"
+            "command": "cd \"${CLAUDE_PROJECT_DIR}\" && bash scripts/quality/task-quality-gate.sh",
+            "timeout": 420
           }
         ]
       }
@@ -149,7 +150,39 @@
       "PowerShell(git *stash pop*)",
       "PowerShell(git *stash apply*)",
       "PowerShell(git *stash drop*)",
-      "PowerShell(git *stash clear*)"
+      "PowerShell(git *stash clear*)",
+      "Bash(git push --force*)",
+      "Bash(git push *--force*)",
+      "Bash(git push -f *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "PowerShell(git push --force*)",
+      "PowerShell(git push *--force*)",
+      "PowerShell(git push -f *)",
+      "PowerShell(git push * -f)",
+      "PowerShell(git push * -f *)",
+      "Bash(pwsh *Deploy-Release.ps1*)",
+      "Bash(powershell *Deploy-Release.ps1*)",
+      "Bash(pwsh *Provision-Customer.ps1*)",
+      "Bash(powershell *Provision-Customer.ps1*)",
+      "Bash(./scripts/Deploy-Release.ps1*)",
+      "Bash(scripts/Deploy-Release.ps1*)",
+      "Bash(./scripts/Provision-Customer.ps1*)",
+      "Bash(scripts/Provision-Customer.ps1*)",
+      "PowerShell(pwsh *Deploy-Release.ps1*)",
+      "PowerShell(powershell *Deploy-Release.ps1*)",
+      "PowerShell(& *Deploy-Release.ps1*)",
+      "PowerShell(.\\scripts\\Deploy-Release.ps1*)",
+      "PowerShell(./scripts/Deploy-Release.ps1*)",
+      "PowerShell(scripts\\Deploy-Release.ps1*)",
+      "PowerShell(scripts/Deploy-Release.ps1*)",
+      "PowerShell(pwsh *Provision-Customer.ps1*)",
+      "PowerShell(powershell *Provision-Customer.ps1*)",
+      "PowerShell(& *Provision-Customer.ps1*)",
+      "PowerShell(.\\scripts\\Provision-Customer.ps1*)",
+      "PowerShell(./scripts/Provision-Customer.ps1*)",
+      "PowerShell(scripts\\Provision-Customer.ps1*)",
+      "PowerShell(scripts/Provision-Customer.ps1*)"
     ],
     "allow": [
       "Read(**)",

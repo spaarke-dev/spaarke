@@ -238,6 +238,9 @@ function scalarOf(
 
 // ---- the body -----------------------------------------------------------------------------------------------------------------
 
+/** Why an Existence condition with no test on the record and no related-record test cannot continue (issue key `all`). */
+export const NO_TEST_PROBLEM = 'Add at least one test on the record or one related-record test.';
+
 export interface BuiltBody {
   /** The `sprk_rulebody` JSON text, or null while some input cannot be written into it yet. */
   ruleBody: string | null;
@@ -364,6 +367,12 @@ export function buildRuleBody(
         filter: filterOf(clause.filter, clause.related, catalog, issues),
       };
     });
+    // The Existence schema refuses a body with no clause and no `when` test (a subject-only rule must scope the subject), so it is
+    // stopped here with a plain sentence instead of the BFF's raw schema error. The BFF stays the authority and still refuses it.
+    // Row problems come first: when a row is unfinished, that row's own sentence is the one to show.
+    if (Object.keys(issues).length === 0 && Object.keys(when).length === 0 && condition.clauses.length === 0) {
+      issues.all = NO_TEST_PROBLEM;
+    }
   }
 
   const window = quietWindowDays.trim();

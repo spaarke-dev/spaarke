@@ -24,4 +24,15 @@ public sealed record AssociationDecision
 
     /// <summary>Full provenance trail, serialized to <c>sprk_associationprovenance</c> JSON by the resolver.</summary>
     public required AssociationProvenance Provenance { get; init; }
+
+    /// <summary>
+    /// The regarding field that is the row's denormalized PRIMARY (<c>sprk_regardingrecordid</c> / name / type), when a
+    /// caller decided it; <see langword="null"/> (the default) uses the global priority order
+    /// (<see cref="RegardingFieldMap.All"/>). Honoured only when that field is among <see cref="RegardingWrites"/>.
+    /// Ontology task 176 (review round 2, item 4): a reply to an inquiry keeps the service request as its primary, as the
+    /// inquiry's send does, so the next reply's footer still names the inquiry. §11: existing — the priority pick in
+    /// <c>IncomingAssociationResolver.PrimaryRegarding</c>; extension — a per-decision preference on it rather than a
+    /// reordered global list; cost of doing nothing — the reply's primary becomes the matter and the inquiry rule is lost.
+    /// </summary>
+    public string? PrimaryRegardingField { get; init; }
 }

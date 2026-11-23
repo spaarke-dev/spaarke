@@ -266,7 +266,9 @@ $Catalog = @(
         SchemaFile = 'infrastructure/ai-search/spaarke-invoices-index.json'
         Invariants = @{
             VectorFields             = @('contentVector')
-            RequiredFilterableFields = @('tenantId', 'invoiceId', 'matterId', 'projectId')
+            # ebilling-r1 task 152 (FR-43, D-44): the firm (vendorOrgId), core record, UTBMS code collections, timekeepers and status are the
+            # filters an accepted invoice is found by; the first four are the pre-152 scope fields.
+            RequiredFilterableFields = @('tenantId', 'invoiceId', 'matterId', 'projectId', 'vendorOrgId', 'coreRecordType', 'coreRecordId', 'timekeeperIds', 'taskCodes', 'activityCodes', 'expenseCodes', 'statusCode')
         }
     }
 )

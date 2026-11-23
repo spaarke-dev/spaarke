@@ -417,7 +417,7 @@ Library="$webresource:prefix_ScriptName.js"
 - **NEVER import full SpaarkeCore** for ribbon work — use a dedicated small solution containing only the target entity
 - **Always validate CrmParameter values** against the reference table in this skill before importing
 - Reference `docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md` for HideCustomAction and subgrid details
-- Reference [RIBBON-COMMAND-BAR-MODIFICATIONS.md](../../../docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md) for templates
+- Reference RIBBON-COMMAND-BAR-MODIFICATIONS.md for templates
 - Reference [RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md](../../../docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md) for full button guide with examples
 
 ---

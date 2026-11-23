@@ -11,10 +11,15 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
+using Sprk.Bff.Api.Tests.Services.Compose;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Services.Ai.Membership.Events;
 using Xunit;
@@ -88,13 +93,37 @@ public class DataverseDocumentsEndpointsMembershipPublishingTests
                 .ReturnsAsync(DocumentId.ToString("D"));
             Documents.Setup(d => d.GetDocumentAsync(DocumentId.ToString("D"), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new DocumentEntity { Id = DocumentId.ToString("D"), Name = "Brief.docx", FileName = "Brief.docx", ContainerId = "b!container" });
+
+            // Task 166: the create first asks Create on sprk_document as the caller, and requires the body's container to be
+            // the caller's business-unit container. This site models a caller who passes both (the refusals are pinned in
+            // DocumentCreateOwnershipContractTests); the container reads go to their OWN double, so the owner-event
+            // assertions on Dataverse below are unchanged.
+            Probe.Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            ContainerRows.Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new EntityCollection(new List<Entity>
+                {
+                    new("systemuser", Guid.NewGuid())
+                    {
+                        ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId),
+                        ["domainname"] = "caller@contoso.example",
+                        ["isdisabled"] = false,
+                        ["accessmode"] = new OptionSetValue(0),
+                    },
+                }));
+            ContainerRows.Setup(d => d.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Entity("businessunit", BusinessUnitId) { ["sprk_containerid"] = "b!container" });
         }
+
+        private static readonly Guid BusinessUnitId = Guid.Parse("bbbbbbbb-1666-0000-0000-000000000166");
 
         public Mock<IDocumentDataverseService> Documents { get; } = new(MockBehavior.Strict);
         public Mock<IRecordOwnershipResolver> Ownership { get; } = new(MockBehavior.Strict);
         public Mock<IGenericEntityService> Dataverse { get; } = OwnerEventTestKit.Dataverse();
         public RecordingMembershipEventPublisher Publisher { get; } = new();
         public CreateDocumentRequest? Written { get; private set; }
+        public Mock<CallerRecordAccessProbe> Probe { get; } = ComposeServiceCollaborators.Probe();
+        public Mock<IGenericEntityService> ContainerRows { get; } = new(MockBehavior.Strict);
 
         public Task<IResult> RunAsync()
         {
@@ -110,6 +139,9 @@ public class DataverseDocumentsEndpointsMembershipPublishingTests
                 Publisher,
                 Ownership.Object,
                 Dataverse.Object,
+                Probe.Object,
+                new RecordContainerResolver(
+                    Mock.Of<ISecurableEntityRegistry>(), ContainerRows.Object, NullLogger<RecordContainerResolver>.Instance),
                 NullLogger<Program>.Instance,
                 context,
                 CancellationToken.None);

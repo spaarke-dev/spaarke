@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191h" project="unified-access-control-r2">
+  <metadata>
+    <title>T191h: the SPA lists, the AI derived-table filter and the retrieval trim use the same ExternalVisibility predicate (#2189, #2369)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>blocked: 191b merged</gate>
+    <status>completed (PR open, not merged; stacked on 191c #2723)</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what external callers see on the SPA and AI surfaces; security parity with Dataverse.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Three surfaces with different read identities; parity must hold without widening anything.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits ExternalDataService, ExternalCallerCommunicationGuard's callers and RetrievalAccessTrim; 191b must be merged first because it also edits ExternalCallerCommunicationGuard.</parallel-reason>
+    <deps>191b</deps>
+    <tags>bff-api, security, access-control, ai, testing</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Make the SPA's to-do and event lists, the AI tools' derived-table filter and the RAG retrieval trim ask ExternalVisibility, so a record about a hidden communication or document, or an invoice hidden by ebilling (a′), is hidden on every app-only surface exactly as in Dataverse.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the external SPA data service, the AI Dataverse handlers and RetrievalAccessTrim.</role>
+  <goal>The three surfaces narrow external callers with the one predicate; #2189's tables and #2369 part 2 are covered; results for internal callers are unchanged.</goal>
+
+  <context>
+    <background>Design §3.3 (callers), §3.10 (events and to-dos), §1.2 (app-only rows; #2369 part 2), Q3 taint closure (round 114). #2189 lists the AI-derived tables; #2369 part 2 is semantic search over an invoice's associated documents without (a′).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs (GetTodosAsync :1676, GetEventsAsync :1769)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs (derived-row filter calls the predicate)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RetrievalAccessTrim.cs (NarrowDocumentKeysForExternalCallerAsync :244)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalDataServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/RetrievalAccessTrimTests.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191b" status="pending">ExternalVisibility.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">AI data governance: retrieval narrows, never widens; the trim stays in the AI PublicContracts facade.</constraint>
+    <constraint source="project">Only narrows: no row an external caller cannot see today becomes visible; internal callers' results unchanged.</constraint>
+    <constraint source="project">Undecided is hidden.</constraint>
+    <constraint source="project">No new endpoint, route or DI registration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+      <file>projects/unified-access-control-r2/notes/task-188-d7-document-narrowing.md</file>
+    </files>
+    <patterns>
+      <pattern name="one predicate, every surface" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDocumentNarrowing.cs">Task 188's callers pass the batch and drop hidden rows.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">SPA to-do and event lists call the predicate for the page's rows and drop Hidden and Undecided.</step>
+    <step order="2">The AI derived-row filter asks the predicate for every registry table the tools return (closes #2189's classification, including analyses linked only by sprk_regardingcommunication).</step>
+    <step order="3">The retrieval trim applies the predicate to an invoice's associated documents (ebilling (a′), #2369 part 2).</step>
+    <step order="4">Tests (must-fire perturbation-checked): a to-do and an event regarding an internal-only communication are absent for an external caller and present for an internal one; an analysis linked only through sprk_regardingcommunication is hidden; an invoice document hidden by (a′) is trimmed.</step>
+    <step order="5">Build, targeted tests, full ArchTests, publish-size delta. PR with the adversarial passes.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE / OWNER GO: the BFF deploy carrying this task (via R3) needs the owner's deploy go (design §3.19 step 5).</trigger>
+    <trigger>If any surface would show an external caller a row it hides today, or change an internal caller's result, STOP and escalate.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RetrievalAccessTrim.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalDataServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An external caller's to-do and event lists omit rows regarding an internal-only communication, a hidden document, or a Restricted root.</criterion>
+    <criterion testable="true">The AI tools omit, for an external caller, every derived-table row the predicate hides, including an analysis linked only through sprk_regardingcommunication (#2189).</criterion>
+    <criterion testable="true">Semantic search trims an invoice's associated documents that ebilling (a′) hides (#2369 part 2).</criterion>
+    <criterion testable="true">Negative (must-not-fire): internal callers' results are unchanged on all three surfaces.</criterion>
+    <criterion testable="true">Negative: an Undecided row is omitted, never shown.</criterion>
+    <criterion testable="true">BFF 0 errors; targeted tests and full ArchTests green; publish-size delta recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>#2369 part 1 (read_query completeness) is expected to close by construction once Dataverse returns only shared rows to flagged users; 191j re-checks and closes or re-scopes it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

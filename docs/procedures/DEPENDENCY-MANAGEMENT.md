@@ -17,11 +17,11 @@
 
 ## .NET Dependency Management
 
-### Central Package Management
+### Package versions live in each `.csproj`
 
-All .NET package versions are centralized in `Directory.Packages.props` at the repository root. Individual `.csproj` files reference packages without version numbers.
+Spaarke does **not** use NuGet Central Package Management. Every `<PackageReference>` carries its own `Version="…"` in the `.csproj` that uses it, and that is the version that builds. The repository-root `Directory.Packages.props` was removed on 2026-11-10: CPM had been switched off in it, so its pins were ignored and had drifted from the real versions (e.g. it said Kiota 1.17.1 and Microsoft.Graph 5.88.0 while the BFF built with Graph 6.5.0). Removing it also removes the old "rename it before `pac` commands" workaround (NU1008).
 
-**Key file**: `Directory.Packages.props`
+To find the version a project actually uses: `dotnet list <project> package` (add `--include-transitive` for transitive versions).
 
 | Package Group | Example Packages | Update Coordination |
 |---------------|-----------------|---------------------|
@@ -48,8 +48,8 @@ These apply to all .NET projects. Changes here affect every build.
 
 ### Procedure: Updating a NuGet Package
 
-1. Edit `Directory.Packages.props` -- change the version for the target package(s)
-2. If updating Kiota packages: update ALL 7 `Microsoft.Kiota.*` entries to the same version
+1. Change the `Version` on the `<PackageReference>` in every `.csproj` that references the package (find them with `git grep -n 'Include="<PackageId>"' -- '*.csproj'`)
+2. If updating Kiota packages: update ALL 7 `Microsoft.Kiota.*` references to the same version
 3. Run `dotnet restore --verbosity minimal`
 4. Run `dotnet build -warnaserror` to verify no breaking changes
 5. Run `dotnet test` to verify functionality
@@ -165,7 +165,7 @@ Solutions (src/solutions/*)
   └── vite (build tooling)
 
 .NET Projects
-  └── All versions in Directory.Packages.props (central management)
+  └── Versions pinned per .csproj (no central package management)
 ```
 
 ## Checklists

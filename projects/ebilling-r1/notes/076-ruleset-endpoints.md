@@ -87,6 +87,8 @@ Probe tests from the reviewer (`ReviewProbeTests.cs`: probes 1-4) were ported in
 
 **For 130 / 134 / 135 (callers of `GetFirmClauseAsync`):** superseded by review round 2 (section 8, item 5). The parameter is now `invoiceFirmId`: the invoice's `sprk_vendororg`, never the SPA identity's firm.
 
+> Superseded by task 083: `GetFirmClauseAsync(policyVersionId, invoiceId, ct)`, keyed to the invoice's snapshot (see 083-firm-clause-applicability.md).
+
 ### K1 - D-108 (owner accepted): billing admin = Write on `sprk_ruleset` at ANY depth
 
 No change to the check. D-108 is recorded in the `BillingAdminAuthorization` remarks (commit below): the check asks whether the caller holds the privilege (`FinanceAuthorizationCheck.CallerPrivilege`, "any depth"), not at what depth; the role the owner grants carries Org depth in practice.
@@ -150,6 +152,8 @@ All of them pass after the fixes.
 ### Caller contract for 130 / 131 / 133 / 134 / 135 (copy into those POMLs)
 
 > `GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct)`: `invoiceFirmId` is the firm of the INVOICE the finding belongs to. That is the invoice's `sprk_vendororg`, read server-side. Pass it only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route), and never pass the SPA identity's firm. A CIAM caller may belong to several firms (130), so "the caller's firm" is not one value, and internal callers (131, 133) have no SPA identity. `Guid.Empty` (the invoice has no firm) returns no text.
+
+> Superseded by task 083: `GetFirmClauseAsync(policyVersionId, invoiceId, ct)`, keyed to the invoice's snapshot (see 083-firm-clause-applicability.md).
 
 ### Section 11 - new surface this round
 

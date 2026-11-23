@@ -99,9 +99,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var log = new CopiedDefaultLog();
 
         var result = await ChildRecordEndpoints.CreateAsync(
-            "sprk_workassignment", Payload(WizardWorkAssignmentFor(assignedToInternal: null)), _user, _world.Resolver(),
-            _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure(),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            "sprk_workassignment", Payload(WizardWorkAssignmentFor(assignedToInternal: null)), _user,
+            RouteRecordCreation.Over(
+                _world.Resolver(), _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure(), logger: log),
             HttpContextOfCaller(), log, CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
@@ -265,7 +265,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     // ── Harness ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The route's log, with each entry's structured values.</summary>
-    private sealed class CopiedDefaultLog : ILogger<Program>
+    // Task 017: the route's create now runs in the service, which logs the copied-default warning under its own category.
+    private sealed class CopiedDefaultLog : ILogger<Program>, ILogger<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>
     {
         public List<(LogLevel Level, string Message, IReadOnlyDictionary<string, object?> Values)> Entries { get; } = new();
 

@@ -79,22 +79,34 @@ function makeForm(overrides?: Partial<ICreateMatterFormState>): ICreateMatterFor
   };
 }
 
+const BFF_BASE = 'https://example.test';
+
+/**
+ * Task 021: the create no longer goes through `dataService.createRecord` (Xrm.WebApi) -- it is POSTed to the BFF
+ * child-records route. `authFetch` records the body of that POST into `createCalls`, so the payload assertions below are
+ * unchanged: they still read the exact create payload the wizard produced.
+ */
 function makeDataService(): {
   dataService: IDataService;
+  authFetch: jest.Mock;
   createCalls: Array<{ entity: string; payload: Record<string, unknown> }>;
 } {
   const createCalls: Array<{ entity: string; payload: Record<string, unknown> }> = [];
   const dataService: IDataService = {
-    createRecord: jest.fn().mockImplementation(async (entity: string, payload: Record<string, unknown>) => {
-      createCalls.push({ entity, payload });
-      return 'created-record-guid';
-    }),
+    createRecord: jest.fn().mockResolvedValue('xrm-created-guid'),
     retrieveRecord: jest.fn().mockResolvedValue({}),
     retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
     updateRecord: jest.fn().mockResolvedValue(undefined),
     deleteRecord: jest.fn().mockResolvedValue(undefined),
   };
-  return { dataService, createCalls };
+  const authFetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).startsWith(`${BFF_BASE}/api/v1/child-records/sprk_matter`)) {
+      createCalls.push({ entity: 'sprk_matter', payload: JSON.parse(init?.body as string) });
+      return { ok: true, status: 201, json: async () => ({ id: 'created-record-guid' }) } as unknown as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+  });
+  return { dataService, authFetch, createCalls };
 }
 
 /** ManyToOneRelationships metadata for sprk_matter (PascalCase nav props). */
@@ -126,8 +138,6 @@ const MATTER_RELATIONSHIPS = [
   },
 ];
 
-const BFF_BASE = 'https://example.test';
-
 describe('MatterService — nav-prop convergence create-payload equivalence (task 016)', () => {
   const originalFetch = globalThis.fetch;
 
@@ -148,8 +158,7 @@ describe('MatterService — nav-prop convergence create-payload equivalence (tas
   });
 
   it('emits the exact PascalCase @odata.bind keys/values/order (byte-identical to pre-convergence output)', async () => {
-    const { dataService, createCalls } = makeDataService();
-    const authFetch = jest.fn();
+    const { dataService, authFetch, createCalls } = makeDataService();
 
     const service = new MatterService(dataService, authFetch, BFF_BASE);
 
@@ -198,8 +207,8 @@ describe('MatterService — nav-prop convergence create-payload equivalence (tas
       async () => ({ ok: false, status: 500, json: async () => ({}) }) as unknown as Response
     ) as unknown as typeof fetch;
 
-    const { dataService, createCalls } = makeDataService();
-    const service = new MatterService(dataService, jest.fn(), BFF_BASE);
+    const { dataService, authFetch, createCalls } = makeDataService();
+    const service = new MatterService(dataService, authFetch, BFF_BASE);
 
     await service.createMatter(makeForm({ assignedAttorneyId: 'att-guid-1' }), [], {});
 

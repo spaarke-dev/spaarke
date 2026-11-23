@@ -160,6 +160,7 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:redis_endpoint',
     'from-h2a-output:content_safety_endpoint',
     'from-h2a-output:storage_blob_endpoint',
+    'from-h2a-output:ontology_writer_client_id',
     'from-h2a-output:bff_url',
     'from-h3-output:bff_app_client_id',
     'from-h5-output:dataverse_env_url',
@@ -1100,7 +1101,7 @@ function New-TokensDocArtifact {
 
 # Canonical KV Secret Reference
 
-**Authority**: spec.md FR-36 + §7.9 R1-R4 · [AZURE-RESOURCE-NAMING-CONVENTION.md](../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) · [naming-exception-registry.md](../../projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md)
+**Authority**: spec.md FR-36 + §7.9 R1-R4 · [AZURE-RESOURCE-NAMING-CONVENTION.md](../../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) · [naming-exception-registry.md](../../../projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md)
 
 This document is **generated** from ``scripts/canonical-secret-catalog/manifest.yaml``. Do NOT edit by hand — any local edit is destroyed by the next generator run.
 

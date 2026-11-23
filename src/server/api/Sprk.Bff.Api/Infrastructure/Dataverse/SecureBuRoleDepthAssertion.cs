@@ -90,6 +90,33 @@ public static class SecureBuRoleDepthAssertion
             .ToArray();
     }
 
+    /// <summary>
+    /// ebilling-r1 (procedure model 5.1, NFR-05 depth list): the Read privileges of the hard-deny tables
+    /// (<c>RecordOwnershipResolver.RestrictedContentTables</c>), which clause 1 grades like a codified child table whether or
+    /// not the codified set lists them. Names verified against live metadata 2026-11-03; the casing follows each table's
+    /// SCHEMA name.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Separate from <see cref="GuardedPrivileges"/>, and non-throwing.</b> A guarded root that does not resolve stops
+    /// the census (<see cref="SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved"/>). A name here that the
+    /// environment does not return is ONE finding naming it (<see cref="SecureBuVerdict.RestrictedContentPrivilegeNotResolved"/>),
+    /// so a table not installed in one environment never blinds clauses 1-4. When the codified set also lists the privilege,
+    /// clause 5 already names it, and this list adds no second finding.</para>
+    /// <para><b>Why these tables.</b> Their rows hold one record's rules, overrides and stored files; a row of one of them is
+    /// owned by the memberless restricted-content owner team, or by the Secure Record Owners team when its record is Secure
+    /// (EB-D-168). Read on them at a depth that reaches the secure business unit discloses the Secure rows as Read on a root
+    /// does. <c>sprk_storedfile</c> is not in the codified set yet (ebilling-r1 task 086 registers it); it is guarded here
+    /// already.</para>
+    /// </remarks>
+    public static readonly IReadOnlyList<(string LogicalName, string PrivilegeName)> RestrictedContentPrivileges = new[]
+    {
+        ("sprk_procedureassignment", "prvReadsprk_procedureassignment"),
+        ("sprk_ruleset", "prvReadsprk_ruleset"),
+        ("sprk_policy", "prvReadsprk_Policy"),
+        ("sprk_policyversion", "prvReadsprk_PolicyVersion"),
+        ("sprk_storedfile", "prvReadsprk_StoredFile"),
+    };
+
     /// <summary>The role that legitimately anchors ownership inside the secure BU (design §5.1a).</summary>
     public const string SecureOwnerRoleName = "Secure Record Owner";
 
@@ -248,8 +275,40 @@ public static class SecureBuRoleDepthAssertion
         findings.AddRange(EvaluateOwnerTeamClause(census, secureBu));
         findings.AddRange(EvaluateOwnerRoleContainmentClause(census));
         findings.AddRange(EvaluateOwnerRoleCoverageClause(census));
+        findings.AddRange(EvaluateRestrictedContentResolution(census));
 
         return new SecureBuAssertionOutcome(findings) { AcceptedExceptions = acceptedExceptions };
+    }
+
+    /// <summary>
+    /// The NFR-05 depth list (<see cref="RestrictedContentPrivileges"/>): one finding per listed privilege the environment
+    /// did not return, so clause 1 could not grade that table, except where clause 5 already names it (see below).
+    /// </summary>
+    private static IEnumerable<SecureBuFinding> EvaluateRestrictedContentResolution(SecureBuRoleDepthCensus census)
+    {
+        var coverage = census.OwnerRoleCoverage;
+
+        // Clause 5 names a codified table the environment lacks only when it can grade at all: tables present and exactly one
+        // owner role that is not a replica. Where it cannot (it returns early), this clause is the only one naming the
+        // privilege (089a review K6); where it can, it already did, and a second finding would double-report.
+        var clauseFiveGrades = coverage.Tables.Count > 0 && coverage.OwnerRoleCount == 1 && coverage.InheritedFromRootRoleId is null;
+
+        foreach (var (logicalName, privilegeName) in census.UnresolvedRestrictedContentPrivileges)
+        {
+            if (clauseFiveGrades
+                && coverage.Tables.Any(t => !t.ExistsInEnvironment
+                                            && string.Equals(t.PrivilegeName, privilegeName, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            yield return new SecureBuFinding(
+                SecureBuVerdict.RestrictedContentPrivilegeNotResolved,
+                $"The NFR-05 depth list requires {privilegeName} (table {logicalName}), but this environment has no privilege of "
+                + "that name: the table is not installed, was renamed, or the list mis-cases it (casing follows the schema name; "
+                + $"compare EntityDefinitions(LogicalName='{logicalName}')/Privileges). Read on {logicalName} is NOT graded "
+                + "here, so its isolation is UNKNOWN, not proven.");
+        }
     }
 
     /// <summary>
@@ -650,9 +709,12 @@ public static class SecureBuRoleDepthAssertion
     /// reaches <paramref name="secureBusinessUnitId"/>.
     /// </summary>
     /// <remarks>
-    /// <para>The anchor is the ROLE COPY's business unit for a directly-assigned role (Dataverse only
-    /// lets a user hold the copy that lives in their own BU) and the TEAM's business unit for a
-    /// team-assigned role (team privileges are evaluated against the team's BU, not the member's).</para>
+    /// <para>The anchor is the ROLE COPY's business unit for a directly-assigned role and the TEAM's business
+    /// unit for a team-assigned role (team privileges are evaluated against the team's BU, not the member's).
+    /// The role copy's business unit may differ from the user's home business unit: with cross-business-unit
+    /// ownership enabled (<c>EnableOwnershipAcrossBusinessUnits</c>), a user can be directly assigned the copy
+    /// of a role that lives in another business unit, so the census anchors a direct grant at the copy's unit,
+    /// never at the user's.</para>
     /// <para><c>Basic</c> reaches nothing by business unit — it matches only records the principal owns,
     /// which is why clause 2 exists separately. An UNRECOGNISED depth mask fails closed.</para>
     /// </remarks>
@@ -788,7 +850,27 @@ public static class SecureBuRoleDepthCensusBuilder
             returnedNames.TryAdd(returned, returned);
         }
 
+        // ebilling-r1 (NFR-05 depth list): the hard-deny tables' Reads are graded too, codified or not. One not returned by
+        // the environment is graded nowhere and is reported (once: clause 5 names it when it can grade the codified set).
+        var codifiedPrivileges = ownerRoleSet.Tables.Select(t => t.PrivilegeName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var restricted = SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+            .Where(entry => !codifiedPrivileges.Contains(entry.PrivilegeName)
+                            && !SecureBuRoleDepthAssertion.GuardedPrivileges.Contains(entry.PrivilegeName, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+
+        // 089a review K6: EVERY depth-list entry the environment did not return, codified or not. A codified one is named by
+        // clause 5 too, but only when clause 5 can grade (exactly one non-replica owner role); the evaluator drops this
+        // report where clause 5 speaks, so each missing privilege still yields exactly one finding naming it.
+        var unresolvedRestricted = SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+            .Where(entry => !SecureBuRoleDepthAssertion.GuardedPrivileges.Contains(entry.PrivilegeName, StringComparer.OrdinalIgnoreCase)
+                            && !returnedNames.ContainsKey(entry.PrivilegeName))
+            .ToArray();
+
         var childTables = SecureBuRoleDepthAssertion.GuardedChildTables(ownerRoleSet)
+            .Select(table => (PrivilegeName: table.PrivilegeName, LogicalName: table.LogicalName))
+            .Concat(restricted
+                .Where(entry => returnedNames.ContainsKey(entry.PrivilegeName))
+                .Select(entry => (PrivilegeName: entry.PrivilegeName, LogicalName: entry.LogicalName)))
             .Select(table => (
                 Privilege: returnedNames.TryGetValue(table.PrivilegeName, out var returned) ? returned : table.PrivilegeName,
                 table.LogicalName))
@@ -868,7 +950,10 @@ public static class SecureBuRoleDepthCensusBuilder
             namedTeams.Count,
             ownerTeamMembers,
             secureBuUsers,
-            OwnerRoleCoverage(ownerRoleSet, resolvedPrivilegeNames, depthByRootRole, roles, secureBuIds));
+            OwnerRoleCoverage(ownerRoleSet, resolvedPrivilegeNames, depthByRootRole, roles, secureBuIds))
+        {
+            UnresolvedRestrictedContentPrivileges = unresolvedRestricted,
+        };
     }
 
     /// <summary>
@@ -879,10 +964,16 @@ public static class SecureBuRoleDepthCensusBuilder
     {
         ArgumentNullException.ThrowIfNull(ownerRoleSet);
 
-        return SecureBuRoleDepthAssertion.GuardedPrivileges
+        var names = SecureBuRoleDepthAssertion.GuardedPrivileges
             .Concat(ownerRoleSet.Tables.Select(t => t.PrivilegeName))
             .Distinct(StringComparer.Ordinal)
-            .ToArray();
+            .ToList();
+
+        // ebilling-r1 (NFR-05 depth list): the hard-deny tables' Reads, after the codified set, unless it names them already.
+        names.AddRange(SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+            .Select(entry => entry.PrivilegeName)
+            .Where(name => !names.Contains(name, StringComparer.OrdinalIgnoreCase)));
+        return names;
     }
 
     /// <summary>
@@ -1095,7 +1186,15 @@ public sealed record SecureBuRoleDepthCensus(
     int SecureOwnerTeamMatches,
     IReadOnlyList<string> SecureOwnerTeamMembers,
     IReadOnlyList<string> SecureBusinessUnitUsers,
-    SecureOwnerRoleCoverage OwnerRoleCoverage);
+    SecureOwnerRoleCoverage OwnerRoleCoverage)
+{
+    /// <summary>
+    /// The NFR-05 depth-list privileges (<see cref="SecureBuRoleDepthAssertion.RestrictedContentPrivileges"/>) the environment
+    /// did not return: one finding each, except a codified one clause 5 names itself. Empty when every one resolved.
+    /// </summary>
+    public IReadOnlyList<(string LogicalName, string PrivilegeName)> UnresolvedRestrictedContentPrivileges { get; init; } =
+        Array.Empty<(string, string)>();
+}
 
 /// <summary>The <c>Secure Record Owner</c> role's coverage of the codified set (task 145).</summary>
 /// <param name="OwnerRoleCount">How many distinct roles of that name live in the secure BU. Only 1 is gradeable.</param>
@@ -1156,7 +1255,13 @@ public enum SecureBuVerdict
     /// The <c>Secure Record Owner</c> role lacks Read at User depth on a codified table, holds it wider, or cannot be
     /// graded (task 145). Fail-CLOSED, not an exposure: the secure child of that table cannot be owned by the team.
     /// </summary>
-    SecureOwnerRoleLacksCodifiedPrivilege
+    SecureOwnerRoleLacksCodifiedPrivilege,
+
+    /// <summary>
+    /// A privilege of the NFR-05 depth list (<see cref="SecureBuRoleDepthAssertion.RestrictedContentPrivileges"/>) is not in
+    /// the environment, so Read on that table is not graded (ebilling-r1). Isolation of it is unknown, not exposed.
+    /// </summary>
+    RestrictedContentPrivilegeNotResolved
 }
 
 /// <summary>One violation, with the operator-actionable message that belongs in the log.</summary>
@@ -1223,6 +1328,7 @@ public sealed record SecureBuAssertionOutcome(IReadOnlyList<SecureBuFinding> Fin
         SecureBuVerdict.SecureOwnerTeamNotResolved => 5,
         SecureBuVerdict.SecureBusinessUnitAmbiguous => 6,
         SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege => 7, // fail-closed: ranks below every exposure
+        SecureBuVerdict.RestrictedContentPrivilegeNotResolved => 7, // a table not graded: ranks with the codified gap
         SecureBuVerdict.VacuousCensus => 8,
         SecureBuVerdict.SecureBusinessUnitNotFound => 9,
         _ => 10

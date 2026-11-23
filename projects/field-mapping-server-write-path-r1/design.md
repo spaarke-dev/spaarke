@@ -776,6 +776,7 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
 
 - **Query count:** the worst case is about (edges per level × 4 levels) batched reads per view, 100 or more for a big matter. Measure p95 on dev and record it. Narrow each level to the edges whose parent table is present only if it hurts in practice.
 - **Truncation favours the anchor:** in a truncated full-family view, the anchor's ancestor chain and its own subtree are filled first. Siblings' branches are the ones cut, and "load more" reaches them (UAC C4; tested).
+- **Depth cap counted from the top (owner decision 2026-10-29; exception to UAC C4):** the cap of 4 levels runs from the walk's top, the highest readable ancestor, not from the anchor. An anchor at depth 3 or 4 therefore shows one level or none of its own subtree, and "load more" cannot reach the rest. Opening that record from a shallower point, or on its own when it is the top, shows its subtree. (task 071 review B, finding 2)
 - **Permissiveness:** the view is exactly as permissive as Dataverse read for the caller, never more. Gaps Dataverse itself has today (e.g. the flagged-external systemuser reading Restricted rows, UAC task 191) show here as they do in the MDA.
 
 ### 12.12 The family abstraction contract (UAC-r2 round 130, 2026-10-28, owner decision; #2362)
@@ -884,3 +885,416 @@ Filed as a known limit (#2413). Not recomputed at a move.
 
 - **FR-38.** *Existing:* FR-10's fill-only default at step 8 (`RecordCreationService.SearchIndexDefaultAsync`). *Extension:* yes. The same step owns the column, plus a drop before step 5; no new service. *Cost of doing nothing:* every child-BU user's create is refused whenever their BU names an index the caller cannot append to (#2399), and a client can route a record into another BU's index.
 - **FR-39.** *Existing:* H12b's seeder. *Extension:* yes, an owner bind on its creates. *Cost of doing nothing:* every seeded mapping row lands owned by the provisioning identity's BU instead of the customer team, which is the #2399 defect for mapping configuration.
+
+## 14. The search index follows the content type, never the user (addendum 2026-11-02, #2502; DRAFT for UAC-r2 and provisioning review)
+
+> Draft for `design.md`. Binding owner decisions: `notes/decisions.md` "2026-11-01 — #2502 …" and "2026-11-02 — Owner accepts the three recommendations" item 1; `notes/defer-issues.md` DI-012. They are not re-opened here. Line numbers are on `work/field-mapping-server-write-path-r1` at 4fdb0a5c99 (master merged).
+
+### 14.1 Why
+
+- **A caller chooses where a file is indexed (DI-012).** `POST /api/ai/rag/index-file` carries the body's `searchIndexName` into the request (`RagEndpoints.cs:582`, `request with { TenantId }`) and on to `FileIndexingService` (`:140`, `:224`, `:272`) → `RagService.IndexDocumentsBatchAsync` (`RagService.cs:657-659`). Any allow-listed index is accepted. The route then stamps `sprk_searchindexname` with `GetDefaultIndexName()` (`RagEndpoints.cs:638-648`), so the record can name an index the file is not in.
+- **Per-record and per-BU routing is a second chooser.** `SearchIndexNameResolver.ResolveAsync` (`:138-225`) walks the document → the parent → the parent's owning BU. FR-10/FR-38 step 8 copies the BU's index onto new records. The wizards copy the *user's* BU index onto records and into index-file bodies. On dev every BU that has an index names `spaarke-files-index`, which equals `KnowledgeIndexName`. Customer BUs have none, and each customer has its own search service with the fixed names. The routing changes nothing today. It costs two Dataverse reads per create and up to three per indexing job, and it is the source of #2399, #2206 and #2413.
+
+**Owner rule (2026-11-01):** users never choose the index. The index is decided by what is being indexed.
+
+### 14.2 The rule
+
+1. The server picks the index for each content type from settings: SPE document chunks → `AiSearch:KnowledgeIndexName` (`spaarke-files-index`; discovery-tier chunks → `DiscoveryIndexName`), chat session files → `SessionFilesIndexName`, invoices → the invoice handler's index, and so on (`AI-SEARCH-INDEX-CATALOG.md` §4). No request field, record column or business-unit column changes it.
+2. The only SPE-document seam that still takes an index argument is `FileIndexingService`. Every caller of it gets the files index. Session files (`RagIndexingPipeline.cs:314`), discovery (`:156`) and invoices already follow rule 1.
+3. `sprk_document.sprk_searchindexname` stays the **stamp** of where the file landed. It is written only by the indexing pipeline, app-only, and always equals the index actually written. `VisualizationService.cs:108`, `RelocatedFileIndexing.cs:109-111` and the relocator (`DocumentContainerRelocator.cs:2692`) read it, so it must be true.
+4. Record columns `sprk_ai_search_index` / `sprk_searchindexname` on the six search-indexed tables: **no server writer** (step 8 and Repair stop), **no client writer** (task 039's drop stays), **no reader on the indexing path**. Existing values stay; nothing is backfilled or cleared.
+
+### 14.3 Current inventory: who picks or stamps an index
+
+| Site | Today | Source |
+|---|---|---|
+| `RagEndpoints.IndexFile` `:582`, `:620` | body `searchIndexName` → write | caller |
+| `RagEndpoints.IndexFile` `:638-648` | stamp = `GetDefaultIndexName()` | settings (**mismatch** with the write) |
+| `RagEndpoints.SendToIndex` `:1311-1312`, `:1329`, `:1361` | resolver → write, stamp = resolved ?? default | record → parent → BU |
+| `RagIndexingJobHandler` `:143-151`, `:184-191`, `:249` | payload, else resolver; INDEX_NOT_ALLOWED → retry with null; stamp = resolved ?? default | payload/record/BU (**mismatch** after the retry: the stamp names the rejected index) |
+| `BulkRagIndexingJobHandler` `:291-306`, `:333-339` | resolver → write; retry with null | record → parent → BU |
+| `IndexingWorkerHostedService` `:159-173`, `:196` | resolver(document only) → write | record |
+| `PostUploadIndexingEnqueuer` `:194`, `:338`, `:414-416` | request value (all 8 producers pass `null`); OBO stamp = `AnalysisOptions.SharedIndexName` | settings, but the **deprecated** one (G-9 split if it differs from `KnowledgeIndexName`) |
+| `RecordCreationService` step 8 `:749-760`, `:1365-1447` | copies the final owning BU's two columns | BU |
+| `RecordCreationService.Repair` `:618-700` | fills unset columns from the owning BU | BU |
+| `KnowledgeDeploymentService` `:124-131`, `:306` | `null` index → Shared deployment → `KnowledgeIndexName` | settings |
+| Search: `RagEndpoints.Search` `:274`, `SemanticSearchService` `:144`, `:286`, `RecordSearchService` `:235-249` | request-named index, allow-listed; trimmed by live Read (§13.3b) | caller, search-time only |
+
+### 14.4 Components changed (task 041; BFF only)
+
+| # | File | Change | Reason |
+|---|---|---|---|
+| 1 | `Services/Ai/IFileIndexingService.cs` (`FileIndexRequest:162`, `ContentIndexRequest:262`), `Jobs/Handlers/RagIndexingJobHandler.cs:436` (payload), `Services/Ai/IPostUploadIndexingEnqueuer.cs:145` | **Remove** the `SearchIndexName` property/parameter | A type check enforces the rule (enforcement ladder: type): no producer can name an index. JSON bodies and queued payloads that still carry it bind fine; unknown members are ignored, and none of these DTOs sets `JsonUnmappedMemberHandling.Disallow`. |
+| 2 | `Services/Ai/FileIndexingService.cs` `:140`, `:224`, `:272`, `:313`, `:384`, `:410` | Pass `searchIndexName: null` to `IndexDocumentsBatchAsync` / `DeleteChunksBeyondCountAsync`; drop the parameter from `IndexTextInternalAsync` | One seam, one index: the Shared deployment default (`KnowledgeIndexName`). |
+| 3 | `Api/Ai/RagEndpoints.cs` IndexFile `:582-648`; SendToIndex `:1301-1371` | IndexFile: nothing to strip once (1) lands. SendToIndex: delete the resolver call. Both stamp `GetDefaultIndexName()` | Removes the caller chooser and the record/BU chooser; the stamp equals the write. |
+| 4 | `RagIndexingJobHandler.cs:137-192`, `:249`; `BulkRagIndexingJobHandler.cs:286-339`; `Workers/Office/IndexingWorkerHostedService.cs:155-200` | Delete the resolver calls and the INDEX_NOT_ALLOWED retry branches; stamp `GetDefaultIndexName()` | The indexer stops reading record and BU columns (owner). Closes the retry stamp mismatch. |
+| 5 | `Services/Ai/PostUploadIndexingEnqueuer.cs:414-416` | Stamp `ISearchIndexNameResolver.GetDefaultIndexName()`, not `AnalysisOptions.SharedIndexName` | The write uses `KnowledgeIndexName`; the stamp must too (G-9). The resolver is registered scoped and unconditionally (`AnalysisServicesModule.cs:65`); the enqueuer is scoped (`:110`). |
+| 6 | 8 producers passing `SearchIndexName: null` (`AnalysisEndpoints.cs:997`, `ExternalProjectDataEndpoints.cs:2011`, `AnalysisResultPersistence.cs:274`, `RelocatedFileIndexing.cs:74`, `CommunicationEnrichmentService.cs:394`, `IncomingCommunicationProcessor.cs:1498`, `ComposeService.cs:2300`, `UploadFinalizationWorker.cs:1432`) | Delete that one argument line | Follows from (1). Hot-path files: run `/conflict-check`. |
+| 7 | `Services/Ai/SearchIndexNameResolver.cs` | Delete `ResolveAsync` and its FetchXml helpers; keep `GetDefaultIndexName()` (the G-9 single point) | No caller is left. |
+| 8 | `Services/RecordCreation/RecordCreationService.cs` step 8 `:749-760`, `:1331-1447`, `:295`, `:301`, `:787-789` | **Keep the step as a recorded no-op** (`NoOp`, "the index follows the content type (#2502); nothing written"). Delete `SearchIndexFill`, `BusinessUnitSearchDefaultsAsync` and the step-8 warning. Keep `TeamBusinessUnitAsync` (step 7 uses it, `:1262`) | Step numbers 9–12 are cited in the spec, the docs and the trace tests. A no-op keeps them stable and reads nothing. Saves two Dataverse reads per create (NFR-02). |
+| 9 | `RecordCreationService.Repair.cs:132`, `:611-700`, reason codes `:950`, `:971-972`, part `:844` | Delete `RepairSearchIndexAsync` and its three reason codes. **Keep** `:342-343` (mapping may not write the columns in Repair) | Repair is internal and has no production caller yet (052 is 🔲), so the report shape is free to change. |
+| 10 | `RecordTableRules.cs:169-175` (comments), `:504`, `:512-524`, `:620-657`, `:754-780`; `Api/DataverseDocumentsEndpoints.cs:151-167` | **Keep the 039 drop.** Move `LookupColumn` / `LegacyTextColumn` here from the resolver; fix the comments that call step 8 "the only writer"; `applied` is now always none, so every client value is logged as `client_search_index_dropped` (ids only) | The columns stay server-owned, so no client can bring routing back. This also removes a CRUD → AI-internal type reference (ADR-013). |
+| 11 | `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:135` (I-5), `docs/architecture/AI-SEARCH-INDEX-CATALOG.md` §4 | I-5 becomes "no server writer; client values dropped; the stamp is the pipeline's"; the catalog gets a routing paragraph (rule 14.2) | Code wins, and the docs are fixed with it. The runbook `MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md` goes to 062. |
+
+**Out of 041, in W3 (021–029: the client stops sending; the server already ignores or drops the values):**
+- `EntityCreationService.ts` (`:227-279` index-file `searchIndexName`; `:368-401` `applyDefaultSearchIndexName`; `:441-461` `resolveUserBuDefaults` select) is shared by all of the following.
+- `CreateMatterWizard/matterService.ts:298-302` (bind) and `:403-412`.
+- `CreateProjectWizard/projectService.ts:322-326` and `CreateProjectWizard.tsx:858-867`.
+- `CreateEventWizard/eventService.ts:237-267`; `CreateInvoiceWizard/invoiceService.ts:214-217`; `CreateWorkAssignmentWizard/workAssignmentService.ts:415-416`.
+- `document-upload/DocumentRecordService.ts:226-232`, `:379-386`; `DocumentUploadWizard/src/services/uploadOrchestrator.ts:347-386`, `:454`, `:499-607`; `DocumentUploadWizard/src/components/searchIndexResolver.ts:102-126` (029).
+- `EmailComposer/createXrmEmailComposeHandlers.ts:281`, `:308-310`. **No W3 task names it.** Proposed: 028 (email).
+- `Spaarke.SdapClient/src/types/index.ts:187` and `operations/IndexFileOperation.ts:51` are removed after the last wizard (035).
+
+### 14.5 What stays
+
+- The `sprk_aisearchindex` catalog. Provisioning seeds it (H12b; `CanonicalIndexCatalog`, 7 names, no BU default). `DataverseAllowedIndexesProvider` and the Semantic Search picker (`aiSearchIndexService.ts`, `SearchIndexSelector.tsx`) read it.
+- Search-time index selection on the search routes: allow-listed, never from the caller's BU, trimmed by live Read (§13.3b). This is not indexing.
+- Read-only consumers of the record columns:
+  - the PCF `SearchIndexResolver.ts` → `SemanticSearchControl.tsx:543` → `NavigationService.ts:168-170`, which reads the host record's lookup to pick the index searched. Existing values equal the default; new records have none, so the default applies;
+  - the Office profile display (`useDocumentProfile.ts:150`).
+- Existing column values on every row; BU columns; the Core User role. Removing `prvAppendTosprk_AISearchIndex` stays §13.2 (e)'s question.
+- The stamp columns and the relocator's cleanup of the old index plus the default index.
+- The `ISearchIndexNameResolver` registration.
+
+### 14.6 Compatibility and rollout
+
+- **No client breaks.** Clients that still send `searchIndexName` to index-file get 200, with the chunks in the files index; the field is ignored at binding. A body naming a non-allow-listed index used to get 400 `INDEX_NOT_ALLOWED`; it now gets 200 (a relaxation). Record payloads keep being dropped (039).
+- **No behaviour change on dev or customers today**, because every routed value already equals `KnowledgeIndexName`. The exception is documents whose stamp names another index; 041 step 1 counts them first.
+- **Order:** 019 (W2 deploy and review, in progress) → **041** (spec amendment → UAC-r2 review → task → owner approval) → 021–029.
+  - W3 cannot verify "the wizard sends no index" against a server that still copies the BU's value, so 041 goes first.
+  - 041 also amends these acceptance lines, which now say "the owning-BU search index present at create": 029 `:23`, `:75`, `:82`, `:89`; 030 `:22`, `:110`; 036 `:23`, `:103`; 052 `:22`; 053 `:88`. The new reading is "no index column written by the server; the document stamp names the files index after indexing".
+- **Queued jobs** enqueued before the deploy carry `SearchIndexName: null` (every producer passes null), so they are unaffected.
+
+### 14.7 Test plan (ADR-038: update the tests that pin routing; delete only those whose subject is gone)
+
+**Must-fire (new or inverted)**
+1. index-file with an allow-listed `searchIndexName: "spaarke-invoices-index"` → `RagService` gets no index (default); stamp = `KnowledgeIndexName`.
+2. index-file naming a non-allow-listed index → 200, not 400; the default index is written.
+3. SendToIndex on a document whose lookup, text column, parent or BU names another index → write and stamp are the default (inverts `RagSendToIndexIndexNameContractTests.cs:105`).
+4. `RagIndexingJobHandler`, bulk handler and Office worker: a document/parent/BU naming another index → no catalog-link fetch is issued; write and stamp are the default.
+5. Unified create on each of the six search-indexed tables, with an owning BU that **has** an index → neither column is in the create body; the step-8 trace is `NoOp`; no `businessunit` retrieve (rewrites `SearchIndexDefaultTests.cs:115`, `:125`, `:135`, `:154`, `:197`, `:268`).
+6. Repair of a row missing both columns, owner settled → no index key in the patch (rewrites `RecordRepairModeTests.cs:229`, `:264`).
+7. OBO enqueuer with `SharedIndexName ≠ KnowledgeIndexName` → stamp = `KnowledgeIndexName` (rewrites `PostUploadIndexingEnqueuerTests.cs:158`).
+
+**Must-not-fire (unchanged behaviour)**
+1. index-file with no index, and the skipped (e-billing) file: same write, same stamp, and no stamp when skipped.
+2. index-file authorization: tenant 403, row mismatch 409, knowledge-source 400 (existing contract tests pass unchanged).
+3. A create or update never sends either column as `null`. Existing values are untouched (absent from the body, not cleared).
+4. The 039 drop and its logs (`SearchIndexDefaultTests.cs:228-359` drop half, `RecordCreationServiceMappingSeamTests.Task039.cs`, `SearchIndexGenericUpdatePathTests.cs`, `SecureChildOwnershipAiToolTests.SearchIndex*.cs`) and `Spaarke.ArchTests/SearchIndexDropGuardTests.cs`.
+5. Search-time selection (`SearchIndexNameEndpointContractTests.cs`, `RagEndpointsTests.cs:105-174`).
+6. Relocation cleanup (`RelocatedFileIndexingTests.cs:71`, `:137`), session-files and discovery routing.
+
+**Deleted (the subject is gone)**
+- `SearchIndexNameResolverTests.cs:89-326` (9 `ResolveAsync` tests; the two `GetDefaultIndexName` tests stay).
+- `RagIndexingJobHandlerTests.cs:490`, `:522`, `:558`.
+- `FileIndexingServiceTests.cs:459`, `:506` (thread-through).
+- `SearchIndexDefaultTests.cs:280` and `RecordRepairModeTests.cs:166`, `:210`, `:364` (BU-has-none and unsettled-owner cases: nothing is filled any more, so they fold into must-fire 5 and 6).
+
+**Compile-only updates (mocks of `ResolveAsync`)**
+- `BulkRagIndexingJobHandlerReplaceStaleChunksTests.cs`, `VersionSaveAiRefreshSeamTests.cs`, `RelocatedFileIndexingTests.cs`.
+- Office quick-create contract tests and the pipeline/secure-root seam tests, where they assert index columns on the create.
+
+### 14.8 ADR checks, placement and component justification
+
+| ADR | Result |
+|---|---|
+| ADR-002 | **Comply.** No plugin. One owner per invariant: "the chunks' index and the stamp agree" is owned by `FileIndexingService` plus the stamp sites. The record columns hold no invariant any more, and the drop keeps clients out. |
+| ADR-008 (path A, this project) | **Comply.** `CallerWriteAuthorization` and the index-file and send-to-index endpoint filters are unchanged. The caller controls one input fewer. No AppendTo on the catalog (already 039). |
+| ADR-010 | **Comply.** No new registration; one constructor swaps `IOptions<AnalysisOptions>` for the registered resolver. Removes Dataverse reads. |
+| ADR-013 | **Comply, improved.** AI routing stays in `Services/Ai`. `RecordCreation` stops referencing `SearchIndexNameResolver` (the constants move to `RecordTableRules`). |
+| ADR-038 | **Comply.** §14.7 updates the tests that pin routing, adds tests for the new behaviour, and deletes only tests whose subject is gone. |
+| BFF §10 | In the BFF, where the code already lives. Modifications and deletions only. Publish-size delta is expected at ≈ 0 and is measured against a fresh master build. No package change. |
+| §11 | **No new surface.** No endpoint, service, interface, registration, column or package. The moved constants are a relocation. The three questions do not apply. |
+
+### 14.9 Risks
+
+- **Chunks left in a non-default index.** A document indexed under a per-record or caller-named index keeps those chunks there; a re-index writes the files index and trims only there. `privilege_group_ids` is only a pre-filter. The access boundary is `IRetrievalAccessTrim` / `TrimToReadableDocumentsAsync` in each consumer: `RagEndpoints` search, `SemanticSearchEndpoints`, `ReadableRagSearch`, `AnalysisRagProcessor`, `DocumentSearchHandler` and `PlaybookChatContextProvider`. `RecallSessionFileHandler` is scoped to the session (UAC-r2, 2026-11-02). Mitigation: 041 step 1 counts stamps ≠ `spaarke-files-index` on dev and records the count. **Owner 2026-11-02: leave the old chunks;** they are not cleaned.
+- **The Dedicated deployment model** (`{tenant}-knowledge`, "do not configure", #1432) would make the `null` write differ from `GetDefaultIndexName()`. This is a known limit and is unchanged.
+- **Two settings name the files index** (`KnowledgeIndexName`, `FilesIndexName`; `AiSearchOptions.cs:14`, `:42`). Drift is possible and pre-exists this change; not changed here.
+- **Hot-path churn** (RagEndpoints, Compose, Communication, ExternalAccess): one-line deletions; run `/conflict-check` before the PR.
+- **The hook is lost.** A future Secure Records index would need a new rule (§14.10 Q1), not a BU column.
+
+### 14.10 Open questions
+
+1. **Owner: Secure Records.** On 2026-10-27 the owner said "no per-BU search except Secure Records". Nothing implements a Secure Records index or plans one:
+   - the Secure Record BU has no index (§13.3);
+   - `CanonicalIndexCatalog` has 7 names and none is secure;
+   - provisioning's H12b seeds rows with no BU default;
+   - `infrastructure/ai-search/` has no secure index.
+
+   **Recommendation:** treat the carve-out as withdrawn by the 2026-11-01 rule. If a separate index is ever wanted, the server chooses it from the record's secure state, with its own design and UAC-r2 review, never from BU columns. Withdrawn, or a future requirement?
+2. **UAC-r2:** with nothing applied, `client_search_index_dropped` now fires for every client value until W3 lands (ids only). Keep it at Information as the W3 progress signal, or lower it to Debug?
+3. **UAC-r2:** do #2206 (stamp not re-derived on owner change) and #2413 (BU move known limit) close with 041? Under rule 14.2 the record's owner no longer affects routing.
+4. **Owner:** if the dev pre-check finds documents stamped into a non-default index, clean their old chunks, or leave them?
+
+### 14.11 Proposed task 041 — Index routing follows the content type (#2502)
+
+- **Deps:** 039 ✅; after 019 (do not disturb its review set). **Blocks:** 021 (W3 verification). It amends the acceptance of 029, 030, 036, 052 and 053 (§14.6).
+- **Rigor:** FULL. Model sonnet / high. Tags: `bff`, `ai-indexing`, `testing`. One adversarial pass.
+- **Scope:** §14.4 rows 1–11 only. No client file, no schema, no data write.
+
+**Steps**
+1. Dev read-only pre-check via the Dataverse MCP: `sprk_document` count with `sprk_searchindexname` set and ≠ `spaarke-files-index`; per table (6), rows whose `_sprk_ai_search_index_value` ≠ the `spaarke-files-index` catalog row; BUs with an index. Record the results in the notes.
+2. Write must-fire 1–7 (failing first). Then make changes 1–11, the docs and the test updates in §14.7.
+3. Build, `dotnet test`, publish-size delta against a fresh master build, `dotnet list package --vulnerable --include-transitive`.
+
+**Acceptance criteria**
+- AC1: index-file with any `searchIndexName` (allow-listed or not, or absent) writes to `KnowledgeIndexName` and stamps the same name; never 400 `INDEX_NOT_ALLOWED` for a body value.
+- AC2: SendToIndex, the RAG job handler, the bulk handler and the Office worker issue no Dataverse read of `sprk_ai_search_index` / `sprk_searchindexname` on any record or BU, and write and stamp `KnowledgeIndexName`.
+- AC3: `FileIndexRequest`, `ContentIndexRequest`, `RagIndexingJobPayload` and `PostUploadIndexingRequest` have no index field. `grep -rn "ResolveAsync" Services/Ai/SearchIndexNameResolver.cs` returns nothing.
+- AC4: a unified create on each of the six search-indexed tables, with an owning BU that has an index, sends neither column; trace step 8 = `NoOp`; no `businessunit` retrieve.
+- AC5: Repair writes neither column, on any row.
+- AC6 (negative): no create, update or Repair body contains either column with `null`. Existing values are unchanged on read-back in the seam tests.
+- AC7 (negative): the 039 drop tests, `SearchIndexDropGuardTests`, the index-file authorization contract tests, the search-time selection tests and the relocation cleanup tests pass **unchanged**.
+- AC8 (negative): session-files, discovery and invoice index routing are unchanged (existing tests pass).
+- AC9: the OBO enqueuer stamp equals `KnowledgeIndexName` when `SharedIndexName` differs.
+- AC10: I-5 and the catalog doc are updated in the same PR. The publish-size delta and the CVE result are recorded. No new HIGH CVE.
+
+### 14.12 Reviews (2026-11-02)
+
+**UAC-r2: OK.** Index routing was never an access control; the per-caller trim on live Read is the boundary (see above). Conditions:
+- **Log level.** `client_search_index_dropped` goes to **Information** (039 shipped it at Warning) and stays there as the W3 progress signal, ids only. When W3 lands it goes back to **Warning**. This is a W3 acceptance criterion: from then on, any firing is a client regression.
+- **#2206 and #2413.** Both close on 041's merge, with a link to the PR. Close them only after 041 step 1's count is recorded. (Dev fact: the BU1 move ran on 2026-11-02.)
+- **Search routes.** Keep a test showing that a request-named index outside the allow-list is still refused on the SEARCH routes.
+- **Interaction with 042b (§15.5).** §15.5's step-8 bullet, "a secure event gets an empty index plus `search_index_unset_for_owner_bu`", is moot once step 8 is a no-op. Whichever of 041 and 042b lands second updates that bullet and its test.
+- **Review before merge.** UAC-r2 does a scoped check of 041's diff before merge, confirming that only routing is removed and no trim call moves (RagEndpoints, Communication, ExternalAccess).
+- **Accepted.** The 400 → 200 change on index-file is acceptable.
+
+**Secure Records carve-out.** The owner deferred this to UAC-r2. UAC-r2's answer: a separate index is not needed, because secure isolation rests on Read and the trim enforces it. The carve-out is **withdrawn**. If a secure index is ever wanted, the server chooses it from the record's secure state, with its own design and a UAC-r2 review, never from BU columns.
+
+**Provisioning: confirmed, no dependency.** H10, H2b, H4b and H13 never read a BU index default. H12b (not built) seeds one catalog row per verified index, with `sprk_isdefault` on `spaarke-files-index` and no BU default. 041 must not change what `sprk_isdefault` means on the catalog row.
+- **Added to 041's scope:** retire or update `scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1`, which reads `businessunits.sprk_searchindexname`. Once routing is retired, its "drift" means nothing.
+
+**Owner (2026-11-02):** documents found in a non-default index are **left** as they are; nothing is cleaned.
+
+## 15. The owner decision sees the derived stamp's root (addendum 2026-11-02, #2483 / DI-009; DRAFT for UAC-r2 review)
+
+Binding, not re-opened: notes/decisions.md 2026-11-02 item 3; DI-009; #2483 and its two comments (UAC-r2 facts 2026-10-30; owner decision 2026-11-02). Line numbers are at `4fdb0a5c99` (master merged).
+
+### 15.1 The defect
+
+- **Where.** `RecordCreationService.DecideAsync` decides the owner at step 7 (`RecordCreationService.cs:730-747`) over the item: `OwnedChildWrite.LookupsOf(item)`, the project pair parent and a work assignment's intermediates (`ResolveOwnerOverAsync`, `:1030-1067`, through `OwnerQuestionOf` → `RecordOwnershipContext.ForRow`, `:1074-1082`).
+- Step 10 (`:771-777`, `StampBeforeCreateAsync` `:806-911`) derives the I-1 stamp fill-only (`CoreAncestorRestamper.PlanMissingStampAsync`, `CoreAncestorRestamper.cs:525-569`, app-only) and binds it into `fields` only. The item, which steps 7 and 12 read, does not change (`:802-805`).
+- **Why secure-if-any misses the root.** The resolver looks through only parents that are NOT team-owned: the primary look-through (`RecordOwnershipResolver.cs:3715-3718`) and the lineage walk in `SecureDecisionAsync` (`:3836-3843`). A team-owned intermediate is taken at its own business unit (`:3796-3798`).
+- **Scenario.** Matter MAT-1 is made secure. It is now owned by the Secure Record Owners team in the Secure Record BU, with `sprk_issecure = true`. Invoice INV-1 (`sprk_matter = MAT-1`) is still owned by the Litigation BU's default team, because the Make Secure pass has not reached it yet or ended incomplete.
+  1. A user who can AppendTo INV-1 posts `POST /api/v1/child-records/sprk_todo` with `{ sprk_regardinginvoice: INV-1 }` and no stamp.
+  2. Step 5 asks AppendTo on INV-1: allowed.
+  3. Step 7 resolves the owner over [INV-1]. INV-1 is team-owned, so nothing above it is read, and the answer is the **Litigation** team.
+  4. Step 10 derives `sprk_regardingmatter = MAT-1` into the body.
+  5. The to-do is created in Litigation. The Litigation team can read it, and also INV-1.
+  6. Within about 2–4 minutes, `SecureChildReconciliationJob`'s recent-changes pass (`*/2 * * * *`, `SecureChildReconciliationJob.cs:131`; writes on unless the emergency stop is set, `:140-143`) asks the written row's question. That question includes the stamp (`RecordOwnershipContext.ForExistingRowAsync` → `OrderedParentsOf`, `RecordOwnershipResolver.cs:437-441`), so the reconciler re-owns the to-do to the Secure team.
+- **Reach (UAC-r2, #2483).** Affected: the route and the chat Owned create for to-do, event, memo and analysis, a filed communication, and a decision's "Add To Do". Not affected: `email.draft` (§15.5), documents (#2169, no pre-create stamp, `:810-811`), work assignments (the #2475 intermediates) and the budget inquiry.
+- The job's own remarks say "in-product creates no longer open that window" (`SecureChildReconciliationJob.cs:56-57`). DI-009 is an in-product create that does.
+
+### 15.2 Change 1, stated precisely (accepted by the owner 2026-11-02)
+
+Today's create does not do this. The fix introduces it at create. The reconciler's question already gives the same answer.
+
+- The derived stamp joins step 7's question under its real column (`sprk_regarding{matter|project|workassignment|servicerequest}`). It is therefore an ordinary member of the table's primary order (`RecordOwnershipContext.InPrimaryOrder`, `RecordOwnershipResolver.cs:515-572`), not a Secure-only parent.
+- On a row with no subject (no pair on a regarding-builder host, `:562`; any row of event, memo, analysis or communication), the lineage order decides the primary. Where that order ranks the root column above the intermediate's column, an **ordinary** row's owner moves from the intermediate's BU default team to the root's.
+- Under today's orders, that happens only for a row filed under a **report card**. `sprk_regardingreportcard` ranks after matter and project on to-do, event and communication, and memo's `sprk_reportcard` ranks last (`SecureChildLineage.cs:124`, `:174-175`, `:213-215`, `:246-247`). Every other intermediate ranks above the roots, and the work-assignment root ranks last. Signal and Decision Record keep the core, then the subject (`RecordOwnershipResolver.cs:548-559`). A to-do with its pair keeps its subject first.
+- This is the reconciler's answer for the written row. The reconciler moves an ordinary row only when `OrdinaryMovesWritesEnabled` is on (`SecureChildReconciliationJob.cs:103-112`).
+- **Owner rationale:** in the target model every record is owned by the customer's main BU or by Secure Record, so the move changes nothing there.
+
+### 15.3 The fix: new step order
+
+| # | Step | Change |
+|---|---|---|
+| 1–5½ | principal … pre-write rules | none (step 5's AppendTo set is unchanged; the derived root is never asked as the caller) |
+| 6 | secure-root plan | none (stamped tables never `Inherits`, so `isolatedTeam` is always null for them) |
+| **6½** | **I-1 derivation** (moved from 10) | `PlanMissingStampAsync` over the item, app-only, exactly as step 10 runs it today (`:818-850`). Refusals: 400 `stamp_underivable` and 503 `stamp_unavailable`, the same codes, words and trace step (`StampAndInheritance`, begun here). A document is skipped, as today. Runs for every principal. |
+| 7 | owner | `DecideOwnerAsync` takes the FULL plan (`PlanStampOfRowAsync`, what the step-12 restamp will write). `ResolveOwnerOverAsync` asks over the lookups **as the row ends** (`AsTheRowEnds`): each stamp column the plan names takes the planned root (a held value that disagrees is REPLACED, a planned clear removes it, a missing one is added); every other lookup, and a held stamp that agrees, is unchanged. Same `OwnerQuestionOf` / `ForRow`. **Amended by 042b fix round 1 (owner decision A', 2026-11-03, "replace, not add"):** the first version was fill-only here, so a caller-sent stamp that disagreed with the intermediate's root decided the owner and the restamp then moved the row from under it (the #2483 state again). |
+| 8 | search index | none in code; it reads the FINAL owning team, which may now be Secure (§15.5) |
+| 9 | creator / defaults | none |
+| 10 | **bind + I-16** | binds the MISSING part of the 6½ plan (`MissingOf`: fill-only, unchanged by A') as the caller (`BindStampAsync`, `:859-885`; 500 `no_decision` / 503 unchanged, still here) and sets I-16 from the same row (`:889-908`). No second derivation. A system principal still binds after the create (DI-007). A held stamp that disagrees is created as sent and replaced by the step-12 restamp, as before 042b. |
+| 11–12 | create, post-create | none |
+
+- **Shape:** split `StampBeforeCreateAsync` into a plan half (6½) and a bind/I-16 half (10). The plan is passed through `DecideAsync`'s locals. No new type, enum member, interface, registration or package.
+- **A' (fix round 1):** `CoreAncestorRestamper.PlanStampOfRowAsync` returns the full plan (SET `EntityReference` / CLEAR `DBNull`, the restamp's own `PlanStamp`); `PlanMissingStampAsync` is now `MissingOf(row, PlanStampOfRowAsync(...))`, so its callers are unchanged. This is the one file outside 042b's list (owner-approved; component justification in `notes/task-042b-notes.md`). The bind stays fill-only; the derived root is never probed as the caller; no refusal changes.
+- **Repair** (`RecordCreationService.Repair.cs:119-133`) has the same order: the owner is decided at `:121` and the stamp is added at `:133`. 042b plans the stamp once, before `RepairOwnerAsync`, asks the owner over `AsTheRowEnds(row lookups, plan)` (A', security finding 6: a stale held stamp no longer decides the re-own) and hands the missing part (`MissingOf`) to `RepairStamp`, still fill-only. If planning fails, the owner is kept (Skipped, `record_repair.stamp_unavailable`) and never re-owned over the lookups alone (Q2).
+
+### 15.4 Refusal parity (NFR-07)
+
+A refusal raised by a single condition keeps its code, status and words. Only the ORDER changes when two conditions fail at once, plus the new refusals (rows 5–7). The maps are unchanged: `RecordCreationProblemMap.cs:33-41` (400 Invalid / 409 OwnerUnresolved / 500 Undecided / 503 Unavailable).
+
+| # | Conditions | Today (step 7 first) | After 042b (6½ first) | Reach |
+|---|---|---|---|---|
+| 1 | Root underivable (two roots, or gone) **and** step 7 refuses | 409 owner code | 400 `stamp_underivable` | a caller already passed step 5 AppendTo on the intermediate, so this needs a compound data fault |
+| 2 | Root read faults **and** step 7 refuses | 409 | 503 `stamp_unavailable` | compound |
+| 3 | Root read faults **and** the owner decision faults | 503 `owner_unavailable` | 503 `stamp_unavailable` | the same status; the code differs |
+| 4 | System principal, intermediate missing (no step 5) | 409 `ParentUnresolved` | 400 `stamp_underivable` | no system creator exists (DI-007, owner task 033) |
+| 5 | **New:** the root is flagged secure but not isolated | 201, owned ordinary | 409 `SecureParentNotIsolated` (`RecordOwnershipResolver.cs:3876-3889`) | UAC change 3, fail closed (Q1) |
+| 6 | **New:** the root cannot be read at step 7 after 6½ read it (a race) | 201 | 409 `ParentUnresolved` | a race only |
+| 7 | **New (change 1):** a report-card child whose root's BU has no default team | 201 (report card's team) | 409 | rare; the reconciler asks the same question (its outcome is to be confirmed by the parity test) |
+| 8 | **Superseded:** a Signal or Decision Record under a team-owned intermediate of a Secure root (042b addendum A) | — | — | superseded 2026-11-04 by the owner's decision (D-204): the general create refuses these tables (row 19) |
+| 9 | **New (042b addendum B):** a create carrying `sprk_communicationthread` whose thread cannot be read at step 7 | 201 (the thread was not read) | 503 `owner_unavailable` | a race or fault only: step 5 already asks AppendTo on the thread as the caller |
+| 10 | **New (042b addendum C, Repair):** a stamp-planning fault on a filed row whose owner is kept for another reason (for example team-owned) | the stamp Skipped, the mapping ran | the stamp Skipped AND the mapping Skipped (`record_repair.mapping_filing_undecided`) | fail closed by design: without the stamp's root the filing's owner is undecided. Repair has no production caller yet (052, DI-008). A permanent planning fault is reported as `stamp_unavailable` (K2: no new enum member) |
+| 11 | **K3 (042b fix round 2, Repair window):** a row Repair re-owned per the PLANNED root still holds the stale stamp until `CoreAncestorStampReconciliationJob` restamps it (`*/5`, `CoreAncestorStampReconciliationJob.cs:74`, registered `MetadataServiceExtensions.cs:48`); `SecureChildReconciliationJob` (`*/2`, `SecureChildReconciliationJob.cs:131`, registered `ExternalAccessModule.cs:734`) is an independent schedule with no ordering between the two, so a reconcile can run first and ask over the stale stamp | — (before A' Repair asked over the stale stamp itself) | owner per the planned root; the stored stamp is stale until the restamp | the recent-changes pass only moves a child INTO isolation, so a Secure re-own is not undone there; only the SWEEP (`SecureChild:Reconciliation:WritesEnabled`, absent = report-only) could move it to the stale stamp's owner, and the next restamp + reconcile moves it back. No job change here; Repair has no production caller yet (052, DI-008) |
+| 12 | **K3 (UAC-r2 AC15 note 2, the create twin of row 11):** a create whose item SENDS a stamp that disagrees with the intermediate's root keeps the sent bind (fill-only, step 10) while its owner follows the PLANNED root (step 7, A'); if the step-12 restamp does not complete (`RecordCreationService.cs` ~:1802), the row holds the sent stamp until `CoreAncestorStampReconciliationJob` restamps it (`*/5`, `CoreAncestorStampReconciliationJob.cs:74`, registered `MetadataServiceExtensions.cs:48`) | 201, owned per the SENT root outright | 201, owned per the planned root; the stored stamp is the sent one until the restamp | narrower than before 042b. Within the window only the `SecureChildReconciliationJob` SWEEP (`*/2`, `SecureChildReconciliationJob.cs:131`, registered `ExternalAccessModule.cs:734`; `SecureChild:Reconciliation:WritesEnabled`, absent = report-only) could move the owner to the sent root's owner; the next restamp + reconcile moves it back. No code change; UAC-r2 accepted 2026-11-04 |
+| 13 | **Superseded:** a Signal or Decision Record create naming a core pair (042c fix round 1) | — | — | superseded 2026-11-04 by the owner's decision (D-204): the general create refuses these tables (row 19) |
+| 14 | **Superseded:** a Signal or Decision Record create with a core record (042c fix round 2) | — | — | superseded 2026-11-04 by the owner's decision (D-204): the general create refuses these tables (row 19) |
+| 15 | **Superseded:** a Signal or Decision Record create with a half core pair (042c fix round 3) | — | — | superseded 2026-11-04 by the owner's decision (D-204): the general create refuses these tables (row 19) |
+| 16 | **Superseded:** a Signal or Decision Record create completed from the row it is filed under (042c fix round 3) | — | — | superseded 2026-11-04 by the owner's decision (D-204): the general create refuses these tables (row 19) |
+| 17 | **Superseded:** a Signal or Decision Record create completed from the row it is filed under (042c fix round 3) | — | — | superseded 2026-11-04 by the owner's decision (D-204): the general create refuses these tables (row 19) |
+| 18 | **Superseded:** a Decision Record create through the general create (042c fix round 3) | — | — | superseded 2026-11-04 by the owner's decision (D-204): the general create refuses these tables (row 19) |
+| 19 | **New (042c fix round 4, owner decision D-204):** a create of `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision` through the general create (`RecordCreationService`, by any route, for the caller or the system principal) or the chat `dataverse.create_record` tool | service: 201, or row 8's 409 | service: 400 `record_creation.table_unsupported` (`Invalid`), "'<table>' records are not created here.", the refusal of a table the service does not create, before anything is read, mapped, checked or written; chat: `ValidationFailed` before any Dataverse call, in both the validate and the execute leg | these tables are created only by their writers (`SignalWriter`, `DecisionRecordWriter`, the decision action executors), which do not use the general create. The flag is `RecordTableRule.CreatedOnlyByItsWriter` |
+
+- Unchanged:
+  - the bind refusals (they stay at step 10);
+  - the step-6 refusals;
+  - `ownership_exception` (an unfiled row has no source, so nothing is derived);
+  - the secure-filing refusals in `OwnerDecided` (`:1106-1121`): every stamped table in the access taxonomy is a reparentable child, so a Secure owner is allowed (Signal and Decision Record are not created by the general create at all: row 19).
+- **Edges:**
+  - route: `ChildRecordEndpoints.RefusalResult`;
+  - chat: the tool codes (`ChatCreatedChildStampTests.cs:310-345`);
+  - `email.draft`: `EmailDraftToolHandler.cs:1296-1306`;
+  - Office quick-create: roots only, so it never reaches 6½.
+- **No new leak (UAC):** every row above follows step 5's AppendTo on the intermediate. A 400 says no more than step 10's 400 says today.
+
+### 15.5 Interactions
+
+- **System principal (#2479, DI-007):**
+  - it already derives at step 10 (`:859-862`) and binds after the create;
+  - after 042b it derives at 6½ and step 7 uses the result, so the owner is right before the stamp is bound;
+  - DI-007 itself is unchanged.
+- **`email.draft` (a′):**
+  - the handler checks AppendTo as the caller on the regarding, derives `DeriveForHostAsync` (`EmailDraftToolHandler.cs:360-408`) and keeps the stamp in the item (`:446-448`);
+  - so step 5 asks AppendTo on it, step 7 already sees it, and 6½ finds nothing missing;
+  - the owner and the checks do not change. Only 6½'s root read moves ahead of step 7, as row 1–3 ordering.
+- **Office:**
+  - the Office to-do is its own writer;
+  - it stamps first and then asks `ForChild(todo)` with the stamps (`OfficeService.cs:3030-3060`, `:3105-3119`), which is the shape 042b copies;
+  - Office quick-create uses the service only for a matter or project (`:2431`), which are not stamped;
+  - Office codes are unchanged (NFR-07).
+- **Repair:** §15.3. It has no production caller yet (052, DI-008).
+- **Reconciler:**
+  - **After the fix it still has work:**
+    - the intermediate itself (INV-1 stays ordinary until the pass reaches it);
+    - rows that existed before the pass;
+    - writes made outside the product;
+    - documents.
+  - **Agreement by construction:**
+    - the create asks `ForRow(table, item lookups ∪ derived stamp, pair)`;
+    - the reconciler asks `ForExistingRowAsync(written row)`;
+    - the written row's ownership parents are exactly the item lookups plus the bound stamp. The creator-person and index lookups are not ownership parents.
+    - 042b pins this with a parity test.
+  - **Known difference beyond the stamp (to be confirmed by that test):** the reconciler and Repair add a message's record-thread filing (`SecureChildReconciler.cs:3040-3051`, `RecordCreationService.cs:1183-1187`), and the create does not (Q3).
+- **Step 8 index (updated by task 042b, 2026-11-03):**
+  - task 041 (FR-40, #2502) merged first: step 8 is NoOp. The create writes neither search-index column for any owner, so an event made Secure at create gets no index value from step 8, as an ordinary one does;
+  - there is therefore no step-8 index assertion in 042b's must-fire tests (AC13);
+  - the text this bullet held before 041 (an empty index plus `search_index_unset_for_owner_bu` for the Secure Record BU) no longer describes the code.
+
+### 15.6 Test plan (ADR-038; KEEP paths; the characterization lands first, alone)
+
+**042a: characterization (tests only, no `src/` change). It pins today's wrong owner.**
+
+- **A1:** `RouteCreatePreCreateStampTests.cs` (the route harness, the real service, a `StampWorld` and `.WithSecureRoot("sprk_matter", SecureMatter)`). Name: `RouteCreate_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window`.
+  - Setup: the Event is team-owned by `ChildTeam` in `ChildBu` and filed under `SecureMatter`. The stamp world derives `sprk_regardingmatter = SecureMatter`.
+  - Pins:
+    - 201;
+    - `ownerid@odata.bind = /teams(ChildTeam)`;
+    - `sprk_RegardingMatter@odata.bind = /sprk_matters(SecureMatter)`;
+    - no sharee-mirror row on the new event.
+  - The comment names #2483 and says that 042b inverts this test.
+- **A2 (same file): the reconciler disagrees.**
+  - Build the written row from A1's create body and ask the same resolver `ForExistingRowAsync`.
+  - Pins: `SecureNamedTeam`. This is the window's disagreement in one assertion.
+- **A3:** `RecordCreationServicePipelineSeamTests.PreCreateStamp.cs`. The same world as the system principal. Pins:
+  - an ordinary owner;
+  - no stamp in the body;
+  - the stamp is bound by the post-create re-derivation (as `:178`).
+- **Ordinary control (existing):** `ChatCreatedChildStampTests.cs:106` (an event under an event under an ORDINARY matter, owned by `ChildTeam`).
+
+**042b: the fix. A1–A3 are inverted in the same PR; nothing is deleted.**
+
+- **Must fire:**
+  - A1/A3: owned by `SecureNamedTeam`; the sharee mirror is written at create (as `ChatCreatedChildStampTests.cs:130`); the event's index is empty and the warning is logged.
+  - A chat twin in `ChatCreatedChildStampTests`.
+  - A2 now agrees.
+  - **Parity theory** (`WriterBuilderOwnershipParityTests` style): for every table in `RecordTableRules` that `IsStampedChildEntity` (to-do, event, memo, analysis, communication, Signal, Decision Record), with a secure world and an ordinary one, the create's owner equals `ResolveOwnerAsync(ForExistingRowAsync(written row))`.
+  - **Change 1:** a to-do with no pair under a team-owned report card in BU X, whose matter is in BU Y, is owned by Y's team.
+  - **Change 3:** a matter flagged secure but not isolated gives 409 `SecureParentNotIsolated` and no create.
+  - **Order:** a root read fault combined with an owner world that refuses gives 503 `stamp_unavailable` (pins row 2).
+  - **Repair:** a user-owned to-do missing its stamp under a team-owned invoice of a Secure matter is re-owned to Secure in the one update. If planning faults, the owner is kept (`stamp_unavailable`) and the mapping is Skipped (`mapping_filing_undecided`).
+  - **A' (fix round 1, F1): a sent stamp that disagrees is replaced in the owner question.**
+    - (a) a sent ORDINARY stamp under a team-owned intermediate of a Secure root is owned by `SecureNamedTeam`, with the sharee mirror at create (route, and a chat twin); the body keeps the sent value (fill-only) and the step-12 restamp replaces it;
+    - (b) a sent SECURE matter under an intermediate whose root is ordinary is owned by the ordinary owner, never the Secure team, and gets no mirror;
+    - Repair: a user-owned to-do holding a stale stamp whose source's root is Secure is re-owned to Secure (same unit) or held by the escalation (another unit), never re-owned to the ordinary team; the held stamp is not overwritten.
+  - **Parity theory, caller principal (fix round 1):** memo, analysis and communication created as the caller bind the stamp in the create body (step 10) and agree with the reconciler.
+- **Must not fire:**
+  - `ChatCreatedChildStampTests.cs:106` stays green. Its comment at `:108-110` ("step 10 adds it to the create BODY only, so the owner question is unchanged") is rewritten.
+  - The same report card with the to-do's pair set is owned by X. (Does not hold on this code: a report card is not a server to-do regarding-builder target, so the pair names no subject; 042b pins parity with the reconciler instead. Filed as #2556 / DI-017.)
+  - Step 5's AppendTo probes are identical. The derived root is never asked as the caller.
+  - `EmailDraftRecordCreationTests`: the owner and the AppendTo calls are unchanged.
+  - A browser-sent stamp that AGREES with the intermediate's root: the plan is empty, nothing is bound, and the owner and the question are unchanged (AC12 as amended: "a sent stamp that agrees changes nothing; one that disagrees is replaced in the owner question"). Step 6½ still reads the intermediate once when a stamp is sent (AC1 as amended).
+  - A document (seam `:229`) and a work assignment (seam `:64`) derive nothing.
+  - Single-condition refusals are unchanged: `RouteCreatePreCreateStampTests.cs:64,81`, seam `:84-148`, `ChildRecordCreateRefusalContractTests`, `CrossSurfaceOwnerTests.cs:78-144`, and the Office suites (`OfficeRecordOwnershipTests`, `SecureRootCreateRouteTests.Office*`).
+
+### 15.7 ADR checks, placement (§10) and component justification (§11)
+
+| ADR | Point | Resolution |
+|---|---|---|
+| ADR-008 path A | Caller checks as the user, create app-only | Comply. Step 5's set is unchanged. The derivation stays app-only, as `PlanMissingStampAsync` already is (`CoreAncestorRestamper.cs:41`), and its answers are never shown before the caller's AppendTo on the intermediate. |
+| ADR-010 | DI | Comply. There is no new registration; `_restamper` is already injected. |
+| ADR-002 | No plugins; one server-side owner per invariant | Comply. It strengthens the rule: the create and the reconciler ask ONE question, built by `ForRow`, and a parity test proves it. |
+| ADR-038 | Tests | Comply. The characterization lands first, alone (042a), then the inversion with the fix (042b). Tests are at KEEP paths (`data-mutation`, `seam`). No `Mock<HttpMessageHandler>`. |
+
+- **Placement:** a modification inside `RecordCreationService` (and `.Repair.cs`) in the BFF. There is no new endpoint, service, package or background work. The publish-size delta is measured per §10 bullet 4 (expected ≈ 0).
+- **§11:** no new surface. The two private halves of an existing method and one extra argument to a private method are a pure modification.
+- **Hot path:** BFF Y, unchanged.
+
+### 15.8 Risks
+
+- **The creator may lose sight of their own row.** A caller who is not a sharee of the Secure matter creates a to-do they then cannot read. This is the intended outcome; it is the same as filing directly under a Secure matter today.
+- **Cost:** none added. The derivation's root read moves ahead of step 7; it is not repeated.
+- **More 409s during Make Secure** if the flag is set before the move (row 5, Q1).
+- **The parity theory may expose other differences between the create and the reconciler** (the thread filing, Q3). Each one is fixed in 042b or filed. None is suppressed.
+- **The stale comment at `ChatCreatedChildStampTests.cs:108-110`** would mislead a later reader if it is not rewritten. It is listed under 042b's must-not-fire tests.
+
+### 15.9 Questions for UAC-r2
+
+1. **Make Secure order.** In a normal Make Secure pass, is there an interval where the root is flagged `sprk_issecure` but not yet owned in the Secure Record BU? If so, 042b turns that interval's ordinary creates into 409 `SecureParentNotIsolated` (row 5). Is that acceptable, or should a root that is mid-Make-Secure be named the way `UnsecuringRoot` is for the reverse transition?
+2. **Repair.** Do you accept the same reorder in `RepairAsync`, with a planning failure keeping the current owner (`stamp_unavailable`, no re-own), rather than re-owning over the row's lookups alone?
+3. **Thread filing.** The reconciler and Repair add a message's record-thread filing to its question; the create does not. If 042b's parity theory confirms that a create can carry `sprk_communicationthread` today, should it be fixed in 042b or filed as its own issue?
+
+### 15.10 Tasks (scope path: this design → UAC-r2 review → spec amendment → task files → TASK-INDEX → owner approval)
+
+**042a: characterization of the #2483 window** (tests only; sonnet / high; STANDARD, plus code-review and adr-check because it touches `tests/**`)
+
+- **AC1:** A1, A2 and A3 (§15.6) are added and pass on the current `src/`. `git diff --stat` shows no `src/` change.
+- **AC2:** A1 pins all four facts: 201, the `ChildTeam` owner, the Secure matter stamp in the body, and no mirror row. A2 pins `SecureNamedTeam`.
+- **AC3 (negative):** A1 fails if `ResolveOwnerOverAsync` is given the derived stamp. This is verified once by a local scratch edit that is never committed, and recorded in the notes.
+- **AC4:** the existing ordinary control `ChatCreatedChildStampTests.cs:106` is unchanged and green.
+
+**042b: derive the stamp before step 7** (depends on 042a merged and on UAC-r2's answers to Q1–Q3; sonnet / xhigh; FULL; reviewed by UAC-r2)
+
+- **AC1:** the new order in §15.3. Step 10 does not derive a second time. The bind, I-16 and the system-principal post-create bind are unchanged.
+- **AC2:** A1–A3 are inverted, and every must-fire test in §15.6 passes.
+- **AC3 (negative):** every must-not-fire test in §15.6 passes. Specifically:
+  - no new AppendTo probe;
+  - `email.draft` is unchanged;
+  - single-condition refusal codes, statuses and words are unchanged;
+  - Office codes are unchanged.
+- **AC4:** the parity theory passes for every stamped table registered in `RecordTableRules`. Any other difference it finds is fixed here or filed with a DI entry (Q3).
+- **AC5:** the refusal-order rows 1–7 of §15.4 are recorded as K lines in the PR. Rows 2 and 5 are covered by tests.
+- **AC6:** the publish-size delta is measured against a fresh master build. The UAC-r2 review line is in the PR. DI-009 is closed, and #2483 is closed with a link to the PR.
+
+### 15.11 UAC-r2 review (2026-11-02): OK with conditions
+
+UAC-r2 confirms the design: step 7 asks the reconciler's question, built once by `ForRow`. There is no caller-side probe and no new surface, and the G5 split is kept. The derivation stays app-only and is never exposed before step 5's AppendTo on the intermediate. Rows 6 and 7 fail closed, which is correct.
+
+- **Q1, the Make Secure order.**
+  - **The interval exists.** Make Secure (`ProvisionProjectEndpoint.cs`, class doc) sets `sprk_issecure` first at 4.1 and assigns the Secure team only at step 5. A failed or compensated run (5.5) can leave that state in place for good.
+  - **Row 5 is accepted** as 409 `SecureParentNotIsolated`. This is the existing C11 refusal, which direct children already get. There is **no** "SecuringRoot" exemption, because one would give a child an ordinary owner while its family goes secure.
+  - **Condition (a):** two tests for row 5, one for the transient interval and one for the lasting compensated state.
+  - **Condition (b):** keep the existing refusal words ("re-run Make Secure on it, then retry"). A friendlier transient message can only be a client-side mapping; no new server code.
+- **Q2, Repair.**
+  - **The same reorder is accepted.** A planning failure keeps the current owner (Skipped, `record_repair.stamp_unavailable`) and never re-owns over the row's lookups alone.
+  - **Condition (c):** the skip is counted in the repair result and logged with the row id and reason, never silently.
+- **Q3, thread filing.**
+  - **Fix it in 042b** if the parity theory confirms that a create can carry `sprk_communicationthread`. The fix goes inside `OwnerQuestionOf` / `ForRow`, the way `RecordCreationService.cs:1183-1187` already handles Repair.
+  - **File it** as its own issue, with a DI entry, only if it needs a different seam.
+  - **Either way,** AC4's parity theory covers a communication that carries a thread.
+- **Row 7:** the parity test confirms that the reconciler refuses the same report-card case. If the two disagree, fix it in 042b.
+- **§15.8, creator visibility:** this is the intended outcome. The create response stays the normal 201 and reveals no secure-family id beyond what the caller sent. Add an assertion for this.
+- **042b review:** UAC-r2 gets the diff before merge and does a full pass, since the change touches the owner decision on secure families.

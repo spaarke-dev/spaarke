@@ -566,6 +566,34 @@ public class SecureChildOrdinaryParentMoveTests
         _world.OwnerWrites.Should().NotContain(w => w.Id == signal);
     }
 
+    /// <summary>The record-type catalog row naming <c>sprk_servicerequest</c> (a Signal's core type).</summary>
+    private static readonly Guid CatalogServiceRequest = Guid.Parse("4b000000-0000-4000-8000-000000194402");
+
+    [Fact(DisplayName = "194 F1b must fire: a Signal whose core is a moved service request, its subject filed elsewhere, follows the service request to B")]
+    public async Task ASignalWhoseCoreIsAMovedServiceRequest_FollowsIt_ThoughItsSubjectIsElsewhere()
+    {
+        var (request, otherMatter, signal) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_servicerequest", request, ("owningteam", new EntityReference("team", TeamB)));
+        _world.Add("sprk_recordtype_ref", CatalogServiceRequest, ("sprk_recordlogicalname", "sprk_servicerequest"));
+        // Its subject is an event under an ordinary matter that stays in A; no lookup of the Signal names the service request,
+        // so only its core record pair files it there.
+        _world.Add(Matter, otherMatter, ("owningteam", TeamRef(GeneralTeam)), ("sprk_issecure", false));
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingmatter", Matter, otherMatter));
+        Row("sprk_signal", signal, TeamRef(GeneralTeam), ("sprk_regardingevent", "sprk_event", EventId),
+            ("sprk_corerecordtype", "sprk_recordtype_ref", CatalogServiceRequest));
+        _world.Set("sprk_signal", signal, "sprk_corerecordid", request.ToString("D"));
+        _world.Set("sprk_signal", signal, "sprk_regardingrecordid", EventId.ToString("D"));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            "sprk_servicerequest", request, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "its core, the service request, is its primary parent, and the ordinary pass over it finds the Signal by its pair");
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(GeneralTeam), "its subject is not under the service request");
+        report.ChildrenReowned.Should().Be(1);
+    }
+
     [Theory(DisplayName = "194b must fire: an .eml document of a user-owned communication filed to the B matter is already correct at B's team, and its attachment does not cascade")]
     [InlineData(true)]  // it also names the matter (after the communication in its attributes): the primary order decides
     [InlineData(false)] // it names only the communication: its user-owned FILED communication is looked through (I-6)
@@ -1900,7 +1928,9 @@ public class SecureChildOrdinaryParentMoveTests
         _world.Set("sprk_decisionrecord", record, "sprk_regardingrecordid", workAssignment.ToString("D"));
         _world.Set("sprk_decisionrecord", record, "sprk_steps", JsonSerializer.Serialize(new
         {
-            reviewId = Guid.NewGuid().ToString("D"), resolvedSignalIds = Array.Empty<string>(), steps = Array.Empty<object>(),
+            reviewId = Guid.NewGuid().ToString("D"),
+            resolvedSignalIds = Array.Empty<string>(),
+            steps = Array.Empty<object>(),
         }));
 
         // Driven from the ROOT's pass: the work assignment did not change, so its own pass never runs.

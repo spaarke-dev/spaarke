@@ -54,6 +54,7 @@
     <constraint source="NFR-10, ADR-028">Feed items reach only the submitter or the firm's billing contact, and only for a record in the caller's accessible set (same fail-closed re-check the feed applies to grants); appnotifications only to eligible approvers resolved by 103.</constraint>
     <constraint source="ADR-015">Emails carry only the 131 notice; logs carry ids, recipient counts and outcome codes, never addresses or text.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF IJobHandler (spec placement table), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="EB-D-207; uac-r2 and field-mapping 032 (2026-11-07)">Every firm-facing email and feed item renders only `sprk_invoice` columns in the external invoice module's ReadableColumns, or columns protected from field mapping. A test pins the rendered column set against ReadableColumns, so a column added to the notice later fails the test.</constraint>
   </constraints>
 
   <knowledge>

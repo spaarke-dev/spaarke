@@ -137,5 +137,5 @@ The "irreducible core" is the orchestration logic that legitimately belongs in a
 ## Related
 
 - [Interface Segregation Guide](INTERFACE-SEGREGATION-GUIDE.md) — Companion guide for interface decomposition
-- [ADR-010: DI Minimalism](../../.claude/adr/ADR-010.md) — ≤15 non-framework DI registrations per module
+- [ADR-010: DI Minimalism](../../.claude/adr/ADR-010-di-minimalism.md) — ≤15 non-framework DI registrations per module
 - [Service Registration Pattern](../../.claude/patterns/api/service-registration.md) — Feature module and DI patterns

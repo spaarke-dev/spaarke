@@ -37,17 +37,17 @@ public sealed class ArithmeticCheckerTests
         decimal? expenses = null,
         decimal? adjustments = null,
         decimal? totalDue = null) => new()
-    {
-        FirmId = Guid.NewGuid(),
-        Header = new InvoiceResolutionHeader
         {
-            FeesTotal = new ResolutionField<decimal?>(fees),
-            ExpensesTotal = new ResolutionField<decimal?>(expenses),
-            AdjustmentsTotal = new ResolutionField<decimal?>(adjustments),
-            TotalDue = new ResolutionField<decimal?>(totalDue),
-        },
-        Lines = lines,
-    };
+            FirmId = Guid.NewGuid(),
+            Header = new InvoiceResolutionHeader
+            {
+                FeesTotal = new ResolutionField<decimal?>(fees),
+                ExpensesTotal = new ResolutionField<decimal?>(expenses),
+                AdjustmentsTotal = new ResolutionField<decimal?>(adjustments),
+                TotalDue = new ResolutionField<decimal?>(totalDue),
+            },
+            Lines = lines,
+        };
 
     private static ArithmeticOutcome Outcome(ArithmeticReport report, int? line, string field) => report.OutcomeOf(line, field);
 

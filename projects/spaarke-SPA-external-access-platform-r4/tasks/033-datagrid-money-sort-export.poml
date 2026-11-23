@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>DataGrid Money columns sort by value + Export writes formatted values (FR-20, #2446, #2447)</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 028 and 032</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared DataGrid sort and CSV export (.ts/.tsx) used by many surfaces</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two scoped fixes in named functions with a clear expected result</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>028, 032</deps>
+    <tags>frontend, typescript, unit-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In the shared DataGrid, make Money (currency) columns sort by numeric value, and make CSV Export write the same text the Money cell displays.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. TypeScript developer on the shared DataGrid.</role>
+  <goal>Sorting $9 / $10 / $100 orders them by value in both directions, and an exported Money cell's text equals the displayed value; every other column type sorts and exports as before.</goal>
+
+  <context>
+    <background>Spec FR-20; design §7 (the invoice grid shows two Money columns since R3 task 002: `sprk_totalamount`, `sprk_totalamount_base`). Sort: the column comparator (`DataGrid.tsx:1160-1175`) compares numerically only when both raw values are JS numbers; otherwise it compares the displayed strings (`renderCellValue` + `formattedLabelOf`), so a Money value that arrives as a non-number, or as a number with a formatted label, sorts as text ("$10" before "$9"). Find which shape the external module fetch actually returns for Money (raw number, string, object, `@formattedValues` label) before choosing the fix; cite it in the notes. Display: `renderCellValue` 'currency' branch (`DataGrid.tsx:622-640`) and `usesFormattedLabel` (`:606-611`). Export: `exportCsv` writes raw `record[c.name]` (`commandBar/csvExport.ts:150-178`, line `:167`) — so Money exports unformatted. The existing export test is `commandBar/__tests__/csvExport.test.ts`.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/csvExport.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/__tests__/csvExport.test.ts</file>
+      <file role="new-artifact">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.moneySort.test.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.formattedValues.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed (phase-deploy convention)</dependency>
+      <dependency task="032" status="pending">DataGrid.tsx changes for persisted settings land first (same file)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-20">Money columns (renderer 'currency', or a money attribute type as the resolver derives it) sort by numeric value in both directions; null/empty sort as today's empties do (state the rule in the notes and test it).</constraint>
+    <constraint source="spec FR-20">For Money columns, the exported cell text equals the cell's displayed text (same `renderCellValue` + formatted-label path). Export for every other renderer is unchanged in this task.</constraint>
+    <constraint source="ADR-012">No change to `DataGridProps`, the CSV filename, BOM, CRLF or quoting rules; other consumers' behaviour for non-Money columns is unchanged (tests stay green).</constraint>
+    <constraint source="project">Coordinate the change with the dataset-grid framework owners (the same contact as 032); record their OK in the notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Display string as sort key" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx">task 061 comparator — extend it with a Money branch, do not replace it</pattern>
+      <pattern name="Export unit tests" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/__tests__/csvExport.test.ts">pure-function tests for exportCsv</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Establish the Money value shape the grid receives (mock and, if needed, the BFF module fetch code); write it in the notes.</step>
+    <step order="2">Extract the comparator into a testable function; add a Money branch that compares numeric value.</step>
+    <step order="3">Make export use the display text for Money columns (pass the formatted-label lookup into `exportCsv` or pre-render at the CommandBar call site).</step>
+    <step order="4">Tests: $9/$10/$100 ascending and descending; nulls; a non-Money number column and a text column sort as before; Money export text equals `renderCellValue` output; non-Money export unchanged.</step>
+    <step order="5">Run the shared-lib DataGrid tests and the SPA build.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations and the value-shape finding in projects/spaarke-SPA-external-access-platform-r4/notes/task-033-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the framework owners want formatted export for every column type (not only Money), STOP and ask the owner: that changes every consumer's CSV and is beyond FR-20 as written.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Money sort and export">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>On the Invoices tab sort by Total amount ascending and descending</step>
+        <step>Export to CSV; open it</step>
+        <step>Compare an exported Total amount with the cell on screen</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Value order; exported text equals the displayed text</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark mode on the Invoices grid</step></steps>
+      <expected>No visual change from this task; semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run shared-lib tests and the SPA build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/csvExport.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.moneySort.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/__tests__/csvExport.test.ts</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-033-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Money column with $9, $10 and $100 sorts 9, 10, 100 ascending and 100, 10, 9 descending.</criterion>
+    <criterion testable="true">Empty Money values sort by the rule recorded in the notes, consistently in both directions.</criterion>
+    <criterion testable="true">An exported Money cell's text equals the displayed cell text.</criterion>
+    <criterion testable="true">Non-Money columns sort and export exactly as before; existing DataGrid and csvExport tests pass unchanged.</criterion>
+    <criterion testable="true">No `DataGridProps` change; filename, BOM, CRLF and quoting unchanged.</criterion>
+    <criterion testable="true">The framework owners' OK is recorded.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20; issues #2446 (sort), #2447 (export).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

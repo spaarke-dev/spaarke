@@ -164,6 +164,62 @@ public class InvoiceComplianceEvaluatorFeeKindTests
         OverCapPolicies(result).Should().Equal("CD-POSTAGE");
     }
 
+    // ── 101 B2a F2 review (ontology-r1): an AddedFee refusal is covered only by a version of the same fee kind (and code set for 'other') ──
+
+    private static Func<BillingRuleDefinition, BillingRuleOrigin, BillingFactSet, IReadOnlyList<BillingFinding>> RefusingHandlerFor(string policyCode) =>
+        (rule, origin, facts) => rule.PolicyCode == policyCode
+            ? throw new BillingRuleRefusedException(BillingRuleRefusedException.ParameterMissing, rule.RuleType, "test")
+            : BillingRuleHandlers.Evaluate(rule, origin, facts);
+
+    [Fact(DisplayName = "082c C8: a refused firm cap is not covered by the lower-ranked client default cap on the same fee kind; a client default cap the firm's displaces is never run, so never refused")]
+    public void ARefusedFirmCap_IsNotCoveredByTheLowerRankedClientDefault_ADisplacedClientDefaultIsNeverRun_C8()
+    {
+        var clientLate = Cap("CD-LATE", "lateFee", "E120", RuleSetScope.ClientDefault);
+        var firmLate = Cap("FIRM-LATE", "lateFee", "E120", RuleSetScope.Firm);
+
+        var firmRefused = Evaluator(handlers: RefusingHandlerFor("FIRM-LATE")).Evaluate(OverCapInvoice(), Loaded(clientLate, firmLate));
+        var defaultRefused = Evaluator(handlers: RefusingHandlerFor("CD-LATE")).Evaluate(OverCapInvoice(), Loaded(clientLate, firmLate));
+
+        OverCapPolicies(firmRefused).Should().Equal("CD-LATE");
+        var scope = firmRefused.RefusalScopes.Should().ContainSingle().Which;
+        scope.AppliesToInvoice.Should().BeTrue("the firm's own cap, which outranks the default's, was not checked");
+        scope.LineIndexes.Should().Equal(0, 1, 2);
+
+        OverCapPolicies(defaultRefused).Should().Equal("FIRM-LATE");
+        defaultRefused.Refusals.Should().BeEmpty("a Replace version below the top valid rank is displaced before its handler runs");
+        defaultRefused.RefusalScopes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ARefusedFirmCap_OnAnotherFeeKindThanTheClientDefaults_StillLeavesItsSubjectsUnchecked_F2()
+    {
+        var clientLate = Cap("CD-LATE", "lateFee", "E120", RuleSetScope.ClientDefault);
+        var firmAdmin = Cap("FIRM-ADMIN", "administrativeFee", "E130", RuleSetScope.Firm);
+
+        var result = Evaluator(handlers: RefusingHandlerFor("FIRM-ADMIN")).Evaluate(OverCapInvoice(), Loaded(clientLate, firmAdmin));
+
+        var scope = result.RefusalScopes.Should().ContainSingle().Which;
+        scope.RuleType.Should().Be(RuleType.AddedFee);
+        scope.AppliesToInvoice.Should().BeTrue("no administrative-fee cap judged the invoice: the late-fee default is a different key");
+        scope.LineIndexes.Should().Equal(0, 1, 2);
+    }
+
+    [Fact]
+    public void AGateRefusedFirmCap_KeepsItsScopeWhole_ItsFeeKindIsUnreadable_FailsClosed_F2()
+    {
+        // The gate refuses the body, so there is no definition and no fee kind to key on: even a client default of one kind stays no cover.
+        var clientLate = Cap("CD-LATE", "lateFee", "E120", RuleSetScope.ClientDefault);
+        var firm = Version("FIRM-BAD", RuleType.AddedFee,
+            """{"type":"AddedFee","feeKind":"lateFee","allowance":"cap","feeCodes":["E120"],"capAmount":100,"unknownMember":1}""", RuleSetScope.Firm);
+
+        var result = Evaluator().Evaluate(OverCapInvoice(), Loaded(clientLate, firm));
+
+        result.Refusals.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingEvaluationReasons.GateRefused);
+        var scope = result.RefusalScopes.Should().ContainSingle().Which;
+        scope.AppliesToInvoice.Should().BeTrue();
+        scope.LineIndexes.Should().Equal(0, 1, 2);
+    }
+
     [Fact]
     public void ADiscountRule_StillReplacesByRuleTypeAlone_RegressionControl_D39()
     {

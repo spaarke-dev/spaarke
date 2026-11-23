@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// (<see cref="StoredFileRig"/>); the committed transaction's Stored File create lands in that store's Dataverse, so the flip after the
 /// commit runs for real.
 /// </summary>
-public class InvoiceSubmissionPersisterTests
+public partial class InvoiceSubmissionPersisterTests
 {
     private static readonly Guid Submission = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
     private static readonly Guid Matter = Guid.Parse("04900000-0000-4000-8000-0000000000a1");
@@ -101,7 +101,8 @@ public class InvoiceSubmissionPersisterTests
         line.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter, "D-75: the line's own core lookup");
         line.GetAttributeValue<int>("sprk_linesequence").Should().Be(1);
         line.GetAttributeValue<OptionSetValue>("sprk_costtype").Value.Should().Be(InvoiceSubmissionPersister.CostTypeFee);
-        line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusPending);
+        line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusClean,
+            "103 Q2: an unflagged line of a coded invoice is Clean, or no invoice could be approved (I-2)");
         line.GetAttributeValue<Money>("sprk_amount").Value.Should().Be(750m);
         line.GetAttributeValue<decimal>("sprk_quantity").Should().Be(1.5m, "a fee line's hours");
         line.GetAttributeValue<string>("sprk_timekeeper").Should().Be("Jane Smith");
@@ -213,6 +214,8 @@ public class InvoiceSubmissionPersisterTests
         Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
         var line = Target(requests[2]);
         line.Attributes.Should().NotContainKey("sprk_codingconfidence", "the lines are uncoded");
+        line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusPending,
+            "an uncoded line is still owed its codes: it stays Pending (Processing), not Clean (D-126, D-58)");
         using (var confidence = JsonDocument.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence")))
         {
             confidence.RootElement.GetProperty("coding").GetProperty("status").GetString().Should().Be("NotCoded");
@@ -446,6 +449,284 @@ public class InvoiceSubmissionPersisterTests
 
         Target(store.Transactions.Single()[2]).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value
             .Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+    }
+
+    [Theory(DisplayName = "103 Q2: the initial line status - Flagged beats everything; an unflagged line is Clean when the invoice was coded, Pending when it was not")]
+    [InlineData(true, true, InvoiceSubmissionPersister.LineStatusFlagged)]
+    [InlineData(true, false, InvoiceSubmissionPersister.LineStatusFlagged)]
+    [InlineData(false, true, InvoiceSubmissionPersister.LineStatusClean)]
+    [InlineData(false, false, InvoiceSubmissionPersister.LineStatusPending)]
+    public void LineStatusFor_FlaggedThenCoded(bool flagged, bool coded, int expected) =>
+        InvoiceSubmissionPersister.LineStatusFor(flagged, coded).Should().Be(expected);
+
+    [Fact(DisplayName = "103 Q2 END TO END: a line the real persister wrote Clean is approvable through InvoiceApprovalService; the same line Pending is refused (I-2)")]
+    public async Task PersistedCleanLine_CanBeApproved_EndToEnd()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+        await store.Build().PersistAsync(outcome, null);
+        var persisted = Target(store.Transactions.Single()[2]);
+        persisted.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusClean);
+
+        // The persister's own line row, as written, in the approval's in-memory Dataverse (only its parent and core are re-pointed at the world).
+        ApprovalWorld WorldWith(Entity line)
+        {
+            // Task 165b: the world's invoice is the persister's own (its submission's), so the line is that submission's intake line.
+            InvoiceLineOrigin.IsIntakeLineOf(line, Submission).Should().BeTrue("the persister wrote the line for its own submission");
+            var world = new ApprovalWorld("sprk_matter", ownSubmissionId: Submission);
+            var row = new Entity(line.LogicalName, line.Id);
+            foreach (var attribute in line.Attributes)
+            {
+                row[attribute.Key] = attribute.Value;
+            }
+
+            row["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId);
+            row["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId);
+            row["versionnumber"] = 101L;
+            world.Put(row);
+            world.StoreTotalsFromLines(); // Task 165b-2: as the totals service does after the persister writes the lines
+            world.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId),
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId),
+            };
+            return world;
+        }
+
+        var approvable = WorldWith(persisted);
+        var approved = await approvable.ApproveAs(ApprovalWorld.AliceUser);
+        approved.Outcome.Should().Be(ApprovalOutcome.Approved, "the Clean line is accepted in bulk (D-72) and the invoice is approved");
+        approvable.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+
+        // The control that makes the assertion able to fail: the same row as the persister used to write it.
+        var oldBehaviour = new Entity(persisted.LogicalName, persisted.Id);
+        foreach (var attribute in persisted.Attributes)
+        {
+            oldBehaviour[attribute.Key] = attribute.Value;
+        }
+
+        oldBehaviour["sprk_linestatus"] = new OptionSetValue(InvoiceSubmissionPersister.LineStatusPending);
+        var refused = await WorldWith(oldBehaviour).ApproveAs(ApprovalWorld.AliceUser);
+        refused.Outcome.Should().NotBe(ApprovalOutcome.Approved, "a Pending line keeps the invoice from being approved");
+    }
+
+    // ── EB-D-175 / EB-D-176: a line the AI did not check, and a line with no description, are Flagged ──
+
+    /// <summary>Persists a one-line invoice with the given narrative and coding outcome; returns the stored line and the stored findings JSON.</summary>
+    private static async Task<(Entity Line, JsonDocument Findings)> PersistOneLineAsync(string? narrative, bool notReturned, bool coded = true)
+    {
+        var harness = new ProcessorHarness
+        {
+            Lines = [InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>(narrative) }],
+        };
+        if (notReturned)
+        {
+            harness.Coding.NotReturnedKeys = new HashSet<string> { "0" };
+        }
+
+        if (!coded)
+        {
+            harness.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+        }
+
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+        await store.Build().PersistAsync(outcome, null);
+        var requests = store.Transactions.Single();
+        return (Target(requests[2]), JsonDocument.Parse(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson")));
+    }
+
+    [Fact(DisplayName = "EB-D-175: a line the coding Action did not return is Flagged, with the coding.not_returned finding; the firm's codes are kept")]
+    public async Task ANotReturnedLine_IsFlagged_WithItsFinding()
+    {
+        var (line, findings) = await PersistOneLineAsync("Drafted the motion.", notReturned: true);
+        using (findings)
+        {
+            line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+            line.GetAttributeValue<string>("sprk_taskcodeasbilled").Should().Be("L110", "the firm's codes are kept");
+            var stored = findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray().Single();
+            stored.GetProperty("line").GetInt32().Should().Be(0);
+            stored.GetProperty("code").GetString().Should().Be("coding.not_returned");
+            stored.GetProperty("message").GetString().Should().Be("The line was not checked by the AI.");
+        }
+    }
+
+    [Fact(DisplayName = "EB-D-176: a line with a blank narrative on a coded invoice (NoNarrative) is Flagged, with the line.no_description finding")]
+    public async Task ABlankNarrativeLine_OfACodedInvoice_IsFlagged_WithItsFinding()
+    {
+        var (line, findings) = await PersistOneLineAsync("   ", notReturned: false);
+        using (findings)
+        {
+            line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+            line.GetAttributeValue<string>("sprk_taskcodeasbilled").Should().Be("L110", "the firm's codes are kept");
+            var stored = findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray().Single();
+            stored.GetProperty("code").GetString().Should().Be("line.no_description");
+            stored.GetProperty("message").GetString().Should().Be("The line has no description.");
+            JsonDocument.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence")).RootElement
+                .GetProperty("coding").GetProperty("status").GetString().Should().Be("NoNarrative");
+        }
+    }
+
+    [Fact(DisplayName = "EB-D-176: a line with a blank narrative on an UNCODED invoice is Flagged too, with the line.no_description finding")]
+    public async Task ABlankNarrativeLine_OfAnUncodedInvoice_IsFlagged_WithItsFinding()
+    {
+        var (line, findings) = await PersistOneLineAsync(null, notReturned: false, coded: false);
+        using (findings)
+        {
+            line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+            findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray().Single()
+                .GetProperty("code").GetString().Should().Be("line.no_description");
+        }
+    }
+
+    [Fact(DisplayName = "EB-D-175/176 unchanged: a described, returned line is Clean with no line finding; an uncoded invoice's described line stays Pending")]
+    public async Task ADescribedReturnedLine_IsStillClean_AndAnUncodedDescribedLine_StillPending()
+    {
+        var (clean, cleanFindings) = await PersistOneLineAsync("Drafted the motion.", notReturned: false);
+        using (cleanFindings)
+        {
+            clean.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusClean);
+            cleanFindings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).GetArrayLength().Should().Be(0);
+        }
+
+        var (pending, pendingFindings) = await PersistOneLineAsync("Drafted the motion.", notReturned: false, coded: false);
+        using (pendingFindings)
+        {
+            pending.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusPending, "D-126: unchanged");
+            pendingFindings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).GetArrayLength().Should().Be(0);
+        }
+    }
+
+    [Theory(DisplayName = "EB-D-175/176: the finding code of a line - a blank narrative, or a NoNarrative result, is no_description; a NotReturned result is not_returned; else none")]
+    [InlineData(null, LineCodingStatus.Coded, "line.no_description")]
+    [InlineData("  ", LineCodingStatus.NotReturned, "line.no_description")]
+    [InlineData("x", LineCodingStatus.NoNarrative, "line.no_description")]
+    [InlineData("x", LineCodingStatus.NotReturned, "coding.not_returned")]
+    [InlineData("x", LineCodingStatus.Coded, null)]
+    public void LineFindingCodeFor_Cases(string? narrative, LineCodingStatus status, string? expected) =>
+        InvoiceSubmissionPersister.LineFindingCodeFor(narrative, new LineCodingResult
+        {
+            LineKey = "0",
+            Status = status,
+            Task = new LineCodeValue(null, null, false),
+            Activity = new LineCodeValue(null, null, false),
+            Expense = new LineCodeValue(null, null, false),
+            Confidence = 0m,
+            Observations = [],
+            RefusedCodes = [],
+            CodeSetId = Guid.Empty,
+            CodeSetName = "x",
+            CodeSetSource = CodeSetSource.FirmCodes,
+        }).Should().Be(expected);
+
+    [Fact(DisplayName = "EB-D-175/176 END TO END: a persisted NotReturned line is Flagged and blocks approval; the reviewer accepts it through InvoiceLineDecisionService; the invoice is then approved")]
+    public async Task AFlaggedNotReturnedLine_IsDecidableThenApprovable_EndToEnd()
+    {
+        var (persisted, findings) = await PersistOneLineAsync("Drafted the motion.", notReturned: true);
+        findings.Dispose();
+        persisted.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+
+        // The persister's own line row, as written, in the approval's in-memory Dataverse (only its parent and core are re-pointed at the world).
+        static ApprovalWorld WorldWith(Entity line)
+        {
+            // Task 165b: the world's invoice is the persister's own (its submission's), so the line is that submission's intake line.
+            InvoiceLineOrigin.IsIntakeLineOf(line, Submission).Should().BeTrue("the persister wrote the line for its own submission");
+            var world = new ApprovalWorld("sprk_matter", ownSubmissionId: Submission);
+            var row = new Entity(line.LogicalName, line.Id);
+            foreach (var attribute in line.Attributes)
+            {
+                row[attribute.Key] = attribute.Value;
+            }
+
+            row["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId);
+            row["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId);
+            row["versionnumber"] = 101L;
+            world.Put(row);
+            world.StoreTotalsFromLines(); // Task 165b-2: as the totals service does after the persister writes the lines
+            world.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId),
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", world.InvoiceId),
+            };
+            return world;
+        }
+
+        var blocked = await WorldWith(persisted).ApproveAs(ApprovalWorld.AliceUser);
+        blocked.Outcome.Should().NotBe(ApprovalOutcome.Approved, "a Flagged line must be decided before the invoice is approved (I-2)");
+
+        var (decision, decided, records) = await InvoiceLineDecisionServiceTests.AcceptPersistedLineAsync(persisted, billedTotal: 750m);
+        decision.Should().Be(LineDecisionStatus.Applied, "the existing decision path needs only a non-Pending status: no Signal, no finding entry");
+        decided.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be((int)InvoiceLineStatus.Accepted);
+
+        var approvable = WorldWith(decided);
+        approvable.H.Created.AddRange(records);
+        var approved = await approvable.ApproveAs(ApprovalWorld.AliceUser);
+        approved.Outcome.Should().Be(ApprovalOutcome.Approved, $"{approved.Code} {approved.Detail}");
+        approvable.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    // ── EB-D-170: AI provenance ──
+
+    [Fact(DisplayName = "EB-D-170: each line stores the analyzer id, API version, Action code and version; the submission stores the pair and the header as read")]
+    public async Task Provenance_IsStored_OnTheLine_AndOnTheSubmission()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var requests = store.Transactions.Single();
+        var line = ExtractionProvenance.ParseLine(Target(requests[2]).GetAttributeValue<string>("sprk_extractionconfidence"));
+        line.Should().NotBeNull("a line written now carries its provenance");
+        line!.AnalyzerId.Should().Be(outcome.Read!.AnalyzerId);
+        line.ApiVersion.Should().Be(outcome.Read.ApiVersion);
+        line.ActionCode.Should().Be(LineCodingService.ActionCode);
+        line.ActionVersion.Should().Be(LineCodingService.ActionVersion);
+        line.HasExtraction.Should().BeTrue();
+
+        var submission = ExtractionProvenance.ParseSubmission(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson"));
+        submission.Should().NotBeNull("the header's provenance home is the submission's stored findings");
+        submission!.AnalyzerId.Should().Be(outcome.Read.AnalyzerId);
+        submission.ApiVersion.Should().Be(outcome.Read.ApiVersion);
+        submission.ActionVersion.Should().Be(LineCodingService.ActionVersion);
+        submission.Header.Keys.Should().BeEquivalentTo(ExtractionProvenance.HeaderFieldNames, "every correctable header field is recorded as read");
+        var header = outcome.Read.Header;
+        submission.Header["FirmInvoiceNumber"].Value.Should().Be(header.FirmInvoiceNumber.Value);
+        submission.Header["FirmInvoiceNumber"].Confidence.Should().Be(header.FirmInvoiceNumber.Confidence);
+        submission.Header["TotalDue"].Value.Should().Be(ExtractionProvenance.Text(header.TotalDue.Value));
+        submission.Header["InvoiceDate"].Value.Should().Be(ExtractionProvenance.Text(header.InvoiceDate.Value));
+        submission.Header["Currency"].Combined.Should().Be(outcome.Resolution!.HeaderFields["Currency"].Combined, "046's combined confidence is stored with it");
+    }
+
+    [Fact(DisplayName = "EB-D-170: a line that was not coded stores no Action pair (only the analyzer pair)")]
+    public async Task Provenance_UncodedLine_HasNoActionPair()
+    {
+        var harness = new ProcessorHarness();
+        harness.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var requests = store.Transactions.Single();
+        var line = ExtractionProvenance.ParseLine(Target(requests[2]).GetAttributeValue<string>("sprk_extractionconfidence"));
+        line!.HasExtraction.Should().BeTrue();
+        line.ActionCode.Should().BeNull("no AI code exists to attribute");
+        line.ActionVersion.Should().BeNull();
+        ExtractionProvenance.ParseSubmission(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson"))!.ActionCode.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "EB-D-170: a line or submission stored before the change (no provenance member) parses to null, never to blanks")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("{\"fields\":{},\"coding\":{}}")]
+    [InlineData("not json")]
+    [InlineData("{\"provenance\":\"x\"}")]
+    public void Provenance_LegacyOrDamagedJson_IsNull(string? json)
+    {
+        ExtractionProvenance.ParseLine(json).Should().BeNull();
+        ExtractionProvenance.ParseSubmission(json).Should().BeNull();
     }
 
     // ── owner ──
@@ -747,6 +1028,16 @@ public class InvoiceSubmissionPersisterTests
             .Should().OnlyHaveUniqueItems();
     }
 
+    // 095c-5 pass-2 review: scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 (Get-InvoiceIdFor) ports InvoiceIdFor to PowerShell to find
+    // a held submission's invoice whatever its link says. The three vectors below were produced by that PowerShell function; this test makes
+    // the C# produce the same Guids, so a change to the derivation here fails until the script is changed with it.
+    [Theory(DisplayName = "095c-5 pass-2: InvoiceIdFor matches the backfill script's port (test vectors)")]
+    [InlineData("11111111-2222-3333-4444-555555555555", "672fd995-e798-c85d-b141-751abf54978a")]
+    [InlineData("00000000-0000-0000-0000-000000000000", "9fe5ecd0-dcce-b5ae-2159-b3600dd97f3e")]
+    [InlineData("f47ac10b-58cc-4372-a567-0e02b2c3d479", "b0e42f51-3d97-0fb9-9f3c-c9d799adcb1e")]
+    public void InvoiceIdFor_MatchesTheBackfillScriptsPort(string submissionId, string expectedInvoiceId) =>
+        InvoiceSubmissionPersister.InvoiceIdFor(Guid.Parse(submissionId)).Should().Be(Guid.Parse(expectedInvoiceId));
+
     [Fact(DisplayName = "049 C (D-112): a withheld finding's group stores no values read")]
     public async Task WithheldFinding_StoresNoValuesRead()
     {
@@ -794,6 +1085,242 @@ public class InvoiceSubmissionPersisterTests
         hidden.RootElement.GetProperty("findings")[0].TryGetProperty("suggestedAdjustment", out _).Should().BeFalse("D-112: a withheld group stores no detail");
         none.RootElement.GetProperty("findings")[0].TryGetProperty("suggestedAdjustment", out _).Should().BeFalse("must-not-fire: a rule that suggests nothing stores nothing");
     }
+
+    // ── 101 B2a F2: a refused rule version is a check that did not run - its lines are Flagged, never Clean ──
+
+    private static ProcessorHarness TwoLineHarness(params BillingRuleCandidate[] rules) => new()
+    {
+        Rules = rules,
+        Lines =
+        [
+            InvoiceSubmissionProcessorTests.FeeLine(),
+            InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("Reviewed the exhibits.") },
+        ],
+    };
+
+    /// <summary>Persists the outcome and returns its stored lines (in line order) and the stored findings JSON.</summary>
+    private static async Task<(List<Entity> Lines, JsonDocument Findings)> PersistLinesAsync(SubmissionEvaluationOutcome outcome)
+    {
+        var store = new Store();
+        await store.Build().PersistAsync(outcome, null);
+        var requests = store.Transactions.Single();
+        var lines = requests.Select(Target).Where(e => e.LogicalName == "sprk_billingevent").ToList();
+        return (lines, JsonDocument.Parse(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson")));
+    }
+
+    private static int StatusOf(Entity line) => line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value;
+
+    private static IEnumerable<JsonElement> NotChecked(JsonDocument findings) =>
+        findings.RootElement.GetProperty(InvoiceSubmissionPersister.LineFindingsMember).EnumerateArray()
+            .Where(f => f.GetProperty("code").GetString() == InvoiceSubmissionPersister.LineFindingRulesNotChecked);
+
+    [Fact(DisplayName = "101 B2a F2: a rule version the gate refuses leaves its lines Flagged with a rules.not_checked finding naming the type, not Clean")]
+    public async Task ARefusedRuleVersion_FlagsItsLines_WithTheTypeNamedAndNoRuleId()
+    {
+        var outcome = await TwoLineHarness(Version("BILL-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}")).RunAsync();
+        outcome.Evaluation!.Refusals.Should().NotBeEmpty("the setup: the gate refused the version, so it produced no finding");
+        outcome.Evaluation.Findings.Should().BeEmpty();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Should().HaveCount(2);
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusFlagged);
+            var entries = NotChecked(findings).ToList();
+            entries.Select(e => e.GetProperty("line").GetInt32()).Should().Equal(0, 1);
+            entries.Should().OnlyContain(e => e.GetProperty("message").GetString()!.Contains("ApprovedRate"));
+            entries.Should().NotContain(e => e.GetProperty("message").GetString()!.Contains("BILL-RATE"));
+            findings.RootElement.GetRawText().Should().NotContain(outcome.Evaluation.Refusals[0].PolicyVersionId.ToString("D"), "no rule id is stored for the finding");
+        }
+    }
+
+    [Fact(DisplayName = "101 B2a F2: a refusal scoped to one line flags that line only; a refusal with no scope flags every line")]
+    public async Task ARefusal_IsTiedToItsLines_OrFlagsEveryLineWhenItCannotBe()
+    {
+        var clean = await TwoLineHarness().RunAsync();
+        var refusal = new BillingRuleRefusal(Guid.NewGuid(), "BILL-RATE", Guid.NewGuid(), BillingEvaluationReasons.GateRefused);
+        var scoped = clean with
+        {
+            Evaluation = clean.Evaluation! with
+            {
+                Refusals = [refusal],
+                RefusalScopes = [new BillingRuleRefusalScope(refusal.PolicyVersionId, RuleType.ApprovedRate, false, [1])],
+            },
+        };
+        var unscoped = clean with { Evaluation = clean.Evaluation! with { Refusals = [refusal] } };
+
+        var (scopedLines, scopedFindings) = await PersistLinesAsync(scoped);
+        var (unscopedLines, unscopedFindings) = await PersistLinesAsync(unscoped);
+        using (scopedFindings)
+        using (unscopedFindings)
+        {
+            scopedLines.Select(StatusOf).Should().Equal(InvoiceSubmissionPersister.LineStatusClean, InvoiceSubmissionPersister.LineStatusFlagged);
+            NotChecked(scopedFindings).Select(e => e.GetProperty("line").GetInt32()).Should().Equal(1);
+
+            unscopedLines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusFlagged);
+            NotChecked(unscopedFindings).Select(e => e.GetProperty("message").GetString()).Should().OnlyContain(m => m!.Contains("could not be checked"));
+        }
+    }
+
+    [Fact(DisplayName = "101 B2a F2 review (must-not-fire): a refusal whose higher-ranked version of the same key judged the lines flags nothing; an emptied scope is not an untied refusal (082c C8)")]
+    public async Task ARefusal_WhoseHigherRankedVersionJudgedTheLines_FlagsNothing_AnEmptiedScopeIsNotUntied()
+    {
+        // 082c C8: coverage follows the rank. A refused client default is covered by the firm version of its key (which outranks it); the
+        // reverse (a refused firm version beside a judged client default) is no longer covered: the evaluator tests pin that half.
+        var outcome = await TwoLineHarness(
+            Version("CD-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}"),
+            Version("FIRM-RATE", RuleType.ApprovedRate, scope: RuleSetScope.Firm)).RunAsync();
+        outcome.Evaluation!.Refusals.Should().ContainSingle("the setup: the client-default version is refused");
+        var scope = outcome.Evaluation.RefusalScopes.Should().ContainSingle().Which;
+        scope.AppliesToInvoice.Should().BeFalse("the setup: the firm version judged every subject, so the scope is emptied");
+        scope.LineIndexes.Should().BeEmpty();
+        outcome.Evaluation.Findings.Should().BeEmpty("the setup: the lines are otherwise clean");
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusClean);
+            NotChecked(findings).Should().BeEmpty();
+        }
+    }
+
+    [Fact(DisplayName = "101 B2a F2 review (must-fire): the same refusal with no client default of its key flags every line")]
+    public async Task ARefusal_WithNoClientDefaultOfItsKey_StillFlagsTheLines()
+    {
+        var outcome = await TwoLineHarness(
+            Version("FIRM-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}", scope: RuleSetScope.Firm)).RunAsync();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusFlagged);
+            NotChecked(findings).Select(e => e.GetProperty("line").GetInt32()).Should().Equal(0, 1);
+        }
+    }
+
+    [Fact(DisplayName = "101 B2a F2 (must-not-fire): with no refusal the lines are Clean and no rules.not_checked finding is stored")]
+    public async Task WithNoRefusal_TheLinesStayClean_AndNoRulesNotCheckedFinding()
+    {
+        var outcome = await TwoLineHarness().RunAsync();
+        outcome.Evaluation!.Refusals.Should().BeEmpty();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusClean);
+            NotChecked(findings).Should().BeEmpty();
+        }
+    }
+
+    // ── 101 B2a F3: the coding Action is attributed only to a line it was sent ──
+
+    [Fact(DisplayName = "101 B2a F3: a NoNarrative line (never sent to the model) stores no Action pair; a NotReturned line (sent) keeps it")]
+    public async Task Provenance_NoNarrativeLine_HasNoActionPair_ButANotReturnedLineKeepsIt()
+    {
+        var harness = new ProcessorHarness
+        {
+            Lines =
+            [
+                InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("Drafted the motion.") },
+                InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("   ") },
+            ],
+        };
+        harness.Coding.NotReturnedKeys = new HashSet<string> { "0" };
+        var outcome = await harness.RunAsync();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            var notReturned = ExtractionProvenance.ParseLine(lines[0].GetAttributeValue<string>("sprk_extractionconfidence"))!;
+            var noNarrative = ExtractionProvenance.ParseLine(lines[1].GetAttributeValue<string>("sprk_extractionconfidence"))!;
+            notReturned.ActionCode.Should().Be(LineCodingService.ActionCode, "the line was sent to the Action, which returned nothing usable");
+            notReturned.ActionVersion.Should().Be(LineCodingService.ActionVersion);
+            noNarrative.HasExtraction.Should().BeTrue("the analyzer pair is still the line's source");
+            noNarrative.ActionCode.Should().BeNull("a blank-narrative line was never sent to the model");
+            noNarrative.ActionVersion.Should().BeNull();
+            ExtractionProvenance.ParseSubmission(findings.RootElement.GetRawText())!.ActionCode.Should().Be(LineCodingService.ActionCode, "the invoice was coded, so the submission still names the Action");
+        }
+    }
+
+    // ── 101 B2a: the per-entry builders leave the stored findings JSON byte-identical ──
+
+    /// <summary>
+    /// A mixed invoice: one rule firing on two lines (line 0 visible with a suggested adjustment, line 1 withheld), a line the Action did
+    /// not return and a line with a blank narrative. Its stored JSON exercises findings[] (visible and scrubbed), lineFindings[] and signalPlan[].
+    /// </summary>
+    private static async Task<SubmissionEvaluationOutcome> MixedInvoiceAsync()
+    {
+        var harness = new ProcessorHarness
+        {
+            Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()],
+            Lines =
+            [
+                InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20)),
+                InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 21)) with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("  ") },
+            ],
+            Channel = InvoiceSubmissionChannel.Internal,
+        };
+        harness.Coding.NotReturnedKeys = new HashSet<string> { "0" };
+        var outcome = await harness.RunAsync();
+        return outcome with
+        {
+            Evaluation = outcome.Evaluation! with
+            {
+                Findings =
+                [
+                    .. outcome.Evaluation.Findings.Select(f => f.Subject.LineIndex == 1
+                        ? f with { DetailWithheld = true }
+                        : f with { SuggestedAdjustment = new BillingSuggestedAdjustment(BillingAdjustmentKind.Reduce, 120.50m) }),
+                ],
+            },
+        };
+    }
+
+    [Fact(DisplayName = "101 B2a: the stored findings JSON of a mixed invoice is byte-identical to the pre-extraction output")]
+    public async Task FindingsJson_OfAMixedInvoice_IsPinned()
+    {
+        var outcome = await MixedInvoiceAsync();
+
+        var json = InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId);
+
+        json.Should().Be(MixedInvoiceGoldenJson);
+    }
+
+    [Fact(DisplayName = "101 B2a: each findings[], signalPlan[] and lineFindings[] entry of the stored copy equals its per-entry builder")]
+    public async Task EachStoredEntry_EqualsItsPerEntryBuilder()
+    {
+        var outcome = await MixedInvoiceAsync();
+        var json = InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId);
+
+        // The builders B2b patches an entry with produce exactly the entries in the stored copy.
+        var root = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+        var findings = outcome.Evaluation!.Findings;
+        var decisions = outcome.Decision!.Findings.ToDictionary(d => d.Index);
+        var withheld = findings.Where(f => f.DetailWithheld).Select(f => (f.PolicyId, f.Subject)).ToHashSet();
+        root["findings"]!.AsArray().Should().HaveCount(findings.Count);
+        for (var i = 0; i < findings.Count; i++)
+        {
+            decisions.TryGetValue(i, out var decided);
+            var built = InvoiceSubmissionPersister.FindingEntryJson(i, findings[i], decided, withheld.Contains((findings[i].PolicyId, findings[i].Subject)));
+            built.ToJsonString().Should().Be(root["findings"]![i]!.ToJsonString());
+        }
+
+        var plan = InvoiceSubmissionPersister.SignalPlanJson(outcome, InvoiceId);
+        plan.Should().NotBeEmpty();
+        for (var i = 0; i < plan.Count; i++)
+        {
+            root["signalPlan"]![i]!.ToJsonString().Should().Be(plan[i]!.ToJsonString());
+        }
+
+        var lineFindings = root[InvoiceSubmissionPersister.LineFindingsMember]!.AsArray();
+        lineFindings.Should().HaveCount(2);
+        InvoiceSubmissionPersister.LineFindingEntryJson(0, InvoiceSubmissionPersister.LineFindingNotReturned).ToJsonString().Should().Be(lineFindings[0]!.ToJsonString());
+        InvoiceSubmissionPersister.LineFindingEntryJson(1, "line.no_description").ToJsonString().Should().Be(lineFindings[1]!.ToJsonString());
+    }
+
+    /// <summary>Captured from the persister BEFORE the per-entry builders were extracted (B2a); a change to it is a change to the stored contract.
+    /// 082d added the trailing <c>procedureSnapshot</c> member (model 7.4; additive, every earlier byte unchanged).</summary>
+    private const string MixedInvoiceGoldenJson = """{"schema":1,"kind":"Blocked","reasonCode":"ebilling.submission.blocked","invoiceId":"702a4e41-057f-9921-ef82-f784a2afb206","trackingNumber":"INV-100.2","receivedOn":"2026-06-05","decision":{"outcome":"Rejected","reliabilityThreshold":0.90,"deciding":[0,1]},"codeSet":{"id":"04900000-0000-4000-8000-0000000000e1","name":"UTBMS","source":"FirmCodes","needsReview":false},"findings":[{"index":0,"ruleType":"InvoiceAge","policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","clause":"Clause of BILL-AGE v1","clauseLocation":"OCG BILL-AGE","subject":"Line","line":0,"reasonCode":"invoice_age.too_old","detailWithheld":false,"consequence":"Reject","rejects":true,"heldBecause":null,"valuesRead":[{"name":"line.date","value":"2026-01-20","line":0,"field":"Date","confidence":0.99,"belowReliabilityThreshold":false},{"name":"invoice.date","value":"2026-06-01","line":null,"field":"InvoiceDate","confidence":0.99,"belowReliabilityThreshold":false},{"name":"line.hours","value":"1.5","line":0,"field":"Hours","confidence":0.99,"belowReliabilityThreshold":false},{"name":"line.amount","value":"750.00","line":0,"field":"Amount","confidence":0.99,"belowReliabilityThreshold":false}],"suggestedAdjustment":{"kind":"Reduce","amount":120.50}},{"index":1,"ruleType":"InvoiceAge","policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","clause":"Clause of BILL-AGE v1","clauseLocation":"OCG BILL-AGE","subject":"Line","line":1,"reasonCode":"invoice_age.too_old","detailWithheld":true,"consequence":"Reject","rejects":true,"heldBecause":null}],"pipelineFindings":[],"codingFindings":[],"lineFindings":[{"line":0,"code":"coding.not_returned","message":"The line was not checked by the AI."},{"line":1,"code":"line.no_description","message":"The line has no description."}],"invoiceName":"Firm LLP - INV-100","invoiceNumberReadConfidence":0.99,"signalPlan":[{"policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","subjectEntity":"sprk_billingevent","subjectId":"b9402a4d-5142-0eff-2cb9-fcaf0eaa30ee","subjectName":"INV-100.2 #1","headline":"Invoice held for review","lane":100000000,"severity":null,"template":"The rejection rule would reject this invoice: {{decidingReason}}","facts":{"invoice.date":"2026-06-01","line.date":"2026-01-20","rule.maxAgeDays":"90","decidingReason":"The line dated 2026-01-20 is more than 90 days before the invoice date 2026-06-01."},"sentence":"The rejection rule would reject this invoice: The line dated 2026-01-20 is more than 90 days before the invoice date 2026-06-01.","evidence":[{"kind":"billing.reasonset","ref":"invoice_age.too_old|Reject","tier":"Fact","confidence":null,"text":null,"source":null,"asOf":null,"clause":null},{"kind":"billing.reason","ref":"invoice_age.too_old","tier":"Fact","confidence":null,"text":"The line dated 2026-01-20 is more than 90 days before the invoice date 2026-06-01.","source":"sprk_policyversion:e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","asOf":null,"clause":null},{"kind":"billing.decision","ref":"Held","tier":"Fact","confidence":null,"text":"ebilling.submission.blocked","source":null,"asOf":null,"clause":null},{"kind":"billing.field","ref":"line[0].Date","tier":"Observation","confidence":0.99,"text":"2026-01-20","source":"line.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"invoice.InvoiceDate","tier":"Observation","confidence":0.99,"text":"2026-06-01","source":"invoice.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[0].Hours","tier":"Observation","confidence":0.99,"text":"1.5","source":"line.hours","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[0].Amount","tier":"Observation","confidence":0.99,"text":"750.00","source":"line.amount","asOf":null,"clause":null}],"reasonCodes":["invoice_age.too_old"],"consequence":"Reject","fingerprint":"invoice_age.too_old|Reject","decision":"Blocked"},{"policyId":"c76b3d50-3e51-97b1-e0d6-6da9e29e9094","policyCode":"BILL-AGE","policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","subjectEntity":"sprk_billingevent","subjectId":"37c0f9a8-1bb6-a7c3-10f8-209c9d981223","subjectName":"INV-100.2 #2","headline":"Invoice held for review","lane":100000000,"severity":null,"template":"The rejection rule would reject this invoice: {{decidingReason}}","facts":{"decidingReason":"This matches an earlier submission."},"sentence":"The rejection rule would reject this invoice: This matches an earlier submission.","evidence":[{"kind":"billing.reasonset","ref":"invoice_age.too_old|Reject","tier":"Fact","confidence":null,"text":null,"source":null,"asOf":null,"clause":null},{"kind":"billing.reason","ref":"invoice_age.too_old","tier":"Fact","confidence":null,"text":"This matches an earlier submission.","source":"sprk_policyversion:e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","asOf":null,"clause":null},{"kind":"billing.decision","ref":"Held","tier":"Fact","confidence":null,"text":"ebilling.submission.blocked","source":null,"asOf":null,"clause":null},{"kind":"billing.field","ref":"line[1].Date","tier":"Observation","confidence":0.99,"text":null,"source":"line.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"invoice.InvoiceDate","tier":"Observation","confidence":0.99,"text":null,"source":"invoice.date","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[1].Hours","tier":"Observation","confidence":0.99,"text":null,"source":"line.hours","asOf":null,"clause":null},{"kind":"billing.field","ref":"line[1].Amount","tier":"Observation","confidence":0.99,"text":null,"source":"line.amount","asOf":null,"clause":null}],"reasonCodes":["invoice_age.too_old"],"consequence":"Reject","fingerprint":"invoice_age.too_old|Reject","decision":"Blocked"}],"provenance":{"analyzerId":"test","apiVersion":"test","actionCode":"invoice-line-code","actionVersion":1,"header":{"FirmInvoiceNumber":{"value":"INV-100","confidence":0.99,"combined":0.99},"InvoiceDate":{"value":"2026-06-01","confidence":0.99,"combined":0.99},"BillingPeriodStart":{"value":"2026-05-01","confidence":0.99,"combined":0.99},"BillingPeriodEnd":{"value":"2026-05-31","confidence":0.99,"combined":0.99},"Currency":{"value":"USD","confidence":0.99,"combined":0.99},"TotalDue":{"value":"1500.00","confidence":0.99,"combined":0.99}}},"procedureSnapshot":{"version":1,"chain":[],"overrides":[],"resolutions":[{"dates":["2026-01-20","2026-01-21","2026-06-01"],"procedures":[],"rules":[],"excludedRules":[],"excludedProcedures":[],"gaps":[]}],"applications":[{"policyVersionId":"e894a2fe-0118-6a93-cbd3-b0b5f1cf26c1","source":"Legacy","applied":{"invoice":true,"lines":[0,1]}}]}}""";
 
     // ── part D: the stored Signal plan ──
 
@@ -996,6 +1523,191 @@ public class InvoiceSubmissionPersisterTests
         Target(store.Transactions.Single()[^1]).Contains(InvoiceSubmissionPersister.SubmissionAdminAttention).Should().BeFalse("never written null or empty");
     }
 
+    // ── Task 104 (FR-36, D-43): the supersedes link ──
+
+    private static readonly Guid Earlier1 = Guid.Parse("10400000-0000-4000-8000-000000000001");
+    private static readonly Guid Earlier2 = Guid.Parse("10400000-0000-4000-8000-000000000002");
+    private static readonly DateTime EarlierOld = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime EarlierNew = new(2026, 9, 20, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
+    /// An invoice the firm sent earlier under the same invoice number (filed under the matter unless told otherwise). Every invoice has its
+    /// approval row except an automatic rejection (049 creates it Rejected with none): pass <c>approval: false</c> for that.
+    /// </summary>
+    private static Entity EarlierInvoice(
+        Guid id, int status, DateTime createdOn, Guid? firm = null, string number = "INV-100", string core = "sprk_matter", Guid? coreId = null,
+        bool approval = true) =>
+        new("sprk_invoice", id)
+        {
+            [Store.HasApprovalMarker] = approval,
+            ["statuscode"] = new OptionSetValue(status),
+            ["createdon"] = createdOn,
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", firm ?? Firm),
+            ["sprk_invoicenumber"] = number,
+            [core] = new EntityReference(core, coreId ?? Matter),
+        };
+
+    private static async Task<(Store Store, SubmissionPersistResult Result)> PersistWithEarlierAsync(params Entity[] earlier)
+    {
+        var store = new Store();
+        store.EarlierInvoices.AddRange(earlier);
+        var outcome = await new ProcessorHarness().RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        return (store, await store.Build().PersistAsync(outcome, null));
+    }
+
+    [Fact(DisplayName = "104 D-43: an accepted resubmission of a Returned to Firm invoice (same firm and invoice number, same core record) is created with sprk_supersedesinvoice set to it")]
+    public async Task Resubmission_OfAReturnedInvoice_IsLinked()
+    {
+        var (store, result) = await PersistWithEarlierAsync(EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld));
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var invoice = Target(store.Transactions.Single()[0]);
+        invoice.LogicalName.Should().Be("sprk_invoice");
+        invoice.GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(Earlier1);
+        invoice.GetAttributeValue<EntityReference>("sprk_supersedesinvoice").LogicalName.Should().Be("sprk_invoice");
+        store.EarlierInvoiceQueries.Should().ContainSingle("one read, app-only, before the transaction");
+    }
+
+    [Theory(DisplayName = "104 D-43 SEEDED: a Rejected (or any other non-Returned) most recent predecessor is NEVER linked")]
+    [InlineData(InvoiceStatusCodes.Rejected)]
+    [InlineData(InvoiceStatusCodes.Approved)]
+    [InlineData(InvoiceStatusCodes.InReview)]
+    [InlineData(InvoiceStatusCodes.Cancelled)]
+    public async Task Resubmission_AfterANonReturnedInvoice_IsNotLinked(int status)
+    {
+        var (store, result) = await PersistWithEarlierAsync(EarlierInvoice(Earlier1, status, EarlierOld));
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43: with no earlier invoice for the firm and number, nothing is linked (the ordinary first submission)")]
+    public async Task FirstSubmission_IsNotLinked()
+    {
+        var (store, _) = await PersistWithEarlierAsync();
+
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43: the MOST RECENT earlier invoice decides - a Returned one after a Rejected one is linked; a Rejected one after a Returned one is not")]
+    public async Task MostRecentEarlierInvoiceDecides()
+    {
+        var (afterRejected, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.Rejected, EarlierOld), EarlierInvoice(Earlier2, InvoiceStatusCodes.ReturnedToFirm, EarlierNew));
+        Target(afterRejected.Transactions.Single()[0]).GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(Earlier2);
+
+        var (afterReturned, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld), EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew));
+        Target(afterReturned.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43 F1-b SEEDED: an AUTOMATIC rejection (Rejected, no approval row) newer than the Returned invoice does not hide it - the resubmission is linked to the Returned one")]
+    public async Task AutomaticRejection_AfterAReturnedInvoice_DoesNotHideIt()
+    {
+        var (store, result) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew, approval: false));
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        Target(store.Transactions.Single()[0]).GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(Earlier1);
+    }
+
+    [Fact(DisplayName = "104 D-43 F1-b SEEDED: a HUMAN rejection (Rejected with its approval row) newer than the Returned invoice still blocks the link")]
+    public async Task HumanRejection_AfterAReturnedInvoice_BlocksTheLink()
+    {
+        var (store, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew, approval: true));
+
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43 F1-b: several automatic rejections are all walked past; with only automatic rejections before it, nothing is linked")]
+    public async Task SeveralAutomaticRejections_AreWalkedPast()
+    {
+        var third = Guid.Parse("10400000-0000-4000-8000-000000000003");
+        var (linked, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew.AddDays(1), approval: false),
+            EarlierInvoice(third, InvoiceStatusCodes.Rejected, EarlierNew.AddDays(2), approval: false));
+        Target(linked.Transactions.Single()[0]).GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(Earlier1);
+
+        var (none, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.Rejected, EarlierOld, approval: false),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.Rejected, EarlierNew, approval: false));
+        Target(none.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43 (escalation 3): two Returned predecessors resolve to the most recent by created on - the chain case, deterministic")]
+    public async Task TwoReturnedPredecessors_TheMostRecentIsLinked()
+    {
+        var (store, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld), EarlierInvoice(Earlier2, InvoiceStatusCodes.ReturnedToFirm, EarlierNew));
+
+        Target(store.Transactions.Single()[0]).GetAttributeValue<EntityReference>("sprk_supersedesinvoice").Id.Should().Be(Earlier2);
+    }
+
+    [Fact(DisplayName = "104 D-43: another firm's invoice, or another invoice number, is never the predecessor")]
+    public async Task OtherFirmOrNumber_IsNotLinked()
+    {
+        var (store, _) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierNew, firm: Guid.NewGuid()),
+            EarlierInvoice(Earlier2, InvoiceStatusCodes.ReturnedToFirm, EarlierNew, number: "INV-101"));
+
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43 / 013: a Returned predecessor filed under ANOTHER core record is not linked (a supersedes link never crosses core records)")]
+    public async Task PredecessorOnAnotherCore_IsNotLinked()
+    {
+        var (store, result) = await PersistWithEarlierAsync(
+            EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld, core: "sprk_project", coreId: Project));
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed, "the invoice is still accepted");
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43 / 013: a predecessor naming no single core record is not linked")]
+    public async Task PredecessorWithNoSingleCore_IsNotLinked()
+    {
+        var both = EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld);
+        both["sprk_project"] = new EntityReference("sprk_project", Project);
+        var (store, _) = await PersistWithEarlierAsync(both);
+
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+    }
+
+    [Fact(DisplayName = "104 D-43: an automatic rejection is not an accepted resubmission - it is never linked, and reads no predecessor")]
+    public async Task AutoRejected_IsNeverLinked()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AutoRejected);
+        var store = new Store();
+        store.EarlierInvoices.Add(EarlierInvoice(Earlier1, InvoiceStatusCodes.ReturnedToFirm, EarlierOld));
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        Target(store.Transactions.Single()[0]).Attributes.Should().NotContainKey("sprk_supersedesinvoice");
+        store.EarlierInvoiceQueries.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "104 D-43: a fault reading the predecessor is a Retry with a stable code and NOTHING is persisted (a missed link would be permanent)")]
+    public async Task PredecessorReadFault_IsARetry_AndPersistsNothing()
+    {
+        var store = new Store { EarlierInvoiceFault = new HttpRequestException("dataverse down") };
+        var outcome = await new ProcessorHarness().RunAsync();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.SupersedesReadFailedCode);
+        store.Transactions.Should().BeEmpty();
+    }
+
     // ── harness ──
 
     private static Entity Target(OrganizationRequest request) => request switch
@@ -1095,6 +1807,118 @@ public class InvoiceSubmissionPersisterTests
         store.Transactions.Single().OfType<CreateRequest>().Single(c => c.Target.LogicalName == "sprk_invoice").Target.Attributes
             .Should().NotContainKey(InvoiceSubmissionPersister.InvoiceDocument, "the invoice no longer links a document");
         store.Isolation.OwnerWrites.Should().BeEmpty("the source is never re-owned");
+    }
+
+    // ── Task 118b-2: the from-document intake's supporting documents, staged by the REAL intake into this store's file store, committed here ──
+
+    private static readonly Guid SupportingA = Guid.Parse("118b0000-0000-4000-8000-0000000002a1");
+    private static readonly Guid SupportingB = Guid.Parse("118b0000-0000-4000-8000-0000000002b1");
+
+    private static byte[] SupportingBytes(Guid id) => System.Text.Encoding.ASCII.GetBytes("supporting " + id.ToString("N"));
+
+    /// <summary>Runs the REAL from-document intake for <see cref="Document"/> naming <paramref name="supporting"/>, staging into <paramref name="store"/>'s file store.</summary>
+    private static async Task StageSupportingThroughTheIntakeAsync(Store store, params Guid[] supporting)
+    {
+        var intake = new InvoiceSubmissionServiceTests.Harness
+        {
+            Files = store.Files,
+            ExistingDocument = new Entity("sprk_document", Document) { ["sprk_graphdriveid"] = "b!drive", ["sprk_graphitemid"] = "item-118b" },
+        };
+        var outcome = await intake.Build().SubmitExistingDocumentAsync(new InvoiceSubmissionRequest
+        {
+            FirmId = InvoiceSubmissionServiceTests.FirmId,
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, InvoiceSubmissionServiceTests.MatterId),
+            Channel = InvoiceSubmissionChannel.Internal,
+            FirmInvoiceNumber = "INV-100",
+            ExistingDocumentId = Document,
+            SupportingDocumentIds = supporting,
+            ReadSupportingDocument = (id, _, _) => Task.FromResult(new SourceDocumentFile(
+                SourceDocumentFileOutcome.Read, SupportingBytes(id), Version: 4, MimeType: "application/vnd.ms-excel", FileName: "Timesheet.XLS")),
+        }, CancellationToken.None);
+        outcome.Receipt!.SubmissionId.Should().Be(SourceSubmission);
+    }
+
+    [Fact(DisplayName = "118b-2 (acceptance: two readable supporting documents): Accepted - the invoice has 1 Invoice PDF (the job's copy) and 2 Supporting Stored Files, each with sprk_sourcedocument its own document, in the ONE transaction; every file ends Servable after the gate re-ran each source")]
+    public async Task Source_WithTwoSupportingDocuments_CommitsOneInvoicePdfAndTwoSupporting_EachWithItsSourceDocument()
+    {
+        var store = new Store();
+        await StageSupportingThroughTheIntakeAsync(store, SupportingB, SupportingA);
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.Transactions.Single().Select(Describe).Should().Equal(
+            "Create sprk_invoice", "Create sprk_storedfile", "Create sprk_storedfile", "Create sprk_storedfile", "Create sprk_billingevent",
+            "Create sprk_invoiceapproval", "Update sprk_document", "Update sprk_invoicesubmission");
+        var files = store.Transactions.Single().OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity).Select(c => c.Target).ToList();
+        files.Count(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoicePdf).Should().Be(1);
+        var supporting = files.Where(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoiceSupportingFile).ToList();
+        supporting.Select(f => f.Id).Should().Equal(
+            InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 1), InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 2));
+        supporting.Select(f => f.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id).Should().Equal(SupportingA, SupportingB);
+        files.Single(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoicePdf)
+            .GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id.Should().Be(Document);
+        foreach (var (row, id) in supporting.Zip(new[] { SupportingA, SupportingB }))
+        {
+            row.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(SourceInvoice);
+            row.GetAttributeValue<bool>(StoredFileSchema.FirmVisible).Should().BeFalse();
+            row.GetAttributeValue<string>(StoredFileSchema.SourceVersion).Should().Be("4");
+            row.GetAttributeValue<string>(StoredFileSchema.SourceSha256).Should().Be(Sha(SupportingBytes(id)));
+            row.GetAttributeValue<string>(StoredFileSchema.Name).Should().MatchRegex(@"^INV-100\.2-[12]\.xls$", "the tracking number and the part number, never the source's name");
+            row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(Submitter);
+        }
+
+        store.Files.Dataverse.Rows.Values.Select(r => (StoredFileStatus)r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value)
+            .Should().HaveCount(3).And.OnlyContain(s => s == StoredFileStatus.Servable, "the gate re-ran each file's own source and flipped every file");
+    }
+
+    [Fact(DisplayName = "118b review (must not fire, the limit): 49 supporting documents (50 files with the invoice document: the commit gate's MaxFiles) are staged by the intake and committed - Accepted, 49 Supporting rows, every file Servable; the reader and the gate agree on the limit")]
+    public async Task Source_With49SupportingDocuments_CommitsWithinTheGatesLimitOf50()
+    {
+        var store = new Store();
+        var ids = Enumerable.Range(1, SubmissionCommitGate.MaxFiles - 1).Select(i => new Guid($"118b0000-0000-4000-8000-{i:D12}")).ToArray();
+        await StageSupportingThroughTheIntakeAsync(store, ids);
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var files = store.Transactions.Single().OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity).Select(c => c.Target).ToList();
+        files.Should().HaveCount(SubmissionCommitGate.MaxFiles, "the invoice document's copy and 49 supporting copies");
+        files.Count(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoiceSupportingFile).Should().Be(ids.Length);
+        files.Where(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoiceSupportingFile)
+            .Select(f => f.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id).Should().BeEquivalentTo(ids);
+        store.Files.Dataverse.Rows.Values.Select(r => (StoredFileStatus)r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value)
+            .Should().HaveCount(SubmissionCommitGate.MaxFiles).And.OnlyContain(s => s == StoredFileStatus.Servable);
+    }
+
+    [Theory(DisplayName = "118b-2 (must fire): supporting parts that do not read back as the first part lists them (a part missing, the list not 1..N) are Refused file_unservable before any write")]
+    [InlineData("missing")]
+    [InlineData("list")]
+    public async Task Source_SupportingPartsDoNotReadBack_IsRefused_NoTransaction(string fault)
+    {
+        var store = new Store();
+        await StageSupportingThroughTheIntakeAsync(store, SupportingA, SupportingB);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, SourceInvoice);
+        var container = StoredFileSchema.ContainerOf(StoredFilePurpose.InvoiceSupportingFile);
+        if (fault == "missing")
+        {
+            await store.Files.Gateway.DeleteIfExistsAsync(container,
+                StoredFileBlobName.Build(store.Files.TenantId, parent, InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 2)), ifMatch: null, CancellationToken.None);
+        }
+        else
+        {
+            store.Files.Gateway.Get(container, StoredFileBlobName.Build(store.Files.TenantId, parent, InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 1)))!
+                .Metadata[StoredFileBlobs.MetadataEmlParts] = "1,3";
+        }
+
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        store.Transactions.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "094: the guard writes the review status back exactly as the check read it (a value-preserving write) at the staged version")]
@@ -1407,6 +2231,26 @@ public class InvoiceSubmissionPersisterTests
         store.Submission.GetAttributeValue<string>("sprk_ponumber").Should().Be("PO-1");
     }
 
+    [Fact(DisplayName = "095d-1b (uac-r2): the firm invoice number is an access column refused to the generic writers, and the commit gate's undo still clears it")]
+    public async Task Gate_Undo_StillClearsTheFirmInvoiceNumber_AfterItIsListedInAccessColumns()
+    {
+        // The listing refuses the app-only GENERIC writers (output mapping, Update Record node, field mapping, Repair). The undo is a typed
+        // writer on IGenericEntityService and asks no refusal list, so it must still clear the column.
+        InheritedAccessPermission.RefuseAppOnlyWrite(TrackingNumberAllocator.SubmissionEntity, [TrackingNumberAllocator.FirmInvoiceNumberColumn])
+            .Should().NotBeNull("095d-1b lists sprk_firminvoicenumber in AccessColumns");
+
+        var store = new Store
+        {
+            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) },
+        };
+        store.Submission[TrackingNumberAllocator.FirmInvoiceNumberColumn] = "INV-100";
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Undone);
+
+        store.Submission.Attributes.Should().NotContainKey(TrackingNumberAllocator.FirmInvoiceNumberColumn, "the undo clears it");
+    }
+
     // ── 050a review round 3 (uac-r2 F1-b): the isolation rule is decided again at commit, and again after a rolled-back transaction ──
 
     private static readonly Guid SecureMatterS = Guid.Parse("050a0003-0000-4000-8000-0000000000a5");
@@ -1515,7 +2359,8 @@ public class InvoiceSubmissionPersisterTests
     {
         var store = new Store
         {
-            // The source stays filed under M (the filing check passes); the copy's roots (its invoice's, until 086) no longer include M.
+            // The source stays filed under M (the filing check passes); the copy's roots (walked up from its file row through its
+            // invoice, task 086) no longer include M.
             AfterCommit = s => s.Isolation
                 .OrdinaryRoot("sprk_matter", OtherMatter)
                 .OrdinaryChild("sprk_invoice", SourceInvoice, ("sprk_matter", "sprk_matter", OtherMatter)),
@@ -1603,7 +2448,7 @@ public class InvoiceSubmissionPersisterTests
         ProjectForTheFirm(store, world, withStoredFiles: true);
 
         var decision = await world.NewService(identity: null)
-            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags, world.CallerFirms);
 
         decision.IsVisible(InvoiceId).Should().BeTrue(decision.HiddenSummary());
         decision.Faulted.Should().BeFalse();
@@ -1620,7 +2465,7 @@ public class InvoiceSubmissionPersisterTests
         ProjectForTheFirm(store, world, withStoredFiles: false);
 
         var decision = await world.NewService(identity: null)
-            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags, world.CallerFirms);
 
         decision.IsVisible(InvoiceId).Should().BeFalse();
     }
@@ -1632,7 +2477,7 @@ public class InvoiceSubmissionPersisterTests
         var submission = store.Submission;
         submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id.Should().Be(InvoiceId);
         world.Submission(InvoiceId, submission.GetAttributeValue<EntityReference>("sprk_document")?.Id,
-            submission.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value);
+            submission.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value, id: submission.Id); // its own submission (task 165c)
         if (!withStoredFiles)
         {
             return;
@@ -2348,11 +3193,30 @@ public class InvoiceSubmissionPersisterTests
             marker: emlMarked, communication: world.Communication(internalOnly: false, world.Thread(openThread)), matter: Matter);
 
         return await world.NewService(identity: null)
-            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags);
+            .HideInvoicesForAsync(FirmContact(), [InvoiceId], world.RootFlags, world.CallerFirms);
     }
 
     private sealed class Store
     {
+        /// <summary>082c-2: whether the review detail column exists (fixed per test; never the process-wide probe).</summary>
+        public ReviewDetailColumnProbe ReviewDetailProbe { get; set; } = ReviewDetailColumnProbe.Fixed(present: true);
+
+        /// <summary>
+        /// 082c-2 fix round 2 (F2): the probe the commit gate (and the lifecycle it builds the supersede undo with) uses. Separate from
+        /// <see cref="ReviewDetailProbe"/> on purpose: the undo can run in another delivery or process than the commit, with a probe that has not
+        /// yet been asked.
+        /// </summary>
+        public ReviewDetailColumnProbe GateReviewDetailProbe { get; set; } = ReviewDetailColumnProbe.Fixed(present: true);
+
+        /// <summary>
+        /// 082c-2 fix round 2 (F2): Dataverse has no <see cref="InvoiceReviewDetail.Column"/>: the probe's read of it faults, and so does any
+        /// write of the old invoice (the supersede undo's reopen) that names it - as Dataverse refuses an unknown attribute.
+        /// </summary>
+        public bool ReviewDetailColumnAbsentInDataverse { get; set; }
+
+        private static Exception ColumnAbsentFault() =>
+            new InvalidOperationException($"'sprk_invoice' entity doesn't contain attribute with Name = '{InvoiceReviewDetail.Column}'");
+
         public Entity Submission { get; } = new("sprk_invoicesubmission", InvoiceSubmissionPersisterTests.Submission)
         {
             ["sprk_trackingnumber"] = "INV-100.2",
@@ -2364,11 +3228,67 @@ public class InvoiceSubmissionPersisterTests
             ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
             ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing),
             ["sprk_createdbyperson"] = new EntityReference("systemuser", Submitter),
+            // Task 095c-4 (review K4): Dataverse's row version; every write of the submission bumps it (Apply, BumpSubmission).
+            ["versionnumber"] = 1L,
         };
+
+        /// <summary>Task 095c-4: a write of the submission by another writer (a direct firm or core-record edit, any column): its version moves.</summary>
+        public void BumpSubmission() => Submission["versionnumber"] = Submission.GetAttributeValue<long>("versionnumber") + 1;
 
         public string MatterNumber { get; init; } = "M-1";
 
         public List<Entity> StoredLines { get; } = [];
+
+        /// <summary>Task 104: the firm's earlier invoices (sprk_invoice rows with statuscode, createdon, sprk_vendororg, sprk_invoicenumber and a core lookup).</summary>
+        public List<Entity> EarlierInvoices { get; } = [];
+
+        /// <summary>Task 104: every read of the firm's earlier invoices the persister made.</summary>
+        public List<QueryExpression> EarlierInvoiceQueries { get; } = [];
+
+        /// <summary>Task 104: a fault on that read.</summary>
+        public Exception? EarlierInvoiceFault { get; init; }
+
+        /// <summary>Marks an earlier invoice that has its approval row (the store answers the approval read from it).</summary>
+        public const string HasApprovalMarker = "test_hasapproval";
+
+        private static bool IsEarlierApprovalQuery(QueryExpression q) =>
+            q.EntityName == InvoiceSubmissionPersister.ApprovalEntity
+            && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceSubmissionPersister.ApprovalInvoice && c.Operator == ConditionOperator.In);
+
+        private EntityCollection AnswerEarlierApprovals(QueryExpression q)
+        {
+            var ids = q.Criteria.Conditions.Single().Values.Cast<Guid>().ToHashSet();
+            return new EntityCollection(EarlierInvoices
+                .Where(i => ids.Contains(i.Id) && i.GetAttributeValue<bool>(HasApprovalMarker))
+                .Select(i => new Entity(InvoiceSubmissionPersister.ApprovalEntity, Guid.NewGuid())
+                {
+                    [InvoiceSubmissionPersister.ApprovalInvoice] = new EntityReference("sprk_invoice", i.Id),
+                }).ToList());
+        }
+
+        private static bool IsEarlierInvoiceQuery(QueryExpression q) =>
+            q.EntityName == "sprk_invoice"
+            && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_vendororg")
+            && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_invoicenumber");
+
+        /// <summary>Evaluates the query's equality conditions, its orders and its top count over <see cref="EarlierInvoices"/>, as Dataverse would.</summary>
+        private EntityCollection AnswerEarlierInvoices(QueryExpression q)
+        {
+            IEnumerable<Entity> rows = EarlierInvoices.Where(r => q.Criteria.Conditions.All(c =>
+                r.Contains(c.AttributeName)
+                && (r[c.AttributeName] is EntityReference er ? er.Id.Equals(c.Values.Single()) : Equals(r[c.AttributeName], c.Values.Single()))));
+            IOrderedEnumerable<Entity>? ordered = null;
+            foreach (var order in q.Orders)
+            {
+                object? Key(Entity e) => order.AttributeName == "sprk_invoiceid" ? e.Id : e.Contains(order.AttributeName) ? e[order.AttributeName] : null;
+                ordered = ordered is null
+                    ? (order.OrderType == OrderType.Descending ? rows.OrderByDescending(Key) : rows.OrderBy(Key))
+                    : (order.OrderType == OrderType.Descending ? ordered.ThenByDescending(Key) : ordered.ThenBy(Key));
+            }
+
+            return new EntityCollection((ordered ?? rows).Take(q.TopCount ?? int.MaxValue).Select(Copy).ToList());
+        }
+
         public List<IReadOnlyList<OrganizationRequest>> Transactions { get; } = [];
         public List<Guid> TotalsCalls { get; } = [];
         public List<RecordOwnershipContext> OwnerContexts { get; } = [];
@@ -2376,6 +3296,12 @@ public class InvoiceSubmissionPersisterTests
         public bool CommitDespiteFault { get; init; }
         public Exception? TotalsFault { get; set; }
         public bool SubmissionDeleted { get; init; }
+
+        /// <summary>EB-D-226 (task 095e): the firm record's name (<c>sprk_organizationname</c>) the persister reads before it writes (null: a row with no name).</summary>
+        public string? FirmRecordName { get; init; } = "Hartwell and Co LLP";
+
+        /// <summary>EB-D-226 (task 095e): a fault the firm-name read throws.</summary>
+        public Exception? FirmNameReadFault { get; init; }
         public RecordOwnerResolution Owner { get; init; } = RecordOwnerResolution.Owned(TeamId);
 
         /// <summary>EB-D-168a: when set, every owner question is answered by the REAL resolver over this directory (not <see cref="Owner"/>).</summary>
@@ -2494,16 +3420,73 @@ public class InvoiceSubmissionPersisterTests
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity switch
                 {
                     "sprk_invoicesubmission" when SubmissionDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
+                    "sprk_invoicesubmission" when OtherSubmissions.TryGetValue(id, out var other) => Project(columns, Copy(other)),
                     "sprk_invoicesubmission" => Capture(columns, Copy(Submission)),
+                    "sprk_invoice" when OldInvoice is { } old && old.Id == id => ReadOldInvoice(columns),
                     "sprk_document" when DocumentDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
                     "sprk_document" => ReadDocument(id, columns),
+                    "sprk_organization" when FirmNameReadFault is { } nameFault => throw nameFault,
+                    "sprk_organization" => new Entity(entity, id) { ["sprk_organizationname"] = FirmRecordName },
                     _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = MatterNumber },
                 });
             // The lines (the resume's read, the undo's delete loop); task 094: the gate's lineage read of the invoice goes to the isolation world.
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName == InvoiceSubmissionPersister.LineEntity
-                    ? new EntityCollection(StoredLines.ToList())
-                    : Isolation.Answer(q));
+                .Returns((QueryExpression q, CancellationToken _) =>
+                {
+                    // 082c-2 fix round 2: an environment without the column - the probe's one-row read of it faults as Dataverse faults.
+                    if (ReviewDetailColumnAbsentInDataverse && q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.Contains(InvoiceReviewDetail.Column))
+                    {
+                        return Task.FromException<EntityCollection>(ColumnAbsentFault());
+                    }
+
+                    if (IsEarlierApprovalQuery(q))
+                    {
+                        return EarlierInvoiceFault is { } approvalFault
+                            ? Task.FromException<EntityCollection>(approvalFault)
+                            : Task.FromResult(AnswerEarlierApprovals(q));
+                    }
+
+                    if (IsSupersededByQuery(q))
+                    {
+                        return Task.FromResult(AnswerSupersededBy(q));
+                    }
+
+                    if (IsEarlierInvoiceQuery(q))
+                    {
+                        EarlierInvoiceQueries.Add(q);
+                        return EarlierInvoiceFault is { } fault
+                            ? Task.FromException<EntityCollection>(fault)
+                            : Task.FromResult(AnswerEarlierInvoices(q));
+                    }
+
+                    // Task 095c-5 review K1: the app-only read of the replaced invoice's firm hold (the invoice's own column; no linked submission).
+                    if (q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.Contains(InvoiceFirmHold.InvoiceHoldColumn))
+                    {
+                        if (HoldReadFault is { } holdFault)
+                        {
+                            return Task.FromException<EntityCollection>(holdFault);
+                        }
+
+                        var asked = q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                        return Task.FromResult(new EntityCollection(OldInvoice is { } held && asked.Contains(held.Id) ? [Copy(held)] : []));
+                    }
+
+                    // The submissions that name an invoice (InvoiceFirmHold's In read; 082c-2 fix round 1: InvoiceProcedureHold's Equal read, which the
+                    // supersede undo makes of the old invoice): only OldInvoiceSubmissions, empty unless a test plants one.
+                    if (q.EntityName == FinanceBaseValues.SubmissionEntity
+                        && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceSubmissionPersister.SubmissionInvoice
+                            && (c.Operator == ConditionOperator.In || c.Operator == ConditionOperator.Equal)))
+                    {
+                        var named = q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                        return Task.FromResult(new EntityCollection(OldInvoiceSubmissions
+                            .Where(s => s.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice) is { } r && named.Contains(r.Id))
+                            .Select(Copy).ToList()));
+                    }
+
+                    return Task.FromResult(q.EntityName == InvoiceSubmissionPersister.LineEntity
+                        ? new EntityCollection(StoredLines.ToList())
+                        : Isolation.Answer(q));
+                });
 
             // Task 094: the commit gate's writes - the undo's Failed write and its column clear (DBNull.Value clears), and its deletes.
             entities.Setup(e => e.UpdateAsync(FinanceBaseValues.SubmissionEntity, It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
@@ -2550,6 +3533,11 @@ public class InvoiceSubmissionPersisterTests
                         return UndoTransaction(requests.Cast<DeleteRequest>().ToList());
                     }
 
+                    if (requests is [UpdateRequest { Target.LogicalName: "sprk_invoice" } reopen])
+                    {
+                        return OldInvoiceTransaction(reopen);
+                    }
+
                     Transactions.Add(requests);
                     BeforeTransaction?.Invoke(this);
 
@@ -2560,6 +3548,23 @@ public class InvoiceSubmissionPersisterTests
                         if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } guard
                             && guard.Target.LogicalName == "sprk_document"
                             && (DocumentDeleted || guard.Target.RowVersion != DocumentVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                        {
+                            return Task.FromException(new DataverseTransactionException(
+                                "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
+                        }
+
+                        // Task 095c-4 (review K4): the submission update, conditional on the version the persister re-read.
+                        if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } link
+                            && link.Target.LogicalName == "sprk_invoicesubmission"
+                            && link.Target.RowVersion != Submission.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        {
+                            return Task.FromException(new DataverseTransactionException(
+                                "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
+                        }
+
+                        // Task 097c: the old invoice's close, conditional on the version the persister read.
+                        if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } close
+                            && close.Target.LogicalName == "sprk_invoice" && !OldInvoiceMatches(close))
                         {
                             return Task.FromException(new DataverseTransactionException(
                                 "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
@@ -2610,18 +3615,33 @@ public class InvoiceSubmissionPersisterTests
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                     () => Isolation, new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
-                NullLogger<SubmissionCommitGate>.Instance);
+                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance)
+                {
+                    ReviewDetailProbe = GateReviewDetailProbe,
+                },
+                NullLogger<SubmissionCommitGate>.Instance,
+                Index.Submitter)
+            {
+                ReviewDetailProbe = GateReviewDetailProbe,
+            };
 
             return new InvoiceSubmissionPersister(
                 entities.Object,
                 recordTypes.Object,
                 ownership.Object,
-                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
+                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance)
+                {
+                    ReviewDetailProbe = ReviewDetailProbe,
+                },
                 totals.Object,
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Files.Service,
                 Gate,
-                Logger);
+                Logger,
+                Index.Submitter)
+            {
+                ReviewDetailProbe = ReviewDetailProbe,
+            };
         }
 
         /// <summary>
@@ -2645,15 +3665,17 @@ public class InvoiceSubmissionPersisterTests
                         break;
                     case "sprk_invoice":
                         CreatedRows.Add(("sprk_invoice", create.Target.Id));
-                        if (create.Target.GetAttributeValue<EntityReference>("sprk_matter") is { } matter)
+                        CreatedInvoices[create.Target.Id] = Copy(create.Target);
+                        if (CoreLookupOf(create.Target) is { } found)
                         {
-                            if (Isolation.ValueOf<bool>("sprk_matter", matter.Id, "sprk_issecure"))
+                            var (coreColumn, core) = found;
+                            if (Isolation.ValueOf<bool>(core.LogicalName, core.Id, "sprk_issecure"))
                             {
-                                Isolation.SecureChild("sprk_invoice", create.Target.Id, ("sprk_matter", "sprk_matter", matter.Id));
+                                Isolation.SecureChild("sprk_invoice", create.Target.Id, (coreColumn, core.LogicalName, core.Id));
                             }
                             else
                             {
-                                Isolation.OrdinaryChild("sprk_invoice", create.Target.Id, ("sprk_matter", "sprk_matter", matter.Id));
+                                Isolation.OrdinaryChild("sprk_invoice", create.Target.Id, (coreColumn, core.LogicalName, core.Id));
                             }
                         }
 
@@ -2664,13 +3686,60 @@ public class InvoiceSubmissionPersisterTests
                 }
             }
 
+            // Task 086: sprk_storedfile is a lineage child of sprk_invoice, so the commit gate walks the copy's roots up from its file rows
+            // (SubmissionCommitGate.FileRootsAsync). Each file goes into the isolation world filed under its invoice and owned as the
+            // transaction owns it (its own ownerid: the answer of the persister's Stored File question), whatever the invoice's core
+            // record is: a matter, a project or a work assignment (CoreLookupOf).
+            foreach (var create in requests.OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity))
+            {
+                if (create.Target.GetAttributeValue<EntityReference>("sprk_invoice") is not { } invoice
+                    || !CreatedInvoices.TryGetValue(invoice.Id, out var created)
+                    || CoreLookupOf(created) is null)
+                {
+                    continue;
+                }
+
+                var invoiceLookup = ("sprk_invoice", (object)new EntityReference("sprk_invoice", invoice.Id));
+                if (create.Target.GetAttributeValue<EntityReference>("ownerid") is { } owner)
+                {
+                    var ownerColumn = string.Equals(owner.LogicalName, "team", StringComparison.OrdinalIgnoreCase) ? "owningteam" : "owninguser";
+                    Isolation.Add(StoredFileSchema.Entity, create.Target.Id,
+                        (ownerColumn, new EntityReference(owner.LogicalName, owner.Id)), invoiceLookup);
+                }
+                else
+                {
+                    Isolation.Add(StoredFileSchema.Entity, create.Target.Id, invoiceLookup);
+                }
+            }
+
+            foreach (var update in requests.OfType<UpdateRequest>().Where(u => u.Target.LogicalName == "sprk_invoice"))
+            {
+                ApplyToOldInvoice(update);
+            }
+
             foreach (var update in requests.OfType<UpdateRequest>().Where(u => u.Target.LogicalName == "sprk_invoicesubmission"))
             {
                 foreach (var (column, value) in update.Target.Attributes)
                 {
                     Submission[column] = value;
                 }
+
+                BumpSubmission();
             }
+        }
+
+        /// <summary>The core record an invoice is filed under, from any of its three core lookups (matter, project, work assignment).</summary>
+        private static (string Column, EntityReference Core)? CoreLookupOf(Entity invoice)
+        {
+            foreach (var column in new[] { "sprk_matter", "sprk_project", CoreAncestorResolver.StampColumnFor("sprk_workassignment") })
+            {
+                if (invoice.GetAttributeValue<EntityReference>(column) is { } core)
+                {
+                    return (column, core);
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -2744,6 +3813,135 @@ public class InvoiceSubmissionPersisterTests
         /// <summary>Fix round: whether the committed invoice row is still there.</summary>
         public bool InvoiceExists => CreatedRows.Any(r => r.Table == "sprk_invoice");
 
+        // ── Task 097c: the invoice a Correction replaces ──
+
+        /// <summary>Task 097c: re-index jobs queued by the persister and the gate.</summary>
+        public IndexQueueDouble Index { get; } = new();
+
+        /// <summary>
+        /// Task 097c (review F3): reads return only the columns asked for, as Dataverse does, so a column dropped from a read (the gate's
+        /// <c>sprk_resubmissionof</c>, the old invoice's status or version) fails the test instead of being answered anyway. Off by default:
+        /// the older tests were written against whole rows.
+        /// </summary>
+        public bool ProjectReads { get; set; }
+
+        /// <summary>Task 097c: other submission rows by id (the earlier submission a Correction names).</summary>
+        public Dictionary<Guid, Entity> OtherSubmissions { get; } = [];
+
+        /// <summary>Task 097c: the old invoice as Dataverse keeps it (statecode, statuscode, versionnumber, firm, core lookup); null: none.</summary>
+        public Entity? OldInvoice { get; set; }
+
+        /// <summary>082c-2 fix round 1: submission rows that name the old invoice (its stored outcome reason and findings), as the holds read them.</summary>
+        public List<Entity> OldInvoiceSubmissions { get; } = [];
+
+        /// <summary>Task 095c-5 review K1: non-null, the app-only read of the replaced invoice's firm hold throws this.</summary>
+        public Exception? HoldReadFault { get; set; }
+
+        /// <summary>Task 097c: the old invoice no longer exists.</summary>
+        public bool OldInvoiceDeleted { get; set; }
+
+        /// <summary>Task 097c: faults the next N reads of the old invoice.</summary>
+        public int OldInvoiceReadFaults { get; set; }
+
+        /// <summary>Task 097c: every read of the old invoice (columns).</summary>
+        public List<string[]> OldInvoiceReads { get; } = [];
+
+        /// <summary>Task 097c: every single-request transaction on the old invoice (the undo's reopen), applied or not.</summary>
+        public List<UpdateRequest> OldInvoiceWrites { get; } = [];
+
+        /// <summary>Task 097c: another writer's slot between the undo's read of the old invoice and its reopen.</summary>
+        public Action<Store>? BeforeOldInvoiceWrite { get; set; }
+
+        /// <summary>Task 097c: other live invoices that supersede the old invoice (another correction's).</summary>
+        public List<Guid> OtherSupersedingInvoices { get; } = [];
+
+        /// <summary>Task 097c: the invoices the committed transaction created, by id.</summary>
+        private Dictionary<Guid, Entity> CreatedInvoices { get; } = [];
+
+        public int OldInvoiceStatus => OldInvoice!.GetAttributeValue<OptionSetValue>("statuscode").Value;
+
+        public long OldInvoiceVersion => OldInvoice!.GetAttributeValue<long>("versionnumber");
+
+        /// <summary>Task 097c: another writer changes the old invoice (a status move or any edit): its version moves on.</summary>
+        public void ChangeOldInvoice(int? statusCode = null, int? stateCode = null)
+        {
+            if (statusCode is { } status)
+            {
+                OldInvoice!["statuscode"] = new OptionSetValue(status);
+            }
+
+            if (stateCode is { } state)
+            {
+                OldInvoice!["statecode"] = new OptionSetValue(state);
+            }
+
+            OldInvoice!["versionnumber"] = OldInvoiceVersion + 1;
+        }
+
+        private Entity ReadOldInvoice(string[] columns)
+        {
+            OldInvoiceReads.Add(columns);
+            if (OldInvoiceDeleted)
+            {
+                throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist");
+            }
+
+            if (OldInvoiceReadFaults > 0)
+            {
+                OldInvoiceReadFaults--;
+                throw new HttpRequestException("Dataverse unavailable");
+            }
+
+            return Project(columns, Copy(OldInvoice!));
+        }
+
+        private bool OldInvoiceMatches(UpdateRequest update) =>
+            OldInvoice is { } old && !OldInvoiceDeleted && update.Target.Id == old.Id
+            && update.Target.RowVersion == OldInvoiceVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        private void ApplyToOldInvoice(UpdateRequest update)
+        {
+            foreach (var (column, value) in update.Target.Attributes)
+            {
+                OldInvoice![column] = value;
+            }
+
+            OldInvoice!["versionnumber"] = OldInvoiceVersion + 1;
+        }
+
+        private Task OldInvoiceTransaction(UpdateRequest update)
+        {
+            BeforeOldInvoiceWrite?.Invoke(this);
+            OldInvoiceWrites.Add(update);
+            if (ReviewDetailColumnAbsentInDataverse && update.Target.Contains(InvoiceReviewDetail.Column))
+            {
+                return Task.FromException(ColumnAbsentFault());
+            }
+
+            // As Dataverse: only a conditional update is refused at a stale version; an unconditional one overwrites.
+            if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches && !OldInvoiceMatches(update))
+            {
+                return Task.FromException(new DataverseTransactionException("ConcurrencyVersionMismatch", failedRequestIndex: 0, outcomeUnknown: false, null));
+            }
+
+            ApplyToOldInvoice(update);
+            return Task.CompletedTask;
+        }
+
+        private static bool IsSupersededByQuery(QueryExpression q) =>
+            q.EntityName == "sprk_invoice" && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_supersedesinvoice");
+
+        private EntityCollection AnswerSupersededBy(QueryExpression q)
+        {
+            var target = (Guid)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_supersedesinvoice").Values.Single();
+            var live = CreatedInvoices.Values
+                .Where(i => CreatedRows.Contains(("sprk_invoice", i.Id)) && i.GetAttributeValue<EntityReference>("sprk_supersedesinvoice")?.Id == target)
+                .Select(i => i.Id)
+                .Concat(OtherSupersedingInvoices)
+                .Select(id => new Entity("sprk_invoice", id));
+            return new EntityCollection(live.Take(q.TopCount ?? int.MaxValue).ToList());
+        }
+
         private Entity ReadDocument(Guid id, string[] columns)
         {
             DocumentReads.Add(columns);
@@ -2755,6 +3953,21 @@ public class InvoiceSubmissionPersisterTests
         private Entity Capture(string[] columns, Entity row)
         {
             SubmissionReadColumns.Add(columns);
+            return Project(columns, row);
+        }
+
+        private Entity Project(string[] columns, Entity row)
+        {
+            if (!ProjectReads)
+            {
+                return row;
+            }
+
+            foreach (var column in row.Attributes.Keys.Where(c => !columns.Contains(c)).ToList())
+            {
+                row.Attributes.Remove(column);
+            }
+
             return row;
         }
 

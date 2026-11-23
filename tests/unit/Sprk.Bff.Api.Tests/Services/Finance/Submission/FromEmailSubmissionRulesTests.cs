@@ -34,7 +34,10 @@ public class FromEmailSubmissionRulesTests
 
     private static FromEmailMark Mark(AttachmentReference a, string mark) => new()
     {
-        FileName = a.FileName, Size = a.Size, ContentType = a.ContentType, Mark = mark,
+        FileName = a.FileName,
+        Size = a.Size,
+        ContentType = a.ContentType,
+        Mark = mark,
     };
 
     private static readonly AttachmentReference Invoice = Att("Invoice 1001.pdf", PdfBytes, "application/pdf");
@@ -191,15 +194,15 @@ public class FromEmailSubmissionRulesTests
 
     internal static FromEmailSubmissionInput Input(IReadOnlyList<FromEmailMark>? marks = null, string number = "1001",
         string mode = "New", Guid? firm = null, string messageId = "<inv-1001@firm.example>") => new()
-    {
-        CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
-        SaveEntityType = "Matter",
-        Email = new EmailMetadata { Subject = "Invoice 1001", SenderEmail = "billing@firm.example", InternetMessageId = messageId },
-        Marks = marks ?? new[] { Mark(Invoice, "Invoice"), Mark(Timesheet, "Supporting") },
-        FirmId = firm ?? FirmId,
-        FirmInvoiceNumber = number,
-        Mode = mode,
-    };
+        {
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
+            SaveEntityType = "Matter",
+            Email = new EmailMetadata { Subject = "Invoice 1001", SenderEmail = "billing@firm.example", InternetMessageId = messageId },
+            Marks = marks ?? new[] { Mark(Invoice, "Invoice"), Mark(Timesheet, "Supporting") },
+            FirmId = firm ?? FirmId,
+            FirmInvoiceNumber = number,
+            Mode = mode,
+        };
 
     [Fact]
     public void Key_IsTheCanonicalV2Array_InTheContractsFieldOrder_WithNoFirmDetails()

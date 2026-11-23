@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
@@ -103,7 +104,9 @@ public class CiamUserProvisioningService
         var oid = created?.Id
             ?? throw new InvalidOperationException("CIAM Graph POST /users returned a null user id.");
 
-        _logger.LogInformation("[CIAM-PROVISION] Created CIAM user {Oid} for {Email}", oid, email);
+        // Never the invitee's email: the oid and the trace id identify the create.
+        _logger.LogInformation("[CIAM-PROVISION] Created CIAM user {Oid}. Trace {TraceId}.", oid,
+            Activity.Current?.TraceId.ToString() ?? "(none)");
         return oid;
     }
 

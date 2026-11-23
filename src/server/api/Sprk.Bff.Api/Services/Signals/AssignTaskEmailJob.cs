@@ -12,21 +12,28 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// </summary>
 /// <remarks>
 /// <para><b>Once per task.</b> Three layers, strongest last: an idempotency entry under the task's key (set after a send), a processing
-/// lock owned by this job id (a second copy is refused while the first runs; a redelivery of this job takes over its own dead lock), and
-/// the durable check in the notifier (an email whose <c>sprk_communication</c> carries the task's correlation id is not sent again). The
+/// lock owned by this job id (a second copy is refused while the first runs, and a refusal is a retry, never a completion; a redelivery
+/// of this job takes over its own dead lock once it is <c>IdempotencyService.OwnerTakeoverAge</c> old), and the durable check in the notifier (an email whose <c>sprk_communication</c> carries the task's correlation id is not sent again). The
 /// cache is check-then-set and fails open (#984), which is why the last layer is a Dataverse read.</para>
 /// <para><b>Outcomes.</b> Sent, already sent, nothing to send (the task or contact is gone, the task was closed or reassigned, or the
 /// contact has no address) and not allowed (the recipient gate refused the assignee at send time, D-199 Q2) are <c>Success</c>. An
 /// unreadable payload, and a fault no retry can fix (fix round, review finding 5: a 4xx from the send path such as an unset or
 /// unapproved <c>DefaultMailbox</c>, an owner refusal or a validation error, and an <see cref="InvalidOperationException"/>) are
-/// <c>Poisoned</c>. A gate that could not check (<see cref="AssignTaskSystemEmailOutcome.Unverified"/>) and any other fault (Graph 5xx,
-/// Dataverse, a timeout) are <c>Failure</c>: redelivered, then dead-lettered by <c>ServiceBusJobProcessor</c>. Faults are logged by
-/// exception type and error code, never the exception (its message can name an address).</para>
+/// <c>Poisoned</c>. A gate that could not check (<see cref="AssignTaskSystemEmailOutcome.Unverified"/>), any other fault (Graph 5xx,
+/// Dataverse, a timeout) and a refused processing lock are <c>Failure</c>: redelivered, then dead-lettered by <c>ServiceBusJobProcessor</c>.
+/// A refused lock is never a <c>Success</c>: it does not prove an email was sent (it may be this job's own leftover lock, after an attempt
+/// failed and its release hit a cache fault, still younger than the takeover age), and completing would drop the email silently. The
+/// processor abandons without a delay, so the redeliveries of a refused job all land inside that one-minute age and it is dead-lettered
+/// (visible); a replay after a minute takes the lock over, or finds the email already sent (the check before the lock stays <c>Success</c>).
+/// Faults are logged by exception type and error code, never the exception (its message can name an address).</para>
 /// <para>The payload and every log line hold ids only. Placement (ADR-004, ADR-052): a queue consumer on the existing main-queue seam,
 /// the <see cref="GateDecisionRecordJobHandler"/> shape. §11: see <see cref="AssignTaskNotifier"/>.</para>
 /// </remarks>
 public sealed class AssignTaskEmailJobHandler : IJobHandler
 {
+    /// <summary>The <see cref="JobOutcome"/> error text of a job refused the task's processing lock (a log and dead-letter reason).</summary>
+    internal const string LockRefusedError = "ProcessingLockRefused";
+
     /// <summary>How long a job holds the task's processing lock.</summary>
     internal static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
 
@@ -74,9 +81,26 @@ public sealed class AssignTaskEmailJobHandler : IJobHandler
         var owner = job.JobId.ToString("N", CultureInfo.InvariantCulture);
         if (!await _idempotency.TryAcquireProcessingLockAsync(key, owner, LockDuration, ct).ConfigureAwait(false))
         {
-            _logger.LogInformation(AssignTaskNotifierEvents.SystemEmailJob,
-                "[ASSIGN-TASK-NOTIFY] job {JobId} not run: another job holds the email for task {TaskId}.", job.JobId, payload.TaskId);
-            return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+            // A refused lock is not proof that the email was sent: it may be a concurrent copy that is still sending, or this job's OWN
+            // leftover lock (its earlier attempt failed and the release hit a cache fault; the lock is younger than
+            // IdempotencyService.OwnerTakeoverAge). Completing here would drop the email, so it is a Failure: the processor abandons it
+            // for redelivery and dead-letters it after the last delivery. The lock is not ours, so it is neither released nor sent under.
+            if (job.IsFinalDelivery)
+            {
+                _logger.LogError(AssignTaskNotifierEvents.SystemEmailJob,
+                    "[ASSIGN-TASK-NOTIFY] job {JobId} for task {TaskId} was refused the processing lock on its final delivery " +
+                    "(attempt {Attempt}, delivery {Delivery}); it will be dead-lettered and no email was sent by it.",
+                    job.JobId, payload.TaskId, job.Attempt, job.DeliveryCount);
+            }
+            else
+            {
+                _logger.LogWarning(AssignTaskNotifierEvents.SystemEmailJob,
+                    "[ASSIGN-TASK-NOTIFY] job {JobId} not run: the processing lock for task {TaskId} is held; it will be redelivered " +
+                    "(attempt {Attempt}, delivery {Delivery}), and dead-lettered after the last delivery.",
+                    job.JobId, payload.TaskId, job.Attempt, job.DeliveryCount);
+            }
+
+            return JobOutcome.Failure(job.JobId, JobType, LockRefusedError, job.Attempt, stopwatch.Elapsed);
         }
 
         try

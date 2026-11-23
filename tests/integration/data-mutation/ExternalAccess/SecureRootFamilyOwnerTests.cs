@@ -586,4 +586,72 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         rootOwners.GetProperty("withGrants").GetInt32().Should().Be(0);
         rootOwners.GetProperty("changes").GetArrayLength().Should().Be(1);
     }
+
+    // ── Task 195 (#2352): the project filing census (report only) ────────────────────────────────────────────────────────
+
+    /// <summary>An N:N row of the Project ↔ Matter association (<c>sprk_project_sprk_matter</c>).</summary>
+    private void Linked(Guid project, Guid matter) =>
+        World.Add(SecureRootInheritance.ProjectMatterLinkEntity, Guid.NewGuid(), ("sprk_projectid", project), ("sprk_matterid", matter));
+
+    private Guid ProjectFiledUnder(Guid? matter, Guid matterType)
+    {
+        var project = Guid.NewGuid();
+        _fixture.SeedProject(project, owningTeamId: TeamA, isSecure: false);
+        if (matter is { } m)
+            FilePair(_fixture, "sprk_project", project, m, matterType);
+        return project;
+    }
+
+    [Fact(DisplayName = "Task 195 must fire: the root-owner report counts projects linked to a matter with no pair, and projects whose pair matter has no link row")]
+    public async Task TheFilingCensus_CountsBothDisagreements_AndWritesNothing()
+    {
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        var (m1, m2, m3, m5, m6) = (MatterInA(), MatterInA(), MatterInA(), MatterInA(), MatterInA());
+        var linkedNoPair = ProjectFiledUnder(null, matterType);
+        Linked(linkedNoPair, m1);
+        ProjectFiledUnder(m2, matterType);                     // a pair, no link row
+        Linked(ProjectFiledUnder(m3, matterType), m3);         // both agree: neither count
+        Linked(ProjectFiledUnder(m6, matterType), m5);         // linked to one matter, filed under another: the second count
+        ProjectFiledUnder(null, matterType);                   // neither: no count
+
+        var pass = await PassAsync();
+
+        pass.RootOwners.ProjectsWithMatterLinkButNoPair.Should().Be(1);
+        pass.RootOwners.ProjectsWhosePairMatterHasNoLink.Should().Be(2);
+        _fixture.ConditionalRootWrites.Should().BeEmpty("report only");
+        World.QueriedTables.Should().Contain(SecureRootInheritance.ProjectMatterLinkEntity);
+        var rootOwners = JsonSerializer.SerializeToElement(pass.RootOwners, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        rootOwners.GetProperty("projectsWithMatterLinkButNoPair").GetInt32().Should().Be(1, "the job's ResultJson carries it");
+    }
+
+    [Fact(DisplayName = "Task 195 must not fire: when the link table cannot be read the counts are not reported (null), a problem line says so, and the pass completes")]
+    public async Task TheFilingCensus_WhenTheLinkTableCannotBeRead_ReportsNoCounts()
+    {
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        ProjectFiledUnder(MatterInA(), matterType);
+        World.FailingQueriesOf(SecureRootInheritance.ProjectMatterLinkEntity);
+
+        var pass = await PassAsync();
+
+        pass.RootOwners.ProjectsWithMatterLinkButNoPair.Should().BeNull();
+        pass.RootOwners.ProjectsWhosePairMatterHasNoLink.Should().BeNull();
+        pass.Problems.Should().Contain(p => p.Contains("project filing census"));
+    }
+
+    [Fact(DisplayName = "Task 195 must fire: a project whose pair type is missing or not in the catalog is counted with a problem line, never skipped silently")]
+    public async Task TheFilingCensus_CountsAPairWhoseTypeIsUnknown()
+    {
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        var matter = MatterInA();
+        Linked(ProjectFiledUnder(matter, matterType), matter);  // agrees: no count
+        ProjectFiledUnder(matter, Guid.NewGuid());              // a type the catalog does not have
+        var noType = ProjectFiledUnder(null, matterType);
+        World.Set("sprk_project", noType, "sprk_regardingrecordid", matter.ToString("D")); // an id with no type
+
+        var pass = await PassAsync();
+
+        pass.RootOwners.ProjectsWhosePairTypeIsUnknown.Should().Be(2);
+        pass.RootOwners.ProjectsWhosePairMatterHasNoLink.Should().Be(0);
+        pass.Problems.Should().Contain(p => p.Contains("project filing census found 2 project(s)"));
+    }
 }

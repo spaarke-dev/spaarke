@@ -1,7 +1,7 @@
 /**
  * Launch-seam contract for the "create from this email" actions (task 113 / UAT R3 C11-3).
  *
- * Protects: all three flows (Create Event / Create To Do / Link Invoice) route through
+ * Protects: both flows (Create Event / Create To Do) route through
  * ONE seam that opens an in-app MODAL via `navigateTo` `{ pageType:'entityrecord',
  * target: 2 }` at the correct target entity — so OOB↔custom is swappable without editing
  * the button call sites.
@@ -13,13 +13,18 @@ describe('launchCreate seam', () => {
   it('maps each kind to the correct target entity + title', () => {
     expect(CREATE_LAUNCH_TARGETS.event.entityName).toBe('sprk_event');
     expect(CREATE_LAUNCH_TARGETS.todo.entityName).toBe('sprk_todo');
-    expect(CREATE_LAUNCH_TARGETS.invoice.entityName).toBe('sprk_invoice');
     expect(CREATE_LAUNCH_TARGETS.event.title).toBe('Create Event');
     expect(CREATE_LAUNCH_TARGETS.todo.title).toBe('Create To Do');
-    expect(CREATE_LAUNCH_TARGETS.invoice.title).toBe('Link Invoice');
   });
 
-  it.each<CreateKind>(['event', 'todo', 'invoice'])(
+  // ebilling-r1 task 118: an invoice is submitted through the BFF (the shared Submit Invoice flow), never by opening a
+  // raw sprk_invoice create form, so the seam has no invoice target.
+  it('has no invoice target: Submit Invoice does not create an sprk_invoice from a form', () => {
+    expect(Object.keys(CREATE_LAUNCH_TARGETS).sort()).toEqual(['event', 'todo']);
+    expect(JSON.stringify(CREATE_LAUNCH_TARGETS)).not.toContain('sprk_invoice');
+  });
+
+  it.each<CreateKind>(['event', 'todo'])(
     'opens %s as an in-app modal dialog (entityrecord + target:2) at the mapped entity',
     kind => {
       const navigateTo = jest.fn().mockResolvedValue(undefined);
@@ -55,10 +60,10 @@ describe('launchCreate seam', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const hostNav = (global as any).Xrm.Navigation.navigateTo as jest.Mock;
     hostNav.mockClear();
-    expect(() => launchCreate('invoice', {})).not.toThrow();
+    expect(() => launchCreate('event', {})).not.toThrow();
     expect(hostNav).toHaveBeenCalledTimes(1);
     const [pageInput, navOptions] = hostNav.mock.calls[0];
-    expect(pageInput).toEqual({ pageType: 'entityrecord', entityName: 'sprk_invoice' });
+    expect(pageInput).toEqual({ pageType: 'entityrecord', entityName: 'sprk_event' });
     expect(navOptions.target).toBe(2);
   });
 

@@ -315,14 +315,13 @@ public partial class SignalSuppressionTests
         var s = new Store();
         (Guid Type, Guid Id)[] cores =
         [
-            (WorkAssignmentType, WorkAssignmentId), (ServiceRequestType, ServiceRequestId), (MatterType, MatterId), (FifthCoreType, FifthCoreId),
+            (WorkAssignmentType, WorkAssignmentId), (ServiceRequestType, ServiceRequestId), (MatterType, MatterId), (ProjectType, ProjectId),
         ];
-        // A fifth core type exists only as a catalog row (a type ref id) and an id: nothing in the service names it.
         for (var n = 0; n < 3; n++)
         {
             s.Dismiss(WorkAssignmentId, Guid.NewGuid(), daysAgo: n + 1, coreType: WorkAssignmentType);
             s.Dismiss(ServiceRequestId, Guid.NewGuid(), daysAgo: n + 1, coreType: ServiceRequestType);
-            s.Dismiss(FifthCoreId, Guid.NewGuid(), daysAgo: n + 1, coreType: FifthCoreType);
+            s.Dismiss(ProjectId, Guid.NewGuid(), daysAgo: n + 1, coreType: ProjectType);
         }
 
         s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1); // the matter has only one
@@ -333,7 +332,34 @@ public partial class SignalSuppressionTests
             results.Add((await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForCore(type, id), default)).SuppressedUntil);
         }
 
+        // The four core types are counted independently, and the service names none of them (D-36): each is a catalog type id
+        // and a core id. A type the catalog maps to no core table is held instead (ACorePairOfAnUnknownType_IsHeld_NeverStamped_D204).
         results.Select(r => r is not null).Should().Equal(true, true, false, true);
+    }
+
+    [Fact]
+    public async Task ACorePairOfAnUnknownType_IsHeld_NeverStamped_D204()
+    {
+        // The core tables are a closed set, so a core record pair whose type the catalog maps to no core table is a data error: its
+        // Signals are held (undetermined), as the ownership question holds such a row. The undetermined bucket is fail closed: its
+        // dismissals are not counted for the pairing, and nothing is stamped.
+        var s = new Store();
+        var dismissed = Enumerable.Range(0, 3)
+            .Select(n => s.Dismiss(FifthCoreId, Guid.NewGuid(), daysAgo: n + 1, coreType: FifthCoreType))
+            .ToList();
+        var open = s.Open(FifthCoreId, Guid.NewGuid());
+        s.Signals.Single(x => x.Id == open)["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", FifthCoreType);
+        s.Signals.Single(x => x.Id == open).Attributes.Remove("sprk_matter");
+
+        (await s.Service.PartitionsOfSignalsAsync([.. dismissed, open], default))
+            .Should().OnlyContain(p => p == SuppressionPartition.Undetermined, "a type that names no core table holds the Signal");
+
+        var status = await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForCore(FifthCoreType, FifthCoreId), default);
+
+        status.DismissalsCounted.Should().Be(0, "a held dismissal counts toward nothing");
+        status.SuppressedUntil.Should().BeNull();
+        s.StampedIds.Should().BeEmpty("the undetermined bucket is never stamped");
+        s.Signals.Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == null);
     }
 
     [Fact]
@@ -619,7 +645,7 @@ public partial class SignalSuppressionTests
         var signal = s.Open(MatterId, Guid.NewGuid());
         var before = s.Queries;
         var todoSubject = Guid.NewGuid();
-        var entities = new Mock<IGenericEntityService>();
+        var entities = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
         var users = new Mock<IDataverseUserClient>();
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
@@ -1427,13 +1453,14 @@ public partial class SignalSuppressionTests
         // CHARACTERISATION (review F3: not acceptance-7 evidence). The stamp is written here by hand; it pins only that the partition
         // walk follows sprk_regarding{project,workassignment} on a Signal, so that a stamp the restamper writes (proven in
         // OntologyStampedChildRestampTests and SecureChildOwnershipAiToolTests.OntologyRestamp) moves a Secure-owned Signal out of the
-        // undetermined bucket.
+        // undetermined bucket. The Signal carries no core record pair here, so the stamp is its only way up (a pair is a parent of its
+        // own: CorePair_ASecureOwnedSignal_IsPlacedUnderTheProjectOrWorkAssignmentItsPairNames).
         var s = new Store();
-        var (core, type) = SecureCore(s, coreTable);
+        var (core, _) = SecureCore(s, coreTable);
         var subject = Guid.NewGuid();
         // The subject does not reach the root: an ordinary team's communication filed under nothing the walk can follow (#1746 K4).
         s.Subject(subject);
-        var signal = s.Dismiss(core, subject, daysAgo: 1, coreType: type, secure: true);
+        var signal = s.Dismiss(core: null, subject, daysAgo: 1, secure: true);
 
         (await s.Service.PartitionsOfSignalsAsync([signal], default)).Should().Equal([SuppressionPartition.Undetermined],
             "before the stamp: a Secure-owned Signal with no secure root found is undetermined");
@@ -1442,6 +1469,71 @@ public partial class SignalSuppressionTests
 
         (await s.Service.PartitionsOfSignalsAsync([signal], default)).Should().Equal([SuppressionPartition.Secure([(coreTable, core)])],
             "the stamp reaches the secure core, so the Signal is counted and muted in its own family");
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectAndWorkAssignmentCores))]
+    public async Task CorePair_ASecureOwnedSignal_IsPlacedUnderTheProjectOrWorkAssignmentItsPairNames(string coreTable, string stampColumn)
+    {
+        // Must-fire: a Signal has no typed project or work-assignment column, and its subject (re-filed, D-123) no longer reaches the
+        // core; its core record pair still names it, so the walk finds the secure core (before: undetermined, no root found).
+        var s = new Store();
+        var (core, type) = SecureCore(s, coreTable);
+        var subject = Guid.NewGuid();
+        s.Subject(subject);
+        var signal = s.Dismiss(core, subject, daysAgo: 1, coreType: type, secure: true);
+
+        (await s.Service.PartitionsOfSignalsAsync([signal], default)).Should().Equal([SuppressionPartition.Secure([(coreTable, core)])],
+            "the pair names the secure core, so the Signal is counted and muted in its own family");
+
+        // Must-not-fire: the stamp names the same core, so the root is not counted twice.
+        s.Signals.Single(x => x.Id == signal)[stampColumn] = new EntityReference(coreTable, core);
+        (await s.Service.PartitionsOfSignalsAsync([signal], default)).Should().Equal([SuppressionPartition.Secure([(coreTable, core)])]);
+    }
+
+    [Fact]
+    public async Task CorePair_TwoSignalsWithTheSameLookupsButDifferentCores_AreWalkedApart()
+    {
+        // The walk is shared by lineage key; the pair is part of the key, so two Signals on one subject under different secure
+        // projects are never placed in one family.
+        var s = new Store();
+        var subject = Guid.NewGuid();
+        s.Subject(subject);
+        var a = s.Dismiss(Store.ProjectA, subject, daysAgo: 1, coreType: ProjectType, secure: true, episode: 1);
+        var b = s.Dismiss(Store.ProjectB, subject, daysAgo: 1, coreType: ProjectType, secure: true, episode: 2);
+
+        (await s.Service.PartitionsOfSignalsAsync([a, b], default)).Should().Equal(
+            [SuppressionPartition.Secure([("sprk_project", Store.ProjectA)]), SuppressionPartition.Secure([("sprk_project", Store.ProjectB)])]);
+    }
+
+    [Fact]
+    public async Task CorePair_ACatalogReadFault_FailsThePlacement_NeverOrdinary()
+    {
+        // Fail closed: the pair's type cannot be read, so the Signal cannot be placed; the read throws (the caller's retry path),
+        // never an ordinary or partial answer.
+        var s = new Store();
+        var subject = Guid.NewGuid();
+        s.Subject(subject);
+        var signal = s.Dismiss(Store.ProjectA, subject, daysAgo: 1, coreType: ProjectType, secure: false);
+        s.FailCatalogReads = true;
+
+        var placing = () => s.Service.PartitionsOfSignalsAsync([signal], default);
+
+        await placing.Should().ThrowAsync<Exception>();
+        s.CatalogReads.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task CorePair_AServiceRequestCore_AddsNoRoot()
+    {
+        // Must-not-fire (D-36): a service request is not a root; the pair adds nothing, and the subject's root still decides.
+        var s = new Store();
+        var subject = Guid.NewGuid();
+        s.Subject(subject, family: Store.ProjectA, owner: Store.SecureOwner);
+        var signal = s.Dismiss(ServiceRequestId, subject, daysAgo: 1, coreType: ServiceRequestType, secure: true);
+
+        (await s.Service.PartitionsOfSignalsAsync([signal], default)).Should().Equal([SuppressionPartition.Secure([("sprk_project", Store.ProjectA)])]);
+        s.QueriesOf("sprk_servicerequest").Should().Be(0);
     }
 
     [Theory]
@@ -1637,7 +1729,7 @@ public partial class SignalSuppressionTests
         Store s, DataverseUserResponse signalRow, DataverseUserResponse core, IEnumerable<Guid>? hide = null,
         Exception? listFault = null, DataverseUserResponse? listResponse = null)
     {
-        var entities = new Mock<IGenericEntityService>();
+        var entities = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", MatterType, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
@@ -1761,6 +1853,18 @@ public partial class SignalSuppressionTests
                     FailReads ? throw new InvalidOperationException("dataverse is down") : Signals.Single(x => x.Id == id));
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => Run(q));
+            // The record-type catalog a Signal's core record pair names, as Dataverse answers it (the lineage walk reads a pair's type
+            // through it): each type's table, and a missing row for any other type.
+            entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                {
+                    CatalogReads++;
+                    if (FailCatalogReads) throw new TimeoutException("Dataverse timed out on a record-type catalog read.");
+                    return CatalogTables.TryGetValue(id, out var table)
+                        ? new Entity("sprk_recordtype_ref", id) { ["sprk_recordlogicalname"] = table }
+                        : throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                            new OrganizationServiceFault { Message = $"sprk_recordtype_ref With Id = {id} Does Not Exist" }, "Does Not Exist");
+                });
 
             var org = new Mock<IOrganizationServiceAsync2>();
             Task Write(Entity update)
@@ -1806,16 +1910,44 @@ public partial class SignalSuppressionTests
             Others.Add(Root("sprk_matter", OtherMatterId, secure: false));
             Others.Add(Root("sprk_project", ProjectA, secure: true));
             Others.Add(Root("sprk_project", ProjectB, secure: true));
+            // The ordinary project and work assignment the core-type tests name as a Signal's core (its pair is a lineage parent).
+            Others.Add(Root("sprk_project", ProjectId, secure: false));
+            Others.Add(Root("sprk_workassignment", WorkAssignmentId, secure: false));
         }
 
+        /// <summary>The record-type catalog: each core type's table; <see cref="FifthCoreType"/> names a table the resolver does not
+        /// know as a core record (a type added to the catalog later): a data error, as the core tables are a closed set, so the
+        /// lineage holds its Signals (K1).</summary>
+        private static readonly IReadOnlyDictionary<Guid, string> CatalogTables = new Dictionary<Guid, string>
+        {
+            [MatterType] = "sprk_matter",
+            [ProjectType] = "sprk_project",
+            [WorkAssignmentType] = "sprk_workassignment",
+            [ServiceRequestType] = "sprk_servicerequest",
+            [FifthCoreType] = "sprk_fifthcorerecord",
+        };
+
+        /// <summary>Every record-type catalog read faults, like a Dataverse timeout.</summary>
+        public bool FailCatalogReads { get; set; }
+        public int CatalogReads { get; private set; }
+
         /// <summary>A secure matter (owned by the Secure team, flagged secure): a hit whose core record is this matter sits under it.</summary>
-        public void SecureMatter(Guid id) => Others.Add(Root("sprk_matter", id, secure: true));
+        public void SecureMatter(Guid id) => AddRoot("sprk_matter", id, secure: true);
 
         /// <summary>Ontology task 144: a secure work assignment (owned by the Secure team, flagged secure).</summary>
-        public void SecureWorkAssignment(Guid id) => Others.Add(Root("sprk_workassignment", id, secure: true));
+        public void SecureWorkAssignment(Guid id) => AddRoot("sprk_workassignment", id, secure: true);
 
         /// <summary>Ontology task 144: an ordinary project (user-owned, not flagged).</summary>
-        public void OrdinaryProject(Guid id) => Others.Add(Root("sprk_project", id, secure: false));
+        public void OrdinaryProject(Guid id) => AddRoot("sprk_project", id, secure: false);
+
+        /// <summary>A secure project (owned by the Secure team, flagged secure).</summary>
+        public void SecureProject(Guid id) => AddRoot("sprk_project", id, secure: true);
+
+        private void AddRoot(string table, Guid id, bool secure)
+        {
+            Others.RemoveAll(r => r.LogicalName == table && r.Id == id);
+            Others.Add(Root(table, id, secure));
+        }
 
         private static Entity Root(string table, Guid id, bool secure)
         {

@@ -348,11 +348,32 @@ public class DataverseWebApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
-    public virtual async Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+    public virtual Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+        => QueryCoreAsync<T>(entitySetName, filter, select, top, skip, orderBy: null, strict: false, cancellationToken);
+
+    /// <summary>
+    /// <see cref="QueryAsync{T}(string, string?, string?, int?, int?, CancellationToken)"/> for a read that decides access:
+    /// a success response whose body has no <c>value</c> array (missing or null) is not a Dataverse answer, so it throws
+    /// <see cref="InvalidOperationException"/> instead of reading as "no rows". Same request; only that final step differs.
+    /// </summary>
+    public virtual Task<List<T>> QueryStrictAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+        => QueryCoreAsync<T>(entitySetName, filter, select, top, skip, orderBy: null, strict: true, cancellationToken);
+
+    /// <summary>
+    /// <see cref="QueryAsync{T}(string, string?, string?, int?, int?, CancellationToken)"/> with a <c>$orderby</c>
+    /// (e.g. <c>modifiedon desc</c>), for a capped read that must keep a defined end of the set rather than whatever
+    /// prefix Dataverse returns. A separate method, so the existing <c>QueryAsync</c> overrides keep compiling.
+    /// </summary>
+    public virtual Task<List<T>> QueryOrderedAsync<T>(string entitySetName, string? filter, string? select, int? top, string orderBy, CancellationToken cancellationToken = default)
+        => QueryCoreAsync<T>(entitySetName, filter, select, top, skip: null,
+            orderBy ?? throw new ArgumentNullException(nameof(orderBy)), strict: false, cancellationToken);
+
+    private async Task<List<T>> QueryCoreAsync<T>(string entitySetName, string? filter, string? select, int? top, int? skip, string? orderBy, bool strict, CancellationToken cancellationToken)
     {
         var queryParams = new List<string>();
         if (filter != null) queryParams.Add($"$filter={filter}");
         if (select != null) queryParams.Add($"$select={select}");
+        if (orderBy != null) queryParams.Add($"$orderby={orderBy}");
         if (top != null) queryParams.Add($"$top={top}");
         if (skip != null && skip > 0) queryParams.Add($"$skip={skip}");
 
@@ -365,8 +386,15 @@ public class DataverseWebApiClient : IDisposable
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<T>>(cancellationToken: cancellationToken);
-        return result?.Value ?? new List<T>();
+        if (!strict)
+        {
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<T>>(cancellationToken: cancellationToken);
+            return result?.Value ?? new List<T>();
+        }
+
+        var strictResult = await response.Content.ReadFromJsonAsync<StrictODataCollectionResponse<T>>(cancellationToken: cancellationToken);
+        return strictResult?.Value
+            ?? throw new InvalidOperationException("The Dataverse read succeeded without a value array.");
     }
 
     /// <summary>
@@ -419,5 +447,12 @@ public class DataverseWebApiClient : IDisposable
 
         [JsonPropertyName("@odata.nextLink")]
         public string? NextLink { get; set; }
+    }
+
+    /// <summary>The strict read's shape: no default, so a missing or null <c>value</c> stays null and is refused.</summary>
+    private sealed class StrictODataCollectionResponse<T>
+    {
+        [JsonPropertyName("value")]
+        public List<T>? Value { get; set; }
     }
 }

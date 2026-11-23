@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095a" project="ebilling-r1">
+  <metadata>
+    <title>Read the latest invoice submission of an email (add-in "already submitted" banner)</title>
+    <phase>3 Rules (follow-up to 095; owner scope 2026-11-03)</phase>
+    <gate>owner confirms scope in the ebilling session</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a read endpoint to the BFF behind the Finance route gate; tags include bff-api and auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One read endpoint following GET /api/finance/invoice-submissions/{id} and the 097e prefill read; gate and refusal shapes already exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>095, 097e</deps>
+    <tags>bff-api, auth, ebilling</tags>
+    <estimated-effort>0.5–1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Give the Outlook add-in one read that answers "was this email already submitted as an invoice, and how did it go?", so the pane can show a banner at the top when it opens: "Already submitted on {date} as {tracking number} by {name}" plus the status, the same way Save shows "already filed to". Owner, 2026-11-03 (relayed by word-add-in-r1): "the user should see a message at the top that invoice has already been submitted, date, tracking number and who submitted (if available)".</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Minimal API, the Finance route gate and the ebilling from-email intake.</role>
+
+  <goal>GET /api/finance/invoice-submissions?internetMessageId=… returns the latest submission attempt for that email that the caller may read, in the GET /invoice-submissions/{id} body plus submittedOn, submittedBy and a correction flag; anything else answers the uniform 404; the pane can resume polling by the returned id.</goal>
+
+  <context>
+    <background>
+      Read first: projects/ebilling-r1/notes/095-from-email-contract.md (§4 the key K, §5 replay and generations), notes/097e-correction-prefill-read.md (the reference read), notes/097f-superseded-submission-view.md (replacedBy on the submission view).
+      K (FromEmailSubmissionKey.Of) contains the core record, mode, invoice id and marks as well as the Message-ID, so the submission id CANNOT be derived from the Message-ID alone. The email is known server-side through its .eml Document (sprk_document.sprk_emailmessageid, the lookup FromEmailSubmissionService already runs) and each attempt records the .eml it was copied from (FromEmailAttemptSource.SourceEmlDocumentId). Find how that source is persisted on the submission and query through it. Normalise the Message-ID exactly as the intake does before it queries sprk_emailmessageid (the add-in sends Outlook's internetMessageId with angle brackets, URL-encoded).
+      "Latest attempt": across every K for this email (new or correction, any core record), the most recently created submission the caller may read. A later Failed attempt is still the latest (the pane shows its sentence and "Submit again").
+      submittedBy is the person (sprk_createdbyperson on the submission, a systemuser; display name only), never the service identity in createdby (on dev that is "# mi-bff-api-dev"); null when no person is recorded.
+    </background>
+    <relevant-files>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionEndpoints.cs (GET /invoice-submissions/{id:guid}, GetAsync, InvoiceSubmissionView) — extend this file and reuse its view mapping</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/FromEmailSubmissionService.cs (Message-ID normalisation and the sprk_emailmessageid query; the attempt source)</file>
+      <file role="reference">The 097e correction-prefill route (gate, uniform 404, tests)</file>
+      <file role="modify">projects/ebilling-r1/notes/095-from-email-contract.md (add the route's contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">The route answers the three justification questions in the task notes. Extend InvoiceSubmissionEndpoints.cs and the existing view mapping; no new service unless §11 says so.</constraint>
+    <constraint source="ADR-008 / Finance route gate">The route is in the /api/finance group with step 0, internal callers only, RequireEbillingEnabled, and a Finance authorization check of Read on the returned submission. Candidates the caller cannot read are skipped, never returned.</constraint>
+    <constraint source="uniform not-found">No attempt for the email, no readable attempt, a malformed or empty internetMessageId, a step-0 refusal and a rights-read fault all answer the same 404 the finance reads use. The answer never reveals that an unreadable attempt exists. A Dataverse read fault is 503, never a partial answer.</constraint>
+    <constraint source="privacy">submittedBy carries the display name only: no email address, no id of a person the caller could not otherwise read.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
+    <constraint source="project CLAUDE.md">No schema change without the owner's OK. ebilling never deploys the dev BFF; SPA-r3 does.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Response, agreed with word-add-in-r1 (2026-11-03): 200 is the GET /invoice-submissions/{id} body for the latest readable attempt (submissionId, trackingNumber, processing status, outcome reason code, invoiceId when set, replacedBy where 097f sets it) plus submittedOn (the attempt's createdon, UTC ISO 8601), submittedBy { name } | null, and isCorrection (true when the attempt targets an existing invoice).</step>
+    <step>Find the persisted link from a submission to its source .eml and implement the query through it (see escalation).</step>
+    <step>Implement the route; update the route ledger in tests/Spaarke.ArchTests if one lists routes.</step>
+    <step>Update the 095 contract notes and write notes/095a-submission-by-email-read.md (justification, placement, publish size, review log).</step>
+    <step>Send word-add-in-r1 the PR number; after merge ask SPA-r3 for the dev BFF deploy (Set-ChildRecordCreatorPersonSchema.ps1 -Verify must exit 0 first).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>An email with one Accepted attempt the caller can read: 200 with that attempt, its tracking number, Accepted, the invoice id, submittedOn and submittedBy.</criterion>
+    <criterion>An email with a Failed attempt followed by an Accepted one (generations 1..n): 200 with the Accepted, latest one. An email whose latest attempt is Failed: 200 with the Failed attempt and its reason code.</criterion>
+    <criterion>A still-running attempt (Received / processing): 200 with that status, so the pane resumes polling by submissionId.</criterion>
+    <criterion>A correction attempt: isCorrection true.</criterion>
+    <criterion>The Message-ID with and without angle brackets, and differing only in case where the intake treats case as equal, finds the same attempt.</criterion>
+    <criterion>No attempt; an attempt the caller cannot read (and no readable one); empty or malformed internetMessageId; step-0 refusal: the identical 404. A Dataverse read fault: 503.</criterion>
+    <criterion>A submission with no person recorded: submittedBy null, never the service identity.</criterion>
+    <criterion>With Ebilling:Enabled false the route answers 503 ebilling.disabled.</criterion>
+    <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes. Seed-proof the read-rights skip only.</criterion>
+    <criterion>Gate: the 5 test projects build; ArchTests and the broad Finance filter pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If no persisted link from a submission to its email exists (so the query would need a new column or a scan), STOP and escalate (root CLAUDE.md §6): a schema change needs the owner's OK and a notice to peers.</trigger>
+    <trigger>If showing who submitted would reveal a person to a caller who cannot read that person's other records, STOP and escalate to uac-r2 and the owner.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>

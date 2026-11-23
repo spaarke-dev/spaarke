@@ -42,6 +42,15 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>Team-role disassociations are accepted but do not stick (verify-phase tests).</summary>
     internal bool TeamRoleDisassociationsIgnored { get; set; }
 
+    /// <summary>Team-role associations are accepted but do not stick (S25 verify-phase test).</summary>
+    internal bool TeamRoleAssociationsIgnored { get; set; }
+
+    /// <summary>User-role associations are accepted but do not stick (S23 verify-phase test).</summary>
+    internal bool UserRoleAssociationsIgnored { get; set; }
+
+    /// <summary>User-role associations of these users are accepted but do not stick (S23/S24 verify-phase tests).</summary>
+    internal HashSet<Guid> UserRoleAssociationsIgnoredFor { get; } = [];
+
     /// <summary>Profiles whose user/team associations are accepted but do not stick (verify-phase tests).</summary>
     internal HashSet<Guid> ProfileAssociationsIgnored { get; } = [];
 
@@ -74,6 +83,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>Optional fault: thrown by every member whose name the predicate accepts.</summary>
     internal Func<string, Exception?>? Fault { get; set; }
 
+    /// <summary>Optional: runs after each recorded write - a change another actor makes between the read and the re-read.</summary>
+    internal Action<string>? OnWrite { get; set; }
+
     /// <summary>Optional fault thrown by <c>IsAttributeSecuredAsync</c> for the <c>"table.column"</c> keys the predicate accepts.</summary>
     internal Func<string, Exception?>? ColumnReadFault { get; set; }
 
@@ -93,8 +105,27 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal Guid AccessAdministratorRoleId { get; private set; }
     internal Guid CoreUserRoleId { get; private set; }
     internal Guid NoAccessEntryReadPrivilegeId { get; private set; }
+    /// <summary>S23: the SpaarkeMaster role as the import leaves it - the root copy and the customer unit's copy (a replica of it).</summary>
+    internal Guid RootOntologyRoleId { get; private set; }
+    internal Guid OntologyRoleId { get; private set; }
     internal Guid BffAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f1");
     internal Guid MiAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f2");
+
+    /// <summary>T266 S24 (#2605): H10's ontology writer application user, holding no role — since task 267 ALONE in its own unit.</summary>
+    internal Guid WriterAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f3");
+
+    /// <summary>Task 267 (#2618): the writer's own unit "Spaarke Ontology Writer" (H10) — a direct child of the root.</summary>
+    internal Guid WriterUnitId { get; private set; }
+    internal Guid WriterDefaultTeamId { get; private set; }
+
+    /// <summary>Task 267: the writer unit's copy of "Spaarke Ontology Service" (Dataverse copies root roles into every unit).</summary>
+    internal Guid WriterOntologyRoleId { get; private set; }
+
+    /// <summary>Task 267 S25: "Spaarke Basic User" as SpaarkeMaster ships it — the root copy and the customer unit's copy.</summary>
+    internal Guid RootBasicUserRoleId { get; private set; }
+    internal Guid BasicUserRoleId { get; private set; }
+    internal Guid OntologyWriterFieldWritersProfileId { get; private set; }
+    internal Guid OntologyWriterFirmReasonProfileId { get; private set; }
     internal static readonly string[] LockedTables = ["sprk_invoice", "sprk_matter", "sprk_project", "sprk_workassignment"];
 
     /// <summary>
@@ -103,8 +134,11 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// permissions on four tables (secured), the two identity-link profiles with their permissions on
     /// contact.sprk_externalobjectid and systemuser.sprk_primarycontact (secured) exactly as SpaarkeMaster ships them, the
     /// platform System Administrator profile (read/create/update on every secured column, as the platform grants it),
-    /// and H10's two application users IN the customer's own unit (T259 — a direct child of the root, with its default
-    /// team).
+    /// and H10's two BFF application users IN the customer's own unit (T259 — a direct child of the root, with its default
+    /// team), the ontology writer's application user (T266, holding no role) alone in ITS own unit "Spaarke Ontology Writer"
+    /// (task 267 — a direct child of the root, with its default team and its copy of "Spaarke Ontology Service"), the two
+    /// ontology-writer profiles with no members, and "Spaarke Basic User" (Deep Read on every codified table, as
+    /// SpaarkeMaster ships it) in the root and the customer unit, held by no team.
     /// </summary>
     internal static FakeSecureRecordSetupDataverse NewEnvironment(SecureRecordOwnerRoleSet roleSet)
     {
@@ -120,7 +154,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
         dv.ReaderProfileId = dv.AddProfile(SecureRecordSetupProcedure.ReaderProfileName);
         dv.WriterProfileId = dv.AddProfile(SecureRecordSetupProcedure.WriterProfileName);
-        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName);
+        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName,
+            SecureRecordSetupProcedure.SystemAdministratorFieldSecurityProfileId);
         foreach (var table in LockedTables)
         {
             dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, table, 4, 0, 0));
@@ -139,6 +174,25 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             permissions.Add(new SecureSetupFieldPermission(dv.LinkWriterProfileId, table, 4, 4, 4));
             permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, table, 4, 4, 4));
             dv.SecuredColumns[ColumnKey(table, column)] = true;
+        }
+
+        // Task 268 (ebilling task 166, EB-D-200): the invoice amounts and firm as SpaarkeMaster ships them (secured; Readers
+        // 4/0/0, Writers 4/4/4, plus the platform's System Administrator profile).
+        foreach (var column in SecureRecordSetupProcedure.InvoiceMoneyColumns)
+        {
+            var permissions = dv.ColumnPermissions(column);
+            permissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 0, 0));
+            permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InvoiceMoneyTable, column)] = true;
+        }
+
+        // Task 270: the invoice-family links (#2799) and the four packaged message-access columns (field-mapping 054b) as a
+        // release carrying both locks ships them. The direct recipient is absent (provisioning never creates it):
+        // AddDirectRecipient adds it.
+        foreach (var (table, column) in SecureRecordSetupProcedure.InvoiceFamilyLinkColumns.Concat(SecureRecordSetupProcedure.MessageAccessColumns))
+        {
+            dv.SeedBffManagedLock(table, column);
         }
 
         // ISS-020: the standing-grant profile as SpaarkeMaster ships it (Read/Create/Update on contact.sprk_standinggrant,
@@ -175,14 +229,44 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         dv.RolePrivileges[dv.AccessAdministratorRoleId][entryRead.Id] = (entryRead.Name, "Global");
         dv.CoreUserRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.CoreUserRoleName);
 
+        dv.RootOntologyRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName);
         dv.UserApplicationId[dv.BffAppUser] = Guid.NewGuid();
         dv.UserApplicationId[dv.MiAppUser] = Guid.NewGuid();
+        dv.UserApplicationId[dv.WriterAppUser] = Guid.NewGuid();
         dv.CustomerUnitId = Guid.NewGuid();
         dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, CustomerUnitName, dv.RootUnitId));
         dv.CustomerDefaultTeamId = dv.AddTeam(dv.CustomerUnitId, CustomerUnitName, isDefault: true);
         dv.UserUnit[dv.BffAppUser] = dv.CustomerUnitId;
         dv.UserUnit[dv.MiAppUser] = dv.CustomerUnitId;
+        dv.WriterUnitId = Guid.NewGuid();
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.WriterUnitId, SecureRecordSetupProcedure.OntologyWriterBusinessUnitName, dv.RootUnitId));
+        dv.WriterDefaultTeamId = dv.AddTeam(dv.WriterUnitId, SecureRecordSetupProcedure.OntologyWriterBusinessUnitName, isDefault: true);
+        dv.UserUnit[dv.WriterAppUser] = dv.WriterUnitId;
+        dv.OntologyWriterFieldWritersProfileId = dv.AddProfile(SecureRecordSetupProcedure.OntologyWriterFieldWritersProfileName);
+        dv.OntologyWriterFirmReasonProfileId = dv.AddProfile(SecureRecordSetupProcedure.OntologyWriterFirmReasonProfileName);
+        dv.OntologyRoleId = dv.AddRole(dv.CustomerUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
+        dv.WriterOntologyRoleId = dv.AddRole(dv.WriterUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
+
+        // By the name SpaarkeMaster ships (not the constant), so S25's tests fail if the procedure ever names another role.
+        dv.RootBasicUserRoleId = dv.AddRole(dv.RootUnitId, "Spaarke Basic User");
+        dv.BasicUserRoleId = dv.AddRole(dv.CustomerUnitId, "Spaarke Basic User", parentRootRoleId: dv.RootBasicUserRoleId);
+        foreach (var basicUser in new[] { dv.RootBasicUserRoleId, dv.BasicUserRoleId })
+        {
+            foreach (var privilege in roleSet.Tables.SelectMany(table => dv.TableReadPrivileges[table.LogicalName]))
+            {
+                dv.RolePrivileges[basicUser][privilege.Id] = (privilege.Name, "Deep");
+            }
+        }
         return dv;
+    }
+
+    /// <summary>A systemuser in <paramref name="unitId"/>; <paramref name="isApplicationUser"/> false = an interactive user (no application id).</summary>
+    internal Guid AddUser(Guid unitId, bool isApplicationUser)
+    {
+        var id = Guid.NewGuid();
+        UserUnit[id] = unitId;
+        UserApplicationId[id] = isApplicationUser ? Guid.NewGuid() : null;
+        return id;
     }
 
     /// <summary>
@@ -230,6 +314,34 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
     internal static string ColumnKey(string table, string column) => $"{table}.{column}";
 
+    /// <summary>
+    /// Task 270: a BFF-managed column lock as SpaarkeMaster ships it on <paramref name="table"/>.<paramref name="column"/> —
+    /// secured; Readers 4/0/0, Writers 4/4/4, plus the platform's System Administrator profile.
+    /// </summary>
+    internal void SeedBffManagedLock(string table, string column)
+    {
+        var permissions = ColumnPermissions(column);
+        permissions.Add(new SecureSetupFieldPermission(ReaderProfileId, table, 4, 0, 0));
+        permissions.Add(new SecureSetupFieldPermission(WriterProfileId, table, 4, 4, 4));
+        permissions.Add(new SecureSetupFieldPermission(SystemAdministratorProfileId, table, 4, 4, 4));
+        SecuredColumns[ColumnKey(table, column)] = true;
+    }
+
+    /// <summary>Task 270: the environment ran scripts/Set-DirectRecipientSchema.ps1 and Set-ThreadFlagFieldSecurity.ps1.</summary>
+    internal void AddDirectRecipient()
+        => SeedBffManagedLock(SecureRecordSetupProcedure.DirectRecipientColumn.Table, SecureRecordSetupProcedure.DirectRecipientColumn.Column);
+
+    /// <summary>Every permission row on <paramref name="table"/>.<paramref name="column"/> for <paramref name="profileId"/> removed.</summary>
+    internal void RemoveGrant(string table, string column, Guid profileId)
+        => ColumnPermissions(column).RemoveAll(p => p.ProfileId == profileId && string.Equals(p.EntityName, table, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary><paramref name="profileId"/>'s grant on <paramref name="table"/>.<paramref name="column"/> replaced by read/create/update.</summary>
+    internal void SetGrant(string table, string column, Guid profileId, int read, int create, int update)
+    {
+        RemoveGrant(table, column, profileId);
+        ColumnPermissions(column).Add(new SecureSetupFieldPermission(profileId, table, read, create, update));
+    }
+
     internal List<SecureSetupFieldPermission> ColumnPermissions(string column)
     {
         if (!FieldPermissionsByColumn.TryGetValue(column, out var permissions))
@@ -239,9 +351,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return permissions;
     }
 
-    internal Guid AddProfile(string name)
+    internal Guid AddProfile(string name, Guid? fixedId = null)
     {
-        var id = Guid.NewGuid();
+        var id = fixedId ?? Guid.NewGuid();
         if (!Profiles.TryGetValue(name, out var ids))
         {
             Profiles[name] = ids = [];
@@ -293,6 +405,7 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             throw ex;
         }
         Writes.Add(description);
+        OnWrite?.Invoke(description);
     }
 
     // ---------------- reads ----------------
@@ -320,9 +433,16 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task<IReadOnlyList<SecureSetupBusinessUnit>> FindBusinessUnitsByNameAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
     {
         Read(nameof(FindBusinessUnitsByNameAsync));
+        // Dataverse's `name eq` ignores case AND accents (CI_AI collation) — so does this fake.
         return Task.FromResult<IReadOnlyList<SecureSetupBusinessUnit>>(
-            Units.Where(u => string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray());
+            Units.Where(u => string.Equals(FoldAccents(u.Name), FoldAccents(name), StringComparison.OrdinalIgnoreCase)).Take(2).ToArray());
     }
+
+    /// <summary>Strips combining marks after canonical decomposition ("Sécure" → "Secure"), as Dataverse's name match does.</summary>
+    internal static string FoldAccents(string value)
+        => new string(value.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .ToArray()).Normalize(System.Text.NormalizationForm.FormC);
 
     public Task<SecureSetupBusinessUnit?> GetBusinessUnitAsync(SecureRecordSetupTarget target, Guid businessUnitId, CancellationToken cancellationToken)
     {
@@ -369,6 +489,50 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return Task.FromResult<IReadOnlyList<SecureSetupRole>>(Roles
             .Where(r => r.BusinessUnitId == businessUnitId && string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))
             .Take(2).ToArray());
+    }
+
+    public Task<IReadOnlyList<SecureSetupRole>> FindRoleCopiesAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
+    {
+        Read(nameof(FindRoleCopiesAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupRole>>(
+            Roles.Where(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray());
+    }
+
+    public Task<IReadOnlyList<SecureSetupRoleUser>> ListRoleUsersAsync(SecureRecordSetupTarget target, Guid roleId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListRoleUsersAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupRoleUser>>(UserRoles.Where(kv => kv.Value.Contains(roleId))
+            .Select(kv => new SecureSetupRoleUser(kv.Key, UserApplicationId.GetValueOrDefault(kv.Key))).ToArray());
+    }
+
+    public Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListUserRolesAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupRole>>(UserRoles.TryGetValue(systemUserId, out var ids)
+            ? ids.Select(id => Roles.Single(r => r.Id == id)).ToArray()
+            : []);
+    }
+
+    /// <summary>As Dataverse: the explicit memberships plus the default team of the user's own unit.</summary>
+    public Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListUserTeamsAsync));
+        var unit = UserUnit.TryGetValue(systemUserId, out var u) ? u : (Guid?)null;
+        return Task.FromResult<IReadOnlyList<SecureSetupTeam>>(Teams
+            .Where(team => TeamMembers[team.Id].Contains(systemUserId) || (team.IsDefault && team.BusinessUnitId == unit))
+            .ToArray());
+    }
+
+    public Task<IReadOnlyList<Guid>> ListUserProfilesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListUserProfilesAsync));
+        return Task.FromResult<IReadOnlyList<Guid>>(ProfileUsers.Where(p => p.Value.Contains(systemUserId)).Select(p => p.Key).ToArray());
+    }
+
+    public Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListTeamProfilesAsync));
+        return Task.FromResult<IReadOnlyList<Guid>>(ProfileTeams.Where(p => p.Value.Contains(teamId)).Select(p => p.Key).ToArray());
     }
 
     public Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
@@ -511,7 +675,24 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task AssociateTeamRoleAsync(SecureRecordSetupTarget target, Guid teamId, Guid roleId, CancellationToken cancellationToken)
     {
         Write($"AssociateTeamRole {teamId} {roleId}");
-        TeamRoles[teamId].Add(roleId);
+        if (!TeamRoleAssociationsIgnored)
+        {
+            TeamRoles[teamId].Add(roleId);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken)
+    {
+        Write($"AssociateUserRole {systemUserId} {roleId}");
+        if (!UserRoleAssociationsIgnored && !UserRoleAssociationsIgnoredFor.Contains(systemUserId))
+        {
+            if (!UserRoles.TryGetValue(systemUserId, out var ids))
+            {
+                UserRoles[systemUserId] = ids = [];
+            }
+            ids.Add(roleId);
+        }
         return Task.CompletedTask;
     }
 

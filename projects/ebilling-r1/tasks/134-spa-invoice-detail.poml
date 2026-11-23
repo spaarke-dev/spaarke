@@ -17,7 +17,7 @@
     <estimated-effort>1-2 days</estimated-effort>
   </metadata>
 
-  <prompt>Show the firm its invoice outcome in the external SPA (FR-38): tracking number, status, billed and approved totals, every Reduced / Disallowed line and invoice-level adjustment with reason, rule set name and version, section reference and quoted clause text exactly as 130 projects them, plus a PDF download (133) — as one InvoiceOutcomeReport component used by the invoice detail view and by 051's rejected-submission result screen.</prompt>
+  <prompt>Show the firm its invoice outcome in the external SPA (FR-38): tracking number, status, billed and approved totals, every Reduced / Disallowed line and invoice-level adjustment with reason, the label FirmClauseText.FirmFacingName from GetFirmClauseAsync, never sprk_ruleset.sprk_name (as the rule set name), version, section reference and quoted clause text exactly as 130 projects them, plus a PDF download (133) — as one InvoiceOutcomeReport component used by the invoice detail view and by 051's rejected-submission result screen.</prompt>
 
   <role>SPAARKE frontend developer. Expert in React 18, Fluent UI v9 (ADR-021), the external SPA's bffApiCall client and accessible responsive layouts.</role>
 
@@ -46,7 +46,8 @@
     <constraint source="FR-38">For an outcome still In Review, show status and billed total and the text "Under review" only.</constraint>
     <constraint source="project">Network calls only through the SPA's existing bffApiCall path (ADR-028 auth v2); errors map to the SPA's existing error presentation (403 → no access message, 503 ebilling.disabled → hidden section).</constraint>
     <constraint source="project">src/client/external-spa is shared with SPA-r3: change RecordDetailModal minimally (one section) and run /conflict-check before the PR.</constraint>
-    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+    <constraint source="076 review round 2 item 5, re-keyed by task 083 (notes/083-firm-clause-applicability.md)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceId, ct). invoiceId is the invoice the finding belongs to, read server-side and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never one derived from the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. GetFirmClauseAsync reads the invoice's firm and its evaluation snapshot itself and returns text only for a policy version that snapshot applied; a displaced or excluded version, an invoice with no snapshot or no firm, a read fault, a non-Billing policy and a rule set with visible-to-firms off all return no text, and it never re-resolves. The result carries FirmFacingName (the Procedure's firm-facing name, or "Billing instructions for this record" for a record rule): show that name, never the Procedure's Name. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+    <constraint source="model 7.4 (R3), task 083">The screen renders only the fields of 130's allow-list DTO; a negative test asserts that no override reason, Procedure name or Procedure id appears in the response or the rendered section.</constraint>
   </constraints>
 
   <knowledge>
@@ -66,7 +67,7 @@
 
   <steps mode="directional">
     <step order="0">Read 130's DTO and routes, 133's download contract and 051's result screen; run npm install --legacy-peer-deps --no-audit --no-fund in src/client/external-spa.</step>
-    <step order="1">InvoiceOutcomeReport: summary (tracking number, status, billed, approved when present), findings list grouped by line then adjustments (subject, decision, reason, citation block with rule set name, version, section and quoted clause; or reason only when the DTO omits the citation), totals reconciliation, Download PDF button when report-available.</step>
+    <step order="1">InvoiceOutcomeReport: summary (tracking number, status, billed, approved when present), findings list grouped by line then adjustments (subject, decision, reason, citation block with the label FirmClauseText.FirmFacingName from GetFirmClauseAsync, never sprk_ruleset.sprk_name, version, section and quoted clause; or reason only when the DTO omits the citation), totals reconciliation, Download PDF button when report-available.</step>
     <step order="2">Client calls in ebilling-client.ts; loading, empty, 403 and 503 states.</step>
     <step order="3">Add the Outcome section to the sprk_invoice detail; replace 051's placeholder for rejected submissions.</step>
     <step order="4">Vitest: renders every DTO item; citation omitted when absent; In Review shows no findings; download hidden without a report; 403 and 503 states; narrow viewport renders stacked cards.</step>
@@ -133,7 +134,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Every item in a fixture outcome DTO renders with subject, decision, reason and (when present) rule set name, version, section reference and clause quote; items without a citation render reason only.</criterion>
+    <criterion testable="true">Every item in a fixture outcome DTO renders with subject, decision, reason and (when present) the firm-facing label (FirmClauseText.FirmFacingName, never sprk_ruleset.sprk_name), version, section reference and clause quote; items without a citation render reason only.</criterion>
     <criterion testable="true">An In Review outcome renders status, billed total and "Under review" and no findings.</criterion>
     <criterion testable="true">Download PDF appears only when the DTO marks a report available and calls 133's route through bffApiCall.</criterion>
     <criterion testable="true">403 renders the SPA's no-access state; 503 ebilling.disabled hides the section.</criterion>

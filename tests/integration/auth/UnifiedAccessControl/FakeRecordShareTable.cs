@@ -49,6 +49,9 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         ["sprk_events"] = "sprk_event",
         ["sprk_communications"] = "sprk_communication",
         ["sprk_communicationattachments"] = "sprk_communicationattachment",
+        // uac-r2 task 198 Part D: the Restricted filing bar removes shares on a message's participant and review-log rows too.
+        ["sprk_communicationparticipants"] = "sprk_communicationparticipant",
+        ["sprk_emailreviewlogs"] = "sprk_emailreviewlog",
         ["sprk_memos"] = "sprk_memo",
         ["sprk_analysises"] = "sprk_analysis",
         ["sprk_fileversions"] = "sprk_fileversion",
@@ -62,6 +65,9 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         // Ontology task 144: Signals and Decision Records are mirrored and released with their subject (SecureChildLineage).
         ["sprk_signals"] = "sprk_signal",
         ["sprk_decisionrecords"] = "sprk_decisionrecord",
+        // GitHub #2560: the hard-deny tables that are secure-lineage children (a mirrored share on them carries Read only).
+        ["sprk_policies"] = "sprk_policy",
+        ["sprk_policyversions"] = "sprk_policyversion",
     };
 
     /// <summary>Makes the batched strict read throw for this table only (task 149: one table's read failing).</summary>
@@ -151,8 +157,13 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
             _shares[key] = (existing | Mask(accessRightsCsv), NextInstant());
         });
 
+        // uac-r2 task 198 pass 2 (F1): a change landing right after a grant (e.g. a filing re-owning the row in between).
+        AfterGrant?.Invoke(entitySetName, recordId, principal);
         return Task.CompletedTask;
     }
+
+    /// <summary>uac-r2 task 198 pass 2 (F1): runs right after each grant is applied (entity set, record, principal).</summary>
+    public Action<string, Guid, DataversePrincipalRef>? AfterGrant { get; set; }
 
     public Task ModifyAccessAsync(
         string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv,
@@ -228,9 +239,14 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         string entityLogicalName, Guid recordId, CancellationToken ct = default)
         => Task.FromResult(FailReads ? Array.Empty<DataversePrincipalAccess>() : Rows(entityLogicalName, recordId));
 
+    /// <summary>uac-r2 task 198 fix round: runs before each strict single read (logical name, record) — a change landing between
+    /// an owner check and the grant that follows the share read.</summary>
+    public Action<string, Guid>? BeforeStrictRead { get; set; }
+
     public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
         string entityLogicalName, Guid recordId, CancellationToken ct = default)
     {
+        BeforeStrictRead?.Invoke(entityLogicalName, recordId);
         lock (_gate)
         {
             StrictReads++;

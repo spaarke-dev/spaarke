@@ -86,6 +86,16 @@ internal static class RecordShareLevels
     internal const string FullAccessRights = CollaborateRights + ",DeleteAccess";
 
     /// <summary>
+    /// uac-r2 task 191c (#2179 design §3.4, owner Q3 = a): the External Collaborators team's share on a visible row of a
+    /// table partners file under (the role grants AppendTo there): Read + AppendTo. Never Write, Share, Assign or Delete.
+    /// </summary>
+    internal static readonly RecordShareRights ExternalTeamFilingRights = new("ReadAccess,AppendToAccess", Read | AppendTo);
+
+    /// <summary>uac-r2 task 191c: the External Collaborators team's share on a visible row of every other partner-readable table:
+    /// Read only (the role holds no AppendTo there, design §3.2).</summary>
+    internal static readonly RecordShareRights ExternalTeamReadRights = new(ViewOnlyRights, ViewOnlyMask);
+
+    /// <summary>
     /// The rights for <paramref name="level"/>. <c>false</c> for <c>null</c> or any value outside the three levels —
     /// an unrecognised level never becomes a share.
     /// </summary>
@@ -203,7 +213,8 @@ internal static class RecordShareLevels
 
     /// <summary>
     /// The rights a share on a secure ROOT may carry onto one of its children: Read, Write, Append, AppendTo, Delete and
-    /// Share. Never Assign, never Create. Each is carried only when the root share holds it (<see cref="ChildMirrorMask"/>).
+    /// Share. Never Assign, never Create. Each is carried only when the root share holds it (<see cref="ChildMirrorMask"/>),
+    /// and a mirrored share on a hard-deny row carries Read only (<see cref="HardDenyChildMirrorableMask"/>).
     /// </summary>
     /// <remarks>
     /// <para><b>Share is carried since owner round 91 (2026-10-10, task 179)</b>, replacing round 11 item 4 ("ShareAccess is
@@ -220,20 +231,57 @@ internal static class RecordShareLevels
     internal const int ChildMirrorableMask = Read | Write | Append | AppendTo | Delete | Share;
 
     /// <summary>
-    /// What a principal holding <paramref name="rootMask"/> on a secure root holds on each of its children: the root's
-    /// rights restricted to <see cref="ChildMirrorableMask"/>. Never wider than the root, by construction.
+    /// GitHub #2560: the rights a share on a secure root may carry onto a row of a HARD-DENY table
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable"/>): Read only. A mirrored
+    /// share on a hard-deny row carries Read only.
     /// </summary>
-    internal static int ChildMirrorMask(int rootMask) => rootMask & ChildMirrorableMask;
+    /// <remarks>The hard-deny tables are Read-only content for everyone but their writers (owner rounds 131 and 136; ebilling
+    /// EB-D-168): nothing reaches them at business-unit depth, and no sharee of a root is given Write, Append, AppendTo,
+    /// Delete or Share on one of their rows through the mirror. The rule is by table name, so a hard-deny table added to
+    /// <see cref="SecureChildLineage.Children"/> later is covered without a change here.</remarks>
+    internal const int HardDenyChildMirrorableMask = Read;
 
     /// <summary>
-    /// The <c>AccessMask</c> literal for a mask built from <see cref="ChildMirrorableMask"/> bits, in the canonical
-    /// order. A bit outside the mirrorable set is refused rather than silently dropped.
+    /// What a principal holding <paramref name="rootMask"/> on a secure root holds on a child row of
+    /// <paramref name="childTable"/>: the root's rights restricted to <see cref="ChildMirrorableMask"/>, or to
+    /// <see cref="HardDenyChildMirrorableMask"/> (Read only) on a hard-deny table. Never wider than the root, by construction.
+    /// Every mirror onto a CHILD row goes through here, so no call site can leave the table out.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">The mask carries a bit a child mirror never carries.</exception>
-    internal static RecordShareRights ChildMirrorRights(int mask)
+    /// <exception cref="ArgumentException"><paramref name="childTable"/> is blank.</exception>
+    internal static int ChildMirrorMask(string childTable, int rootMask)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(childTable);
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable(childTable)
+            ? rootMask & HardDenyChildMirrorableMask
+            : rootMask & ChildMirrorableMask;
+    }
+
+    /// <summary>
+    /// What a principal holding <paramref name="parentMask"/> on a secure parent is given on a secure ROOT filed under it (a
+    /// work assignment or project inheriting its parent's sharees, task 158): the parent's rights restricted to
+    /// <see cref="ChildMirrorableMask"/>. A root is never a hard-deny table, so the hard-deny rule of
+    /// <see cref="ChildMirrorMask"/> never applies here. Never wider than the parent, by construction.
+    /// </summary>
+    internal static int InheritedRootMirrorMask(int parentMask) => parentMask & ChildMirrorableMask;
+
+    /// <summary>
+    /// The <c>AccessMask</c> literal for a mirrored share written on a row of <paramref name="table"/>, from a mask built
+    /// from <see cref="ChildMirrorableMask"/> bits, in the canonical order. A bit outside the mirrorable set is refused rather
+    /// than silently dropped; on a hard-deny table
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable"/>) so is every bit but
+    /// Read (<see cref="HardDenyChildMirrorableMask"/>, GitHub #2560) — the last check before the write, whatever the caller
+    /// computed.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is blank.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The mask carries a bit a mirror on that table never carries.</exception>
+    internal static RecordShareRights ChildMirrorRights(string table, int mask)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
         if ((mask & ~ChildMirrorableMask) != 0)
             throw new ArgumentOutOfRangeException(nameof(mask), mask, "A child mirror carries only Read, Write, Append, AppendTo, Delete and Share.");
+        if (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable(table)
+            && (mask & ~HardDenyChildMirrorableMask) != 0)
+            throw new ArgumentOutOfRangeException(nameof(mask), mask, "A mirrored share on a hard-deny row carries only Read.");
 
         var names = LevelRights.Where(r => (mask & r.DataverseBit) != 0).Select(r => r.Name);
         return new RecordShareRights(string.Join(",", names), mask);

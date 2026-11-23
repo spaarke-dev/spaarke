@@ -71,7 +71,10 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
             .Setup(i => i.AssistantQueryAsync(It.IsAny<AssistantQueryFacadeRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AssistantQueryFacadeResult
             {
-                Path = "rag", Answer = "answer", StructuredKind = "rag", IntentSource = "forceMode",
+                Path = "rag",
+                Answer = "answer",
+                StructuredKind = "rag",
+                IntentSource = "forceMode",
             });
         _fixture.InsightsAi
             .Setup(i => i.AssistantQueryStreamAsync(It.IsAny<AssistantQueryFacadeRequest>(), It.IsAny<CancellationToken>()))
@@ -586,8 +589,10 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
                 It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Binding
             {
-                BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk,
-                ConsumerCode = canonicalName, PlaybookId = playbookId,
+                BindingId = Guid.NewGuid(),
+                ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = canonicalName,
+                PlaybookId = playbookId,
             });
 
     private void ArrangeNodes(Guid playbookId, PlaybookNodeDto[] nodes) =>

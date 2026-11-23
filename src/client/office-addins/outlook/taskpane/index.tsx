@@ -35,9 +35,10 @@ const CONFIG = {
 };
 
 /**
- * Read the `?action=` query param from the taskpane URL. Used by the Outlook ribbon buttons that open the pane on a
- * view: "Create To Do" (`?action=createTodo`, smart-todo-decoupling-r3 FR-27 / task 070) and "Submit Invoice"
- * (`?action=submitInvoice`, task 133). The parsing is the shared, tested `readInitialAction`.
+ * Read the `?action=` query param from the taskpane URL. Set by the former Outlook ribbon buttons "Create To Do"
+ * (`?action=createTodo`, smart-todo-decoupling-r3 FR-27 / task 070) and "Submit Invoice" (`?action=submitInvoice`,
+ * task 133), which package 1.1.4 removed (both are pane tabs); kept for a cached older manifest. The parsing is the
+ * shared, tested `readInitialAction`.
  */
 function readInitialActionFromUrl(): InitialAction | undefined {
   try {

@@ -52,7 +52,7 @@ export type EmailPaneSlotRenderer = (selectedId: string) => React.ReactNode;
  * (Reading-pane MAIN-AREA redesign, email-communication-solution-r5: the toolbar
  * is now Reply / Reply All / Forward / New as icon+text on the LEFT, and a
  * right-aligned group of ICON-ONLY buttons with tooltips — Save to SharePoint,
- * Create Event, Create To Do, Link Invoice, and the demoted Open full form. The
+ * Create Event, Create To Do, Submit Invoice, and the demoted Open full form. The
  * four create/save actions act on the email's RESOLVED association; the host
  * builds those handlers from the same `launchCreate` / archive seams the
  * `CommunicationActions` PCF uses. The old generic `onArchive`/`onCreate` pair is
@@ -75,8 +75,11 @@ export interface EmailToolbarActionHandlers {
   onCreateEvent?: (selectedId: string) => void;
   /** Launches the "Create To Do" flow against the email's resolved association. */
   onCreateTodo?: (selectedId: string) => void;
-  /** Launches the "Link Invoice" flow against the email's resolved association. */
-  onLinkInvoice?: (selectedId: string) => void;
+  /**
+   * Opens the "Submit Invoice" flow for the selected email (ebilling-r1 task 118; replaces "Link Invoice"). The flow
+   * submits an attachment through the BFF's from-document route; nothing here creates a `sprk_invoice` directly.
+   */
+  onSubmitInvoice?: (selectedId: string) => void;
   /** Opens the OOB Email main form for `selectedId` as an 85% `navigateTo` modal (demoted "Open full form"). */
   onOpenFullForm?: (selectedId: string) => void;
 }

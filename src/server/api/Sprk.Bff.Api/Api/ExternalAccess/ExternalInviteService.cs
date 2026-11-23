@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
@@ -131,6 +132,9 @@ public sealed class ExternalInviteService
 
         // A contact an internal user links to is that user's: they sign in on the workforce plane (and are told in-app by
         // the grant notifier). No external account is ever attached to it (the invite core refuses it).
+        // Task 193 (#2338): a SECOND safety net, never the decider. /grant and /invite-and-grant decide "never CIAM-invite an
+        // internal user" earlier, through ContactUserRepresentation (a represented user is shared with, not invited), so a
+        // contact grant that reaches here represents nobody. Any link still answers NotNeeded: it never invites.
         var references = await store.FindSystemUsersLinkingAsync(new[] { contactId }, ct).ConfigureAwait(false);
         if (references.Status != LookupStatus.Read)
             return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));
@@ -529,13 +533,13 @@ public sealed class ExternalInviteService
 
         resolution ??= await binder.ResolveInviteContactAsync(request.Email, ct);
 
-        if (NotProvisionable(resolution, request.Email, logger) is { } stopped)
+        if (NotProvisionable(resolution, logger) is { } stopped)
         {
             return stopped;
         }
 
         if (workAccountTenantId is not null
-            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(resolution, request.Email, logger) is { } bound)
+            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(resolution, logger) is { } bound)
         {
             return bound;
         }
@@ -548,8 +552,8 @@ public sealed class ExternalInviteService
                 // Idempotency gate: an oid bound on the CIAM plane means the CIAM account already exists — do NOT
                 // create a second account (and do not re-send the onboarding email).
                 logger.LogInformation(
-                    "[EXT-INVITE] Contact {ContactId} ({Email}) already has a CIAM oid bound — skipping account creation (idempotent).",
-                    resolution.ContactId, request.Email);
+                    "[EXT-INVITE] Contact {ContactId} already has a CIAM oid bound — skipping account creation (idempotent). Trace {TraceId}.",
+                    resolution.ContactId, TraceId);
                 return new ProvisionOutcome(resolution.ContactId!.Value, AlreadyProvisionedStatus);
 
             case InviteContactAction.ProvisionExisting:
@@ -559,7 +563,7 @@ public sealed class ExternalInviteService
                     // (/invite-and-grant's pre-check, a grant's invite, an assignment's invite), as the guarded create does.
                     if (await binder.InviteRemovedSameEmailRefusalAsync(request.Email, ct).ConfigureAwait(false) is { } removed)
                     {
-                        return NotProvisionable(removed, request.Email, logger)
+                        return NotProvisionable(removed, logger)
                                ?? throw new InvalidOperationException("A removed-email invite refusal must not provision.");
                     }
 
@@ -577,7 +581,7 @@ public sealed class ExternalInviteService
                     var owner = await binder.ResolveCreateOwnerAsync("Invite create", "the invitee", ct);
                     if (owner.Status != ContactIdentityBinder.OwnerTeamStatus.Resolved)
                     {
-                        return OwnerNotResolved(owner.Status, request.Email, logger);
+                        return OwnerNotResolved(owner.Status, logger);
                     }
 
                     try
@@ -588,13 +592,13 @@ public sealed class ExternalInviteService
                             dataverseClient, request.Email, request.FirstName, request.LastName, owner.TeamId, ct);
                         if (refused is not null)
                         {
-                            return NotProvisionable(refused, request.Email, logger)
+                            return NotProvisionable(refused, logger)
                                    ?? throw new InvalidOperationException("A guarded invite create refusal must not provision.");
                         }
 
                         contactId = created;
-                        logger.LogInformation("[EXT-INVITE] Created new Contact {ContactId} for email {Email}",
-                            contactId, request.Email);
+                        logger.LogInformation("[EXT-INVITE] Created new Contact {ContactId}. Trace {TraceId}.",
+                            contactId, TraceId);
                     }
                     catch (Exception ex) when (!ct.IsCancellationRequested && IsOwnerPrivilegeRefusal(ex))
                     {
@@ -629,7 +633,8 @@ public sealed class ExternalInviteService
                 // NeedReferenceLookup (or an action this code does not know) cannot reach here: the binder
                 // completes the reference lookup itself. Fail closed — nothing is created.
                 throw new InvalidOperationException(
-                    $"The invite decision for '{request.Email}' ended in an unexpected state ({resolution.Action}).");
+                    $"The invite decision for contact {resolution.ContactId:D} ended in an unexpected state ({resolution.Action}). " +
+                    $"Trace {TraceId}.");
         }
 
         // Task 184 — the pending-invite marker, BEFORE the CIAM account exists: a first CIAM sign-in that has to email-bind
@@ -653,10 +658,10 @@ public sealed class ExternalInviteService
         // Anything else falls to the marker-not-written 503 below.
         if (mark.Reread is { } reread)
         {
-            if (NotProvisionable(reread, request.Email, logger) is { } refused)
+            if (NotProvisionable(reread, logger) is { } refused)
                 return refused;
             if (workAccountTenantId is not null
-                && InviteExternalUserEndpoint.WorkAccountNotProvisionable(reread, request.Email, logger) is { } boundSince)
+                && InviteExternalUserEndpoint.WorkAccountNotProvisionable(reread, logger) is { } boundSince)
                 return boundSince;
             if (reread.Action == InviteContactAction.AlreadyProvisioned)
                 return new ProvisionOutcome(contactId, AlreadyProvisionedStatus);
@@ -694,8 +699,8 @@ public sealed class ExternalInviteService
                 break;
             default:
                 logger.LogWarning(
-                    "[EXT-INVITE] Contact {ContactId} for {Email} could not be marked invited ({Status}) — no CIAM account created.",
-                    contactId, request.Email, mark.Status);
+                    "[EXT-INVITE] Contact {ContactId} could not be marked invited ({Status}) — no CIAM account created. Trace {TraceId}.",
+                    contactId, mark.Status, TraceId);
                 return MarkerNotWritten(contactId);
         }
 
@@ -719,17 +724,18 @@ public sealed class ExternalInviteService
                 if (!markerLanded)
                 {
                     logger.LogWarning(
-                        "[EXT-INVITE] {Email} already has a CIAM account, but contact {ContactId} carries no pending-invite marker "
-                        + "({Status}) — answered 503, no email sent. Retry once the column is provisioned.",
-                        request.Email, contactId, mark.Status);
+                        "[EXT-INVITE] The invitee of contact {ContactId} already has a CIAM account, but the contact carries no "
+                        + "pending-invite marker ({Status}) — answered 503, no email sent. Retry once the column is provisioned. "
+                        + "Trace {TraceId}.",
+                        contactId, mark.Status, TraceId);
                     return MarkerNotWritten(contactId);
                 }
 
                 // §12 I-10: this operator log line is the ONLY place the branch is named; the inviter's response never says it.
                 logger.LogInformation(
-                    "[EXT-INVITE] {Email} already has a CIAM account ({InviteOutcome}) — contact {ContactId} kept pending; the first "
-                    + "sign-in binds it.",
-                    request.Email, ExistingAccountStatus, contactId);
+                    "[EXT-INVITE] The invitee of contact {ContactId} already has a CIAM account ({InviteOutcome}) — the contact is kept "
+                    + "pending; the first sign-in binds it. Trace {TraceId}.",
+                    contactId, ExistingAccountStatus, TraceId);
                 var existingAccountEmailFailed = false;
                 try
                 {
@@ -739,8 +745,8 @@ public sealed class ExternalInviteService
                 catch (Exception ex)
                 {
                     existingAccountEmailFailed = true;
-                    logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId} for {Email}: the sign-in email failed to send.",
-                        contactId, request.Email);
+                    logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId}: the sign-in email failed to send. Trace {TraceId}.",
+                        contactId, TraceId);
                 }
 
                 // Slice C2b: a pending invite exists only if its email went out. Nobody holds this code, so the invite this
@@ -755,7 +761,7 @@ public sealed class ExternalInviteService
 
             if (!Guid.TryParse(rawOid, out var ciamOid) || ciamOid == Guid.Empty)
             {
-                throw new InvalidOperationException($"CIAM returned an object id that is not a GUID for '{request.Email}'.");
+                throw new InvalidOperationException($"CIAM returned an object id that is not a GUID for contact {contactId:D}. Trace {TraceId}.");
             }
 
             // Persist the oid (D format) + plane External, conditional on the row version read with it. If the bind
@@ -767,7 +773,7 @@ public sealed class ExternalInviteService
                 // C5: an administrator removed the person while the invite was in progress. Nothing is bound and no email is
                 // sent; the invite this call wrote is retracted and the invite is answered as the removed refusal.
                 await RetractUnsentInviteAsync(binder, contactId, mark.WrittenEmailHash, logger).ConfigureAwait(false);
-                return NotProvisionable(removed, request.Email, logger)
+                return NotProvisionable(removed, logger)
                        ?? throw new InvalidOperationException("A removed-contact refusal must not provision.");
             }
 
@@ -777,18 +783,18 @@ public sealed class ExternalInviteService
                 // follows, which this failure prevents). Retryable: a retry finds the account and answers "ExistingAccount"
                 // once the marker can land. No email.
                 logger.LogWarning(
-                    "[EXT-INVITE] CIAM account {Oid} was created for {Email} but neither its oid ({BindStatus}) nor the pending-invite "
-                    + "marker landed on contact {ContactId} — answered 503, no email sent.",
-                    ciamOid, request.Email, bind.Status, contactId);
+                    "[EXT-INVITE] CIAM account {Oid} was created but neither its oid ({BindStatus}) nor the pending-invite "
+                    + "marker landed on contact {ContactId} — answered 503, no email sent. Trace {TraceId}.",
+                    ciamOid, bind.Status, contactId, TraceId);
                 return MarkerNotWritten(contactId);
             }
 
             if (bind.Status != StoreWriteStatus.Written)
             {
                 throw new InvalidOperationException(
-                    $"CIAM account {ciamOid:D} was created for '{request.Email}' but its oid could not be bound to contact " +
+                    $"CIAM account {ciamOid:D} was created but its oid could not be bound to contact " +
                     $"{contactId:D} ({bind.Status}). No email was sent: retry the invite, which sends a new invite code that binds " +
-                    "the contact at its first sign-in.");
+                    $"the contact at its first sign-in. Trace {TraceId}.");
             }
 
             // Send the onboarding email (task 024; task 185: its links open the invite link).
@@ -804,12 +810,14 @@ public sealed class ExternalInviteService
             catch (Exception ex)
             {
                 onboardingEmailFailed = true;
-                logger.LogWarning(ex, "[EXT-INVITE] CIAM account created for {Email} but onboarding email failed to send.", request.Email);
+                logger.LogWarning(ex,
+                    "[EXT-INVITE] CIAM account created for contact {ContactId} but onboarding email failed to send. Trace {TraceId}.",
+                    contactId, TraceId);
             }
 
             logger.LogInformation(
-                "[EXT-INVITE] Provisioned CIAM user {Oid} for {Email} — Contact: {ContactId}",
-                ciamOid, request.Email, contactId);
+                "[EXT-INVITE] Provisioned CIAM user {Oid} — Contact: {ContactId}. Trace {TraceId}.",
+                ciamOid, contactId, TraceId);
 
             return new ProvisionOutcome(contactId, ProvisionedStatus, EmailFailed: onboardingEmailFailed);
         }
@@ -856,12 +864,12 @@ public sealed class ExternalInviteService
     /// lookup that could not be read is the retryable 503 every invite lookup failure is. No id is in either message.
     /// </summary>
     private static ProvisionOutcome OwnerNotResolved(
-        ContactIdentityBinder.OwnerTeamStatus status, string email, ILogger logger)
+        ContactIdentityBinder.OwnerTeamStatus status, ILogger logger)
     {
         if (status == ContactIdentityBinder.OwnerTeamStatus.LookupFailed)
         {
             logger.LogWarning(
-                "[EXT-INVITE] The owner team for the new contact of {Email} could not be read — nothing created", email);
+                "[EXT-INVITE] The owner team for a new invite contact could not be read — nothing created. Trace {TraceId}.", TraceId);
             return new ProvisionOutcome(Guid.Empty, "LookupFailed",
                 Failure: new InviteLookupFailure(
                     ContactBindingDecision.InviteContactLookupFailed,
@@ -870,10 +878,13 @@ public sealed class ExternalInviteService
         }
 
         logger.LogError(
-            "[EXT-INVITE] Invite for {Email} refused: no owner team could be resolved for the new contact " +
-            "(ExternalAccess:CustomerBusinessUnitId) — nothing created", email);
+            "[EXT-INVITE] Invite refused: no owner team could be resolved for the new contact " +
+            "(ExternalAccess:CustomerBusinessUnitId) — nothing created. Trace {TraceId}.", TraceId);
         return OwnerUnconfiguredOutcome();
     }
+
+    /// <summary>The current trace id, logged in place of the invitee's email (never logged).</summary>
+    private static string TraceId => Activity.Current?.TraceId.ToString() ?? "(none)";
 
     /// <summary>The Dataverse error code of "Read Privilege Check For Owner failed" (the owner team cannot own the row).</summary>
     private const string OwnerPrivilegeErrorCode = "0x80040299";

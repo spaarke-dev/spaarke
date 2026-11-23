@@ -109,7 +109,7 @@ Base for the publish delta: `ab4e91011`. Worktree HEAD before the round: `38e565
 
 Test seams added: `CiamUserProvisioningService` is no longer `sealed` and `CreateCiamUserAsync` is `virtual` (no production type derives from it), and `RegistrationEmailService.SendCiamOnboardingEmailAsync` is `virtual`, so the "newly provisioned" path runs through the production endpoint with no live CIAM tenant and the harness can assert that only the onboarding email goes out. `RecordingEmailService` records onboarding sends and can hang until cancelled.
 
-### Updated email copy (still DRAFT FOR OWNER APPROVAL)
+### Updated email copy (APPROVED by the owner 2026-10-31, as drafted; task 072)
 
 Only the body sentence changed. The granter is named only by the display `name` claim; with none, the sentence has no subject (chosen over "A colleague at {organisation}": the BFF has no organisation name to hand, and a made-up one would be worse than none).
 

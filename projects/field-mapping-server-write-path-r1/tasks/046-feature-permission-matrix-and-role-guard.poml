@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Security roles match what each feature asks of its caller: a feature permission matrix, proposed role changes for UAC-r2, and a role guard (owner 2026-11-04)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>031 and 042c merged to master</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-relevant analysis across every create path plus a new ArchTest with a ratchet baseline (tags security, roles, testing).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Deriving what each path asks of the caller needs reading CallerWriteAuthorization, the route filters and the add-in paths together; a security-architecture judgement on each gap.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes one doc section, notes and one ArchTest file; no src/ change. May run beside 043, 044 or 045.</parallel-reason>
+    <deps>031, 042c</deps>
+    <tags>security, roles, testing, dataverse, docs</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build from code a matrix of what each product feature asks of its caller (the table's Create privilege, AppendTo on each lookup target, Read on the mapping source, field-security columns), compare it with the shipped roles in src/dataverse/solutions/SpaarkeMaster/Roles/*.xml and the live dev roles (read-only), list every gap and every excess grant, send the proposed role changes to unified-access-control-r2, and add an ArchTest that keeps each feature's required privileges in the role named for that feature.</prompt>
+  <role>SPAARKE platform architect, Dataverse security roles and the BFF's caller authorization. Follow ADRs strictly.</role>
+  <goal>The matrix is in DATAVERSE-WRITE-PATH-ARCHITECTURE.md beside task 060's ownership matrix; UAC-r2 has the matrix and the proposed role changes; the guard fails on a new gap and lists today's known gaps as a ratchet baseline. No role is changed by this task.</goal>
+
+  <context>
+    <background>Owner decision 1 of 2026-11-04 (notes/decisions.md): "ensure our security roles are correctly set up and aligned with the required permissions &lt;&gt; functionality." UAC-r2 conditions of 2026-11-04 (coordinator relay): the matrix and the proposed role changes go to UAC-r2; applying role changes on any environment needs the owner's go in UAC-r2's session, per change set, with read-back and the census; this task proposes and never applies. Known gaps to include (verified in the role XML at master 0d4aa87ee0): Spaarke Console User holds prvAppendsprk_Signal and prvAppendsprk_DecisionRecord (Deep) but no AppendTo on sprk_matter or sprk_project; Spaarke Office Add In User holds prvAppendTosprk_EventType_Ref only at Deep and nothing on sprk_recordtype_ref; Spaarke AI Analysis User holds prvReadsprk_analysisplaybook (Global) and no AppendTo on sprk_analysisplaybook, which 031 exempts in code (confirm the matrix agrees).</background>
+    <relevant-files>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (a "Feature permission matrix" section beside 060's ownership matrix near I-6; touch nothing else)</file>
+      <file role="new">tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs (declared per-feature permission table + role XML scan + ratchet baseline)</file>
+      <file role="new">projects/field-mapping-server-write-path-r1/notes/task-046-notes.md (derivation evidence, live read, proposed role changes as sent to UAC-r2)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (step 1 Create/Append ~:63-90, step 3 field security ~:92-113, AppendTo ~:116-131): what the service asks</file>
+      <file role="canonical-reference">The route filters of each feature (AnalysisAuthorizationFilter, EntityAccessFilter, RecordRouteAccessAuthorizationFilter, QuickCreateSourceAccessFilter, TodoSourceAccessFilter) and MappingSourceReadProbe: what the routes ask</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/PolicyReadRoleGuardTests.cs and ProcedureRolePrivilegeGuardTests.cs: role XML scans (missing or empty file fails); tests/Spaarke.ArchTests/ChildRowOwnershipBuilderGuardTests.cs: a ratchet baseline with reasons</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/tasks/060-ownership-matrix-and-exception-assessment.poml: the neighbouring matrix (owner rule and role depths per table)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="required">The events and analysis routes create through the service, and the playbook / event-type AppendTo exemption is in code.</dependency>
+      <dependency task="042c" status="required">The Signal / Decision Record core AppendTo is in the service.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-046 &lt;tip of work/field-mapping-server-write-path-r1&gt;` (must contain 031's and 042c's merges), then confirm this POML exists on the branch.</constraint>
+    <constraint source="UAC-r2 2026-11-04">This task proposes and never applies: no edit to src/dataverse/solutions/SpaarkeMaster/Roles/*.xml, no role or profile write on any environment. The dev read is read-only (MCP read_query of role, roleprivileges and privilege). The matrix and the proposed role changes go to UAC-r2; applying any of them needs the owner's go in UAC-r2's session, per change set, with read-back and the census, and is UAC-r2's work.</constraint>
+    <constraint source="task 060">Coordinate, do not duplicate: the feature matrix states what each feature asks; role depths per table stay in 060's matrix. If 060 has landed, link its rows; if not, add only the feature matrix and a pointer for 060 to link back (060 merges or links, recorded in the notes). Re-read the file on the latest master just before editing and run /conflict-check.</constraint>
+    <constraint source="matrix scope (closed)">Rows: the Matter, Project, Event, To Do, Invoice, Work Assignment and Report Card wizards (child-records route), analysis from a playbook, events (typed route), chat create and update of each table the tools allow, the Office add-in paths (save, quick create, To Do), Signal and Decision Record (chat and writers), document upload, mapping-source reads, push. Columns: feature, route or tool, table, privileges asked (Create, Append, AppendTo per lookup target, Read on the source, Write), field-secured columns, the role meant for the feature, file:line evidence.</constraint>
+    <constraint source="confidentiality (repo is public)">The doc and notes list required permissions and missing privileges that make a feature fail for its users. Excess grants are sent to UAC-r2 in its session only, never written into the repo, a PR or a commit.</constraint>
+    <constraint source="ADR-038 / CLAUDE.md §16">The guard lives in tests/Spaarke.ArchTests/** (KEEP); it ships with must-fire and must-not-fire controls and a ratchet baseline (known gaps listed with the issue or UAC-r2 change they wait on; a new gap fails; a baseline entry that no longer reproduces fails, so it is removed). No new file under tests/unit/Sprk.Bff.Api.Tests/**.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (2026-11-04 sections)</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/task-031-notes.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Branch (constraint 1); declare FULL rigor.</step>
+    <step order="1">Derive each matrix row from code (file:line), not from docs: what the route filter asks, then what CallerWriteAuthorization asks for that table's payload, then Read on the mapping source.</step>
+    <step order="2">Compare with Roles/*.xml (privilege name and depth) and with dev (read-only query); record differences between the XML and dev.</step>
+    <step order="3">Write the matrix section and the gap list; write the proposed role changes (role, privilege, depth, the feature it unblocks) in the notes.</step>
+    <step order="4">Write FeatureRolePrivilegeGuardTests: the declared table, the scan, the must-fire and must-not-fire controls, the ratchet baseline holding today's gaps.</step>
+    <step order="5">Send the matrix, the gap list, the proposed changes and the excess-grant list (session only) to UAC-r2; record its answer in the notes.</step>
+    <step order="6">Build; ArchTests pass; one adversarial pass on the matrix's derivation and the guard. Fix every finding.</step>
+    <step order="7">After merge: TASK-INDEX `✅ [done]`; run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the code and the owner's 031 decision disagree about a privilege (for example the playbook AppendTo), STOP and escalate with the evidence rather than choosing.</trigger>
+    <trigger>If a feature has no role meant for it (no role the matrix can name), STOP and ask UAC-r2 which role owns it.</trigger>
+    <trigger>If the dev roles and Roles/*.xml disagree, record it and send it to UAC-r2; do not reconcile either side.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>PolicyReadRoleGuardTests.cs and ProcedureRolePrivilegeGuardTests.cs guard single privileges in named role files; no guard ties a feature's required privileges to a role.</existing>
+    <extension>No: those guards assert a fixed privilege list for a fixed purpose; the new guard is keyed by feature and carries a ratchet baseline, so it is a sibling file that reuses their scan shape (SourceScan.RepoRoot, the missing-file rule).</extension>
+    <cost-of-doing-nothing>A role that lacks a privilege its feature asks for fails that feature for every user holding only that role (the known gaps above), and nothing catches the next one before release.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (Feature permission matrix section)</output>
+    <output type="test">tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-046-notes.md (evidence, dev read, proposed role changes, UAC-r2's answer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: the matrix has one row per feature in the closed scope, each with file:line evidence for every privilege it lists and the role meant for the feature; no row is taken from a document without a code reference.</criterion>
+    <criterion testable="true">AC2: the gap list includes the three known gaps (Console User AppendTo on sprk_matter / sprk_project; Office Add In User sprk_eventtype_ref depth and sprk_recordtype_ref; AI Analysis User and sprk_analysisplaybook, stating whether the 031 exemption makes it no gap) and every other gap found, each with the feature it fails.</criterion>
+    <criterion testable="true">AC3: the proposed role changes (role, privilege, depth, reason) and the matrix were sent to UAC-r2, and its answer is recorded; no Roles/*.xml file and no environment role or profile changed in this task (git diff and the notes show it).</criterion>
+    <criterion testable="true">AC4: the guard fails (must-fire) on a seeded role file missing a privilege a feature requires at the declared depth, and on a seeded new feature row whose role lacks a privilege; it passes (must-not-fire) when the role holds the privilege at the declared depth or deeper, and on a privilege no feature declares.</criterion>
+    <criterion testable="true">AC5: the ratchet baseline holds exactly today's gaps, each with its reason; a gap not in the baseline fails; a baseline entry the role files no longer reproduce fails with a message to remove it; a missing, unparsable or empty role file fails.</criterion>
+    <criterion testable="true">AC6: the matrix section links 060's matrix (or leaves the pointer 060 will link), and duplicates none of its role-depth rows; no other section of the document changes.</criterion>
+    <criterion testable="true">AC7: solution build 0 errors, 0 warnings; ArchTests pass; no excess grant is described in the repo, a PR or a commit.</criterion>
+    <criterion testable="true">Test scope: AC4-AC5 only; anything beyond needs a one-line reason in the notes. One seeding proof: delete one baseline entry once and show the guard fails (recorded, reverted).</criterion>
+  </acceptance-criteria>
+
+  <notes>Placement (CLAUDE.md §10): no BFF change; docs, notes and one ArchTest. No publish delta.
+§11: one new test file (justification above); no src/ surface.
+The declared per-feature table lives in the guard; the doc matrix cites it, so the two stay one list.
+Added 2026-11-04 from owner decision 1 (after the 031 review) and UAC-r2's conditions.
+Additional inputs to the matrix (2026-11-04):
+- Event type: Spaarke Basic User also holds no AppendTo on sprk_eventtype_ref (Read Deep only). The event route keeps the caller AppendTo; 031 pins this as K1.
+- ebilling-r1, owner-approved: Spaarke Billing Administrator gains prvReadsprk_procedure at Deep. Removing or previewing a Procedure override needs Read on sprk_procedure. Role source: src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml; deploy script: scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1; branch task/ebilling-089e 01924f383d. Record it as a feature row (billing: Procedure override remove/preview → Read sprk_procedure) with ebilling-r1 as the owner of the change. Ask ebilling-r1 for any other billing-role requirements when the matrix is built.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

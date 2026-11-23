@@ -4,11 +4,11 @@
 #
 # Automatically lints files after Claude Code edits them.
 # Dispatches to the correct linter based on file extension:
-#   .cs       → dotnet format --verify-no-changes
-#   .ts/.tsx  → npx eslint (compact format)
+#   .ts/.tsx  → the package's own eslint, run from its ESLint-config folder
 #   .ps1      → Invoke-ScriptAnalyzer via pwsh
+#   .cs       → not here (cannot finish in 4 s; see the case statement)
 #
-# Registered in .claude/settings.json as a PostToolUse hook with matcher "Edit".
+# Registered in .claude/settings.json as a PostToolUse hook with matcher "Edit|Write".
 #
 # Exit codes:
 #   0 — Always (lint violations are advisory, not blocking)
@@ -31,15 +31,27 @@ set -uo pipefail
 # The PostToolUse hook receives JSON on stdin with tool_input containing file_path.
 INPUT=$(cat)
 
-# --- Extract file path ---
-# Try jq first; fall back to Python; fall back to simple grep/sed.
+# --- Extract file path (pure bash, no fork) ---
+# This hook runs after EVERY edit, so its fixed cost matters: on a loaded Windows machine each fork
+# (jq lookup, python start) measured 6-8 s, ~18 s per edit even for files it never lints. A bash
+# regex reads file_path; a file type it does not lint exits before any fork.
 FILE=""
-if command -v jq &>/dev/null; then
-  FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
+if [[ "$INPUT" =~ \"file_path\"[[:space:]]*:[[:space:]]*\"(([^\"\\]|\\.)*)\" ]]; then
+  FILE="${BASH_REMATCH[1]}"
+  FILE="${FILE//\\\\/\\}"   # JSON-unescape backslashes (Windows paths)
+  FILE="${FILE//\\\//\/}"   # and escaped slashes
 fi
+[ -n "$FILE" ] || exit 0
 
-# Prefer `python`: on Windows, `python3` is often the Microsoft Store alias stub
-# (…/WindowsApps/python3), which does not reliably forward stdin and has been seen
+BASENAME="${FILE##*[\\/]}"
+EXT_LOWER="${BASENAME##*.}"
+EXT_LOWER="${EXT_LOWER,,}"
+case "$EXT_LOWER" in ts|tsx|ps1) ;; *) exit 0 ;; esac
+
+[ -f "$FILE" ] || exit 0   # deleted, or not a real path
+
+# Prefer `python` (used only to JSON-encode findings): on Windows, `python3` is often the Microsoft
+# Store alias stub (…/WindowsApps/python3), which does not reliably forward stdin and has been seen
 # spinning at 100% CPU for days (2026-10-13, 2026-10-15). Skip that stub entirely.
 PY=""
 for cand in python python3; do
@@ -48,55 +60,77 @@ for cand in python python3; do
   PY="$cand"; break
 done
 
-if [ -z "$FILE" ] && [ -n "$PY" ]; then
-  FILE=$(echo "$INPUT" | "$PY" -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    print(d.get('tool_input', {}).get('file_path', ''))
-except:
-    print('')
-" 2>/dev/null || true)
-fi
-
-if [ -z "$FILE" ]; then
-  # Last resort: simple text extraction
-  FILE=$(echo "$INPUT" | grep -oP '"file_path"\s*:\s*"([^"]+)"' | head -1 | sed 's/.*"file_path"\s*:\s*"//;s/"$//' 2>/dev/null || true)
-fi
-
-# --- Validate file path ---
-if [ -z "$FILE" ]; then
-  # No file path found — nothing to lint, exit silently
-  exit 0
-fi
-
-if [ ! -f "$FILE" ]; then
-  # File doesn't exist (may have been deleted or path is invalid)
-  exit 0
-fi
-
-# --- Determine file extension ---
-BASENAME=$(basename "$FILE")
-EXT="${BASENAME##*.}"
-EXT_LOWER=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
-
 # --- Dispatch to appropriate linter ---
 # FINDINGS holds only lines that are real lint findings (filtered per tool), so a clean file, a
 # timeout (exit 124, no output), a missing config or a missing tool never reaches the agent.
 FINDINGS=""
+
+# Run "$@" (after cd to $2) under a hard cap of $1 seconds; print its output. On timeout the whole
+# Windows process tree is killed: plain `timeout` kills only the direct child, which is how
+# `dotnet format` left 97 BuildHost processes running for days (found 2026-11-09).
+# POSIX fallback that does not rely on job control: kill descendants, then the process.
+# (pgrep is absent in Git Bash; there taskkill /T covers it.)
+kill_tree() {
+  local p="$1" c
+  for c in $(pgrep -P "$p" 2>/dev/null || true); do kill_tree "$c"; done
+  kill -KILL "$p" 2>/dev/null || true
+}
+capped_in_dir() {
+  local secs="$1" dir="$2"; shift 2
+  local tmp="${TMPDIR:-/tmp}/post-edit-lint.$$.out" pid wp end=$((SECONDS + secs))
+  # Job control on: the background job becomes its own process group, so a timeout can kill
+  # everything it started on POSIX hosts (Windows uses taskkill /T below).
+  set -m
+  ( cd "$dir" && exec "$@" ) >"$tmp" 2>&1 </dev/null &
+  pid=$!
+  set +m
+  # Wall-clock deadline: counting sleep iterations drifts badly on a loaded machine (measured 65 s
+  # for a "4 s" cap).
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$end" ]; then
+      wp=$(cat "/proc/$pid/winpid" 2>/dev/null || true)
+      if [ -n "$wp" ] && command -v taskkill >/dev/null 2>&1; then taskkill //T //F //PID "$wp" >/dev/null 2>&1 || true; fi
+      kill -TERM -- "-$pid" 2>/dev/null || true
+      kill_tree "$pid"
+      kill -KILL -- "-$pid" 2>/dev/null || true
+      break
+    fi
+    sleep 0.2
+  done
+  wait "$pid" 2>/dev/null || true
+  cat "$tmp" 2>/dev/null || true
+  rm -f "$tmp" 2>/dev/null || true
+}
+
 case "$EXT_LOWER" in
-  cs)
-    # C# files: use dotnet format in verify mode
-    command -v dotnet &>/dev/null || { echo "[post-edit-lint] dotnet not found, skipping C# lint" >&2; exit 0; }
-    OUTPUT=$(timeout 4 dotnet format --include "$FILE" --verify-no-changes 2>&1) || true
-    FINDINGS=$(echo "$OUTPUT" | grep -E ': (error|warning) [A-Za-z]+[0-9]*' || true)
-    ;;
+  # C# (.cs) is deliberately not linted here. Even whitespace-only `dotnet format --folder` takes
+  # ~12 s and a full `dotnet format` loads the MSBuild workspace (minutes), so neither fits this
+  # hook's 4 s budget: the old call never finished, never reported, and leaked a BuildHost per
+  # edit. C# formatting is checked by the Stop gate (task-quality-gate.sh) and CI tier2 `format`.
 
   ts|tsx)
-    # TypeScript files: use ESLint with compact format
-    command -v npx &>/dev/null || { echo "[post-edit-lint] npx not found, skipping TypeScript lint" >&2; exit 0; }
-    OUTPUT=$(timeout 4 npx eslint "$FILE" --format compact 2>&1) || true
-    FINDINGS=$(echo "$OUTPUT" | grep -E ': line [0-9]+, col [0-9]+, (Error|Warning)' || true)
+    # ESLint from the nearest folder holding an ESLint config, with that package's own eslint, so
+    # its config and plugins resolve. Default "stylish" output: the "compact" formatter left
+    # ESLint core in v9, so the old `--format compact` call exited 2 on every edit.
+    REL=$(realpath --relative-to=. "$(cygpath -u "$FILE" 2>/dev/null || echo "$FILE")" 2>/dev/null) || exit 0
+    case "$REL" in ../*|/*) exit 0 ;; esac
+    D=$(dirname "$REL"); CFGDIR=""
+    while [ "$D" != "." ] && [ "$D" != "/" ]; do
+      if compgen -G "$D/eslint.config.*" >/dev/null 2>&1 || compgen -G "$D/.eslintrc*" >/dev/null 2>&1; then CFGDIR="$D"; break; fi
+      D=$(dirname "$D")
+    done
+    [ -n "$CFGDIR" ] || exit 0
+    D="$CFGDIR"; ESLINT=""
+    while :; do
+      if [ -f "$D/node_modules/.bin/eslint" ]; then ESLINT="$(cd "$D/node_modules/.bin" && pwd)/eslint"; break; fi
+      [ "$D" = "." ] && break
+      D=$(dirname "$D")
+    done
+    [ -n "$ESLINT" ] || exit 0
+    # POST_EDIT_LINT_TIMEOUT overrides the 4 s cap (used by the hook's own controls).
+    OUTPUT=$(capped_in_dir "${POST_EDIT_LINT_TIMEOUT:-4}" "$CFGDIR" "$ESLINT" "${REL#"$CFGDIR"/}")
+    # A file the package's config ignores is not a finding.
+    FINDINGS=$(echo "$OUTPUT" | grep -E '^[[:space:]]+[0-9]+:[0-9]+[[:space:]]+(error|warning)[[:space:]]' | grep -v 'File ignored because' || true)
     ;;
 
   ps1)

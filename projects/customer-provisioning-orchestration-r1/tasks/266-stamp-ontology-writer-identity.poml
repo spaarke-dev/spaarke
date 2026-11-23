@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="266" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Per-stamp ontology writer identity: UAMI, app setting, Dataverse grants, read-back (#2605)</title>
+    <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (2026-11-06, ontology-platform-r1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (H2a, H4b, H10, H7b, H13) and Bicep; adds an identity and its Dataverse grants (auth / least privilege).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive identity work across five handlers plus Bicep, with a least-privilege boundary that must not regress (tags auth).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches H7b SecureRecordSetupProcedure.cs and the H7b ProcedureVersion, which S23 just changed; sequential with any H7b work.</parallel-reason>
+    <deps>none</deps>
+    <tags>provisioning, provisioning-handler, l2-controlplane, auth, bicep, dataverse, model1-dedicated, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Give every stamp the ontology writer identity the BFF's SignalWriter / DecisionRecordWriter need, so they stop failing closed: a dedicated UAMI on both BFF slots, its client id as an app setting, a customer-BU application user holding exactly the writer grants, all read back before the run completes.</prompt>
+
+  <role>SPAARKE platform developer (L2 handlers H2a, H4b, H10, H7b, H13; customer.bicep). Least privilege is the point of this identity.</role>
+
+  <goal>
+    A new stamp run ends with: (1) a UAMI `mi-spaarke-{customerId}-{env}-ontology-writer` in the stamp RG, attached to the BFF site
+    AND the staging slot next to the stamp UAMI (keyVaultReferenceIdentity stays the stamp UAMI); (2) `Ontology__Writer__ManagedIdentityClientId`
+    on both slots equal to that UAMI's client id; (3) a Dataverse application user for it in the customer business unit, holding the
+    customer-BU copy of "Spaarke Ontology Service" and NO other role, and a member of exactly the two writer field-security profiles;
+    (4) H7b and H13 fail the run when any of that is missing or wrong. ACME's hand-applied equivalent is adopted with no drift.
+  </goal>
+
+  <context>
+    <background>
+      Source: GitHub #2605 (filed 2026-11-06 with the ontology project). The BFF resolves the writer through
+      `OntologyWriterCredentialFactory` (config key `Ontology:Writer:ManagedIdentityClientId`, FR-21: a separate least-privileged UAMI,
+      never the BFF runtime identity). No stamp provisions it, so Signal and Decision Record writes fail closed on every stamp.
+      S23 (H7b, procedure v6) gives the BFF RUNTIME user the Ontology Service role; that is a different principal and does not satisfy this.
+      Role and profile names are in committed solution source (`SpaarkeMaster/Other/FieldSecurityProfiles.xml`, S23's
+      `OntologyServiceRoleName`); privilege specifics come from the ontology project and stay out of committed prose (ontology request).
+      The second writer profile ships in SpaarkeMaster 1.2.4.0+ (ACME is on 1.2.3.1 until the 1.3.0.0 upgrade): a missing profile is a
+      Resumable refusal naming the solution version, not a pass.
+      ACME (2026-11-06): the ontology session may hand-apply the Azure half and part of the Dataverse half under the owner's go, using the
+      name above; this task's code must adopt those objects (lookup by name / applicationid, add-only).
+    </background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep (+ regenerated customer.json) — second `modules/uami.bicep` instance; output its clientId</file>
+      <file role="modify">infrastructure/bicep/modules/app-service.bicep, modules/app-service-slot.bicep — optional additional UAMI resource ids (default empty, so other callers are unchanged)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ (H2a output capture — copy how `uami_client_id` is captured)</file>
+      <file role="modify">H4b manifest + `PerEnvSourceCatalog.cs` source for `Ontology__Writer__ManagedIdentityClientId` (copy the `Graph__ManagedIdentity__ClientId` entry) + FilePerEnvSettingsManifestTests parity</file>
+      <file role="modify">H10 application-user creation (copy the UAMI app-user path: lookup by applicationid, create in the customer BU); record `InterStepState.OntologyWriterSystemUserId`; declare in HandlerRunInputs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs — new step S24 (canonical reference: S23 in the same file)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/H7bSecureRecordSetupHandler.cs — pass the writer user; ProcedureVersion → 7</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/CustomerIdentityT7Probe.cs — both-slot read-back of the setting (canonical reference: T265's CheckCustomerBusinessUnit)</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (H2a / H4b / H10 / H7b / T7 rows)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-21 / least privilege">The writer application user holds exactly one role (customer-BU "Spaarke Ontology Service") and exactly the two writer profiles. H10's System Administrator assignment path must NOT apply to it; a test proves it.</constraint>
+    <constraint source="ADR-028 / T5">Bicep keeps `type: 'UserAssigned'` (never SystemAssigned) and `keyVaultReferenceIdentity` = the stamp UAMI on both slots; `Graph__ManagedIdentity__ClientId` keeps selecting the stamp UAMI.</constraint>
+    <constraint source="T261 / G31">The writer UAMI gets NO Graph app role; extend T3's stamp-identity Graph-role check to include it.</constraint>
+    <constraint source="run-context contract">Every new InterStepState value has one producer, is declared in HandlerRunInputs, and RunContextContractTests stay green.</constraint>
+    <constraint source="H7b idempotency">ProcedureVersion bumps to "secure-setup-procedure=7" with a test that a v6-completed run does not short-circuit past S24 (copy the v5→v6 test).</constraint>
+    <constraint source="S24 sweep">Holder sweep: any team or interactive user (null applicationid) holding the customer-BU Ontology Service role copy, or any member of the writer profiles other than the writer user, is QuarantineRequired (copy S23's sweep). Exception: the S23 BFF runtime user is an allowed role holder.</constraint>
+    <constraint source="ontology request">Committed text names identities and profiles but states no privilege specifics and no client ids / object ids.</constraint>
+    <constraint source="owner">No live Azure/Dataverse change and no deploy in this task. ACME application is a separate owner-OK'd action recorded in the T186 run log.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/OntologyWriterCredentialFactory.cs</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds8-uami-dv-appuser-maturity.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Bicep: second UAMI, additional-identity param on the site and slot modules, clientId output; rebuild customer.json; Bicep tests.</step>
+    <step order="2">H2a captures the writer clientId; H4b writes `Ontology__Writer__ManagedIdentityClientId` to both slots; manifest parity tests.</step>
+    <step order="3">H10 creates or adopts the writer application user in the customer BU (no role assignment from H10); records its systemuserid.</step>
+    <step order="4">H7b S24: resolve role copy and both profiles; refuse Resumable when a profile is absent (name the SpaarkeMaster version); sweep; add-only writes; verify read-back fails the run; v7.</step>
+    <step order="5">H13 T7: both slots carry the setting equal to the run's writer clientId; T3 includes the writer UAMI.</step>
+    <step order="6">Guide rows; dotnet test control-plane tests; one adversarial pass x2 (auth tag).</step>
+    <step order="7">TASK-INDEX: `✅ [done]`; notes below.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology requires a live Signal-write smoke at H13, STOP: the BFF has no self-test endpoint for it, and adding one is BFF surface owned with ontology (root CLAUDE.md §10/§11). Ask ontology/owner before building it.</trigger>
+    <trigger>If the writer must live outside the customer BU, or needs a role or profile beyond the three named, STOP and confirm with ontology rather than widening grants.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Stamp UAMI `modules/uami.bicep` (customer.bicep:254), H10's UAMI app-user path, S23 in SecureRecordSetupProcedure.cs, T7's slot read-back.</existing>
+    <extension>Yes — every piece extends an existing module or step; no new handler, interface or DI registration. The UAMI is a second instance of the existing module because FR-21 forbids reusing the runtime identity. New members on existing seams (code-review W1, 2026-11-07): IGraphAppRoleParityVerifier.FindAnyRolesAsync — FindUnexpectedRolesAsync deliberately answers Unknown for an empty allowed set, so "allowed = none" needs its own call; ISecureRecordSetupDataverse.ListUserTeamsAsync / ListUserProfilesAsync — the only way to see roles inherited through a team and direct profile memberships, without which S24 cannot prove "exactly this role and these profiles"; TrapVerificationRequest's two writer fields — T7/T3 have no other input.</extension>
+    <cost-of-doing-nothing>Every stamp BFF's SignalWriter and DecisionRecordWriter fail closed, so no Signal or Decision Record is ever written on a customer stamp (#2605).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/customer.bicep, modules/app-service.bicep, modules/app-service-slot.bicep, customer.json</output>
+    <output type="code">L2 handlers H2a, H4b, H10, H7b (S24), H13 (T7, T3)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests (handler, procedure, manifest, run-context tests)</output>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Bicep emits the writer UAMI and attaches it to site and slot; the stamp UAMI stays the keyVaultReferenceIdentity; callers that pass no extra identities produce unchanged output.</criterion>
+    <criterion testable="true">H4b writes the setting to both slots from H2a's output; manifest parity tests pass.</criterion>
+    <criterion testable="true">H10 creates the writer app user in the customer BU when absent, adopts it when present (no duplicate), and assigns it no role.</criterion>
+    <criterion testable="true">S24 assigns the role and both profile memberships when absent and writes nothing when present; read-back passes.</criterion>
+    <criterion testable="true">Negative: S24 refuses Resumable when a writer profile or the role copy is absent; QuarantineRequired for a human/team holder, an extra profile member, or a writer user outside the customer BU; verify fails when the writer holds any other role.</criterion>
+    <criterion testable="true">Negative: T7 fails a slot missing the setting, blank, or different from the run's writer clientId; T3 fails if the writer UAMI holds a Graph role.</criterion>
+    <criterion testable="true">A v6-completed run does not short-circuit past S24.</criterion>
+    <criterion testable="true">RunContextContractTests and all Sprk.Provisioning.ControlPlane tests pass. Test scope: the stated contract plus the negatives above; anything beyond needs a one-line justification in notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-11-07">Done (code + tests + guide; no live change). Commits b514a9edca (bicep/H2a/H4b), fefcfb09b8 (H10 writer App User), 99fb858153 (H7b S24, procedure v7), 77d468dcf7 (H13 T7 + T3), bafbba6a43 (guide), 9073fa3e14 + 3eb0f08a70 + 9f24305bf2 (review fixes). 3315 control-plane tests, ArchTests 1950/1950. The second writer profile ships first in SpaarkeMaster 1.3.0.0 (not 1.2.4.0 as first noted).</note>
+    <note date="2026-11-07">Rework (adversarial review x2 — auth): S24 now also refuses a writer that would inherit a role through a team (any team but its unit's default team, or a role on that default team) or holds another profile directly; verify: extras QuarantineRequired, missing Resumable; H10 adoption refuses a row whose azureactivedirectoryobjectid is not the principal id (also the stamp UAMI); H10/H4b say "start a new run" for runs predating an H2a output; privilege specifics dropped from comments. Seeding proofs: team guard 3 tests, profile guard 1, verify class 2, adoption guard 2. Known limits: K4 FindAnyRoles/FindUnexpectedRoles share ~15 lines; S24 inline in RunAsync; H10 checks the writer's unit only at adoption (ordering, no wrong outcome).</note>
+    <note date="2026-11-07">Scoped re-check of the fix diff (Sonnet, one pass — the approach did not change): F2 the guide's external-access row asks for a contact role on the customer unit's default team, which S24 refuses (the writer inherits it) — cross-project security decision filed as #2618, S24 left fail-closed, both guide places cross-reference it; K1 late-role test fixed; K2 real Dataverse returning the default team in teammembership_association unconfirmed live (if it does not, no inheritance through it exists either).</note>
+    <note date="2026-11-06">Created from #2605 (ontology confirmed stamps must write Signals / Decision Records; owner direction relayed by ontology to add it here). ACME facts sent to ontology the same day; ACME lacks the second writer profile until SpaarkeMaster ≥ 1.2.4.0.</note>
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

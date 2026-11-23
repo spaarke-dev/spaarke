@@ -98,7 +98,8 @@ public class AnalysisResultPersistence
                         TargetRecordId = analysisId,
                     }
                     : AppOnlyAnalysisService.OwnershipOfNewAnalysis(documentId))
-                    with { RequestedBy = requestedBy },
+                    with
+                { RequestedBy = requestedBy },
                 cancellationToken);
 
             if (!owner.IsOwned)
@@ -271,7 +272,6 @@ public class AnalysisResultPersistence
             ContentType: null,
             DocumentId: documentId,
             ParentEntity: null,
-            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "AnalysisOrchestration",
             CorrelationId: analysisId);
 

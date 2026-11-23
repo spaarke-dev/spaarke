@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151c-1b" project="ebilling-r1">
+  <metadata>
+    <title>Email to AP and Mark Sent to AP: UI (modal step, Billing Export form buttons, Sent to AP Date on the views)</title>
+    <phase>6 Export and index (WP6) — wave W6-2 (split from 151c, EB-D-181 / EB-D-182)</phase>
+    <gate>startable after 151c-1a (the two routes and both columns)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Client-side only (code page, ribbon script, RibbonDiff, view definitions); no BFF, schema or auth change. The server stays the authority for every right and every refusal. Tags include frontend, ribbon and dataverse-views.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pattern-following: the 151b ApExport page, ribbon script and RibbonDiff are the reference; the route shapes and every error code are in notes/151c1a-email-route.md.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>151b, 151c-1a</deps>
+    <tags>frontend, ribbon, ebilling, dataverse-views, code-page</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build the UI of Email to AP and Mark Sent to AP (EB-D-181 to EB-D-184) on top of 151b: an Email to AP step in the export modal (after a successful export, and when the modal is opened on an existing Completed batch), a Mark Sent to AP action in the modal and on the Billing Export form ribbon, an Email to AP button on the batch form, and the Sent to AP Date on the batch Active view and the 151b invoice views. Client-side work only: no BFF change, no new BFF call beyond the two routes of 151c-1a. Change source files and scripts only; import or publish nothing to Dataverse.</prompt>
+
+  <role>SPAARKE front-end developer. Expert in React 19 code pages with Fluent UI v9, Dataverse ribbon customisation (RibbonDiff, EntityPrivilegeRule, custom rules) and view definitions (FetchXML, layoutxml).</role>
+
+  <goal>A finance user with Write on a Completed AP export batch can email its files to the configured AP address from the modal (with optional CCs and message), sees "Sent to AP" with the date and recipients, or one plain sentence that says whether to try again or to use Download plus Mark Sent to AP; cannot send the same batch twice from the dialog; can record a delivery made another way with Mark Sent to AP; and sees when a batch (and so each invoice in it) was sent to AP in the views.</goal>
+
+  <context>
+    <background>
+      Read first: notes/151c1a-email-route.md (the contract: both routes and every error code), EB-D-181 to EB-D-184 in notes/decisions-log.md, notes/151b-export-ui.md (the page, ribbon script and RibbonDiff this extends), docs/standards/MODAL-DECISION-CRITERIA.md, docs/standards/MODAL-DESIGN-SYSTEM.md, .claude/patterns/ui/record-modal-selection.md (ADR-050), .claude/skills/fluent-v9-component/SKILL.md.
+      Reference to copy: src/solutions/ApExport (ExportDialog.tsx, services/exportFlow.ts and its tests for the pure-function-plus-test shape), the Mark Paid Write display rule (sprk.ApExport.InvoiceWritePrivilege.DisplayRule) in the sprk_Invoice RibbonDiff.
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/ApExport/src/App.tsx, components/ExportDialog.tsx, services/launch.ts, services/apExportApi.ts</file>
+      <file role="new">src/solutions/ApExport/src/components/BatchEmailView.tsx, MarkSentDialog.tsx, MarkSentSection.tsx; services/emailFlow.ts, markSentFlow.ts, batch.ts, singleFlight.ts</file>
+      <file role="new">src/solutions/ApExport/src/__tests__/emailFlow.test.ts, markSentAndBatch.test.ts; extended __tests__/ribbonScript.test.ts</file>
+      <file role="modify">src/client/webresources/js/sprk_apexport_ribbon.js and its SpaarkeMaster mirror WebResources/sprk_/scripts/apexport_ribbon.js</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_billingexport/RibbonDiff.xml and SavedQueries/{c19542df-...}.xml (Active view)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/SavedQueries/{cd153641-...}.xml (Sent to AP), {b0feb580-...}.xml (Paid)</file>
+      <file role="modify">scripts/ebilling/Deploy-EbillingFormsViews.ps1 (the billingexport Active view column spec only)</file>
+      <file role="new">projects/ebilling-r1/notes/151c1b-email-ui.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="scope">Client-side only. Do not touch the BFF. No new BFF call beyond POST .../email and POST .../mark-sent-to-ap. No new npm package. Do not import or publish anything to Dataverse; the dev import needs the owner's OK, which the main session obtains.</constraint>
+    <constraint source="EB-D-183">Email to AP and Mark Sent to AP are shown only to a user with Write on sprk_billingexport (EntityPrivilegeRule, the InvoiceWritePrivilege pattern); the buttons are enabled only on a Completed batch. Display only: the server checks Read and Write.</constraint>
+    <constraint source="EB-D-182 (3)">The Sent to AP Date reaches the invoice views only through the batch link (a linked-entity column). No per-invoice copy, no new invoice column.</constraint>
+    <constraint source="ADR-050, MODAL-DESIGN-SYSTEM">The step lives inside the existing navigateTo dialog; no second Dialog (single title source). Footer contract: Cancel / Close left, actions right.</constraint>
+    <constraint source="ADR-021, ADR-028">Fluent v9 semantic tokens only; every BFF call through authenticatedFetch.</constraint>
+    <constraint source="151c-1a notes">Server rules are the authority. The client checks CC (at most 10, bare valid addresses, de-duplicated) and message (at most 2000 characters) only to save a round trip, and maps the server's 400 too.</constraint>
+    <constraint source="wording">Neutral wording in the UI and the notes.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>After a successful export, and when opened on an existing batch, the modal offers Email to AP and shows the configured AP address; with no address it shows the not-configured message and offers Download only (no CC, message or Send).</criterion>
+    <criterion>On 200 the dialog shows "Sent to AP", the Sent to AP Date and the recipients. A 200 with sentToApDateSet:false and sentToApDate:null shows "The email was sent, but the Sent to AP Date could not be recorded; use Mark Sent to AP." and no Send is possible afterwards.</criterion>
+    <criterion>Every error code of the 151c-1a notes maps to one plain sentence that says whether to try again or to use Download plus Mark Sent to AP. 409 ap_email_recipient_monitored (AP address, a CC or the sender's own mailbox), email_owner_refused, email_send_refused, attachments_too_large, file_not_available and ap_email_not_configured are not retryable; 503 email_send_failed and ebilling.export.unavailable are. The uniform 404 reads "This export batch isn't available to you."</criterion>
+    <criterion>Send is disabled while a send is in flight and a second call is refused before the network (a double click sends once); after any 200, or a failure that says not to try again, no further send starts.</criterion>
+    <criterion>Mark Sent to AP: a button on the Billing Export form ribbon and in the modal; 200 {sentToApDate, alreadySet}, 409 batch_not_completed and the uniform 404 are shown in plain words.</criterion>
+    <criterion>Email to AP and Mark Sent to AP buttons on the batch form: shown only with Write on sprk_billingexport and an existing record, enabled only on a Completed batch; Download CSV/JSON keep their rules (must-not-fire: no Write rule).</criterion>
+    <criterion>sprk_senttoapdate is on the sprk_billingexport Active view (SpaarkeMaster and the Deploy-EbillingFormsViews.ps1 spec) and, as a linked-entity column through the invoice's sprk_billingexport lookup, on the Sent to AP and Paid invoice views.</criterion>
+    <criterion>Tests: the error-code-to-sentence mapping and the no-re-send state, with fail-before proofs; the code page's tests and typecheck pass; the production build succeeds; the WebResourceMirrorParity and related ArchTests pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a behaviour needs a BFF change or a third BFF call, STOP and report.</trigger>
+    <trigger>If the dev import of the ribbon or views is needed to confirm a behaviour, report it to the main session; do not import.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+  </knowledge>
+</task>

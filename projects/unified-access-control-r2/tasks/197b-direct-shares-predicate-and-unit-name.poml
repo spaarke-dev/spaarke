@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="197b" project="unified-access-control-r2">
+  <metadata>
+    <title>Direct-message participant shares follow the external visibility predicate for flagged users; Gate Decision Record sharing reads the stored flag only; one source for the External Collaborators unit name</title>
+    <phase>Session 28: UAC (owner and coordinator decisions on task 191c follow-ups, 2026-11-12)</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization code: who is granted Read on Direct messages and Gate Decision Records, and which unit the external team share engine uses. Tagged auth and tenant-isolation, so two adversarial passes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The NoRoot exemption is a bounded authorization decision across three grant paths; the coordinator approved option B with explicit bounds.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Task 197a edits RecordOwnershipResolver, DirectMessageOwnerStep, DocumentLinkFields and the refile path (SecureChildReconciler) in parallel; this task stays off those files.</parallel-reason>
+    <tags>bff-api, access-control, auth, tenant-isolation, external-access, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>
+      Task 191c's review findings, decided by the owner and the coordinator 2026-11-12: (1) participants flagged external on a Direct message bypassed THE predicate (191b) through the Direct participant shares; (2) GateDecisionRecordSharing still treated a guest-shaped domain name as external (ADR-028 A9 Model 1 says the stored flag only); (3) ExternalTeamShareSynchronizer kept its own configurable unit name next to 191e's compiled one.
+    </origin>
+  </metadata>
+
+  <goal>
+Every Direct-message share for a user flagged external goes through the 191h seam. An unfiled Direct message has no root, so the predicate answers Undecided (NoRoot). The NoRoot exemption lets flagged participants keep Direct messaging, and it is participant-scoped: it applies only when the message is positively recognized as an unfiled Direct message whoever owns it (bound i', coordinator review of #2760: no filing lookup, a Direct thread with no typed lookup that is not the master thread, a valid stamped pair), the predicate answers exactly NoRoot, and the grantee is in that pair. The 191c engine consults the same exemption before revoking. Hidden wins and revokes; a transient Undecided grants nothing and is retried. Gate Decision Record sharing treats a user as external only when sprk_isexternal is true. The external team share engine finds its unit through ExternalCollaboratorPlacement.ResolveUnitAsync, so the unit name has one source.
+  </goal>
+
+  <component-justification>
+    1. Existing: AppOnlyExternalVisibility / ExternalRowVisibility (191h seam), RestrictedFilingShareBar's one user-flag read, DirectMessageParticipantShares (the job and refile reconcile), DirectThreadAccessService (the live grant), ExternalCollaboratorPlacement.ResolveUnitAsync (191e).
+    2. Extension: one read-only member on ExternalRowVisibility (UndecidedOnlyForNoRoot) and no third entry point. The bar's existing read also returns the flagged set (GrantEligibility). One static decision helper on DirectMessageParticipantShares is shared by the reconcile and the live grant. The engine calls the existing unit lookup.
+    3. Cost of doing nothing: a participant flagged external is shared a Direct message the predicate hides (internal-only, thread not Open, review log); a guest-shaped domain name withholds a Gate Decision Record from an internal user; and a leftover unit-name setting makes the engine and the placement job disagree on the unit. The startup warning exists because, without it, a leftover slot value would be silently ignored and nobody would know the config is stale.
+  </component-justification>
+
+  <steps mode="directional">
+    1. ExternalRowVisibility.UndecidedOnlyForNoRoot(table, id): not faulted and Undecided with reason NoRoot. Documented as NOT visible.
+    2. RestrictedFilingShareBar.EligibilityForGrantAsync returns Eligible, FlaggedExternal and Complete from the one user read. EligibleForGrantAsync is unchanged for its callers.
+    3. DirectMessageParticipantShares: an optional seam. For flagged participants only, one predicate call over the message and its content rows decides each row: Grant, Hidden (revoke the flagged participant's held share, owner re-checked, read back), Defer (incomplete, retried) or Withhold (settled). Content rows follow their message. The job passes the seam from its run scope. The refile path (197a's file) passes none, so flagged participants are deferred there.
+    4. DirectThreadAccessService: on the Direct-team branch, flagged eligible participants get rows only on Grant, with the seam resolved in its own scope because the service is a singleton. On the other Direct branch, flagged or unreadable-flag participants are granted on Visible, or on exactly NoRoot when they are in the stamped pair of a recognized unfiled Direct message. Both branches re-read the recognition before granting; a changed message grants nothing. The live grant never revokes.
+    5. GateDecisionRecordSharing: read sprk_isexternal only; domainname is no longer read.
+    6. ExternalTeamShareSynchronizer.ResolveExternalTeamAsync uses ExternalCollaboratorPlacement.ResolveUnitAsync. Remove the BusinessUnitName key and the duplicate default. StartupValidationService logs one Warning naming the retired KEY when it still has a value. The ArchTests pin the compiled unit and role names to config/external-collaborator-role.json and scan checked-in configuration for the retired key.
+    7. (Review of #2760) DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync is the one recognition; the share job, both live branches and ExternalTeamShareSynchronizer (RevocableOnNoRootAsync, via NoRootExemptPairForRowAsync) use it.
+  </steps>
+
+  <acceptance-criteria>
+    - A flagged participant on an ordinary Open Direct-team message (NoRoot) is shared the message and its content rows, never the email review log.
+    - A flagged participant on an internal-only message or one whose thread is not Open is not shared, and an existing share on the message and its content rows is revoked.
+    - A flagged non-participant, or a flagged participant outside the stamped pair, is never shared. A NoRoot user-owned unfiled Direct message is shared with its flagged pair member; a NoRoot unfiled communication that is not a recognized Direct message (no pair, filed, wrong thread) grants a flagged participant nothing. A Hidden user-owned Direct message grants nothing, and the 191c engine revokes an existing share on it; on exactly NoRoot it keeps the pair member's share.
+    - A transient Undecided answer, no seam, a throwing seam, a faulted decision or a flag-read fault grants a flagged participant nothing; the reconcile is incomplete and retried, and nothing is revoked on an unknown answer. A structural Undecided answer is withheld and settled.
+    - Unflagged participants never ask the predicate and are granted as before.
+    - Gate Decision Record sharing: a guest-shaped domain name with sprk_isexternal false or blank is internal and shared; sprk_isexternal true is skipped; "an unreturned sharee row is skipped" and "a read fault shares nothing" are unchanged.
+    - The engine ignores the retired setting and refuses a named unit that is not a direct child of the root; a leftover value is reported once by key only.
+    - Negative: no new endpoint, no new DI registration, no third seam entry point, no change to 197a's files, no App Service setting change.
+  </acceptance-criteria>
+
+  <constraints>
+    - ADR-028 A9 (Model 1: the stored flag is the external test). Root CLAUDE.md sections 10 and 11. The K7 seam-consumer allow-list (ExternalDocumentNarrowingGuardTests) and the grant-caller allow-list (ExternalTeamShareGuardTests) list every new consumer with its reason.
+    - No Dataverse, Entra, Key Vault or App Service setting changes; no merge or deploy from this task.
+  </constraints>
+</task>

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165f" project="ebilling-r1">
+  <metadata>
+    <title>External invoice visibility counts a submission's document link only when it is the submission's own document (follows 165c and 165e)</title>
+    <phase>4 Review (165 family)</phase>
+    <gate>165e merged into work (both edit ExternalInvoiceVisibility). uac-r2 assigned this to ebilling on 2026-11-07 and reviews it.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Partner-readable visibility (ExternalAccess); two adversarial passes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>External access decision on a partner read path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Infrastructure/ExternalAccess (shared with uac-r2) and the same readers as 165e.</parallel-reason>
+    <deps>165e</deps>
+    <tags>bff-api, ebilling, auth, external-access</tags>
+  </metadata>
+
+  <prompt>165c binds each submission's invoice link with one rule (`InvoiceBlockedHold.IsOwnSubmission`). This task binds the document link the same way, with the persister's existing rule `InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId)` (used at InvoiceSubmissionPersister.cs ~:348 and SubmissionEvaluationOutcome.cs ~:197).
+    Read first: `notes/165c-visibility-own-submission.md` (including the 165e section); `ExternalInvoiceVisibility` reader 1 (`DecideSubmissionsAsync`) and reader 2 (`ReadSubmissionSourcesAsync`).
+    Wording in commits, notes, comments and the PR stays neutral: "decides only from the submission's own document". Never describe a sequence of steps.</prompt>
+
+  <goal>Both external visibility readers use a submission's `sprk_document` link only when `IsExistingDocumentSubmissionIdOf` holds for that pair. Otherwise the link contributes nothing and the invoice is decided as if the document were absent.</goal>
+
+  <scope>
+    <in>
+      - Readers 1 and 2 call the one rule (no copy). A mismatched pair logs a reason code with ids only, following 165c's log-level split (reader 1 Warning; reader 2 Information, or Debug when reader 1 already logged the pair).
+      - Extend `OwnSubmissionRuleSingleSourceTests`, or add a sibling guard with the same mechanics, so that a document-id comparison outside the rule fails.
+      - (From 165e pass 1, K1.) Reader 1 decides a submission with no invoice link whose derived invoice exists (looked up the way the firm-hold check already does, `InvoiceKeysOf`) by that invoice's verdict, not by channel alone. A read fault there withholds the submission. The existence check is required (165e pass 2): a Received or Processing submission with no invoice yet must stay decided by channel, not withheld.
+    </in>
+    <out>
+      - Field security on the submission link columns (owner question, dev-deploy checklist).
+      - Internal readers.
+      - Any client change.
+    </out>
+  </scope>
+
+  <acceptance-criteria>
+    <criterion>Must-fire, each with its must-not-fire control: in reader 1 and in reader 2, a submission whose `sprk_document` is not its own document contributes nothing. Control: the submission's own document is used, as today.</criterion>
+    <criterion>A read fault in the document check hides the invoice (fail closed). One test per reader.</criterion>
+    <criterion>K1 item: a submission with no invoice link whose derived invoice is hidden is withheld by reader 1. Control: its derived invoice is visible, so the submission is too. A read fault withholds it.</criterion>
+    <criterion>One seed per reader: drop the check, and that reader's must-fire test fails. Also the guard's must-fire fixture.</criterion>
+    <criterion>Dev data (read-only): count the submissions whose document link fails the rule. Expected 0. If more than 0, STOP and send the ids to the lead only.</criterion>
+    <criterion>Filtered unit tests (ExternalAccess, ExternalInvoiceVisibility, Finance, Submission) and the full ArchTests pass. The BFF builds.</criterion>
+    <criterion>Notes go in `notes/165c-visibility-own-submission.md`, in a new 165f section, in neutral wording.</criterion>
+    <criterion>Test scope: exactly the criteria above.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a legitimate submission (internal, from email, a Correction) has a document link the rule rejects, STOP before hiding anything.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>

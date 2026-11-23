@@ -21,9 +21,12 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Domain.Signals.Billing;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -76,12 +79,12 @@ public sealed class InvoiceSubmissionServiceTests
         public StoredFileRig Files { get; set; } = new();
 
         public readonly List<(string Entity, Guid Id)> Deleted = new();
-        public readonly List<(Guid SubmissionId, Guid FirmId, string Number, IReadOnlyDictionary<string, object>? Fields)> Allocations = new();
+        public readonly List<(Guid SubmissionId, Guid? FirmId, string Number, IReadOnlyDictionary<string, object>? Fields)> Allocations = new();
         public readonly List<JobContract> JobsSent = new();
         public readonly List<RecordOwnershipContext> OwnerContexts = new();
         public readonly List<CancellationToken> WriteTokens = new();
 
-        /// <summary>Every stage the intake asked the file store for (one write-once blob create each), as "container/name".</summary>
+        /// <summary>Every stage the intake asked the file store for (one blob create each, write-once per content: a reuse rewrites the same bytes, DEF-044), as "container/name".</summary>
         public IReadOnlyList<string> Stages => BlobCalls("create");
 
         /// <summary>Every staged-blob delete (compensation), as "container/name".</summary>
@@ -110,6 +113,30 @@ public sealed class InvoiceSubmissionServiceTests
 
         /// <summary>050a review #5: non-null, the allocator's create stores this row as <see cref="Submission"/> (what a concurrent creator left).</summary>
         public Entity? StoredOnCreate;
+
+        /// <summary>Task 097b: the <c>sprk_invoice</c> rows a Correction reads, by id (absent: not found).</summary>
+        public readonly Dictionary<Guid, Entity> Invoices = new();
+
+        /// <summary>
+        /// Task 097b: the submissions the Correction guard's query (<c>sprk_invoicesubmission</c> by <c>sprk_invoice</c>) can find; each is
+        /// returned when its <c>sprk_invoice</c> is the queried invoice.
+        /// </summary>
+        public readonly List<Entity> PriorSubmissions = new();
+
+        /// <summary>Task 097b: non-null, the Correction guard's submission query throws this.</summary>
+        public Exception? PriorSubmissionReadFailure;
+
+        /// <summary>Task 097e: non-null, the query for the submissions that name an earlier one (<c>sprk_resubmissionof</c>) throws this.</summary>
+        public Exception? ResubmissionReadFailure;
+
+        /// <summary>Task 095c-5 review K1: non-null, the app-only read of the invoice's own firm hold throws this.</summary>
+        public Exception? HoldReadFailure;
+
+        /// <summary>Task 097f: non-null, the status routes' page read of which invoices are Superseded (<c>sprk_invoice</c> by key) throws this.</summary>
+        public Exception? SupersededInvoiceReadFailure;
+
+        /// <summary>Task 097f: every page read of which invoices are Superseded, with the ids it asked about.</summary>
+        public readonly List<Guid[]> SupersededInvoiceReads = new();
 
         /// <summary>050a: the <c>sprk_document</c> the existing-document entry reads (null: not found).</summary>
         public Entity? ExistingDocument;
@@ -235,10 +262,88 @@ public sealed class InvoiceSubmissionServiceTests
                     "sprk_communicationthread" => ThreadReadFailure is { } threadFailure
                         ? throw threadFailure
                         : Threads.TryGetValue(id, out var thread) ? OnlyColumns(thread, columns) : throw NotFound(),
+                    "sprk_invoice" when Invoices.Count > 0 => Invoices.TryGetValue(id, out var invoice) ? OnlyColumns(invoice, columns) : throw NotFound(),
                     _ => null!,
                 });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new EntityCollection());
+                .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+                {
+                    // Task 097b: the Correction guard's read of an invoice's submission; every other query finds nothing, as before.
+                    if (q.EntityName == "sprk_invoicesubmission"
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_invoice") is { } byInvoice)
+                    {
+                        if (PriorSubmissionReadFailure is { } failure)
+                        {
+                            throw failure;
+                        }
+
+                        // Second review F1: only the columns asked for, as Dataverse does, so a column dropped from the guard's read
+                        // (the submission's status) fails a test instead of being answered anyway.
+                        return new EntityCollection(PriorSubmissions
+                            .Where(s => s.GetAttributeValue<EntityReference>("sprk_invoice")?.Id is { } invoiceId
+                                && byInvoice.Values.Contains(invoiceId))
+                            .Select(s =>
+                            {
+                                var row = new Entity(s.LogicalName, s.Id);
+                                foreach (var column in q.ColumnSet.Columns.Where(s.Attributes.ContainsKey))
+                                {
+                                    row[column] = s[column];
+                                }
+
+                                return row;
+                            })
+                            .ToList());
+                    }
+
+                    // Task 097e: the correction prefill's read of the submissions that name an earlier one (sprk_resubmissionof), among the same rows.
+                    if (q.EntityName == "sprk_invoicesubmission"
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_resubmissionof") is { } byEarlier)
+                    {
+                        if (ResubmissionReadFailure is { } failure)
+                        {
+                            throw failure;
+                        }
+
+                        return new EntityCollection(PriorSubmissions
+                            .Where(s => s.GetAttributeValue<EntityReference>("sprk_resubmissionof")?.Id is { } earlierId
+                                && byEarlier.Values.Contains(earlierId))
+                            .Select(s => OnlyColumns(s, q.ColumnSet.Columns.ToArray()))
+                            .ToList());
+                    }
+
+                    // Task 095c-5 review K1: the app-only read of the invoice's own firm hold (sprk_firmhold), among Invoices.
+                    if (q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.Contains(InvoiceFirmHold.InvoiceHoldColumn)
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_invoiceid") is { } byHoldKey)
+                    {
+                        if (HoldReadFailure is { } holdFailure)
+                        {
+                            throw holdFailure;
+                        }
+
+                        return new EntityCollection(Invoices.Values.Where(i => byHoldKey.Values.Contains(i.Id))
+                            .Select(i => OnlyColumns(i, q.ColumnSet.Columns.ToArray())).ToList());
+                    }
+
+                    // Task 097f: the status routes page read of which of the asked invoices are Superseded, among Invoices.
+                    if (q.EntityName == "sprk_invoice"
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_invoiceid") is { } byKey)
+                    {
+                        if (SupersededInvoiceReadFailure is { } failure)
+                        {
+                            throw failure;
+                        }
+
+                        SupersededInvoiceReads.Add(byKey.Values.Cast<Guid>().ToArray());
+                        var wanted = q.Criteria.Conditions.First(c => c.AttributeName == "statuscode").Values.Cast<int>().ToHashSet();
+                        return new EntityCollection(Invoices.Values
+                            .Where(i => byKey.Values.Contains(i.Id)
+                                && i.GetAttributeValue<OptionSetValue>("statuscode") is { } status && wanted.Contains(status.Value))
+                            .Select(i => OnlyColumns(i, q.ColumnSet.Columns.ToArray()))
+                            .ToList());
+                    }
+
+                    return new EntityCollection();
+                });
             Entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Callback((string entity, Guid id, CancellationToken _) => Deleted.Add((entity, id)))
                 .Returns(Task.CompletedTask);
@@ -250,9 +355,9 @@ public sealed class InvoiceSubmissionServiceTests
                     return OwnerAnswer;
                 });
 
-            Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+            Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                     It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken ct) =>
+                .ReturnsAsync((Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken ct) =>
                 {
                     Allocations.Add((id, firm, number, fields));
                     WriteTokens.Add(ct);
@@ -317,9 +422,52 @@ public sealed class InvoiceSubmissionServiceTests
 
         public IOptionsMonitor<EbillingOptions> Monitor => Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == Options);
 
-        public InvoiceSubmissionService Build() =>
-            new(Allocator.Object, Entities.Object, RecordTypes.Object, Participations, Files.Service, Ownership.Object,
-                IsolationOver(() => Isolation), Jobs.Object, Monitor, NullLogger<InvoiceSubmissionService>.Instance);
+        /// <summary>Task 191: the invoice reader's options the intake checks (configured by default, so every other test takes the normal path).</summary>
+        public ContentUnderstandingOptions Reader { get; } = new() { Endpoint = "https://invoice-reader.test/" };
+
+        public InvoiceSubmissionService Build() => Build(NullLogger<InvoiceSubmissionService>.Instance);
+
+        /// <summary>
+        /// ebilling-r1 082c-3: the intake's billing-terms pre-check reads the Procedure resolution through
+        /// <see cref="InvoiceSubmissionService.ReadProcedureResolutionAsync"/>; this hook answers it (the core record and firm it was asked
+        /// for are recorded in <see cref="PrecheckReads"/>). Null (the default): an EMPTY resolution (no Procedures, so no warning and no
+        /// read on <see cref="Entities"/>), so every other test sees an intake that behaves exactly as before 082c-3.
+        /// </summary>
+        public Func<ProcedureResolution>? ProcedureRead { get; set; }
+
+        /// <summary>
+        /// F1: an ASYNC answer for the pre-check's read, given the token the service passes it (so a test can model a read that never completes
+        /// and honours only its token). When set, it wins over <see cref="ProcedureRead"/>.
+        /// </summary>
+        public Func<CancellationToken, Task<ProcedureResolution>>? ProcedureReadAsync { get; set; }
+
+        /// <summary>F1: the pre-check's time budget in a test (null: the service's own <see cref="InvoiceSubmissionService.PrecheckTimeout"/>).</summary>
+        public TimeSpan? PrecheckTimeLimit { get; set; }
+
+        /// <summary>Every (core record, firm) the pre-check read the Procedure resolution for.</summary>
+        public readonly List<(CoreRecordReference Core, Guid FirmId)> PrecheckReads = new();
+
+        public InvoiceSubmissionService Build(ILogger<InvoiceSubmissionService> logger) => new HarnessService(this, logger);
+
+        /// <summary>The service with NO pre-check seam: its Procedure read is the real resolver over <paramref name="entities"/>.</summary>
+        public InvoiceSubmissionService BuildReal(IGenericEntityService entities) =>
+            new(Allocator.Object, entities, RecordTypes.Object, Participations, Files.Service, Ownership.Object,
+                IsolationOver(() => Isolation), Jobs.Object, Monitor, Microsoft.Extensions.Options.Options.Create(Reader), NullLogger<InvoiceSubmissionService>.Instance);
+
+        private sealed class HarnessService(Harness h, ILogger<InvoiceSubmissionService> logger) : InvoiceSubmissionService(
+            h.Allocator.Object, h.Entities.Object, h.RecordTypes.Object, h.Participations, h.Files.Service, h.Ownership.Object,
+            IsolationOver(() => h.Isolation), h.Jobs.Object, h.Monitor, Microsoft.Extensions.Options.Options.Create(h.Reader), logger)
+        {
+            protected internal override Task<ProcedureResolution> ReadProcedureResolutionAsync(CoreRecordReference core, Guid firmId, CancellationToken ct)
+            {
+                h.PrecheckReads.Add((core, firmId));
+                return h.ProcedureReadAsync is { } readAsync
+                    ? readAsync(ct)
+                    : Task.FromResult(h.ProcedureRead?.Invoke() ?? new ProcedureKit().Build());
+            }
+
+            protected internal override TimeSpan PrecheckTimeLimit => h.PrecheckTimeLimit ?? base.PrecheckTimeLimit;
+        }
 
         /// <summary>The container and name the upload of <paramref name="submissionId"/> is staged under (the job derives the same).</summary>
         public (string Container, string Name) StagedName(Guid submissionId)
@@ -347,16 +495,16 @@ public sealed class InvoiceSubmissionServiceTests
 
     internal static InvoiceSubmissionRequest Spa(
         string? number = "INV-1", byte[]? bytes = null, string? contentType = "application/pdf", string? po = null) => new()
-    {
-        FirmId = FirmId,
-        CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
-        Channel = InvoiceSubmissionChannel.Spa,
-        FirmInvoiceNumber = number,
-        PoNumber = po,
-        File = new InvoiceSubmissionFile("May invoice.pdf", contentType, bytes ?? Pdf()),
-        ExternalCaller = Contact(),
-        CorrelationId = "corr-1",
-    };
+        {
+            FirmId = FirmId,
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
+            Channel = InvoiceSubmissionChannel.Spa,
+            FirmInvoiceNumber = number,
+            PoNumber = po,
+            File = new InvoiceSubmissionFile("May invoice.pdf", contentType, bytes ?? Pdf()),
+            ExternalCaller = Contact(),
+            CorrelationId = "corr-1",
+        };
 
     private static InvoiceSubmissionRequest Internal() => Spa() with
     {
@@ -618,6 +766,29 @@ public sealed class InvoiceSubmissionServiceTests
         h.Writes.Should().Be(0);
     }
 
+    [Theory(DisplayName = "095c-2 (must fire): the SPA upload, the internal upload and the existing-document entry (from-document, confirm) refuse no firm as 400 firm_invalid, reading and writing nothing")]
+    [InlineData("spa")]
+    [InlineData("internal")]
+    [InlineData("existing-document")]
+    public async Task No_firm_outside_the_from_email_entry_is_400_firm_invalid(string entry)
+    {
+        var h = new Harness();
+        var service = h.Build();
+
+        var outcome = entry switch
+        {
+            "spa" => await service.SubmitAsync(Spa() with { FirmId = null }, CancellationToken.None),
+            "internal" => await service.SubmitAsync(Internal() with { FirmId = null }, CancellationToken.None),
+            _ => await service.SubmitExistingDocumentAsync(
+                Internal() with { FirmId = null, File = null, ExistingDocumentId = Guid.NewGuid() }, CancellationToken.None),
+        };
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o =>
+            o.StatusCode == 400 && o.ErrorCode == InvoiceSubmissionErrors.FirmInvalid && o.Detail == "A firm is required.");
+        h.Writes.Should().Be(0);
+        h.Entities.Invocations.Should().BeEmpty("the field check refuses before anything is read");
+    }
+
     [Fact]
     public async Task A_firm_that_cannot_be_read_is_503_firm_unverifiable_not_a_500()
     {
@@ -667,6 +838,60 @@ public sealed class InvoiceSubmissionServiceTests
         h.Writes.Should().Be(0);
         h.Files.Gateway.StorageCalls.Should().Be(0);
         h.Deleted.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 191, upload route: the reader that is not set up is a 422 before the stage, so no blob, no tracking number, no row and no job;
+    /// set up, the same request takes the normal path. Where the store is not configured either, the store's code wins (the from-email order).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_TheReaderIsNotConfigured_Is422ReaderNotConfigured_NothingStagedTrackedOrCreated(bool storeUnconfiguredToo)
+    {
+        var h = new Harness { Reader = { Endpoint = "" } };
+        if (storeUnconfiguredToo)
+        {
+            h.Files = new StoredFileRig(configured: false);
+        }
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 422
+            && o.ErrorCode == (storeUnconfiguredToo ? InvoiceSubmissionErrors.StorageNotConfigured : InvoiceSubmissionErrors.ReaderNotConfigured));
+        h.Writes.Should().Be(0);
+        h.Allocations.Should().BeEmpty("no tracking number is allocated and no row is created");
+        h.JobsSent.Should().BeEmpty();
+        h.Files.Gateway.StorageCalls.Should().Be(0, "nothing is staged");
+        h.Deleted.Should().BeEmpty();
+
+        if (!storeUnconfiguredToo)
+        {
+            h.Reader.Endpoint = "https://invoice-reader.test/";
+            (await h.Build().SubmitAsync(Spa(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        }
+    }
+
+    /// <summary>
+    /// Task 191: the intake's check and the reader's are the same test (<see cref="ContentUnderstandingOptions.IsConfigured"/>) over the same
+    /// bound options, so they cannot disagree: pinned for an empty, a blank and a set endpoint.
+    /// </summary>
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(null, false)]
+    [InlineData("https://invoice-reader.test/", true)]
+    public void The_intakes_reader_check_and_the_readers_own_agree(string? endpoint, bool configured)
+    {
+        var h = new Harness { Reader = { Endpoint = endpoint } };
+        var reader = new Sprk.Bff.Api.Services.Ai.ContentUnderstanding.ContentUnderstandingClient(
+            Mock.Of<IHttpClientFactory>(), Mock.Of<TokenCredential>(), Microsoft.Extensions.Options.Options.Create(h.Reader), TimeProvider.System,
+            NullLogger<Sprk.Bff.Api.Services.Ai.ContentUnderstanding.ContentUnderstandingClient>.Instance);
+
+        var intake = h.Build();
+
+        intake.ReaderIsConfigured.Should().Be(reader.IsConfigured).And.Be(configured);
+        (intake.ReaderNotConfiguredRefusal() is null).Should().Be(configured);
     }
 
     [Fact]

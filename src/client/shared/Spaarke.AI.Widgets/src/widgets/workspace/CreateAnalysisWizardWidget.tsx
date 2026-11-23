@@ -104,6 +104,8 @@ import {
   ANALYSIS_REGARDING_TARGETS,
   AddTodoFollowOnStep,
   CreateRecordWizard,
+  EMAIL_NOT_SENT_NO_SERVER,
+  EMPTY_COMPOSED_EMAIL,
   EMPTY_TODO_FORM,
   EntityCreationService,
   SendEmailFollowOnStep,
@@ -114,7 +116,9 @@ import {
   cleanGuid,
   createTodoRegardingChild,
   discoverNavProps,
+  isComposedEmailReady,
   resolveAnalysisFilePreview,
+  sendComposedEmail,
   withBffChildWrites,
 } from '@spaarke/ui-components';
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
@@ -125,7 +129,9 @@ import type {
   FollowOnCardConfig,
   ICreateRecordWizardConfig,
   ICreateTodoFormState,
+  IComposedEmail,
   IDataService,
+  IEmailComposeHandlers,
   IFinishContext,
   ILookupItem,
   INavigationService,
@@ -219,6 +225,11 @@ export interface CreateAnalysisWizardData {
   defaultSubDomain?: string;
   /** Search callback for the Access (owner) lookup — searches systemuser. */
   searchUsers?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Send Email step composer handlers (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+   * The Xrm host builds them (`createXrmEmailComposeHandlers`); a missing handler hides its feature.
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** Search callback for the To Do Assignee lookup — searches contact/systemuser per host convention. */
   searchAssignees?: (query: string) => Promise<ILookupItem[]>;
   /**
@@ -448,17 +459,11 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   reviewDepthRef.current = reviewDepth;
 
   // ── Next-steps state (Send Email / Create To Do) ────────────────────────
-  const [emailTo, setEmailTo] = useState('');
-  const [emailSubject, setEmailSubject] = useState('');
-  const [emailBody, setEmailBody] = useState('');
+  const [email, setEmail] = useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
   const [todoForm, setTodoForm] = useState<ICreateTodoFormState>(EMPTY_TODO_FORM);
 
-  const emailToRef = useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = useRef(emailBody);
-  emailBodyRef.current = emailBody;
+  const emailRef = useRef(email);
+  emailRef.current = email;
   const todoFormRef = useRef(todoForm);
   todoFormRef.current = todoForm;
 
@@ -488,6 +493,8 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
 
   const webApiAdapter = useMemo(() => (dataService ? buildWebApiAdapter(dataService) : null), [dataService]);
   const searchUsers = data?.searchUsers ?? EMPTY_SEARCH;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- same guarded read as every `data?.` above: a registry mount can pass no widget data at runtime
+  const emailComposeHandlers = data?.emailComposeHandlers;
   const searchAssignees = data?.searchAssignees ?? data?.searchUsers ?? EMPTY_SEARCH;
 
   const handleSearchAssignees = useCallback((query: string) => searchAssignees(query), [searchAssignees]);
@@ -556,20 +563,15 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         stepLabel: 'Send Email',
         icon: <MailRegular fontSize={28} />,
         description: 'Compose and queue an introductory email about this analysis.',
-        canAdvance: () =>
-          emailToRef.current.trim() !== '' &&
-          emailSubjectRef.current.trim() !== '' &&
-          emailBodyRef.current.trim() !== '',
+        // Task 182 (D-219): the shared EmailComposer, compose-only; sent at Finish, filed under the analysis.
+        canAdvance: () => isComposedEmailReady(emailRef.current),
         renderStep: () => (
           <SendEmailFollowOnStep
-            emailTo={emailToRef.current}
-            onEmailToChange={setEmailTo}
-            emailSubject={emailSubjectRef.current}
-            onEmailSubjectChange={setEmailSubject}
-            emailBody={emailBodyRef.current}
-            onEmailBodyChange={setEmailBody}
-            onSearchUsers={searchUsers}
-            infoNote="This email is queued once the analysis is created. Associate-to inheritance and any configured Field Mapping profile may pre-fill the subject/body."
+            value={emailRef.current}
+            onChange={setEmail}
+            composeHandlers={emailComposeHandlers}
+            onSearchRecipients={searchUsers}
+            subtitle="The email is sent when you finish the wizard, from the mailbox chosen in From, and is filed under the new analysis. A configured Field Mapping profile may replace the subject and message."
           />
         ),
       },
@@ -583,6 +585,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           dataService ? (
             <AddTodoFollowOnStep
               dataService={dataService}
+              navigationService={navigationService}
               formValues={todoFormRef.current}
               onFormValuesChange={setTodoForm}
               onSearchAssignees={handleSearchAssignees}
@@ -592,7 +595,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           ),
       },
     ],
-    [dataService, searchUsers, handleSearchAssignees]
+    [dataService, navigationService, searchUsers, handleSearchAssignees, emailComposeHandlers]
   );
 
   // ── Wizard config ────────────────────────────────────────────────────────
@@ -957,7 +960,12 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
 
         // -- Follow-on: Send Email (Field-Mapping-driven subject/body,
         //    falling back to user-entered values when no profile is configured) --
-        if (context.selectedActions.includes('send-email') && emailToRef.current.trim() && authFetch && bffBaseUrl) {
+        if (
+          context.selectedActions.includes('send-email') &&
+          emailRef.current.to.length > 0 &&
+          authFetch &&
+          bffBaseUrl
+        ) {
           let mappedSubject: string | undefined;
           let mappedBody: string | undefined;
           try {
@@ -984,14 +992,24 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             // Graceful no-op — falls back to user-entered subject/body below.
           }
 
-          const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
-          const emailResult = await emailService.sendEmail({
-            to: emailToRef.current,
-            subject: mappedSubject ?? emailSubjectRef.current,
-            body: mappedBody ?? emailBodyRef.current,
-            associations: [{ entityType: 'sprk_analysis', entityId: analysisId, entityName: finishName }],
-          });
+          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the analysis.
+          const composed = emailRef.current;
+          const emailResult = await sendComposedEmail(
+            {
+              ...composed,
+              subject: mappedSubject ?? composed.subject,
+              ...(mappedBody !== undefined ? { body: mappedBody, bodyFormat: 'PlainText' as const } : {}),
+            },
+            {
+              associations: [{ entityType: 'sprk_analysis', entityId: analysisId, entityName: finishName }],
+              authenticatedFetch: authFetch,
+              bffBaseUrl,
+              onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
+            }
+          );
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         // -- Open the document in the EDITABLE Compose/TipTap surface (Phase 1, UAT
@@ -1175,6 +1193,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
     lookupError,
     handlePickContact,
     followOnCards,
+    emailComposeHandlers,
     styles,
     dispatch,
     data?.initialAssociation,

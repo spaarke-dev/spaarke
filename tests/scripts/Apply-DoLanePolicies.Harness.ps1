@@ -1,5 +1,6 @@
-# Test double of the Dataverse Web API for scripts/Apply-DoLanePolicies.ps1 (ontology task 171, D-197). Dot-sourced by
-# Apply-DoLanePolicies.Tests.ps1 inside a CHILD pwsh, where it stands in for `az` and Invoke-RestMethod, so the whole script runs
+# Test double of the Dataverse Web API for scripts/Apply-DoLanePolicies.ps1 (ontology task 171, D-197) and, with the two lookups by
+# policy code and by (policy, version number), for scripts/ebilling/Seed-BillingSystemPolicy.ps1 (ebilling-r1 task 049, D-197). Dot-sourced by
+# Apply-DoLanePolicies.Tests.ps1 and Seed-BillingSystemPolicy.Tests.ps1 inside a CHILD pwsh, where it stands in for `az` and Invoke-RestMethod, so the whole script runs
 # (exit codes included) with no environment and no network. Never run against Dataverse; there is nothing here to connect with.
 #
 # State lives in $global:FakeDb (a hashtable loaded from the scenario file); every request is appended to $global:FakeLogPath as one
@@ -54,8 +55,18 @@ function Invoke-FakeDataverse([string]$Method, [string]$Uri, $Body) {
             $options = @($db.options[$column].GetEnumerator() | ForEach-Object { @{ Value = $_.Value; Label = @{ UserLocalizedLabel = @{ Label = $_.Key } } } })
             return @{ OptionSet = @{ Options = $options } }
         }
-        if ($route -eq 'sprk_policies') { return @{ value = (Select-FakeRows $db.policies @{ sprk_policyid = (Get-FakeFilterValue $filter 'sprk_policyid') }) } }
-        if ($route -eq 'sprk_policyversions') { return @{ value = (Select-FakeRows $db.versions @{ sprk_policyversionid = (Get-FakeFilterValue $filter 'sprk_policyversionid') }) } }
+        if ($route -eq 'sprk_policies') {
+            # Apply-DoLanePolicies reads a policy by id; Seed-BillingSystemPolicy reads it by code.
+            $code = Get-FakeFilterValue $filter 'sprk_policycode'
+            $eq = if ($code) { @{ sprk_policycode = $code } } else { @{ sprk_policyid = (Get-FakeFilterValue $filter 'sprk_policyid') } }
+            return @{ value = (Select-FakeRows $db.policies $eq) }
+        }
+        if ($route -eq 'sprk_policyversions') {
+            # Apply-DoLanePolicies reads a version by id; Seed-BillingSystemPolicy reads version N of a policy.
+            $policy = Get-FakeFilterValue $filter '_sprk_policy_value'
+            $eq = if ($policy) { @{ _sprk_policy_value = $policy; sprk_versionnumber = (Get-FakeFilterValue $filter 'sprk_versionnumber') } } else { @{ sprk_policyversionid = (Get-FakeFilterValue $filter 'sprk_policyversionid') } }
+            return @{ value = (Select-FakeRows $db.versions $eq) }
+        }
         if ($route -eq 'businessunits') {
             $id = Get-FakeFilterValue $filter 'businessunitid'
             $eq = if ($id) { @{ businessunitid = $id } } else { @{ name = (Get-FakeFilterValue $filter 'name') } }

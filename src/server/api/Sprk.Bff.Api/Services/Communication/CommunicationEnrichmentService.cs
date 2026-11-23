@@ -391,7 +391,6 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ContentType: null,
             DocumentId: archivedDocumentId.Value.ToString(),
             ParentEntity: parentEntity,
-            SearchIndexName: null, // handler runs the ISearchIndexNameResolver chain
             Source: "OutboundEmail",
             CorrelationId: communicationId.ToString("N"));
 

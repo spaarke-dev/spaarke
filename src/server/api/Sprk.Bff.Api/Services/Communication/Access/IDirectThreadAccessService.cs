@@ -48,6 +48,8 @@ public interface IDirectThreadAccessService
     /// Returns the thread's explicit Direct-topology participants (<c>ownerid</c> ∪ POA-shared systemuser
     /// principals). Returns EMPTY for a non-Direct (or unknown) thread — this is the topology gate that
     /// keeps Open/record-anchored threads unaffected (they derive membership from ADR-034, not this seam).
+    /// uac-r2 198 pass 2 item 7: a POA share counts only with the Read bit, and a share-read fault THROWS (the ACS
+    /// membership reconcile retries rather than removing the other participant).
     /// </summary>
     Task<IReadOnlyList<Guid>> GetParticipantSystemUserIdsAsync(Guid threadId, CancellationToken ct = default);
 

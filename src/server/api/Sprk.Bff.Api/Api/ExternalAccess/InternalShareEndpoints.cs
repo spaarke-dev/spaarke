@@ -211,7 +211,7 @@ public static class InternalShareEndpoints
     /// <summary>Users whose names one list query reads, which keeps the OData filter far below Dataverse's URL limit.</summary>
     internal const int NameBatchSize = 50;
 
-    private const string NotSharedTitle = "Record not shared";
+    internal const string NotSharedTitle = "Record not shared";
     private const string NotUnsharedTitle = "Share not removed";
     private const string NotConfirmedTitle = "Change not confirmed";
 
@@ -223,7 +223,8 @@ public static class InternalShareEndpoints
             .WithSummary("Share a record with an internal user at one access level")
             .WithDescription(
                 "Creates or changes a system user's POA share on the record so it carries exactly the level's rights " +
-                "(View Only, Collaborate or Full Access), then reads the stored rights back. Requires Write and Share on the record.")
+                "(View Only, Collaborate or Full Access), then reads the stored rights back. An optional expiryDate dates the paired " +
+                "workforce-app grant only; the share has no end date (expiryNotApplied). Requires Write and Share on the record.")
             .Produces<ShareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -239,7 +240,10 @@ public static class InternalShareEndpoints
             .WithSummary("Remove an internal user's share on a record")
             .WithDescription(
                 "Revokes a system user's POA share on the record and confirms it is gone. A user with no share is " +
-                "answered removed = false without a write, so repeating the call is safe. Requires Write and Share on the record.")
+                "answered removed = false without a write, so repeating the call is safe. Once the share is gone, the " +
+                "workforce-app grant paired with it is ended too (pairedGrant: ended, none, endFailed, unconfirmed or " +
+                "fileAccessUnconfirmed; pairedGrantEnded kept for compatibility). The share stays removed either way; repeating " +
+                "the call retries the grant. Requires Write and Share on the record.")
             .Produces<UnshareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -290,298 +294,49 @@ public static class InternalShareEndpoints
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct,
-        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null)
+        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null,
+        [FromServices] ContactInternalUserShare? pairedGrant = null,
+        [FromServices] IAccessibleRecordSetService? accessibleRecords = null,
+        [FromServices] TimeProvider? timeProvider = null)
     {
-        // ── Validation — nothing reaches Dataverse until the request is well-formed ──
-        // The delegation filter resolved this root already and denies an unresolvable one. Checked again anyway: a
-        // handler must not trust a pipeline it cannot see.
-        var root = GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId);
-        if (!root.Ok)
-            return Refused(httpContext, StatusCodes.Status400BadRequest, "Validation Error",
-                RecordUnresolvedReasonCode, root.Error!);
+        // Task 193 G4a (B-F3): the requested date dates the paired workforce-app grant only (the share has no end date). A past
+        // one is refused before anything is written, exactly as /grant refuses it.
+        if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(
+                request.ExpiryDate, ExternalGrantLifecycle.TodayUtc(timeProvider ?? TimeProvider.System), httpContext) is { } expiryProblem)
+            return expiryProblem;
 
-        if (request.SystemUserId is not { } systemUserId || systemUserId == Guid.Empty)
-            return Refused(httpContext, StatusCodes.Status400BadRequest, "Validation Error",
-                UserRequiredReasonCode, "SystemUserId is required and must be a valid GUID.");
+        var shared = await InternalUserShareCore.ShareAsync(
+            request, recordShare, dataverseClient, participations, cache, callerAccessProbe, secureChildShares,
+            noAccessGuard, relatedRoots, assignedAccess, accessNotifier, httpContext, logger, ct, workforceIdentity);
 
-        if (!RecordShareLevels.TryGetRights(request.AccessLevel, out var rights))
-            return Refused(httpContext, StatusCodes.Status400BadRequest, "Validation Error",
-                LevelInvalidReasonCode,
-                "AccessLevel is required and must be 100000000 (View Only), 100000001 (Collaborate) or 100000002 (Full Access).");
+        // Task 193 G1 (owner F1-b, decision 2): a colleague picked directly gets the same two things as one added through their
+        // contact: the share (above) and, beside it, the workforce-app grant on the ONE contact that represents them, paired
+        // with the share. Only after the record's own share is confirmed (the 200, or children_incomplete); a grant that is
+        // not written leaves the share standing, and the answer says why. Both services are registered in every host; the
+        // auth tests that drive this handler without them exercise the share alone.
+        if (shared.Shared is not { } confirmed || pairedGrant is null || accessibleRecords is null
+            || GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId) is not { Ok: true } root)
+            return shared.Result;
 
-        var level = request.AccessLevel!.Value;
-        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
-        var rootEntitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
+        var workforceApp = await pairedGrant.GrantPairedForUserAsync(
+            confirmed.SystemUserId, root.Type, root.Id, request.AccessLevel!.Value, request.ExpiryDate, dataverseClient,
+            participations, accessibleRecords, callerAccessProbe, httpContext, logger, ct);
 
-        // ── Who: an existing, enabled person — and, on a Restricted record, not flagged external ──
-        SystemUserRow? user;
-        try
+        // The share has no end date: a requested one is reported as not applied to it, never silently (as /grant does).
+        var expiryNotApplied = request.ExpiryDate is not null ? true : (bool?)null;
+        if (shared.ChildrenIncomplete)
         {
-            user = await ReadSystemUserAsync(dataverseClient, systemUserId, ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            logger.LogError(ex,
-                "[USER-SHARE] Could not read system user {SystemUserId} (caller {CallerOid}). Nothing was shared.",
-                systemUserId, callerOid);
-            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
-                ReadFailedReasonCode, "The user could not be looked up, so the record was not shared. Try again.");
-        }
-
-        if (user is null)
-            return Refused(httpContext, StatusCodes.Status404NotFound, NotSharedTitle,
-                UserNotFoundReasonCode, "No user with this id exists, so the record was not shared.");
-
-        // Owner round 67: whether the record is Restricted matters only for a user flagged external who would otherwise be
-        // eligible, so the flags are read only then — an ordinary share costs no extra read, and a disabled or non-person
-        // account keeps its own 422. A read that fails, or flags that come back unreadable, refuse (ADR-003) as "could not
-        // be read", never as "the record is Restricted", which it could not back (task 138's rule for the grant policy).
-        bool? rootIsRestricted = null;
-        if (user.IsExternal == true
-            && ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, rootIsRestricted: false)
-               == ShareEligibility.Eligible)
-        {
-            RootRecordFlags? readFlags = null;
-            try
+            if (shared.Result is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem })
             {
-                // Task 174 (owner round 84): Restricted through a parent bars the external-flagged user too.
-                var flags = await participations.GetEffectiveRootRecordFlagsAsync(
-                    ExternalGrantRoot.LogicalNameFor(root.Type), new[] { root.Id }, ct);
-                if (flags.TryGetValue(root.Id, out var f) && !f.IsUnreadable)
-                    readFlags = f;
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                logger.LogError(ex,
-                    "[USER-SHARE] Could not read the access settings of {RootType} {RootId} (caller {CallerOid}). Nothing " +
-                    "was shared.", root.Type, root.Id, callerOid);
+                problem.Extensions["workforceApp"] = workforceApp;
+                if (expiryNotApplied is not null)
+                    problem.Extensions["expiryNotApplied"] = true;
             }
 
-            if (readFlags is not { } known)
-                return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
-                    ReadFailedReasonCode,
-                    "This user is flagged as external, and whether this record is Restricted could not be read, so it " +
-                    "was not shared. Try again.");
-
-            rootIsRestricted = known.IsRestricted;
+            return shared.Result;
         }
 
-        if (EligibilityRefusal(user, rootIsRestricted, httpContext) is { } ineligible)
-        {
-            logger.LogWarning(
-                "[USER-SHARE] Refused to share {RootType} {RootId} with {SystemUserId}: disabled={IsDisabled}, " +
-                "accessmode={AccessMode}, application={IsApplication}, external={IsExternal}, restricted={IsRestricted} " +
-                "(caller {CallerOid}).",
-                root.Type, root.Id, systemUserId, user.IsDisabled, user.AccessMode, user.ApplicationId is not null,
-                user.IsExternal, rootIsRestricted, callerOid);
-            return ineligible;
-        }
-
-        // ── The No Access list for internal users on secure records (task 143, owner Q4) ──
-        //
-        // Before any share read or write. On a secure record a walled person is refused — through any of the three
-        // subject forms (the user, a contact that represents them, an organization that contact belongs to) and any
-        // object form (this record, or an organization it references). An unanswerable check refuses too (ADR-003).
-        // A non-secure record is not the wall's (Q4): the check answers NotSecure and the share proceeds as before.
-        //
-        // Task 158 r1c-v2 (main-session round 39 item 2): a work assignment or project filed under a SECURE matter or project
-        // is secure itself (owner round 6), so a DIRECT share on it honours the No Access list of every secure record it is
-        // filed under as well as its own — the guard's ONE entry point (never a second copy of the parent walk). The same
-        // codes; the message says whose list, never which entry. A filing or parent that cannot be read refuses (ADR-003).
-        var wall = await noAccessGuard.CheckRecordAndSecureParentsAsync(
-            ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, systemUserId, SecureWallRecordScope.AsFlagged, ct);
-        var wallList = wall.ParentTable is { } wallParent
-            ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(wallParent)} this record is filed under"
-            : wall.FilingUnreadable
-                ? "the No Access list of a secure record this record is filed under"
-                : "the No Access list for this record";
-        if (wall.Outcome == SecureShareWallOutcome.Walled)
-        {
-            logger.LogWarning(
-                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: on the No Access list of " +
-                "{Where} (entries {EntryIds}) (caller {CallerOid}).",
-                root.Type, root.Id, systemUserId,
-                wall.ParentTable is { } p ? $"{p}:{wall.ParentId:D}" : "the record itself", string.Join(",", wall.EntryIds), callerOid);
-            return Refused(httpContext, StatusCodes.Status403Forbidden, NotSharedTitle, SubjectNoAccessReasonCode,
-                $"This person is on {wallList}, so it was not shared with them.");
-        }
-
-        if (wall.Outcome == SecureShareWallOutcome.Unverifiable)
-        {
-            logger.LogError(
-                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: the No Access check could " +
-                "not read its {Fault} (caller {CallerOid}). Nothing was shared.",
-                root.Type, root.Id, systemUserId, wall.Fault, callerOid);
-            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
-                NoAccessUnverifiableReasonCode,
-                $"Whether this person is on {wallList} could not be checked, so it was not shared with them. Try again.");
-        }
-
-        // ── You may grant only what you hold (owner decision 2026-09-16) ──────
-        //
-        // The POA write is app-only, so Dataverse sees the APPLICATION's rights and cannot apply its own rule that a
-        // sharer may only pass on rights they hold. Intersecting the requested level with the caller's own rights
-        // restores it: a caller who cannot delete this record cannot hand Delete to anyone — themselves included,
-        // which is the escalation path this closes.
-        //
-        // The rights are re-probed rather than carried over from the delegation filter, which computed them a moment
-        // ago. That mirrors the filter's own reasoning for re-reading the grant row (DelegationRuleFilter's remarks on
-        // FromAccessRecordAsync): one more caller-scoped read on a low-volume admin mutation does not materially
-        // change request cost, and a handler that trusted authorization state cached by a filter would be trusting
-        // something it cannot verify.
-        AccessRights callerRights;
-        try
-        {
-            callerRights = await callerAccessProbe.GetCallerRightsAsync(
-                Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext),
-                rootEntitySet, root.Id, ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            logger.LogError(ex,
-                "[USER-SHARE] Could not establish the caller's own rights on {RootType} {RootId} (caller {CallerOid}). " +
-                "Nothing was shared.", root.Type, root.Id, callerOid);
-            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
-                ReadFailedReasonCode,
-                "Your own access to this record could not be established, so nothing was shared. Try again.");
-        }
-
-        var granted = RecordShareLevels.Intersect(rights, callerRights);
-        var narrowed = granted.AccessRightsMask != rights.AccessRightsMask;
-
-        // The probe answers None both for "no rights" and for "could not answer" — deliberately indistinguishable —
-        // so an unanswerable probe refuses here too, which is the fail-closed direction.
-        if (!RecordShareLevels.IsGrantable(granted))
-        {
-            logger.LogWarning(
-                "[USER-SHARE] Caller {CallerOid} holds {CallerRights} on {RootType} {RootId}, which grants nothing of " +
-                "{Level}; nothing was shared.", callerOid, callerRights, root.Type, root.Id, level);
-            return Refused(httpContext, StatusCodes.Status403Forbidden, NotSharedTitle, CallerCannotGrantReasonCode,
-                "You can only give someone the access you have on this record, and yours does not cover the level you " +
-                "asked for. Nothing was shared.");
-        }
-
-        if (narrowed)
-        {
-            logger.LogInformation(
-                "[USER-SHARE] Caller {CallerOid} asked for {Level} on {RootType} {RootId} but holds {CallerRights}, so " +
-                "the share is narrowed to mask {Granted}.",
-                callerOid, level, root.Type, root.Id, callerRights, granted.AccessRightsMask);
-        }
-
-        // ── The user's current share, from the STRICT read ─────────────────────
-        int current;
-        try
-        {
-            current = await ReadDirectShareMaskAsync(recordShare, root, systemUserId, ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            logger.LogError(ex,
-                "[USER-SHARE] Could not read the shares on {RootType} {RootId} (caller {CallerOid}). Nothing was shared.",
-                root.Type, root.Id, callerOid);
-            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
-                ReadFailedReasonCode, "The shares on this record could not be read, so nothing was changed. Try again.");
-        }
-
-        // ── Never silently lower (task 139) ─────────────────────────────────────
-        // ModifyAccess REPLACES the rights. When the caller's own rights narrowed the request, writing the narrowed
-        // mask over a share that holds MORE would take rights away while the caller asked for more — lowering access
-        // somebody else gave. Refused instead, with nothing written. An explicit request for a lower level (not
-        // narrowed) is a deliberate downgrade by a Write-holder and is still applied below.
-        if (narrowed && RecordShareLevels.WouldRemoveRights(current, granted.AccessRightsMask))
-        {
-            logger.LogWarning(
-                "[USER-SHARE] Refused: {SystemUserId} holds mask {Current} on {RootType} {RootId}; the request for {Level} " +
-                "was narrowed to {Granted} by the caller's own rights {CallerRights}, and writing it would remove rights " +
-                "(caller {CallerOid}).",
-                systemUserId, current, root.Type, root.Id, level, granted.AccessRightsMask, callerRights, callerOid);
-            return Refused(httpContext, StatusCodes.Status409Conflict, NotSharedTitle,
-                ExternalGrantLifecycle.WouldLowerExistingReasonCode,
-                "They already have more access than you can grant on this record. Nothing was changed, so their " +
-                "existing access stays as it is.");
-        }
-
-        if (current == granted.AccessRightsMask)
-        {
-            logger.LogInformation(
-                "[USER-SHARE] {SystemUserId} already holds mask {Mask} on {RootType} {RootId}; nothing was written " +
-                "(caller {CallerOid}).", systemUserId, current, root.Type, root.Id, callerOid);
-
-            // Task 142: a deliberate share onto a user the Assigned-To rule shared to (or suggested) is now the operator's.
-            await assignedAccess.MarkShareAdoptedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
-
-            // Still fanned out: a repeat of a share whose fan-out was incomplete is how a caller completes it.
-            return await ChildrenIncompleteAfterShareAsync(
-                       secureChildShares, relatedRoots, root, systemUserId, OutcomeUnchanged, current, httpContext, logger,
-                       callerOid, ct)
-                   ?? TypedResults.Ok(new ShareRecordWithUserResponse(
-                       systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed));
-        }
-
-        // ── Write, then confirm what Dataverse stored ─────────────────────────
-        var principal = DataversePrincipalRef.User(systemUserId);
-        int? stored = null;
-        Exception? failure = null;
-        try
-        {
-            if (current == 0)
-                await recordShare.GrantAccessAsync(rootEntitySet, root.Id, principal, granted.AccessRightsCsv, ct);
-            else
-                await recordShare.ModifyAccessAsync(rootEntitySet, root.Id, principal, granted.AccessRightsCsv, ct);
-
-            stored = await ReadDirectShareMaskAsync(recordShare, root, systemUserId, ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            failure = ex;
-        }
-        finally
-        {
-            // Cleared whether or not the write is confirmed: a write that threw, or was cancelled, may still have
-            // applied, and a stale cached set is exactly what this clean-up exists to prevent.
-            await ImpersonatedRootSetSource.InvalidateAsync(
-                cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type),
-                ImpersonatedRootSetSource.CustomerTenantIdsOrNone(workforceIdentity, logger), logger);
-        }
-
-        if (failure is not null || stored != granted.AccessRightsMask)
-        {
-            logger.LogError(failure,
-                "[USER-SHARE] Sharing {RootType} {RootId} with {SystemUserId} at {Level} was not confirmed: the user held " +
-                "mask {Previous}, the write asked for {Requested}, and the read-back found {Stored} (caller {CallerOid}).",
-                root.Type, root.Id, systemUserId, level, current, granted.AccessRightsMask,
-                stored?.ToString() ?? "nothing readable", callerOid);
-            return NotConfirmed(httpContext,
-                "The share could not be confirmed. Reload the list to see what this user holds, then try again.",
-                stored);
-        }
-
-        var outcome = current == 0 ? OutcomeCreated : OutcomeUpdated;
-
-        // Task 142: a manual share (incl. "Grant" on a secure-record suggestion) on a user the Assigned-To ledger holds
-        // becomes ADOPTED — never revoked by the rule afterwards. Ledger-only; never thrown.
-        await assignedAccess.MarkShareAdoptedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
-
-        logger.LogInformation(
-            "[USER-SHARE] Caller {CallerOid} shared {RootType} {RootId} with {SystemUserId}: asked {Level}, granted mask " +
-            "{Granted} ({Outcome}; was {Previous}; narrowed={Narrowed}).",
-            callerOid, root.Type, root.Id, systemUserId, level, granted.AccessRightsMask, outcome, current, narrowed);
-
-        // ── Task 181 (owner round 89 item 3): the user is told, in-app with a link, when the share GAVE them rights they
-        // did not hold. Best effort, after the confirmed write; a failure is reported, never undoes the share ──
-        var notificationFailed = (granted.AccessRightsMask & ~current) != 0
-            && await accessNotifier.NotifyUserShareAsync(
-                   root.Type, root.Id, systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), httpContext.User)
-               == GrantNotificationOutcome.Failed;
-
-        // ── Task 149: the root write is confirmed; now its secure children (a no-op for an ordinary record) ──
-        return await ChildrenIncompleteAfterShareAsync(
-                   secureChildShares, relatedRoots, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger,
-                   callerOid, ct, notificationFailed)
-               ?? TypedResults.Ok(new ShareRecordWithUserResponse(
-                   systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
-                   outcome, narrowed, notificationFailed));
+        return TypedResults.Ok(confirmed.Response with { WorkforceApp = workforceApp, ExpiryNotApplied = expiryNotApplied });
     }
 
     // =========================================================================
@@ -611,7 +366,73 @@ public static class InternalShareEndpoints
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct,
-        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null)
+        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null,
+        [FromServices] ExternalGrantRevocationService? pairedGrants = null)
+    {
+        var result = await UnshareRecordShareAsync(
+            request, recordShare, dataverseClient, participations, cache, assignedAccess, secureChildShares, relatedRoots,
+            recordLock, httpContext, logger, ct, workforceIdentity);
+
+        // Task 193 G2 (owner F1-b: the paired grant follows the share): once the user's share on the record is confirmed
+        // GONE — removed now, or held none (the 200), or the record's own share removed with its children still catching up
+        // (children_incomplete) — every grant on the record PAIRED with them is ended through the one grant revoke. The share
+        // first, then the grant: a share removal that failed or was refused changes nothing here. A grant that is not ended
+        // leaves the share removed and says so (pairedGrant, task 193 G4a: ended | none | endFailed | unconfirmed |
+        // fileAccessUnconfirmed; pairedGrantEnded kept for compatibility); repeating the removal retries it. This is a manual
+        // removal in Manage Access, so it records the operator's decline on the contact's Assigned-To rows (owner ruling
+        // 2026-10-28). The grant revoke is registered in every host (ExternalAccessModule, task 193 G2b); the auth tests that
+        // drive this handler without it exercise the share alone.
+        if (pairedGrants is null || !ShareConfirmedGone(result)
+            || GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId) is not { Ok: true } root
+            || request.SystemUserId is not { } systemUserId)
+            return result;
+
+        // Task 193 G4a (A-F4): the share is already confirmed gone, so its paired grant is ended whatever happens to the
+        // request now — an aborted request must not leave the grant behind (as MarkContactShareAdoptedAsync).
+        var paired = await pairedGrants.RevokePairedWithAsync(
+            root.Type, root.Id, systemUserId, GrantEndCause.Operator, CancellationToken.None);
+
+        if (result is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem })
+        {
+            if (paired.PairedGrantEnded is { } endedInProblem)
+                problem.Extensions["pairedGrantEnded"] = endedInProblem;
+            problem.Extensions["pairedGrant"] = paired.Outcome;
+            return result;
+        }
+
+        return result is Microsoft.AspNetCore.Http.HttpResults.Ok<UnshareRecordWithUserResponse> { Value: { } body }
+            ? TypedResults.Ok(body with { PairedGrantEnded = paired.PairedGrantEnded, PairedGrant = paired.Outcome })
+            : result;
+    }
+
+    /// <summary>
+    /// Whether an <c>/unshare-user</c> answer means the user's share on the record itself is gone: the 200 (removed, or held
+    /// none), or the 500 <see cref="ChildrenIncompleteReasonCode"/>, which is sent only after the record's own share is
+    /// confirmed removed. Every other answer is a refusal or an unconfirmed removal.
+    /// </summary>
+    private static bool ShareConfirmedGone(IResult result) => result switch
+    {
+        Microsoft.AspNetCore.Http.HttpResults.Ok<UnshareRecordWithUserResponse> => true,
+        Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult { ProblemDetails: { } problem } =>
+            problem.Extensions.TryGetValue("reasonCode", out var code) && Equals(code, ChildrenIncompleteReasonCode),
+        _ => false,
+    };
+
+    /// <summary>The share half of <c>/unshare-user</c>: validation, the lease, the S5 check, the revoke and its read-back.</summary>
+    private static async Task<IResult> UnshareRecordShareAsync(
+        UnshareRecordWithUserRequest request,
+        IDataverseRecordShareService recordShare,
+        DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
+        ITenantCache cache,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
+        Spaarke.Scheduling.IScheduledJobLease recordLock,
+        HttpContext httpContext,
+        ILogger<Program> logger,
+        CancellationToken ct,
+        IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity)
     {
         var root = GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId);
         if (!root.Ok)
@@ -827,7 +648,7 @@ public static class InternalShareEndpoints
     /// <see cref="ChildrenIncompleteReasonCode"/> refusal when some could not be — or <c>null</c> when every child is in line
     /// (or the record is not secure).
     /// </summary>
-    private static async Task<IResult?> ChildrenIncompleteAfterShareAsync(
+    internal static async Task<IResult?> ChildrenIncompleteAfterShareAsync(
         SecureChildShareSynchronizer secureChildShares,
         SecureRootInheritance relatedRoots,
         GrantExternalAccessEndpoint.GrantRootResolution root,
@@ -931,6 +752,14 @@ public static class InternalShareEndpoints
         // where that part could not be given back yet — the opposite direction from a share not removed, so its own sentence.
         var filedNotRegiven = filed.NotRegiven;
         var filedNotEnded = filed.IsComplete ? 0 : filedNotRegiven > 0 && filed.NotDone == 0 ? 0 : Math.Max(filed.NotDone, 1);
+        // Task 193 G4a: records whose inherited share IS removed, but whose paired grant could not be confirmed ended. Not a
+        // share left in place, so not "removed automatically": its own sentence asks for the retry that ends it.
+        var filedPairedNotEnded = Math.Min(filed.PairedNotEnded, filedNotEnded);
+        var filedSharesNotEnded = filedNotEnded - filedPairedNotEnded;
+        var pairedSentence = filedPairedNotEnded == 0
+            ? string.Empty
+            : $" On {filedPairedNotEnded} secure work assignment(s) or project(s) filed under it, this person's access was " +
+              "removed, but the external access paired with it could not be confirmed ended. Try again to end it.";
         var regivenSentence = filedNotRegiven == 0
             ? string.Empty
             : $" On {filedNotRegiven} secure work assignment(s) or project(s) filed under it, the access the other secure records " +
@@ -944,12 +773,12 @@ public static class InternalShareEndpoints
                 "had passed on were not all ended or given back: {Detail} (caller {CallerOid}). The secure-root inheritance job " +
                 "completes it.", systemUserId, root.Type, root.Id, removed, filed.Detail, callerOid);
             return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle,
-                (filedNotEnded == 0
+                (filedSharesNotEnded == 0
                     ? "This user's access to the record was removed."
                     : "This user's access to the record was removed, but the access this record gave them on " +
-                      $"{filedNotEnded} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
+                      $"{filedSharesNotEnded} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
                       "they may still open those. They are removed automatically within a few minutes, or you can try again.")
-                + regivenSentence,
+                + pairedSentence + regivenSentence,
                 systemUserId, children, ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
                 ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
         }
@@ -970,7 +799,7 @@ public static class InternalShareEndpoints
               "updated yet, so they may still open those. They are removed automatically within a few minutes, or you can " +
               "try again.";
 
-        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail + regivenSentence, systemUserId, children,
+        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail + pairedSentence + regivenSentence, systemUserId, children,
             ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
             ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
     }
@@ -1093,6 +922,12 @@ public static class InternalShareEndpoints
         // still in force) — shown read-only. Display only: a ledger read that fails marks nothing (logged).
         var inherited = await InheritedSharesAsync(ledger, root.Type, root.Id, logger, ct);
 
+        // Task 193 G2: the workforce-app grant PAIRED with each share (display only; an unreadable pairing pairs nothing). One
+        // grant per user is shown — the lowest id when, rarely, two contacts' grants are paired with the same user.
+        var pairedGrants = (await RecordGrantsEndpoint.ReadDisplayPairingsAsync(dataverseClient, root.Type, root.Id, logger, ct))
+            .GroupBy(kv => kv.Value)
+            .ToDictionary(g => g.Key, g => g.Select(kv => kv.Key).Min());
+
         var listed = userShares
             .Select(s => new RecordUserShare(
                 s.SystemUserId,
@@ -1101,7 +936,10 @@ public static class InternalShareEndpoints
                 RecordShareLevels.LevelForMask(s.Mask),
                 s.ModifiedOn,
                 ExternalNoAccess: IsBarredOnRestricted(people.GetValueOrDefault(s.SystemUserId)?.IsExternal, restricted),
-                InheritedFrom: inherited.GetValueOrDefault(s.SystemUserId)))
+                InheritedFrom: inherited.GetValueOrDefault(s.SystemUserId),
+                PairedWith: pairedGrants.TryGetValue(s.SystemUserId, out var grantId)
+                    ? new RecordAccessPairing(grantId, RecordAccessPairing.GrantKind)
+                    : null))
             .OrderBy(s => s.FullName is null)
             // Ordinal, not CurrentCulture (Step 9.5 review finding 11): a server-side order must not depend on the
             // host's culture configuration, or one record lists its users in different orders across hosts — or
@@ -1253,7 +1091,7 @@ public static class InternalShareEndpoints
     /// record): not a share this surface made or can remove, so it reads as "no share", and a new share there is a
     /// GrantAccess. Rows are OR-ed in case more than one comes back for the principal, so none is missed.
     /// </remarks>
-    private static async Task<int> ReadDirectShareMaskAsync(
+    internal static async Task<int> ReadDirectShareMaskAsync(
         IDataverseRecordShareService recordShare,
         GrantExternalAccessEndpoint.GrantRootResolution root,
         Guid systemUserId,
@@ -1334,7 +1172,7 @@ public static class InternalShareEndpoints
     /// its users out — names <c>null</c>, unmarked — rather than failing the list: who holds which rights has already been
     /// read.
     /// </summary>
-    private static async Task<IReadOnlyDictionary<Guid, SystemUserRow>> ReadNamesAsync(
+    internal static async Task<IReadOnlyDictionary<Guid, SystemUserRow>> ReadNamesAsync(
         DataverseWebApiClient dataverseClient, IReadOnlyList<Guid> systemUserIds, ILogger logger, CancellationToken ct)
     {
         var names = new Dictionary<Guid, SystemUserRow>();
@@ -1370,7 +1208,7 @@ public static class InternalShareEndpoints
     /// <summary>
     /// The refusal for a user who cannot receive a share, or <c>null</c> for one who can (<see cref="ClassifyEligibility"/>).
     /// </summary>
-    private static IResult? EligibilityRefusal(SystemUserRow user, bool? rootIsRestricted, HttpContext httpContext)
+    internal static IResult? EligibilityRefusal(SystemUserRow user, bool? rootIsRestricted, HttpContext httpContext)
         => ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, rootIsRestricted) switch
         {
             ShareEligibility.Disabled => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
@@ -1428,7 +1266,7 @@ public static class InternalShareEndpoints
         => isExternal == true && rootIsRestricted is not false;
 
     /// <summary>The single refusal shape: ProblemDetails with a reason code (ADR-003) and the trace id (ADR-019).</summary>
-    private static IResult Refused(HttpContext httpContext, int statusCode, string title, string reasonCode, string detail)
+    internal static IResult Refused(HttpContext httpContext, int statusCode, string title, string reasonCode, string detail)
         => Results.Problem(
             statusCode: statusCode,
             title: title,
@@ -1448,7 +1286,7 @@ public static class InternalShareEndpoints
     /// extension is absent when the read-back itself failed — which is its own answer, and not one to fake a number
     /// for.
     /// </remarks>
-    private static IResult NotConfirmed(HttpContext httpContext, string detail, int? observedAccessRightsMask)
+    internal static IResult NotConfirmed(HttpContext httpContext, string detail, int? observedAccessRightsMask)
     {
         var extensions = new Dictionary<string, object?>
         {

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="194" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Email documents (Semantic Search PCF and Document Relationship Viewer): the To/Cc/Bcc side-pane lookup opens above the wizard, not behind it</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared client code (.ts/.tsx), a PCF control and a code page; tags include pcf.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-frame layering across three hosts (PCF in-page modal, iframe inside a PCF dialog) touching the shared WizardShell modal mode; needs judgment on which surface yields.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches DocumentEmailWizard.tsx, which 195 also modifies (summary step). Run 194 and 195 one after the other; 193 is independent.</parallel-reason>
+    <deps>none</deps>
+    <tags>pcf, frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 185 dev checks C1/C2 (2026-11-16; notes/task-185-notes.md): in Semantic Search → Email documents and in the Document Relationship Viewer's Email documents, clicking To/Cc/Bcc opens the Dataverse "Lookup Records" pane BEHIND the wizard dialog, so it cannot be used. This is a defect in task 183/188 delivered scope. Owner approved the fix 2026-11-16 ("All three").</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9, Dataverse PCF hosting, Xrm side panes and the @spaarke/ui-components WizardShell/SprkModal layering.</role>
+  <goal>In both hosts the recipient lookup opens visibly above the Email documents wizard, the pick lands as a chip, Cancel keeps earlier picks, and the wizard returns to its normal layer afterwards — using the existing yield-to-side-pane mechanism, not a new one.</goal>
+  <context>
+    <background>
+- Semantic Search PCF: DocumentEmailWizard is not embedded, so WizardShell.tsx ~548-560 wraps it in a blocking SprkModal (`modalType='modal'`) and passes neither `nonBlocking` nor `yieldToSidePane`. The composer's recipient lookup goes through `createXrmEmailComposeHandlers.onLookupRecipients` (called from SendEmailFollowOnStep.tsx ~385) → `Xrm.Utility.lookupObjects`. A PCF renders in the Dataverse page's own document, so the Fluent dialog layer sits over the lookup pane.
+- Reference that works: SendEmailDialog.tsx ~314-361 `wrapLookup` with `yieldToSidePane` lowers its modal under the pane via SprkModal/sidePaneLayering.ts, then restores it. Copy that; do not write a second layering mechanism.
+- Hosts that already work (Create Project code page, Console) run inside an iframe, so the pane opens in the top window above the whole iframe.
+- Document Relationship Viewer: Semantic Search's Find Similar opens it as an in-page iframe inside the PCF's own FindSimilarViewerDialog (SemanticSearchControl.tsx ~731-736; FindSimilarViewerDialog.tsx). Its lookup opens in the top window, underneath that OUTER dialog, so fixing the inner wizard is not enough: the outer dialog must yield (postMessage from the iframe to the PCF, reusing sidePaneLayering) or the viewer must open as a top-level `Xrm.Navigation.navigateTo` dialog. Choose the option that changes the least behaviour and record why in the task notes. Also check the DRV opened directly from a form (not via Semantic Search) still works.
+- Line numbers are at origin/master `ce6c241964`; re-grep before editing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/SendEmailFollowOnStep.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FindSimilarViewer/FindSimilarViewerDialog.tsx</file>
+      <file role="modify">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sidePaneLayering.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="owner">Owner directive 2026-11-12, applies to every file this task touches: reuse the existing side-pane lookup and the existing EmailComposer; never re-create either. Reuse sidePaneLayering/yieldToSidePane; no second layering mechanism.</constraint>
+    <constraint source="project">A WizardShell change is opt-in: every WizardShell host other than the two in this task renders and layers exactly as today (embedded mode untouched; existing WizardShell tests unchanged and passing).</constraint>
+    <constraint source="ADR-006 / ADR-022">The PCF keeps its platform React; follow docs/guides/PCF-DEPLOYMENT-GUIDE.md (version bump in every location; `npm run build:prod`; judge the build by its output, pcf-scripts exits 0 on failure).</constraint>
+    <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
+    <constraint source="ADR-038">Tests cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="project">No deploy in this task. The dev deploy of the PCF and the DRV code page is a separate owner-approved step from master (D-126), scoped publish only.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/task-185-notes.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read SendEmailDialog's wrapLookup/yieldToSidePane and sidePaneLayering end to end; read WizardShell's modal mode and the PCF and DRV launch paths.</step>
+    <step order="2">Let WizardShell's modal mode accept the yield option (opt-in) and have DocumentEmailWizard's composer wrap its lookup handlers the way SendEmailDialog does.</step>
+    <step order="3">Make the outer FindSimilarViewerDialog yield while the DRV's lookup is open (or open the DRV top-level); record the choice.</step>
+    <step order="4">Bump the SemanticSearchControl version in every location and build with build:prod; build the DRV code page.</step>
+    <step order="5">Write the tests in the acceptance criteria; run them, the touched folders' suites, `npx tsc --noEmit -p .` in Spaarke.UI.Components and `node scripts/quality/client-lint/client-lint.mjs check`.</step>
+    <step order="6">Update tasks/TASK-INDEX.md status to `✅ [done]` AND this POML's status to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`. Record deviations in notes/task-194-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test: when the DocumentEmailWizard recipient lookup starts, the WizardShell modal is lowered under the side pane; when it resolves (pick or cancel) or throws, the modal is restored.</criterion>
+    <criterion testable="true">Test: a pick returns chips; Cancel keeps the earlier recipients; a lookup failure behaves as cancel (no crash, earlier recipients kept).</criterion>
+    <criterion testable="true">Test: WizardShell without the new option renders and layers exactly as before (existing WizardShell and SendEmailDialog tests unchanged and passing).</criterion>
+    <criterion testable="true">DRV via Semantic Search: the outer dialog yields while the lookup is open and is restored after (test where feasible; otherwise a recorded manual check).</criterion>
+    <criterion testable="true">SemanticSearchControl version bumped in every location; build:prod output shows success; the DRV code page builds.</criterion>
+    <criterion testable="true">wizardLookupPatternGuard.test.ts passes with its baseline unchanged; tsc and the client-lint ratchet pass.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If neither yielding the outer dialog nor a top-level DRV launch works without changing how the DRV opens from forms, STOP and report the options.</trigger>
+    <trigger>If the fix needs a change to sidePaneLayering's contract that other hosts depend on, STOP and report.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Lookup above the wizard">
+      <steps>
+        <step>Matter form → Semantic Search → select a document → Email → Compose; click To, Cc, Bcc</step>
+        <step>Same from the Document Relationship Viewer opened from Semantic Search Find Similar, and from a form</step>
+      </steps>
+      <expected>The side pane appears above the wizard; picks show as chips; Cancel keeps earlier picks; the wizard is usable again afterwards. Light and dark.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components; PCF `npm run build:prod` (build ../Spaarke.SdapClient then Spaarke.UI.Components first in a fresh worktree; do not run PCF builds in parallel with the shared-lib build)</tool>
+  </tools>
+  <completion>Done 2026-11-16: PR #2856 merged to master (e476e9b61b). Independent adversarial review (Opus) found 2 F1 (stacked-preview backdrop close; RelatedDocumentCount form path), both fixed and re-checked. SemanticSearchControl 1.1.87, RelatedDocumentCount 1.21.7; not deployed (owner go). Known limits and the non-blocking behaviour change in notes/task-194-notes.md. rework: fix-round-2 task 194</completion>
+  <execution>
+    <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master. Starts after 195 merges or before it, never in parallel with it.</protocol>
+  </execution>
+</task>

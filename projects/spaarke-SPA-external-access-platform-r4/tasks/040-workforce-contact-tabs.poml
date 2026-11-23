@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Workforce-contact tabs scoped by grants; none when no grants (FR-24, #2508)</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>after 038 (P3 deploy)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx (and likely one BFF .cs) on an access-scoping path (tag authorization)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Access scoping across the Tier-1 entitlement rule and the SPA plane gate; revisits R3 known limits K2/K3</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>038</deps>
+    <tags>frontend, react, authorization, bff-api</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Let a workforce contact (WorkforceHome) who holds at least one record grant see the Projects, Matters, Work Assignments, Documents and Invoices tabs, listing only granted records, and show none of those tabs to a workforce contact with no grants. Partner (CIAM) behaviour stays exactly as it is.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the external SPA's Tier-1 entitlement gate (React, Fluent v9) and the BFF's ModuleEntitlementResolver.</role>
+  <goal>A granted WorkforceHome contact sees the five tabs with only granted records; an ungranted one sees none of them; CIAM partners and licensed systemusers see exactly what they see today; the K2/K3 revisit outcome is recorded; UAC's review is recorded.</goal>
+
+  <context>
+    <background>Today the five data widgets carry `planes: ['ciam']` (widgetRegistry.ts:190-253), so no workforce caller ever sees them, even with grants (#2508). Owner 2026-11-09: a contact with no grants sees no tabs (not empty tabs). Spec assumption: "no grants" = an empty accessible set from the existing Tier-2 resolution; no new endpoint. The Tier-1 rule lives server-side in ModuleEntitlementResolver.cs (`OutsideCounselModules` = `assigned-work` for CIAM, :49; `WorkforceDefaultModules`, :61) and is reported by /me/entitlements; the SPA mirrors it in `isEntitled` (widgetRegistry.ts:300). Record lists are already Tier-2-scoped server-side, so tab contents need no new filtering — verify it. R3 known limits to revisit (projects/spaarke-SPA-external-access-platform-r3/notes/task-090-notes.md:43-44): K2 — the feed marker and identity cache are keyed by the token tid, so a person signing in both at home and through the Spaarke tenant sees two unread counts; K3 — a licensed user later linked to the same home (tid, oid) as a WorkforceHome contact resolves as the systemuser, so the contact's grants stop applying (partly covered by R3 079).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/registry/widgetRegistry.ts</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/shell/useWorkspaceTabs.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/shell/PortalWorkspaceShell.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/bff-client.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/api/me-client.ts</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/notes/task-090-notes.md</file>
+      <file role="new-artifact">src/client/external-spa/tests/WorkforceContactTabs.test.tsx</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-040-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="038" status="pending">P3 deployed and E2E-proved (phase-deploy convention)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-24">The five widgets are shown to a WorkforceHome contact ONLY when its server-resolved accessible set is non-empty; with an empty set none of the five appear as tabs, defaults or library entries. No new endpoint and no new route.</constraint>
+    <constraint source="NFR-04 / ADR-028 A1">The client gate is UX only. Every list the tabs read stays Tier-2-scoped server-side (`sprk_externalrecordaccess`); this task adds no client-side record filtering as a security control and loosens no server check.</constraint>
+    <constraint source="spec FR-24">CIAM partner behaviour is unchanged: the same five widgets, the same defaults, the same `assigned-work` blanket entitlement. Licensed systemusers on the workforce plane see the same tabs as today.</constraint>
+    <constraint source="ADR-010 / NFR-05">If ModuleEntitlementResolver changes, it is a pure rule change inside the existing class: no new DI registration, interface, package or endpoint.</constraint>
+    <constraint source="bff-extensions">If any file under src/server/api/Sprk.Bff.Api changes: state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); measure the publish-size delta against a fresh master build (more than +5 MB needs written justification; total at or under 60 MB); no new HIGH CVE; tests with the change; run /conflict-check before the PR (shared surface with unified-access-control-r2 and ebilling-r1). Never deploy the dev BFF directly — request it via uac-r2 (docs/procedures/dev-bff-deploy-coordination.md).</constraint>
+    <constraint source="project wave E">Do not edit src/client/external-spa/src/api/me-client.ts or tests/no-mock-identity.test.tsx in this task (tasks 043 and 044 own them in this wave).</constraint>
+    <constraint source="NFR-04">Logs and errors carry no tenant, oid, UPN, email or token.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>src/client/external-spa/README.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tier-1 entitlement gate" location="src/client/external-spa/src/registry/widgetRegistry.ts">`isEntitled` (:300) with `planes` + `requiredEntitlement`; the Policy Library widget is the workforce-plane example.</pattern>
+      <pattern name="Server Tier-1 set" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs">One rule reported by /me/entitlements and asked by routes via `IsEntitledAsync` (:115), so route, /me and descriptor cannot drift.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Confirm from code how a WorkforceHome contact's principal and accessible set are known server-side (CallerPrincipalResolver WorkforcePrincipalStrategy, ~:654-810) and what /me/entitlements returns for it today.</step>
+    <step order="2">Decide the signal: preferred — ModuleEntitlementResolver adds `assigned-work` for a WorkforceHome contact whose composed accessible set is non-empty, and the five widgets gate on planes ['ciam','workforce'] with `assigned-work` required on the workforce plane (CIAM stays blanket). Record the choice and why in the task notes.</step>
+    <step order="3">Implement the server rule (if chosen) and the widgetRegistry change; keep defaults (`defaultForRoles`) consistent with the owner rule.</step>
+    <step order="4">Verify every list behind the five tabs is already Tier-2-scoped for a WorkforceHome contact; if one is not, STOP (escalation).</step>
+    <step order="5">Revisit K2 and K3 against this change; record each as fixed here, still a known limit (with class and reason), or filed via /project-defer-issue-tracking.</step>
+    <step order="6">Tests: SPA vitest for the gate (granted contact, ungranted contact, CIAM unchanged, licensed systemuser unchanged); BFF tests for the entitlement rule under a KEEP path (tests/integration/auth/**).</step>
+    <step order="7">Request UAC's review of the change and record it (link or quote) in the task notes and the PR.</step>
+    <step order="8">Run the SPA tests (`npm test` in src/client/external-spa) and, if the BFF changed, `dotnet build src/server/api/Sprk.Bff.Api/` and the affected tests; measure publish size if the BFF changed.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="10">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r4/notes/task-040-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any list behind the five tabs is NOT Tier-2-scoped for a WorkforceHome contact (it would show ungranted records), STOP and escalate (root CLAUDE.md §6) — do not add client-side filtering as the fix.</trigger>
+    <trigger>If the "has grants" signal cannot come from the existing resolution without a new endpoint or a new /me field, STOP and ask the owner and UAC before adding surface.</trigger>
+    <trigger>If fixing K3 would change principal-resolution precedence (systemuser vs contact), STOP: that is the auth plane (uac-r2 / auth review), not this task.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Granted workforce contact sees scoped tabs">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>Sign in with the company account of a WorkforceHome contact that holds one project grant</step>
+        <step>Open the Projects tab and the other four tabs; open the granted record from the tab</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>The five tabs show; lists contain only granted records; the granted record opens; no console errors.</expected>
+    </test>
+    <test name="Ungranted workforce contact sees no tabs">
+      <steps>
+        <step>Sign in as a WorkforceHome contact with no grants</step>
+        <step>Check the tab strip and the widget library</step>
+      </steps>
+      <expected>None of Projects, Matters, Work Assignments, Documents, Invoices appears; no empty tab.</expected>
+    </test>
+    <test name="Partner unchanged + dark mode (ADR-021)">
+      <steps>
+        <step>Sign in as a CIAM partner; compare the tabs with the P3 build</step>
+        <step>Switch to dark theme and check the tab strip</step>
+      </steps>
+      <expected>Same five tabs as before; semantic tokens only, no hard-coded colours in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run the external-spa vitest suite</tool>
+    <tool name="dotnet">Build and test the BFF if it changes</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/registry/widgetRegistry.ts</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs (if the server rule is chosen)</output>
+    <output type="test">src/client/external-spa/tests/WorkforceContactTabs.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-040-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a WorkforceHome contact with at least one record grant, the Projects, Matters, Work Assignments, Documents and Invoices tabs are available, and a granted record is reachable from its tab.</criterion>
+    <criterion testable="true">Each of those tab lists contains only records in the contact's accessible set.</criterion>
+    <criterion testable="true">Negative: a WorkforceHome contact with no grants sees none of the five tabs (not as defaults, not in the widget library).</criterion>
+    <criterion testable="true">Negative: a CIAM partner's tabs, defaults and entitlements are unchanged (test).</criterion>
+    <criterion testable="true">Negative: a licensed systemuser on the workforce plane sees the same tabs as before (test).</criterion>
+    <criterion testable="true">No new endpoint, route, DI registration or package.</criterion>
+    <criterion testable="true">K2 and K3 each have a recorded outcome in the task notes (fixed, known limit with class, or filed issue + defer-issues entry).</criterion>
+    <criterion testable="true">UAC's review of the change is recorded in the task notes and cited in the PR.</criterion>
+    <criterion testable="true">If the BFF changed: build green, publish size recorded at or under 60 MB with the delta against a fresh master build, no new HIGH CVE, /conflict-check run.</criterion>
+    <criterion testable="true">All SPA tests (and affected BFF tests) pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the negative cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-24; issue #2508. UAC review required (spec Dependencies). One full adversarial pass; two if the BFF rule changes (authorization). The widgets' comment block cites R2 task 072 "Option B" for CIAM blanket entitlement — keep it true for CIAM.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

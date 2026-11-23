@@ -42,7 +42,10 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// TTL; the run says so.</para>
 ///
 /// <para><b>The <see cref="ExternalAccessReconciliationJob"/> A1 rules, applied.</b> A bounded run: the candidate roots
-/// are read (two scans per root type, each to <see cref="AssignedAccessStore.MaxScanRows"/>; one more reports TRUNCATED),
+/// are read (per root type: assigned roots newest first, assigned roots changed within
+/// <see cref="RecentScanWindow"/>, Restricted roots newest first, Restricted roots changed within the window; plus the ledger
+/// scan newest first and the ledger rows changed within the window — each to <see cref="AssignedAccessStore.MaxScanRows"/>;
+/// one more reports TRUNCATED),
 /// and at most <see cref="MaxRootsPerRun"/> are materialized per run — recently modified roots FIRST (so a grid edit is
 /// picked up on the next tick), then a window that ROTATES from run to run so every root is visited within
 /// ceil(N / <see cref="MaxRootsPerRun"/>) runs. A failed scan or any root the materializer could not complete records
@@ -55,7 +58,7 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// root lookup of its ledger rows (RemoveLink — a table may have only one cascade-delete parent, and the project holds it),
 /// so the rows stay live with no root: the candidate scan cannot name a root for them, the materializer never visits them,
 /// and they count toward that scan's bound forever. Each run therefore also reads the live Assigned-To rows with every root
-/// lookup empty (<see cref="AssignedAccessStore.ScanRootlessLedgerRowsAsync"/>), reads the record the row's KEY names
+/// lookup empty (<see cref="AssignedAccessStore.ScanRootlessLedgerRowsAsync"/>, paged by row id), reads the record the row's KEY names
 /// (<see cref="AssignedAccessStore.RootFromLedgerKey"/> — the root id kept as text), and only when that read answers "no such
 /// record" marks the row <see cref="AssignedAccessState.Revoked"/> with <see cref="AssignedAccessReason.RootDeleted"/> —
 /// the state an ended assignment takes (rows are never deleted or deactivated by the BFF), written conditionally on the
@@ -77,8 +80,24 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
     /// <summary>Stable job id.</summary>
     public const string JobIdConstant = "assigned-access-reconciliation";
 
-    /// <summary>Every 5 minutes (owner round 3 R3/R4: "≤ 5 min, never hourly").</summary>
+    /// <summary>Every 5 minutes (owner round 3 R3/R4: "≤ 5 min, never hourly"). Must match <see cref="TickInterval"/>.</summary>
     internal const string DefaultCronSchedule = "*/5 * * * *";
+
+    /// <summary>The time between two runs, as <see cref="DefaultCronSchedule"/> fires them (a test pins the two together).</summary>
+    internal static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Task 049 (F2): how many missed or failed ticks the recent-change scan still covers. A root changed within one tick
+    /// is read by the next run; the margin keeps it a candidate through this many more runs that did not complete.
+    /// </summary>
+    internal const int RecentScanMarginTicks = 3;
+
+    /// <summary>
+    /// Task 049 (F2): how far back the recent-change scan (<see cref="AssignedAccessStore.ScanRecentlyChangedAssignedRootsAsync"/>)
+    /// reads — one tick plus <see cref="RecentScanMarginTicks"/> ticks of margin (20 minutes). The job keeps no
+    /// last-successful-run watermark, so the window is sized from the tick.
+    /// </summary>
+    internal static readonly TimeSpan RecentScanWindow = TickInterval * (1 + RecentScanMarginTicks);
 
     /// <summary>
     /// The switch that lets the job REMOVE access on an ended assignment. Named positively, so an absent, empty or
@@ -89,8 +108,11 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
     /// <summary>Roots materialized per run. Past it the window rotates (reported ROTATING).</summary>
     internal const int MaxRootsPerRun = 200;
 
-    /// <summary>A root modified this recently is materialized first, ahead of the rotating window.</summary>
-    internal static readonly TimeSpan RecentChangeWindow = TimeSpan.FromMinutes(15);
+    /// <summary>
+    /// A root modified this recently is materialized first, ahead of the rotating window. Fix round 3 (K2): derived from
+    /// <see cref="RecentScanWindow"/> (20 minutes), so the ranking covers every root the recent-change scans read.
+    /// </summary>
+    internal static readonly TimeSpan RecentChangeWindow = RecentScanWindow;
 
     internal const string StatusOk = "ok";
     internal const string StatusPartial = "partial";
@@ -112,6 +134,13 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
 
     private readonly object _cursorGate = new();
     private (ExternalGrantRootType Type, Guid Id)? _cursor;
+
+    /// <summary>
+    /// Fix round 3 (K4): the id of the last rootless ledger row a run reached, in id order; the next run reads after it. Kept in
+    /// memory per instance, like <see cref="_cursor"/> (the job has no durable state store): a restart reads from the first
+    /// row again. <c>null</c> = from the start.
+    /// </summary>
+    private Guid? _rootlessCursor;
 
     public AssignedAccessReconciliationJob(
         IServiceScopeFactory scopeFactory,
@@ -188,23 +217,41 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             // ── Candidates: every root with an Assigned column set, and every root holding a live ledger row ──
             var all = new Dictionary<(ExternalGrantRootType, Guid), DateTimeOffset?>();
             var assigned = new HashSet<(ExternalGrantRootType, Guid)>();
+            var recentSince = _timeProvider.GetUtcNow() - RecentScanWindow;
             foreach (var type in RootTypes)
             {
                 var fields = materializer.RegistryFor(type).Select(r => r.Field).ToList();
                 var (roots, scanTruncated) = await store.ScanAssignedRootsAsync(type, fields, cancellationToken).ConfigureAwait(false);
                 truncated |= scanTruncated;
-                foreach (var r in roots)
+
+                // Task 049 (F2): the roots changed within the recent window too, whatever the full scan's bound kept — a
+                // new root whose queued grant did not complete is a candidate on the next tick. Keyed, so a root both
+                // scans return is one candidate.
+                var (recent, recentTruncated) = await store
+                    .ScanRecentlyChangedAssignedRootsAsync(type, fields, recentSince, cancellationToken).ConfigureAwait(false);
+                truncated |= recentTruncated;
+
+                foreach (var r in roots.Concat(recent))
                 {
                     all[(r.RootType, r.RootId)] = r.ModifiedOn;
                     assigned.Add((r.RootType, r.RootId));
                 }
             }
 
+            // Task 049 (fix round 2): the ledger scan reads newest change first too, and its recent-change scan adds the roots
+            // whose live ledger row changed within the window, whatever the full scan's bound kept. Each scan reports its own
+            // truncation, and the job ORs them, so a capped read of either is reported.
             var (ledgerRoots, ledgerTruncated) = await store.ScanLedgerRootsAsync(cancellationToken).ConfigureAwait(false);
             truncated |= ledgerTruncated;
-            foreach (var r in ledgerRoots)
+            var (recentLedgerRoots, recentLedgerTruncated) = await store
+                .ScanRecentlyChangedLedgerRootsAsync(recentSince, cancellationToken).ConfigureAwait(false);
+            truncated |= recentLedgerTruncated;
+            foreach (var r in ledgerRoots.Concat(recentLedgerRoots))
             {
-                all.TryAdd((r.RootType, r.RootId), null);
+                // Fix round 3 (K2): the ledger row's change time ranks the root with the recently changed ones.
+                all[(r.RootType, r.RootId)] = all.TryGetValue((r.RootType, r.RootId), out var known) && known is { } earlier
+                    ? (r.ModifiedOn is { } later && later > earlier ? later : earlier)
+                    : r.ModifiedOn;
                 assigned.Add((r.RootType, r.RootId));
             }
 
@@ -215,7 +262,14 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             {
                 var (roots, scanTruncated) = await store.ScanRestrictedRootsAsync(type, cancellationToken).ConfigureAwait(false);
                 truncated |= scanTruncated;
-                foreach (var r in roots)
+
+                // Task 049 (fix round 2): the Restricted roots changed within the recent window too, whatever the full scan's
+                // bound kept. Keyed below, so a root both scans return is one candidate.
+                var (recentRestricted, recentRestrictedTruncated) = await store
+                    .ScanRecentlyChangedRestrictedRootsAsync(type, recentSince, cancellationToken).ConfigureAwait(false);
+                truncated |= recentRestrictedTruncated;
+
+                foreach (var r in roots.Concat(recentRestricted))
                 {
                     if (all.TryGetValue((r.RootType, r.RootId), out var known))
                         all[(r.RootType, r.RootId)] = known ?? r.ModifiedOn;
@@ -463,9 +517,15 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         AssignedAccessStore store, RootlessLedgerReport report, JobRunContext context, CancellationToken ct)
     {
         IReadOnlyList<AssignedAccessLedgerRow> rows;
+        Guid? startedAfter;
+        lock (_cursorGate)
+        {
+            startedAfter = _rootlessCursor;
+        }
+
         try
         {
-            (rows, report.Truncated) = await store.ScanRootlessLedgerRowsAsync(ct).ConfigureAwait(false);
+            (rows, report.Truncated) = await store.ScanRootlessLedgerRowsAsync(startedAfter, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -482,9 +542,14 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
 
         // record -> does it exist (null = the read failed). One read per record, however many rows name it.
         var exists = new Dictionary<AssignedRootRef, bool?>();
+        Guid? previousId = null;
+        var deferralSeen = false;
+        Guid? resumeAfter = null;
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
+            var idBefore = previousId;
+            previousId = row.Id;
 
             // Re-decided in code, not trusted from the scan filter: a row that names a root, or is already Revoked, is not ours.
             if (AssignedAccessStore.RootOf(row) is not null || row.State == AssignedAccessState.Revoked)
@@ -505,6 +570,14 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                 if (exists.Count >= MaxRootsPerRun)
                 {
                     report.Deferred++;
+
+                    // The next run resumes at the first row this one did not reach.
+                    if (!deferralSeen)
+                    {
+                        deferralSeen = true;
+                        resumeAfter = idBefore;
+                    }
+
                     continue;
                 }
 
@@ -573,8 +646,16 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                 report.Unresolved++;
                 _logger.LogError(ex,
                     "[ASSIGNED-ACCESS-RECON] Ledger row {RowId} (its record {RootId} was deleted) could not be marked revoked; " +
-                    "the next run retries it. correlationId={CorrelationId}", row.Id, root.RootId, context.CorrelationId);
+                    "it is retried when the scan next reaches it. correlationId={CorrelationId}", row.Id, root.RootId, context.CorrelationId);
             }
+        }
+
+        // The next run starts after the last row this one fully handled; past the end of the rows, it starts again at the first.
+        lock (_cursorGate)
+        {
+            _rootlessCursor = deferralSeen ? resumeAfter ?? startedAfter
+                : report.Truncated ? rows.LastOrDefault()?.Id ?? startedAfter
+                : null;
         }
     }
 

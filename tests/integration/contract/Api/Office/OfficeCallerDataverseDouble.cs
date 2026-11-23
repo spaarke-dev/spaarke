@@ -166,6 +166,13 @@ public sealed partial class OfficeCallerDataverseDouble : IDataverseUserClient
     /// <summary>World rows the caller holds no AppendTo on (RetrievePrincipalAccess answers Read and Write only).</summary>
     public HashSet<(string Table, Guid Id)> NoAppendTo { get; } = new();
 
+    /// <summary>
+    /// Field mapping task 030a: tables whose every row exists for the caller, with no column values unless <see cref="Rows"/>
+    /// lists the row — for suites that name records by fresh ids per test (the Office To Do suites). <see cref="Missing"/>,
+    /// <see cref="Unreadable"/> and <see cref="NoAppendTo"/> still apply to them. Empty by default: the world stays closed.
+    /// </summary>
+    public HashSet<string> OpenTables { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Rows that do not exist: a read or RetrievePrincipalAccess of one answers 404.</summary>
     public HashSet<(string Table, Guid Id)> Missing { get; } = new();
 
@@ -266,7 +273,7 @@ public sealed partial class OfficeCallerDataverseDouble : IDataverseUserClient
 
             if (Missing.Contains((table, id)))
                 return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
-            if (!Rows.ContainsKey((table, id)))
+            if (!Rows.ContainsKey((table, id)) && !OpenTables.Contains(table))
                 throw new UnscriptedCallerRequestException(request, $"row {table}({id:D}) is not in the world");
 
             return Ok(new
@@ -327,7 +334,11 @@ public sealed partial class OfficeCallerDataverseDouble : IDataverseUserClient
             }
 
             if (!Rows.TryGetValue((table, id), out var values))
-                throw new UnscriptedCallerRequestException(request, $"row {table}({id:D}) is not in the world");
+            {
+                values = OpenTables.Contains(table)
+                    ? new Dictionary<string, object?>()
+                    : throw new UnscriptedCallerRequestException(request, $"row {table}({id:D}) is not in the world");
+            }
 
             var primaryId = TableNamed(table, request).PrimaryId;
             var body = new Dictionary<string, object?> { [primaryId] = id };

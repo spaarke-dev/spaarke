@@ -21,8 +21,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceRollup;
 /// matter. The price is that a missing matter now surfaces as <see cref="KeyNotFoundException"/>, which the
 /// handler's retry classification treats as permanent: without the skip, every such job would be poisoned and
 /// dead-lettered for a matter that simply no longer exists.</para>
-/// <para>The rollup service is substituted at its <c>virtual</c> entry point (its reads unwrap a concrete
-/// <c>ServiceClient</c>, which no double can stand in for); the handler is the production type.</para>
+/// <para>The rollup service is substituted at its <c>virtual</c> entry point; the handler is the production type.</para>
 /// </remarks>
 public class SpendSnapshotDeletedMatterTests
 {
@@ -85,6 +84,8 @@ public class SpendSnapshotDeletedMatterTests
 
         public RollupDouble(Exception failure)
             : base(Mock.Of<IDataverseService>(), Mock.Of<IFieldMappingDataverseService>(),
+                new BillingDecisionRecorder(new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness().Writer,
+                    Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(), NullLogger<BillingDecisionRecorder>.Instance),
                 NullLogger<FinanceRollupService>.Instance)
         {
             _failure = failure;

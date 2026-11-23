@@ -38,6 +38,17 @@ public interface IGraphAppRoleParityVerifier
         string tenantId,
         IReadOnlyList<GraphAppRoleEntry> allowedRoles,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 266 (#2605): lists EVERY Microsoft Graph app role <paramref name="servicePrincipalObjectId"/> holds — for an
+    /// identity that must hold none (the ontology writer). <see cref="FindUnexpectedRolesAsync"/> refuses an empty allowed set
+    /// on purpose (a stamp catalog regressed to empty must not pass), so this is its own call. Never throws for an HTTP or
+    /// token failure — that is <see cref="GraphAppRoleExtrasResult.Unknown"/>, never "none".
+    /// </summary>
+    Task<GraphAppRoleExtrasResult> FindAnyRolesAsync(
+        string servicePrincipalObjectId,
+        string tenantId,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

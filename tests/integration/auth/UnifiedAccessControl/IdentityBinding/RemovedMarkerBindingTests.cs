@@ -199,7 +199,8 @@ public class RemovedMarkerBindingTests
     public void WorkforceHomeResolve_DeniesARemovedContact(bool removed)
     {
         var row = new ContactBindingRow(ContactA, 0, Caller.ToString("D"), ContactBindingDecision.WorkforceHomePlaneValue,
-            RawExternalTenantId: CustomerTenant.ToString("D")) { RemovedOn = removed ? RemovedOn : null };
+            RawExternalTenantId: CustomerTenant.ToString("D"))
+        { RemovedOn = removed ? RemovedOn : null };
 
         var decision = ContactBindingDecision.DecideHomeContact(ContactLookup.Of(row), CustomerTenant, Caller)!;
 

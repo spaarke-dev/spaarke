@@ -21,9 +21,12 @@ public sealed class SecureRecordSetupProcedureTests
     private static readonly SecureRecordOwnerRoleSet Set = SecureRecordOwnerRoleSet.Embedded;
     private static readonly SecureRecordSetupTarget Target = new("https://spaarke-acme.crm.dynamics.com/", "tenant", "bff-app");
 
-    private static Task<SecureRecordSetupOutcome> RunAsync(FakeSecureRecordSetupDataverse dv, bool dryRun = false, Guid? customerUnit = null)
+    private static Task<SecureRecordSetupOutcome> RunAsync(
+        FakeSecureRecordSetupDataverse dv, bool dryRun = false, Guid? customerUnit = null, Guid? runtimeUser = null,
+        Guid? writerUser = null, Guid? writerUnit = null)
         => new SecureRecordSetupProcedure(dv, NullLogger.Instance)
-            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], customerUnit ?? dv.CustomerUnitId, dryRun),
+            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], runtimeUser ?? dv.MiAppUser,
+                writerUser ?? dv.WriterAppUser, customerUnit ?? dv.CustomerUnitId, writerUnit ?? dv.WriterUnitId, dryRun),
                 CancellationToken.None);
 
     private static FakeSecureRecordSetupDataverse NewEnv() => FakeSecureRecordSetupDataverse.NewEnvironment(Set);
@@ -108,7 +111,7 @@ public sealed class SecureRecordSetupProcedureTests
 
         var plan = outcome.Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
         dv.Writes.Should().BeEmpty();
-        dv.Units.Should().HaveCount(2, "nothing was created (the root and the customer unit only)");
+        dv.Units.Should().HaveCount(3, "nothing was created (the root, the customer unit and the ontology writer's unit only)");
         plan.Should().Contain(a => a.StartsWith("create business unit", StringComparison.Ordinal));
         plan.Should().Contain(a => a.StartsWith("create the Owner team", StringComparison.Ordinal));
         plan.Should().Contain(a => a.StartsWith("create the role", StringComparison.Ordinal));
@@ -287,7 +290,8 @@ public sealed class SecureRecordSetupProcedureTests
         var dv = await ConfiguredEnvAsync();
         dv.ProfileTeams[dv.LinkReaderProfileId].Clear();
         dv.ProfileUsers[dv.LinkWriterProfileId].Clear();
-        var defaultTeams = dv.Teams.Where(t => t.IsDefault).Select(t => t.Id).ToArray();
+        // Every default team but the ontology writer unit's (task 267: it is in no profile).
+        var defaultTeams = dv.Teams.Where(t => t.IsDefault && t.Id != dv.WriterDefaultTeamId).Select(t => t.Id).ToArray();
 
         var outcome = await RunAsync(dv);
 
@@ -325,7 +329,8 @@ public sealed class SecureRecordSetupProcedureTests
         dv.Writes.Should().BeEmpty();
         plan.Should().OnlyContain(a => a.EndsWith($"'{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'", StringComparison.Ordinal)
                                        || a.EndsWith($"'{SecureRecordSetupProcedure.IdentityLinkWriterProfileName}'", StringComparison.Ordinal));
-        plan.Should().HaveCount(dv.Teams.Count(t => t.IsDefault) + 2);
+        plan.Should().HaveCount(dv.Teams.Count(t => t.IsDefault && t.Id != dv.WriterDefaultTeamId) + 2,
+            "every default team but the ontology writer unit's (task 267), and the BFF's two users");
     }
 
     [Fact]
@@ -663,6 +668,105 @@ public sealed class SecureRecordSetupProcedureTests
                 },
                 SecureRecordSetupRejectionCodes.IdentityLinkLockOtherWriter, FailureClass.QuarantineRequired },
 
+            // ---- S26: the invoice amounts and firm (task 268; ebilling task 166, EB-D-200) ----
+            { "sprk_invoice.sprk_totalamount not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_invoice", "sprk_totalamount")] = false,
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "sprk_invoice.sprk_vendororg absent (package before task 166)", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("sprk_invoice", "sprk_vendororg")),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read sprk_invoice.sprk_approvedtotal", dv =>
+                    dv.ColumnPermissions("sprk_approvedtotal").RemoveAll(p => p.ProfileId == dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Readers read 0 on sprk_invoice.sprk_feestotal", dv =>
+                    Replace(dv, "sprk_feestotal", dv.ReaderProfileId, 0, 0, 0),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers grant nothing on sprk_invoice.sprk_expensestotal", dv =>
+                    dv.ColumnPermissions("sprk_expensestotal").RemoveAll(p => p.ProfileId == dv.WriterProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot read sprk_invoice.sprk_lineadjustmentstotal (0/4/4)", dv =>
+                    Replace(dv, "sprk_lineadjustmentstotal", dv.WriterProfileId, 0, 4, 4),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot create sprk_invoice.sprk_invoiceadjustmentstotal (4/0/4)", dv =>
+                    Replace(dv, "sprk_invoiceadjustmentstotal", dv.WriterProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update sprk_invoice.sprk_totalamount (4/4/0)", dv =>
+                    Replace(dv, "sprk_totalamount", dv.WriterProfileId, 4, 4, 0),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers grant sprk_totalamount on another table only", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_totalamount");
+                    permissions.RemoveAll(p => p.ProfileId == dv.WriterProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, "sprk_invoicecorrection", 4, 4, 4));
+                },
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "the Readers profile may update sprk_invoice.sprk_approvedtotal (4/0/4)", dv =>
+                    Replace(dv, "sprk_approvedtotal", dv.ReaderProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_invoice.sprk_totalamount", dv =>
+                    dv.ColumnPermissions("sprk_totalamount").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_invoice", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+            // S14's path (row above: S26). The fake's name lookup ignores case only, so the look-alike carries the exact name: the
+            // old by-name exemption returned both ids and excused it.
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_matter.sprk_issecure", dv =>
+                    dv.FieldPermissions.Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_matter", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.FieldLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create sprk_invoice.sprk_vendororg", dv =>
+                    dv.ColumnPermissions("sprk_vendororg")
+                        .Add(new SecureSetupFieldPermission(dv.AddProfile("Billing Admins"), "sprk_invoice", 4, 4, 0)),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S27: the invoice-family links (task 270; unified-access-control-r2 #2799) ----
+            { "sprk_invoice.sprk_matter not secured (SpaarkeMaster 1.3.1.0)", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_invoice", "sprk_matter")] = false,
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "sprk_externalidentifier.sprk_regardinginvoice absent", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("sprk_externalidentifier", "sprk_regardinginvoice")),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read sprk_invoicesubmission.sprk_regardingworkassignment", dv =>
+                    dv.RemoveGrant("sprk_invoicesubmission", "sprk_regardingworkassignment", dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update sprk_billingevent.sprk_invoice (4/4/0)", dv =>
+                    dv.SetGrant("sprk_billingevent", "sprk_invoice", dv.WriterProfileId, 4, 4, 0),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "Writers grant sprk_regardingmatter on the other family tables but not sprk_invoiceapproval", dv =>
+                    dv.RemoveGrant("sprk_invoiceapproval", "sprk_regardingmatter", dv.WriterProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable },
+            { "the Readers profile may update sprk_invoicecorrection.sprk_invoice (4/0/4)", dv =>
+                    dv.SetGrant("sprk_invoicecorrection", "sprk_invoice", dv.ReaderProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter, FailureClass.QuarantineRequired },
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_invoice.sprk_project", dv =>
+                    dv.ColumnPermissions("sprk_project").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_invoice", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S28: the message-access columns (task 270; field-mapping task 054b) ----
+            { "sprk_communication.sprk_sentby not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_sentby")] = false,
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot create sprk_communicationthread.sprk_threadtype (4/0/4)", dv =>
+                    dv.SetGrant("sprk_communicationthread", "sprk_threadtype", dv.WriterProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "the direct recipient exists but is not secured", dv =>
+                {
+                    dv.AddDirectRecipient();
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_directrecipient")] = false;
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "another profile may update sprk_communication.sprk_communicationthread", dv =>
+                    dv.ColumnPermissions("sprk_communicationthread").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Mail Admins"), "sprk_communication", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create the direct recipient", dv =>
+                {
+                    dv.AddDirectRecipient();
+                    dv.ColumnPermissions("sprk_directrecipient").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Mail Admins"), "sprk_communication", 4, 4, 0));
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter, FailureClass.QuarantineRequired },
+
             // ---- S19–S21: the standing-grant environment (ISS-020 / #1565) ----
             { "standing-grant profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.StandingGrantProfileName),
                 SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
@@ -915,17 +1019,74 @@ public sealed class SecureRecordSetupProcedureTests
         dv.Writes.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task CustomerUnit_NamedLikeTheSecureUnit_IsRefused_BecauseItsUsersWouldBeInTheSecureUnit()
+    [Theory]
+    [InlineData("exact name")]
+    [InlineData("other casing")]
+    [InlineData("accent variant")]
+    public async Task CustomerUnit_ThatDataverseFindsForTheSecureName_IsRefusedById_WithoutWriting(string variant)
     {
-        // Intake refuses this name; if a unit called "Secure Record" were recorded as the customer's anyway, S1 adopts it as
-        // the Secure Record unit and S2 refuses the BFF's application users found in it.
+        // Must fire: a fresh stamp where H10 created the customer's unit under a name Dataverse cannot tell apart from the
+        // Secure Record name (no Secure Record unit existed yet for H10 to compare against). S1's lookup finds the
+        // CUSTOMER's unit; S1 refuses by id — naming the real cause — before S2 or any write.
+        var customerName = variant switch
+        {
+            "exact name" => Set.BusinessUnitName,
+            "other casing" => Set.BusinessUnitName.ToUpperInvariant(),
+            _ => AccentVariant(Set.BusinessUnitName),
+        };
+        if (variant == "accent variant")
+        {
+            customerName.Should().NotBe(Set.BusinessUnitName, "the accent variant must really differ from the configured name");
+            string.Equals(customerName, Set.BusinessUnitName, StringComparison.OrdinalIgnoreCase)
+                .Should().BeFalse("OrdinalIgnoreCase — the old code-side comparison — does not see the collision");
+        }
         var dv = NewEnv();
         dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
-        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, Set.BusinessUnitName, dv.RootUnitId));
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, customerName, dv.RootUnitId));
 
-        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitHasUsers, FailureClass.QuarantineRequired);
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.CustomerUnitId.ToString()).And.Contain("without case or accents");
         dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CustomerUnit_AccentVariantName_WhenTheSecureUnitAlsoExists_IsRefusedAsTheCustomersUnit_WithoutWriting()
+    {
+        // Dataverse finds both units for the Secure Record name; one is the customer's — the refusal names that cause
+        // (QuarantineRequired), not a generic "rename one" ambiguity.
+        var dv = NewEnv();
+        dv.Units.Add(new SecureSetupBusinessUnit(Guid.NewGuid(), Set.BusinessUnitName, dv.RootUnitId));
+        dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, AccentVariant(Set.BusinessUnitName), dv.RootUnitId));
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit, FailureClass.QuarantineRequired)
+            .Diagnostic.Should().Contain(dv.CustomerUnitId.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SecureUnitLookup_Fault_FailsClosed_WithoutWriting()
+    {
+        var dv = NewEnv();
+        dv.Fault = member => member == nameof(ISecureRecordSetupDataverse.FindBusinessUnitsByNameAsync)
+            ? new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other, "simulated Dataverse 503")
+            : null;
+
+        var act = () => RunAsync(dv);
+
+        // The fault propagates (the handler maps it to a failure) — never read as "no Secure Record unit, create one".
+        await act.Should().ThrowAsync<SecureRecordSetupDataverseException>();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The configured name with its first Latin vowel accented ("Secure Record" → "Sécure Record").</summary>
+    private static string AccentVariant(string name)
+    {
+        var index = name.IndexOfAny(['e', 'a', 'o', 'u', 'i']);
+        index.Should().BeGreaterThanOrEqualTo(0, "the Secure Record name needs a vowel to accent");
+        var accented = name[index] switch { 'e' => 'é', 'a' => 'á', 'o' => 'ó', 'u' => 'ú', _ => 'í' };
+        return name[..index] + accented + name[(index + 1)..];
     }
 
     [Fact]
@@ -1005,6 +1166,143 @@ public sealed class SecureRecordSetupProcedureTests
 
         refused.Diagnostic.Should().Contain(admins.ToString()).And.Contain("contact.sprk_standinggrant")
             .And.Contain("Only Standing Grant Administrators and System Administrator may create or update the standing grant");
+    }
+
+    // ------------------------------------------------------------ S26: the invoice amounts and firm (task 268)
+
+    [Fact]
+    public async Task InvoiceMoneyLock_OnAPackageBeforeTask166_IsRefusedResumable_NamingTheColumnAndTheRemedy()
+    {
+        // Must fire: a stamp whose SpaarkeMaster predates ebilling task 166 — the seven columns exist unsecured with no
+        // profile rows. A BFF from master would run there while any user could set an invoice's total or firm.
+        var dv = NewEnv();
+        foreach (var column in SecureRecordSetupProcedure.InvoiceMoneyColumns)
+        {
+            dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(SecureRecordSetupProcedure.InvoiceMoneyTable, column)] = false;
+            dv.ColumnPermissions(column).Clear();
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("sprk_invoice.sprk_totalamount").And.Contain("IsSecured=False")
+            .And.Contain("scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1").And.Contain("Nothing was written")
+            .And.Contain("Only where H7b has completed on this environment before");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceMoneyLock_OtherWriter_IsQuarantined_NamingTheProfile()
+    {
+        var dv = NewEnv();
+        var billingAdmins = dv.AddProfile("Billing Admins");
+        dv.ColumnPermissions("sprk_approvedtotal")
+            .Add(new SecureSetupFieldPermission(billingAdmins, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 0, 4));
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(billingAdmins.ToString()).And.Contain("sprk_invoice.sprk_approvedtotal");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceMoneyLock_SystemAdministratorAndAWriterOnAnotherTable_DoNotRefuse()
+    {
+        // Must not fire: the platform's System Administrator profile writes every secured column (owner decision F4, seeded
+        // by NewEnvironment), and a profile writing a column of the SAME NAME on another table is no invoice writer.
+        var dv = NewEnv();
+        dv.ColumnPermissions("sprk_totalamount")
+            .Add(new SecureSetupFieldPermission(dv.AddProfile("Correction Admins"), "sprk_invoicecorrection", 4, 4, 4));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+    }
+
+    // ------------------------------------------------------------ S27/S28: invoice-family links and message access (task 270)
+
+    [Fact]
+    public async Task InvoiceFamilyLock_OnSpaarkeMaster1310_IsRefusedResumable_NamingTheColumnAndTheRemedy()
+    {
+        // Must fire: SpaarkeMaster 1.3.1.0 ships the 24 columns unsecured with no profile rows. A BFF from master would run
+        // where any user could re-file an invoice-family row past the BFF's checks (#2799).
+        var dv = NewEnv();
+        foreach (var (table, column) in SecureRecordSetupProcedure.InvoiceFamilyLinkColumns)
+        {
+            dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(table, column)] = false;
+            dv.ColumnPermissions(column).RemoveAll(p => string.Equals(p.EntityName, table, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("sprk_billingevent.sprk_invoice").And.Contain("IsSecured=False")
+            .And.Contain("re-file an invoice-family row").And.Contain("scripts/Set-InvoiceFamilyFieldSecurity.ps1")
+            .And.Contain("Only where H7b has completed on this environment before")
+            .And.Contain("Nothing was written");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceFamilyLock_OtherWriter_IsQuarantined_NamingTheProfileAndTheColumn()
+    {
+        var dv = NewEnv();
+        var billingAdmins = dv.AddProfile("Billing Admins");
+        dv.ColumnPermissions("sprk_supersedesinvoice")
+            .Add(new SecureSetupFieldPermission(billingAdmins, "sprk_invoice", 4, 4, 0));
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(billingAdmins.ToString()).And.Contain("sprk_invoice.sprk_supersedesinvoice")
+            .And.Contain("#2799");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceFamilyAndMessageLocks_AWriterOnASameNamedColumnOfAnotherTable_DoesNotRefuse()
+    {
+        // Must not fire: sprk_matter / sprk_invoice / sprk_communicationthread are common column names; a profile writing one
+        // on a table outside the lock (here sprk_event, sprk_document) is no writer of the locked column.
+        var dv = NewEnv();
+        var other = dv.AddProfile("Event Admins");
+        dv.ColumnPermissions("sprk_matter").Add(new SecureSetupFieldPermission(other, "sprk_event", 4, 4, 4));
+        dv.ColumnPermissions("sprk_invoice").Add(new SecureSetupFieldPermission(other, "sprk_document", 4, 4, 4));
+        dv.ColumnPermissions("sprk_communicationthread").Add(new SecureSetupFieldPermission(other, "sprk_document", 4, 4, 4));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_DirectRecipientAbsent_Passes_WithTheDirectMessageNote()
+    {
+        var applied = (await RunAsync(NewEnv())).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().ContainSingle(n => n.Contains("sprk_communication.sprk_directrecipient: not in this environment")
+                                                        && n.Contains("the Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset"));
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_DirectRecipientPresentAndLocked_Passes_WithoutTheNote()
+    {
+        var dv = NewEnv();
+        dv.AddDirectRecipient();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().NotContain(n => n.Contains("sprk_directrecipient", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_DirectRecipientPresentButUnlocked_IsRefused_NamingTheThreadFlagScript()
+    {
+        // Must fire: the column exists (Set-DirectRecipientSchema.ps1 ran) but its lock does not — a user could name
+        // themselves a message's direct recipient.
+        var dv = NewEnv();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_directrecipient")] = false;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("sprk_communication.sprk_directrecipient").And.Contain("IsSecured=False")
+            .And.Contain("scripts/Set-ThreadFlagFieldSecurity.ps1").And.Contain("-SolutionUniqueName SpaarkeMaster")
+            .And.Contain("only where sprk_communication.sprk_directrecipient exists").And.Contain("Nothing was written");
     }
 
     // ------------------------------------------------------------ S18/S19: an environment on SpaarkeMaster 1.2.3.1
@@ -1220,6 +1518,724 @@ public sealed class SecureRecordSetupProcedureTests
 
         (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(SecureRecordSetupFaultKind.RateLimited);
         dv.Writes.Should().BeEmpty();
+    }
+
+    // ------------------------------------------------------------ S23: the runtime identity holds "Spaarke Ontology Service"
+
+    private static readonly string OntologyRole = SecureRecordSetupProcedure.OntologyServiceRoleName;
+
+    [Fact]
+    public async Task S23_AssignsTheCustomerUnitCopy_ToTheRuntimeUser_AndVerifiesIt()
+    {
+        var dv = NewEnv();
+
+        var outcome = await RunAsync(dv);
+
+        var applied = outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId }, "the copy in the user's own (customer) business unit");
+        dv.UserRoles.Should().NotContainKey(dv.BffAppUser, "only the managed identity's application user gets the role");
+        dv.Writes.Should().ContainSingle(w => w.StartsWith($"AssociateUserRole {dv.MiAppUser}", StringComparison.Ordinal));
+        applied.Actions.Should().Contain($"give BFF runtime user {dv.MiAppUser} the role '{OntologyRole}'");
+    }
+
+    [Fact]
+    public async Task S23_RoleAlreadyHeld_WritesNothing()
+    {
+        var dv = NewEnv();
+        dv.UserRoles[dv.MiAppUser] = [dv.OntologyRoleId];
+
+        var outcome = await RunAsync(dv);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().NotContain(w => w.StartsWith($"AssociateUserRole {dv.MiAppUser}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S23_DryRun_PlansTheAssignment_WithoutWriting()
+    {
+        var dv = NewEnv();
+
+        var outcome = await RunAsync(dv, dryRun: true);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Planned>().Which.Actions
+            .Should().Contain($"give BFF runtime user {dv.MiAppUser} the role '{OntologyRole}'");
+        dv.UserRoles.Should().BeEmpty();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_RoleMissingInTheCustomerUnit_Refuses_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.Roles.RemoveAll(r => r.BusinessUnitId == dv.CustomerUnitId && r.Name == OntologyRole);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(OntologyRole).And.Contain("import SpaarkeMaster");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_TwoCopiesInTheCustomerUnit_Refuses_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.AddRole(dv.CustomerUnitId, OntologyRole);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved, FailureClass.Resumable);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_RuntimeUserAbsent_Refuses_AndWritesNothing()
+    {
+        var dv = NewEnv();
+
+        var refused = Refused(await RunAsync(dv, runtimeUser: Guid.Empty),
+            SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("H10 output missing");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_RuntimeUserInAnotherBusinessUnit_Refuses_NamingBothIds_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        var stray = dv.AddUser(dv.RootUnitId, isApplicationUser: true);
+
+        var refused = Refused(await RunAsync(dv, runtimeUser: stray),
+            SecureRecordSetupRejectionCodes.OntologyServiceRoleUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.RootUnitId.ToString()).And.Contain(dv.CustomerUnitId.ToString());
+        dv.Writes.Should().BeEmpty();
+        dv.UserRoles.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_TeamHoldsTheRole_Quarantines_NamingIt_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Add(dv.OntologyRoleId);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.CustomerDefaultTeamId.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_TeamHoldingTheRootCopy_AlsoQuarantines()
+    {
+        var dv = NewEnv();
+        dv.TeamRoles[dv.RootDefaultTeamId].Add(dv.RootOntologyRoleId);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder, FailureClass.QuarantineRequired);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_InteractiveUserHoldsTheRole_Quarantines_NamingIt_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        var human = dv.AddUser(dv.CustomerUnitId, isApplicationUser: false);
+        dv.UserRoles[human] = [dv.OntologyRoleId];
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(human.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_AppRegistrationUserHoldsTheRole_IsAllowed_AndNeverRemoved()
+    {
+        var dv = NewEnv();
+        dv.UserRoles[dv.BffAppUser] = [dv.OntologyRoleId];
+
+        var outcome = await RunAsync(dv);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId }, "an application user may hold it and is left alone");
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+        dv.Writes.Should().NotContain(w => w.Contains(dv.BffAppUser.ToString(), StringComparison.Ordinal) && w.Contains(dv.OntologyRoleId.ToString(), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S23_AssociationThatDoesNotStick_FailsTheStep_WithTheNotHeldCode()
+    {
+        var dv = NewEnv();
+        dv.UserRoleAssociationsIgnoredFor.Add(dv.MiAppUser);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(dv.MiAppUser.ToString()).And.Contain(OntologyRole);
+    }
+
+    // ------------------------------------------------------------ S24 (#2605): the ontology writer's role and profiles
+
+    private static readonly string FieldWriters = SecureRecordSetupProcedure.OntologyWriterFieldWritersProfileName;
+    private static readonly string FirmReasonWriters = SecureRecordSetupProcedure.OntologyWriterFirmReasonProfileName;
+
+    [Fact]
+    public async Task S24_GivesTheWriterExactlyTheOntologyRole_AndBothProfiles_AndVerifiesIt()
+    {
+        var dv = NewEnv();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.WriterOntologyRoleId },
+            "its OWN unit's copy (task 267), and nothing else (FR-21)");
+        dv.UserRoles[dv.WriterAppUser].Should().NotContain(dv.OntologyRoleId, "the customer-unit copy is the runtime user's");
+        dv.UserUnit[dv.WriterAppUser].Should().Be(dv.WriterUnitId, "H7b never moves a user");
+        dv.ProfileUsers[dv.OntologyWriterFieldWritersProfileId].Should().BeEquivalentTo(new[] { dv.WriterAppUser });
+        dv.ProfileUsers[dv.OntologyWriterFirmReasonProfileId].Should().BeEquivalentTo(new[] { dv.WriterAppUser });
+        dv.TeamRoles[dv.WriterDefaultTeamId].Should().BeEmpty("the writer unit's default team holds no role");
+        dv.ProfileTeams.Values.Should().NotContain(teams => teams.Contains(dv.WriterDefaultTeamId),
+            "S11/S16 skip the writer unit's default team: it is in no field-security profile");
+        applied.Actions.Should().Contain(new[]
+        {
+            $"give ontology writer user {dv.WriterAppUser} the role '{OntologyRole}' (its unit's copy {dv.WriterOntologyRoleId})",
+            $"add ontology writer user {dv.WriterAppUser} to '{FieldWriters}'",
+            $"add ontology writer user {dv.WriterAppUser} to '{FirmReasonWriters}'",
+        });
+        foreach (var profile in new[] { dv.WriterProfileId, dv.LinkWriterProfileId, dv.StandingGrantProfileId })
+        {
+            dv.ProfileUsers[profile].Should().NotContain(dv.WriterAppUser, "the writer joins only its own two profiles");
+        }
+    }
+
+    [Fact]
+    public async Task S24_SecondRun_WritesNothing()
+    {
+        var dv = await ConfiguredEnvAsync();
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Which.Actions.Should().BeEmpty();
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_AsTheAcmeHandApplyLeftIt_AddsOnlyTheMissingFirmReasonMembership()
+    {
+        // Role and "Field Writers" already applied by hand; only "Firm Reason Writers" is missing.
+        var dv = NewEnv();
+        dv.UserRoles[dv.WriterAppUser] = [dv.WriterOntologyRoleId];
+        dv.ProfileUsers[dv.OntologyWriterFieldWritersProfileId].Add(dv.WriterAppUser);
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.Writes.Should().NotContain(w => w.Contains(dv.WriterAppUser.ToString(), StringComparison.Ordinal)
+                                           && !w.StartsWith($"AssociateProfileUser {dv.OntologyWriterFirmReasonProfileId}", StringComparison.Ordinal));
+        dv.Writes.Should().ContainSingle(w => w.StartsWith($"AssociateProfileUser {dv.OntologyWriterFirmReasonProfileId}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S24_DryRun_PlansTheWriter_WithoutWriting()
+    {
+        var dv = NewEnv();
+
+        var plan = (await RunAsync(dv, dryRun: true)).Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
+
+        plan.Should().Contain($"give ontology writer user {dv.WriterAppUser} the role '{OntologyRole}' (its unit's copy {dv.WriterOntologyRoleId})")
+            .And.Contain($"add ontology writer user {dv.WriterAppUser} to '{FirmReasonWriters}'");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnknown_IsResumable_TellingTheOperatorToStartANewRun_AndWritesNothing()
+    {
+        var dv = NewEnv();
+
+        var refused = Refused(await RunAsync(dv, writerUser: Guid.Empty),
+            SecureRecordSetupRejectionCodes.OntologyWriterUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("start a new run");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task S24_WriterThatIsABffIdentity_IsQuarantined_AndWritesNothing(bool runtimeIdentity)
+    {
+        // Fail closed: a writer id equal to a System Administrator identity would make the profiles' lock meaningless.
+        var dv = NewEnv();
+
+        var refused = Refused(await RunAsync(dv, writerUser: runtimeIdentity ? dv.MiAppUser : dv.BffAppUser),
+            SecureRecordSetupRejectionCodes.OntologyWriterIsBffIdentity, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain("FR-21");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task S24_WriterOutsideItsOwnUnit_OrUnknownToDataverse_IsQuarantined_AndWritesNothing(bool existsElsewhere)
+    {
+        var dv = NewEnv();
+        var writer = existsElsewhere ? dv.AddUser(dv.RootUnitId, isApplicationUser: true) : Guid.NewGuid();
+
+        var refused = Refused(await RunAsync(dv, writerUser: writer),
+            SecureRecordSetupRejectionCodes.OntologyWriterOutsideItsBusinessUnit, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(writer.ToString()).And.Contain(dv.WriterUnitId.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterStillInTheCustomerUnit_IsQuarantined_AndNeverMoved()
+    {
+        // The pre-267 placement (ACME): H7b refuses it; only H10 moves the writer.
+        var dv = NewEnv();
+        dv.UserUnit[dv.WriterAppUser] = dv.CustomerUnitId;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterOutsideItsBusinessUnit,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.CustomerUnitId.ToString()).And.Contain(dv.WriterUnitId.ToString());
+        dv.UserUnit[dv.WriterAppUser].Should().Be(dv.CustomerUnitId);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    // ---- task 267 (#2618): the writer's own business unit
+
+    [Fact]
+    public async Task S24_WriterUnitUnknown_IsResumable_TellingTheOperatorToStartANewRun_AndWritesNothing()
+    {
+        var dv = NewEnv();
+
+        var refused = Refused(await RunAsync(dv, writerUnit: Guid.Empty),
+            SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("start a new run").And.Contain(SecureRecordSetupProcedure.OntologyWriterBusinessUnitName);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnitThatDoesNotExist_IsQuarantined_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        var gone = Guid.NewGuid();
+
+        var refused = Refused(await RunAsync(dv, writerUnit: gone),
+            SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitMissing, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(gone.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnitNotADirectChildOfTheRoot_IsQuarantined_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        var nested = Guid.NewGuid();
+        dv.Units.Add(new SecureSetupBusinessUnit(nested, SecureRecordSetupProcedure.OntologyWriterBusinessUnitName, dv.CustomerUnitId));
+
+        var refused = Refused(await RunAsync(dv, writerUnit: nested),
+            SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitWrongParent, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.CustomerUnitId.ToString()).And.Contain(dv.RootUnitId.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnitThatIsTheCustomerUnit_IsQuarantined_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.UserUnit[dv.WriterAppUser] = dv.CustomerUnitId;
+
+        Refused(await RunAsync(dv, writerUnit: dv.CustomerUnitId),
+            SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitIsReserved, FailureClass.QuarantineRequired);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnitThatIsTheSecureRecordUnit_IsQuarantined_ById_AndWritesNothing()
+    {
+        // A unit renamed after H10 ran: the writer's unit now carries the Secure Record name.
+        var dv = NewEnv();
+        var secure = SecureUnit(dv);
+        dv.UserUnit[dv.WriterAppUser] = secure;
+        dv.AddRole(secure, OntologyRole, parentRootRoleId: dv.RootOntologyRoleId);
+
+        var refused = Refused(await RunAsync(dv, writerUnit: secure),
+            SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitIsReserved, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(secure.ToString()).And.Contain(Set.BusinessUnitName);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnitHoldingAnotherUser_IsQuarantined_NamingIt_AndNothingIsMoved()
+    {
+        var dv = NewEnv();
+        var stranger = dv.AddUser(dv.WriterUnitId, isApplicationUser: false);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitHasOtherUsers,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(stranger.ToString());
+        dv.UserUnit[stranger].Should().Be(dv.WriterUnitId);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task S24_WriterUnitRoleCopyNotExactlyOne_IsResumable_AndWritesNothing(int copies)
+    {
+        // Dataverse copies a root role into a new unit asynchronously: right after H10 creates the unit, it may not be there.
+        var dv = NewEnv();
+        dv.Roles.RemoveAll(r => r.Id == dv.WriterOntologyRoleId);
+        for (var i = 0; i < copies; i++)
+        {
+            dv.AddRole(dv.WriterUnitId, OntologyRole, parentRootRoleId: dv.RootOntologyRoleId);
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterRoleUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(dv.WriterUnitId.ToString()).And.Contain("resume");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnitDefaultTeamInAFieldSecurityProfile_IsQuarantined_AndNothingIsRemoved()
+    {
+        var dv = NewEnv();
+        dv.ProfileTeams[dv.ReaderProfileId].Add(dv.WriterDefaultTeamId);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherProfile,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.WriterDefaultTeamId.ToString()).And.Contain(dv.ReaderProfileId.ToString());
+        dv.ProfileTeams[dv.ReaderProfileId].Should().Contain(dv.WriterDefaultTeamId);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterUnitDefaultTeamJoiningAReaderProfileDuringTheRun_FailsTheVerify_AsQuarantine()
+    {
+        var dv = NewEnv();
+        dv.OnWrite = description =>
+        {
+            if (description.StartsWith($"AssociateUserRole {dv.WriterAppUser}", StringComparison.Ordinal))
+            {
+                dv.ProfileTeams[dv.LinkReaderProfileId].Add(dv.WriterDefaultTeamId);
+            }
+        };
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.WriterDefaultTeamId.ToString());
+    }
+
+    [Fact]
+    public async Task S24_WriterHoldingAnotherRole_IsQuarantined_NamingIt_AndNothingIsRemoved()
+    {
+        var dv = NewEnv();
+        var admin = dv.AddRole(dv.CustomerUnitId, "System Administrator", roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        dv.UserRoles[dv.WriterAppUser] = [admin];
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherRole,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(admin.ToString()).And.Contain("System Administrator");
+        refused.Diagnostic.Should().NotContain("DoNotRemoveRolesOnChangeBusinessUnit", "the kept-on-move hint is for the writer's own role only");
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { admin });
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterStillHoldingTheCustomerUnitsOntologyServiceCopy_IsQuarantined_WithTheKeptOnMoveHint()
+    {
+        // The environment kept the writer's roles when H10 moved it out of the customer unit (DoNotRemoveRolesOnChangeBusinessUnit).
+        var dv = NewEnv();
+        dv.UserRoles[dv.WriterAppUser] = [dv.OntologyRoleId];
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherRole,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.OntologyRoleId.ToString())
+            .And.Contain("DoNotRemoveRolesOnChangeBusinessUnit")
+            .And.Contain("remove that copy from the writer by hand (owner OK), then resume");
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task S24_AWriterProfileMissing_IsResumable_NamingTheSpaarkeMasterRelease_AndWritesNothing(bool firmReason)
+    {
+        // An environment on SpaarkeMaster 1.2.3.1 (ACME): "Firm Reason Writers" is not there yet.
+        var dv = NewEnv();
+        dv.Profiles.Remove(firmReason ? FirmReasonWriters : FieldWriters);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterProfileUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(firmReason ? FirmReasonWriters : FieldWriters).And.Contain("1.3.0.0").And.Contain("H6");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_TwoProfilesOfOneName_IsResumable_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.AddProfile(FieldWriters);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterProfileUnresolved, FailureClass.Resumable);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task S24_AWriterProfileWithAnotherMember_IsQuarantined_NamingIt_AndNothingIsRemoved(bool firmReason, bool team)
+    {
+        var dv = NewEnv();
+        var profile = firmReason ? dv.OntologyWriterFirmReasonProfileId : dv.OntologyWriterFieldWritersProfileId;
+        var stranger = Guid.NewGuid();
+        if (team)
+        {
+            dv.ProfileTeams[profile].Add(stranger);
+        }
+        else
+        {
+            dv.ProfileUsers[profile].Add(stranger);
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterProfileHasOtherMember,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(stranger.ToString());
+        (team ? dv.ProfileTeams[profile] : dv.ProfileUsers[profile]).Should().Contain(stranger);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task S24_WriterInheritingARoleThroughATeam_IsQuarantined_NamingIt_AndNothingIsRemoved(bool defaultTeamHoldsTheRole)
+    {
+        // A user holds every role of every team it is in. Its unit's default team always counts; any other team never may.
+        var dv = NewEnv();
+        var admin = dv.AddRole(dv.WriterUnitId, "System Administrator", roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        Guid team;
+        if (defaultTeamHoldsTheRole)
+        {
+            team = dv.WriterDefaultTeamId;
+            dv.TeamRoles[team].Add(admin);
+        }
+        else
+        {
+            team = dv.AddTeam(dv.CustomerUnitId, "Matter Admins", isDefault: false);
+            dv.TeamMembers[team].Add(dv.WriterAppUser);
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterTeamAccess, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(team.ToString()).And.Contain(dv.WriterAppUser.ToString());
+        if (defaultTeamHoldsTheRole)
+        {
+            refused.Diagnostic.Should().Contain(admin.ToString());
+            dv.TeamRoles[team].Should().Contain(admin);
+        }
+        else
+        {
+            dv.TeamMembers[team].Should().Contain(dv.WriterAppUser);
+        }
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterInAnotherProfile_IsQuarantined_NamingIt_AndNothingIsRemoved()
+    {
+        var dv = NewEnv();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Add(dv.WriterAppUser);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherProfile,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.StandingGrantProfileId.ToString());
+        dv.ProfileUsers[dv.StandingGrantProfileId].Should().Contain(dv.WriterAppUser);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task S24_WriterGainingAccessBetweenTheReadAndTheReRead_IsQuarantined_NotResumable(bool role)
+    {
+        // Something else gives the writer more while H7b runs. A resume cannot take it away, so the verify refuses it the way
+        // the read half would have.
+        var dv = NewEnv();
+        var admin = dv.AddRole(dv.CustomerUnitId, "System Administrator", roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        var team = dv.AddTeam(dv.CustomerUnitId, "Matter Admins", isDefault: false);
+        dv.OnWrite = description =>
+        {
+            if (description.StartsWith($"AssociateUserRole {dv.WriterAppUser}", StringComparison.Ordinal))
+            {
+                if (role)
+                {
+                    // Keeps the ontology role too: the re-read must refuse the EXTRA role, not a missing one.
+                    dv.UserRoles[dv.WriterAppUser] = [dv.WriterOntologyRoleId, admin];
+                }
+                else
+                {
+                    dv.TeamMembers[team].Add(dv.WriterAppUser);
+                }
+            }
+        };
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(role ? admin.ToString() : team.ToString());
+    }
+
+    [Fact]
+    public async Task S24_RoleAssociationThatDoesNotStick_FailsTheStep_WithTheWriterCode()
+    {
+        var dv = NewEnv();
+        dv.UserRoleAssociationsIgnoredFor.Add(dv.WriterAppUser);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(dv.WriterAppUser.ToString()).And.Contain(OntologyRole);
+    }
+
+    [Fact]
+    public async Task S24_ProfileAssociationThatDoesNotStick_FailsTheStep_WithTheWriterCode()
+    {
+        var dv = NewEnv();
+        dv.ProfileAssociationsIgnored.Add(dv.OntologyWriterFirmReasonProfileId);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(FirmReasonWriters);
+    }
+
+    // ------------------------------------------------------------ S25 (task 267, #2618): Basic User on the customer default team
+
+    private static readonly string BasicUser = SecureRecordSetupProcedure.BasicUserRoleName;
+
+    [Fact]
+    public async Task S25_GivesTheCustomerDefaultTeamTheCustomerUnitCopyOfBasicUser_AndVerifiesIt()
+    {
+        var dv = NewEnv();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Should().BeEquivalentTo(new[] { dv.BasicUserRoleId },
+            "the customer-unit copy, never the root copy");
+        dv.Writes.Should().ContainSingle(w => w == $"AssociateTeamRole {dv.CustomerDefaultTeamId} {dv.BasicUserRoleId}");
+        applied.Actions.Should().Contain(a => a.Contains(BasicUser, StringComparison.Ordinal)
+                                              && a.Contains(dv.CustomerDefaultTeamId.ToString(), StringComparison.Ordinal));
+        dv.TeamRoles[dv.WriterDefaultTeamId].Should().BeEmpty("the writer is not in the customer unit and gets nothing from it");
+        dv.TeamRoles[dv.RootDefaultTeamId].Should().NotContain(dv.RootBasicUserRoleId);
+    }
+
+    [Fact]
+    public async Task S25_RoleAlreadyHeld_WritesNothing_AndOtherTeamRolesAreLeftAlone()
+    {
+        var dv = NewEnv();
+        var other = dv.AddRole(dv.CustomerUnitId, "Spaarke Core User");
+        dv.TeamRoles[dv.CustomerDefaultTeamId].UnionWith([dv.BasicUserRoleId, other]);
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.Writes.Should().NotContain(w => w.Contains("TeamRole", StringComparison.Ordinal)
+                                           && w.Contains(dv.CustomerDefaultTeamId.ToString(), StringComparison.Ordinal));
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Should().BeEquivalentTo(new[] { dv.BasicUserRoleId, other }, "S25 never removes a role");
+    }
+
+    [Fact]
+    public async Task S25_DryRun_PlansTheAssociation_WithoutWriting()
+    {
+        var dv = NewEnv();
+
+        var plan = (await RunAsync(dv, dryRun: true)).Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
+
+        plan.Should().Contain(a => a.Contains(BasicUser, StringComparison.Ordinal));
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Should().BeEmpty();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task S25_CustomerUnitCopyNotExactlyOne_IsResumable_NamingSpaarkeMaster_AndWritesNothing(int copies)
+    {
+        var dv = NewEnv();
+        dv.Roles.RemoveAll(r => r.Id == dv.BasicUserRoleId);
+        for (var i = 0; i < copies; i++)
+        {
+            dv.AddRole(dv.CustomerUnitId, BasicUser, parentRootRoleId: dv.RootBasicUserRoleId);
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BasicUserRoleUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(BasicUser).And.Contain("SpaarkeMaster").And.Contain("H6");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S25_CustomerUnitWithoutExactlyOneDefaultTeam_IsResumable_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.AddTeam(dv.CustomerUnitId, "second default", isDefault: true);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BasicUserRoleUnresolved, FailureClass.Resumable);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S25_BasicUserHoldingGlobalReadOnASecureTable_IsQuarantined_AndWritesNothing()
+    {
+        // On the customer default team, Global Read would let every customer user read every secure record.
+        var dv = NewEnv();
+        var table = Set.Tables[0].LogicalName;
+        var privilege = dv.TableReadPrivileges[table][0];
+        dv.RolePrivileges[dv.BasicUserRoleId][privilege.Id] = (privilege.Name, "Global");
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BasicUserRoleReachesSecureUnit,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(privilege.Name).And.Contain("Global");
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Should().BeEmpty();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S25_BasicUserHoldingGlobalOnAnUncodifiedPrivilege_IsAllowed()
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.BasicUserRoleId][Guid.NewGuid()] = ("prvReadsprk_somethingelse", "Global");
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Should().Contain(dv.BasicUserRoleId);
+    }
+
+    [Fact]
+    public async Task S25_AssociationThatDoesNotStick_FailsTheVerify_Resumable()
+    {
+        var dv = NewEnv();
+        dv.TeamRoleAssociationsIgnored = true;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(BasicUser).And.Contain(dv.CustomerDefaultTeamId.ToString());
     }
 
     private static Guid SecureUnit(FakeSecureRecordSetupDataverse dv)

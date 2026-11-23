@@ -3,6 +3,19 @@
 > **Purpose**: Detailed validation rules and grep patterns for each ADR.
 > **Usage**: Loaded by the `adr-check` skill during validation.
 
+## Contents
+
+Each ADR section holds its grep patterns and what a hit means. Jump to the ADRs your change touches.
+
+- **Runtime and write path**: ADR-001 + ADR-052 (BFF runtime, background-work placement); ADR-002 (no plugins, server-side write path)
+- **Auth**: ADR-003 (authorization seams); ADR-008 (endpoint filter authorization); ADR-028 (auth architecture v2, near the end — secrets, MSAL, the E-1/E-3 allowlists)
+- **Jobs and storage**: ADR-004 (async job contract); ADR-005 (flat SPE storage); ADR-017 (job status and persistence)
+- **Frontend**: ADR-006 (PCF over web resources); ADR-011 (dataset PCF over subgrids); ADR-012 (shared component library)
+- **BFF structure**: ADR-007 (Graph isolation); ADR-009 (Redis-first caching); ADR-010 (DI minimalism); ADR-019 (ProblemDetails); ADR-020 (versioning)
+- **AI**: ADR-014 (caching and reuse); ADR-015 (data governance); ADR-016 (cost and rate limits); ADR-018 (feature flags and kill switches)
+- **Quick Validation Script** — one PowerShell pass over the common checks
+- **ADRs Without Inline Patterns** — ADRs with no grep patterns; read the ADR itself
+
 ---
 
 ## ADR-001 + ADR-052: Minimal API BFF runtime; background-work placement per workload

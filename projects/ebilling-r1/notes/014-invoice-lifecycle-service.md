@@ -57,3 +57,9 @@ An independent adversarial agent could not be launched (concurrent sub-agent cap
 - **Class search (Step 9.5 rule 6):** Grep for other writers of invoice `statecode` / `statuscode` in `src/server/api/Sprk.Bff.Api/Services/Finance` and `Api/Finance`: none. The mechanical "only writer" ArchTest is deferred to 015 as the POML says.
 
 rework: fix-round-1 task 014
+
+## 7. Ribbon: Activate / Deactivate hides are source-only (2026-11-03)
+
+The 7 `HideCustomAction` elements in `Entities/sprk_Invoice/RibbonDiff.xml` that hide the OOB Activate and Deactivate commands (#1957) are in source but have never been deployed. The ApExport ribbon import to dev on 2026-11-03 (151b / 151c-1b) deliberately left them out: it took dev's current invoice RibbonDiff and added only the ApExport elements, because hiding those commands is a behaviour change outside that OK.
+
+**The next import of the `sprk_invoice` RibbonDiff must decide this explicitly:** either keep them out again (splice from dev's current RibbonDiff, as on 2026-11-03), or include them with the owner's OK and a notice to unified-access-control-r2. A plain import of the source RibbonDiff would bring them in silently.

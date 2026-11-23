@@ -127,7 +127,7 @@ For `sprk_communication` — the same email arriving via multiple mailboxes, or 
 
 - [communication-intelligence-architecture.md](communication-intelligence-architecture.md) — the association/triage engine dedup feeds (association ≠ dedup)
 - [ADR-049](../../.claude/adr/ADR-049-compose-shadow-document.md) — Compose save contract (the editable path whose graduate-on-divergence lives here)
-- [ADR-007](../../.claude/adr/ADR-007-spe-storage-seam.md) — `SpeFileStore` facade (the hash-read seam)
+- [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) — `SpeFileStore` facade (the hash-read seam)
 - `projects/email-communication-intelligence-r2/spec.md` — FR-C1..C4 + NFR-02/04/08 (the requirements this implements)
 - [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) — the add-in save path that consumes this
 

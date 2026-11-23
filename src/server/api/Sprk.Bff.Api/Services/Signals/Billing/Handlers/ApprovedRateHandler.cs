@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// not judged (nothing to approve); a missing rate is a RequiredData matter.</para>
 /// <para><b>Reads:</b> Rate, Date, TimekeeperAsBilled (all extracted), and Hours and Amount whenever the line has them: the
 /// credit test that precedes every finding reads both (<see cref="HandlerContext.WithCreditTestReads"/>), and the reduction
-/// uses Hours; the approved rate, its limit, basis, scope and ids are reference values.</para>
+/// uses Hours; the approved rate, its limit, basis, rank (Level, Distance and FirmSpecific of the Procedure whose rate card decided; ebilling-r1 085 replaced the
+/// card scope with it) and ids are reference values.</para>
 /// </remarks>
 internal static class ApprovedRateHandler
 {
@@ -88,7 +89,7 @@ internal static class ApprovedRateHandler
             HandlerContext.Reference("approvedRate", BillingText.Money(approved)),
             HandlerContext.Reference("approvedRate.limit", BillingText.Money(limit)),
             HandlerContext.Reference("approvedRate.basis", resolution.Basis?.ToString()),
-            HandlerContext.Reference("approvedRate.scope", resolution.Scope?.ToString()),
+            HandlerContext.Reference("approvedRate.rank", resolution.Rank is { } rank ? RateRankLabel.Of(rank) : null),
             HandlerContext.Reference("rateCard.id", resolution.RateCardId?.ToString("D")),
             HandlerContext.Reference("rateCard.rateId", resolution.RateId?.ToString("D")),
         ]);

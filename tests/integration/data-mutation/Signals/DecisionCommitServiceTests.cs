@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
@@ -135,7 +136,7 @@ public sealed partial class DecisionCommitServiceTests
 
         public int WhoAmICalls;
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
-        public Mock<IGenericEntityService> Entities { get; } = new();
+        public Mock<IGenericEntityService> Entities { get; } = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         public Mock<IDataverseUserClient> User { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; }
 
@@ -582,7 +583,7 @@ public sealed partial class DecisionCommitServiceTests
 
             var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -1358,6 +1359,8 @@ public sealed partial class DecisionCommitServiceTests
     [InlineData("reject-invoice")]
     [InlineData("return-to-firm")]
     [InlineData("override-submission")]
+    [InlineData("assign-firm")] // 095d-1b
+    [InlineData("add-line")] // 164a-2 (EB-D-198): BillingActions only
     [InlineData("accept-line")]
     public async Task ABillingCode_IsRefusedByTheCommitRoute_NothingWritten_Ebilling074(string code)
     {
@@ -1415,7 +1418,7 @@ public sealed partial class DecisionCommitServiceTests
         var missing = PathBReview() with { Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"))), Skip("revise-budget"), Skip("approve-variance")] };
         var unknown = PathBReview() with
         {
-            Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"), ("subject", "s"), ("body", "b"), ("bcc", "x"))), Skip("revise-budget"), Skip("approve-variance")],
+            Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"), ("subject", "s"), ("body", "b"), ("replyBy", "x"))), Skip("revise-budget"), Skip("approve-variance")],
         };
 
         (await rig.CommitAsync(missing)).ReasonCode.Should().Be(DecisionCommitReasons.InvalidParameter);
@@ -2132,6 +2135,7 @@ public sealed partial class DecisionCommitServiceTests
     private static readonly Guid OtherUser = Guid.Parse("c0430000-0000-4000-8000-000000000092");
     private static readonly Guid FilingMatter = Guid.Parse("c0430000-0000-4000-8000-000000000093");
     private static readonly Guid FilingDocument = Guid.Parse("c0430000-0000-4000-8000-000000000096");
+    private static readonly Guid TypeDocument = Guid.Parse("c0430000-0000-4000-8000-000000000097");   // the sprk_recordtype_ref row for sprk_document (#2506: a lookup, as on dev)
     private static readonly Guid FilingServiceRequest = Guid.Parse("c0430000-0000-4000-8000-000000000095");
 
     /// <summary>The REAL resolver over: a personal To Do (user-owned, filed under nothing unless <paramref name="filed"/>) in the
@@ -2210,7 +2214,7 @@ public sealed partial class DecisionCommitServiceTests
                 // identity parents (not lineage) and the ADR-024 pair alone: all FILED, so the assignee never wins
                 "todo-regarding-organization" => new() { ["sprk_regardingorganization"] = new EntityReference("sprk_organization", Guid.NewGuid()) },
                 "todo-regarding-contact" => new() { ["sprk_regardingcontact"] = new EntityReference("contact", Guid.NewGuid()) },
-                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = "sprk_document", ["sprk_regardingrecordid"] = FilingDocument.ToString() },
+                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", TypeDocument), ["sprk_regardingrecordid"] = FilingDocument.ToString() },
                 _ => null,
             });   // owner-confirmed K2: only a To Do filed under NOTHING is personal
         rig.Links.UsersByLink[AssigneeContact] = fallback switch
@@ -3750,10 +3754,14 @@ public sealed partial class DecisionCommitServiceTests
     [Fact]
     public async Task K3_AResumeAfterTheReviewWindow_DoesNotRecloseASystemResolutionOlderThanTheWindow()
     {
+        // Task 191 fix round 1 (D-222): the window bounds a resume whose first attempt landed NOTHING. One whose writes landed is an
+        // unfinished review and keeps its start (AnUnfinishedReview_FinishedAfterThePlanReadWindow_StillReclosesTheSignalTheTriggerClosed_Acted).
         var rig = new Rig();
-        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        rig.Executors["revise-budget"].Result = DecisionActionOutcome.Refused("revise-budget", DecisionActionReasons.WriteFailed, "no");
         var review = PathBReview(inquiry: false);
-        (await rig.CommitAsync(review)).Resumable.Should().BeTrue(); // the review started at Now
+        var first = await rig.CommitAsync(review);
+        first.Resumable.Should().BeTrue(); // the review started at Now
+        first.Landed.Should().BeEmpty();
 
         // The system closed the Signal 30 minutes after the review started; the resume comes five hours later.
         rig.Signals[Primary]["sprk_signalstatus"] = new OptionSetValue(Resolved);
@@ -3761,7 +3769,7 @@ public sealed partial class DecisionCommitServiceTests
         rig.Signals[Primary]["sprk_resolvedon"] = Now.UtcDateTime.AddMinutes(30);
         rig.Versions[Primary]++;
         rig.Clock.Advance(TimeSpan.FromHours(5));
-        rig.Executors["add-todo"].Result = null;
+        rig.Executors["revise-budget"].Result = null;
 
         var retried = await rig.CommitAsync(review with { Retry = true });
 

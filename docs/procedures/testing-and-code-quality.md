@@ -19,7 +19,7 @@ This guide explains the complete code quality system in the Spaarke development 
 |-------|------|-------|-----------|
 | **Pre-commit** | Every `git commit` | Husky + lint-staged (Prettier, ESLint, dotnet format) | Yes |
 | **Task-level** | During Claude Code task execution | code-review, adr-check, lint (Step 9.5) | Yes |
-| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates (Tier 1, blocking); format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck, PCF ESLint (standalone, advisory) | Router + Client lint: Yes |
+| **PR gates** | Every pull request (`CI / Router` + `Client lint`, required; `CI Standalone Checks`, advisory) | Compile, ArchTests, eval/tenant/Compose gates, format of changed C# files (Tier 1, blocking); whole-solution format, lint, full unit tests (Tier 2, advisory); dependency audit, Release build, Compose client gate, client typecheck, PCF ESLint (standalone, advisory) | Router + Client lint: Yes |
 | **Nightly** | Weeknights Mon-Fri 6 AM UTC | Full test suite, SonarCloud, Claude AI review, dependency audit | Advisory |
 | **Weekly** | Fridays 10 PM UTC | Trend aggregation from nightly runs | Advisory |
 | **Quarterly** | Manual trigger | Full audit runbook | Advisory |
@@ -49,19 +49,20 @@ This guide explains the complete code quality system in the Spaarke development 
 9. [Quarterly Audit](#quarterly-audit)
 10. [UI Testing (Step 9.7)](#ui-testing-step-97)
 11. [Claude Code Hooks](#claude-code-hooks)
-12. [AI-Assisted PR Reviews](#ai-assisted-pr-reviews)
-13. [Repository Cleanup (Task 090)](#repository-cleanup-task-090)
-14. [Module-Specific Test Guidance](#module-specific-test-guidance)
-15. [Test Selection Matrix](#test-selection-matrix)
-16. [Coverage Targets](#coverage-targets)
-17. [Architecture Test Enforcement](#architecture-test-enforcement)
-18. [BFF Test Suite Repair Lessons (2026-06-01 — r2 codification)](#bff-test-suite-repair-lessons-2026-06-01--r2-codification)
+12. [Agent Code-Navigation Tools](#agent-code-navigation-tools)
+13. [AI-Assisted PR Reviews](#ai-assisted-pr-reviews)
+14. [Repository Cleanup (Task 090)](#repository-cleanup-task-090)
+15. [Module-Specific Test Guidance](#module-specific-test-guidance)
+16. [Test Selection Matrix](#test-selection-matrix)
+17. [Coverage Targets](#coverage-targets)
+18. [Architecture Test Enforcement](#architecture-test-enforcement)
+19. [BFF Test Suite Repair Lessons (2026-06-01 — r2 codification)](#bff-test-suite-repair-lessons-2026-06-01--r2-codification)
     - [Asymmetric-Registration Pre-Commit Check](#asymmetric-registration-pre-commit-check-lesson-1)
     - [Fixture-Config-FIRST Inspection Protocol](#fixture-config-first-inspection-protocol-lesson-2)
     - [Empirical-Reproduction-FIRST Protocol](#empirical-reproduction-first-protocol-lesson-3)
     - [Deterministic Test Data: TestClock + IGuidProvider Pattern](#deterministic-test-data-testclock--iguidprovider-pattern-fr-13)
-19. [Complete Quality Flow](#complete-quality-flow)
-20. [Skill Reference](#skill-reference)
+20. [Complete Quality Flow](#complete-quality-flow)
+21. [Skill Reference](#skill-reference)
 
 ---
 
@@ -85,7 +86,7 @@ Pre-commit hooks are the first quality layer, catching formatting and lint issue
 |-----------|------|--------|
 | `*.ts`, `*.tsx` | Prettier + ESLint | Format, then lint (from nearest eslint.config directory) |
 | `*.json`, `*.yaml`, `*.yml` | Prettier | Format |
-| `*.cs` | dotnet format | Format (scoped to staged files) |
+| `*.cs` | `dotnet format whitespace --folder` | Whitespace-format the staged files (~2 s; no MSBuild workspace). A commit that skips the hook (`--no-verify`) is caught by Tier 1 `Format (changed C# files)` |
 
 ### Performance Target
 
@@ -642,7 +643,7 @@ dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 One shared, **type-aware** ESLint 9 toolchain lints the client packages against each package's own tsconfig and blocks only **new** violations. It lives in `scripts/quality/client-lint/` (own `package.json`; packages do not get their own ESLint setups).
 
 - **Rule (P2):** `@typescript-eslint/no-unnecessary-condition` at `error`, on non-test `src/**`. It flags a dead `if (!res.ok)` / `res.status === 404` after `AuthenticatedFetchFn` (which resolves to `OkResponse`: `ok: true`, 2xx). Nothing else is enabled; existing rules are untouched.
-- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DocumentOperations, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
+- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
 - **Type resolution:** the runner generates a lint tsconfig per package (`.generated/`, gitignored) that extends the package tsconfig and points every `@spaarke/*` at sibling **source**, so nothing has to be built first. Third-party types come from each package's own `node_modules`, hence the `install` step.
 
 ### Run it
@@ -716,8 +717,9 @@ The legacy `sdap-ci.yml` pipeline was **retired on 2026-10-14** (archived at `do
 | **Compile (Debug)** | Tier 1 | Whole-solution `dotnet build` | Yes |
 | **Arch Tests** | Tier 1 | Full NetArchTest suite (`tests/Spaarke.ArchTests`) | Yes |
 | **Eval Gate**, **Tenant Isolation**, **Naming Conformance**, **Compose Fidelity Gate**, smoke + guard jobs | Tier 1 | Golden-utterance evals, I1–I5 invariants, naming, Compose round-trip, changed-surface/auth smoke, Xrm capability guard | Yes |
+| **Format (changed C# files)** | Tier 1 | `scripts/quality/check-changed-cs-format.sh`: `dotnet format whitespace --folder --verify-no-changes` over the PR's changed `*.cs` under `src/` and `tests/` (<1 min, parallel) | Yes |
 | **Client lint (type-aware ratchet)** | `client-lint.yml` | Typed ESLint ratchet over the client packages | Yes (required) |
-| **Format**, **Lint** | Tier 2 | `dotnet format whitespace --verify-no-changes`; Prettier + PCF ESLint | Advisory |
+| **Format**, **Lint** | Tier 2 | `dotnet format whitespace --verify-no-changes` over the whole solution (a backstop for the Tier 1 changed-files check); Prettier + PCF ESLint | Advisory |
 | **Full Unit Tests (Debug)** | Tier 2 | Whole unit suite in 4 shards, two-pass retry classifier | Advisory |
 | **ADR Compliance**, **Plugin Size**, **Markdown Link Validator**, **Last Reviewed Stamp** | Tier 2 | As named; one "Tier 2 Advisory Report" PR comment | Advisory |
 | **Dependencies audit** | `ci-standalone-checks.yml` | `dotnet list package --vulnerable --include-transitive` outside the accepted-risk list | Advisory (alert on master) |
@@ -735,7 +737,8 @@ Advisory does not mean ignorable. On master every red check raises a **quality a
 npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
 cd src/client/pcf && node_modules/.bin/eslint .
 
-# Tier 2 format / Tier 1 arch tests
+# Tier 1 format of changed C# files (base = the commit you branched from) / Tier 2 format / Tier 1 arch tests
+bash scripts/quality/check-changed-cs-format.sh origin/master
 dotnet format whitespace --verify-no-changes
 dotnet test tests/Spaarke.ArchTests/
 
@@ -817,13 +820,29 @@ Claude Code hooks provide real-time quality feedback during AI-assisted developm
 
 | Hook Event | Matcher | Script | Purpose |
 |-----------|---------|--------|---------|
-| `PostToolUse` | `Edit` | `scripts/quality/post-edit-lint.sh` | Runs lint checks after every file edit |
-| `TaskCompleted` | (all) | `scripts/quality/task-quality-gate.sh` | Runs quality gate when a task completes |
+| `PostToolUse` | `Edit\|Write` | `scripts/quality/post-edit-lint.sh` | Returns lint findings for the edited file (advisory) |
+| `Stop` | (all) | `scripts/quality/task-quality-gate.sh` | Blocking quality gate over the session's changes when Claude ends a turn |
 
 ### How They Work
 
-- **PostToolUse (Edit)**: After Claude edits any file, the post-edit lint hook runs relevant linters on the changed file. This provides immediate feedback without waiting for Step 9.5.
-- **TaskCompleted**: When Claude marks a task as complete, the quality gate hook runs a final check. This complements the Step 9.5 quality gates in the task-execute protocol.
+- **PostToolUse (Edit/Write)**: After Claude edits a `.ts`/`.tsx` or `.ps1` file, the hook runs the matching linter (ESLint from the nearest ESLint-config folder with that package's own `eslint`; PSScriptAnalyzer) under a 4-second cap and returns findings to Claude as `additionalContext`. Advisory; never blocks. Type-aware ESLint configs usually exceed the cap and report nothing here; the Stop gate covers them. `.cs` is not linted per edit: no C# formatter finishes in 4 seconds.
+- **Stop**: When Claude is about to end its turn, the gate checks the session's changes (edits vs `HEAD` plus untracked files): it builds each project that owns a changed `.cs` file, runs `tsc --noEmit` for each `tsconfig.json` that owns a changed `.ts`/`.tsx` file, lints changed files (advisory: `dotnet format whitespace --folder` per project, ESLint per config folder), and runs `tests/Spaarke.ArchTests` when C# changed. It **blocks** (exit 2, report on stderr) only on definite code failures: compiler errors, TypeScript errors located in a changed file, failing arch tests, or a new `projects/x-*` folder. Timeouts, file locks, restore errors and missing tools are warnings. It blocks at most once per stop (`stop_hook_active`); a failure that persists after that becomes a warning to the user. The build omits `-warnaserror` because `Directory.Build.props` owns the warning policy (as CI tier1 `compile` does). Run it by hand with `bash scripts/quality/task-quality-gate.sh </dev/null`. This complements, and does not replace, the `task-execute` Step 9.5 quality gates.
+
+---
+
+## Agent Code-Navigation Tools
+
+Agents navigate code with Grep, Glob and Read. No language server or semantic index is configured for agent sessions.
+
+### C# language server (LSP plugin) — evaluated, not adopted (2026-11-16)
+
+The per-session plugin `csharp-lsp@claude-plugins-official`, which runs `csharp-ls`, was trialled A/B against Grep-only on `Sprk.Bff.Api`. The trial used 10 real-session questions (find references, find implementations, receiver type, signature change) with compiler-checked answers, the same Sonnet model in both arms, and the three gates in `projects/reuse-governance-tightening-r1/design.md` §7.6.
+- **Result:** all three gates passed, with no gain. Both arms scored 10/10 and had zero false "no references". With LSP, the agent made 29 tool calls against Grep's 16, cost 1.6× as much and took 6× the wall time.
+- **Per-session load:** about 1.9 GB of memory and a 3-minute cold start while it loads `Spaarke.sln`. Its 60-second request limit times out until the load finishes, and an agent that is not told to retry falls back to Grep.
+- **Decision (owner): do not adopt** — neither project-wide nor as a documented opt-in.
+- **When to evaluate again:** if navigation questions on overloaded or generic names (`ExecuteAsync`, `Validate`, extension methods) become a real source of wrong answers, or the plugin's cold start or request limit changes. Rerunning it takes about an hour. The full record, the question set, the harness and the steps to repeat it are in `projects/reuse-governance-tightening-r1/notes/csharp-lsp-trial.md`.
+
+A **shared** LSP / semantic-index sidecar serving every worktree was rejected separately, on staleness (`projects/reuse-governance-tightening-r1/design.md` §10, item 6).
 
 ---
 

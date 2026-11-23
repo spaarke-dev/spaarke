@@ -680,6 +680,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         Check(outputs.RedisEndpoint, nameof(BicepDeployOutputs.RedisEndpoint));
         Check(outputs.ContentSafetyEndpoint, nameof(BicepDeployOutputs.ContentSafetyEndpoint));
         Check(outputs.StorageBlobEndpoint, nameof(BicepDeployOutputs.StorageBlobEndpoint));
+        Check(outputs.OntologyWriterClientId, nameof(BicepDeployOutputs.OntologyWriterClientId));
+        Check(outputs.OntologyWriterObjectId, nameof(BicepDeployOutputs.OntologyWriterObjectId));
         return missing;
     }
 
@@ -791,6 +793,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         run.InterStepState.RedisEndpoint = outputs.RedisEndpoint;
         run.InterStepState.ContentSafetyEndpoint = outputs.ContentSafetyEndpoint;
         run.InterStepState.StorageBlobEndpoint = outputs.StorageBlobEndpoint;
+        run.InterStepState.OntologyWriterClientId = outputs.OntologyWriterClientId;
+        run.InterStepState.OntologyWriterObjectId = outputs.OntologyWriterObjectId;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

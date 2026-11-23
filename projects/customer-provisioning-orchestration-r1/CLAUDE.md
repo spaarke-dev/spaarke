@@ -135,11 +135,12 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - **`.github/workflows/**`.** ci-cd-unit-test-remediation-r1 is closed (owner 2026-10-02); this project changes its own provisioning workflows. Check `projects/INDEX.md` for an active CI-governance project first.
 - **spaarkeai-word-add-in-r1.** Owns the Office add-ins and `@spaarke/auth`'s OfficeNaaStrategy use. Agreed 2026-10-07: a Spaarke directory endpoint (T240c) instead of client-side `/me/memberOf`; a dev diagnostics build for T240b. Messages: `notes/coordination/2026-10-07-*word-add-in-r1*`.
 - **spaarke-SPA-external-access-platform-r3.** Owns the External Access SPA, which is also the Teams tab (`src/client/external-spa/appPackage`). Answered 2026-10-07 (`notes/coordination/2026-10-07-from-external-access-r3.md`); our reply `…-to-external-access-r3-2.md`. It added the requirements (`external.spaarke.com`, Teams via NAA with its own client app, no SSO fallback, Spaarke-tenant workforce authority, per-customer CIAM) to its design.md and starts execution 2026-10-07. T240d is designed with it.
+- **provision-environment skill restructure (DRAFT PR #2536, tracking #2537; notified 2026-11-03).** Another session split the skill into `scripts/provision-environment/` + prereq scripts, keeping every step id. We owe a review, a dev dry run before merge and decisions on D9–D15; state and details live in `current-task.md` Remaining. Until it merges, the live skill is the old one.
 - **Hot paths:** BFF, skill directives, CI workflows. Registry: `projects/INDEX.md`.
 
 ## 5. Environment and live actions
 
-- Dev BFF `spaarke-bff-dev`: deploy only from master at or after `c8b93b294`. Dev Redis, its alerts and App Insights `spe-insights-dev-67e2xz` are in `spe-infrastructure-westus2`, not `rg-spaarke-dev`.
+- Dev BFF `spaarke-bff-dev`: deploy only from master at or after `c8b93b294`. **Since 2026-11-03 uac-r2 (session `spaarke-wt-unified-access-control-r2-38`) runs every dev BFF deploy; R3 stopped.** We never deploy it ourselves: send deploy requests and any change to a standing OK to uac-r2, per `docs/procedures/dev-bff-deploy-coordination.md` (on master, not yet merged into this branch). Live then: `d763dc120e` (since 22:26:31Z, passed uac-r2's 30-minute gate). Dev Redis, its alerts and App Insights `spe-insights-dev-67e2xz` are in `spe-infrastructure-westus2`, not `rg-spaarke-dev`.
 - The L2 control plane deploys with `scripts/provisioning/Deploy-ControlPlane.ps1`; see the gotcha below. Current blockers: `current-task.md` owner items.
 - Operator documents:
   - prerequisites: `docs/guides/PROVISIONING-PREREQUISITES.md` + `scripts/provisioning-prereqs/prereqs.yaml` (`validate.ps1`);

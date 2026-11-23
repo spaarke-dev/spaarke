@@ -27,6 +27,7 @@ import {
   applyResolverFields,
   cleanGuid,
   updateChildRecordViaBff,
+  nullRecordNumberWhenTargetHasNone,
   TODO_REGARDING_CATALOG,
   type INavPropEntry,
   type IPolymorphicWebApi,
@@ -302,6 +303,10 @@ export async function applyRegardingSelection(
 
   const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
   if (hasHostGuid) {
+    // The primary's display values follow the selection; the filing route writes only what it is sent (it does not
+    // re-derive or clear the number on a change of primary, ChildRecordEndpoints.UpdateAsync filingOnly), so a target
+    // with no number nulls the previous primary's number here (045c).
+    nullRecordNumberWhenTargetHasNone(payload, navProps);
     try {
       await writeRegarding(ctx, cleanGuid(ctx.hostRecordId as string), payload);
     } catch (err) {

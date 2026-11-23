@@ -26,6 +26,8 @@ import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import type { DocumentRoot } from '../../api/web-api-client';
+import { eventRegardingLink, readEventRecord } from '../events/eventDetail';
+import { childRecordAttributesOf } from '../record/childRecord';
 
 // ---------------------------------------------------------------------------
 // Per-entity description
@@ -34,12 +36,28 @@ import type { DocumentRoot } from '../../api/web-api-client';
 /** How one field's value is turned into text when Dataverse supplied no formatted value. */
 export type DetailFieldKind = 'text' | 'date' | 'money' | 'lookup';
 
+/**
+ * Where a field's value leads, when the value is another record (R4 task 015: an event's Regarding). `entity` is the record
+ * template entity to open, `noun` how it reads in the control's accessible name ("project").
+ */
+export interface DetailFieldLink {
+  entity: string;
+  id: string;
+  noun: string;
+}
+
 export interface DetailFieldDef {
   /** Dataverse logical name of the column (must be on the module's allow-list). */
   attribute: string;
   /** Row label. */
   label: string;
   kind?: DetailFieldKind;
+  /**
+   * Task 015. Resolves the record this field's value points at, or null (no link for this row). The value is drawn as a
+   * link-style button, only where the host passes `onOpenLink` to `RecordDetailFields`; with no handler (or a null link) it is
+   * plain text. Generic: the entity description decides, never the renderer.
+   */
+  link?: (record: DetailRecord) => DetailFieldLink | null;
 }
 
 export interface RecordDetailEntity {
@@ -60,14 +78,19 @@ export interface RecordDetailEntity {
   extraColumns?: readonly string[];
   /**
    * The task 031 route root (`/api/v1/external/{root}/{id}/documents`) that serves this record's documents; absent = no
-   * documents section. An invoice uses the `invoices` root (owner decision 2026-10-11, option A: access inherited from the
-   * invoice's matter and project).
+   * documents section. An invoice has none: its Files section reads ebilling's `/invoices/{id}/files` routes (R4 task 021).
    */
   documentsRoot?: DocumentRoot;
   /** `sprk_invoice` lookup that ties invoices to this record; absent = no invoices section. */
   invoicesBy?: string;
   /** Project, Matter and Work Assignment only (notes/decisions.md): Document, Invoice and Service Request omit it. */
   showsEventsAndTasks: boolean;
+  /**
+   * Task 015. The entity's own reader, for a record the module fetch seam cannot give (an event: its names and rights come from
+   * `GET /events/{id}`). `useRecord` uses, in order, a reader supplied for the opening, this, then the module fetch. It throws
+   * an `ApiError` (403 denied, 404 not found) or `RecordNotFoundError`, which `useRecord` maps to the matching state.
+   */
+  read?: (id: string) => Promise<DetailRecord>;
 }
 
 export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>> = {
@@ -146,7 +169,6 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_project', label: 'Project', kind: 'lookup' },
       { attribute: 'sprk_matter', label: 'Matter', kind: 'lookup' },
     ],
-    documentsRoot: 'invoices',
     showsEventsAndTasks: false,
   },
   sprk_servicerequest: {
@@ -167,6 +189,30 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
     // A service request's documents are reachable ONLY through the servicerequests route (task 031 K3/K4).
     documentsRoot: 'servicerequests',
     showsEventsAndTasks: false,
+  },
+  // R4 task 015 (FR-36). An event is read from the BFF's event DTO, not the module fetch seam (`read`, `events/eventDetail.ts`):
+  // the columns below are the record `toEventDetailRecord` builds, so they add no allow-listed column and no module read.
+  // Every value shows a name or a label (never an id) and "—" when empty. Title repeats the heading: the template names its
+  // `nameAttribute` among the read fields, and the row is a plain way to read a long title in full.
+  sprk_event: {
+    entity: 'sprk_event',
+    label: 'Event',
+    idAttribute: 'sprk_eventid',
+    titleAttributes: ['sprk_name'],
+    fields: [
+      { attribute: 'sprk_name', label: 'Title' },
+      { attribute: 'sprk_eventtype', label: 'Event Type', kind: 'lookup' },
+      { attribute: 'statuscode', label: 'Status' },
+      { attribute: 'sprk_duedate', label: 'Due Date', kind: 'date' },
+      { attribute: 'sprk_priority', label: 'Priority' },
+      { attribute: 'sprk_assignedto', label: 'Assigned To', kind: 'lookup' },
+      { attribute: 'sprk_description', label: 'Description' },
+      { attribute: 'createdon', label: 'Created On', kind: 'date' },
+      { attribute: 'sprk_createdby', label: 'Created By', kind: 'lookup' },
+      { attribute: 'sprk_regarding', label: 'Regarding', kind: 'lookup', link: eventRegardingLink },
+    ],
+    showsEventsAndTasks: false,
+    read: readEventRecord,
   },
 };
 
@@ -310,26 +356,66 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
     overflowWrap: 'anywhere',
+    // A long description keeps its line breaks.
+    whiteSpace: 'pre-wrap',
+  },
+  // A value that opens another record: link-style, the same as a document name in a grid.
+  linkButton: {
+    margin: 0,
+    padding: 0,
+    border: 'none',
+    backgroundColor: 'transparent',
+    font: 'inherit',
+    textAlign: 'start',
+    color: tokens.colorBrandForeground1,
+    cursor: 'pointer',
+    ':hover': { textDecoration: 'underline' },
+    ':focus-visible': {
+      outlineStyle: 'solid',
+      outlineWidth: tokens.strokeWidthThick,
+      outlineColor: tokens.colorStrokeFocus2,
+    },
   },
 });
 
 export interface RecordDetailFieldsProps {
   cfg: RecordDetailEntity;
   record: DetailRecord;
+  /**
+   * Task 015. Opens the record a linked field points at (`DetailFieldDef.link`), with the control that was activated (focus
+   * returns to it on close). Absent = every value is plain text (a child record: one level only).
+   */
+  onOpenLink?: (link: DetailFieldLink, trigger: HTMLElement) => void;
 }
 
-export const RecordDetailFields: React.FC<RecordDetailFieldsProps> = ({ cfg, record }) => {
+export const RecordDetailFields: React.FC<RecordDetailFieldsProps> = ({ cfg, record, onOpenLink }) => {
   const styles = useStyles();
   return (
     <dl className={styles.list} aria-label={`${cfg.label} details`} data-testid="record-detail-fields">
-      {cfg.fields.map(def => (
-        <React.Fragment key={def.attribute}>
-          <dt className={styles.term}>{def.label}</dt>
-          <dd className={styles.definition} data-testid={`record-detail-field-${def.attribute}`}>
-            {formatDetailValue(record, def)}
-          </dd>
-        </React.Fragment>
-      ))}
+      {cfg.fields.map(def => {
+        const text = formatDetailValue(record, def);
+        const link = onOpenLink && def.link ? def.link(record) : null;
+        return (
+          <React.Fragment key={def.attribute}>
+            <dt className={styles.term}>{def.label}</dt>
+            <dd className={styles.definition} data-testid={`record-detail-field-${def.attribute}`}>
+              {link && onOpenLink ? (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  aria-label={`Open ${link.noun} ${text}`}
+                  {...childRecordAttributesOf(link.entity, link.id)}
+                  onClick={e => onOpenLink(link, e.currentTarget)}
+                >
+                  {text}
+                </button>
+              ) : (
+                text
+              )}
+            </dd>
+          </React.Fragment>
+        );
+      })}
     </dl>
   );
 };

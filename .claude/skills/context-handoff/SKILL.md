@@ -90,7 +90,7 @@ This skill creates a checkpoint of working state that enables another Claude ins
 ```
 DETERMINE active project:
   - Check if in a project worktree
-  - Check git branch name (feature/{project-name})
+  - Check git branch name (work/{project-name}; older projects: feature/{project-name})
   - Check recent file modifications under projects/
   - If ambiguous: Ask user
 

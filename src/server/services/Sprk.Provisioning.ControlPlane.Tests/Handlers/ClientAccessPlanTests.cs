@@ -27,17 +27,17 @@ public sealed class ClientAccessPlanTests
         IEnumerable<PreAuthorizedApplication>? preAuthorized = null,
         bool scopeEnabled = true,
         bool withScope = true) => new()
-    {
-        AppId = BffAppId,
-        Spa = new SpaApplication { RedirectUris = (spa ?? []).ToList() },
-        Api = new ApiApplication
         {
-            Oauth2PermissionScopes = withScope
+            AppId = BffAppId,
+            Spa = new SpaApplication { RedirectUris = (spa ?? []).ToList() },
+            Api = new ApiApplication
+            {
+                Oauth2PermissionScopes = withScope
                 ? [new PermissionScope { Id = ScopeId, Value = "user_impersonation", IsEnabled = scopeEnabled, Type = "User" }]
                 : [],
-            PreAuthorizedApplications = (preAuthorized ?? []).ToList(),
-        },
-    };
+                PreAuthorizedApplications = (preAuthorized ?? []).ToList(),
+            },
+        };
 
     private static PreAuthorizedApplication Pre(string appId) => new()
     {

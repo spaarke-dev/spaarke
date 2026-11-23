@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -138,6 +140,59 @@ public class OfficeTodoRegardingContractTests
         entity.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(matterId);
         entity.Contains("sprk_regardingdocument").Should().BeFalse();
         entity.Contains("sprk_regardingcommunication").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_WithARecordRegarding_WritesTheRecordUrlBesideTheIdAndName()
+    {
+        // field-mapping-server-write-path-r1 045c (gap G5, writer W11): the to-do's display columns follow its pair. The
+        // writer already holds the table and the id, so the relative record URL (the format every other writer of the pair
+        // uses, RegardingRecordType.BuildRecordUrl) is written with them, never left blank.
+        using var factory = new TodoRegardingTestWebAppFactory();
+        using var client = factory.CreateClient();
+
+        var matterId = Guid.NewGuid();
+        var request = new CreateTodoRequest
+        {
+            Name = "Draft engagement letter",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+            RegardingRecordName = "Acme Corp",
+            PriorityScore = 50,
+            EffortScore = 50,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var entity = factory.CreatedEntities.Should().ContainSingle().Subject;
+        entity.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(matterId.ToString());
+        entity.GetAttributeValue<string>("sprk_regardingrecordurl")
+            .Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", matterId.ToString()));
+    }
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_WithOnlyACarrier_WritesNoRecordUrl()
+    {
+        // The URL describes the RECORD, like the id and the name: a to-do filed only to a document names no record, so no
+        // URL is invented for the carrier.
+        using var factory = new TodoRegardingTestWebAppFactory();
+        using var client = factory.CreateClient();
+
+        var request = new CreateTodoRequest
+        {
+            Name = "Review NDA red-lines",
+            DocumentId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var entity = factory.CreatedEntities.Should().ContainSingle().Subject;
+        entity.Contains("sprk_regardingrecordurl").Should().BeFalse();
+        entity.Contains("sprk_regardingrecordid").Should().BeFalse();
     }
 
     [Fact]
@@ -428,11 +483,36 @@ public class OfficeTodoRegardingContractTests
 /// </summary>
 public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
 {
-    /// <summary>Every <see cref="Entity"/> passed to <c>IGenericEntityService.CreateAsync</c> during this factory's lifetime, in call order.</summary>
-    public List<Entity> CreatedEntities { get; } = new();
+    /// <summary>
+    /// Field mapping task 030a: the To Do is created by <c>RecordCreationService</c> as the caller. This host scripts the
+    /// caller's Dataverse for it and captures its one app-only create (<see cref="OfficeTodoRecordCreationHost"/>).
+    /// </summary>
+    public OfficeTodoRecordCreationHost RecordCreation { get; } = new();
+
+    /// <summary>
+    /// Every created row, in call order, as the SDK entity the old <c>IGenericEntityService.CreateAsync</c> capture held: since
+    /// task 030a, the service's app-only create viewed as that entity (<see cref="RecordCreationWriteCapture"/>).
+    /// </summary>
+    public IReadOnlyList<Entity> CreatedEntities => RecordCreation.CreatedEntities;
+
+    /// <summary>Every <see cref="Entity"/> passed to <c>IGenericEntityService.CreateAsync</c> (none since task 030a).</summary>
+    public List<Entity> GenericCreates { get; } = new();
 
     /// <summary>Task 156: carrier rows (document / communication) by (entity, id) — their root columns.</summary>
     public Dictionary<(string Entity, Guid Id), Entity> CarrierRows { get; } = new();
+
+    /// <summary>
+    /// Task 030a: mapping-source rows (a matter or project the To Do is filed under) by (entity, id), as the app-only read of
+    /// the field-mapping step answers them. Empty by default: the read answers nothing, as before.
+    /// </summary>
+    public Dictionary<(string Entity, Guid Id), Entity> SourceRows { get; } = new();
+
+    /// <summary>
+    /// Field mapping task 030a (K3): the <c>sprk_recordtype_ref</c> id the best-effort record-type search answers for the regarding
+    /// table (<see cref="RecordTypeCatalogSetup.MatterTypeId"/> for a matter), so the To Do carries the typed ADR-024 pair. Null
+    /// (the default) leaves the search unanswered, as before: no type, the typed lookup alone. Set before the first request.
+    /// </summary>
+    public Guid? RegardingRecordTypeId { get; init; }
 
     /// <summary>Task 156: carriers whose read fails.</summary>
     public HashSet<(string Entity, Guid Id)> CarrierFaults { get; } = new();
@@ -511,7 +591,7 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                 {
                     var id = Guid.NewGuid();
                     entity.Id = id;
-                    CreatedEntities.Add(entity);
+                    GenericCreates.Add(entity);
                     return id;
                 });
             // Deliberate failure seam for the fail-closed stamp test (task 035): Invoice is CHILD-class,
@@ -519,6 +599,14 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
             dataverseMock
                 .Setup(d => d.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("Test: simulated core-ancestor read failure for sprk_invoice."));
+            // Task 030a: the field-mapping step's app-only read of the matter or project a To Do is filed under.
+            foreach (var source in new[] { "sprk_matter", "sprk_project" })
+            {
+                dataverseMock
+                    .Setup(d => d.RetrieveAsync(source, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken __) =>
+                        SourceRows.TryGetValue((entity, id), out var row) ? row.WithGate() : null!);
+            }
             // Task 156 (verifier round 1 item 8): a carrier-only To Do is stamped from its carrier, so the carrier is READ.
             // A carrier not seeded in CarrierRows names no root (an empty row); one in CarrierFaults is unreadable.
             foreach (var carrier in new[] { "sprk_document", "sprk_communication" })
@@ -546,8 +634,36 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                         .Select(r => r.Value)
                         .ToList());
                 });
+            // Field mapping task 030a (K3): the ADR-024 record-type catalog, read app-only by the stamp derivation.
+            dataverseMock
+                .Setup(d => d.RetrieveMultipleAsync(
+                    It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => RecordTypeCatalogSetup.IsCatalogQuery(q)),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) => RecordTypeCatalogSetup.Answer(q));
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseMock.Object);
+
+            if (RegardingRecordTypeId is { } recordTypeId)
+            {
+                // The best-effort search for the regarding table's record-type ref (OfficeSearchService, app-only Web API).
+                var searchClient = new Mock<DataverseWebApiClient>(
+                    MockBehavior.Loose,
+                    Mock.Of<IConfiguration>(c => c["Dataverse:ServiceUrl"] == "https://test.crm.dynamics.com"),
+                    Mock.Of<ILogger<DataverseWebApiClient>>(),
+                    new NoOpTokenCredential(),
+                    (IConfidentialClientProvider)null!);
+                searchClient
+                    .Setup(c => c.QueryAsync<Dictionary<string, System.Text.Json.JsonElement>>(
+                        "sprk_recordtype_refs", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                        It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(
+                    [
+                        System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
+                            $"{{ \"sprk_recordtype_refid\": \"{recordTypeId:D}\" }}")!,
+                    ]);
+                services.RemoveAll<DataverseWebApiClient>();
+                services.AddSingleton(searchClient.Object);
+            }
 
             // CoreAncestorResolver: replace the base registration (which opens a real MetadataService
             // scope) with one built from an in-memory column probe.
@@ -566,6 +682,9 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
 
             // Capture logs in-memory so a test can assert the "no linked contact" warning was actually written.
             services.AddSingleton<ILoggerProvider>(Logs);
+
+            // Task 030a: the caller's Dataverse and the service's app-only writer.
+            RecordCreation.Register(services);
         });
     }
 
@@ -603,4 +722,15 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
 
     /// <summary>One captured log entry.</summary>
     public sealed record LogEntry(LogLevel Level, string Message);
+
+    /// <summary>A <see cref="TokenCredential"/> that never touches the network (local, as the other Office suites' copies are).</summary>
+    private sealed class NoOpTokenCredential : TokenCredential
+    {
+        private static AccessToken Token => new("stub-token-not-a-real-credential", DateTimeOffset.UtcNow.AddHours(1));
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) => Token;
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(Token);
+    }
 }

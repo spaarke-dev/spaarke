@@ -18,10 +18,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <para>
 /// The implementation:
 /// <list type="bullet">
-///   <item>Resolves <see cref="RagIndexingJobPayload.SearchIndexName"/> later in
-///     <see cref="Jobs.Handlers.RagIndexingJobHandler"/> via
-///     <see cref="ISearchIndexNameResolver"/> when the caller passes null —
-///     parent record → BU cascade is unchanged.</item>
+///   <item>Names no index (field-mapping-server-write-path-r1 task 041, FR-40): every file lands in the
+///     content type's index, <see cref="ISearchIndexNameResolver.GetDefaultIndexName"/>.</item>
 ///   <item>Uses idempotency key <c>rag-index-{driveId}-{itemId}</c> so duplicate
 ///     uploads (e.g., client retries) don't double-index.</item>
 ///   <item>Is non-fatal — failure to enqueue is logged at WARN; never propagates
@@ -109,13 +107,8 @@ public interface IPostUploadIndexingEnqueuer
 /// <param name="DocumentId">Optional Dataverse <c>sprk_document</c> ID. When the
 /// upload created or linked to a Dataverse record, pass it here so the indexer
 /// can correlate.</param>
-/// <param name="ParentEntity">Optional parent entity context (Matter/Project/etc.).
-/// When provided, <see cref="ISearchIndexNameResolver"/> uses it for the index
-/// name cascade.</param>
-/// <param name="SearchIndexName">Optional explicit index name. When the caller has
-/// already resolved it (e.g., wizard had it pre-resolved), pass it here to avoid
-/// a second resolver lookup downstream. When null, the handler runs the resolver
-/// chain.</param>
+/// <param name="ParentEntity">Optional parent entity context (Matter/Project/etc.) the chunks are
+/// filed under. It does not choose the index (task 041).</param>
 /// <param name="Source">Identifies the caller for telemetry / debugging. Suggested
 /// values: <c>SpeContainerUpload</c>, <c>OboUploadSession</c>,
 /// <c>DirectContainerUpload</c>, <c>DirectUploadSession</c>, <c>ChatPersist</c>,
@@ -142,7 +135,6 @@ public sealed record PostUploadIndexingRequest(
     string? ContentType,
     string? DocumentId,
     ParentEntityContext? ParentEntity,
-    string? SearchIndexName,
     string Source,
     string CorrelationId,
     string? VersionDiscriminator = null);

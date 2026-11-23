@@ -331,7 +331,8 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     };
   }, [contactQuery, assignedTo, onSearchContacts]);
 
-  const canCreate = isFiled && name.trim().length > 0 && status === 'idle';
+  // 'error' stays saveable: a refusal keeps the input, and the user retries or changes the assignee (fm 030a).
+  const canCreate = isFiled && name.trim().length > 0 && (status === 'idle' || status === 'error');
 
   const handleCreate = async (): Promise<void> => {
     setStatus('creating');

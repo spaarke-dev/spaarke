@@ -3990,7 +3990,7 @@ public static class ProvisionProjectEndpoint
         string recordName,
         Guid recordId,
         Guid ownerTeamId,
-        Guid owningBusinessUnitId,        ILogger logger,
+        Guid owningBusinessUnitId, ILogger logger,
         string traceId,
         CancellationToken ct)
     {

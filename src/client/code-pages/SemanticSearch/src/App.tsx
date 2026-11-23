@@ -50,7 +50,7 @@ import { SearchResultsTreemap } from './components/SearchResultsTreemap';
 import { SearchResultsTimeline } from './components/SearchResultsTimeline';
 import { VisualizationSettings } from './components/VisualizationSettings';
 import { useSavedSearches } from './hooks/useSavedSearches';
-import { useDocumentActions } from '@spaarke/document-operations';
+import { useDocumentActions } from '@spaarke/ui-components/hooks/useDocumentActions';
 import { getBffBaseUrl } from './services/apiBase';
 import { useSemanticSearch } from './hooks/useSemanticSearch';
 import { useRecordSearch } from './hooks/useRecordSearch';
@@ -374,8 +374,8 @@ export const App: React.FC<AppProps> = ({
   const { savedSearches, isLoading: isSavedSearchesLoading, saveSearch } = useSavedSearches();
 
   // --- Document Actions ---
-  // Hook lives in @spaarke/document-operations (moved by task 031, consumed
-  // directly here by task 032 — local shim deleted, no behavior change).
+  // Hook lives in @spaarke/ui-components (shared with Compose; moved there from the retired
+  // document-operations package by reuse-governance-tightening-r1 task 033, no behavior change).
   // `actionError` ("Couldn't delete the document: <reason>") is shown in the main area's error bar below —
   // without it a failed open / download / delete / email-link / send-to-index showed the user nothing.
   const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex, actionError } =

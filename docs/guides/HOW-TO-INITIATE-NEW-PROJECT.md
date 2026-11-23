@@ -127,12 +127,7 @@ mkdir projects/my-feature
 
 If you don't have any documentation yet:
 
-1. Create `projects/my-feature/spec.md` manually with:
-   - Problem statement
-   - Proposed solution
-   - Scope (in/out)
-   - Technical approach
-   - Acceptance criteria
+1. Create `projects/my-feature/spec.md` from `.claude/skills/design-to-spec/references/spec-template.md`, keeping its headings (project-pipeline Step 1 checks them): Executive Summary, Scope, Requirements, Technical Constraints, Success Criteria and ADR Tensions ("No ADR tensions surfaced at design time." is a valid entry).
 
 2. Run `/project-pipeline projects/my-feature`
 
@@ -153,38 +148,15 @@ This reads `design.md` (or similar) and creates an AI-optimized `spec.md`.
 
 **Option B: Write spec.md manually**
 
-**Required Sections**:
-- Problem statement / Background
-- Proposed solution
-- Scope (in/out)
-- Technical approach
-- Acceptance criteria
+**Required Sections**: copy `.claude/skills/design-to-spec/references/spec-template.md` and keep its headings verbatim. project-pipeline Step 1 stops when one is missing:
+- `## Executive Summary`
+- `## Scope` (In Scope / Out of Scope / Affected Areas)
+- `## Requirements` (Functional / Non-Functional)
+- `## Technical Constraints`
+- `## Success Criteria`
+- `## ADR Tensions (per CLAUDE.md §6.5)` — one row per tension with Path A/B/C, or "No ADR tensions surfaced at design time."
 
-**Example Minimal Spec**:
-```markdown
-# Feature Name
-
-## Problem
-What problem does this solve?
-
-## Solution
-High-level approach to solve it.
-
-## Scope
-### In Scope
-- Item 1
-- Item 2
-
-### Out of Scope
-- Item A
-
-## Technical Approach
-How will this be implemented?
-
-## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-```
+The template also has Placement & New Components (hot-path declaration, §11 table), Dependencies, Owner Clarifications, Assumptions and Unresolved Questions; fill those that apply. Running `/design-to-spec` instead produces all of them.
 
 ---
 
@@ -413,9 +385,9 @@ Before starting implementation, verify:
 
 ## Related Documents
 
-- [Skills Index](.claude/skills/INDEX.md) - All available skills
-- [ADR Index](docs/adr/INDEX.md) - Architecture decisions
-- [Root CLAUDE.md](CLAUDE.md) - Repository-wide AI instructions
+- [Skills Index](../../.claude/skills/INDEX.md) - All available skills
+- [ADR Index](../adr/INDEX.md) - Architecture decisions
+- [Root CLAUDE.md](../../CLAUDE.md) - Repository-wide AI instructions
 
 ---
 
@@ -548,11 +520,11 @@ Hooks are silent on success (single `✅ Portfolio synced: #N` line) and degrade
 
 ## Related Documents
 
-- [Skills Index](.claude/skills/INDEX.md) - All available skills (includes 9 `/devops-*` family)
-- [ADR Index](docs/adr/INDEX.md) - Architecture decisions
-- [Root CLAUDE.md](CLAUDE.md) - Repository-wide AI instructions
+- [Skills Index](../../.claude/skills/INDEX.md) - All available skills (includes 9 `/devops-*` family)
+- [ADR Index](../adr/INDEX.md) - Architecture decisions
+- [Root CLAUDE.md](../../CLAUDE.md) - Repository-wide AI instructions
 - [Project #2 (Spaarke Core)](https://github.com/users/spaarke-dev/projects/2) - Portfolio board
-- [AI Coding Procedures Guide](docs/procedures/AI-CODING-PROCEDURES-GUIDE.md) - Lifecycle scenarios
+- [AI Coding Procedures Guide](../procedures/AI-CODING-PROCEDURES-GUIDE.md) - Lifecycle scenarios
 
 ---
 

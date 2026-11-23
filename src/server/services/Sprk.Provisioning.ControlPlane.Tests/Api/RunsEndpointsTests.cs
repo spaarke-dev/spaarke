@@ -1357,6 +1357,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     [InlineData("displayName", " ", "h10-customer-display-name-required")]
     [InlineData("displayName", "Secure Record", "h10-customer-display-name-invalid")]      // never the secure unit
     [InlineData("displayName", "SECURE RECORD", "h10-customer-display-name-invalid")]      // Dataverse compares names without case
+    [InlineData("displayName", "spaarke ontology writer", "h10-customer-display-name-invalid")]   // T267: the writer's own unit
     [InlineData("displayName", "Acme ", "h10-customer-display-name-invalid")]             // trailing whitespace
     [InlineData("displayName", "Acme\tCorp", "h10-customer-display-name-invalid")]        // a control character
     public async Task PostRuns_OperatorIntakeBreaksAHandlerRule_Returns400_BeforeGuardRegistryCosmosOrEnqueue(

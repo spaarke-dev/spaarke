@@ -14,7 +14,7 @@ The AI Assistant components use Fluent UI v9's design token system for consisten
 
 ## ADR-021 Compliance
 
-Per [ADR-021: Fluent UI v9 Design System](../../adr/ADR-021-fluent-ui-v9-design-system.md), all PCF controls must:
+Per [ADR-021: Fluent UI v9 Design System](../adr/ADR-021-fluent-ui-design-system.md), all PCF controls must:
 
 - Use Fluent UI v9 components and tokens exclusively
 - Support both light and dark themes automatically
@@ -249,6 +249,6 @@ The reference implementation lived in the `PlaybookBuilderHost` PCF, which was d
 
 ## References
 
-- [ADR-021: Fluent UI v9 Design System](../adr/ADR-021-fluent-ui-v9-design-system.md)
+- [ADR-021: Fluent UI v9 Design System](../adr/ADR-021-fluent-ui-design-system.md)
 - [Fluent UI v9 Tokens](https://react.fluentui.dev/?path=/docs/concepts-developer-theming--page)
 - [Fluent UI v9 Theme Designer](https://react.fluentui.dev/?path=/docs/themedesigner--page)

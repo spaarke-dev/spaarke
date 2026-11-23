@@ -451,18 +451,8 @@ New-MgServicePrincipalAppRoleAssignment \
 ```bash
 cd c:/code_files/spaarke/src/server/api/Spe.Bff.Api
 
-# Disable Directory.Packages.props temporarily (CPM issue)
-if [ -f "../../Directory.Packages.props" ]; then
-    mv "../../Directory.Packages.props" "../../Directory.Packages.props.disabled"
-fi
-
 # Build for Release
 dotnet publish -c Release -o ./publish
-
-# Restore Directory.Packages.props
-if [ -f "../../Directory.Packages.props.disabled" ]; then
-    mv "../../Directory.Packages.props.disabled" "../../Directory.Packages.props"
-fi
 ```
 
 **Expected Output:**
@@ -789,17 +779,7 @@ az webapp cors add \
 error NU1008: Projects that use central package version management should not define the version...
 ```
 
-**Solution:**
-```bash
-# Disable Directory.Packages.props before building
-mv Directory.Packages.props Directory.Packages.props.disabled
-
-# Build
-dotnet publish -c Release
-
-# Restore
-mv Directory.Packages.props.disabled Directory.Packages.props
-```
+**Solution:** this happens only in a worktree branched before 2026-11-10, which still has the repository-root `Directory.Packages.props` (removed from master then; versions are pinned in each `.csproj`). Merge master, or rename the file aside for the build.
 
 ### Deployment Issues
 

@@ -236,7 +236,7 @@ public sealed class InvoiceRelatedWorkEndpointsAuthorizationContractTests
     {
         await using var host = await Host.StartAsync();
         host.GrantRead();
-        host.Line[ "sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Expense);
+        host.Line["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Expense);
 
         var response = await host.SendAsync(Request(Url(InvoiceId, LineId)));
 

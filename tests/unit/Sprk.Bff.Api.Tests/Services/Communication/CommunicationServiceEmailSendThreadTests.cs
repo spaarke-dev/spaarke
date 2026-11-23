@@ -94,7 +94,9 @@ public class CommunicationServiceEmailSendThreadTests
         return new CommunicationService(
             dispatcher,
             senderValidator,
-            Mock.Of<ICommunicationDataverseService>(),
+            // Issue #2033: a send as user needs the caller's enabled systemuser.
+            Mock.Of<ICommunicationDataverseService>(c =>
+                c.QuerySystemUserByAzureAdOidAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()) == Task.FromResult<Guid?>(Guid.NewGuid())),
             entityService,
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not exercised (ArchiveToSpe = false; see CommunicationServiceTests precedent)

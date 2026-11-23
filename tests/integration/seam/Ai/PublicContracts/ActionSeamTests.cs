@@ -59,8 +59,8 @@ public class ActionSeamTests
 
         _fieldMappingMock = new Mock<IFieldMappingDataverseService>();
         _fieldMappingMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _scopeFactoryMock = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
@@ -321,9 +321,9 @@ public class ActionSeamTests
         UseMetadataFor("sprk_document", BuildDocumentMetadata());
         Dictionary<string, object?>? captured = null;
         _fieldMappingMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => captured = fields)
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, fields, _, _) => captured = fields)
             .Returns(Task.CompletedTask);
 
         var request = new UpdateRecordRequest
@@ -372,8 +372,8 @@ public class ActionSeamTests
         result.Error.Should().Contain("Bogus");
         result.Error.Should().Contain("Contract");
         _fieldMappingMock.Verify(
-            s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -417,8 +417,53 @@ public class ActionSeamTests
         result.Error.Should().Be(ReadFailedMessage);
         System.Text.RegularExpressions.Regex.Matches(result.Error!, "invoice_family_read_failed").Count.Should().Be(1);
         _fieldMappingMock.Verify(
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Task 045b: the invoice-family guard runs before the regarding-pair planner (so the test above keeps the guard's code
+    /// when both reads fail). The other half: the guard's read answers and the planner's row read faults — still fail closed,
+    /// the planner's own refusal, and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task UpdateRecordAsync_AnInvoiceWhosePairPlannerReadFails_AfterTheFamilyGuardPassed_WritesNothing()
+    {
+        var invoice = Guid.NewGuid();
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_invoice", invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+                columns.Contains("sprk_regardingrecordid", StringComparer.OrdinalIgnoreCase)
+                    ? Task.FromException<Entity>(new TimeoutException("socket")) // the planner's row read
+                    : Task.FromResult(new Entity(table, id)));                  // the guard's stored-lookup read
+        var provider = new ServiceCollection().AddSingleton(entities.Object).BuildServiceProvider();
+        _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(() => provider.CreateScope());
+
+        var result = await CreateSeam().UpdateRecordAsync(new UpdateRecordRequest
+        {
+            EntityLogicalName = "sprk_invoice",
+            RecordId = invoice,
+            LegacyFields = new Dictionary<string, string?> { ["sprk_regardingrecordid"] = Guid.NewGuid().ToString("D") },
+        }, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain(RecordOwnerRefusal.ParentUndetermined);
+        entities.Verify(e => e.RetrieveAsync("sprk_invoice", invoice,
+            It.Is<string[]>(c => !c.Contains("sprk_regardingrecordid")), It.IsAny<CancellationToken>()), Times.Once,
+            "the family guard read first, and passed (the payload moves no lookup it decides on)");
+        _fieldMappingMock.Verify(
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _fieldMappingMock.Verify(
             s => s.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+        _fieldMappingMock.Verify(
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -460,11 +505,11 @@ public class ActionSeamTests
 
         result.Success.Should().BeTrue(result.Error);
         result.Error.Should().BeNull($"{code} is for a payload no person confirmed");
-        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
-            table, recordId, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(),
-            ConfirmingUser), Times.Once);
-        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+        _fieldMappingMock.Verify(s => s.UpdateExistingRecordFieldsAsync(
+            table, recordId, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), ConfirmingUser,
+            It.IsAny<CancellationToken>()), Times.Once);
+        _fieldMappingMock.Verify(s => s.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()),
             Times.Never, "a confirmed proposal is written AS its person, never app-only");
     }
 
@@ -475,17 +520,17 @@ public class ActionSeamTests
     {
         // Skipping the deny-lists is not skipping the person's rights: Dataverse refuses the impersonated write.
         _fieldMappingMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                ConfirmingUser))
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), ConfirmingUser,
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("403 (Forbidden)", inner: null, System.Net.HttpStatusCode.Forbidden));
 
         var act = () => CreateSeam().UpdateRecordAsync(
             ConfirmedProposal(table, Guid.NewGuid(), column, value, ConfirmingUser), CancellationToken.None);
 
         (await act.Should().ThrowAsync<HttpRequestException>()).Which.StatusCode.Should().Be(System.Net.HttpStatusCode.Forbidden);
-        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+        _fieldMappingMock.Verify(s => s.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()),
             Times.Never, $"a refused person's write is never repeated app-only ({code} not asked)");
     }
 
@@ -503,9 +548,9 @@ public class ActionSeamTests
         // "(code)" is not prefixed again, so the code is asserted by that form, exactly once.
         result.Error.Should().Contain($"({code})");
         System.Text.RegularExpressions.Regex.Matches(result.Error!, System.Text.RegularExpressions.Regex.Escape(code)).Count.Should().Be(1);
-        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<Guid?>()), Times.Never);
+        _fieldMappingMock.Verify(s => s.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── Helpers (metadata cache-HIT for the Choice fail-loud path) ────────────────────────────

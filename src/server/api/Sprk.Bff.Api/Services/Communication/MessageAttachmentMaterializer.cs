@@ -224,7 +224,8 @@ public sealed class MessageAttachmentMaterializer
         // for a secure message; the creator while the message is unfiled, E1).
         var owner = await _ownership.ResolveOwnerAsync(
             Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", request.CommunicationId)
-                with { RequestedBy = request.RequestedBy }, // task 146 c1-r1 — the sender, when the caller knows them
+                with
+            { RequestedBy = request.RequestedBy }, // task 146 c1-r1 — the sender, when the caller knows them
             cancellationToken);
         if (owner.IsRefused)
         {

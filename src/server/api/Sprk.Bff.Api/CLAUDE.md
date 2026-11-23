@@ -57,7 +57,7 @@ Follow [`tests/CLAUDE.md`](../../../../tests/CLAUDE.md): a new endpoint gets a c
 
 ## Package Management
 
-**Microsoft.Graph / Kiota.** The BFF references `Microsoft.Graph` 6.x directly (`Sprk.Bff.Api.csproj`); Kiota is **transitive only**. (`Directory.Packages.props` sets `ManagePackageVersionsCentrally=false`, so its older Graph/Kiota entries are inert.) Every resolved `Microsoft.Kiota.*` assembly must be the same version or the app fails at runtime with binding errors — Graph.Core's own dependency graph guarantees that today. Do not add direct `Microsoft.Kiota.*` `PackageReference`s unless a genuine transitive conflict forces one. If it does:
+**Microsoft.Graph / Kiota.** The BFF references `Microsoft.Graph` 6.x directly (`Sprk.Bff.Api.csproj`); Kiota is **transitive only**. (There is no central package management; the stale root `Directory.Packages.props` was removed 2026-11-10. Versions live in the `.csproj`.) Every resolved `Microsoft.Kiota.*` assembly must be the same version or the app fails at runtime with binding errors — Graph.Core's own dependency graph guarantees that today. Do not add direct `Microsoft.Kiota.*` `PackageReference`s unless a genuine transitive conflict forces one. If it does:
 1. Confirm: `dotnet list package --include-transitive | grep -i kiota` shows more than one Kiota version.
 2. Pin **all** `Microsoft.Kiota.*` references to the same version (never a partial set), with an inline comment naming the conflict.
 3. Re-run the check, then build and test locally before deploying.
