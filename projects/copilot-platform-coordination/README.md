@@ -13,6 +13,8 @@ This is a **coordination** project, not a delivery project. It builds nothing. D
 | [notes/tenant-inventory.md](notes/tenant-inventory.md) | Every Spaarke Copilot artifact in the dev tenant: owner project, purpose, keep / replace / remove, who removes it |
 | [notes/copilot-registration-rules.md](notes/copilot-registration-rules.md) | Rules every project follows before it puts a Copilot artifact into a tenant (draft, awaiting owner approval) |
 | [notes/coordination-map.md](notes/coordination-map.md) | Which project and session owns which Copilot artifact or decision |
+| [notes/copilot-structure.md](notes/copilot-structure.md) | How the MCP server, registrations, skills, plugins and agents fit together; open structure tests S-1 to S-4 |
+| [notes/removal-runbook.md](notes/removal-runbook.md) | Owner-approved removal steps, in trigger order |
 
 ## Why it exists
 

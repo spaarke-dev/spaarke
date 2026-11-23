@@ -5,6 +5,8 @@
 > **Rule (R4):** a new artifact gets a row here, with owner project and removal plan, **before** it is uploaded. When an artifact is removed, move its row to "Removed" with the date; never delete a row.
 > **Who removes:** every tenant action (admin center, Cowork Customize, Copilot Studio, Teams Developer Portal, Entra) is done by **the owner**. The owning project's session writes the step-by-step instruction and records the result here. Claude sessions never click admin actions or handle secrets.
 
+> **Removal list approved by the owner 2026-11-23.** Steps and trigger order: `removal-runbook.md`.
+
 Status values: **KEEP** (stays, has an owner) · **REPLACE** (stays until a named successor ships, then removed) · **REMOVE** (to delete; date or trigger given) · **DECIDE** (owner decision needed first).
 
 ## 1. MCP connectors and plugin packages

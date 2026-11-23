@@ -1,6 +1,6 @@
 # Current Task State — copilot-platform-coordination
 
-> **Last Updated**: 2026-11-23 (setup session)
+> **Last Updated**: 2026-11-23
 > **Worktree**: `C:\code_files\spaarke-worktrees\nostalgic-faraday-81fa74` · **Branch**: `work/copilot-platform-coordination` · **Board**: Issue #3006 under Epic #421
 > **Phase**: coordination. No POML tasks; no `/design-to-spec` unless the owner asks.
 
@@ -8,20 +8,27 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | Setup done: project registered, inventory + draft rules + coordination map written. Waiting on the owner |
-| **Uncommitted** | none after the setup commit |
+| **Active work** | Removal cleanup (owner approved 2026-11-23) per `notes/removal-runbook.md`; structure clarification before rules are confirmed (`notes/copilot-structure.md`) |
+| **Next action** | Owner sends step-0 screenshots (All agents › Registry "Spaarke"; Copilot Studio agents) → name which D1/D5 copy to delete → owner runs runbook steps 1–3 → move rows to "Removed" |
+| **Uncommitted** | none after the last commit |
+
+## Owner decisions so far
+
+- 2026-11-23: project name `copilot-platform-coordination`.
+- 2026-11-23: removal list approved.
+- 2026-11-23: rules **not** confirmed yet. The owner is unsure how the MCP connector relates to plugins, skills and tools, and shared Copilot's answer that duplicates don't make every request run twice. Response: `notes/copilot-structure.md` (Copilot is right about the mechanism; the model chose to call both copies in T2); R1 rationale reworded; R2 marked open pending S-2 (= T10) and S-3; R8 safe-to-repeat writes proposed.
 
 ## Open owner items
 
-1. Approve the registration rules (`notes/copilot-registration-rules.md` Q1–Q3; R2 provisional until mcp-r1 T10).
-2. Approve the removal list (inventory: S5 now; C2 after 040; stale D1 copy; duplicate D5; v0.2 D2/D3 copies if present; D4 if installed).
-3. Send the seven screenshots listed at the end of `notes/tenant-inventory.md`, then this session reconciles every ❓ row.
-4. Name an owner for D5 "Spaarke Dataverse MCP" and D6; decide whether D1 "Spaarke AI" stays.
+1. Step-0 screenshots (runbook); name an owner for D5 "Spaarke Dataverse MCP"; decide whether D1 "Spaarke AI" stays.
+2. Rules: approve R1 and R3–R7 now, R2 later? R8? Q2 (R7), Q3 (customer tenants).
+3. The seven inventory screenshots (end of `notes/tenant-inventory.md`).
 
 ## Waiting on other sessions
 
-- mcp-r1: T10 result (decides R2), 040 ship date (triggers C2 removal).
-- acclerator-r1: what is installed now (S6), whether `nda-library-review` (S4) is still used, whether D4 was installed.
+- mcp-r1: S-1 tool-list check while C1 and C2 are both connected (asked 2026-11-23); T10 result; 040 ship date (triggers runbook step 5); response on R8.
+- acclerator-r1: P1 Word probe upload/removal.
+- specialist-legal-agents-r1: S-3 as a Phase 0 item; D-A11.
 
 ## Standing directives
 

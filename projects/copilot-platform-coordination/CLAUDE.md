@@ -12,7 +12,7 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
 
 ## Gotchas
 
-- Registering the same MCP URL twice (federated connector + package `agentConnectors`) makes Copilot call every tool twice (mcp-r1 T2, 2026-11-23).
+- Registering the same MCP URL twice (federated connector + package `agentConnectors`) gives the model two copies of every tool; in mcp-r1 T2 (2026-11-23) it called both. The platform does not fan out by itself; the model chooses (`notes/copilot-structure.md` §3).
 - The Chat **Sources** switch does not stop tool calls (mcp-r1 T6b). The real off switches are disconnecting the connector or admin removal.
 - Package connectors work in Cowork; in Chat a package connector call failed before reaching the BFF (mcp-r1 T2/T13/T14, 2026-11-23).
 - Cowork shows the **plugin** name, not the connector name (T13).
