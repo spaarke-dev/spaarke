@@ -109,6 +109,9 @@ public sealed partial class DecisionCommitServiceTests
         public Dictionary<string, FakeExecutor> Executors { get; } = new(StringComparer.Ordinal);
         public Exception? FailRecordWith { get; set; }
         public Action<Guid>? BeforeSignalUpdate { get; set; }
+
+        /// <summary>Task 205: when it answers true, the writer's paged read of a decision's Signals faults (asked at each read).</summary>
+        public Func<bool>? SignalPageFaults { get; set; }
         public List<Entity> ExistingRecords { get; } = new();
 
         /// <summary>Task 161 (D-180, fix round 1 F1-a): how many ACTIVE budgets the matter really has, as the BFF's own (app-only) read
@@ -296,6 +299,8 @@ public sealed partial class DecisionCommitServiceTests
             Org.Setup(o => o.RetrieveMultipleAsync(It.Is<QueryBase>(q => q is QueryExpression && ((QueryExpression)q).EntityName == "sprk_signal"), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryBase query, CancellationToken _) =>
                 {
+                    if (SignalPageFaults?.Invoke() == true)
+                        throw new TimeoutException("no answer");
                     var page = ((QueryExpression)query).Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalid" && c.Operator == ConditionOperator.In);
                     return new EntityCollection(page.Values.Cast<Guid>().Where(Signals.ContainsKey).Select(Snapshot).ToList());
                 });

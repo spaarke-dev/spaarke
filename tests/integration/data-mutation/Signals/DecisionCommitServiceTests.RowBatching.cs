@@ -216,4 +216,60 @@ public sealed partial class DecisionCommitServiceTests
             allowed.AddSignal(RowItem(i), DecisionLane.Decide, Matter, PathB, subjectEntity: "sprk_todo", subjectId: i <= 2 ? subjectA : subjectB);
         (await allowed.CommitAsync(PathBReview(also: RowAlso(6)))).Status.Should().Be(DecisionCommitStatus.Recorded, "control: both subjects granted");
     }
+    [Fact]
+    [Trait("status", "new")]
+    public async Task T205_WhenThePagedReadFaultsBeforeTheRecord_NothingIsWritten_AndTheDecisionIsUnavailable()
+    {
+        var rig = RowRig(4);
+        rig.SignalPageFaults = () => true;
+
+        var result = await rig.CommitAsync(PathBReview(also: RowAlso(4)));
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable, "the same answer the per-item read gave for an item it could not read");
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        foreach (var id in RowAlso(4).Prepend(Primary))
+            rig.Status(id).Should().Be(Open);
+    }
+
+    [Fact]
+    [Trait("status", "new")]
+    public async Task T205_WhenThePagedReadFaultsAfterTheRecord_EachItemIsReadOnItsOwn_AndEveryItemStillCloses()
+    {
+        var rig = RowRig(4);
+        rig.SignalPageFaults = () => rig.Records.Count > 0;
+
+        var result = await rig.CommitAsync(PathBReview(also: RowAlso(4)));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Signals.Should().HaveCount(4).And.OnlyContain(s => s.State == "Acted" && s.Warning == null);
+        rig.Org.Invocations.Count(i => i.Method.Name == "RetrieveAsync").Should().Be(4, "each item falls back to its own read by id");
+        foreach (var id in RowAlso(4).Prepend(Primary))
+        {
+            rig.Status(id).Should().Be(Resolved);
+            rig.LinkedRecord(id).Should().Be(RecordId);
+        }
+    }
+
+    [Fact]
+    [Trait("status", "new")]
+    public async Task T205_WhenThePagedReadFaultsOnAReplay_TheOpenItemsAreReportedNotChecked_AndLeftOpen()
+    {
+        var rig = RowRig(3);
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false, also: RowAlso(3));
+        var first = await rig.CommitAsync(review);
+        first.Status.Should().Be(DecisionCommitStatus.Recorded, first.Detail);
+        var open = first.Signals.Where(s => s.Warning is not null).Select(s => s.SignalId).ToList();
+        open.Should().ContainSingle("the first close failed and the others closed");
+
+        rig.SignalPageFaults = () => true;
+        var replay = await rig.CommitAsync(review);
+
+        replay.Replayed.Should().BeTrue(replay.Detail);
+        replay.Signals.Single(s => s.SignalId == open[0]).Warning.Should().Be("signal_close_not_checked");
+        rig.Status(open[0]).Should().Be(Open);
+        rig.Records.Should().ContainSingle("the replay writes no second record");
+    }
 }
