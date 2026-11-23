@@ -1972,6 +1972,17 @@ pwsh scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1 -Apply -OwnerApprov
 pwsh scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1 -Verify
 ```
 
+### `ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1`
+
+Takes the retired `sprk_extractionstatus` and `sprk_extractedjson` controls off the live `sprk_invoice` main form ("Invoice main form") and quick-create form ("Invoice quick create form") (`ebilling-r1` task 194, ISS-045; nothing writes either column since task 050b). **Read-only without `-Apply`**: per form it reports which control it shows, what would be removed (the cell and the row, section and column it leaves empty; the remaining quick-create columns share 50 / 50) and a READY / BLOCKED / ALREADY CLEAN verdict. **`-Apply`** (dev only, `-WhatIf` for a dry run) refuses before the first write (exit 2) when an expected form is missing or ambiguous, a control sits where the script does not edit (a header) or a mention would remain (an event handler), or another pending form or view of `sprk_invoice` would go live with the publish (D-83, unless `-AllowPendingCollateral`); otherwise it edits each form and publishes `sprk_invoice` entity-scoped through `scripts/lib/Publish-SolutionComponents.ps1` (`PublishXml` in a bounded transient retry), then verifies. `-Verify` is read-only: exit 0 only when neither control is on either form. Idempotent. The columns and the `sprk_extractionstatus` option set are not touched. Reads and form edits go through `EbillingSchema.psm1` (`Consistency: Strong`). Tests: `tests/scripts/Remove-EbillingInvoiceExtractionFormControls.Tests.ps1` (Pester 5.7.1).
+
+```powershell
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1 -Apply -WhatIf
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1 -Apply -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1 -Verify
+```
+
 ### `ebilling/Deploy-EbillingFormsViews.ps1`
 
 Builds the WP1 forms, views and navigation in dev (`ebilling-r1` task 029; also the procedure later serial tasks reuse: add the new column names to the `$Spec` table and re-run). Rewrites the stub main form and the Active view of the 11 new WP1 tables (read-only controls, rates / codes / eligible-approver subgrids), adds a `section_ebilling` to the existing `sprk_timekeeper`, `sprk_invoice` and `sprk_billingevent` main forms (the five invoice totals and `sprk_billingevent.sprk_amount` are disabled), creates the "Invoices to review" view on `sprk_invoice`, adds the eBilling sitemap entries, then publishes only the touched entities, the two sitemaps and the two app modules (never a tenant-wide publish). Idempotent: a second run changes nothing and publishes nothing. `-WhatIf` reads everything and writes nothing. Refuses to publish when another pending form / view of a touched entity would go out too, unless `-AllowPendingCollateral`. Dev only in R1. It cannot add tables to an app (the API silently ignores it); it prints that manual app-designer step.
