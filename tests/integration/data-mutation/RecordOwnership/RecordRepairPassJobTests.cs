@@ -250,15 +250,16 @@ public sealed partial class RecordRepairPassJobTests
     // Review F1-a: an owner write is an Assign — never written where it would cascade
     // =====================================================================================
 
-    private static readonly AssignCascadeRelationship ContactTasks = new("Contact_Tasks", "task", "Cascade");
-
     [Fact]
-    public async Task AContactTableThatCascadesAssignToAChild_IsNotReOwned_IsReportedAsAnAnswer_AndLoggedOncePerPass()
+    public async Task AContactWithAnActivityChild_IsNotReOwned_IsReportedAsAnAnswer_AndLoggedPerRow()
     {
+        // Task 052f: the refusal is per row (a contact with a task child), not per table.
         _pass.CustomerTeamResolves();
-        World.AssignCascades["contact"] = [ContactTasks];
+        World.CascadesTo("contact", "Contact_Tasks", "task", "regardingobjectid");
         var first = _pass.NativeContact();
         var second = _pass.NativeContact();
+        World.AddCascadeChild("activitypointer", "regardingobjectid", first, activityType: "task");
+        World.AddCascadeChild("activitypointer", "regardingobjectid", second, activityType: "task");
 
         var result = await _pass.RunAsync();
 
@@ -270,7 +271,7 @@ public sealed partial class RecordRepairPassJobTests
         PassWorld.Count(result, "ownerAssignCascades").Should().Be(2);
         PassWorld.Count(result, "pendingRetry").Should().Be(0, "an answer, not a fault: not asked again");
         World.AssignCascadeReads.Where(t => t == "contact").Should().ContainSingle("the relationships are read once per pass");
-        World.Log.Entries.Where(e => e.Message.Contains("Contact_Tasks -> task")).Should().ContainSingle("logged once per pass");
+        World.Log.Entries.Where(e => e.Message.Contains("Contact_Tasks")).Should().HaveCount(2, "logged per row, naming the relationship");
 
         var direct = await World.RepairAsync("contact", first, _pass.Context());
         direct.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Owner)
@@ -279,10 +280,11 @@ public sealed partial class RecordRepairPassJobTests
     }
 
     [Fact]
-    public async Task ATableThatCascadesAssign_StillGetsItsMapping_WithoutTheOwner()
+    public async Task ARowWithAnUnacceptedChild_StillGetsItsMapping_WithoutTheOwner()
     {
-        World.AssignCascades["sprk_event"] = [new AssignCascadeRelationship("sprk_event_children", "sprk_memo", null)];
+        World.CascadesTo("sprk_event", "sprk_event_children", "sprk_memo", "sprk_regardingevent", assign: null);
         var id = _pass.NativeEvent();
+        World.AddCascadeChild("sprk_memo", "sprk_regardingevent", id);
 
         var result = await _pass.RunAsync();
 
@@ -308,12 +310,6 @@ public sealed partial class RecordRepairPassJobTests
         World.AssignCascadeReads.Should().Contain("contact");
         World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam));
-    }
-
-    [Fact]
-    public void TheAcceptedAssignCascadeList_StartsEmpty()
-    {
-        RecordCreationService.AcceptedAssignCascades.Should().BeEmpty("a child is allowed only by a reasoned entry");
     }
 
     [Fact]

@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{e4bd6ade-2589-4f64-a6dc-1cf3cc7c0813}</WebResourceId>
+  <Name>sprk_invoicefiles</Name>
+  <DisplayName>Invoice Files</DisplayName>
+  <WebResourceType>1</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_invoicefilesE4BD6ADE-2589-4F64-A6DC-1CF3CC7C0813</FileName>
+</WebResource>

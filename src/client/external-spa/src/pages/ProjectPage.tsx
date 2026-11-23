@@ -41,6 +41,7 @@ import {
   IssuedGrantsList,
 } from '../components';
 import { canInvite, useAccessLevel } from '../hooks/useAccessLevel';
+import { useOpenRecord } from '../components/detail/RecordOpener';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -210,6 +211,14 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
   writeAccessPerRecord,
 }) => {
   const styles = useStyles();
+  // A document's name opens the Document record through the shell's shared opener (the record template, task 013), as it
+  // does in a record's Documents section. Focus returns to the name when the record closes.
+  const openRecord = useOpenRecord();
+  const openDocument = React.useCallback(
+    (documentId: string, trigger: HTMLElement | null): void =>
+      openRecord({ entityName: 'sprk_document', recordId: documentId }, { returnFocusTo: trigger }),
+    [openRecord]
+  );
 
   return (
     <div className={styles.overviewTab}>
@@ -241,7 +250,12 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
 
       {/* DOCUMENTS */}
       <SectionCard title="Documents">
-        <DocumentLibrary projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
+        <DocumentLibrary
+          projectId={projectId}
+          accessLevel={accessLevel}
+          writeAccessPerRecord={writeAccessPerRecord}
+          onOpenDocument={openDocument}
+        />
       </SectionCard>
     </div>
   );

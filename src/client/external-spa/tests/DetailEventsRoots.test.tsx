@@ -28,6 +28,9 @@ vi.mock('../src/auth/bff-client', async () => {
 });
 
 const { loginRedirect } = vi.hoisted(() => ({ loginRedirect: vi.fn() }));
+// The Documents list is the shared grid (R4 task 023c): it reads its configuration through this seam.
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
+
 vi.mock('@azure/msal-react', () => ({
   useMsal: () => ({ instance: { loginRedirect }, accounts: [], inProgress: 'none' }),
 }));

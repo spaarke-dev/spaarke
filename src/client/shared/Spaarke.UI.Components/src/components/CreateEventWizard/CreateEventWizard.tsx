@@ -57,6 +57,7 @@ import {
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing — see __tests__/CreateEventWizard.associateToStep.test.ts)
@@ -264,25 +265,6 @@ export interface ICreateEventWizardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter: build a webApi-shaped object from IDataService for CreateRecordWizard
-// ---------------------------------------------------------------------------
-
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // CreateEventWizard
 // ---------------------------------------------------------------------------
 
@@ -350,7 +332,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   );
 
   // -- WebApi adapter for CreateRecordWizard ---------------------------------
-  const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // -- Assistant hand-off file leg (R5-7) ------------------------------------
   // Fetch the drafted-from session document(s) and pre-seed them into the Upload step so they

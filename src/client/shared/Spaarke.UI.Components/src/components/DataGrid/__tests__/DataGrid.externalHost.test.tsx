@@ -123,14 +123,17 @@ const BUILD_FLAG = '__SPAARKE_DATAGRID_EXTERNAL_HOST__';
 
 describe('DataGrid — external-SPA host rule (task 157)', () => {
   let consoleInfo: jest.SpyInstance;
+  let consoleError: jest.SpyInstance;
 
   beforeEach(() => {
     consoleInfo = jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     delete (globalThis as Record<string, unknown>)[BUILD_FLAG];
     consoleInfo.mockRestore();
+    consoleError.mockRestore();
   });
 
   it('control: with no external host the grid shows the picker and requests the saved-query list', async () => {
@@ -216,7 +219,14 @@ describe('DataGrid — external-SPA host rule (task 157)', () => {
       </DataGridExternalHostProvider>
     );
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/savedquery-set source/);
+    // The user sees one plain sentence; the reason (the savedquery-set rule) is logged, not shown (DataGrid.configLoadError).
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This list could not be loaded. Try again later.');
+    expect(alert).not.toHaveTextContent(/savedquery-set/);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('configuration did not load'),
+      expect.objectContaining({ message: expect.stringContaining('savedquery-set source') })
+    );
     expect(client.retrieveSavedQueriesForEntity).not.toHaveBeenCalled();
     expect(client.retrieveSavedQuery).not.toHaveBeenCalled();
   });

@@ -76,12 +76,21 @@ public sealed class BffDeployOptions
     // task 132) — the five r3-era gates run in CI.
 
     /// <summary>
-    /// Maximum time to wait for a single <c>az webapp deployment slot swap</c>
-    /// invocation (staging → production, or the rollback re-swap). Defaults
-    /// to 10 minutes — App Service slot swaps typically complete in 30-90 s
-    /// but the ceiling absorbs cold-warm-up on large plans.
+    /// Maximum time to wait for one ARM slot swap (staging → production, or the rollback re-swap), and the most
+    /// the scheduled-jobs slot guard waits for a swap already in flight on the site. Defaults to 30 minutes.
+    /// A swap restarts the source slot with the target's settings and warms it up before it completes, so it
+    /// takes at least the BFF's start time. On S1 the BFF takes about 220 s to start (T186 L48;
+    /// <c>WEBSITES_CONTAINER_START_TIME_LIMIT</c> is 600 s, customer.bicep), and the ACME swap of 2026-11-22
+    /// took about 11 minutes. The old 10-minute default gave up first, and the automatic retry then collided
+    /// with the swap Azure was still running (ISS-033).
     /// </summary>
-    public TimeSpan SlotSwapTimeout { get; set; } = TimeSpan.FromMinutes(10);
+    public TimeSpan SlotSwapTimeout { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// How often the scheduled-jobs slot guard retries while ARM refuses the staging slot because a swap is in
+    /// flight (409 "prepared for swap"). The guard stops after <see cref="SlotSwapTimeout"/> (ISS-033).
+    /// </summary>
+    public TimeSpan SlotSwapInProgressPollInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Staging and post-swap production /health probe retry count. Defaults to 120 so that

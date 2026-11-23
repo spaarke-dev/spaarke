@@ -54,6 +54,12 @@ internal sealed record ChildAccessPermissionRun
     /// <summary>The run stopped writing at its cap: the caller keeps the window, so the next run continues.</summary>
     public bool WriteCapReached { get; init; }
 
+    /// <summary>
+    /// #2750: the changed-row listing reached the page bound and covered the changes up to this instant only; the caller moves
+    /// the watermark no further, so the rest is listed next run. Null: the listing was complete.
+    /// </summary>
+    public DateTime? CappedAt { get; init; }
+
     /// <summary>Up to 50 "table id: reason" lines for undetermined and failed rows.</summary>
     public IReadOnlyList<string> Problems { get; init; } = [];
 
@@ -297,6 +303,7 @@ internal sealed class ChildAccessPermissionReconciler
         var sweepRows = 0;
         (string Table, Guid Id)? sweepResume = null;
         var sweepEnd = false;
+        DateTime? cappedAt = null;
         IReadOnlyList<Entity> sweepWindow = []; // F2: in the order read, so the cursor can stay before a row it did not handle
         // R3: where each candidate came from, for the order the Restricted bar takes them in (see the bar phase below).
         var seedKeys = new HashSet<(string Table, Guid Id)>();
@@ -333,7 +340,8 @@ internal sealed class ChildAccessPermissionReconciler
                 }
             }
 
-            // (1) The rows changed since the window start.
+            // (1) The rows changed since the window start. #2750: past the page bound a table's listing is capped, oldest
+            // change first (the job's one capped listing); the job moves the watermark no further than the earliest cap.
             var seeds = new List<Entity>();
             foreach (var table in AboveTheFour.OrderBy(t => t, StringComparer.Ordinal))
             {
@@ -342,8 +350,10 @@ internal sealed class ChildAccessPermissionReconciler
                     ColumnSet = await ColumnSetAsync(table, ct).ConfigureAwait(false),
                     NoLock = true,
                 };
-                query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
-                seeds.AddRange(await ReadAllAsync(query, ct).ConfigureAwait(false));
+                var (rows, tableCappedAt) = await SecureChildReconciliationJob.ReadChangedSinceAsync(_dataverse, query, since, ct)
+                    .ConfigureAwait(false);
+                seeds.AddRange(rows);
+                cappedAt = SecureChildReconciliationJob.Earliest(cappedAt, tableCappedAt);
             }
 
             rowsChanged = seeds.Count;
@@ -811,6 +821,7 @@ internal sealed class ChildAccessPermissionReconciler
             Failed = failed,
             Deferred = deferred,
             WriteCapReached = deferred > 0,
+            CappedAt = cappedAt,
             Problems = problems,
             Changes = changes,
             Carry = carry,

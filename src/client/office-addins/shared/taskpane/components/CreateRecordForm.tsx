@@ -26,7 +26,8 @@ import type { ContactOption } from './views/CreateTodoView';
  *
  *   Matter : Name*, Description, Matter Type*, Practice Area*, Assigned To Internal (prefilled)
  *   Project: Name*, Project Type, Description, Assigned To Internal (prefilled)
- *   Invoice: Name*, Description, Assigned To (prefilled)
+ *
+ *   (No Invoice: task 133 slice C took Invoice out of Save and "+ New". An invoice is created only by a submission.)
  *
  * - Built from shared field components: the contact picker is the shared `LookupField` (`onSearch` injected — the
  *   pane's one contact search, `App.handleSearchContacts`); the reference fields are Fluent `Dropdown`s fed by the
@@ -35,8 +36,7 @@ import type { ContactOption } from './views/CreateTodoView';
  * - Create stays disabled until every required field is set; pressing Enter in the name box with one missing shows a
  *   labelled, announced (`role="alert"`) message per field instead.
  * - Assigned To is prefilled with the user's own linked contact (the server's default) and is optional. Clearing it
- *   on a Matter or Project means "the server's default" — which IS the user — so the field says so; an Invoice has no
- *   default, so a cleared Invoice is unassigned.
+ *   on a Matter or Project means "the server's default" — which IS the user — so the field says so.
  * - A list that failed to load shows its message with Retry (never a required field that blocks silently); a list
  *   that loaded empty says so.
  * - One column, full width: fits the 320 px pane. Fluent tokens only (ADR-021).
@@ -173,7 +173,7 @@ export const CreateRecordForm: React.FC<CreateRecordFormProps> = ({
   const styles = useStyles();
   const isMatter = type === 'Matter';
   const isProject = type === 'Project';
-  const assigneeLabel = type === 'Invoice' ? 'Assigned To' : 'Assigned To Internal';
+  const assigneeLabel = 'Assigned To Internal';
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');

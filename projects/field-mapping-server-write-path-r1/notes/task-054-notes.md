@@ -96,7 +96,7 @@ Corrected in fix round 1: the "can a recipient be stamped today" column is what 
 
 | Create site | Type | Thread filing step | Recipient in today's flows |
 |---|---|---|---|
-| `CommunicationService.cs` Message send, no `ThreadId` (the UI send) | Message | **Piece 2b:** `ResolveSentMessageThreadAsync`. An outbound Direct send whose one address maps to one eligible systemuser → `FindOrCreateDirectThreadAsync(sender, recipient)` → `AssignExplicitThreadAsync` (the respond path's join). Otherwise `ResolveOutboundMessageThreadAsync` → resolver, unchanged. | **Stamped when routed** (the pair's thread is owned by one party and shared with Read to the other, so the stamp finds the pair). Not routed (zero or several addresses, external, ambiguous, disabled, application user, self, record-filed, a fault): today's path — the resolver CREATEs an application-owned, unshared Direct thread (`ThreadResolver.cs:190-197`, no owner at `:248`), no pair, no recipient. |
+| `CommunicationService.cs` Message send, no `ThreadId` (no client on master makes this send as of 2026-11-20: every client Message send carries a `threadId`; exercised by tests only) | Message | **Piece 2b:** `ResolveSentMessageThreadAsync`. An outbound Direct send whose one address maps to one eligible systemuser → `FindOrCreateDirectThreadAsync(sender, recipient)` → `AssignExplicitThreadAsync` (the respond path's join). Otherwise `ResolveOutboundMessageThreadAsync` → resolver, unchanged. | **Stamped when routed** (the pair's thread is owned by one party and shared with Read to the other, so the stamp finds the pair). Not routed (zero or several addresses, external, ambiguous, disabled, application user, self, record-filed, a fault): today's path — the resolver CREATEs an application-owned, unshared Direct thread (`ThreadResolver.cs:190-197`, no owner at `:248`), no pair, no recipient. |
 | `CommunicationService.cs` Message send naming a `ThreadId` (respond) | Message | `AssignExplicitThreadAsync` (:1510 → :1567, join at :1577) | **Stamped only when the named thread holds a pair**, i.e. a thread created by `POST /threads/direct` (`CommunicationEndpoints.cs:181` → `FindOrCreateDirectThreadAsync`, owned by the caller and shared with Read to the other user). A respond into a resolver-created thread stamps none. |
 | `MessagingIngestor.cs` inbound chat (ACS), via the resolver (`MessagingIngestor.cs:112-119`) | Message | resolver JOIN (`ThreadResolver.cs:168`) or CREATE (`:190-197`) | **None.** Inbound joins by ACS thread id through `sprk_communicationchannelref`, and the only writer of a channel ref is `MessagingThreadKeyStrategy.OnThreadCreatedAsync` (`MessagingThreadKeyStrategy.cs:63`), which links a thread the resolver just created. So inbound never joins a pair thread. |
 | New Direct thread, first message — resolver CREATE with no regarding (`ThreadResolver.cs:190-197`) | Message | the CREATE path's filing write | **None**, unchanged: the new thread is app-owned and unshared. Since piece 2b an outbound Direct send reaches this path only when the pair routing does not resolve (first row); the first message between a resolved pair goes to the thread `FindOrCreateDirectThreadAsync` creates, and is stamped. |
@@ -891,6 +891,29 @@ Not verified without a live environment:
   - per-reason count removed: **Failed 2**;
   - restored: **Passed 113, Failed 0**.
 - **CI job set** (`Set-CustomerOwnerTeams.Tests.ps1` + the new file, Pester 5.7.1 as CI pins): **131 passed, 0 failed** before the F1 round; **149 passed, 0 failed** after it. Under Pester 6.2 the files fail at load (the harness incompatibility the workflow's pin comment records), not a script defect.
+
+### Live runs
+
+- **dev, Stamp `-DryRun`, 2026-11-20** (owner go in this session; after UAC-r2's D-2 step 3 on dev). Script as on master. Exit 0.
+  - Precondition: all five columns field-secured; both BFF application users on the writer profile; only the BFF identities can write. OK.
+  - Selection: 3 Direct messages with an empty `sprk_directrecipient`. **Plan: 0 rows to stamp.**
+  - Review: `no_sentby` 3 (two messages on one thread, one test message on another). They keep their owner, and Move lists them `no_valid_pair`.
+  - Nothing written. The review list was kept out of the repo.
+  - `-Apply` would write nothing. Its go is still the owner's, with `-Verify` after.
+- **dev, Stamp `-Apply` then `-Verify`, 2026-11-20** (owner go in this session). `-Apply`: exit 0, 0 rows stamped (the same 3 rows listed `no_sentby`). `-Verify`: exit 0, "PASS (no row would stamp; 3 on the manual-review list)", with the precondition OK again. Step 4 of the deploy order is done on dev; Move (step 6) is next, after its own dry run and the owner's go.
+- **dev, Move `-DryRun`, 2026-11-20** (after UAC-r2 confirmed piece 3 and 198 are live: piece 3's merges are ancestors of master fe51619cfc in dev build 5ae2804884; both `DirectMessage:*` settings live since 04:41Z).
+  - The precondition was OK. Direct team check OK: a direct child of the root, no members, no users, not Secure Record.
+  - **First run: refused (exit 1), as designed.** The one Assign-cascading relationship found, `sprk_document -> team.regardingobjectid` (Cascade), was not accepted. Nothing was selected.
+  - **Second run, with `-AcceptedAssignCascade team` (read-only): exit 0.**
+    - `sharetopreviousowneronassign` = false.
+    - 3 Direct messages selected, **0 to move**, review `no_valid_pair` 3: the same 3 rows, which have no sender.
+  - Accepting `->team` matches the owner-approved 052e class "Moves nothing": a team has no owner columns. Accepting it for `-Apply` is the owner's decision.
+  - L16 note: no message on dev holds a valid pair and is still user-owned, so the owner grant (`GrantAccess` body shape) cannot be exercised here without seeding a row. It fails safe: a wrong shape lists the message `participant_grant_unconfirmed`, and the message does not move.
+- **dev, Move `-Apply` then `-Verify`, 2026-11-20** (owner go in this session, including accepting `-AcceptedAssignCascade team`).
+  - **`-Apply`:** scoped `-NamePrefix FMSWP-` per L16, with `-DirectShareJobLive`. Exit 0. 0 messages selected, 0 rows moved, review none.
+  - **`-Verify`, unscoped:** exit 0. "PASS (every valid-pair Direct message and its content rows are on the Direct team, and every enabled participant of a Direct-owned message holds Read on it; 3 on the manual-review list)". Precondition and Direct team checks OK.
+  - **Step 6 of the deploy order is done on dev.** The 3 `no_valid_pair` rows keep their owner.
+  - Still open: the `GrantAccess` body shape (L16), not exercised live. The first environment with a user-owned valid-pair message runs its scoped `-Apply` on one `FMSWP-` message first, as the rule says.
 
 ## 054a piece 3 — the Direct owner rule (3a, 3b, 3c)
 

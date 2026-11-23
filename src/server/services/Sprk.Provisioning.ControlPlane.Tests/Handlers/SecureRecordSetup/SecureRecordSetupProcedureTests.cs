@@ -1235,7 +1235,7 @@ public sealed class SecureRecordSetupProcedureTests
 
         refused.Diagnostic.Should().Contain("sprk_billingevent.sprk_invoice").And.Contain("IsSecured=False")
             .And.Contain("re-file an invoice-family row").And.Contain("scripts/Set-InvoiceFamilyFieldSecurity.ps1")
-            .And.Contain("Only where H7b has completed on this environment before")
+            .And.Contain("Only where H7b has completed on this environment before").And.Contain("import SpaarkeMaster 1.3.2.0 or later")
             .And.Contain("Nothing was written");
         dv.Writes.Should().BeEmpty();
     }

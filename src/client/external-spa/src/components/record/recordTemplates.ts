@@ -24,6 +24,7 @@
  * Tabs are off for every type (owner 2026-11-08).
  */
 import { EMPTY_VALUE, formatDetailValue, type DetailRecord } from '../detail/RecordDetailFields';
+import { reviewDetailSecondaryLine } from './reviewDetail';
 import type { RecordTemplateConfig, RecordToolbarActionId } from './recordTemplate.types';
 
 /**
@@ -90,7 +91,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     titleNumberAttribute: 'sprk_invoicenumber',
     nameAttribute: 'sprk_name',
     headerFacts: [
-      { attribute: 'statuscode', label: 'Status' },
+      // R4 task 020 (FR-11): the status fact's secondary line is the Review detail, only while the invoice is In Review.
+      { attribute: 'statuscode', label: 'Status', secondary: reviewDetailSecondaryLine },
       { attribute: 'sprk_totalamount', label: 'Total amount', kind: 'money' },
       { attribute: 'sprk_invoicedate', label: 'Invoice date', kind: 'date' },
     ],

@@ -32,7 +32,6 @@ import {
   buildDocumentsByMatterQuery,
   buildDocumentsByUserQuery,
   buildDocumentsTabQuery,
-  DOCUMENT_TAB_SELECT_FIELDS,
   buildTodoItemsQuery,
   buildDismissedTodoQuery,
   buildOwnerFilter,
@@ -439,7 +438,6 @@ export class DataverseService {
     return tryCatch(async () => {
       // 1. Retrieve the view's FetchXML
       const entity = options.viewType === 'userquery' ? 'userquery' : 'savedquery';
-      const idField = options.viewType === 'userquery' ? 'userqueryid' : 'savedqueryid';
       const viewRecord = await this._webApi.retrieveRecord(entity, viewId, '?$select=fetchxml');
       let fetchXml = viewRecord.fetchxml as string;
       if (!fetchXml) throw new Error(`View ${viewId} has no fetchxml`);

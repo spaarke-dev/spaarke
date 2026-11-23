@@ -22,7 +22,9 @@ name: CI Standalone Checks
 #                                                                 suite on a push (client-tests.yml is nightly).
 #   client-typecheck        Client Quality > shared-lib builds    The only `tsc` check of the shared client
 #                           + Spaarke.AI.Widgets tsc --noEmit     libraries (client-lint is an ESLint
-#                                                                 ratchet, Tier 2 lint is Prettier + ESLint).
+#                                                                 ratchet, Tier 2 lint is Prettier + ESLint),
+#                                                                 and of LegalWorkspace + SemanticSearch,
+#                                                                 whose bundlers do not type-check (#2808).
 #   pcf-eslint              Client Quality > PCF ESLint           Tier 2 `lint` runs PCF ESLint only when
 #                                                                 SpaarkeAi/BFF paths change and client-lint.yml
 #                                                                 does not cover src/client/pcf, so a PCF-only PR
@@ -342,6 +344,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # ISS-005 / #2808: LegalWorkspace (Vite) and SemanticSearch (webpack) bundle without a
+      # type check, so a type error reached review only if it also broke bundling. Neither
+      # depends on the shared-lib steps below: each tsconfig maps @spaarke/* to SOURCE and resolves bare
+      # imports from that source through its own node_modules, as its bundler does.
+      # They run FIRST, before any shared-lib install, so CI sees what a clean checkout sees:
+      # a shared lib's own node_modules must not change how these two resolve.
+      # LegalWorkspace: src/** must be clean; errors in the shared source it compiles are
+      # pinned in tsc-baseline.json (a new one fails; --fail-on-stale makes a fixed one that
+      # is still listed fail too, so the baseline is pruned in the PR that fixes it).
+      - name: Install LegalWorkspace deps
+        working-directory: src/solutions/LegalWorkspace
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: LegalWorkspace — tsc ratchet
+        working-directory: src/solutions/LegalWorkspace
+        run: node ../../../scripts/tsc-surface-gate.mjs --baseline tsc-baseline.json --fail-on-stale
+
+      - name: Install SemanticSearch deps
+        working-directory: src/client/code-pages/SemanticSearch
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: SemanticSearch — tsc --noEmit
+        working-directory: src/client/code-pages/SemanticSearch
+        run: npm run typecheck
 
       - name: Install Spaarke.Auth deps
         working-directory: src/client/shared/Spaarke.Auth

@@ -39,6 +39,7 @@ public class AccessTableReaderScanTests
             ["businessunit"] = "A business unit: its container, name and parent (a plain Update can re-parent it) are refused per column (AccessColumns).",
             ["team"] = "A team: its owner-team predicates are refused per column (AccessColumns); membership is teammembership (refused).",
             ["audit"] = "Column audit history, written only by the platform (Dataverse refuses a create or update of it); the repair pass's core-pair report (task 052d) reads it and decides no access.",
+            ["activitypointer"] = "Every activity, read by the repair pass (task 052f) top 1 on regardingobjectid only to tell whether a row has an activity child before an owner write; it decides no access and writes nothing to an activity.",
             ["sprk_document"] = "A child record: its Access Permission, own narrowing, D7 links and BFF-owned columns are refused per column.",
             ["sprk_communication"] = "A child record: its internal-only flag is refused per column (AccessColumns), its owner is refused (OwnerColumns); the rest follows its parents.",
             ["sprk_event"] = "A child record; its access follows its parents, its owner and creator are refused (OwnerColumns, CreatorColumns).",

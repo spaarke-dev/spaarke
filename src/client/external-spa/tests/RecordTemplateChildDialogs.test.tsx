@@ -37,6 +37,8 @@ import { FormModal, SprkModal } from '@spaarke/ui-components/components/SprkModa
 
 const h = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
 
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
+
 vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
   return {
@@ -56,6 +58,7 @@ import { renderRecordSection } from '../src/components/record/sections';
 import type { RecordSectionContext } from '../src/components/record/recordTemplate.types';
 import { restoreFocusTo, currentFocusTarget, type CreateActionOffer } from '../src/components/createAction';
 import { installLayout, uninstallLayout } from './jsdomLayout';
+import { documentRow, rowAction } from './documentsGridHarness';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -196,10 +199,11 @@ async function openRecord(onClose: () => void = vi.fn()): Promise<HTMLElement> {
 
 /** Focuses a header button (as a keyboard user would), activates it, and returns the dialog it opened. */
 async function openChild(
-  toolbarName: string,
+  toolbarName: string | (() => Promise<HTMLElement>),
   dialogName: string
 ): Promise<{ button: HTMLElement; child: HTMLElement }> {
-  const button = await screen.findByRole('button', { name: toolbarName });
+  const button =
+    typeof toolbarName === 'string' ? await screen.findByRole('button', { name: toolbarName }) : await toolbarName();
   button.focus();
   fireEvent.click(button);
   // ConfirmModal is dismiss=alert, which Fluent renders as an alertdialog; the other presets are dialogs.
@@ -768,9 +772,13 @@ describe('Version history: a SprkModal inside the record modal', () => {
         versions: [{ versionId: 'v1', versionLabel: '1.0', createdAt: '2026-03-01T10:00:00Z', createdByName: 'Pat' }],
       });
       const onClose = vi.fn();
-      const parent = await openRecord(onClose);
-      await within(parent).findByText('Mine.pdf');
-      const { child } = await openChild('View version history for Mine.pdf', 'Version History — Mine.pdf');
+      await openRecord(onClose);
+      // The row action of the Documents grid (task 023c): the button is named by its label, inside the document's row.
+      const row = await documentRow('Mine.pdf');
+      const { child } = await openChild(
+        async () => rowAction(row, 'Version history') as HTMLElement,
+        'Version History — Mine.pdf'
+      );
 
       expect(await within(child).findByText('Version 1.0')).toBeTruthy();
       fireEvent.keyDown(document.activeElement ?? child, { key: 'Escape' });

@@ -102,6 +102,8 @@ import type {
 import type { RichTextEditorRef } from '../RichTextEditor';
 import type { InlineAiAction } from '../InlineAiToolbar';
 
+import { useFocusReturn } from '../../utils/focusReturn';
+import { isSafeHref } from './composeOnlyText';
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
@@ -110,7 +112,7 @@ import { InternalOnlySwitch } from './subcomponents/InternalOnlySwitch';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 
-// The Dataverse logical name for a governed Document — the paperclip's "Link documents"
+// The Dataverse logical name for a governed Document — the Attach menu's "Link documents"
 // picks this type and ATTACHES it, so it's intentionally excluded from the record-search
 // catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
 const DOCUMENT_LOGICAL_NAME = 'sprk_document';
@@ -228,16 +230,6 @@ function defaultAttachmentSources(
   return wizardContext
     ? [{ kind: 'wizard' }, { kind: 'related' }, { kind: 'local' }, { kind: 'spe' }]
     : [{ kind: 'local' }, { kind: 'related' }, { kind: 'spe' }];
-}
-
-/**
- * Blocks script-executing schemes (`javascript:`/`data:`/`vbscript:`) before an
- * (untrusted) `recordLink.url` is rendered into an `<a href>`. This is the
- * shared send engine — a caller could build the url from record-derived data.
- * Everything else (http(s), app-relative, mailto) is allowed.
- */
-function isSafeHref(url: string): boolean {
-  return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
 /** Escape a plain string for safe interpolation into HTML (record-link label/href). */
@@ -405,7 +397,7 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
     },
   },
-  // Trailing controls placed into the RichTextEditor toolbar slot (paperclip / search).
+  // Trailing controls placed into the RichTextEditor toolbar slot (record search / template / AI).
   // Kept visually grouped at the toolbar's trailing end.
   toolbarSlot: {
     display: 'flex',
@@ -538,8 +530,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Imperative handle to the HTML body editor — used to insert a record link AT THE CURSOR
   // (owner UAT 2026-07-24) rather than appending to the end. Null in plain-text mode.
   const bodyEditorRef = React.useRef<RichTextEditorRef>(null);
-  // Local-file picker input (trigger lives in the RTF toolbar's paperclip menu, owner UAT
-  // 2026-07-24). Pick-time policy rejections surface here.
+  // Local-file picker input (trigger lives in the Attach menu beside the Attachments heading;
+  // owner UAT 2026-07-24, moved task 197). Pick-time policy rejections surface here.
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   // Late-bound handle to handleAddAttachment (defined below) so the file-pick callback,
   // declared earlier, can invoke it without a temporal-dead-zone reference.
@@ -605,7 +597,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
   }, []);
 
-  // Local-file pick (paperclip → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
+  // Local-file pick (Attach menu → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
   // rejected files are dropped and surfaced (never silently). Moved out of AttachmentList when
   // the add controls hoisted to the RTF toolbar (owner UAT 2026-07-24).
   const handleLocalFilesPicked = React.useCallback(
@@ -636,6 +628,40 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [state.attachments.length]
   );
 
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Focus return after a host lookup (task 199; the shared helper is in utils/focusReturn.ts since task 200). The
+  // platform lookup pane hands focus back to whatever opened the surrounding dialog (a grid link behind the wizard)
+  // when it closes, so a keyboard user is lost. Once the lookup settles (pick, cancel or failure) take focus back to
+  // the button that started it; skip when the composer unmounted or focus is already inside it (a host or the user put
+  // it there on purpose); fall back to the composer root when the trigger is gone or disabled. The document comes from
+  // the composer's own ownerDocument, so an iframe-hosted composer (Find Similar -> Document Relationship Viewer ->
+  // Email) uses its own frame. ONE wrapper for every lookup path (recipients, Link a record, Link documents, record search).
+  const returnFocus = useFocusReturn({
+    getRoot: () => rootRef.current,
+    getFallback: () => rootRef.current,
+  });
+  const withLookupFocusReturn = React.useCallback(
+    <T,>(trigger: HTMLElement | null | undefined, run: () => Promise<T>): Promise<T> =>
+      run().then(
+        value => {
+          returnFocus(trigger);
+          return value;
+        },
+        err => {
+          returnFocus(trigger);
+          throw err;
+        }
+      ),
+    [returnFocus]
+  );
+
   // "Link another record" → pick a record via the host polymorphic picker and APPEND it to the
   // in-memory "Related to" list (owner UAT 2026-07-31). No record exists yet in compose/reply/
   // forward, so associations are held in reducer state and ride the send payload; the user can add
@@ -643,24 +669,28 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // maps associations[0] as the primary regarding at send time (CLIENT-ONLY ordering). No
   // replace-confirm — adding is additive, not a single-primary swap.
   const onAddRelationship = props.onAddRelationship;
-  const handleAddRelationship = React.useCallback(() => {
-    if (!onAddRelationship) return;
-    setRelatedCollapsed(false);
-    void onAddRelationship()
-      .then(picked => {
-        if (!picked) return;
-        dispatch({
-          type: 'ADD_ASSOCIATION',
-          association: {
-            entityType: picked.entityType,
-            entityId: picked.id,
-            entityName: picked.name,
-            entityUrl: picked.url,
-          },
-        });
-      })
-      .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
-  }, [onAddRelationship]);
+  const handleAddRelationship = React.useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!onAddRelationship) return;
+      const trigger = e.currentTarget;
+      setRelatedCollapsed(false);
+      void withLookupFocusReturn(trigger, onAddRelationship)
+        .then(picked => {
+          if (!picked) return;
+          dispatch({
+            type: 'ADD_ASSOCIATION',
+            association: {
+              entityType: picked.entityType,
+              entityId: picked.id,
+              entityName: picked.name,
+              entityUrl: picked.url,
+            },
+          });
+        })
+        .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
+    },
+    [onAddRelationship, withLookupFocusReturn]
+  );
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -670,14 +700,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Absent resolver → local picks stay display-only (pre-task-042 behavior).
   const [resolvingIds, setResolvingIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [uploadError, setUploadError] = React.useState<string | undefined>();
-  const mountedRef = React.useRef(true);
-  React.useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   // The "Email not sent" / "Draft not saved" dialog (owner decision 2026-10-09: a failed send is
   // never silent). Transient UI state, not engine state. Non-null → the dialog is open.
   const [failureNotice, setFailureNotice] = React.useState<ISendFailureDescription | null>(null);
@@ -741,7 +763,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const canAddLocal = !state.readOnly && attachmentSources.some(s => s.kind === 'local');
   const canLinkDocument = !state.readOnly && !!props.onLookupRecord;
   // Record search excludes Document (owner UAT 2026-07-24): documents are attached via the
-  // paperclip's "Link documents"; every other catalog type inserts a body link.
+  // the Attach menu's "Link documents"; every other catalog type inserts a body link.
   const recordSearchCatalog = React.useMemo(
     () => (props.recordLookupCatalog ?? []).filter(t => t.logicalName !== DOCUMENT_LOGICAL_NAME),
     [props.recordLookupCatalog]
@@ -751,21 +773,32 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // a record now happens via the "Link another record" tile inside the "Related to" section (item 10).
   const canLinkRecord = !state.readOnly && !!props.onAddRelationship;
 
+  // The buttons whose menus start a record lookup; the menu item itself unmounts on close, so focus
+  // returns to the menu's trigger button (task 199).
+  const attachButtonRef = React.useRef<HTMLButtonElement>(null);
+  const recordSearchButtonRef = React.useRef<HTMLButtonElement>(null);
+
   const runDocumentLink = React.useCallback(() => {
-    if (!props.onLookupRecord) return;
-    void props.onLookupRecord(DOCUMENT_LOGICAL_NAME).then(picked => {
-      if (picked) handleRecordPicked(picked);
-    });
-  }, [props.onLookupRecord, handleRecordPicked]);
+    const onLookupRecord = props.onLookupRecord;
+    if (!onLookupRecord) return;
+    void withLookupFocusReturn(attachButtonRef.current, () => onLookupRecord(DOCUMENT_LOGICAL_NAME))
+      .then(picked => {
+        if (picked) handleRecordPicked(picked);
+      })
+      .catch(err => console.warn('[EmailComposer] record lookup failed:', err));
+  }, [props.onLookupRecord, handleRecordPicked, withLookupFocusReturn]);
 
   const runRecordSearch = React.useCallback(
     (logicalName: string) => {
-      if (!props.onLookupRecord) return;
-      void props.onLookupRecord(logicalName).then(picked => {
-        if (picked) handleRecordPicked(picked);
-      });
+      const onLookupRecord = props.onLookupRecord;
+      if (!onLookupRecord) return;
+      void withLookupFocusReturn(recordSearchButtonRef.current, () => onLookupRecord(logicalName))
+        .then(picked => {
+          if (picked) handleRecordPicked(picked);
+        })
+        .catch(err => console.warn('[EmailComposer] record lookup failed:', err));
     },
-    [props.onLookupRecord, handleRecordPicked]
+    [props.onLookupRecord, handleRecordPicked, withLookupFocusReturn]
   );
 
   // ── Template picker (Wave E) ───────────────────────────────────────────────
@@ -912,32 +945,40 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     return () => window.clearTimeout(t);
   }, [aiMenuOpen]);
 
+  // Attach menu (owner dev recheck 2026-11-18, task 197): the trigger sits beside the
+  // "Attachments" heading — styled like the "Link a record" tile — in BOTH rich and plain-text
+  // modes (it used to be the RTF toolbar paperclip, so plain text could not attach). Same menu
+  // items and handlers as before; absent when the host can neither add local files nor link
+  // documents.
+  const attachMenu =
+    canAddLocal || canLinkDocument ? (
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
+          <button type="button" className={styles.linkTile} ref={attachButtonRef}>
+            <Attach20Regular />
+            <span>Attach</span>
+          </button>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            {canAddLocal && <MenuItem onClick={() => fileInputRef.current?.click()}>Add files</MenuItem>}
+            {canLinkDocument && <MenuItem onClick={runDocumentLink}>Link documents</MenuItem>}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    ) : undefined;
+
   const toolbarSlot =
-    canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker || showSparkle ? (
+    showRecordSearch || showTemplatePicker || showSparkle ? (
       <div className={styles.toolbarSlot}>
-        {(canAddLocal || canLinkDocument) && (
-          <Menu positioning="below-end">
-            <MenuTrigger disableButtonEnhancement>
-              <Tooltip content="Attach files or link a document" relationship="label">
-                <ToolbarButton icon={<Attach20Regular />} aria-label="Attach" />
-              </Tooltip>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {canAddLocal && <MenuItem onClick={() => fileInputRef.current?.click()}>Add files</MenuItem>}
-                {canLinkDocument && <MenuItem onClick={runDocumentLink}>Link documents</MenuItem>}
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-        )}
         {showRecordSearch && (
-          // Grouped in the SAME toolbar section as the paperclip — no divider between them
-          // (owner UAT 2026-07-27). The section-leading divider is still supplied once by
-          // ToolbarPlugin, separating this whole group from the editor controls.
+          // Leads the trailing toolbar group. The section-leading divider is supplied once by
+          // ToolbarPlugin, separating this whole group from the editor controls. (The attach
+          // paperclip moved beside the Attachments heading — task 197.)
           <Menu positioning="below-end">
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="Insert a link to a record" relationship="label">
-                <ToolbarButton icon={<SearchRegular />} aria-label="Insert record link" />
+                <ToolbarButton ref={recordSearchButtonRef} icon={<SearchRegular />} aria-label="Insert record link" />
               </Tooltip>
             </MenuTrigger>
             <MenuPopover>
@@ -951,13 +992,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             </MenuPopover>
           </Menu>
         )}
-        {/* "|" separator between the attach/record-link group and the template/AI group
+        {/* "|" separator between the record-link group and the template/AI group
             (owner UAT 2026-08-03 R5 item 3) — only when both groups have at least one tool. */}
-        {(showTemplatePicker || showSparkle) && (canAddLocal || canLinkDocument || showRecordSearch) && (
+        {(showTemplatePicker || showSparkle) && showRecordSearch && (
           <span className={styles.toolbarDivider} role="separator" aria-orientation="vertical" />
         )}
         {showTemplatePicker && (
-          // Apply an email template (Wave E). Grouped with the paperclip/search in the same
+          // Apply an email template (Wave E). Grouped with the record search in the same
           // toolbar section. Templates load on menu open; picking one fills subject + body.
           <Menu
             positioning="below-end"
@@ -1358,7 +1399,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.to}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'to', value: recipients })}
           onSearch={props.onSearchRecipients}
-          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('to') : undefined}
+          onLookup={
+            props.onLookupRecipients
+              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('to'))
+              : undefined
+          }
           errorMessage={fieldErrors.to}
         />
         <RecipientField
@@ -1367,7 +1412,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.cc}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'cc', value: recipients })}
           onSearch={props.onSearchRecipients}
-          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('cc') : undefined}
+          onLookup={
+            props.onLookupRecipients
+              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('cc'))
+              : undefined
+          }
         />
         {bccVisible ? (
           <RecipientField
@@ -1376,7 +1425,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             value={state.bcc}
             onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
             onSearch={props.onSearchRecipients}
-            onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('bcc') : undefined}
+            onLookup={
+              props.onLookupRecipients
+                ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('bcc'))
+                : undefined
+            }
           />
         ) : (
           !state.readOnly && (
@@ -1405,8 +1458,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
       </div>
 
-      {/* Hidden local-file input — triggered by the RTF toolbar's paperclip "Add files"
-          (owner UAT 2026-07-24). */}
+      {/* Hidden local-file input — triggered by the Attach menu's "Add files" beside the
+          Attachments heading (owner UAT 2026-07-24; moved from the RTF toolbar, task 197). */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1416,14 +1469,15 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         aria-label="Choose files from your computer"
       />
 
-      {/* Attachments — display-only collapsible list, DEFAULT COLLAPSED (owner UAT 2026-07-24);
-          the add/link controls now live in the RTF toolbar. */}
+      {/* Attachments — collapsible list, DEFAULT COLLAPSED (owner UAT 2026-07-24); the add/link
+          menu is the button beside the heading (task 197). */}
       <div className={styles.section} role="region" aria-label="Attachments">
         <AttachmentList
           items={state.attachments}
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
+          headerAction={attachMenu}
           resolvingIds={resolvingIds}
           readOnly={state.readOnly}
           errorMessage={[fieldErrors.attachments, uploadError, ...pickErrors].filter(Boolean).join(' ') || undefined}

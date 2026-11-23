@@ -17,14 +17,27 @@
  */
 import * as React from 'react';
 import { AddRegular } from '@fluentui/react-icons';
+import { REVIEW_DETAIL_COLUMN, reviewDetailCellText } from '../components/record/reviewDetail';
 import { useCallerContext } from '../hooks/useCallerContext';
 import { INVOICE_SUBMIT_PATH } from '../pages/invoiceSubmitLink';
 import type { WidgetBodyComponent } from '../registry/PlaceholderWidgetBody';
-import { createGridWidgetBody, type GridHostCommands } from './GridWidgetBody';
+import { createGridWidgetBody, type GridHostCommands, type GridOverrides } from './GridWidgetBody';
 
 const CONFIG_ID = '3ff4102c-1092-f111-b8dc-7ced8ddc4a05';
 
-const InvoicesGridBody = createGridWidgetBody(CONFIG_ID);
+/**
+ * R4 task 020 (FR-11, 082c): the "Review detail" cell. The column itself is added to the grid configuration (live
+ * `sprk_gridconfiguration` 3ff4102c, task 028); until it is there this renderer is never called. The cell shows text only
+ * while the row's raw `statuscode` is 1 (In Review): the one gate in `record/reviewDetail.ts`, read from the same row.
+ * A module constant, so the grid's resolved configuration is not rebuilt on every render.
+ */
+export const INVOICE_GRID_OVERRIDES: GridOverrides = {
+  columnRenderers: {
+    [REVIEW_DETAIL_COLUMN]: (_value, row) => reviewDetailCellText(row),
+  },
+};
+
+const InvoicesGridBody = createGridWidgetBody(CONFIG_ID, INVOICE_GRID_OVERRIDES);
 
 /** The id of the toolbar command (stable: it is also what the grid reports to `onCommandInvoke`). */
 export const SUBMIT_INVOICE_COMMAND_ID = 'submit-invoice';

@@ -56,6 +56,7 @@ import {
 } from '@fluentui/react-components';
 import { SearchRegular } from '@fluentui/react-icons';
 import { cleanGuid } from '../../utils/guid';
+import { closestDialogOrSelf, useFocusReturn } from '../../utils/focusReturn';
 import { getXrm, type XrmCapability, type XrmPartialContext } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
@@ -234,6 +235,15 @@ export const PolymorphicPicker: React.FC<PolymorphicPickerProps> = ({
   const [error, setError] = React.useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = React.useState(false);
 
+  // Focus return (task 200): the platform lookup pane leaves focus on <body> or on the link behind the dialog, and the
+  // trigger is disabled while it is open, so once the lookup settles focus goes back to the toolbar trigger (found after
+  // the re-render; it opened the menu that held the item the user chose).
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const returnFocus = useFocusReturn({
+    getRoot: () => rootRef.current,
+    getRegion: () => closestDialogOrSelf(rootRef.current),
+  });
+
   const handleSelect = React.useCallback(
     async (entityType: string) => {
       if (readOnly || disabled) return;
@@ -265,15 +275,16 @@ export const PolymorphicPicker: React.FC<PolymorphicPickerProps> = ({
         onError?.(msg);
       } finally {
         setIsLookingUp(false);
+        returnFocus(() => rootRef.current?.querySelector<HTMLElement>('[role="toolbar"] button'));
       }
     },
-    [readOnly, disabled, onError, onSelect]
+    [readOnly, disabled, onError, onSelect, returnFocus]
   );
 
   const triggerDisabled = disabled || isLookingUp || catalog.length === 0;
 
   return (
-    <div className={mergeClasses(styles.root, className)} data-testid="polymorphic-picker">
+    <div className={mergeClasses(styles.root, className)} data-testid="polymorphic-picker" ref={rootRef}>
       {error && (
         <MessageBar intent="error" data-testid="polymorphic-picker-error">
           <MessageBarBody>{error}</MessageBarBody>

@@ -287,11 +287,140 @@ Failure without it: renaming an `OutputWidgetType` value compiles and silently b
 
 ---
 
+### DEF-007 — SmartTodo code page keeps a divergent fork of the `SmartToDo` component
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-18 |
+| **Source** | DEF-002 execution (#2802, PR #2906): the "delete it if it is a copy" check |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2907 |
+
+**Description**
+
+DEF-002 said to delete the SmartTodo code page's `SmartToDo.tsx` if it was a copy of the package's. It is not a copy. The code page's version is 1,101 lines and the package's is 754; the diff is 585 lines added and 238 removed. The code page's version also has about ten features the package's lacks:
+- multi-select (`selectedIds`, `onToggleSelect`);
+- search;
+- `orientation`;
+- `hideHeader`;
+- `onSettingsOpenerReady`;
+- a regarding filter.
+
+LegalWorkspace uses the package component through an 89-line shim. That leaves two implementations of one feature. A fix made in one does not reach the other, so the standalone Smart To Do page and the workspace section behave differently for the same user and data.
+
+**Entry-points**
+
+- `src/solutions/SmartTodo/src/components/SmartToDo.tsx`
+- `src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/SmartToDo.tsx`
+- `git diff --no-index --stat src/solutions/SmartTodo/src/components/SmartToDo.tsx src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/SmartToDo.tsx`
+
+**Suggested fix**: move the code page's extra features into the package component as optional props, then make the code page a thin host, as LegalWorkspace already is.
+
+**Estimated effort**: 1–2 days (feature work in the package and a regression pass on both hosts)
+**Blockers**: none
+**Related**: DEF-002, ADR-012 2026-11-18 amendment
+
+---
+
+### DEF-008 — `CommunicationPage` is reachable from the secure-child ribbon, not dead (P-12 rescoped)
+
+| Field | Value |
+|---|---|
+| **Status** | Done on merge of the `work/def-008-grid-new-email-message` PR. On the owner's spec, the communications grid offers "New Email", which opens the composer "Related to" the host, and "New Message", which opens the form's Messages modal, and no longer the OOB form. The secure-ribbon command became "New Email". CommunicationPage was moved to `docs/archive/code-pages/`. |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-18 |
+| **Source** | DEF-003 execution (#2803, PR #2906): the "delete only if nothing imports or deploys it" check |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2908 |
+
+**Description**
+
+P-12 called `src/client/code-pages/CommunicationPage` a dead prototype. It is not, so it was not deleted:
+- The secure-child ribbon's "New Message" command opens web resource `sprk_communicationpage`, and only this folder builds it.
+- Ontology task 188 changed it in #2812.
+
+It is also not deployed on DEV, so the command has no page to open there. Its `provenance.ts` has drifted from the package's: the package's copy has the `RecordNameMatch` provenance and the code page's has none. Either the command is live and needs a current, deployed page, or it is dead and both the ribbon command and the page should go.
+
+**Entry-points**
+
+- `src/client/webresources/js/sprk_secure_child_ribbon.js:346`
+- `src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js:346`
+- `src/client/code-pages/CommunicationPage/src/components/provenance.ts`
+- `src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts`
+
+**Suggested fix**: the owner decides whether "New Message" on secure-child records stays.
+- If it stays: point it at the package's compose surface, or rebuild the page on the package and deploy it.
+- If it goes: remove the ribbon command and the folder together.
+
+**Estimated effort**: 2–4 hours once decided
+**Blockers**: owner decision on the ribbon command
+**Related**: DEF-003, #2812
+
+---
+
+### DEF-009 — Four nav-prop discovery copies remain after #2803/#2804
+
+| Field | Value |
+|---|---|
+| **Status** | Done on merge of the `work/def-009-nav-prop-copies` PR (three copies folded in; the ribbon script stays a recorded copy) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-18 |
+| **Source** | DEF-003/DEF-004 execution (#2803, #2804): the brief limited the de-duplication to the Pattern D packages |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2909 |
+
+**Description**
+
+The companion PR folds three private copies of the ManyToOne nav-prop metadata query into the shared `discoverNavProps` in `@spaarke/ui-components`. It also adds the ArchTest ratchet `NavPropDiscoveryRatchetTests`. Four copies outside those packages are left (`discoverTodoNavProps` was folded in too), and they sit in the ratchet's baseline, plus one generated SpaarkeMaster copy the scan does not cover. The shared function now lowercases the entity name and warns on an empty result; none of these copies does either. A wrong-case entity name therefore makes these paths bind no navigation property, and their record writes then fail without a warning.
+
+**Entry-points**
+
+- `src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts:94`
+- `src/solutions/Notepad/src/hooks/discoverMemoNavProps.ts:88`
+- `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx:103`
+- `src/client/webresources/js/sprk_secure_child_ribbon.js:225`, plus `src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js` (not scanned)
+- `dotnet test tests/Spaarke.ArchTests --filter NavPropDiscoveryRatchetTests`
+
+**Suggested fix**: replace each copy with `discoverNavProps` and remove its baseline entry; the ratchet fails on a stale entry. The ribbon script has no module system, so it may need to stay as a copy with a recorded reason.
+
+**Estimated effort**: half a day
+**Blockers**: the companion de-duplication PR merges first
+**Related**: DEF-003, DEF-004
+
+---
+
+### DEF-010 — LegalWorkspace `CreateMatter/matterService.ts` carries a dead `MatterService` class
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-20 |
+| **Source** | Adversarial review of the DEF-009 change (#2909, branch `work/def-009-nav-prop-copies`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2931 |
+
+**Description**
+
+`src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts` holds a `MatterService` class (matter create, file upload, follow-on actions) that nothing instantiates. The file's only importer is `FilePreview/FilePreviewDialog.tsx`, for `searchUsersAsLookup`; the live matter wizard is `Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts`. The DEF-009 change folded this file's nav-prop copy into the shared `discoverNavProps`, but the code never runs. The dead class is a third copy of the matter create path: a matter-create fix (payload shape, nav-prop binding, upload) can land in the wrong file, and duplication sweeps keep counting it.
+
+**Entry-points**
+
+- `src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts` (class `MatterService`, `_discoverNavProps`, `_resolveNavProp`)
+- `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx:18` (the only importer)
+- `cd src/solutions/LegalWorkspace && npm run typecheck && npx vite build`
+
+**Suggested fix**: delete the class and the helpers only it uses; keep the exported `search*AsLookup` functions (or point `FilePreviewDialog` at the shared ones). Check `formTypes.ts` / `wizardTypes.ts` for other importers first.
+
+**Estimated effort**: 1–2 hours
+**Blockers**: #2909 merges first
+**Related**: DEF-009, ADR-012
+
+---
+
 ### ISS-004 — Open-in-desktop is implemented on nine surfaces with different behaviour (P-1)
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on branch `fix/open-in-desktop-iss-004` (2026-11-17). Owner decision: Office files open in the Office app in the same tab; every other file downloads through `/content` (not the SharePoint webUrl, which a read-only user on a secure record cannot open). All surfaces use `openInDesktopApp` in `@spaarke/ui-components`. Closes when that PR merges. |
+| **Status** | Fixed by #2895 (merged 2026-11-18). Owner decision: Office files open in the Office app in the same tab; every other file downloads through `/content` (not the SharePoint webUrl, which a read-only user on a secure record cannot open). All surfaces use `openInDesktopApp` in `@spaarke/ui-components`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 finding P-1; re-verified by grep in task 034 (three more call sites than the review listed) |
@@ -325,7 +454,7 @@ The Office add-ins differ on purpose and are out of scope. Failure: the same cli
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed by #2905 (open 2026-11-18). Both projects type-check clean; LegalWorkspace pins 44 shared-lib `noUnusedLocals` findings in `tsc-baseline.json` (ratchet). Gated in each `build` script and in `ci-standalone-checks.yml` `client-typecheck`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Found in passing, tasks 032 and 033 (`notes/032-legal-workspace.md`, `notes/033-document-operations.md`) |
@@ -404,6 +533,42 @@ The BFF URL normalizer is `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.
 **Estimated effort**: 30 minutes
 **Blockers**: none
 **Related**: ISS-006 (same review)
+
+---
+
+### ISS-008 — Communications grid and email page glue for New Email / New Message has no tests
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-22 |
+| **Source** | Code review of #2938 (DEF-008 / #2908), finding 4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2948 |
+
+**Description**
+
+#2908 added "+ New Email" and "+ New Message" to the communications grid page, and a "Related to" prefill to the email composer page. The shared `@spaarke/ui-components` code (`conversationPanelLaunch`, `normalizeRecordRef`, `parseComposeRegarding`) and the PCF hook (`useConversationPanelOpenRequest`) have tests. The page-level glue does not, because neither solution has a test runner.
+
+The page code has branches that no test covers. Examples:
+- the form id must equal the scoped id;
+- "New Message" is offered only on a record form;
+- the three outcomes of the record-scoping parser;
+- the composer reading the `compose`/`regarding*` parameters from the URL or the `data` envelope.
+
+A regression in any of these ships green. "New Email" would open with no "Related to", or "New Message" would show its "did not respond" alert where it should open. Only a hand check on DEV would catch it.
+
+**Entry-points**
+
+- `src/solutions/sprk_communicationspage/src/main.tsx`: `parseRegardingEnvelope` (85), `resolveHostRecord` (163), `newEmail` (180), `newMessage` (200), `HOST_COMMANDS` (218)
+- `src/solutions/EmailPage/src/main.tsx:181`, where `parseComposeRegarding` reads the top-level or `data` parameters
+- Neither solution's `package.json` has a `test` script. `src/solutions/ApExport` and `src/solutions/AllDocuments` do and can be copied.
+
+**Suggested fix**: move the page logic into small modules without changing behaviour. Add a Jest or Vitest setup copied from a solution that has one. Write tests that fail when each branch above is broken.
+
+**Estimated effort**: half a day to one day
+**Blockers**: none
+**Related**: DEF-008 (#2908), PR #2938, PR #2947
 
 ---
 ## Closed

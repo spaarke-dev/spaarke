@@ -19,6 +19,8 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 export interface RecordTemplateHeaderFact {
   label: string;
   value: string;
+  /** Task 020. A quieter line under the value (the invoice's Review detail). Absent or empty = none. */
+  secondary?: string;
 }
 
 export interface RecordTemplateHeaderProps {
@@ -90,6 +92,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     overflowWrap: 'anywhere',
   },
+  factSecondary: {
+    display: 'block',
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground3,
+  },
 });
 
 export const RecordTemplateHeader: React.FC<RecordTemplateHeaderProps> = ({ name, typeLabel, facts, access }) => {
@@ -104,7 +113,14 @@ export const RecordTemplateHeader: React.FC<RecordTemplateHeaderProps> = ({ name
           {facts.map(fact => (
             <div key={fact.label} className={styles.fact}>
               <dt className={styles.factLabel}>{fact.label}</dt>
-              <dd className={styles.factValue}>{fact.value}</dd>
+              <dd className={styles.factValue}>
+                {fact.value}
+                {fact.secondary && (
+                  <span className={styles.factSecondary} data-testid="record-template-fact-secondary">
+                    {fact.secondary}
+                  </span>
+                )}
+              </dd>
             </div>
           ))}
           {access !== undefined && (

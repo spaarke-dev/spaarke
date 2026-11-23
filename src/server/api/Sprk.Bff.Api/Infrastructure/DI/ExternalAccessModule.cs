@@ -63,6 +63,11 @@ public static class ExternalAccessModule
         Guid.Parse("42f4102c-1092-f111-b8dc-7ced8ddc4a05"), // Work Assignments
         Guid.Parse("583a2a33-1092-f111-b8dc-7ced8ddc4a05"), // Matters
         Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (workforce; CIAM only when the partner switch is on - task 028 / r3 task 011)
+        // spaarke-SPA-external-access-platform-r4 task 023b (owner 2026-11-22): the record template's Documents list, a NEW grid
+        // configuration row (not 3af4102c, which also backs the workspace widget). Defined in
+        // config/external-record-documents.gridconfiguration.json, created by scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1.
+        // Its rows come from the record route, not this module's fetch, so no scope, column or route change goes with it.
+        Guid.Parse("286be8b4-f96f-4d5a-b1d5-82fd83ca9693"), // External record documents
     };
 
     /// <summary>
@@ -468,6 +473,11 @@ public static class ExternalAccessModule
         // layoutXml cells and the configjson columns map); (c) the scope-dimension attributes; (d) the
         // /record default projection (primary id + primary name, from EntityDefinitions — each descriptor
         // DECLARES its PrimaryNameAttribute and Register refuses a list missing either). NOTHING ELSE.
+        // EXCEPTION to rule (a) (spaarke-SPA-external-access-platform-r4 task 023b, 2026-11-22): grid 286be8b4 ("External
+        // record documents") has a layout-only cell `sprk_summary`. That grid's rows come from the record route
+        // (/{root}/{id}/documents, which projects the summary itself), never from this module's fetch, so `sprk_summary` is
+        // deliberately NOT readable here. A re-derivation must not add it from that grid; widening the documents module to AI
+        // summaries needs its own UAC review.
         // Task 134's rule (b) — the columns of the internal MDA sibling views the grid's ViewSelector offered
         // — is GONE: inside the external SPA the shared DataGrid itself shows no view picker and never lists
         // the saved queries, whatever props reach it (DataGridExternalHost.tsx: the provider at the SPA root

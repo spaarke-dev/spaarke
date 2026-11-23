@@ -96,6 +96,7 @@ import {
   sendComposedEmail,
 } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing)
@@ -165,25 +166,6 @@ export interface ICreateReportCardWizardProps {
    * Defaults to `false`.
    */
   lockAssociation?: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Adapter: build a webApi-shaped object from IDataService for CreateRecordWizard
-// ---------------------------------------------------------------------------
-
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +318,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   }, []);
 
   // -- WebApi adapter for CreateRecordWizard ---------------------------------
-  const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // -- Custom Next Steps card set: Send Email / Add To Do / Assign Work ------
   // (design.md §5.9, task 040 — mirrors CreateInvoiceWizard's task 030 set.)

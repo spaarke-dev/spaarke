@@ -38,6 +38,7 @@ import { applyFieldMappings } from '../../services/FieldMappingService';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -111,18 +112,7 @@ export class TodoService {
     if (!this._entityService) {
       const dataService = this._dataService;
       // EntityCreationService expects IWebApiWithCreate (createRecord returning { id }).
-      // Same adapter shape as MatterService's constructor (matterService.ts:142-159) and
-      // TodoWizardDialog's existing webApiAdapter for the send-email path.
-      const webApiAdapter = {
-        createRecord: async (entityName: string, data: Record<string, unknown>) => {
-          const id = await dataService.createRecord(entityName, data);
-          return { id };
-        },
-        retrieveRecord: (entityName: string, id: string, options?: string) =>
-          dataService.retrieveRecord(entityName, id, options),
-        retrieveMultipleRecords: (entityName: string, options?: string) =>
-          dataService.retrieveMultipleRecords(entityName, options),
-      };
+      const webApiAdapter = createWebApiFromDataService(dataService);
       this._entityService = new EntityCreationService(webApiAdapter, this._authenticatedFetch, this._bffBaseUrl);
     }
     return this._entityService;

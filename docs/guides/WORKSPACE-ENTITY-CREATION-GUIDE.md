@@ -55,7 +55,7 @@ The Legal Workspace provides multi-step wizards for creating Dataverse entity re
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **MatterService** | shared `components/CreateMatterWizard/matterService.ts` | Matter-specific orchestrator (entity payload, follow-on actions). **Moved out of the solution.** LegalWorkspace keeps a same-named `components/CreateMatter/matterService.ts`, but it is no longer the wizard orchestrator — it survives only for `searchUsersAsLookup`, consumed by `FilePreview/FilePreviewDialog.tsx` |
+| **MatterService** | shared `components/CreateMatterWizard/matterService.ts` | Matter-specific orchestrator (entity payload, follow-on actions). **Moved out of the solution.** LegalWorkspace's residual `components/CreateMatter/` copy was deleted in #2968 (#2866); `FilePreview/FilePreviewDialog.tsx` now uses `searchUsersAsLookup` from the shared `services/userLookup.ts` |
 | **ProjectService** | shared `components/CreateProjectWizard/projectService.ts` | Project-specific orchestrator. **Moved out of the solution** — `src/solutions/LegalWorkspace/src/components/CreateProject/` no longer exists |
 | **xrmProvider.ts** | `services/xrmProvider.ts` | Frame-walk to find Xrm global, user ID, SPE container resolution |
 | **`@spaarke/auth`** | shared library | OBO token acquisition for BFF API calls — wizards call `authenticatedFetch` from `@spaarke/auth` per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md). The legacy `services/bffAuthProvider.ts` was deleted in Auth v2 task 031. |
@@ -347,10 +347,6 @@ types/
 ### Solution (`src/solutions/LegalWorkspace/src/`)
 
 ```
-components/CreateMatter/           # RESIDUAL — the wizard itself is gone (see note below)
-│   ├── matterService.ts          # NOT the orchestrator any more: kept for searchUsersAsLookup
-│   ├── formTypes.ts              # Matter form state types
-│   └── wizardTypes.ts            # IUploadedFile et al.
 services/
 │   ├── EntityCreationService.ts  # Re-export from shared lib
 │   └── xrmProvider.ts            # Xrm frame-walk, userId, container resolution
@@ -363,8 +359,8 @@ config/
 > half-finished: the shared copies became the live ones while the LegalWorkspace originals stayed on
 > disk, unreferenced, for months. They were deleted in three passes (`144ef43c4` — 27 files,
 > `b866f95bb` — 47 files, `1dc190f42` — the `CloseProjectDialog` twin), so
-> `components/CreateProject/` no longer exists and `components/CreateMatter/` is a three-file
-> residue. **Read the shared `Create{Entity}Wizard/` directories, not this solution tree**, when
+> `components/CreateProject/` no longer exists; the three-file `components/CreateMatter/` residue
+> went in #2968 (#2866). **Read the shared `Create{Entity}Wizard/` directories, not this solution tree**, when
 > changing wizard behavior. This guide described the deleted files as current until 2026-09-04.
 
 ### BFF API (Server-Side)

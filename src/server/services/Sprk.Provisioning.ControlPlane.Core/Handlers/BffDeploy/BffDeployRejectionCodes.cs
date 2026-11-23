@@ -215,6 +215,20 @@ public static class BffDeployRejectionCodes
     /// <summary>The <c>az</c> CLI slot-swap invocation threw (az not on PATH, timeout, IO fault) — swap not attempted.</summary>
     public const string SlotSwapInfraFault = "slot-swap-infra-fault";
 
+    /// <summary>
+    /// The swap did not complete within <c>BffDeployOptions.SlotSwapTimeout</c>. Azure may still be swapping,
+    /// so production may already serve the new build. A retry's slot guard waits for that swap before it
+    /// redeploys (ISS-033).
+    /// </summary>
+    public const string SlotSwapTimeout = "slot-swap-timeout";
+
+    /// <summary>
+    /// The scheduled-jobs slot guard found a swap in flight on the site ("prepared for swap") and the swap did
+    /// not finish within <c>BffDeployOptions.SlotSwapTimeout</c>. An operator completes or cancels it
+    /// (ISS-033). Nothing was deployed.
+    /// </summary>
+    public const string SlotSwapInProgress = "slot-swap-in-progress";
+
     // ---- smoke-test + rollback failures ----
 
     /// <summary>

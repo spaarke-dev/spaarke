@@ -23,7 +23,6 @@
     "@microsoft/applicationinsights-web": "^3.3.11",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
-    "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@types/d3-force": "^3.0.10",
     "@types/diff": "^7.0.2",
