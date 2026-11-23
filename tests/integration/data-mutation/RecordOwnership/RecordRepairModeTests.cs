@@ -1882,6 +1882,7 @@ internal sealed partial class RepairWorld
                 RoleAnswer(query) // task 052f fix round: the app identity's roles (the read depth)
                 ?? CascadeChildAnswer(query) // task 052f: a per-row Assign-cascade child read
                 ?? SecureUnitAnswer(query) // task 052g: the guard's read of the Secure Record unit, when a test faults it
+                ?? PrivateMessageReadAnswer(query) // fm task 056: the private-message guard's read, when a test faults it
                 ?? (ThreadReadFault is { } threadFault && query.EntityName == RecordThreadFiling.ThreadTable
                     ? Task.FromException<EntityCollection>(threadFault)
                     : Task.FromResult(Directory.Answer(query))));
