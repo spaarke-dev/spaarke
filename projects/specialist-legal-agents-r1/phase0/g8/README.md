@@ -124,6 +124,8 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 6. **Word (web):** open a **blank test document**, never a real NDA or anything in `answer-key/`. In the Copilot pane, pick the agent (agent list or @mention) and send `Call spike_echo with the message g8-P2-word`.
 7. **Teams:** open the agent's chat and send `Call spike_echo with the message g8-P2-teams`.
 
+**If an approval card appears at any step, click Cancel.** None of these prompts should need one; a card means the model chose a non-read-only tool (for example `spike_write`; Copilot shows a per-call card for it, mcp-r1 T4). Cancel means nothing runs. Note the step and the tool the card names, because it is a result too.
+
 **If the spike tools are gone** (041 has deployed), use `Call spaarke_show_decisions` in place of `spike_echo` everywhere. It is read-only and has no required input. Skip `spike_whoami` in that case.
 
 **Afterwards:** tell this session you are done, with the times and screenshots. This session checks App Insights per minute and records the result. Then remove the agent where you uploaded it (by **2026-11-30**, latest) and tell copilot-platform-coordination it is gone.
