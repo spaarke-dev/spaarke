@@ -1,6 +1,6 @@
 # Specialist Legal Agents — Program Design (`specialist-legal-agents-r1`)
 
-> **Status:** Draft v0.1, umbrella program design. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
+> **Status:** Draft v0.2, umbrella program design. v0.2 (2026-11-23) adds §3.9 (function vs persona framing, D-A12) and Phase 0 test G5. The next step is to split off the Phase 0 child and run `/design-to-spec` on it (§4). `/design-to-spec` has not been run.
 > **Date:** 2026-11-23
 > **Author:** Ralph Schroeder + Claude Code
 > **Source:** [notes/source/design-synopsis-2026-11-22.md](notes/source/design-synopsis-2026-11-22.md), the owner's synopsis of 22 Nov 2026 (verbatim copy). This document keeps the synopsis's design. It changes four things: the primitives table is corrected against code (§6), live Copilot evidence is folded in (§7), the Phase 0 scope is narrowed to what that evidence leaves open (§8), and coordination points and ADR tensions are added (§10, §11).
@@ -115,6 +115,47 @@ The autonomy ladder is triage only → prepare (default) → auto-send (GREEN, s
 
 **Decision rule `[Synopsis]`.** Conversational and tuned: agent. Multi-step, long-running, approval-gated or scheduled: Cowork skill. Data or actions: the single connector. Each procedure is written once in the skill library and packaged both ways.
 
+### 3.9 Framing: is an agent a function or a persona? (D-A12, proposed 2026-11-23)
+
+**The question (owner).** The "legal & IP professional team" could be framed by **function** (an agreement reviewer, a patent application drafter, a trademark searcher), by **persona** (the set of functions a given legal professional needs), or by a mix of both.
+
+**What exists today is function-shaped.** The tenant's Plugins page shows the following, all built on the accelerator r1 branch:
+- Chat tab: the agents *Spaarke NDA Review*, *Spaarke Legal Review* and *Spaarke Legal Hold Review* (Agent Builder), plus *Spaarke AI* and the Copilot Studio agent *Spaarke Dataverse MCP*.
+- Cowork tab: the skills `nda-review`, `accelerator-setup` and `legal-hold-review`, plus the *Spaarke MCP* and *Spaarke MCP spike* connectors.
+
+Each of those agents is one task. That was the right shape for a proof of value, but it does not scale: one agent per function becomes dozens of near-identical entries in the `@` picker, each needing its own profile.
+
+**Proposed answer: both, at different layers. Functions are the machinery; personas are the configuration and the front door.**
+
+| Layer | Unit | Examples | What it owns | Owned by |
+|---|---|---|---|---|
+| **Function** (capability) | One legal task, built once: a `SKILL.md` + a server-side Action/tool (§6 "Skill", "Tool") | `spaarke-nda-review`, `spaarke-contracts-agreement-review`, `spaarke-patents-claim-drafting`, `spaarke-trademarks-clearance-search` | The procedure, deterministic checks, output contract, accuracy claims, its **golden set** and its **position schema** (which positions it reads) | Spaarke (L0/L1) |
+| **Archetype** (persona) | A role template: a set of functions + default positions per function + authority and autonomy ceiling + escalation and voice | "Commercial contracts counsel" = {NDA review, agreement review, …}; "Patent prosecution associate" = {claim drafting, office-action response, prior-art search} under a supervising partner | Which functions it may run, the **authority ratchet**, defaults for each function's positions | Spaarke or firm knowledge team (L1/L2) |
+| **Agent Instance** | One attorney's tuned archetype | "Jane's commercial contracts counsel" | The owner's positions per function, thresholds, voice, golden-set additions (L3), plus matter overlays (L4) | Attorney |
+
+Why each concern sits where it does:
+- **Golden sets and accuracy are per function.** The NDA corpus and expected outputs (§9) test a task, not a person. A persona's eval is the union of its functions' sets, run with that instance's positions.
+- **Positions belong to the function's domain, but ownership follows the layers.** The profile stores positions keyed by function (`positions["spaarke-nda-review"].term = …`). The NDA positions an attorney tunes are used wherever NDA review runs for them.
+- **Authority belongs to the role, not the task.** The same trademark search is fine as a paralegal's draft and needs review before it reaches a client. Autonomy ceilings, send and file rights, and supervision are archetype and instance properties. So the ratchet lives in the persona layer.
+- **Copilot mechanics force function-level skills anyway.**
+  - Cowork cannot call agents (Ignite: Frontier preview), so every function must exist as a standalone skill.
+  - A declarative agent's instructions are capped at 8,000 characters, so a persona agent cannot hold its functions' procedures. It routes to skills and tools.
+  - Skills are reachable under `/` (E1/E2); agents under `@` (E5).
+- **Distribution follows practice areas.** Admins assign plugins to groups (Agent 365), and groups map to practice teams. The agreed naming rule `spaarke-{area}-{capability}` already says it: the **area** is the persona and package grouping, and the **capability** is the function.
+
+**Area and role are two axes; do not build one agent per area × role.** The synopsis's archetypes combine them ("CRE *partner*", "biotech patent *associate*"). Proposed:
+- **one front-door declarative agent per practice area** (`spaarke-contracts`, `spaarke-patents`, `spaarke-trademarks`, …), whose functions are that area's skills;
+- **role (partner / associate / paralegal) as a profile dimension** that sets authority, autonomy, output weighting and the supervision link.
+
+A firm can still publish a role-named agent if it wants one; it is the same archetype with a role preset. This avoids a combinatorial catalog and keeps routing in Copilot's picker manageable.
+
+**Consequences:**
+- **OD-2 (NDA first) stands.** In this model NDA review is the first *function* of the first *area archetype* (commercial contracts). Phase 1 should deliver it as the contracts archetype with NDA review as its first function. If a second existing function (for example the agreement review behind *Spaarke Legal Review*, to be checked) can be added cheaply, Phase 1 also proves routing between functions within one persona.
+- **The existing single-function agents** (*Spaarke NDA Review*, *Legal Review*, *Legal Hold Review*) become either presets of their area agent or are retired in favour of it. That is a coordination item with accelerator r1 (D-A11).
+- **New Phase 0 test G5 (§8):** can a persona-level declarative agent route reliably among its functions?
+
+**Open for the owner:** confirm the three-layer model, and whether the persona grouping is the **practice area** (proposed) or the **professional role**.
+
 ## 4. Program structure (OD-3)
 
 This folder is the umbrella. It holds this design, the decision log, the coordination register and the Phase 0 go/no-go record. It carries no implementation tasks of its own. Each phase is a child project registered under the same Epic. A child starts only after the previous gate passes.
@@ -212,6 +253,13 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 
 **G4 — Declarative agent reach in Word and Outlook.** T1 tested only the bare connector there. *Record:* whether a declarative agent with our MCP action is addressable and can call tools in Word and Outlook, and whether widgets render. This is informational and sets the surface list for Phase 1.
 
+**G5 — Function routing inside a persona agent (§3.9).** Can one area-level declarative agent route each request to the right function skill or tool?
+- *Setup:* one agent with at least three functions (for example NDA review, agreement review, legal hold review).
+- *Measure:* mixed prompts plus out-of-scope controls, in Chat.
+- *Pass:* at least 95% correct routing, and no function invoked for the controls (threshold to confirm in the Phase 0 spec).
+- *If it fails:* the front door falls back to one agent per function, with the persona kept server-side as profile only.
+- This decides D-A12's delivery shape, not the go/no-go.
+
 **Code inventory follow-ups (no spike; Phase 0 desk work):**
 - **I-1 Tool surface:** which surface the profile governs (MCP catalog vs `IAnalysisToolHandler` vs `IAiToolHandler`), and whether the chat Confirmation Gate (`SideEffectGateAIFunction`) also applies on the MCP path.
 - **I-2 Gate policy input:** can `RequiresConfirmation` take a policy argument (the ratchet) without forking the one gate, given ADR-039 "one dispatch protocol".
@@ -273,6 +321,7 @@ The paths are proposals. The human chooses the path for each tension before the 
 | D-A9 | Archetype vs Action Engine Template | Phase 1 defines Archetype minimally; the Action Engine adopts it if and when it resumes | Owner, with action-engine-r1 |
 | D-A10 | What "Skill" means here | Both: the `SKILL.md` package component (shared with the accelerator) and server-side `sprk_analysisskill` prompt fragments; name them differently in the spec | Phase 0 spec |
 | D-A11 | Ownership of the NDA declarative agent | This program owns the profile-driven NDA specialist; the accelerator keeps file-based tiers. To agree with accelerator r1 | Owner + accelerator r1 |
+| **D-A12** | **Framing: function, persona, or both (§3.9)** | Both, in layers: functions (skill + Action, with golden set and position schema) are the machinery; archetypes (persona) are configuration and the Chat front door; instances are per attorney. One agent per **practice area**, with role as a profile dimension; validate routing in G5 | **Owner.** Proposed 2026-11-23, not yet decided |
 
 ## 13. Market position `[Synopsis]`, summary
 
