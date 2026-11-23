@@ -121,6 +121,7 @@ public sealed partial class DecisionCommitServiceTests
 
         result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
         // The outcome origin/master gives a row that changes again after its re-read (the second mismatch is reported as a failed close).
+        // DI-167 (#3028): CloseSignalAsync's own signal_changed outcome for this case is unreachable; this pins today's behaviour.
         result.Signals.Single(s => s.SignalId == busy).Should().Be(new DecisionCommitSignal(busy, "Unchanged", "signal_close_failed"));
         result.Signals.Where(s => s.SignalId != busy).Should().HaveCount(17).And.OnlyContain(s => s.State == "Acted" && s.Warning == null);
         result.Warnings.Should().Equal(["signal_close_failed"]);
@@ -271,5 +272,47 @@ public sealed partial class DecisionCommitServiceTests
         replay.Signals.Single(s => s.SignalId == open[0]).Warning.Should().Be("signal_close_not_checked");
         rig.Status(open[0]).Should().Be(Open);
         rig.Records.Should().ContainSingle("the replay writes no second record");
+    }
+    [Fact]
+    [Trait("status", "new")]
+    public async Task T205_TheClosesOverlap_AtMostCloseParallelismAtOnce_AndTheResultsAndWarningsKeepTheReviewsOrder()
+    {
+        const int items = 8;
+        var rig = RowRig(items);
+        var order = RowAlso(items).Prepend(Primary).ToList();
+        // Later items answer sooner (the reverse of the review order), so completion order is not the review order.
+        rig.SignalUpdateDelay = id => TimeSpan.FromMilliseconds((items - order.IndexOf(id)) * 25);
+        var failing = RowItem(1);
+        var reclosed = RowItem(6);
+        var systemClosed = false;
+        rig.BeforeSignalUpdate = id =>
+        {
+            if (id == failing)
+                throw new TimeoutException("no answer");
+            if (id != reclosed || systemClosed)
+                return;
+            systemClosed = true; // a Classification trigger closes it ConditionCleared between the read and the update
+            rig.Signals[id]["sprk_signalstatus"] = new OptionSetValue(Resolved);
+            rig.Signals[id]["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionConditionCleared);
+            rig.Signals[id]["sprk_resolvedon"] = Now.UtcDateTime;
+            rig.Versions[id]++;
+        };
+
+        var result = await rig.CommitAsync(PathBReview(also: RowAlso(items)));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.PeakSignalUpdatesInFlight.Should().BeGreaterThan(1, "the closes run at the same time")
+            .And.BeLessThanOrEqualTo(DecisionCommitService.CloseParallelism, "never more than the bound at once");
+        result.Signals.Select(s => s.SignalId).Should().Equal(order, "results are in the review's order, not the order closes finished");
+        result.Signals.Single(s => s.SignalId == failing).Warning.Should().Be("signal_close_failed");
+        result.Signals.Single(s => s.SignalId == reclosed).Warning.Should().Be("reclosed_after_system_resolution");
+        result.Warnings.Should().Equal(["signal_close_failed", "reclosed_after_system_resolution"], "warnings follow the review's order");
+        foreach (var id in order.Where(id => id != failing))
+        {
+            rig.Status(id).Should().Be(Resolved);
+            rig.LinkedRecord(id).Should().Be(RecordId);
+        }
+
+        rig.Status(failing).Should().Be(Open);
     }
 }

@@ -65,9 +65,15 @@ singleton shared by concurrent requests.
   paged read's fault paths were untested. Fixed with a `SignalPageFaults` rig knob and three tests (fault before the
   record gives `Unavailable`/`SignalUnreadable` and writes nothing; fault after the record falls back to a read by id per
   item and closes all; fault on a replay reports `signal_close_not_checked` and leaves the item open). A mutation that
-  drops the per-id fallback fails the second one. Known limits kept: closes do not run concurrently on the synchronous
-  fakes (K3; outcomes are by index); the read-then-close window is a little wider (K2; a row reopened in that window is
+  drops the per-id fallback fails the second one. Known limit kept: the read-then-close window is a little wider (K2; a row reopened in that window is
   reported `closed_during_review`, a closed one still meets the row-version check).
+- Review round 2 (main session's Opus review of PR #3027, F2): no test ran the closes concurrently. Added a rig
+  knob that delays each row-version update off the caller's thread (later items answer sooner) and counts updates
+  in flight; `T205_TheClosesOverlap_*` asserts peak in flight > 1 and <= `CloseParallelism`, results in the review's
+  order and warnings in the review's order. Checked by temporary breaks: collecting results in completion order
+  fails it (order differs at index 0), removing the semaphore fails it (peak 8). Doc fix: the memo keeps a core
+  type's table only after it passes the core-type check. DI-167 (#3028) referenced on the `signal_changed` pin.
+- `Sprk.Bff.Api.Tests` filtered (`DecisionCommit|Signals`, after round 2): 5378 passed, 0 failed, 6 skipped.
 - `Sprk.Bff.Api.Tests` filtered (`DecisionCommit|Signals|Mcp|DecisionCapability|DecisionPlan|OntologyWriter`):
   5570 passed, 0 failed, 7 skipped. `Spaarke.ArchTests` full: 2783 passed, 0 failed. BFF build with
   `-warnaserror`: 0 warnings. No package changes; `dotnet list package --vulnerable --include-transitive`: none.
@@ -86,10 +92,11 @@ singleton shared by concurrent requests.
 Uncompressed: `Sprk.Bff.Api.dll` +5,632 bytes, its PDB +852. Total 41.5 MB, under the 55 MB review line.
 
 rework: fix-round-1 task 205 (review F2: paged-read fault tests)
+rework: fix-round-2 task 205 (review F2: concurrent-close test; memo doc)
 
 ## Findings outside scope (for the main session to file)
 
-- `CloseSignalAsync`'s `signal_changed` outcome is unreachable: a second version mismatch is caught by the general
+- Filed as DI-167 (#3028): `CloseSignalAsync`'s `signal_changed` outcome is unreachable: a second version mismatch is caught by the general
   catch (`attempt == 1`) and reported as `signal_close_failed`. Behaviour kept as is (pinned by
   `T205_OneItemsRowVersionKeepsChanging_*`); the code and the `signal_changed` text disagree.
 - The route ledger entry for `POST /api/v1/signals/{signalId:guid}/decision` (uac-r2's

@@ -242,10 +242,6 @@ public sealed class SignalCoreRecordAccess
                     .RetrieveAsync(RecordTypeRefEntity, coreTypeId, [RecordLogicalNameColumn], ct)
                     .ConfigureAwait(false))
                     .GetAttributeValue<string>(RecordLogicalNameColumn)?.Trim().ToLowerInvariant();
-                if (coreReads is not null && !string.IsNullOrEmpty(logicalName))
-                {
-                    coreReads.Tables[coreTypeId] = logicalName;
-                }
             }
 
             if (string.IsNullOrEmpty(logicalName))
@@ -260,6 +256,9 @@ public sealed class SignalCoreRecordAccess
                 _logger.LogWarning("Signal access: the core record type is not an access-control core type; denying.");
                 return SignalAccessDecision.NotFound;
             }
+
+            // Kept only once the catalog row named a core type (the checks above denied otherwise).
+            coreReads?.Tables.TryAdd(coreTypeId, logicalName);
 
             if (coreReads is null || !coreReads.Readable.Contains((logicalName, coreId)))
             {
@@ -777,9 +776,10 @@ public sealed class SignalCoreRecordAccess
 
     /// <summary>
     /// Ontology task 205 (DI-146): what <see cref="AuthorizeAsync"/> may reuse within ONE commit request, as one caller, asked one Signal
-    /// after another: the table each core-record type's catalog row names (configuration), and each core record (table, id) the caller's
-    /// own read ALLOWED. A denial, a fault or a missing catalog row is never kept, so it is asked again (and denies again). Created per
-    /// request by the commit route and never shared across requests or callers; not thread-safe (the route asks sequentially).
+    /// after another: the table each core-record type's catalog row names (configuration), kept only once it passed the core-type check,
+    /// and each core record (table, id) the caller's own read ALLOWED. A denial, a fault or a missing catalog row is never kept, so it is
+    /// asked again (and denies again). Created per request by the commit route and never shared across requests or callers; not
+    /// thread-safe (the route asks sequentially).
     /// </summary>
     /// <remarks>Component justification (CLAUDE.md section 11). Existing: the per-call reads in <see cref="AuthorizeAsync"/>. Extension: this
     /// is that method's optional parameter, not a new service; the route ledger keeps one <c>AuthorizeAsync</c> body. Cost of doing nothing:

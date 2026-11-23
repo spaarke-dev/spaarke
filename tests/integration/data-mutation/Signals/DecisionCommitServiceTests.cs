@@ -112,6 +112,56 @@ public sealed partial class DecisionCommitServiceTests
 
         /// <summary>Task 205: when it answers true, the writer's paged read of a decision's Signals faults (asked at each read).</summary>
         public Func<bool>? SignalPageFaults { get; set; }
+
+        /// <summary>Task 205: when set, each row-version update first waits this long (per item) off the caller's thread, so the
+        /// route's closes really overlap; the rig's state is then changed under one lock.</summary>
+        public Func<Guid, TimeSpan>? SignalUpdateDelay { get; set; }
+
+        /// <summary>Task 205: the most row-version updates that were waiting at the same time.</summary>
+        public int PeakSignalUpdatesInFlight => Volatile.Read(ref _peakUpdatesInFlight);
+
+        private readonly object _signalGate = new();
+        private int _updatesInFlight;
+        private int _peakUpdatesInFlight;
+
+        private async Task<OrganizationResponse> DelayedUpdateAsync(Entity target, TimeSpan delay)
+        {
+            var now = Interlocked.Increment(ref _updatesInFlight);
+            for (var peak = Volatile.Read(ref _peakUpdatesInFlight); now > peak; peak = Volatile.Read(ref _peakUpdatesInFlight))
+            {
+                if (Interlocked.CompareExchange(ref _peakUpdatesInFlight, now, peak) == peak) break;
+            }
+
+            try
+            {
+                await Task.Delay(delay).ConfigureAwait(false);
+                return ApplyUpdate(target);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _updatesInFlight);
+            }
+        }
+
+        private OrganizationResponse ApplyUpdate(Entity target)
+        {
+            lock (_signalGate)
+            {
+                BeforeSignalUpdate?.Invoke(target.Id);
+                if (target.RowVersion != Versions[target.Id].ToString())
+                {
+                    throw new FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = unchecked((int)0x80060882), Message = "ConcurrencyVersionMismatch" });
+                }
+
+                Log.Add($"close:{target.Id}");
+                var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value);
+                SignalUpdates.Add((target.Id, fields));
+                foreach (var (k, v) in fields) Signals[target.Id][k] = v;
+                Versions[target.Id]++;
+                return new OrganizationResponse();
+            }
+        }
         public List<Entity> ExistingRecords { get; } = new();
 
         /// <summary>Task 161 (D-180, fix round 1 F1-a): how many ACTIVE budgets the matter really has, as the BFF's own (app-only) read
@@ -293,7 +343,10 @@ public sealed partial class DecisionCommitServiceTests
                 .ReturnsAsync((string path, CancellationToken _) => AnswerAsCaller(path));
 
             Org.Setup(o => o.RetrieveAsync("sprk_signal", It.IsAny<Guid>(), It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string _, Guid id, ColumnSet _, CancellationToken _) => Snapshot(id));
+                .ReturnsAsync((string _, Guid id, ColumnSet _, CancellationToken _) =>
+                {
+                    lock (_signalGate) return Snapshot(id);
+                });
             // Task 205: the writer's paged read of a decision's Signals (sprk_signalid IN the page), answered like Dataverse: the rows
             // that exist, each with its row version.
             Org.Setup(o => o.RetrieveMultipleAsync(It.Is<QueryBase>(q => q is QueryExpression && ((QueryExpression)q).EntityName == "sprk_signal"), It.IsAny<CancellationToken>()))
@@ -325,19 +378,7 @@ public sealed partial class DecisionCommitServiceTests
                 .Returns((OrganizationRequest request, CancellationToken _) =>
                 {
                     var target = ((UpdateRequest)request).Target;
-                    BeforeSignalUpdate?.Invoke(target.Id);
-                    if (target.RowVersion != Versions[target.Id].ToString())
-                    {
-                        throw new FaultException<OrganizationServiceFault>(
-                            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80060882), Message = "ConcurrencyVersionMismatch" });
-                    }
-
-                    Log.Add($"close:{target.Id}");
-                    var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value);
-                    SignalUpdates.Add((target.Id, fields));
-                    foreach (var (k, v) in fields) Signals[target.Id][k] = v;
-                    Versions[target.Id]++;
-                    return Task.FromResult(new OrganizationResponse());
+                    return SignalUpdateDelay is { } delay ? DelayedUpdateAsync(target, delay(target.Id)) : Task.FromResult(ApplyUpdate(target));
                 });
 
             PlanReads = new DecisionPlanReadStamp(Ledger, Clock, NullLogger<DecisionPlanReadStamp>.Instance);
