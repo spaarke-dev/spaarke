@@ -72,6 +72,19 @@ Each fix has tests that fail with the fix removed (a mutant of the script, run a
 Counts after fix round 1: 194 59 pass; 193 122 pass (was 115); `Deploy-EbillingFormsViews` 7 pass; ArchTests 114 pass; `FinanceBaseValuesSeamTests` 2 pass.
 
 Note for the main session: a genuine resume is refused if Dataverse stores a pending form text in a different shape than the script wrote it (the comparison normalises insignificant whitespace but nothing more); the safe answer is then to publish the pending edit in the form designer and re-run.
+
+## Fix round 2
+
+Mutants are runs of the same test file against a copy of the script with the fix removed.
+
+| # | Change | Evidence (tests failing when it is removed) |
+|---|---|---|
+| F1 | Every pending-text comparison is case-strict: 194 `-cne` on the form text; 193 `-ceq` on the form text, the view fetchxml and the view layoutxml. The other comparisons in both scripts were listed and checked (`-eq`/`-ne`/`-in`/`-contains`/`-like`): they are on form ids (normalised), the host name, XML element names, kinds, types and counts; none compares pending, re-check or resume text. | 194: `-cne` to `-ne`, 3 fail. 193: `-ceq` to `-eq`, 5 fail (form, view fetchxml, view layoutxml, report, change during the run). |
+| F2 | 193: the view is compared per part. A view whose pending fetchxml differs (layoutxml equal to this run's text), and one whose pending layoutxml differs (fetchxml equal), each refuse (exit 2) with 0 writes. Case-only tests in both scripts (form; view fetchxml and layoutxml in 193; report mode; a case-only change during the run). | 193: fetch comparison dropped, 3 fail (fetchxml-only, case-only fetchxml, K2 post-read-back view); layout comparison dropped, 2 fail (layoutxml-only, case-only layoutxml). |
+| K2 | After each PATCH both scripts read the unpublished text back (`RetrieveUnpublished`) and the pre-publish re-check expects THAT text (the form's formxml; a view's fetchxml and layoutxml), so a Dataverse that normalises the XML on save does not stop the first `-Apply` with exit 1 after the writes. The pre-WRITE check of a re-run still compares with the text the script would write, so after a stop before the publish a normalised pending text is refused (exit 2). Help text of both scripts says so: a first-run mismatch means the pending text is not byte-for-byte this script's edit, inspect it, and publishing the pending edit in the designer clears it. | Read-back not adopted: 194 1 fail, 193 1 fail (the normalise-on-save run publishes). A change made after the read-back is still caught (194 and 193, form and view). The re-run refusal is pinned in both. |
+| K1 | A read that fails before the first write (for example the pending `RetrieveUnpublished` read) ends with "Nothing was written (the error happened before the first write)." instead of "Steps already done stay done". `Get-ErrorTrailer` decides from `$script:WriteStarted`, which is set immediately before each write that is actually sent (not under `-WhatIf`, not in report mode). Exit code kept at 1: 2 is reserved for refusal decisions made before the first write, and a failed read is an error, not a decision. | Flag never set: 194 1 fail, 193 1 fail (after a write the trailer must say partly applied). Trailer always the old text: 194 1 fail, 193 1 fail. |
+
+Counts after fix round 2: 194 68 pass (was 59); 193 135 pass (was 122); `Deploy-EbillingFormsViews` and the ArchTests and `FinanceBaseValuesSeamTests` as below.
 ## Commands for the main session (after review, with the uac-r2 notices)
 
 ```powershell

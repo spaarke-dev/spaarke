@@ -48,11 +48,19 @@
     everything unpublished on sprk_invoice WITHOUT excluding the two target forms; for a target form with pending changes the
     unpublished formxml is read (RetrieveUnpublished) and compared, after XML normalisation, with the text this run would write. Equal
     = a resume; anything else = refuse. The same check runs again right before the publish (a change that appears during the run is a
-    plain error, exit 1, nothing published by that step). If Dataverse stores the pending text in a different shape than it was written
-    in, a genuine resume is refused (the safe direction): publish the pending edit in the form designer, then re-run.
+    plain error, exit 1, nothing published by that step). The comparisons are case-STRICT (a case-only change, e.g. of a label, is
+    someone else's edit, not this run's text).
+
+    IF DATAVERSE NORMALISES THE FORM XML ON SAVE. After each PATCH the script reads the unpublished text back and uses THAT as the text the
+    pre-publish re-check expects, so the first live -Apply is not stopped (exit 1, after the writes) by a harmless normalisation. The
+    pre-WRITE check of a re-run still compares the pending text with the text this run would write (the script cannot know how Dataverse
+    would normalise it): after a stop before the publish, a pending text that Dataverse normalised differently is refused (exit 2,
+    "has unpublished changes that are not the edit this script would write"). That mismatch means the pending text is not byte-for-byte
+    this script's edit; inspect the form, and publish the pending edit in the form designer, which clears it, then re-run.
 
     EXIT CODES. 0 = done, report or verified. 1 = an error, or verification failed, or a stop AFTER the first write (re-run to resume).
-    2 = refused BEFORE the first write (nothing changed).
+    2 = refused BEFORE the first write (nothing changed). An ERROR before the first write (e.g. a failed read of the unpublished text)
+    stays exit 1 (it is an error, not a refusal decision) and says "Nothing was written".
 
     Web API calls: the reads and the form edits go through EbillingSchema.psm1 (Consistency: Strong, #2833). The pending-collateral
     reads and PublishXml go through the shared scripts/lib/Publish-SolutionComponents.ps1, whose context carries no Consistency header
@@ -98,6 +106,7 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 . (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
 $DryRun = [bool]$WhatIfPreference
 $DevHost = 'spaarkedev1.crm.dynamics.com'
+$script:WriteStarted = $false
 
 $Table = 'sprk_invoice'
 $Controls = @('sprk_extractionstatus', 'sprk_extractedjson')
@@ -283,7 +292,10 @@ function Get-PendingReport($State) {
         if (-not $targets.ContainsKey($id)) { $foreign.Add($line); continue }
         $f = $targets[$id]
         $unpublished = Read-Dv "systemforms($($f.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml"
-        if ((ConvertTo-CanonicalXml $unpublished.formxml) -ne (ConvertTo-CanonicalXml $f.NewXml)) {
+        # What this run expects to find pending: the text read back right after its own PATCH when there is one (K2: Dataverse may
+        # normalise form XML on save), else the text it would write. Case-STRICT: a case-only edit is someone else's edit (-cne).
+        $expected = if ($f.PSObject.Properties['WrittenXml']) { $f.WrittenXml } else { $f.NewXml }
+        if ((ConvertTo-CanonicalXml $unpublished.formxml) -cne (ConvertTo-CanonicalXml $expected)) {
             $own.Add("form '$($f.Name)' ($($f.Id)) has unpublished changes that are not the edit this script would write (publishing would overwrite them): $line")
         }
     }
@@ -342,8 +354,13 @@ function Edit-Forms($State) {
     $edited = 0
     foreach ($f in @($State.Forms)) {
         if (-not (Confirm-Write "form '$($f.Name)' ($($f.Id))" "PATCH formxml: remove $($f.Removed -join ', ')")) { continue }
+        $script:WriteStarted = $true
         Invoke-Dv -Path "systemforms($($f.Id))" -Method PATCH -Body @{ formxml = $f.NewXml } | Out-Null
         $edited++; Write-Host "  EDITED   form '$($f.Name)': $($f.Removed -join ', ')" -ForegroundColor Green
+        # K2: read the unpublished text back. It is what the pre-publish re-check expects, so a Dataverse that normalises form XML on
+        # save does not stop the first run (exit 1) after the writes.
+        $back = Read-Dv "systemforms($($f.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml"
+        if (-not [string]::IsNullOrWhiteSpace($back.formxml)) { $f | Add-Member -NotePropertyName WrittenXml -NotePropertyValue $back.formxml -Force }
     }
     if (@($State.Forms).Count -eq 0) { Write-Host '  nothing to edit: no form shows a retired control' -ForegroundColor Yellow }
     return $edited
@@ -426,6 +443,13 @@ function Invoke-Cleanup([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]$Dr
     }
 }
 
+# What the error handler tells the operator: after the first write the run is partly applied (re-run to resume); before it, nothing was
+# written (an error in a read, e.g. the pending read, changes nothing). $script:WriteStarted is set right before the first PATCH.
+function Get-ErrorTrailer {
+    if ($script:WriteStarted) { return 'Steps already done stay done; re-run to continue (every step skips work already done).' }
+    return 'Nothing was written (the error happened before the first write).'
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------------------------------------------
@@ -446,7 +470,7 @@ catch [EscalationException] {
 catch {
     Write-Host ''
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host 'Steps already done stay done; re-run to continue (every step skips work already done).' -ForegroundColor Red
+    Write-Host (Get-ErrorTrailer) -ForegroundColor Red
     exit 1
 }
 

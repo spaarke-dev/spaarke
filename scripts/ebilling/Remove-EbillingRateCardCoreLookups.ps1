@@ -57,9 +57,15 @@
     unpublished on sprk_ratecard WITHOUT excluding the forms and views this script edits; for each of those with pending changes the
     unpublished text is read and compared with what this run would write. Anything that differs (someone else's unpublished edit) refuses
     (exit 2, before the first write) and -AllowPendingCollateral does NOT override it; the report and -Apply -WhatIf show the same
-    line. The check runs again right before each publish (a change that appears during the run is a plain error, exit 1). If Dataverse
-    stores a pending text in another shape than it was written in, a genuine resume is refused (the safe direction): publish the pending
-    edit in the designer, then re-run.
+    line. The check runs again right before each publish (a change that appears during the run is a plain error, exit 1). The comparisons
+    are case-STRICT (a case-only change is someone else's edit).
+
+    IF DATAVERSE NORMALISES THE XML ON SAVE. After each PATCH the script reads the unpublished text back and uses THAT as the text the
+    pre-publish re-check expects, so the first live -Apply is not stopped (exit 1, after the writes) by a harmless normalisation. The
+    pre-WRITE check of a re-run still compares the pending text with the text this run would write (the script cannot know how Dataverse
+    would normalise it): after a stop before the publish, a pending text that Dataverse normalised differently is refused (exit 2,
+    "has unpublished changes that are not the edit this script would write"). That mismatch means the pending text is not byte-for-byte
+    this script's edit; inspect the form or view, and publish the pending edit in the designer, which clears it, then re-run.
     EXIT CODES. 0 = done, report or verified. 1 = an error, or a stop AFTER the first write (the retirement is partly applied: re-run to
     resume). 2 = refused BEFORE the first write (nothing changed): a blocker, a missing approval or attestation, the wrong environment, a
     pending-collateral refusal, or a caller who cannot read every row.
@@ -143,6 +149,7 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 . (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
 $DryRun = [bool]$WhatIfPreference
 $DevHost = 'spaarkedev1.crm.dynamics.com'
+$script:WriteStarted = $false
 
 $Table = 'sprk_ratecard'
 $EntitySet = 'sprk_ratecards'
@@ -458,15 +465,25 @@ function Edit-FormsAndViews($State) {
     $edited = 0
     foreach ($f in @($State.Forms)) {
         if (-not (Confirm-Write "form '$($f.Name)' ($($f.Id))" "PATCH formxml: remove $($f.Removed -join ', ')")) { continue }
+        $script:WriteStarted = $true
         Invoke-Dv -Path "systemforms($($f.Id))" -Method PATCH -Body @{ formxml = $f.NewXml } | Out-Null
         $edited++; Write-Host "  EDITED   form '$($f.Name)': $($f.Removed -join ', ')" -ForegroundColor Green
+        # K2: read the unpublished text back. It is what the pre-publish re-check expects, so a Dataverse that normalises form XML on
+        # save does not stop the first run (exit 1) after the writes.
+        $back = Read-Dv "systemforms($($f.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml"
+        if (-not [string]::IsNullOrWhiteSpace($back.formxml)) { $f | Add-Member -NotePropertyName WrittenXml -NotePropertyValue $back.formxml -Force }
     }
     foreach ($v in @($State.Views)) {
         if (-not (Confirm-Write "view '$($v.Name)' ($($v.Id))" "PATCH fetchxml / layoutxml: remove $($v.Changes -join ', ')")) { continue }
         $body = @{ fetchxml = $v.NewFetch }
         if ($v.HasLayout) { $body.layoutxml = $v.NewLayout }
+        $script:WriteStarted = $true
         Invoke-Dv -Path "savedqueries($($v.Id))" -Method PATCH -Body $body | Out-Null
         $edited++; Write-Host "  EDITED   view '$($v.Name)': $($v.Changes -join ', ')" -ForegroundColor Green
+        # K2: the same read-back for the view (fetchxml and layoutxml).
+        $back = Read-Dv "savedqueries($($v.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=fetchxml,layoutxml"
+        if (-not [string]::IsNullOrWhiteSpace($back.fetchxml)) { $v | Add-Member -NotePropertyName WrittenFetch -NotePropertyValue $back.fetchxml -Force }
+        if ($v.HasLayout -and -not [string]::IsNullOrWhiteSpace($back.layoutxml)) { $v | Add-Member -NotePropertyName WrittenLayout -NotePropertyValue $back.layoutxml -Force }
     }
     if (@($State.Forms).Count + @($State.Views).Count -eq 0) { Write-Host '  nothing to edit: no form or view names a column' -ForegroundColor Yellow }
     return $edited
@@ -510,14 +527,20 @@ function Get-PendingReport($State) {
         $id = Get-CollateralItemId $line
         if (-not $targets.ContainsKey($id)) { $foreign.Add($line); continue }
         $t = $targets[$id]; $item = $t.Item
+        # What this run expects to find pending: the text read back right after its own PATCH when there is one (K2: Dataverse may
+        # normalise the XML on save), else the text it would write. Every comparison is case-STRICT (-ceq): a case-only change, e.g. of a
+        # label, is someone else's edit, not this run's text.
         if ($t.Kind -eq 'form') {
             $u = Read-Dv "systemforms($($item.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml"
-            $same = (ConvertTo-CanonicalXml $u.formxml) -eq (ConvertTo-CanonicalXml $item.NewXml)
+            $expected = if ($item.PSObject.Properties['WrittenXml']) { $item.WrittenXml } else { $item.NewXml }
+            $same = (ConvertTo-CanonicalXml $u.formxml) -ceq (ConvertTo-CanonicalXml $expected)
         }
         else {
             $u = Read-Dv "savedqueries($($item.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=fetchxml,layoutxml"
-            $same = ((ConvertTo-CanonicalXml $u.fetchxml) -eq (ConvertTo-CanonicalXml $item.NewFetch)) -and
-                    ((-not $item.HasLayout) -or ((ConvertTo-CanonicalXml $u.layoutxml) -eq (ConvertTo-CanonicalXml $item.NewLayout)))
+            $expectedFetch = if ($item.PSObject.Properties['WrittenFetch']) { $item.WrittenFetch } else { $item.NewFetch }
+            $expectedLayout = if ($item.PSObject.Properties['WrittenLayout']) { $item.WrittenLayout } else { $item.NewLayout }
+            $same = ((ConvertTo-CanonicalXml $u.fetchxml) -ceq (ConvertTo-CanonicalXml $expectedFetch)) -and
+                    ((-not $item.HasLayout) -or ((ConvertTo-CanonicalXml $u.layoutxml) -ceq (ConvertTo-CanonicalXml $expectedLayout)))
         }
         if (-not $same) { $own.Add("$($t.Kind) '$($item.Name)' ($($item.Id)) has unpublished changes that are not the edit this script would write (publishing would overwrite them): $line") }
     }
@@ -554,6 +577,7 @@ function Remove-Relationships($State) {
     foreach ($c in @($State.Columns)) {
         if (-not $c.RelationshipPresent) { Write-Host "  skipped  $($c.Relationship) already gone" -ForegroundColor Yellow; continue }
         if (-not (Confirm-Write "relationship $($c.Relationship) ($Table.$($c.Column))" 'DELETE the relationship (the lookup column and its name companion go with it)')) { continue }
+        $script:WriteStarted = $true
         Invoke-WhilePropagating { Invoke-Dv -Path "RelationshipDefinitions($($c.RelationshipId))" -Method DELETE | Out-Null } | Out-Null
         $deleted++; Write-Host "  DELETED  relationship $($c.Relationship)" -ForegroundColor Green
     }
@@ -646,6 +670,13 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
     }
 }
 
+# What the error handler tells the operator: after the first write the run is partly applied (re-run to resume); before it, nothing was
+# written (an error in a read, e.g. the pending read, changes nothing). $script:WriteStarted is set right before each write.
+function Get-ErrorTrailer {
+    if ($script:WriteStarted) { return 'Steps already done stay done; re-run to continue (every step skips work already done).' }
+    return 'Nothing was written (the error happened before the first write).'
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------------------------------------------
@@ -671,7 +702,7 @@ catch [EscalationException] {
 catch {
     Write-Host ''
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host 'Steps already done stay done; re-run to continue (every step skips work already done).' -ForegroundColor Red
+    Write-Host (Get-ErrorTrailer) -ForegroundColor Red
     exit 1
 }
 

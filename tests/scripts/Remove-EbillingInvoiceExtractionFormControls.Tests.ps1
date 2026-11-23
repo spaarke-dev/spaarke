@@ -25,7 +25,7 @@ BeforeAll {
     $wantedVariables = 'DevHost', 'Table', 'Controls', 'ExpectedForms', 'RetiredPattern'
     $wantedFunctions = 'Get-PreflightRefusals', 'Get-MentionCount', 'Get-MentionedControls', 'Set-EvenColumnWidths', 'ConvertTo-FormWithoutRetiredControls',
         'Read-Dv', 'ConvertTo-FormId', 'ConvertTo-CanonicalXml', 'Get-State', 'Write-State', 'Get-PublishContext', 'Get-CollateralItemId', 'Get-PendingReport',
-        'Write-PendingReport', 'Test-AlreadyClean', 'Get-ApplyBlockers', 'Get-VerifyProblems', 'Edit-Forms', 'Publish-Invoice', 'Invoke-Cleanup'
+        'Write-PendingReport', 'Test-AlreadyClean', 'Get-ApplyBlockers', 'Get-VerifyProblems', 'Edit-Forms', 'Publish-Invoice', 'Get-ErrorTrailer', 'Invoke-Cleanup'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
     $found = [System.Collections.Generic.List[string]]::new()
@@ -76,6 +76,8 @@ BeforeAll {
         param([hashtable]$Context, [string]$Entity, [string[]]$ExcludeIds = @())
         $d = $script:Dev
         $d.CollateralCalls.Add([pscustomobject]@{ Entity = $Entity; ExcludeIds = @($ExcludeIds); Consistency = $Context.Headers['Consistency'] })
+        # MidRun: something that happens AFTER the script's own edit and read-back, found by the pre-publish re-check (once).
+        if ($d.MidRun -and -not $d.MidRunDone -and @($d.Writes | Where-Object { $_ -like 'PATCH *' }).Count -gt 0) { $d.MidRunDone = $true; & $d.MidRun }
         $lines = [System.Collections.Generic.List[string]]::new()
         foreach ($f in $d.Forms) { if ($d.Pending.ContainsKey($f.formid)) { $lines.Add("systemforms: $($f.name) ($($f.formid))") } }
         foreach ($c in @($d.Collateral)) { $lines.Add($c) }
@@ -98,13 +100,15 @@ BeforeAll {
         if ($Method -ne 'GET') {
             $d.Writes.Add("$Method $Path")
             if ($Path -match '^systemforms\((?<id>[^)]+)\)$') {
-                $d.Pending[$Matches.id] = $Body.formxml
+                # NormalizeOnSave: what Dataverse stores when it normalises the form XML on save (K2).
+                $d.Pending[$Matches.id] = $(if ($d.NormalizeOnSave) { & $d.NormalizeOnSave $Body.formxml } else { $Body.formxml })
                 if ($d.AfterPatch) { & $d.AfterPatch $Matches.id }
             }
             return $null
         }
         $d.Gets.Add($Path)
         if ($Path -match '^systemforms\((?<id>[^)]+)\)/Microsoft\.Dynamics\.CRM\.RetrieveUnpublished\(\)') {
+            if ($d.FailUnpublished) { throw 'API error (GET RetrieveUnpublished) HTTP 503: simulated read failure' }
             $form = $d.Forms | Where-Object { $_.formid -eq $Matches.id }
             $xml = if ($d.Pending.ContainsKey($Matches.id)) { $d.Pending[$Matches.id] } else { $form.formxml }
             return [pscustomobject]@{ formxml = $xml }
@@ -142,6 +146,10 @@ BeforeAll {
             )
             Pending = @{}
             AfterPatch = $null
+            MidRun = $null
+            MidRunDone = $false
+            NormalizeOnSave = $null
+            FailUnpublished = $false
             Writes = [System.Collections.Generic.List[string]]::new()
             Gets = [System.Collections.Generic.List[string]]::new()
             Asked = [System.Collections.Generic.List[string]]::new()
@@ -162,7 +170,7 @@ BeforeAll {
     }
     # The run, with the host output captured.
     function Invoke-Run([bool]$Apply = $false, [bool]$Verify = $false, [bool]$WhatIf = $false, [bool]$Allow = $false, [string]$Url = $script:DevUrl) {
-        $script:PublishContext = $null
+        $script:PublishContext = $null; $script:WriteStarted = $false
         return (Invoke-Cleanup $Apply $Verify $WhatIf $Allow $Url 6>&1 | Out-String)
     }
     function Get-Refusal([scriptblock]$Action) {
@@ -532,6 +540,84 @@ Describe '-Apply (T4)' {
         $script:Dev.Writes | Should -Not -Contain 'POST PublishXml'
     }
 
+    # ---- Fix round 2 ----
+    It 'F1/F2: a CASE-ONLY difference in the unpublished text of a target form is someone else''s edit: refused (exit 2), nothing written' {
+        $script:Dev.Pending[$script:QcId] = $script:QcWritten -creplace 'description="sprk_name"', 'description="SPRK_NAME"'
+        $script:Dev.Pending[$script:QcId] | Should -Not -BeExactly $script:QcWritten
+        $script:Dev.Pending[$script:QcId] | Should -Be $script:QcWritten   # -eq is case-insensitive: this is what an -ne/-eq comparison would have accepted
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'has unpublished changes that are not the edit this script would write'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It 'F1/F2: the report shows a case-only difference as an overwrite risk and BLOCKED' {
+        $script:Dev.Pending[$script:MainId] = $script:MainWritten -creplace 'description="sprk_currency"', 'description="SPRK_Currency"'
+        $out = Invoke-Run
+        $out | Should -Match 'OVERWRITE RISK'
+        $out | Should -Match 'VERDICT: BLOCKED'
+    }
+
+    It 'F1: a case-only change that appears DURING the run (after the read-back) stops the publish' {
+        $script:Dev.MidRun = { $script:Dev.Pending[$script:MainId] = $script:Dev.Pending[$script:MainId] -creplace 'description="sprk_currency"', 'description="SPRK_CURRENCY"' }
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -Not -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'a target form changed during the run'
+        $script:Dev.Published.Count | Should -Be 0
+    }
+
+    It 'K2: when Dataverse normalises the form XML on save, the pre-publish re-check expects the text read back after the PATCH, so the first -Apply publishes' {
+        $script:Dev.NormalizeOnSave = { param($xml) $xml -replace '^<form>', '<form headerdensity="HighWithControls">' }
+        $out = Invoke-Run $true
+        $script:Dev.Published.Count | Should -Be 1
+        $out | Should -Not -Match 'changed during the run'
+        Get-MentionCount (Get-FormXml $script:MainId) | Should -Be 0
+        # the stored (normalised) text really differs from what the script wrote
+        (Get-FormXml $script:MainId) | Should -Match 'headerdensity'
+    }
+
+    It 'K2: a change made AFTER the read-back is still caught when Dataverse normalises on save' {
+        $script:Dev.NormalizeOnSave = { param($xml) $xml -replace '^<form>', '<form headerdensity="HighWithControls">' }
+        $script:Dev.MidRun = { $script:Dev.Pending[$script:QcId] = $script:Dev.Pending[$script:QcId] -replace 'sprk_name', 'sprk_changedmidrun' }
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e.Message | Should -Match 'a target form changed during the run'
+        $script:Dev.Published.Count | Should -Be 0
+    }
+
+    It 'K2: a re-run cannot tell a normalised pending text from someone else''s (documented): it refuses before any write' {
+        $script:Dev.Pending[$script:QcId] = $script:QcWritten -replace '^<form>', '<form headerdensity="HighWithControls">'
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $script:Dev.Writes.Count | Should -Be 0
+        (Get-Content -LiteralPath $script:ScriptPath -Raw) | Should -Match 'publish the pending edit in the form designer, which clears it'
+    }
+
+    It 'K1: a failed read of the unpublished text before any write exits 1 with "Nothing was written", not "Steps already done stay done"' {
+        $script:Dev.Pending[$script:QcId] = $script:QcWritten
+        $script:Dev.FailUnpublished = $true
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -Not -BeNullOrEmpty
+        $e | Should -Not -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'simulated read failure'
+        $script:Dev.Writes.Count | Should -Be 0
+        Get-ErrorTrailer | Should -Match 'Nothing was written'
+        Get-ErrorTrailer | Should -Not -Match 'Steps already done'
+    }
+
+    It 'K1: after the first write the trailer says partly applied, and the entry prints the trailer from Get-ErrorTrailer' {
+        Invoke-Run $true | Out-Null
+        $script:WriteStarted | Should -BeTrue
+        Get-ErrorTrailer | Should -Match 'Steps already done stay done'
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text | Should -Match 'Write-Host \(Get-ErrorTrailer\)'
+        $text | Should -Not -Match "Write-Host 'Steps already done"
+    }
+
+    It 'K1: the flag is set only by a write that is actually sent (-WhatIf leaves it clear)' {
+        $script:Allow = $false
+        Invoke-Run $true $false $true | Out-Null
+        $script:WriteStarted | Should -BeFalse
+    }
     It 'with -AllowPendingCollateral an item that appears during the run is accepted, and the publish goes ahead' {
         $script:Dev.CollateralAfterEdit = @("savedqueries: Appeared mid-run (v-late)")
         Invoke-Run $true $false $false $true | Out-Null
@@ -539,7 +625,7 @@ Describe '-Apply (T4)' {
     }
 
     It 'stops before the publish when a target form is changed by someone else DURING the run (exit 1, not published)' {
-        $script:Dev.AfterPatch = { param($id) if ($id -eq $script:QcId) { $script:Dev.Pending[$script:QcId] = $script:QcWritten -replace 'sprk_name', 'sprk_changedmidrun' } }
+        $script:Dev.MidRun = { $script:Dev.Pending[$script:QcId] = $script:QcWritten -replace 'sprk_name', 'sprk_changedmidrun' }
         $e = Get-Refusal { Invoke-Run $true | Out-Null }
         $e | Should -Not -BeOfType ([EscalationException])
         $e.Message | Should -Match 'a target form changed during the run'
