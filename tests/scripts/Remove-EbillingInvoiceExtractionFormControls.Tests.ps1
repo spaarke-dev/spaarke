@@ -4,11 +4,14 @@
 # constants they read are lifted out of its own syntax tree (as Remove-EbillingRateCardCoreLookups.Tests.ps1 does) and run against a stateful
 # test double of the Dataverse calls: no environment, no network.
 #   T1  the pure form transform (controls, emptied row / section / column, widths, shapes it must not edit);
-#   T2  the default mode (no switch) is read-only: it writes nothing, publishes nothing, asks for no write;
-#   T3  -Verify fails while a control is on either form, and passes once both are gone;
-#   T4  -Apply: refuses on an unexpected form shape before the first write; -WhatIf writes nothing; the happy path edits both forms and
-#       publishes once, entity-scoped; a second -Apply is a no-op pass; pending collateral and a non-dev host refuse;
-#   T5  structure: reads only through Read-Dv, writes only behind Confirm-Write, no direct REST call (Consistency: Strong stays in the module);
+#   T2  the default mode (no switch) is read-only: it writes nothing, publishes nothing, asks for no write; it shows the pending changes;
+#   T3  -Verify fails while a control is on either form (or on any other invoice form), and passes once both are gone;
+#   T4  -Apply: the dev-only pre-flight runs first; refuses on an unexpected form shape before the first write; -WhatIf writes nothing; the
+#       happy path edits both forms and publishes once, entity-scoped; a second -Apply is a no-op pass; only the two form ids are edited;
+#       unpublished edits on a target form are never overwritten (resume = equal text only); foreign pending collateral refuses;
+#       a change that appears during the run stops the publish;
+#   T5  structure: reads only through Read-Dv, writes only behind Confirm-Write, no direct REST call, the shared context carries
+#       Consistency: Strong;
 #   T6  the repository sources no longer name the controls; the columns and the option set stay; PB-013 is gone from the seed.
 
 BeforeAll {
@@ -19,10 +22,10 @@ BeforeAll {
     $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errors)
     if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
 
-    $wantedVariables = 'DevHost', 'Table', 'Controls', 'ExpectedForms', 'EditableTypes', 'RetiredPattern'
+    $wantedVariables = 'DevHost', 'Table', 'Controls', 'ExpectedForms', 'RetiredPattern'
     $wantedFunctions = 'Get-PreflightRefusals', 'Get-MentionCount', 'Get-MentionedControls', 'Set-EvenColumnWidths', 'ConvertTo-FormWithoutRetiredControls',
-        'Read-Dv', 'Get-State', 'Write-State', 'Test-AlreadyClean', 'Get-ApplyBlockers', 'Get-VerifyProblems',
-        'Edit-Forms', 'Get-PublishContext', 'Get-PendingCollateral', 'Publish-Invoice', 'Invoke-Cleanup'
+        'Read-Dv', 'ConvertTo-FormId', 'ConvertTo-CanonicalXml', 'Get-State', 'Write-State', 'Get-PublishContext', 'Get-CollateralItemId', 'Get-PendingReport',
+        'Write-PendingReport', 'Test-AlreadyClean', 'Get-ApplyBlockers', 'Get-VerifyProblems', 'Edit-Forms', 'Publish-Invoice', 'Invoke-Cleanup'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
     $found = [System.Collections.Generic.List[string]]::new()
@@ -54,33 +57,58 @@ BeforeAll {
         EscalationException([string]$message) : base($message) {}
     }
 
+    $script:MainId = '93aa1c69-0406-f111-8406-7c1e525abd8b'
+    $script:QcId = 'c5e5807d-e20c-f111-8342-7c1e520aa4df'
+    $script:DevUrl = 'https://spaarkedev1.crm.dynamics.com'
+
     # ---- Test doubles of the calls, over a stateful fake of dev. $script:Dev is set per test. ----
+    # The form layers: Forms[].formxml is the PUBLISHED text (the plain read); Pending[id] is the UNPUBLISHED text (RetrieveUnpublished).
+    # A PATCH writes the unpublished layer; PublishXml moves every pending text to the published layer.
     function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) }
     # -WhatIf is a double that answers no; $script:Allow = $false makes every write refuse.
     function Confirm-Write { param([string]$Target, [string]$Action) $script:Dev.Asked.Add("$Action | $Target"); return [bool]$script:Allow }
+    function Initialize-EbillingSchema { param([string]$EnvironmentUrl, [string]$SolutionUniqueName, [switch]$DryRun, [string]$Entity) $script:Dev.InitCalls.Add($EnvironmentUrl); return $null }
 
-    $EnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com'
-    function Get-DataverseApiContext { param([string]$EnvironmentUrl) return @{ Api = 'https://dev.invalid/api/data/v9.2'; Headers = @{} } }
+    $EnvironmentUrl = $script:DevUrl
+    # Like the real shared context: no Consistency header of its own.
+    function Get-DataverseApiContext { param([string]$EnvironmentUrl) $script:Dev.ContextCalls++; return @{ Api = 'https://dev.invalid/api/data/v9.2'; Headers = @{ Authorization = 'Bearer x'; Accept = 'application/json' } } }
     function Get-EntityPublishCollateral {
         param([hashtable]$Context, [string]$Entity, [string[]]$ExcludeIds = @())
         $d = $script:Dev
-        $d.CollateralCalls.Add([pscustomobject]@{ Entity = $Entity; ExcludeIds = @($ExcludeIds) })
-        return @(@($d.Collateral) | Where-Object { $ExcludeIds -notcontains $_.Id } | ForEach-Object { $_.Text })
+        $d.CollateralCalls.Add([pscustomobject]@{ Entity = $Entity; ExcludeIds = @($ExcludeIds); Consistency = $Context.Headers['Consistency'] })
+        $lines = [System.Collections.Generic.List[string]]::new()
+        foreach ($f in $d.Forms) { if ($d.Pending.ContainsKey($f.formid)) { $lines.Add("systemforms: $($f.name) ($($f.formid))") } }
+        foreach ($c in @($d.Collateral)) { $lines.Add($c) }
+        if ($d.Writes.Count -gt 0 -and -not ($d.Published.Count -gt 0)) { foreach ($c in @($d.CollateralAfterEdit)) { $lines.Add($c) } }
+        $skip = @($ExcludeIds | ForEach-Object { $_.ToLowerInvariant() })
+        return @($lines | Where-Object { $m = [regex]::Match($_, '\(([^()]+)\)\s*$'); -not $m.Success -or $skip -notcontains $m.Groups[1].Value.ToLowerInvariant() })
     }
     function Invoke-PublishXml {
         param([hashtable]$Context, [string]$ParameterXml)
         if ($ParameterXml -notmatch '^<importexportxml>.+</importexportxml>$') { throw 'ParameterXml must be an <importexportxml> document.' }
-        $script:Dev.Writes.Add('POST PublishXml'); $script:Dev.Published.Add($ParameterXml)
+        $d = $script:Dev
+        $d.PublishContexts.Add($Context)
+        $d.Writes.Add('POST PublishXml'); $d.Published.Add($ParameterXml)
+        foreach ($f in $d.Forms) { if ($d.Pending.ContainsKey($f.formid)) { $f.formxml = $d.Pending[$f.formid] } }
+        $d.Pending.Clear()
     }
     function Invoke-Dv {
         param([string]$Path, [string]$Method = 'GET', $Body = $null, [hashtable]$ExtraHeaders = @{}, [switch]$NoRetry)
         $d = $script:Dev
         if ($Method -ne 'GET') {
             $d.Writes.Add("$Method $Path")
-            if ($Path -match '^systemforms\((?<id>.+)\)$') { ($d.Forms | Where-Object { $_.formid -eq $Matches.id }).formxml = $Body.formxml }
+            if ($Path -match '^systemforms\((?<id>[^)]+)\)$') {
+                $d.Pending[$Matches.id] = $Body.formxml
+                if ($d.AfterPatch) { & $d.AfterPatch $Matches.id }
+            }
             return $null
         }
         $d.Gets.Add($Path)
+        if ($Path -match '^systemforms\((?<id>[^)]+)\)/Microsoft\.Dynamics\.CRM\.RetrieveUnpublished\(\)') {
+            $form = $d.Forms | Where-Object { $_.formid -eq $Matches.id }
+            $xml = if ($d.Pending.ContainsKey($Matches.id)) { $d.Pending[$Matches.id] } else { $form.formxml }
+            return [pscustomobject]@{ formxml = $xml }
+        }
         if ($Path -match '^systemforms\?') { return [pscustomobject]@{ value = @($d.Forms | ForEach-Object { [pscustomobject]$_ }) } }
         return [pscustomobject]@{ value = @() }
     }
@@ -102,18 +130,27 @@ BeforeAll {
         "</rows></section></sections></column></columns></tab></tabs></form>"
     $script:CleanQuickCreateXml = $script:QuickCreateXml -replace '<column width="33%"><sections><section name="tab_1_column_3_section_1">.*?</column>', ''
     $script:CleanMainXml = $script:MainXml -replace '<cell id="\{sprk_extractionstatus\}">.*?</cell>', ''
+    # What this run writes for each form (the same transform the script applies).
+    $script:MainWritten = (ConvertTo-FormWithoutRetiredControls $script:MainXml).Xml
+    $script:QcWritten = (ConvertTo-FormWithoutRetiredControls $script:QuickCreateXml).Xml
 
     function New-Dev {
         return @{
             Forms = @(
-                @{ formid = 'f-main'; name = 'Invoice main form'; type = 2; formxml = $script:MainXml }
-                @{ formid = 'f-qc'; name = 'Invoice quick create form'; type = 7; formxml = $script:QuickCreateXml }
+                @{ formid = $script:MainId; name = 'Invoice main form'; type = 2; formxml = $script:MainXml }
+                @{ formid = $script:QcId; name = 'Invoice quick create form'; type = 7; formxml = $script:QuickCreateXml }
             )
+            Pending = @{}
+            AfterPatch = $null
             Writes = [System.Collections.Generic.List[string]]::new()
             Gets = [System.Collections.Generic.List[string]]::new()
             Asked = [System.Collections.Generic.List[string]]::new()
             Published = [System.Collections.Generic.List[string]]::new()
+            PublishContexts = [System.Collections.Generic.List[object]]::new()
+            InitCalls = [System.Collections.Generic.List[string]]::new()
+            ContextCalls = 0
             Collateral = @()
+            CollateralAfterEdit = @()
             CollateralCalls = [System.Collections.Generic.List[object]]::new()
         }
     }
@@ -123,7 +160,13 @@ BeforeAll {
         $d.Forms[1].formxml = $script:CleanQuickCreateXml
         return $d
     }
+    # The run, with the host output captured.
+    function Invoke-Run([bool]$Apply = $false, [bool]$Verify = $false, [bool]$WhatIf = $false, [bool]$Allow = $false, [string]$Url = $script:DevUrl) {
+        $script:PublishContext = $null
+        return (Invoke-Cleanup $Apply $Verify $WhatIf $Allow $Url 6>&1 | Out-String)
+    }
     function Get-Refusal([scriptblock]$Action) {
+        $script:PublishContext = $null
         try { & $Action } catch { return $_.Exception }
         return $null
     }
@@ -143,8 +186,7 @@ Describe 'the targets (T1)' {
     It 'name exactly the two retired columns on sprk_invoice, and the main and quick-create forms' {
         $Table | Should -Be 'sprk_invoice'
         $Controls | Should -Be @('sprk_extractionstatus', 'sprk_extractedjson')
-        @($ExpectedForms | ForEach-Object { "$($_.Type):$($_.Name)" }) | Should -Be @('2:Invoice main form', '7:Invoice quick create form')
-        $EditableTypes | Should -Be @(2, 7)
+        @($ExpectedForms | ForEach-Object { "$($_.Type):$($_.Id):$($_.Name)" }) | Should -Be @('2:93aa1c69-0406-f111-8406-7c1e525abd8b:Invoice main form', '7:c5e5807d-e20c-f111-8342-7c1e520aa4df:Invoice quick create form')
     }
     It 'never names another invoice column' {
         ($Controls -join ' ') | Should -Not -Match 'sprk_confidence|sprk_aisummary|sprk_totalamount'
@@ -225,28 +267,67 @@ Describe 'the default mode (T2): read-only' {
     BeforeEach { $script:Dev = New-Dev; $script:Allow = $true }
 
     It 'reads the forms, reports READY, and writes, publishes and asks for nothing' {
-        $out = Invoke-Cleanup $false $false $false 6>&1 | Out-String
+        $out = Invoke-Run
         $out | Should -Match 'VERDICT: READY'
         $out | Should -Match 'Report only'
         $script:Dev.Writes.Count | Should -Be 0
         $script:Dev.Published.Count | Should -Be 0
         $script:Dev.Asked.Count | Should -Be 0
-        $script:Dev.CollateralCalls.Count | Should -Be 0
         @($script:Dev.Gets | Where-Object { $_ -like 'systemforms?*' }).Count | Should -Be 1
-        (Get-FormXml 'f-main') | Should -Be $script:MainXml
-        (Get-FormXml 'f-qc') | Should -Be $script:QuickCreateXml
+        (Get-FormXml $script:MainId) | Should -Be $script:MainXml
+        (Get-FormXml $script:QcId) | Should -Be $script:QuickCreateXml
     }
 
-    It 'reports ALREADY CLEAN on clean forms, still writing nothing' {
+    It 'shows the pending-changes line (none) and reads the pending items WITHOUT excluding the two target forms (F2)' {
+        $out = Invoke-Run
+        $out | Should -Match 'pending \(unpublished\) items on sprk_invoice: none'
+        $script:Dev.CollateralCalls.Count | Should -Be 1
+        $script:Dev.CollateralCalls[0].Entity | Should -Be 'sprk_invoice'
+        $script:Dev.CollateralCalls[0].ExcludeIds.Count | Should -Be 0
+    }
+
+    It 'reports BLOCKED when someone left unpublished changes on a target form: it would be overwritten (F2), and writes nothing' {
+        $script:Dev.Pending[$script:QcId] = $script:QuickCreateXml -replace 'sprk_totalamount', 'sprk_someoneelse'
+        $out = Invoke-Run
+        $out | Should -Match 'OVERWRITE RISK'
+        $out | Should -Match 'VERDICT: BLOCKED'
+        $out | Should -Match 'would overwrite'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It 'reports a target form whose pending text is exactly this run''s edit as a resume (no risk line), READY' {
+        $script:Dev.Pending[$script:QcId] = $script:QcWritten
+        $out = Invoke-Run
+        $out | Should -Not -Match 'OVERWRITE RISK'
+        $out | Should -Match 'VERDICT: READY'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It 'reports a resume although Dataverse stores the pending text with other insignificant whitespace' {
+        $script:Dev.Pending[$script:MainId] = ($script:MainWritten -replace '><', ">`n  <")
+        $out = Invoke-Run
+        $out | Should -Not -Match 'OVERWRITE RISK'
+        $out | Should -Match 'VERDICT: READY'
+    }
+
+    It 'lists other pending items as would-go-live lines and blocks on them' {
+        $script:Dev.Collateral = @("savedqueries: Someone's draft (v-other)")
+        $out = Invoke-Run
+        $out | Should -Match "would go live   savedqueries: Someone's draft"
+        $out | Should -Match 'VERDICT: BLOCKED'
+    }
+
+    It 'reports ALREADY CLEAN on clean forms, still writing nothing, and reads no pending items (nothing would be published)' {
         $script:Dev = New-CleanDev
-        $out = Invoke-Cleanup $false $false $false 6>&1 | Out-String
+        $out = Invoke-Run
         $out | Should -Match 'ALREADY CLEAN'
         $script:Dev.Writes.Count | Should -Be 0
+        $script:Dev.CollateralCalls.Count | Should -Be 0
     }
 
     It 'reports BLOCKED (and still writes nothing) on an unexpected form shape' {
         $script:Dev.Forms[0].formxml = $script:MainXml -replace '</form>', '<events><event name="onchange" attribute="sprk_extractionstatus"><Handlers /></event></events></form>'
-        $out = Invoke-Cleanup $false $false $false 6>&1 | Out-String
+        $out = Invoke-Run
         $out | Should -Match 'VERDICT: BLOCKED'
         $script:Dev.Writes.Count | Should -Be 0
     }
@@ -256,7 +337,7 @@ Describe '-Verify (T3)' {
     BeforeEach { $script:Dev = New-Dev; $script:Allow = $true }
 
     It 'fails while both controls are on the forms' {
-        $e = Get-Refusal { Invoke-Cleanup $false $true $false 6>&1 | Out-Null }
+        $e = Get-Refusal { Invoke-Run $false $true | Out-Null }
         $e | Should -Not -BeNullOrEmpty
         $e.Message | Should -Match 'Verification failed'
         $e.Message | Should -Match "Invoice quick create form' still names sprk_extractionstatus, sprk_extractedjson"
@@ -267,7 +348,7 @@ Describe '-Verify (T3)' {
     It 'fails while only the main form still shows its control' {
         $script:Dev = New-CleanDev
         $script:Dev.Forms[0].formxml = $script:MainXml
-        $e = Get-Refusal { Invoke-Cleanup $false $true $false 6>&1 | Out-Null }
+        $e = Get-Refusal { Invoke-Run $false $true | Out-Null }
         $e.Message | Should -Match "Invoice main form' still names"
         $e.Message | Should -Not -Match 'quick create form. still names'
     }
@@ -275,14 +356,21 @@ Describe '-Verify (T3)' {
     It 'fails while only the quick-create form still shows a control' {
         $script:Dev = New-CleanDev
         $script:Dev.Forms[1].formxml = $script:QuickCreateXml
-        $e = Get-Refusal { Invoke-Cleanup $false $true $false 6>&1 | Out-Null }
+        $e = Get-Refusal { Invoke-Run $false $true | Out-Null }
         $e.Message | Should -Match 'quick create form. still names'
         $e.Message | Should -Not -Match 'Invoice main form. still names'
     }
 
+    It 'fails while any OTHER invoice form still names a control' {
+        $script:Dev = New-CleanDev
+        $script:Dev.Forms += @{ formid = 'f-other'; name = 'Information'; type = 2; formxml = $script:MainXml }
+        $e = Get-Refusal { Invoke-Run $false $true | Out-Null }
+        $e.Message | Should -Match "form 'Information' \(f-other\) still names sprk_extractionstatus"
+    }
+
     It 'passes when both controls are gone from both forms' {
         $script:Dev = New-CleanDev
-        $out = Invoke-Cleanup $false $true $false 6>&1 | Out-String
+        $out = Invoke-Run $false $true
         $out | Should -Match 'neither sprk_extractionstatus nor sprk_extractedjson'
         $script:Dev.Writes.Count | Should -Be 0
     }
@@ -290,7 +378,7 @@ Describe '-Verify (T3)' {
     It 'fails (nothing can be confirmed) when an expected form is missing' {
         $script:Dev = New-CleanDev
         $script:Dev.Forms = @($script:Dev.Forms[0])
-        $e = Get-Refusal { Invoke-Cleanup $false $true $false 6>&1 | Out-Null }
+        $e = Get-Refusal { Invoke-Run $false $true | Out-Null }
         $e.Message | Should -Match 'Verification failed'
         $e.Message | Should -Match 'quick create form'
     }
@@ -300,41 +388,43 @@ Describe '-Apply (T4)' {
     BeforeEach { $script:Dev = New-Dev; $script:Allow = $true }
 
     It 'edits both forms, publishes sprk_invoice once (entity-scoped) and verifies' {
-        $out = Invoke-Cleanup $true $false $false 6>&1 | Out-String
-        $script:Dev.Writes | Should -Be @('PATCH systemforms(f-main)', 'PATCH systemforms(f-qc)', 'POST PublishXml')
+        $out = Invoke-Run $true
+        $script:Dev.Writes | Should -Be @("PATCH systemforms($($script:MainId))", "PATCH systemforms($($script:QcId))", 'POST PublishXml')
         $script:Dev.Published.Count | Should -Be 1
         $script:Dev.Published[0] | Should -Be '<importexportxml><entities><entity>sprk_invoice</entity></entities></importexportxml>'
-        Get-MentionCount (Get-FormXml 'f-main') | Should -Be 0
-        Get-MentionCount (Get-FormXml 'f-qc') | Should -Be 0
-        @(([xml](Get-FormXml 'f-qc')).SelectNodes('//column') | ForEach-Object { $_.GetAttribute('width') }) | Should -Be @('50%', '50%')
+        Get-MentionCount (Get-FormXml $script:MainId) | Should -Be 0
+        Get-MentionCount (Get-FormXml $script:QcId) | Should -Be 0
+        @(([xml](Get-FormXml $script:QcId)).SelectNodes('//column') | ForEach-Object { $_.GetAttribute('width') }) | Should -Be @('50%', '50%')
         $out | Should -Match 'neither sprk_extractionstatus nor sprk_extractedjson'
-        # D-83: the collateral check excludes the script's own two forms.
-        $script:Dev.CollateralCalls[0].Entity | Should -Be 'sprk_invoice'
-        $script:Dev.CollateralCalls[0].ExcludeIds | Should -Contain 'f-main'
-        $script:Dev.CollateralCalls[0].ExcludeIds | Should -Contain 'f-qc'
+    }
+
+    It 'never excludes its own forms from the pending read (before the edit and right before the publish)' {
+        Invoke-Run $true | Out-Null
+        $script:Dev.CollateralCalls.Count | Should -Be 2
+        foreach ($c in $script:Dev.CollateralCalls) { $c.ExcludeIds.Count | Should -Be 0 }
     }
 
     It 'is idempotent: a second -Apply finds both forms clean, writes nothing and verifies' {
-        Invoke-Cleanup $true $false $false 6>&1 | Out-Null
+        Invoke-Run $true | Out-Null
         $script:Dev.Writes.Clear()
-        $out = Invoke-Cleanup $true $false $false 6>&1 | Out-String
+        $out = Invoke-Run $true
         $out | Should -Match 'already clean'
         $script:Dev.Writes.Count | Should -Be 0
     }
 
     It '-Apply -WhatIf asks for every write, writes nothing and leaves both forms as they were' {
         $script:Allow = $false
-        Invoke-Cleanup $true $false $true 6>&1 | Out-Null
+        Invoke-Run $true $false $true | Out-Null
         $script:Dev.Writes.Count | Should -Be 0
         $script:Dev.Published.Count | Should -Be 0
         $script:Dev.Asked.Count | Should -Be 3
-        (Get-FormXml 'f-main') | Should -Be $script:MainXml
-        (Get-FormXml 'f-qc') | Should -Be $script:QuickCreateXml
+        (Get-FormXml $script:MainId) | Should -Be $script:MainXml
+        (Get-FormXml $script:QcId) | Should -Be $script:QuickCreateXml
     }
 
     It 'refuses on an unexpected form shape before the first write: an event handler names a control' {
         $script:Dev.Forms[1].formxml = $script:QuickCreateXml -replace '</form>', '<events><event name="onload" attribute="sprk_extractedjson"><Handlers /></event></events></form>'
-        $e = Get-Refusal { Invoke-Cleanup $true $false $false 6>&1 | Out-Null }
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
         $e | Should -BeOfType ([EscalationException])
         $e.Message | Should -Match 'Refusing to apply'
         $e.Message | Should -Match 'would still name a retired control'
@@ -344,57 +434,175 @@ Describe '-Apply (T4)' {
 
     It 'refuses on an unexpected form shape before the first write: a control outside a section cell' {
         $script:Dev.Forms[0].formxml = $script:MainXml -replace '<tabs>', '<header><rows><row><cell><control id="sprk_extractionstatus" datafieldname="sprk_extractionstatus" /></cell></row></rows></header><tabs>'
-        $e = Get-Refusal { Invoke-Cleanup $true $false $false 6>&1 | Out-Null }
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
         $e | Should -BeOfType ([EscalationException])
         $e.Message | Should -Match 'not in a cell of a row of a section'
         $script:Dev.Writes.Count | Should -Be 0
     }
 
-    It 'refuses when the quick-create form is missing, and when the main form is ambiguous' {
+    It 'refuses when an expected form is missing (pinned by id) before the first write' {
         $script:Dev.Forms = @($script:Dev.Forms[0])
-        $e = Get-Refusal { Invoke-Cleanup $true $false $false 6>&1 | Out-Null }
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
         $e | Should -BeOfType ([EscalationException])
-        $e.Message | Should -Match "expected exactly one quick create form 'Invoice quick create form'"
-        $script:Dev.Writes.Count | Should -Be 0
-
-        $script:Dev = New-Dev
-        $script:Dev.Forms += @{ formid = 'f-main2'; name = 'Invoice main form'; type = 2; formxml = $script:MainXml }
-        $e = Get-Refusal { Invoke-Cleanup $true $false $false 6>&1 | Out-Null }
-        $e | Should -BeOfType ([EscalationException])
-        $e.Message | Should -Match "expected exactly one main form 'Invoice main form'"
+        $e.Message | Should -Match "expected quick create form 'Invoice quick create form' \(c5e5807d-e20c-f111-8342-7c1e520aa4df, type 7\) was not found"
         $script:Dev.Writes.Count | Should -Be 0
     }
 
+    It 'treats a form with the expected id but another type as not found' {
+        $script:Dev.Forms[1].type = 11
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'was not found'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It 'a form that merely has the expected NAME but another id is not edited, and a control on it is a blocker (K1)' {
+        $script:Dev = New-CleanDev
+        $script:Dev.Forms += @{ formid = 'f-other'; name = 'Invoice main form'; type = 2; formxml = $script:MainXml }
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $e.Message | Should -Match "form 'Invoice main form' \(f-other, type 2\) names sprk_extractionstatus but is not one of the two forms"
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It 'any other invoice form that names a control blocks -Apply before the first write and is never edited, whatever its type (K1)' {
+        foreach ($type in 2, 7, 11, 6) {
+            $script:Dev = New-Dev
+            $script:Dev.Forms += @{ formid = "f-other-$type"; name = "Other $type"; type = $type; formxml = $script:MainXml }
+            $e = Get-Refusal { Invoke-Run $true | Out-Null }
+            $e | Should -BeOfType ([EscalationException])
+            $e.Message | Should -Match "Other $type"
+            $script:Dev.Writes.Count | Should -Be 0
+            (Get-FormXml "f-other-$type") | Should -Be $script:MainXml
+        }
+    }
+
+    It 'edits only the two expected form ids when the other forms are clean' {
+        $script:Dev.Forms += @{ formid = 'f-info'; name = 'Information'; type = 2; formxml = $script:CleanMainXml }
+        Invoke-Run $true | Out-Null
+        @($script:Dev.Writes | Where-Object { $_ -like 'PATCH *' }) | Should -Be @("PATCH systemforms($($script:MainId))", "PATCH systemforms($($script:QcId))")
+    }
+
+    It 'refuses (exit 2) when a target form has unpublished changes that are not this run''s edit: nothing is written (F2)' {
+        $script:Dev.Pending[$script:MainId] = $script:MainXml -replace 'sprk_currency', 'sprk_someoneelse'
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'has unpublished changes that are not the edit this script would write'
+        $script:Dev.Writes.Count | Should -Be 0
+        $script:Dev.Published.Count | Should -Be 0
+        $script:Dev.Pending[$script:MainId] | Should -Match 'sprk_someoneelse'
+    }
+
+    It '-AllowPendingCollateral does NOT override an overwrite of a target form''s unpublished changes' {
+        $script:Dev.Pending[$script:QcId] = $script:QuickCreateXml -replace 'sprk_totalamount', 'sprk_someoneelse'
+        $e = Get-Refusal { Invoke-Run $true $false $false $true | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'would overwrite'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It 'resumes: a target form whose pending text is exactly this run''s edit is written again and published' {
+        $script:Dev.Pending[$script:QcId] = $script:QcWritten
+        $out = Invoke-Run $true
+        $script:Dev.Published.Count | Should -Be 1
+        Get-MentionCount (Get-FormXml $script:QcId) | Should -Be 0
+        $out | Should -Not -Match 'OVERWRITE RISK'
+    }
+
     It 'refuses when another pending form or view of sprk_invoice would go live with the publish, unless -AllowPendingCollateral' {
-        $script:Dev.Collateral = @(@{ Id = 'v-other'; Text = "view 'Someone''s draft' (v-other)" })
-        $e = Get-Refusal { Invoke-Cleanup $true $false $false 6>&1 | Out-Null }
+        $script:Dev.Collateral = @("savedqueries: Someone's draft (v-other)")
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
         $e | Should -BeOfType ([EscalationException])
         $e.Message | Should -Match 'would go live with the publish'
         $script:Dev.Writes.Count | Should -Be 0
 
         $script:Dev = New-Dev
-        $script:Dev.Collateral = @(@{ Id = 'v-other'; Text = "view 'Someone''s draft' (v-other)" })
-        Invoke-Cleanup $true $false $false $true 6>&1 | Out-Null
+        $script:Dev.Collateral = @("savedqueries: Someone's draft (v-other)")
+        Invoke-Run $true $false $false $true | Out-Null
         $script:Dev.Published.Count | Should -Be 1
     }
 
-    It 'does not count its own forms as collateral' {
-        $script:Dev.Collateral = @(@{ Id = 'f-main'; Text = 'form f-main' }, @{ Id = 'f-qc'; Text = 'form f-qc' })
-        Invoke-Cleanup $true $false $false 6>&1 | Out-Null
+    It 'stops before the publish when another pending item appears DURING the run (exit 1, not published)' {
+        $script:Dev.CollateralAfterEdit = @("savedqueries: Appeared mid-run (v-late)")
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -Not -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'appeared and would go live too'
+        $e.Message | Should -Match 'v-late'
+        $script:Dev.Published.Count | Should -Be 0
+        $script:Dev.Writes | Should -Not -Contain 'POST PublishXml'
+    }
+
+    It 'with -AllowPendingCollateral an item that appears during the run is accepted, and the publish goes ahead' {
+        $script:Dev.CollateralAfterEdit = @("savedqueries: Appeared mid-run (v-late)")
+        Invoke-Run $true $false $false $true | Out-Null
         $script:Dev.Published.Count | Should -Be 1
     }
 
-    It 'refuses a host that is not dev, before any Dataverse call' {
-        (Get-PreflightRefusals $true 'https://spaarke-prod.crm.dynamics.com') | Should -Match 'dev only'
-        (Get-PreflightRefusals $true 'https://spaarkedev1.crm.dynamics.com') | Should -BeNullOrEmpty
+    It 'stops before the publish when a target form is changed by someone else DURING the run (exit 1, not published)' {
+        $script:Dev.AfterPatch = { param($id) if ($id -eq $script:QcId) { $script:Dev.Pending[$script:QcId] = $script:QcWritten -replace 'sprk_name', 'sprk_changedmidrun' } }
+        $e = Get-Refusal { Invoke-Run $true | Out-Null }
+        $e | Should -Not -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'a target form changed during the run'
+        $script:Dev.Published.Count | Should -Be 0
+    }
+}
+
+Describe 'the dev-only pre-flight (T4b)' {
+    BeforeEach { $script:Dev = New-Dev; $script:Allow = $true }
+
+    It 'refuses -Apply on a host that is not dev BEFORE anything is initialised, read or written' {
+        $e = Get-Refusal { Invoke-Run $true $false $false $false 'https://spaarke-prod.crm.dynamics.com' | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $e.Message | Should -Match 'dev only'
+        $script:Dev.InitCalls.Count | Should -Be 0
+        $script:Dev.Gets.Count | Should -Be 0
+        $script:Dev.Writes.Count | Should -Be 0
+        $script:Dev.ContextCalls | Should -Be 0
+    }
+
+    It 'refuses -Apply -WhatIf on a host that is not dev too (the refusal does not depend on -WhatIf)' {
+        $e = Get-Refusal { Invoke-Run $true $false $true $false 'https://spaarke-prod.crm.dynamics.com' | Out-Null }
+        $e | Should -BeOfType ([EscalationException])
+        $script:Dev.InitCalls.Count | Should -Be 0
+    }
+
+    It 'does not refuse the read-only modes on another host (report and -Verify are read-only), and dev proceeds to initialise' {
         (Get-PreflightRefusals $false 'https://spaarke-prod.crm.dynamics.com') | Should -BeNullOrEmpty
+        (Get-PreflightRefusals $true $script:DevUrl) | Should -BeNullOrEmpty
+        Invoke-Run $true | Out-Null
+        $script:Dev.InitCalls.Count | Should -Be 1
+        $script:Dev.InitCalls[0] | Should -Be $script:DevUrl
     }
 
-    It 'a form of another type that names a control is reported and not edited' {
-        $script:Dev.Forms += @{ formid = 'f-card'; name = 'Invoice card'; type = 11; formxml = $script:MainXml }
-        Invoke-Cleanup $true $false $false 6>&1 | Out-Null
-        $script:Dev.Writes | Should -Not -Contain 'PATCH systemforms(f-card)'
-        (Get-FormXml 'f-card') | Should -Be $script:MainXml
+    It 'the script entry calls only Invoke-Cleanup (the pre-flight lives inside it, so a test can reach it)' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $entry = $text.Substring($text.LastIndexOf('# Entry'))
+        $entry | Should -Match 'Invoke-Cleanup'
+        $entry | Should -Not -Match 'Get-PreflightRefusals|Initialize-EbillingSchema'
+    }
+}
+
+Describe 'the shared publish context carries Consistency: Strong (F4)' {
+    BeforeEach { $script:Dev = New-Dev; $script:Allow = $true; $script:PublishContext = $null }
+
+    It 'sets the header on the context the pending-collateral reads and the PublishXml POST use' {
+        $ctx = Get-PublishContext
+        $ctx.Headers['Consistency'] | Should -Be 'Strong'
+        $ctx.Headers['Authorization'] | Should -Be 'Bearer x'
+    }
+
+    It 'the context passed to Get-EntityPublishCollateral and Invoke-PublishXml has it, through a whole -Apply' {
+        Invoke-Run $true | Out-Null
+        $script:Dev.CollateralCalls.Count | Should -BeGreaterThan 0
+        foreach ($c in $script:Dev.CollateralCalls) { $c.Consistency | Should -Be 'Strong' }
+        $script:Dev.PublishContexts.Count | Should -Be 1
+        $script:Dev.PublishContexts[0].Headers['Consistency'] | Should -Be 'Strong'
+    }
+
+    It 'makes the context once and reuses it' {
+        $a = Get-PublishContext; $b = Get-PublishContext
+        $script:Dev.ContextCalls | Should -Be 1
+        [object]::ReferenceEquals($a, $b) | Should -BeTrue
     }
 }
 

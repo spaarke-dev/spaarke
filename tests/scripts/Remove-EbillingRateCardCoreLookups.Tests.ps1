@@ -23,7 +23,7 @@ BeforeAll {
     $wantedVariables = 'DevHost', 'Table', 'EntitySet', 'IdColumn', 'Targets', 'CoreLookupPattern', 'RelationshipNamesRegex', 'RateCardMentionRegex', 'CoreColumnMentionRegex', 'BffScanPaths', 'SpaScanPaths'
     $wantedFunctions = 'Get-ReaderProblems', 'Get-PreflightRefusals', 'Test-MentionsCoreLookup', 'Get-MentionCount', 'ConvertTo-FormWithoutCoreLookups', 'ConvertTo-ViewWithoutCoreLookups',
         'Read-Dv', 'Read-DvOrNull', 'Get-ComponentKind', 'Get-DependencyList', 'Get-State', 'Write-State', 'Test-AlreadyRetired', 'Get-ApplyBlockers', 'Get-VerifyProblems',
-        'Edit-FormsAndViews', 'Get-PublishContext', 'Get-PendingCollateral', 'Publish-RateCard', 'Remove-Relationships', 'Wait-ColumnsGone', 'Invoke-Retirement'
+        'Edit-FormsAndViews', 'Get-PublishContext', 'ConvertTo-CanonicalXml', 'Get-CollateralItemId', 'Get-PendingReport', 'Write-PendingReport', 'Publish-RateCard', 'Remove-Relationships', 'Wait-ColumnsGone', 'Invoke-Retirement'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
     $found = [System.Collections.Generic.List[string]]::new()
@@ -66,11 +66,11 @@ BeforeAll {
     # The shared D-83 procedure (scripts/lib/Publish-SolutionComponents.ps1): doubles that apply -ExcludeIds like the real one and record
     # every call. $script:Dev.Collateral rows are @{ Id; Text }; CollateralAfterEdit rows appear once a form or view was edited.
     $EnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com'
-    function Get-DataverseApiContext { param([string]$EnvironmentUrl) $script:Dev.ContextUrls.Add($EnvironmentUrl); return @{ Api = 'https://dev.invalid/api/data/v9.2'; Headers = @{} } }
+    function Get-DataverseApiContext { param([string]$EnvironmentUrl) $script:Dev.ContextUrls.Add($EnvironmentUrl); return @{ Api = 'https://dev.invalid/api/data/v9.2'; Headers = @{ Authorization = 'Bearer x' } } }   # like the real shared context: no Consistency header of its own
     function Get-EntityPublishCollateral {
         param([hashtable]$Context, [string]$Entity, [string[]]$ExcludeIds = @())
         $d = $script:Dev
-        $d.CollateralCalls.Add([pscustomobject]@{ Entity = $Entity; ExcludeIds = @($ExcludeIds) })
+        $d.CollateralCalls.Add([pscustomobject]@{ Entity = $Entity; ExcludeIds = @($ExcludeIds); Consistency = $Context.Headers['Consistency'] })
         $rows = @($d.Collateral)
         if (@($d.Writes | Where-Object { $_ -like 'PATCH *' }).Count -gt 0) { $rows += @($d.CollateralAfterEdit) }
         return @($rows | Where-Object { $ExcludeIds -notcontains $_.Id } | ForEach-Object { $_.Text })
@@ -112,6 +112,16 @@ BeforeAll {
             return $null
         }
         $d.Gets.Add($Path)
+        # The unpublished layer of a form / view (RetrieveUnpublished): $d.UnpubForms / $d.UnpubViews override, else the same as the plain read.
+        if ($Path -match '^systemforms\((?<id>[^)]+)\)/Microsoft\.Dynamics\.CRM\.RetrieveUnpublished\(\)') {
+            if ($d.UnpubForms.ContainsKey($Matches.id)) { return [pscustomobject]@{ formxml = $d.UnpubForms[$Matches.id] } }
+            return [pscustomobject]@{ formxml = ($d.Forms | Where-Object { $_.formid -eq $Matches.id }).formxml }
+        }
+        if ($Path -match '^savedqueries\((?<id>[^)]+)\)/Microsoft\.Dynamics\.CRM\.RetrieveUnpublished\(\)') {
+            if ($d.UnpubViews.ContainsKey($Matches.id)) { return [pscustomobject]$d.UnpubViews[$Matches.id] }
+            $v = $d.Views | Where-Object { $_.savedqueryid -eq $Matches.id }
+            return [pscustomobject]@{ fetchxml = $v.fetchxml; layoutxml = $v.layoutxml }
+        }
         # The caller's identity and rights (Get-ReadAllRowsGap). $d.Who: Admin, Depth ($null = holds no Read privilege), Fault (a message = every call throws).
         $w = $d.Who
         if ($Path -eq 'WhoAmI' -or $Path -match '^systemusers\(|^privileges\?') {
@@ -201,6 +211,8 @@ BeforeAll {
             PublishAttempts = [System.Collections.Generic.List[string]]::new()
             PublishErrors = [System.Collections.Generic.List[object]]::new()
             Collateral = @()
+            UnpubForms = @{}
+            UnpubViews = @{}
             CollateralAfterEdit = @()
             CollateralCalls = [System.Collections.Generic.List[object]]::new()
             ContextUrls = [System.Collections.Generic.List[string]]::new()
@@ -679,18 +691,16 @@ Describe 'Invoke-Retirement (T3, T4, T5)' {
         foreach ($call in $script:Dev.CollateralCalls) { $call.Entity | Should -Be 'sprk_ratecard' }
     }
 
-    It 'checks pending collateral through the shared procedure before the first write, excluding exactly the form and view it edits (F1)' {
-        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-1'; Text = 'savedqueries: Active Rate Cards (v-1)' })
+    It 'checks pending collateral through the shared procedure before the first write, with NO exclusion: the form and view it edits are read like any other (F2)' {
         Invoke-Retirement $true $false $false 'owner OK'
         $script:Dev.CollateralCalls.Count | Should -BeGreaterThan 0
-        $first = $script:Dev.CollateralCalls[0]
-        @($first.ExcludeIds | Sort-Object) | Should -Be @('f-1', 'v-1')
+        foreach ($call in $script:Dev.CollateralCalls) { $call.ExcludeIds.Count | Should -Be 0 }
         $script:Dev.Writes[0] | Should -Be 'PATCH systemforms(f-1)'
         $script:Dev.Writes.Count | Should -Be 7
     }
 
     It 'refuses when another pending form or view of sprk_ratecard would go live with the publish: exit-2 exception, nothing written or published (F1)' {
-        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-other'; Text = 'savedqueries: Someone Else''s View (v-other)' })
+        $script:Dev.Collateral = @(@{ Id = 'v-other'; Text = 'savedqueries: Someone Else''s View (v-other)' })
         $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
         $e | Should -Not -BeNullOrEmpty
         $e.GetType().Name | Should -Be 'EscalationException'
@@ -843,11 +853,85 @@ Describe 'the publish retries a transient failure, and only a transient one (fix
         @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 0
     }
 
-    It 'resume after a stop before the publish, with the plain read showing the published (old) text: the re-run lists the same form and view, excludes them as its own, publishes, and does not refuse (item 5, the expected case)' {
-        # What the stopped run left: its edit is pending (collateral lists the form and view) while the plain read still shows the old text.
-        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-1'; Text = 'savedqueries: Active Rate Cards (v-1)' })
+    # ---- Fix round 1, F2: unpublished edits on the forms and views the script edits are never overwritten ----
+    It 'refuses (exit 2, nothing written or published) when the form it edits has UNPUBLISHED changes that are not its own edit (F2)' {
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' })
+        $script:Dev.UnpubForms['f-1'] = $script:FormXml -replace 'sprk_firm', 'sprk_someoneelse'
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $e.Message | Should -BeLike "*form 'Information' (f-1) has unpublished changes that are not the edit this script would write*"
+        $e.Message | Should -BeLike '*Nothing was changed*'
+        $script:Dev.Writes.Count | Should -Be 0
+        $script:Dev.Published.Count | Should -Be 0
+    }
+
+    It 'refuses the same way when the VIEW it edits has unpublished changes that are not its own edit (F2)' {
+        $script:Dev.Collateral = @(@{ Id = 'v-1'; Text = 'savedqueries: Active Rate Cards (v-1)' })
+        $script:Dev.UnpubViews['v-1'] = @{ fetchxml = ($script:FetchXml -replace 'sprk_effectivefrom', 'sprk_someoneelse'); layoutxml = $script:LayoutXml }
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $e.Message | Should -BeLike "*view 'Active Rate Cards' (v-1) has unpublished changes that are not the edit this script would write*"
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It '-AllowPendingCollateral does NOT override an overwrite of the form or view it edits (F2)' {
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' })
+        $script:Dev.UnpubForms['f-1'] = $script:FormXml -replace 'sprk_firm', 'sprk_someoneelse'
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' $true }
+        $e.GetType().Name | Should -Be 'EscalationException'
+        $e.Message | Should -BeLike '*would overwrite*'
+        $script:Dev.Writes.Count | Should -Be 0
+    }
+
+    It 'the report (no switch) shows the overwrite risk and the BLOCKED verdict, and writes nothing (F2)' {
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' })
+        $script:Dev.UnpubForms['f-1'] = $script:FormXml -replace 'sprk_firm', 'sprk_someoneelse'
+        $out = & { Invoke-Retirement $false $false $false '' } 6>&1 | Out-String
+        $out | Should -Match 'OVERWRITE RISK'
+        $out | Should -Match 'VERDICT: BLOCKED'
+        $script:Dev.Writes.Count | Should -Be 0
+        $script:Dev.CollateralCalls.Count | Should -Be 1
+        $script:Dev.CollateralCalls[0].ExcludeIds.Count | Should -Be 0
+    }
+
+    It 'a pending form whose unpublished text equals this run''s edit is a resume, whatever the whitespace (F2)' {
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' })
+        $script:Dev.UnpubForms['f-1'] = ((ConvertTo-FormWithoutCoreLookups $script:FormXml).Xml -replace '><', ">`n  <")
+        $out = & { Invoke-Retirement $false $false $false '' } 6>&1 | Out-String
+        $out | Should -Not -Match 'OVERWRITE RISK'
+        $out | Should -Match 'VERDICT: READY'
+    }
+
+    It 'a form changed by someone else DURING the run stops the publish with a plain error (exit 1), nothing published (F2)' {
+        $script:Dev.CollateralAfterEdit = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' })
+        $script:Dev.UnpubForms['f-1'] = $script:FormXml -replace 'sprk_firm', 'sprk_changedmidrun'
+        $e = Get-Refusal { Invoke-Retirement $true $false $false 'owner OK' }
+        $e | Should -Not -BeNullOrEmpty
+        $e.GetType().Name | Should -Not -Be 'EscalationException'
+        $e.Message | Should -BeLike '*changed during the run and publishing would overwrite it*'
+        $script:Dev.Published.Count | Should -Be 0
+        @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 0
+    }
+
+    # ---- Fix round 1, F4: the shared lib's context carries Consistency: Strong ----
+    It 'the shared publish context carries Consistency: Strong, and so does the context of the pending reads (F4)' {
+        $script:PublishContext = $null
+        $ctx = Get-PublishContext
+        $ctx.Headers['Consistency'] | Should -Be 'Strong'
+        $ctx.Headers['Authorization'] | Should -Be 'Bearer x'
+        $script:PublishContext = $null
         Invoke-Retirement $true $false $false 'owner OK'
-        @($script:Dev.CollateralCalls[0].ExcludeIds | Sort-Object) | Should -Be @('f-1', 'v-1')
+        foreach ($call in $script:Dev.CollateralCalls) { $call.Consistency | Should -Be 'Strong' }
+    }
+    It 'resume after a stop before the publish, with the plain read showing the published (old) text: the re-run lists the same form and view, reads their unpublished text, finds it equal to its own edit, publishes, and does not refuse (item 5, the expected case)' {
+        # What the stopped run left: its edit is pending (collateral lists the form and view, their unpublished text is exactly this run's
+        # edit) while the plain read still shows the old text.
+        $script:Dev.Collateral = @(@{ Id = 'f-1'; Text = 'systemforms: Information (f-1)' }, @{ Id = 'v-1'; Text = 'savedqueries: Active Rate Cards (v-1)' })
+        $script:Dev.UnpubForms['f-1'] = (ConvertTo-FormWithoutCoreLookups $script:FormXml).Xml
+        $rv = ConvertTo-ViewWithoutCoreLookups $script:FetchXml $script:LayoutXml
+        $script:Dev.UnpubViews['v-1'] = @{ fetchxml = $rv.FetchXml; layoutxml = $rv.LayoutXml }
+        Invoke-Retirement $true $false $false 'owner OK'
+        foreach ($call in $script:Dev.CollateralCalls) { $call.ExcludeIds.Count | Should -Be 0 }
         $script:Dev.Published.Count | Should -Be 2
         @($script:Dev.Writes | Where-Object { $_ -like 'DELETE *' }).Count | Should -Be 3
     }
@@ -1095,8 +1179,8 @@ Describe 'structure (T7)' {
     It 'Publish-RateCard publishes only sprk_ratecard, through Invoke-PublishXml, after Confirm-Write and the pending-collateral check; the script loads the shared procedure and names no hand-rolled PublishXml (F1)' {
         $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Publish-RateCard' }, $true)[0].Extent.Text
         $fn.IndexOf('Confirm-Write') | Should -BeGreaterOrEqual 0
-        $fn.IndexOf('Get-PendingCollateral') | Should -BeGreaterThan $fn.IndexOf('Confirm-Write')
-        $fn.IndexOf('Invoke-PublishXml') | Should -BeGreaterThan $fn.IndexOf('Get-PendingCollateral')
+        $fn.IndexOf('Get-PendingReport') | Should -BeGreaterThan $fn.IndexOf('Confirm-Write')
+        $fn.IndexOf('Invoke-PublishXml') | Should -BeGreaterThan $fn.IndexOf('Get-PendingReport')
         $fn | Should -Match '<entity>\$Table</entity>'
         $fn | Should -Not -Match 'Referenced|\$Targets'
         $text = $script:Ast.Extent.Text
@@ -1119,10 +1203,10 @@ Describe 'structure (T7)' {
 
     It 'the apply path refuses (throws) before the first write, and the verdict is computed before any write' {
         $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-Retirement' }, $true)[0].Extent.Text
-        $fn.IndexOf('Get-ApplyBlockers $state') | Should -BeGreaterThan 0
-        $fn.IndexOf('throw [EscalationException]') | Should -BeGreaterThan $fn.IndexOf('Get-ApplyBlockers $state')
-        $fn.IndexOf('Get-PendingCollateral') | Should -BeGreaterThan $fn.IndexOf('throw [EscalationException]')
-        $fn.IndexOf('Edit-FormsAndViews') | Should -BeGreaterThan $fn.IndexOf('Get-PendingCollateral')
+        $fn.IndexOf('Get-PendingReport $state') | Should -BeGreaterThan 0
+        $fn.IndexOf('Get-ApplyBlockers $state $pending') | Should -BeGreaterThan $fn.IndexOf('Get-PendingReport $state')
+        $fn.IndexOf('throw [EscalationException]') | Should -BeGreaterThan $fn.IndexOf('Get-ApplyBlockers $state $pending')
+        $fn.IndexOf('Edit-FormsAndViews') | Should -BeGreaterThan $fn.IndexOf('throw [EscalationException]')
         $fn.IndexOf('Remove-Relationships') | Should -BeGreaterThan $fn.IndexOf('Edit-FormsAndViews')
     }
 
@@ -1134,8 +1218,8 @@ Describe 'structure (T7)' {
 
     # What this checks, exactly: the script's own Web API calls are the module's Invoke-Dv (which sends Consistency: Strong), and it makes no
     # REST call of its own. It does NOT check that every call carries the header: the pending-collateral reads and PublishXml go through the
-    # shared scripts/lib/Publish-SolutionComponents.ps1 (Get-EntityPublishCollateral, Invoke-PublishXml), which does not send it. The help
-    # and the README say so; the next test pins that the script's only calls into the shared lib are those two.
+    # shared scripts/lib/Publish-SolutionComponents.ps1 (Get-EntityPublishCollateral, Invoke-PublishXml), whose context does not carry it by itself:
+    # Get-PublishContext sets it (F4, tested below). The next test pins that the script's only calls into the shared lib are those.
     It 'makes no REST call of its own: its Web API calls are the module''s Invoke-Dv (Consistency: Strong), and the module is loaded' {
         $text = $script:Ast.Extent.Text
         $text | Should -Match '(?m)^using module \.\\EbillingSchema\.psm1'
@@ -1144,20 +1228,19 @@ Describe 'structure (T7)' {
         $module | Should -Match "Consistency\s*=\s*'Strong'"
     }
 
-    It 'the only calls into the shared lib (no Consistency header) are Get-EntityPublishCollateral, Invoke-PublishXml and Get-DataverseApiContext, and the help says the header does not cover them' {
+    It 'the only calls into the shared lib (no Consistency header) are Get-EntityPublishCollateral, Invoke-PublishXml and Get-DataverseApiContext, and the help says Get-PublishContext sets the header on their context (F4)' {
         $lib = @($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in 'Get-EntityPublishCollateral', 'Invoke-PublishXml', 'Get-DataverseApiContext' }, $true) | ForEach-Object { $_.GetCommandName() } | Sort-Object -Unique)
         $lib | Should -Be @('Get-DataverseApiContext', 'Get-EntityPublishCollateral', 'Invoke-PublishXml')
         $text = $script:Ast.Extent.Text
         $text | Should -Not -Match 'Every Dataverse Web API call goes through EbillingSchema\.psm1'
-        $text | Should -Match 'pending-collateral reads and PublishXml do not'
+        $text | Should -Match 'Get-PublishContext sets\s+Consistency: Strong on it \(F4\)'
         (Get-Content -Raw (Join-Path $script:RepoRoot 'scripts' 'README.md')) | Should -Not -Match 'All Web API calls go through `EbillingSchema\.psm1`'
     }
 
-    It 'the help describes resume after a stop before the publish, and the edit-from-published-text limit (fix round 2, item 5)' {
+    It 'the help describes resume after a stop before the publish, and that unpublished edits are never overwritten (F2)' {
         $text = $script:Ast.Extent.Text
         $text | Should -Match 'RESUME AFTER A STOP BEFORE THE PUBLISH'
-        $text | Should -Match 'It does NOT refuse'
-        $text | Should -Match 'KNOWN LIMIT: IT EDITS FROM THE PUBLISHED TEXT'
+        $text | Should -Match 'UNPUBLISHED EDITS ARE NEVER OVERWRITTEN \(F2\)'
         $text | Should -Not -Match 'the re-run finds them as pending collateral \(they no longer name a column'
     }
 }

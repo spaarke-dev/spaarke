@@ -17,31 +17,32 @@ Status: code and tests done on branch `task/ebilling-194`; the dev form change (
 
 Not touched: the two columns (`Entity.xml`), the `sprk_extractionstatus` option set, `docs/data-model/*` (none of those docs says a form shows these fields; they list the columns, which stay), `FinanceBaseValuesSeamTests`.
 
-## Does Deploy-EbillingFormsViews.ps1 remove controls that are no longer listed?
+## Deploy-EbillingFormsViews.ps1 is NOT a way to change the live main form
 
-Yes, for the section it owns. `Sync-Form` in Section mode builds the whole `section_ebilling` from the `Cols` list and `ReplaceChild`s the existing section with it (it adds the section only when none exists). A control left out of the list therefore disappears with the next run. It is additive only for controls OUTSIDE `section_ebilling`: those get read-only flags but are never removed. On dev the live main form shows the control inside `section_ebilling` (the read-only report below), so the next forms-script run would also remove it. The new script does not wait for that: it removes the control from whichever of the two forms still shows it, so the main session need not run the large forms script (which also touches views, sitemap and apps) for this.
-
+The script's `Cols` list no longer names `sprk_extractionstatus`, so a NEW environment built from it never gets the control. But re-running it on dev is not the way to remove the control from the live main form: in Section mode it rebuilds the whole `section_ebilling` and would drop the `qv_billingexport` quick view (a pre-existing defect, filed separately by the main session). Only `Remove-EbillingInvoiceExtractionFormControls.ps1` is used for the live change; it removes the control from both forms and touches nothing else on them.
 ## The guarded dev path
 
 `scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1`, modelled on 193's `Remove-EbillingRateCardCoreLookups.ps1`:
 
-- Default (no switch): READ-ONLY report. Per form: which control it shows, what would be removed, mentions that would remain, then READY / BLOCKED / ALREADY CLEAN. Writes nothing.
-- `-Apply` (dev host only; `-WhatIf` is the dry run): edits each main / quick-create form that shows a control, then publishes `sprk_invoice` entity-scoped through `Invoke-PublishXml` (`scripts/lib/Publish-SolutionComponents.ps1`) wrapped in `Invoke-WithTransientRetry`, then verifies. Refuses before the first write (exit 2) when: an expected form ("Invoice main form" type 2, "Invoice quick create form" type 7) is missing or ambiguous; a control is outside a cell / row / section (a header) or would leave a tab without columns; a mention would remain after the clean-up (an event handler); or another pending form / view of `sprk_invoice` would go live with the publish (D-83; `-AllowPendingCollateral` overrides). A form of another type that names a control is reported and left alone.
-- `-Verify`: READ-ONLY. Exit 0 only when both forms exist and neither shows either control; exit 1 otherwise.
-- Every Dataverse call goes through `EbillingSchema.psm1` (`Invoke-Dv`, `Consistency: Strong`); the script has no REST call of its own. `ScriptMetadataStrongConsistencyGuardTests` stays green.
-- Known limit (same as 193): the edit is built from the published text; someone else's unpublished edit on the same form would be overwritten. Run the report first and tell whoever works on the `sprk_invoice` forms.
-
-## Read-only run against dev (2026-11-23, https://spaarkedev1.crm.dynamics.com)
+- Default (no switch): READ-ONLY report. Per form: which control it shows, what would be removed, mentions that would remain; the pending (unpublished) items on `sprk_invoice`; then READY / BLOCKED / ALREADY CLEAN. Writes nothing.
+- `-Apply` (dev host only; `-WhatIf` is the dry run): edits the form(s) that show a control, then publishes `sprk_invoice` entity-scoped through `Invoke-PublishXml` (`scripts/lib/Publish-SolutionComponents.ps1`) wrapped in `Invoke-WithTransientRetry`, then verifies.
+- `-Verify`: READ-ONLY. Exit 0 only when both forms exist and neither shows either control (nor does any other invoice form); exit 1 otherwise.
+- Only the two form ids are ever edited: main `93aa1c69-0406-f111-8406-7c1e525abd8b` (type 2) and quick create `c5e5807d-e20c-f111-8342-7c1e520aa4df` (type 7). Any other `sprk_invoice` form that names a control is a blocker (exit 2), whatever its type.
+- Refuses before the first write (exit 2) when: the environment is not dev (checked first, before anything is initialised); an expected form is missing; a control is outside a cell / row / section or would leave a tab without columns; a mention would remain after the clean-up (an event handler); another invoice form names a control; a target form has unpublished changes that are not exactly this run's edit; or another pending form / view of `sprk_invoice` would go live with the publish (D-83; `-AllowPendingCollateral` overrides only this last one).
+- Unpublished edits (fix round 1, F2): the new XML is built from the published text, so the pending read lists everything unpublished on `sprk_invoice` WITHOUT excluding the two target forms; for a target form with pending changes the unpublished formxml is read (`RetrieveUnpublished`) and compared, after XML normalisation, with what this run would write. Equal = a resume; anything else refuses. The same check runs again right before the publish (a change that appears during the run is a plain error, exit 1, nothing published by that step). Both unpublished reads (a form, and a view for 193) were exercised read-only against dev and work.
+- Consistency: the reads and the form edits go through `EbillingSchema.psm1` (`Invoke-Dv`, `Consistency: Strong`). The pending-collateral reads and the `PublishXml` POST go through the shared lib, whose context carries no `Consistency` header of its own; `Get-PublishContext` sets `Consistency: Strong` on it (fix round 1, F4; the same fix is in 193's script, which had the same gap). The script has no REST call of its own. `ScriptMetadataStrongConsistencyGuardTests` stays green.
+## Read-only run against dev (2026-11-23, https://spaarkedev1.crm.dynamics.com; re-run after fix round 1)
 
 Default mode, exit 0:
 
 ```
-sprk_invoice main form 'Invoice main form': found
-sprk_invoice quick create form 'Invoice quick create form': found
+sprk_invoice main form 'Invoice main form' (93aa1c69-0406-f111-8406-7c1e525abd8b): found
+sprk_invoice quick create form 'Invoice quick create form' (c5e5807d-e20c-f111-8342-7c1e520aa4df): found
 forms showing a retired control : 2
-  form 'Invoice quick create form' (c5e5807d-e20c-f111-8342-7c1e520aa4df, type 7): shows sprk_extractionstatus, sprk_extractedjson; would remove control sprk_extractionstatus, an emptied row, control sprk_extractedjson, an emptied row, an emptied section (tab_1_column_3_section_1), an emptied column; mentions left 0
-  form 'Invoice main form' (93aa1c69-0406-f111-8406-7c1e525abd8b, type 2): shows sprk_extractionstatus; would remove control sprk_extractionstatus; mentions left 0
-other form types naming one (not edited): 0
+  form 'Invoice quick create form' (c5e5807d-..., type 7): shows sprk_extractionstatus, sprk_extractedjson; would remove control sprk_extractionstatus, an emptied row, control sprk_extractedjson, an emptied row, an emptied section (tab_1_column_3_section_1), an emptied column; mentions left 0
+  form 'Invoice main form' (93aa1c69-..., type 2): shows sprk_extractionstatus; would remove control sprk_extractionstatus; mentions left 0
+other forms naming one (never edited; blockers): 0
+pending (unpublished) items on sprk_invoice: none
 
 VERDICT: READY
 ```
@@ -50,12 +51,27 @@ VERDICT: READY
 
 ## Tests
 
-- New `tests/scripts/Remove-EbillingInvoiceExtractionFormControls.Tests.ps1` (Pester 5.7.1): 38 pass, 0 fail. Covers the pure transform, default mode writes nothing, `-Verify` both ways (and per form), `-Apply` happy path / idempotent second run / `-WhatIf` / refusal on an unexpected shape (event handler, header control, missing or ambiguous form) / pending collateral / non-dev host, structure (no REST call of its own, writes only behind `Confirm-Write`), and the repository sources (the four form files and the forms script no longer name the controls; the columns and option set stay; PB-013 gone from the seed).
-- Fails before the change: the four source-state tests (forms, Confidence row, forms script, seed) fail on the base commit's files (34 pass / 4 fail), pass after. A mutant that drops the `Confirm-Write` guard and the report-only return fails 4 tests.
-- `Remove-EbillingRateCardCoreLookups.Tests.ps1` (5.7.1): 115 pass. `Deploy-EbillingFormsViews.Tests.ps1` (5.7.1): 7 pass.
-- ArchTests (`ScriptMetadataStrongConsistency|SpaarkeMaster|Form`): 114 pass, 0 fail.
-- `FinanceBaseValuesSeamTests` (compiled into `tests/unit/Sprk.Bff.Api.Tests`): 2 pass, unchanged.
+- New `tests/scripts/Remove-EbillingInvoiceExtractionFormControls.Tests.ps1` (Pester 5.7.1): 59 pass, 0 fail. Covers the pure transform, default mode writes nothing and shows the pending line, `-Verify` both ways, `-Apply` (happy path / idempotent / `-WhatIf` / unexpected shapes / only the two ids / unpublished edits / pending collateral / a change during the run), the dev-only pre-flight, the `Consistency: Strong` context, structure (no REST call of its own, writes only behind `Confirm-Write`), and the repository sources (forms, forms script, columns and option set stay, PB-013 gone).
+- `Remove-EbillingRateCardCoreLookups.Tests.ps1` (5.7.1): 122 pass. `Deploy-EbillingFormsViews.Tests.ps1` (5.7.1): 7 pass.
+- ArchTests (`ScriptMetadataStrongConsistency|SpaarkeMaster|Form`): 114 pass, 0 fail. `FinanceBaseValuesSeamTests` (compiled into `tests/unit/Sprk.Bff.Api.Tests`): 2 pass, unchanged.
+- Fails before the change (first round): the four source-state tests fail on the base commit's files (34 pass / 4 fail).
 
+## Fix round 1 (Opus review of 6a85e61cee)
+
+Each fix has tests that fail with the fix removed (a mutant of the script, run against the same test file) and pass with it.
+
+| # | Fix | Evidence (tests failing when the fix is removed) |
+|---|---|---|
+| 1 | F2, unpublished edits: pending read WITHOUT exclusion; a target form's (193: form or view's) unpublished text must equal this run's edit, else exit 2; same line in report mode; re-checked before the publish. 194 and 193. | 194: own check disabled, 4 fail (report BLOCKED, `-Apply` refuses, `-AllowPendingCollateral` does not override, change during the run); targets excluded from the read again, 6 fail; publish re-check removed, 1 fail (own) + 1 fail (foreign/mid-run). 193: own check disabled, 5 fail; forms and views excluded again, 7 fail; publish re-check removed, 1 fail. |
+| 2 | F4: `Get-PublishContext` sets `Consistency: Strong`. 193 did not do it; fixed there too. | 194: header line removed, 2 fail (context header; the contexts passed to the collateral read and `Invoke-PublishXml` through a whole `-Apply`). 193: header line removed, 1 fail. |
+| 3 | F2, pre-flight: `Get-PreflightRefusals` and `Initialize-EbillingSchema` moved into `Invoke-Cleanup`; the entry only calls it. | Pre-flight call removed: 2 fail (a non-dev URL with `-Apply` / `-Apply -WhatIf` is refused before any initialise, read, context or write). |
+| 4 | K1: only the two form ids are edited (pinned by id and type); any other invoice form naming a control, of any type, is a blocker. | Other-forms blocker removed: 2 fail (same name but another id; any other form of type 2 / 7 / 11 / 6). |
+| 5 | Test gap: "pending changes appeared during the run". | Own re-check removed: 1 fail (target form changed mid-run); foreign re-check removed: 1 fail (another item appears mid-run); with `-AllowPendingCollateral` the foreign one is accepted. |
+| 6 | Docs: script header and this note no longer suggest re-running `Deploy-EbillingFormsViews.ps1`; the false "no REST call of its own" claim is corrected (see the guarded-path section: the shared lib's calls are covered by setting the header on its context). | n/a |
+
+Counts after fix round 1: 194 59 pass; 193 122 pass (was 115); `Deploy-EbillingFormsViews` 7 pass; ArchTests 114 pass; `FinanceBaseValuesSeamTests` 2 pass.
+
+Note for the main session: a genuine resume is refused if Dataverse stores a pending form text in a different shape than the script wrote it (the comparison normalises insignificant whitespace but nothing more); the safe answer is then to publish the pending edit in the form designer and re-run.
 ## Commands for the main session (after review, with the uac-r2 notices)
 
 ```powershell
