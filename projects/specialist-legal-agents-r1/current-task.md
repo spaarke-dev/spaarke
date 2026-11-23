@@ -10,8 +10,8 @@
 |---|---|
 | **Active work** | The owner asked (2026-11-23): (1) "I'm still not clear on the structure and core components of the model" — this program must build on accelerator-r1 both for NDA capabilities and **as the pattern for other persona/skill-based agents**; (2) explain the capability differences between Word Copilot and the M365 Copilot app, and within it between Chat and Cowork, and check whether Ignite 2026 collapsed Chat/Cowork, and what "Copilot Home" is |
 | **Step** | DONE: design.md v0.5 has §0 (model) and §3.11 (surfaces, from notes/research/copilot-surfaces-post-ignite-2026-11-23.md). Next: owner reviews the model; D-A11 still "discuss first" |
-| **Design version** | design.md v0.4 (commit `3fed5d95f3`) |
-| **Uncommitted** | this file; the research note when it lands |
+| **Design version** | design.md v0.5 (commit `b5ebb37b3c`) |
+| **Uncommitted** | none |
 
 ## Owner context to keep (2026-11-23)
 - accelerator-r1's purpose: a simple **individual install package, no IT**, a more capable, purpose-built NDA review on top of Microsoft's Copilot for legal (Legal for Cowork + Word legal plugin), as shown in the Cowork redlining video. **It is not done; it completes in parallel with this project.**
