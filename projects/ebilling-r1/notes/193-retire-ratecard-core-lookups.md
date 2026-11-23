@@ -138,3 +138,29 @@ Counts (filters and results):
 - **K7, the effect of a team's privilege-inheritance mode on the reported depth is unverified.** Whether a caller who holds Read through a team, with a team privilege-inheritance mode that differs from the user's own, is reported at the same depth by `RetrieveUserPrivileges` was not checked on a live environment. The check fails closed (a depth other than Global is a gap), so the risk is a false refusal, not a false pass; the first dev report run shows which depth the operator reads.
 
 ## Live dev run
+
+## Live dev run (2026-11-23)
+
+- **Owner's go**, typed in the ebilling-r1 session: "approved to delete the columns on dev".
+- **uac-r2:** APPROVED 46a89e55f8, and was sent a notice before and after.
+- Run from work/ebilling-r1 at c21bde55a2 (the merge of 46a89e55f8), against spaarkedev1.
+- **Attestations:**
+  - BFF: 9df4e5c8192ee7b35a5a7ddd25bd2f989edf2b42, the dev BFF live since about 12:30Z.
+  - SPA: 2dcbe35e34, spa-r4's SPA deploy at 13:04Z.
+  - Both were given by uac-r2.
+
+1. **-Apply -WhatIf: VERDICT READY.**
+   - Rows with a value: 0 for each column.
+   - Each column had 2 dependents: form da801593 and view de71004e.
+   - 0 personal views and 0 grid configurations name them.
+   - Nothing was written.
+2. **-Apply, exit 0:**
+   - Edited form 'Information' (3 controls plus an emptied row) and view 'Active Rate Cards' (3 fetch attributes, 3 layout cells).
+   - Published sprk_ratecard, then confirmed no dependents remain.
+   - Deleted sprk_matter_ratecard_matter, sprk_project_ratecard_project and sprk_workassignment_ratecard_workassignment.
+   - Published sprk_ratecard again.
+   - Its inline Verify passed.
+3. **-Verify, a separate run, exit 0:** VERDICT ALREADY RETIRED.
+   - No column, no relationship, and no form, view, personal view or grid configuration names them.
+
+Other environments lose the columns only through a SpaarkeMaster managed upgrade import, after this script's report mode is run against each target. provisioning-r1 has been told.

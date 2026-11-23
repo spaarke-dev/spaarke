@@ -255,7 +255,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 190 | 🔲 [open] | Project wrap-up | FULL | sonnet / high | none | all |
 | 191 | ✅ [done; on work e657bfda4c] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |
 | 192 | ✅ [done; on work 25778a59b7] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
-| 193 | 🟡 [wip 2026-11-23: owner go to build typed in session; build on task/ebilling-193; dev -Apply needs a second go] | Retire sprk_ratecard core-record lookups (matter, project, work assignment): solution source, schema script, docs, guarded dev delete | FULL | sonnet / high | none (p-safe false, SpaarkeMaster) | 085 |
+| 193 | ✅ [done 2026-11-23: merged c21bde55a2; Opus pass, 2 fix rounds, scoped re-check; uac-r2 APPROVED 46a89e55f8; dev -Apply on owner's go, -Verify PASS] | Retire sprk_ratecard core-record lookups (matter, project, work assignment): solution source, schema script, docs, guarded dev delete | FULL | sonnet / high | none (p-safe false, SpaarkeMaster) | 085 |
 
 ## Parallel Execution Plan
 
