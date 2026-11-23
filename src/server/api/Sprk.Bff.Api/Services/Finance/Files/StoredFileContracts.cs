@@ -614,6 +614,15 @@ public sealed record InvoiceFileListItem(
 public sealed record InvoiceFileSourceEmail(Guid DocumentId, string? Name);
 
 /// <summary>
+/// The 201 body of <c>POST /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 123, wire contract
+/// <c>projects/ebilling-r1/notes/123-upload-contract.md</c>): the new Stored File, already Servable (a download still waits for its scan).
+/// </summary>
+/// <param name="FileId">The Stored File's id (the <c>Location</c> is its internal content route).</param>
+/// <param name="FileName">The name as stored (the part's file name).</param>
+/// <param name="SizeBytes">The stored length in bytes.</param>
+public sealed record InvoiceFileUploaded(Guid FileId, string FileName, long SizeBytes);
+
+/// <summary>
 /// One row of the firm route <c>GET /api/v1/external/invoices/{id}/files</c> (ebilling-r1 task 093, model 9.3): an OUTBOUND response record
 /// (outside <c>Api/**</c>, as <see cref="InvoiceFileListItem"/>). Built field by field from the visible file set; it carries no blob path,
 /// container, source id, storage URL or SAS.
