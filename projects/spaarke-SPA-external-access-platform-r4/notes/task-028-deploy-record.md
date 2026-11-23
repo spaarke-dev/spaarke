@@ -49,7 +49,9 @@ FR-11 and FR-13 can both be checked in this round; neither is deferred.
   4. `filterChips = { mode: "denylist", denylist: ["sprk_reviewdetail"] }`.
   
   The other keys, the other source keys and the existing columns are byte-identical (checked).
-- **PATCH:** pending the owner's go. The script re-reads the row and stops if `versionnumber` changed, then reads the row back and compares.
+- **PATCH:**
+  - Owner go: 2026-11-23 ("Yes, write it"). Rollback stated beforehand: write the saved string below back (`patch-3ff4102c.ps1 -Rollback`).
+  - At 14:58:28Z the pre-check passed (versionnumber unchanged). The PATCH was `PATCHED: read-back equals target (2045 chars)`. The row is now modifiedon `2026-11-23T14:58:28Z`, versionnumber `32877194`.
 
 **ROLLBACK 3ff4102c** (raw `sprk_configjson` before the change; modifiedon `2026-11-01T16:06:04Z`, versionnumber `29336457`). Rollback = PATCH this string back:
 
