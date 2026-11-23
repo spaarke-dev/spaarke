@@ -2472,7 +2472,7 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 
 | Field | Value |
 |---|---|
-| **Status** | Open (code owner: spaarke-ontology-platform-r1; told 2026-11-23) |
+| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-162; label swapped by them 2026-11-23) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 117 adversarial review, pass A (found in passing) |
