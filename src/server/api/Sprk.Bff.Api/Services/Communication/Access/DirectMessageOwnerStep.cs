@@ -713,23 +713,14 @@ public sealed class DirectMessageOwnerStep
 
     /// <summary>
     /// fm task 056 (owner 2026-11-22, "always stays 1:1 - no filing"): the columns that file a <c>sprk_communication</c> under a
-    /// record, which a private message never holds. Derived, never hand-listed: the ownership-parent lookups of the communication's
-    /// lineage (<see cref="SecureChildLineage.Children"/>, less the thread lookup, which is the pair's Direct thread), every typed
-    /// regarding lookup (<see cref="Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.AllRegardingFields"/>, the columns
-    /// <see cref="DirectMessageRecipient.CarriesATypedRegarding"/> reads), and the ADR-024 regarding pair
-    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordIdColumn"/>,
-    /// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordTypeColumn"/>).
+    /// record, which a private message never holds: the write guard's one list (<see cref="PrivateMessageWriteGuard.TriggerColumns"/>:
+    /// the ownership-parent lookups of the communication's lineage, every typed regarding lookup — the columns
+    /// <see cref="DirectMessageRecipient.CarriesATypedRegarding"/> reads — and the ADR-024 regarding pair), less the thread lookup,
+    /// which is the pair's Direct thread and is never cleared.
     /// </summary>
     internal static readonly IReadOnlyList<string> PrivateFilingColumns =
-        SecureChildLineage.Children[CommunicationTable].LineageColumns
+        PrivateMessageWriteGuard.TriggerColumns
             .Where(c => !string.Equals(c, ThreadLookup, StringComparison.OrdinalIgnoreCase))
-            .Concat(Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.AllRegardingFields)
-            .Concat(new[]
-            {
-                Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordIdColumn,
-                Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.RegardingRecordTypeColumn,
-            })
-            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
     /// <summary>

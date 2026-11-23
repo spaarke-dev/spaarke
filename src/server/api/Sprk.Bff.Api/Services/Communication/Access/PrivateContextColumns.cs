@@ -97,6 +97,18 @@ internal static class PrivateContextColumns
     /// </summary>
     internal static async Task<string?> NotPrivateODataFilterAsync(IGenericEntityService entities, CancellationToken ct)
     {
+        var present = await PresentColumnsAsync(entities, ct).ConfigureAwait(false);
+        return present.Count == 0 ? null : "(" + string.Join(" and ", present.Select(c => $"_{c}_value eq null")) + ")";
+    }
+
+    /// <summary>
+    /// The reference columns that exist on <c>sprk_communication</c> (published metadata, through the send gate's cached
+    /// column-presence check, <see cref="PrivateMessageSendGate.CommunicationColumnsPresentAsync"/>), so a read of the table can
+    /// select exactly those for <see cref="IsPrivate"/>. Empty when none exists (no private message can exist). A metadata read that
+    /// faults propagates, and one that gives no answer throws: either is a fault of the caller's read.
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>> PresentColumnsAsync(IGenericEntityService entities, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(entities);
         var present = new List<string>(All.Count);
         foreach (var column in All)
@@ -114,7 +126,7 @@ internal static class PrivateContextColumns
             }
         }
 
-        return present.Count == 0 ? null : "(" + string.Join(" and ", present.Select(c => $"_{c}_value eq null")) + ")";
+        return present;
     }
 
     /// <summary>
