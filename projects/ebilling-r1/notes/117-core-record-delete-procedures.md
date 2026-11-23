@@ -8,16 +8,18 @@ After a core record is deleted, the platform clears the record lookups of its re
 
 | Part | Where | What it does |
 |---|---|---|
-| Rule-set retire | `Services/Finance/RuleSetService.cs:2956` `RetireUnlinkedRecordSetsAsync` (result record `:2939`) | Selects Billing sets with scope Record or Firm record, no Procedure, every core lookup null, not Retired, and older than the age floor. Pages in id order. Re-reads and re-checks each set before writing. Switches each live Billing policy Off (`sprk_enabled` = No), then sets the set to statecode Inactive (1) and statuscode Retired (2). If any policy write faults, the set stays Active. |
-| Unlinked predicate | `Services/Finance/Procedures/ProcedureAssignmentService.cs:216` `RecordRuleSet.IsUnlinked`, `:223` `AddUnlinkedFilter`, `:235` `UnlinkedColumns` | The scope values and the core-lookup list (`InvoiceFamilyCoreRecordGuard.FilingCoreTables`), in the class that already holds them. |
-| Orphan assignment delete | `ProcedureAssignmentService.cs:2654` `DeleteOrphanAssignmentsAsync` (result record `:2641`) | Selects `sprk_procedureassignment` rows with every core lookup null and older than the age floor. Pages in id order. Re-reads and re-checks each row before the delete. |
-| Job | `Services/Finance/Procedures/RecordRuleSetRetireJob.cs` (`ExecuteAsync` `:107`, heartbeat `:169`) | One `IScheduledJob`, one scope per run. Runs the two parts and writes one heartbeat with all counts and the Apply flag. A page read fault makes the run FAILED; a per-row fault makes it partial. |
+| Rule-set retire | `Services/Finance/RuleSetService.cs:2957` `RetireUnlinkedRecordSetsAsync` (result record `:2939`) | Selects Billing sets with scope Record or Firm record, named as 089 names a record set, no Procedure, every core lookup null, not Retired, and older than the age floor. Pages in id order. Re-reads and re-checks each set before writing. Switches each live Billing policy Off (`sprk_enabled` = No), then sets the set to statecode Inactive (1) and statuscode Retired (2). If any policy write faults, the set stays Active. |
+| Unlinked predicate | `Services/Finance/Procedures/ProcedureAssignmentService.cs:221` `RecordRuleSet.IsUnlinked`, `:229` `AddUnlinkedFilter`, `:242` `UnlinkedColumns` | The scope values, 089's record-set name (`RecordRuleSet.Name`, fix round 1) and the core-lookup list (`InvoiceFamilyCoreRecordGuard.FilingCoreTables`), in the class that already holds them. |
+| Orphan assignment delete | `ProcedureAssignmentService.cs:2661` `DeleteOrphanAssignmentsAsync` (result record `:2648`) | Selects `sprk_procedureassignment` rows with every core lookup null and older than the age floor. Pages in id order. Re-reads and re-checks each row before the delete. |
+| Job | `Services/Finance/Procedures/RecordRuleSetRetireJob.cs` (`ExecuteAsync` `:122`, kill switch `:128`, heartbeat `:189`) | One `IScheduledJob`, one scope per run. Reads `Ebilling:Enabled` first (ADR-018): off means no read and no write. Runs the two parts and writes one heartbeat with all counts, the Apply flag and the skip reason. A page read fault makes the run FAILED; a per-row fault makes it partial. |
 | Registration | `Infrastructure/DI/FinanceModule.cs:146` | `AddScheduledJob<RecordRuleSetRetireJob>(CronOf(configuration), enabled: false)`. It is registered disabled, like `CommunicationThreadFilingSweepJob`. There is no BackgroundService. |
-| Config | `appsettings.template.json:498` section `RecordRuleSetRetireSweep` | `Apply` (default false), `Cron` (blank = `45 3 * * *`, read at start-up), `PageSize` (100, max 5000), `MaxPages` (10), `MinAgeMinutes` (15). The Communication sweep's keys are not in the template, so this section sits after `Ebilling`. |
-| Delete guard list | `tests/Spaarke.ArchTests/WriterOnlyTablesDeleteGuardTests.cs:60` | Adds `ProcedureAssignmentService.DeleteOrphanAssignmentsAsync` to `FixedTableDeletes`, citing uac-r2 design §14. **uac-r2 must agree this entry.** |
+| Config | `appsettings.template.json:498` section `RecordRuleSetRetireSweep` | `Apply` (default false), `Cron` (blank = `45 3 * * *`, read at start-up), `PageSize` (100, max 5000), `MaxPages` (10), `MinAgeMinutes` (15, max 525600 = one year). The Communication sweep's keys are not in the template, so this section sits after `Ebilling`. |
+| Delete guard list | `tests/Spaarke.ArchTests/WriterOnlyTablesDeleteGuardTests.cs:60` | Adds `ProcedureAssignmentService.DeleteOrphanAssignmentsAsync` to `FixedTableDeletes`, citing ADR-002 and uac-r2 design §14. **uac-r2 must agree this entry.** |
+| Census waiver | `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs:136` `RuleSetServicePolicyWaiver` | Names the task 117 exception: the retire writes statecode / statuscode and `sprk_enabled` only on record-scoped rows. `RuleSetServiceRecordSetRetireWritesStatusOnly` enforces it, with controls. |
 
 What the sweep never does:
 
+- read or write anything while `Ebilling:Enabled` is false (fix round 1);
 - delete anything except an orphan assignment row;
 - send an Assign, or write the owner, `sprk_createdbyperson` or any lookup;
 - write `sprk_policyversion`;
@@ -29,7 +31,7 @@ All reads and writes are app-only, through `IGenericEntityService`.
 
 ### Placement and scope justifications
 
-- **Billing domain only (rule sets).** Ontology owns the rule sets of other domains, and 089 creates only Billing record sets (`ProcedureAssignmentService.RecordRuleSetCreateAsync`, `:3011`). The sweep filters on `RuleDomains.AddBillingFilter` and re-checks each row with `RuleDomains.IsBillingRow`.
+- **Billing domain only (rule sets).** Ontology owns the rule sets of other domains, and 089 creates only Billing record sets (`ProcedureAssignmentService.RecordRuleSetCreateAsync`, `:3018`). The sweep filters on `RuleDomains.AddBillingFilter` and re-checks each row with `RuleDomains.IsBillingRow`.
 - **Where the orphan delete lives.** `ProcedureAssignmentService` already writes every assignment row, including the removal delete. `RuleSetService` owns rule sets only, so a delete of assignment rows does not belong there.
 - **The predicate is outside `RuleSetService`.** `RecordOwnerAssignmentCensusTests` (089a K4) fails when the waived `RuleSetService.cs` names a record scope (`RecordRuleSet.ScopeRecord`/`ScopeFirmRecord`). So the "unlinked" predicate and filter sit in `RecordRuleSet`, beside `IsRecordScoped` and `RequireOneHome`. `RuleSetService` stays the one rule-set lifecycle writer and gains one method.
 
@@ -37,9 +39,9 @@ All reads and writes are app-only, through `IGenericEntityService`.
 
 Rule sets and assignment rows are taken only when `modifiedon` is earlier than now minus `MinAgeMinutes` (default 15). The selection query applies this, and so does the in-memory re-check after the re-read. Supporting evidence: both 089 creators write the core lookup in the create request itself.
 
-- Assignment rows: `AssignmentCreateAsync` builds the row with `[spec.CoreTable] = new EntityReference(...)` (`ProcedureAssignmentService.cs:2955`).
-- The record-scoped set: `RecordRuleSetCreateAsync` builds it with `[coreTable] = new EntityReference(coreTable, recordId)` (`:3019`) and checks it with `RequireOneHome` before the create.
-- The census lists `RecordRuleSetCreateAsync` as the one record-scoped `sprk_ruleset` create (`RecordOwnerAssignmentCensusTests.cs:309`).
+- Assignment rows: `AssignmentCreateAsync` builds the row with `[spec.CoreTable] = new EntityReference(...)` (`ProcedureAssignmentService.cs:2962`).
+- The record-scoped set: `RecordRuleSetCreateAsync` builds it with `[coreTable] = new EntityReference(coreTable, recordId)` (`:3026`) and checks it with `RequireOneHome` before the create.
+- The census lists `RecordRuleSetCreateAsync` as the one record-scoped `sprk_ruleset` create (`RecordOwnerAssignmentCensusTests.cs:314`).
 - No other BFF file creates `sprk_procedureassignment` rows. A grep of `src/server` finds only metadata lists (lineage, resolver, role checks).
 
 ### What deleting an assignment removes (uac-r2 addition b)
@@ -47,7 +49,7 @@ Rule sets and assignment rows are taken only when `modifiedon` is earlier than n
 `sprk_excludedpolicy` is a lookup ON `sprk_procedureassignment` to `sprk_policy`. The policy is the parent, so deleting an assignment deletes nothing else. Evidence:
 
 - `src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_Policy.xml:34`, relationship `sprk_procedureassignment_excludedpolicy_policy`: referencing entity `sprk_procedureassignment`, referencing attribute `sprk_ExcludedPolicy`, CascadeDelete `Cascade`. Deleting the **policy** deletes its override rows.
-- `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1:593` (lookup spec, "a deleted rule deletes its override") and `:70` (the only parental relationship of the table).
+- `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`, the `sprk_excludedpolicy` lookup spec ("a deleted rule deletes its override"; line 593 on this branch, its base and master) and `:70` (the only parental relationship of the table).
 
 A delete of an orphan assignment row removes that row only. There is nothing cascade-deleted to count, so the report-only output has no cascade count.
 
@@ -108,30 +110,36 @@ The sweep sends no request to `sprk_ratecard` or `sprk_ratecardrate`. The forbid
 | Must not fire: set with one lookup (each core table) | `ASetWithALookup_IsUntouched` (theory over `FilingCoreTables`, Record and Firm-record sets) |
 | Must not fire: Procedure set, ClientDefault, Firm, Retired, non-Billing (Ontology and empty domain) | `OtherSets_AreUntouched` |
 | Must not fire: assignment with a live lookup (each core table) | `AnAssignmentRowWithALiveLookup_IsKept` (theory) |
+| Must not fire: a Record or Firm-record set with no lookup that 089 did not create (another name) | `ASetNotOf089sShape_IsUntouched` (theory: a legacy name, a case variant, empty) |
+| Must not fire: eBilling off with Apply on, zero requests | `EbillingDisabled_WithApplyOn_SendsNoRequest_AndHeartbeatsTheSkip` |
 | Apply off: no write, counts logged | `ApplyOff_WritesNothing_AndReportsTheCounts`; `AnythingButTrue_IsReportOnly` (theory); `RuleSetServiceTests.RetireUnlinked_ReportOnly_CountsAndWritesNothing`; `ProcedureAssignmentServiceTests.DeleteOrphans_ReportOnly_DeletesNothing` |
-| Recorded requests: only reads, single-row updates (`sprk_enabled` / state+status) and orphan deletes; no Assign, lookup, owner or version write; no forbidden table | `AssertOnlyTheSweepsRequests`, called in the must-fire, report-only and fault tests |
+| Recorded requests: only reads, single-row updates (`sprk_enabled` / state+status) and orphan deletes; no Assign, lookup, owner or version write; no forbidden table; no Signal close, Decision Record, owner question or caller probe | `AssertOnlyTheSweepsRequests`, called in the must-fire, report-only and fault tests |
 | Re-read before write | `RuleSetServiceTests.RetireUnlinked_ASetReLinkedBeforeItsWrite_IsSkipped`; `ProcedureAssignmentServiceTests.DeleteOrphans_ARowReLinkedBeforeItsDelete_IsKept` |
-| Age floor | `TheAgeFloor_LeavesRecentRows_AndTakesOlderOnes` (14 min kept, 16 min taken); `TheAgeFloor_IsConfigurable` |
+| Age floor | `TheAgeFloor_LeavesRecentRows_AndTakesOlderOnes` (14 min kept, 16 min taken); `TheAgeFloor_IsConfigurable`; `AHugeAgeFloor_IsClampedToOneYear_AndTheRunCompletes` |
 | Policy fault leaves the set Active; the run goes on; the next run retires it; a third run writes nothing | `APolicyFault_LeavesTheSetActive_TheRunContinues_AndTheNextRunRetiresIt` |
 | Second run writes nothing | `ASecondRun_WritesNothing` |
 | Delete fault on one row continues | `ADeleteFault_OnOneRow_ContinuesTheRun` |
-| Read fault means a failed run | `AReadFault_IsAFailedRun` |
+| Read fault means a failed run | `AReadFault_IsAFailedRun` (rule sets); `AnAssignmentReadFault_IsAFailedRun` |
 | Paging and cap | `ThePageCap_IsHonoured_AndTheNextRunTakesTheRest` |
-| Registered through AddScheduledJob, disabled, configurable cron, no hosted service | `TheJob_IsRegisteredThroughAddScheduledJob_Disabled` |
+| The id cursor moves the pages on | `ReportOnly_PagesOnTheIdCursor_CountingEachRowOnce`; `AFirstRowThatAlwaysFaults_IsAttemptedOnce_AndTheRestAreProcessed` |
+| Registered through AddScheduledJob, disabled, configurable cron | `TheJob_IsRegisteredThroughAddScheduledJob_Disabled` |
+| The retire writes status and `sprk_enabled` only on record-scoped rows (waiver exception) | ArchTest `RuleSetServiceRecordSetRetireWritesStatusOnly`, controls `RecordSetRetire_Control_Fires`, `RecordSetRetire_Control_StatusOnlyPasses_VacuousFires` |
 
 ### Seeding proofs
 
-- **(a) Drop "every lookup null".** Removed the `FilingCoreTables.All(... is null)` clause from `RecordRuleSet.IsUnlinked` and the per-core `Null` conditions from `AddUnlinkedFilter`. With the filter `RecordRuleSetRetireJobTests|DisplayName~117:`, 5 of 26 failed:
+Redone after fix round 1 (the filter now selects 34 tests).
+
+- **(a) Drop "every lookup null".** Removed the `FilingCoreTables.All(... is null)` clause from `RecordRuleSet.IsUnlinked` and the per-core `Null` conditions from `AddUnlinkedFilter`. With the filter `RecordRuleSetRetireJobTests|DisplayName~117:`, 5 of 34 failed:
   - `ASetWithALookup_IsUntouched` (sprk_matter, sprk_project, sprk_workassignment);
   - `RuleSetServiceTests.RetireUnlinked_ASetReLinkedBeforeItsWrite_IsSkipped`;
   - `ApplyOff_WritesNothing_AndReportsTheCounts`.
-  After restoring, 26 of 26 passed.
-- **(b) Drop the assignment "all lookups null" condition.** Removed it from `DeleteOrphanAssignmentsAsync`'s `Matches` and `Selection`. With the same filter, 6 of 26 failed:
+  After restoring, 34 of 34 passed.
+- **(b) Drop the assignment "all lookups null" condition.** Removed it from `DeleteOrphanAssignmentsAsync`'s `Matches` and `Selection`. With the same filter, 6 of 34 failed:
   - `AnAssignmentRowWithALiveLookup_IsKept` (×3);
   - `ProcedureAssignmentServiceTests.DeleteOrphans_DeletesTheOrphan_KeepsEveryRowWithALiveLookup`;
   - `DeleteOrphans_ARowReLinkedBeforeItsDelete_IsKept`;
   - `ApplyOff_WritesNothing_AndReportsTheCounts`.
-  After restoring, 26 of 26 passed.
+  After restoring, 34 of 34 passed.
 
 ### Filters and counts
 
@@ -141,6 +149,7 @@ The sweep sends no request to `sprk_ratecard` or `sprk_ratecardrate`. The forbid
 - **ArchTests filter 1:** `WriterOnlyTables|WorkloadPlacement|RouteAuthorizationGuard|SecureChild|Finance|ADR010_DI|LayerDependency|RecordOwnerAssignmentCensus|RuleSetService|DryRunNoWrite|ProcedureRetireSelection|HardDenyOwnershipQuestion|Procedure|PolicyVersion|DraftPolicyVersion|ChildRowOwnership|AccessTableReaderScan|IOptionsDrift|CurrentVersionReader|SecureFamilyConsistency|FeatureRolePrivilege|ADR013_AiBoundary|RuleSetVisibleToFirms|SpaarkeMasterApplicationDependency` (each as `FullyQualifiedName~`): **547 passed, 0 failed**. Before the guard-list entry, 1 failed: `WriterOnlyTablesDeleteGuardTests.EveryGenericDeletePath_...` on `DeleteOrphanAssignmentsAsync`, as expected.
 - **ArchTests filter 2:** `Owner|Census|Job|Delete|Writer|Lineage|Billing|Rule|Scheduled|AppOnly|Signal`: **993 passed, 0 failed**.
 - The full ArchTests and full unit suites were not run, as the brief instructs.
+- **Fix round 1.** Build: 0 errors, 0 warnings. Unit filter `RecordRuleSetRetireJobTests|DisplayName~117:|RuleSetServiceTests|ProcedureAssignmentServiceTests|SignalReevaluationJob|StoredFileReconcileJob|EligibleApproverRefreshJob|FinanceModule` (each `FullyQualifiedName~`, except the `DisplayName~117:`): **789 passed, 0 failed**. ArchTests filter `WriterOnlyTablesDeleteGuard|RecordOwnerAssignmentCensus|WorkloadPlacement|RuleSetService|IOptionsDrift|DryRunNoWrite|Scheduled|FeatureFlag|Ebilling`: **229 passed, 0 failed**.
 
 ## 3. Publish size and CVE
 
@@ -163,9 +172,34 @@ The sweep sends no request to `sprk_ratecard` or `sprk_ratecardrate`. The forbid
 
 ## 4. Known limits and open points
 
-- **Every run starts at the top.** If more than `PageSize × MaxPages` rows fault on every run, they would hold back the rows after them. The counts and the `moreRemain` flag show this.
+- **Faulting rows can hold back the rest, only past the page cap.** Every run starts at the top, and within a run the id cursor moves past a faulted row (it is attempted once per run). Only when more than `PageSize × MaxPages` rows fault on every run do they hold back the rows after them. The `faulted` counts and the `moreRemain` flag show this.
 - **Which policies the retire switches Off.** It uses `LoadPoliciesAsync`, which returns the set's live (statecode Active) Billing policies, the same read as the Procedure retire (081). An inactive or non-Billing policy of a record set is not written.
-- **No eBilling kill switch.** The job does not read `Ebilling:Enabled`, the same as the Communication sweep. Writes are gated by `Apply` alone. Main session to decide whether the kill switch should also gate it.
 - **Age floor and RemoveLink.** The age floor assumes the platform's RemoveLink cascade updates `modifiedon`. If it does not, the row is still taken; the floor then measures from its last edit.
+- **A restored record does not revive its set.** If a matter is restored with its original id after the sweep has run, its set stays Retired: re-linking does not revive it. A later "change rule" on that record gets 409, as for any unlinked set.
+- **A planner delete between the re-read and the delete.** If uac-r2's planner deletes an assignment row after the sweep re-reads it and before the sweep deletes it, the delete faults. That run shows one `faulted` row and is partial; the next run no longer finds the row.
+- **An app-created assignment row with no core lookup is deleted.** A `sprk_procedureassignment` row created in the model-driven app with no core lookup, older than the age floor, is deleted. Model 5.2: such a row applies to nothing.
+- **Record-set shape.** The sweep takes a set only when its name is exactly `RecordRuleSet.Name`, which 089's creator always writes. A set renamed in the app after its record's delete is not retired. A read-only scope on the rule-set form is a further option, not taken here (no form or script edit).
+
+## 5. Review passes A and B, fix round 1
+
+Each fix-now item has a test that fails before the fix and passes after; the proof is named. Fix commits are on `task/ebilling-117`.
+
+| # | Finding | Class | Fix commit | Test and proof |
+|---|---|---|---|---|
+| 1 | The job never read `Ebilling:Enabled` (ADR-018); the sibling Finance jobs do | F | `1214a0e509` | `EbillingDisabled_WithApplyOn_SendsNoRequest_AndHeartbeatsTheSkip`: eBilling off and Apply on send zero requests; heartbeat `skippedReason=ebilling-disabled`; `Success` true, `Skipped` false (the host alone sets it, `.claude/patterns/api/scheduled-jobs.md`). Failed with the flag read replaced by `null`, passes with it. The old claim that the Communication sweep justified skipping the switch is removed. |
+| 2 | A set hand-edited in the app to a record scope with no lookup (for example a legacy ClientDefault set) would be retired | K2 | `ac585e5ce6` | `ASetNotOf089sShape_IsUntouched` (3 cases × Record and Firm record): all 3 failed on the old predicate, pass now. See the evidence below. |
+| 3 | `MinAgeMinutes` became a date before the try, so a huge value threw out of `ExecuteAsync` | K1 | `ed2d6af9db` | `AHugeAgeFloor_IsClampedToOneYear_AndTheRunCompletes` (`int.MaxValue`): failed with `ArgumentOutOfRangeException` before; passes with the clamp to 525,600 minutes. |
+| 4 | The census waiver said record-scoped sets are NOT covered by `RuleSetService`, but the retire now writes them | F2 | `f1bfa64e96` | The waiver names the task 117 exception (statecode / statuscode and `sprk_enabled` only; no create, owner, lookup, Assign or delete; ADR-002, ADR-036). New guard `RuleSetServiceRecordSetRetireWritesStatusOnly` with must-fire (8 cases) and must-not-fire / non-vacuous controls. Proved on the real file: adding an `ownerid` write to the retire fails it. |
+| 5 | The id cursor was unproven: a mutant dropping both `GreaterThan cursor` conditions passed every test | F2 | `ad50562314` | `ReportOnly_PagesOnTheIdCursor_CountingEachRowOnce` (3 of each, PageSize 1, MaxPages 5 → selected 3 each) and `AFirstRowThatAlwaysFaults_IsAttemptedOnce_AndTheRestAreProcessed`. Both fail on that mutant, pass now. |
+| 6 | An assignment read fault failing the run was untested | F2 | `ad50562314` | `AnAssignmentReadFault_IsAFailedRun`: fails when the job ignores `assignments.ReadFailed`, passes now. |
+| 7 | The registration test asserted DI descriptor lifetimes (ADR-038 ban B3) | F2 | `ad50562314` | Those two assertions are removed; `Enabled == false` and the cron checks stay. Not a behaviour change, so no fail-before. |
+| 8 | The new delete-guard entry cited no ADR (tests/CLAUDE.md) | F2 | `f1bfa64e96` | The reason cites ADR-002 and uac-r2 core-record-delete design §14. Text only; `WriterOnlyTablesDeleteGuardTests` passes. |
+| 9 | `AssertOnlyTheSweepsRequests` covered `IGenericEntityService` only | K | `ad50562314` | It also asserts no Signal close, no Decision Record preflight, record or enqueue, no owner question and no caller probe. No production path reaches them, so there is no fail-before. |
+| 10 | Known limits not recorded (restored record, faults past the cap, planner race, app-created orphan row) | K3 | this notes commit | §4. |
+| 11 | The `Deploy-EbillingProcedureSchema.ps1` line reference | — | this notes commit | The `sprk_excludedpolicy` lookup spec is at line 593 on this branch, its base and master (checked; line 594 is the `sprk_firm` spec). The reference now names the spec and says where the line number holds. The script is not edited. |
+
+**Evidence for item 2.** `RecordRuleSetCreateAsync` (`ProcedureAssignmentService.cs:3018`) always writes `["sprk_name"] = RecordRuleSet.Name` (`:3023`). It is the one record-scoped `sprk_ruleset` create (census `RecordOwnerAssignmentCensusTests.cs:314`), and `RuleSetService` reads a record-scoped set as no set on every mutation route (`LoadRuleSetAsync`, `RuleSetService.cs:3592-3593`), so no BFF path renames one. So the name condition holds for every set 089 makes; it is ordinal, so it fails closed. `sprk_createdbyperson` is **not** a condition: 089's creator stamps it through `owner.ApplyTo(set)` (`:3055`), and `RecordOwnerResolution.ApplyTo` stamps a person only when the caller resolves to one (`RecordOwnershipResolver.cs:1855-1860`, `:2264-2266`: an unknown person "simply records nobody"). A set 089 made can therefore lack it.
+
+**Not re-measured.** Publish size and CVE (§3) were not re-measured in this round. The change adds no package and a few lines of BFF code.
 
 ## uac-r2 hand-off and review
