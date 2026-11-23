@@ -4,7 +4,7 @@
     <title>Shared side-pane lookup fields return keyboard focus to their button after the Dataverse lookup pane closes</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library used by every create wizard, the rule wizard and PCF hosts.</rigor-reason>
     <model-tier>sonnet</model-tier>
