@@ -17,7 +17,7 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import {
   REASON_COLUMN_NOT_AUTHORABLE,
@@ -42,6 +42,7 @@ const maybe = (id: string) => screen.queryByTestId(id);
 const change = (id: string, value: string) => fireEvent.change(byId(id), { target: { value } });
 const click = (id: string) => fireEvent.click(byId(id));
 const optionValues = (id: string) => Array.from((byId(id) as HTMLSelectElement).options).map(o => o.value);
+const optionTexts = (id: string) => Array.from((byId(id) as HTMLSelectElement).options).map(o => o.text);
 const valueOf = (id: string) => (byId(id) as HTMLInputElement).value;
 /** How many times `text` is rendered anywhere on the page, hidden or not. */
 const occurrencesOf = (text: string) => (document.body.textContent ?? '').split(text).length - 1;
@@ -231,6 +232,35 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     // No text area, and no input that takes a rule body, anywhere in the step.
     expect(document.querySelectorAll('textarea')).toHaveLength(0);
     expect(screen.queryByLabelText(/json/i)).toBeNull();
+  });
+
+  it('shows each table by its display name and keeps the logical name as the value (DI-157)', async () => {
+    // A catalog of the real tables: the wizard names them for a person, and sends the logical name.
+    const real = {
+      ...catalog,
+      subjects: [
+        {
+          ...catalog.subjects[0],
+          entity: 'sprk_matter',
+          joins: [{ ...catalog.subjects[0].joins[0], related: 'sprk_budgetrevision' }],
+        },
+        { ...catalog.subjects[1], entity: 'sprk_invoice' },
+        { ...catalog.subjects[1], entity: 'sprk_workassignment' },
+      ],
+    };
+    cleanup();
+    setup({ service: makeAuthoringService({ getCatalog: jest.fn(async () => ({ ok: true as const, data: real })) }) });
+    await fillBasics();
+    await next('rule-wizard-condition');
+
+    expect(optionTexts('rule-wizard-subject')).toEqual(['Choose a table', 'Matter', 'Invoice', 'Work Assignment']);
+    expect(optionValues('rule-wizard-subject')).toEqual(['', 'sprk_matter', 'sprk_invoice', 'sprk_workassignment']);
+
+    change('rule-wizard-subject', 'sprk_matter');
+    click('rule-wizard-add-clause');
+    expect(optionTexts('rule-wizard-clause-0-related')).toEqual(['Choose related records', 'Budget Revision']);
+    expect(optionValues('rule-wizard-clause-0-related')).toEqual(['', 'sprk_budgetrevision']);
+    expect(document.body.textContent).not.toMatch(/sprk_(matter|invoice|workassignment|budgetrevision)/);
   });
 
   it("offers a Threshold only the tables that have a measure, and only that table's measures", () => {

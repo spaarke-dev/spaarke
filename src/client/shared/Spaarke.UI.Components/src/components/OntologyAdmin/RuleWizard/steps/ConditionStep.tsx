@@ -17,6 +17,7 @@
 import * as React from 'react';
 import { Button, Input, Select, Text } from '@fluentui/react-components';
 import { AddRegular, DeleteRegular } from '@fluentui/react-icons';
+import { tableLabel } from '../../../../utils/tableLabels';
 import { buildDraftBody, emptyClause, emptyRow, RULE_TYPE_THRESHOLD, subjectOf } from '../ruleDraft';
 import type { ClauseDraft, ClauseKind, ConditionDraft, FilterRow } from '../ruleDraft';
 import { errorMessage, RefusableField, useStepStyles } from '../stepCommon';
@@ -109,7 +110,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
           <option value="">Choose a table</option>
           {subjects.map(s => (
             <option key={s.entity} value={s.entity}>
-              {s.entity}
+              {tableLabel(s.entity)}
             </option>
           ))}
         </Select>
@@ -225,7 +226,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
                         <option value="">Choose related records</option>
                         {subject.joins.map(j => (
                           <option key={j.related} value={j.related}>
-                            {j.related}
+                            {tableLabel(j.related)}
                           </option>
                         ))}
                       </Select>

@@ -1628,6 +1628,12 @@ public sealed partial class OntologyAdminAuthoringService
                     "nextSteps, never twice in one list and never in both."];
                 check = check with { ReasonCode = check.ReasonCode ?? ReasonDuplicateAction };
             }
+            else if (plan.IsRefused && plan.RefusalReason == DecisionPlanRefusalReason.PlanMissing)
+            {
+                // DI-157: an empty plan is the wizard's "nothing chosen yet", so the author is told what to do, not the internal code.
+                // The refusal reason is unchanged (telemetry, the plan route and the stored-plan refusal still carry it).
+                errors["decisionPlan"] = ["Choose at least one action."];
+            }
             else if (plan.IsRefused)
             {
                 errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): it must list actions from the {l} lane's catalog."];

@@ -388,6 +388,23 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         _fixture.World.Writes.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("""{"actions":[]}""")]
+    [InlineData("")]
+    public async Task Validate_AnEmptyPlan_SaysChooseAtLeastOneAction_AndNoInternalCode_DI157(string plan)
+    {
+        var validate = await Json(await Validate(Draft(plan: plan)));
+        var save = await Save(draft: Draft(plan: plan));
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        var message = ValidateErrors(validate)["decisionPlan"].Single();
+        message.Should().Be("Choose at least one action.");
+        message.Should().NotContain("plan_missing").And.NotContain("refused").And.NotContain("(");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(message);
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Validate_ACodeInBothActionsAndNextSteps_GetsTheDuplicateMessageAndCode_AsTheSaveDoes()
     {

@@ -129,7 +129,7 @@ public class RuleBodyDescriberTests
         "sprk_event where sprk_eventtype_ref = 124f5fc9-98ff-f011-8406-7c1e525abd8b and statuscode = 659490001 and sprk_duedate < now-5d")]
     [InlineData("do-task-due-within-3-days", "Each event where event type is Task, status is 659490001, and due date is on or after now and is on or before 3 days from now.",
         "sprk_event where sprk_eventtype_ref = 124f5fc9-98ff-f011-8406-7c1e525abd8b and statuscode = 659490001 and sprk_duedate >= now and sprk_duedate <= now+3d")]
-    [InlineData("do-workassignment-past-due", "Each work assignment where state is 0 and response due date is before now.",
+    [InlineData("do-workassignment-past-due", "Each work assignment where the work assignment is active and response due date is before now.",
         "sprk_workassignment where statecode = 0 and sprk_responseduedate < now")]
     public async Task EachDoFixture_IsOneLine_NamingTheSubject_TheDateColumn_AndTheRelativeDate(string fixture, string text, string formal)
     {
@@ -142,6 +142,37 @@ public class RuleBodyDescriberTests
         line.Kind.Should().Be("Subject");
         line.Text.Should().Be(text);
         line.Formal.Should().Be(formal);
+    }
+
+    // DI-159: statecode is a choice (0 Active, 1 Inactive on every custom table), so the line says "active", never "state is 0". The formal line keeps the raw test.
+    [Theory]
+    [InlineData(0, "A budget exists for the matter where the budget is active.", "exists sprk_budget via sprk_matter where statecode = 0")]
+    [InlineData(1, "A budget exists for the matter where the budget is inactive.", "exists sprk_budget via sprk_matter where statecode = 1")]
+    public async Task AStateCodeTest_IsDescribedByItsLabel_NotItsNumber_AndTheFormalLineKeepsTheNumber(int state, string text, string formal)
+    {
+        var (describer, _) = WithAllRows();
+        var body = """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_budget","path":"sprk_matter","filter":{"statecode":""" + state + "}}]}";
+
+        var result = await describer.DescribeAsync(body, CancellationToken.None);
+
+        result.IsRefused.Should().BeFalse(result.Refusal);
+        var line = result.Description!.Clauses.Should().ContainSingle().Subject;
+        line.Text.Should().Be(text);
+        line.Text.Should().NotContain("state is");
+        line.Formal.Should().Be(formal);
+    }
+
+    [Fact]
+    public async Task AStateCodeInASubjectWhen_IsDescribedByItsLabel_ForAThresholdBodyToo()
+    {
+        var (describer, _) = WithAllRows();
+
+        var result = await describer.DescribeAsync(
+            """{"type":"Threshold","subject":"sprk_matter","when":{"statecode":0},"threshold":{"field":"sprk_budgetutilizationpercent","operator":">=","value":85}}""",
+            CancellationToken.None);
+
+        result.Description!.Clauses[0].Text.Should().Be("Each matter where the matter is active.");
+        result.Description.Clauses[0].Formal.Should().Be("sprk_matter where statecode = 0");
     }
 
     [Theory]

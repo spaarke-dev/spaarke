@@ -295,7 +295,7 @@ public class DecisionActionCatalogTests
             ("dueDate", DecisionParameterKind.Date, false),
             ("notify", DecisionParameterKind.Boolean, false));
         action.EffectLines.Should().Equal(
-            "Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded",
+            "Creates a task (an event of type Task) linked to the record, assigned to the person you choose, when the decision is recorded",
             "With Send email notification on, emails the person the task and notifies them in Spaarke");
     }
 

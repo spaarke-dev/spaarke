@@ -40,7 +40,8 @@ public sealed record RuleDescriptionResult(RuleDescription? Description, string?
 /// A relative date is stated as the filter states it (<c>now-30d</c> is "30 days ago"), never softened into "recently".
 /// A classifier-based clause (a <c>sprk_triagecategory</c> condition) is phrased as a classification, per v4 HANDOFF
 /// section 1.4 (binding). A value with no known label is printed as the filter holds it (for example a choice value
-/// 100000003), not invented. Known gap: choice option labels need a metadata read this task does not make; the formal
+/// 100000003), not invented. Known gap: choice option labels need a metadata read this task does not make, except <c>statecode</c>, whose two
+/// states are the same on every table and are said as "active" / "inactive" (DI-159); the formal
 /// form always carries the exact value.</para>
 /// <para><b>Names.</b> Lookup GUIDs in the closed <see cref="LookupColumns"/> table are resolved by ONE batched read per
 /// reference table, with the BFF's own <see cref="IGenericEntityService"/> (the evaluator's principal: reference rows
@@ -93,6 +94,8 @@ public sealed class RuleBodyDescriber
     };
 
     private const string TriageCategoryColumn = "sprk_triagecategory";
+
+    private const string StateCodeColumn = "statecode";
 
     private static readonly Regex RelativeDate = new(@"^now(?:(?<sign>[-+])(?<days>[0-9]{1,4})d)?\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -383,10 +386,26 @@ public sealed class RuleBodyDescriber
             if (value.ValueKind == JsonValueKind.Array)
             {
                 var shown = value.EnumerateArray().Select(v => Display(v, isLookup, names)).ToList();
+                if (field.Name == StateCodeColumn && value.EnumerateArray().All(v => StateWord(v) is not null))
+                {
+                    words.Add($"the {Label(EntityLabels, entity)} is {OrList(value.EnumerateArray().Select(v => StateWord(v)!).ToList())}");
+                    formal.Add($"{field.Name} in ({string.Join(", ", value.EnumerateArray().Select(Raw))})");
+                    continue;
+                }
+
                 words.Add(field.Name == TriageCategoryColumn
                     ? $"it was classified as {OrList(shown)}"
                     : $"{label} is {OrList(shown)}");
                 formal.Add($"{field.Name} in ({string.Join(", ", value.EnumerateArray().Select(Raw))})");
+                continue;
+            }
+
+            if (field.Name == StateCodeColumn && StateWord(value) is { } stateWord)
+            {
+                // DI-159: statecode is the same two-state choice on every table the rule grammar reads (0 Active, 1 Inactive), so it is
+                // said by its label, never as "state is 0". The formal line below keeps the exact test.
+                words.Add($"the {Label(EntityLabels, entity)} is {stateWord}");
+                formal.Add($"{field.Name} = {Raw(value)}");
                 continue;
             }
 
@@ -398,6 +417,12 @@ public sealed class RuleBodyDescriber
 
         return (words, formal);
     }
+
+    /// <summary>The label of a <c>statecode</c> value: 0 is "active", 1 is "inactive"; null for any other value (shown as the filter holds it).</summary>
+    private static string? StateWord(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var state)
+            ? state switch { 0 => "active", 1 => "inactive", _ => null }
+            : null;
 
     private static string OperatorWords(string op, JsonElement operand, string column, bool isLookup, Dictionary<Guid, string> names)
     {
