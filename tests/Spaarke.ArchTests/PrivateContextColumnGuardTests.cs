@@ -55,6 +55,9 @@ public class PrivateContextColumnGuardTests
         (Bff + "Services/Dataverse/RecordOwnershipResolver.cs", true,
             "CitationLookups: the columns are citations, so no parent derivation (ownership, secure-if-any, reparent) reads them; "
             + "ReparentAsync: a row holding one is a private message, never filed or moved to another thread (Q5)"),
+        (Bff + "Services/Communication/Access/DirectMessageOwnerStep.cs", true,
+            "ClearPrivateFilingAsync (owner 2026-11-22, no filing): reads the reference only to find a private message filed outside " +
+            "the BFF, and clears its filing columns; it never writes the reference"),
     };
 
     /// <summary>The registry source files the scan checks by name (rule 1, the parts not read at run time).</summary>
