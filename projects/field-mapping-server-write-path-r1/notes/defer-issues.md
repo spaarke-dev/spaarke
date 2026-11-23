@@ -362,3 +362,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing test flake from master (task 199); this project does not touch EmailComposer |
 | **Need** | Make the focus-return assertion robust to slow jsdom ticks under full-suite load. It passes alone. |
 | **Status** | Filed. The same run's OntologyAdmin Rules failure is already #2597. |
+
+## DI-038 — A private-message refusal carries the title "Record owner unresolved" (found in the 056 live check)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-23, 056 live check on dev (`PATCH /api/communications/{id}/filing` on a private message) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3023 |
+| **Class** | Cosmetic (ProblemDetails title). The status, `reasonCode` and detail are correct, and clients branch on `reasonCode`. |
+| **Need** | `ProblemDetailsHelper.RecordOwnerRefused` picks its title from the code: `not_fileable` and `check_unavailable` get their own titles. Add a contract test for each. |
+| **Status** | Filed. Fix with the next BFF change in this area. |
