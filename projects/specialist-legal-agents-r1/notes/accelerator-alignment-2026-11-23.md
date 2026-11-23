@@ -3,7 +3,7 @@
 > **For:** the accelerator r1 session (`acclerator-r1`, worktree `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1`).
 > **From:** the specialist-legal-agents-r1 setup session.
 > **Read with:** `projects/specialist-legal-agents-r1/design.md` §3.9, §3.10 and §10.1 on branch `work/specialist-legal-agents-r1`.
-> **Status:** awaiting the accelerator's review. This program's Phase 0 is blocked on it (gate A0, D-A14).
+> **Status:** **reviewed by the accelerator session on 2026-11-23.** Its corrections C1–C5 and answers to Q1–Q8 are recorded in design.md §10.1 (v0.4). Remaining owner decisions: D-A11, D-A16 and the Q7 catalogue owner.
 
 ## What this program is
 
