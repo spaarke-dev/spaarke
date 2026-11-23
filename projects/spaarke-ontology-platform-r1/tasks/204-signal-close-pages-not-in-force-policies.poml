@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The nightly D-170 close reads every not-in-force policy (paged) and reports a truncated read, instead of silently stopping at 5,000 (DI-162)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF Signals services (.cs) on a nightly job path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located defect with a reference implementation to copy (SecureChildReconciliationJob id-cursor paging).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No file overlap with 203 (RuleBodyDescriber, DecisionActionCatalog, authoring catalog, Worklist UI).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, worker, job, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-23: "continue with other tasks so we can make progress". Issue #2982 (DI-162, filed by ebilling-r1 as ISS-044; read it in full). `SignalClosureService.ReadPoliciesNotInForceAsync` (`src/server/api/Sprk.Bff.Api/Services/Signals/SignalClosureService.cs` ~200-216) reads Off and Inactive policies with one unpaged `RetrieveMultipleAsync` per condition and ignores `MoreRecords`; `SignalReevaluationJob.ClosePoliciesNotInForceAsync` then closes open Signals per policy. Past 5,000 not-in-force policies the rest are silently skipped. ebilling task 117 switches record rules Off on every core-record delete, so the count grows.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse SDK paging, ADR-036 scheduled jobs.</role>
+  <goal>The close reads every not-in-force policy via id-cursor paging (copy `SecureChildReconciliationJob.cs` ~1384), dedupes across the two conditions, and logs/reports a truncated or failed read loudly (D-78: fail loudly and retry), so no open Signal of an Off/Inactive policy is silently left open.</goal>
+  <context>
+    <background>Read the current SignalClosureService and SignalReevaluationJob on origin/master first (`git log -5` on both). Consider (only if cheap and correct) limiting the policy read to policies that still have open Signals; otherwise keep the per-policy close as is. Do not change which policies count as not in force, the close semantics (D-120 resolvedon = lastevaluated), or D-61 (never stamp unchanged Signals).</background>
+  </context>
+  <constraints>
+    <constraint source="project">D-61, D-120, D-170 semantics unchanged; only completeness of the read and reporting change.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="ADR-038">Tests: more than one page of policies are all closed (fails on origin/master); a page read failure is reported and not swallowed; Off and Inactive overlap is deduped.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Failing test: a fake returning MoreRecords across pages; policies on page 2 get their Signals closed.</step>
+    <step order="2">Implement id-cursor paging; report truncation/failure (log + job outcome per D-78).</step>
+    <step order="3">Filtered tests (SignalClosure, SignalReevaluation), full ArchTests, BFF build, publish-size delta.</step>
+    <step order="4">PR to master; notes in notes/task-204-notes.md; tell ebilling-r1 (they filed it) when merged.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Policies beyond the first page are read and their open Signals closed; test fails on origin/master.</criterion>
+    <criterion testable="true">A failed or truncated read is logged at Warning/Error with counts and surfaces as a job failure or a reported outcome, never a silent partial success.</criterion>
+    <criterion testable="true">Existing SignalClosure/SignalReevaluation tests pass unmodified; build, full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a schema change, a new scheduled job, or changes which policies are closed: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree; PR to master.</protocol>
+  </execution>
+</task>

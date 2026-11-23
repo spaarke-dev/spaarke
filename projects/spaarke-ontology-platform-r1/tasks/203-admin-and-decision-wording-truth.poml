@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="203" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>User-facing wording tells the truth: rule wizard display names and no raw plan codes, decision wizard state labels and Assign Task text, Worklist summary names two lanes (DI-157, DI-159, DI-161)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF Signals (.cs) and shared UI (.ts/.tsx); text the user reads on UAT paths.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located wording defects with stated fixes in issues #2945, #2950, #2952.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No file overlap with 204 (SignalClosureService / SignalReevaluationJob) or PR #3004 (SprkModal, RuleWizard.tsx catalog gate only).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-23: "in parallel where possible continue with other tasks so we can make progress in this project". Three issues found in the main session's dev browser checks 2026-11-22, all on UAT paths (105). Read each issue in full: DI-157 #2945, DI-159 #2950, DI-161 #2952 (gh issue view). Summary:
+(1) DI-157 Rule wizard: Condition step "The rule is about" lists logical names (`sprk_matter`); show display names, keep the logical name as the value. Actions step Next with nothing chosen shows "The decision plan is refused (plan_missing): ..."; no internal code reaches the user: "Choose at least one action."
+(2) DI-159 Decision wizard: "How this was determined" reads "where state is 0" (`RuleBodyDescriber.cs` ~:87 label, ~:440 Display); describe `statecode` (and `statuscode` where labels are known) by option label ("where the budget is active"); the formal line stays. Assign Task catalog text "assigned to the person above" (`DecisionActionCatalog.cs` ~:265) becomes "assigned to the person you choose"; update the test that pins it (`DecisionWizard.assignTaskNotify.test.tsx:40`).
+(3) DI-161 Worklist summary: `worklistNarrative.ts` ~:73-88 sends past-due Do items as a third category to `POST /api/ai/daily-briefing/narrate`, so the Assistant writes "241 notifications across 3 categories". Past-due is a subset of Do; Work Items are not notifications.</prompt>
+  <role>SPAARKE full-stack developer: .NET 10 Minimal API BFF Signals services and @spaarke/ui-components (Fluent v9).</role>
+  <goal>On dev, after the Console auto-deploys and the next dev BFF build, every string named above reads as the issue's "Done when" says, with tests pinning each, and nothing else changes.</goal>
+  <context>
+    <background>Code at origin/master (ontology code is on master). Display names: find where the rule wizard's table list comes from (authoring catalog route / service) and whether display names are already available (record-type catalog, entity metadata) before adding anything; reuse first (CLAUDE.md §11). DI-161: prefer a change that needs no Dataverse or playbook write. Option (a) in #2952 (two lane categories + past-due as a fact + a Work Item hint) or (b) (deterministic summary line from the counts). If the only correct fix needs a Dataverse/playbook write (the narrate prompt lives in Dataverse), STOP that item and report: it needs the owner's approval.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §11">No new endpoint, service or package unless the three questions are answered in the PR; prefer extending the catalog/describer.</constraint>
+    <constraint source="project">Formal rule text, rule evaluation, plan validation codes and API reason codes stay as they are; only what the user reads changes. Exact-set catalog tests unaffected except the one string.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE.</constraint>
+    <constraint source="project CLAUDE.md §6">client-lint ratchet before pushing; filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="ADR-038">Tests assert the user-visible strings and fail on origin/master.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Failing tests first for each of the five strings.</step>
+    <step order="2">Fix each with the smallest change; reuse existing label/metadata sources.</step>
+    <step order="3">Filtered BFF tests (RuleBodyDescriber, DecisionActionCatalog, authoring catalog), full ArchTests, jest for OntologyAdmin/RuleWizard, DecisionWizard, Worklist; tsc; client-lint; Console build; publish-size delta.</step>
+    <step order="4">PR to master; notes in notes/task-203-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Rule wizard Condition step lists display names with logical-name values; Actions step empty Next shows "Choose at least one action." and no "(plan_missing)". Tests fail on origin/master.</criterion>
+    <criterion testable="true">Describer renders statecode by its label ("active"/"inactive") in the plain-language line; formal line unchanged. Test fails on origin/master.</criterion>
+    <criterion testable="true">Assign Task text says "the person you choose"; the pinning test updated; no other catalog test changes.</criterion>
+    <criterion testable="true">Worklist narrative body never sends past-due as a sibling category and never more categories than lanes; test fails on origin/master. Or a reported STOP if only a Dataverse write can fix it.</criterion>
+    <criterion testable="true">Builds, filtered tests, full ArchTests, jest, tsc, client-lint pass; publish-size delta reported.</criterion>
+    <criterion testable="false">Main session checks the strings on dev after the Console auto-deploy and the next uac-r2 dev BFF build.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>A fix needs a Dataverse, playbook or schema write, a new endpoint, or a change to an API reason code: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree; PR to master.</protocol>
+  </execution>
+</task>
