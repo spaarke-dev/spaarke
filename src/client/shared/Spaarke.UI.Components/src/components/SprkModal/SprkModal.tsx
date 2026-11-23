@@ -248,7 +248,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // moves focus: the content mounts in the same commit as this component (the portal does not defer it), so a child's
   // layout effect or an `autoFocus` input has already focused itself by the time a layout effect of ours runs, and
   // Fluent's `useFocusFirstElement` (a passive effect) comes after both. The read has no side effect; it is committed to
-  // `openerRef` by the layout effect below. Pinned by focusRestore.test.tsx ("captures the opener before ...").
+  // `openerChainRef` by the layout effect below. Pinned by focusRestore.test.tsx ("captures the opener before ...").
   const openerCandidateRef = React.useRef<OpenerCandidate[]>([]);
   if (open && !wasOpenRef.current) {
     const doc = targetDocument ?? document;
