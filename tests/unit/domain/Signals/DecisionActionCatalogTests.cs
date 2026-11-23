@@ -277,15 +277,23 @@ public class DecisionActionCatalogTests
     }
 
     [Fact]
-    public void NoPersonEffectLine_SaysThePersonAbove_ReassignSaysThePersonYouChoose_DI159()
+    public void NoEffectLine_PointsAbove_BecauseWhatItDoesIsShownBeforeTheFields_DI159()
     {
-        // The wizard shows "What it does" BEFORE the fields, so "the person above" points at nothing.
+        // The wizard shows "What it does" (and a next step's card description) BEFORE the fields, so a line that says "above" points at
+        // nothing. Every effect line of every action is checked; none is genuinely above (ActionStepView renders effect lines first).
         DecisionActionCatalog.TryGet("reassign", out var reassign).Should().BeTrue();
         reassign.EffectLines.Should().Equal("Assigns the item to the person you choose");
+        DecisionActionCatalog.TryGet("send-reminder", out var reminder).Should().BeTrue();
+        reminder.EffectLines[0].Should().Be("Sends the message to the recipient");
+        DecisionActionCatalog.TryGet("send-email", out var email).Should().BeTrue();
+        email.EffectLines.Should().Equal("Sends the message when the decision is recorded");
+        var procedures = DecisionActionCatalog.RecordProcedureActions.ToDictionary(a => a.Code);
+        procedures["pin-procedure"].EffectLines.Should().Equal("Applies the Procedure to the record at the version you choose");
+        procedures["unpin-procedure"].EffectLines.Should().Equal("Removes the record's pin of the Procedure to the version you choose");
 
-        DecisionActionCatalog.All.Concat(DecisionActionCatalog.BillingActions)
+        DecisionActionCatalog.All.Concat(DecisionActionCatalog.BillingActions).Concat(DecisionActionCatalog.RecordProcedureActions)
             .SelectMany(a => a.EffectLines.Select(line => (a.Code, line)))
-            .Where(x => x.line.Contains("person above", StringComparison.OrdinalIgnoreCase))
+            .Where(x => Regex.IsMatch(x.line, @"above", RegexOptions.IgnoreCase))
             .Should().BeEmpty();
     }
 

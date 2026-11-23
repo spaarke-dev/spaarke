@@ -55,6 +55,50 @@ Client (jest, UI.Components; 5 failed against master source, pass after):
   `worklistSummaryLine` "names the two lanes and the Work Items ..." and "says all of them when every Do item is past due ...";
   `WorklistWidget narrative` "shows the Assistant's narrative above the lanes ..." (now asserts the deterministic line)
 
+## Follow-up 2: the other "above" lines and the client duplicate sentence
+Where each referred-to thing renders, relative to "What it does" (`ActionStepView`: effect lines first, then `ParameterFields`; a next step's
+card shows `effectLines[0]` on the Next-step chooser, before any fields exist): every one is BELOW or not yet shown, none is genuinely above.
+- send-budget-inquiry, send-reminder: "Sends the message above to the recipient" -> "Sends the message to the recipient"
+- send-email (next step): "Sends the message above when the decision is recorded" -> "Sends the message when the decision is recorded"
+- pin-procedure: "...at the version above" -> "Applies the Procedure to the record at the version you choose"
+- unpin-procedure: "...to the version above" -> "Removes the record's pin of the Procedure to the version you choose"
+- Wizard fixture copy of send-budget-inquiry updated. Guard renamed `NoEffectLine_PointsAbove_BecauseWhatItDoesIsShownBeforeTheFields_DI159`: it
+  scans every effect line of `All`, `BillingActions` and `RecordProcedureActions` for the word "above" and pins the five new lines.
+- Client fallback (`authoringService.ts` REASON_FIELD, duplicate_action) now carries the server's sentence word for word. Pinned on both sides:
+  `authoringService.test.ts` (exact text) and `OntologyAdminAuthoringEndpointTests.Validate_TheDuplicateSentence_IsTheSentenceTheClientFallbackShows_...`
+  (reads the TS file and requires the server's sentence in it), so they cannot drift apart.
+- Fail before: the guard, the agreement test and the client test fail on the previous head's source (3); 385/385 BFF, 832/832 jest, ArchTests 2775/2775 after.
+
+## Follow-up commit results
+- Filtered BFF tests (RuleBodyDescriber, DecisionActionCatalog, OntologyAdminAuthoringEndpoint, AuthoringCatalog): 384 / 384. Against the previous head's
+  source (HEAD, before this commit's source edits) 3 fail: `NoPersonEffectLine_...DI159`, `Validate_ACodeInBothActionsAndNextSteps_...`,
+  `Validate_AndSave_RefuseADraftThatNamesCreateBudget_...` (the tests were edited to the new text).
+- Full ArchTests 2775 / 2775; jest (Worklist, OntologyAdmin, DecisionWizard, RecordFamilyModal) 832 / 832; `tsc --noEmit` clean; client-lint
+  ui-components and spaarkeai ok; Console build OK.
+
+## Results
+- `dotnet build src/server/api/Sprk.Bff.Api/` 0 errors; `dotnet build tests/Spaarke.ArchTests` 0 errors; full ArchTests 2775 / 2775.
+- jest (Worklist, OntologyAdmin, DecisionWizard, RecordFamilyModal): 35 suites, 832 tests, all pass; one unrelated `Rules.test.tsx`
+  retire-dialog test failed once under load and passed alone (38/38).
+- `tsc --noEmit` in Spaarke.UI.Components clean. Console (`src/solutions/SpaarkeAi`) `npm run build` OK (surface-owned tsc errors: 0).
+- client-lint: ui-components and spaarkeai ok. Other surfaces (ai-widgets, compose, communication, daily-briefing, legal-workspace,
+  reporting, semantic-search) report one violation each in files this task does not touch (no node_modules for those packages in this
+  worktree); not caused by this change.
+
+## Publish size (.claude/rules/bff-hygiene.md item 4)
+Fresh short-path worktrees, `dotnet publish -c Release`, `Compress-Archive` of both outputs:
+- origin/master (`9d08576e63`): 191 files, 42,615,397 bytes zipped (141,225,153 raw)
+- branch: 191 files, 42,616,229 bytes zipped (141,225,849 raw)
+- delta: +832 bytes zipped, +696 bytes raw, 0 files. No package change.
+
+## Component justification (CLAUDE.md section 11)
+No new service, endpoint, DI registration, package, column or catalog field. The one new file (`utils/tableLabels.ts`) is the existing
+`RecordFamilyModal` table list moved so two callers share it (Existing: that list; Extension: it is the extension; Cost of doing nothing: a
+second hand-kept copy of the same list).
+
+## Noticed, not changed
+- `statuscode` is still shown as a number (e.g. "status is 659490001"); see DI-159 above.
+
 ## Follow-up commit results
 - Filtered BFF tests (RuleBodyDescriber, DecisionActionCatalog, OntologyAdminAuthoringEndpoint, AuthoringCatalog): 384 / 384. Against the previous head's
   source (HEAD, before this commit's source edits) 3 fail: `NoPersonEffectLine_...DI159`, `Validate_ACodeInBothActionsAndNextSteps_...`,

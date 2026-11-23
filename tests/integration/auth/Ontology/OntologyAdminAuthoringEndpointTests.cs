@@ -390,6 +390,25 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         _fixture.World.Writes.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Validate_TheDuplicateSentence_IsTheSentenceTheClientFallbackShows_SoTheyNeverDisagree()
+    {
+        // authoringService.ts shows its own sentence when a 400 names only the reason code; it must be the server's, word for word.
+        var validate = await Json(await Validate(Draft(plan: """{"actions":["assign-work"],"nextSteps":["assign-work"]}""")));
+        var sentence = ValidateErrors(validate)["decisionPlan"].Single();
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "client")))
+        {
+            dir = dir.Parent;
+        }
+
+        dir.Should().NotBeNull("the repository root is above the test output");
+        var client = await File.ReadAllTextAsync(Path.Combine(dir!.FullName, "src", "client", "shared", "Spaarke.UI.Components", "src",
+            "components", "OntologyAdmin", "RuleWizard", "authoringService.ts"));
+        client.Should().Contain($"message: '{sentence}'");
+    }
+
     [Theory]
     [InlineData("""{"actions":[]}""")]
     [InlineData("")]

@@ -52,7 +52,7 @@ export const sendInquiry: DecisionAction = {
     ...mailParameters,
     { code: 'outsideFirm', label: 'Outside firm', kind: 'Lookup', required: false, lookupEntity: 'sprk_organization' },
   ],
-  effectLines: ['Sends the message above to the recipient', 'Records the inquiry against the matter'],
+  effectLines: ['Sends the message to the recipient', 'Records the inquiry against the matter'],
   excludes: [],
 };
 

@@ -679,7 +679,7 @@ describe('RuleWizard - a new rule', () => {
 
   it('refuses a save the BFF refuses (400): the message is on the field, the banner leads to its step, and nothing is closed', async () => {
     const message =
-      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+      'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.';
     const savePolicy = jest.fn(async () =>
       failure({
         status: 400,
@@ -739,7 +739,7 @@ describe('RuleWizard - a new rule', () => {
 
   it("shows a refused save (400) once: in the banner, not again as the shell's own error", async () => {
     const message =
-      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+      'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.';
     const savePolicy = jest.fn(async () =>
       failure({ status: 400, reasonCode: REASON_DUPLICATE_ACTION, fieldErrors: { decisionPlan: [message] }, message })
     );

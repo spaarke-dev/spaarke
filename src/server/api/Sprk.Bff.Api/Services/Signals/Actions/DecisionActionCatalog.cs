@@ -185,7 +185,7 @@ public static class DecisionActionCatalog
                     LookupEntity: "sprk_organization"),
             ],
             [
-                "Sends the message above to the recipient",
+                "Sends the message to the recipient",
                 "Records the inquiry against the matter",
                 "The item stays open until the budget is revised or the variance approved",
             ],
@@ -299,7 +299,7 @@ public static class DecisionActionCatalog
 
         new("send-reminder", "Send a reminder", DecisionLane.Do, IsNextStep: false, WorkType: null,
             MessageParameters,
-            ["Sends the message above to the recipient", "The response date is unchanged", "The item stays open until the work is done or its due date moves"],
+            ["Sends the message to the recipient", "The response date is unchanged", "The item stays open until the work is done or its due date moves"],
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true, Composer = EmailComposer },
@@ -355,7 +355,7 @@ public static class DecisionActionCatalog
 
         new("send-email", "Send Notification Email", PlanLane: null, IsNextStep: true, WorkType: null,
             MessageParameters,
-            ["Sends the message above when the decision is recorded"],
+            ["Sends the message when the decision is recorded"],
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), SendsMessage = true, Composer = EmailComposer },
@@ -623,14 +623,14 @@ public static class DecisionActionCatalog
 
         new("pin-procedure", "Pin Procedure version", PlanLane: null, IsNextStep: false, WorkType: null,
             [ProcedureParameter(required: true), VersionParameter(), NoteParameter()],
-            ["Applies the Procedure to the record at the version above"],
+            ["Applies the Procedure to the record at the version you choose"],
             Excludes: [],
             RecordProcedureRoutine)
         { Gate = RecordProcedureGate },
 
         new("unpin-procedure", "Unpin Procedure version", PlanLane: null, IsNextStep: false, WorkType: null,
             [ProcedureParameter(required: true), VersionParameter(), NoteParameter()],
-            ["Removes the record's pin of the Procedure to the version above"],
+            ["Removes the record's pin of the Procedure to the version you choose"],
             Excludes: [],
             RecordProcedureRoutine)
         { Gate = RecordProcedureGate },
