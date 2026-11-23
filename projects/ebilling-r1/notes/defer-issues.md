@@ -2476,7 +2476,7 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 
 | Field | Value |
 |---|---|
-| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-162; label swapped by them 2026-11-23) |
+| **Status** | Done by spaarke-ontology-platform-r1 (DI-162): fixed on master by PR #3011 (merge 33d7c6a6ad), #2982 closed 2026-11-23. Id-cursor paging, no 5,000 cap; a truncated or failed read counts as a PolicyFailure. Follow-up cost item DI-164 #3014 (one Signal query per not-in-force policy). |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 117 adversarial review, pass A (found in passing) |

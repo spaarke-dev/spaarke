@@ -238,3 +238,5 @@ The live metadata read of 2026-11-23 shows sprk_ratecard still has the three Rem
 - The removed DI assertions are covered elsewhere.
 
 **Merged** into work/ebilling-r1 as f4a272136c. Post-merge: build 0 warnings 0 errors; unit filter (117, RuleSetService, ProcedureAssignment, upload, commit gate, StoredFile, FinanceModule, dry-run parity) 1071/0; ArchTests filter (WriterOnlyTablesDeleteGuard, RecordOwnerAssignmentCensus, WorkloadPlacement, RouteAuthorizationGuard, SecureChild, IOptionsDrift, FinanceStepZero) 324/0. Apply stays off until task 079 switches it on with the owner's OK.
+
+**Update 2026-11-23 (ontology-r1).** #2982 is fixed on master by PR #3011 (merge `33d7c6a6ad`). The D-170 close now reads not-in-force policies by id-cursor paging, with no 5,000 cap. A truncated or failed read is counted as a PolicyFailure, so the job fails loudly. The 079 precondition is met once the deployed BFF contains `33d7c6a6ad` (check by content). It reaches dev with the next uac-r2 dev BFF build from master. Related cost item: DI-164 #3014, one Signal query per not-in-force policy, which grows with the sweep's Off switches.

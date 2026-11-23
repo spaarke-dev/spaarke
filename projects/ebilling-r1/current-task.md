@@ -25,7 +25,7 @@
 - **164 ✅ 2026-11-23:** dev was already in the target state; -Verify and the SecureChild -Verify PASS; uac-r2 acked.
 - **Dev BFF a48398746d ✅ (uac-r2, 2026-11-23 18:43Z, carries #2992 = 117/123/124/193):** gate PASSED 18:43–19:11Z. 123 check count 0, K1 closed (notes/123 §12). DynamicCommandResolver exceptions are pre-existing (#3005, uac-r2).
 - **Stays off:**
-  - 117s Apply stays off until 079 (owner OK), and needs #2982 first, or the dev count of not-in-force policies.
+  - 117s Apply stays off until 079 (owner OK). Precondition #2982 is FIXED on master (#3011, 33d7c6a6ad): it holds once the deployed BFF contains that commit.
   - `Ebilling:StoredFileReconcileEnabled` stays false (F4, DEF-044, owner go via uac-r2).
 - **Uncommitted files:** none.
 ## Recently done (detail in the notes and git)
