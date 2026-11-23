@@ -455,7 +455,7 @@ public class CommunicationPrivateContextReadSeamTests
     }
 
     [Fact]
-    public async Task ReadThread_ThePresenceOfTheColumns_IsReadOnceAndRemembered_ButTheirAbsenceIsAskedAgain()
+    public async Task ReadThread_ThePresenceOfTheColumns_IsReadOnceAndRemembered_AndTheirAbsenceForAShortWhile()
     {
         var pair = Pair(owner: Alice, other: Bob);
         DirectMessage(pair, from: Alice, to: Bob);
@@ -464,15 +464,16 @@ public class CommunicationPrivateContextReadSeamTests
         await ReadThread(Bob, pair);
         _entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
 
-        // A fresh connection (another entity service) in an environment without the columns asks on every read, so the columns
-        // are used as soon as the schema script has run.
+        // A fresh connection (another entity service) in an environment without the columns asks once and remembers the "no" for
+        // PrivateMessageSendGate.ColumnsMissingRememberedFor (asked again after it: PrivateMessageSendGateSeamTests), so a missing
+        // schema costs no metadata read per thread read, and the columns are used within that long once the script has run.
         var fresh = new CommunicationPrivateContextReadSeamTests();
         var freshPair = fresh.Pair(owner: Alice, other: Bob);
         fresh.DirectMessage(freshPair, from: Alice, to: Bob);
         fresh.WithoutTheSchemaScriptColumns();
         await fresh.ReadThread(Alice, freshPair);
         await fresh.ReadThread(Alice, freshPair);
-        fresh._entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Exactly(2));
+        fresh._entities.Verify(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── 400s, before any read ───────────────────────────────────────────────────────────────────────────────────────────────
