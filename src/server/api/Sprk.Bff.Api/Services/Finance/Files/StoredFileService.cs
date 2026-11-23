@@ -836,8 +836,7 @@ public sealed class StoredFileService
     /// not already <see cref="StoredFileStatus.Removed"/> (one write of <c>sprk_filestatus</c> = Removed per row, conditioned on the row
     /// version that was read), so no row of an invoice being undone is served once its blob is deleted. Called before
     /// <see cref="DeleteBlobForUndoAsync"/> by <see cref="Submission.SubmissionCommitGate.CompensateAsync"/>, by
-    /// <see cref="WithdrawExportFileAsync"/> and (task 123 fix round 2) by the supporting-file upload route when its own file left the invoice
-    /// over the file limit. A row changed
+    /// <see cref="WithdrawExportFileAsync"/> and (task 123 fix round 2) by <see cref="RemoveOwnUploadAsync"/>. A row changed
     /// since the read or any fault throws (the undo is held and a later delivery re-reads and retries); a row already gone is skipped.
     /// </summary>
     internal Task WithdrawForUndoAsync(IReadOnlyList<StoredFileRow> rows, CancellationToken ct) =>
@@ -921,6 +920,50 @@ public sealed class StoredFileService
 
         await WithdrawForUndoAsync([row], ct).ConfigureAwait(false);
         await DeleteBlobForUndoAsync(row, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 123 fix round 2 (uac-r2 condition 1): removes a file the caller's own upload just stored, when the upload route's count
+    /// after the write finds the invoice over its file limit (concurrent uploads passed the check before the write together). The submission
+    /// undo's own order (<see cref="Submission.SubmissionCommitGate.CompensateAsync"/>): the row is read (for its row version), withdrawn
+    /// (<see cref="WithdrawForUndoAsync"/>: Removed, never served again), its blob deleted (<see cref="DeleteBlobForUndoAsync"/>), then the row
+    /// itself deleted, so the invoice's row count drops back. A row already gone is done. Any fault throws, logged with the step that failed (a
+    /// step after the withdraw leaves a Removed row, never a Servable one). The route passes <see cref="CancellationToken.None"/>: the row
+    /// already exists, and a cancelled request must not skip its removal.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="WithdrawExportFileAsync"/> (withdraw, then blob) and the
+    /// undo's compensation. (2) Extension — this composes the same two steps plus the undo's row delete; <see cref="WithdrawExportFileAsync"/>
+    /// keeps its row on purpose (an export file's history), so it is not reused. (3) Cost of doing nothing — the row stays counted and the
+    /// invoice file list answers 503 for that invoice for good (or the route deletes Stored File rows itself, outside the row's writer).</remarks>
+    internal async Task RemoveOwnUploadAsync(Guid fileId, CancellationToken ct)
+    {
+        var step = "read";
+        try
+        {
+            if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is not { } row)
+            {
+                return;
+            }
+
+            step = "withdraw";
+            await WithdrawForUndoAsync([row], ct).ConfigureAwait(false);
+            step = "blob";
+            await DeleteBlobForUndoAsync(row, ct).ConfigureAwait(false);
+            step = "row";
+            try
+            {
+                await _entities.DeleteAsync(StoredFileSchema.Entity, fileId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (StoredFileNotFound.Is(ex))
+            {
+                // Already gone: nothing is left.
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Stored file {FileId}: the removal of an upload over its invoice's file limit failed at step {Step}", fileId, step);
+            throw;
+        }
     }
 
     /// <summary>

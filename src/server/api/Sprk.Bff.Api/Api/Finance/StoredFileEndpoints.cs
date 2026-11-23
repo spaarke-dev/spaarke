@@ -152,7 +152,7 @@ public static class StoredFileEndpoints
     /// leaves no Servable row (a failed row write deletes the staged blob, a refused flip leaves the row Not yet servable) and answers 503
     /// with <c>Retry-After</c>; (5) fix round 2 (uac-r2 condition 1, <see cref="RecountAfterUploadAsync"/>): once the row is Servable, the
     /// invoice's rows are counted again, because (1) counts them before the write and concurrent uploads can all pass it. More than
-    /// <see cref="MaxListedFiles"/> → this file's row and blob are removed (the submission undo's withdraw, blob delete, row delete) and the
+    /// <see cref="MaxListedFiles"/> → this file's row and blob are removed (<see cref="StoredFileService.RemoveOwnUploadAsync"/>) and the
     /// answer is 409 <see cref="FileLimitReachedErrorCode"/>; a faulted count or removal → 503 with <c>Retry-After</c>. Step (5) runs on
     /// <see cref="CancellationToken.None"/>, so a cancelled request never skips the removal of a row it already wrote.
     /// </summary>
@@ -286,7 +286,7 @@ public static class StoredFileEndpoints
         // (5) Fix round 2 (uac-r2 condition 1): the limit is checked by reads BEFORE the write, so concurrent uploads can all pass it and
         // push the invoice past MaxListedFiles (the list route then answers 503 for that invoice for good). The invoice's rows are counted
         // again now that this file's row exists; over the limit, this file is removed and the answer is the limit's 409.
-        if (await RecountAfterUploadAsync(invoiceId, fileId, service, entities, logger, httpContext) is { } overLimit)
+        if (await RecountAfterUploadAsync(invoiceId, fileId, service, logger, httpContext) is { } overLimit)
         {
             return overLimit;
         }
@@ -397,7 +397,7 @@ public static class StoredFileEndpoints
     /// must not skip its removal (as <see cref="StoredFileService.FlipToServableAsync"/> runs its committed step on None).
     /// </summary>
     private static async Task<IResult?> RecountAfterUploadAsync(
-        Guid invoiceId, Guid fileId, StoredFileService service, IGenericEntityService entities, ILogger logger, HttpContext httpContext)
+        Guid invoiceId, Guid fileId, StoredFileService service, ILogger logger, HttpContext httpContext)
     {
         int count;
         try
@@ -408,7 +408,7 @@ public static class StoredFileEndpoints
         {
             logger.LogError(ex, "Invoice {InvoiceId}: its stored files could not be counted after file {FileId} was stored; removing the file (503)",
                 invoiceId, fileId);
-            await RemoveUploadedFileAsync(invoiceId, fileId, service, entities, logger);
+            await RemoveUploadedFileAsync(invoiceId, fileId, service, logger);
             return UploadUnavailable(httpContext);
         }
 
@@ -419,52 +419,29 @@ public static class StoredFileEndpoints
 
         logger.LogWarning("Invoice {InvoiceId}: {Count} stored files after file {FileId} was stored (a concurrent upload); removing it (409)",
             invoiceId, count, fileId);
-        return await RemoveUploadedFileAsync(invoiceId, fileId, service, entities, logger)
+        return await RemoveUploadedFileAsync(invoiceId, fileId, service, logger)
             ? FileLimitReached()
             : UploadUnavailable(httpContext);
     }
 
     /// <summary>
-    /// Fix round 2: removes the file this request just stored, through the submission undo's own steps and in its order
-    /// (<see cref="Services.Finance.Submission.SubmissionCommitGate.CompensateAsync"/>): the row is read (for its row version) and withdrawn
-    /// (<see cref="StoredFileService.WithdrawForUndoAsync"/>: Removed, never served again), then its blob is deleted
-    /// (<see cref="StoredFileService.DeleteBlobForUndoAsync"/>), then the row itself, so the invoice's row count drops back. A row already
-    /// gone is done. All on <see cref="CancellationToken.None"/>. True when nothing is left; false when a step faulted (logged with the
-    /// residue: a step that failed after the withdraw leaves a Removed row, never a Servable one).
+    /// Fix round 2: removes the file this request just stored, through <see cref="StoredFileService.RemoveOwnUploadAsync"/> (the row's
+    /// writer; the submission undo's order: read, withdraw, blob, row), on <see cref="CancellationToken.None"/>. True when nothing is left;
+    /// false when a step faulted (the service logs the step; a step that failed after the withdraw leaves a Removed row, never a Servable one).
     /// </summary>
-    private static async Task<bool> RemoveUploadedFileAsync(
-        Guid invoiceId, Guid fileId, StoredFileService service, IGenericEntityService entities, ILogger logger)
+    private static async Task<bool> RemoveUploadedFileAsync(Guid invoiceId, Guid fileId, StoredFileService service, ILogger logger)
     {
-        var step = "read";
         try
         {
-            if (await service.ReadRowAsync(fileId, CancellationToken.None) is not { } row)
-            {
-                return true;
-            }
-
-            step = "withdraw";
-            await service.WithdrawForUndoAsync([row], CancellationToken.None);
-            step = "blob";
-            await service.DeleteBlobForUndoAsync(row, CancellationToken.None);
-            step = "row";
-            try
-            {
-                await entities.DeleteAsync(StoredFileSchema.Entity, fileId, CancellationToken.None);
-            }
-            catch (Exception ex) when (StoredFileNotFound.Is(ex))
-            {
-                // Already gone: nothing is left.
-            }
-
+            await service.RemoveOwnUploadAsync(fileId, CancellationToken.None);
             logger.LogInformation("Invoice {InvoiceId}: file {FileId} removed (row and blob)", invoiceId, fileId);
             return true;
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "Invoice {InvoiceId}: file {FileId} could not be removed at step {Step}; it stays under the invoice (Removed once the withdraw " +
-                "has run) and may leave the invoice over the file limit", invoiceId, fileId, step);
+                "Invoice {InvoiceId}: file {FileId} could not be removed; it stays under the invoice (Removed once the withdraw has run) and " +
+                "may leave the invoice over the file limit", invoiceId, fileId);
             return false;
         }
     }

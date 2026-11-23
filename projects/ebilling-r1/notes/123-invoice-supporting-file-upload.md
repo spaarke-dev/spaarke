@@ -141,7 +141,7 @@ Two adversarial reviews. Every F item is fixed; each fix has a test that fails o
 
 **Defect.** The 50-file limit was checked only by reads before the write. Two concurrent uploads at 49 rows both passed, and the invoice reached 51 rows. From then on `GET /api/finance/invoices/{id}/files` answered 503 for that invoice permanently, because it treats more than `MaxListedFiles` rows as a fault.
 
-**Fix** (`StoredFileEndpoints.UploadInvoiceFile`, new step (5); `RecountAfterUploadAsync`, `RemoveUploadedFileAsync`):
+**Fix** (`StoredFileEndpoints.UploadInvoiceFile`, new step (5), with `RecountAfterUploadAsync` and `RemoveUploadedFileAsync`; the removal itself is `StoredFileService.RemoveOwnUploadAsync`):
 - After `UploadForCallerAsync` answers Created, the invoice's rows are counted again with the same capped read: `ReadRowsForInvoiceAsync(invoiceId, MaxListedFiles + 1, …)`.
 - At most 50 → 201, as before.
 - More than 50 → this request's own file is removed, and the answer is 409 `ebilling.files.limit_reached`, the existing code, with no `Retry-After`. The removal reuses the submission undo's steps in its order (`SubmissionCommitGate.CompensateAsync`), with no new delete logic:
@@ -149,6 +149,7 @@ Two adversarial reviews. Every F item is fixed; each fix has a test that fails o
   2. it is withdrawn with `WithdrawForUndoAsync` (Removed, so it is never served again);
   3. its blob is deleted with `DeleteBlobForUndoAsync`;
   4. the row is deleted (`IGenericEntityService.DeleteAsync`, the single-row form of the undo's `DeleteRequest`; a row already gone counts as done).
+  - Follow-up after uac-r2's approval: these steps live in `StoredFileService.RemoveOwnUploadAsync(fileId, ct)` (internal), on the row's writer. The endpoint calls it with `CancellationToken.None` and no longer deletes a Stored File row itself. The service logs the step that failed and rethrows; the endpoint maps the fault to the 503.
 - Concurrent uploads that are all over the limit each remove their own file, so more than one may be removed. Each can send its file again.
 - The re-count read faults → this file is removed in the same way, and the answer is 503 `file_store_unavailable` with `Retry-After: 30`. The route's 503 means nothing was stored, so a retry does not add a second copy.
 - The removal faults (after an over-limit count or a faulted count) → 503 `file_store_unavailable` with `Retry-After: 30`. The fault is logged with the step that failed.
@@ -185,6 +186,30 @@ The must-not-fire test passes on every version.
 **Commands (fix round 2).**
 - `dotnet build` of `src/server/api/Sprk.Bff.Api/`, `tests/unit/Sprk.Bff.Api.Tests` and `tests/Spaarke.ArchTests`: 0 warnings, 0 errors.
 - Unit tests, `--filter "InvoiceFileUpload|StoredFileEndpoints|InvoiceFilesList|StoredFileService|SubmissionCommitGate"`: 332 passed, 0 failed.
-- ArchTests, `--filter "RouteAuthorization|StoredFile|InvoicePdfWriter"`: 109 passed, 0 failed. `InvoicePdfWriterGuardTests` needs no entry: the new code deletes a row and never creates or updates one, and the withdraw is the approved `WithdrawRowsAsync`.
+- ArchTests, `--filter "RouteAuthorization|StoredFile|InvoicePdfWriter"`: 109 passed, 0 failed (at `d12b115f7a`). This filter did not include `WriterOnlyTablesDeleteGuardTests`; see the follow-up below.
+
+**Follow-up (after uac-r2's approval): the removal moves to the service, and the ArchTest guards.**
+- **Found:** `WriterOnlyTablesDeleteGuardTests` (field-mapping 048, D-204) is a closed list. Every BFF member that sends a delete through `IGenericEntityService.DeleteAsync` (or the two other scanned delete APIs) must either ask `RecordTableRules.RefuseWriterOnlyTableDelete` or be listed with its fixed table. The fix-round-2 endpoint helper was neither, so this guard failed at `d12b115f7a`. The filter `RouteAuthorization|StoredFile|InvoicePdfWriter` does not select it, so the run above missed it.
+- **Fixed:**
+  - `StoredFileService.RemoveOwnUploadAsync` is added to the guard's `FixedTableDeletes` list. Its table is `StoredFileSchema.Entity`, fixed in code, the same reason as the listed `StoredFileReconcileJob.DeleteRowAsync`.
+  - Must-fire: before the entry, the guard failed and named `StoredFileService.RemoveOwnUploadAsync`; with the entry, it passes.
+- **Guards that touch Stored File writes or deletes:** found by grepping `tests/Spaarke.ArchTests` for `StoredFile`, `sprk_storedfile` and `DeleteAsync`.
+
+  | Guard | What it checks | Effect of the move |
+  |---|---|---|
+  | `InvoicePdfWriterGuardTests` | Stored File writers: Entity, Create, Update and Upsert requests and `IGenericEntityService` Create, Update and Upsert | A delete is not a write primitive there, and the withdraw is the approved `WithdrawRowsAsync`; it flags neither the service-side delete nor the old endpoint one |
+  | `WriterOnlyTablesDeleteGuardTests` | Every delete through a scanned API | Listed now, as above |
+  | `RecordOwnerAssignmentCensusTests` | Owner writes per file and table (`sprk_storedfile` in `StoredFileService.cs`: the one `BuildRow` create) | No owner write added |
+  | `HardDenyOwnershipQuestionGuardTests` | The `BuildRow` owner question | Unchanged |
+  | `StoredFileRolePrivilegeGuardTests` | Security-role privileges on `sprk_storedfile`, not code | Unaffected |
+  | `ExternalFileStoreRouteCensusTests`, `ExternalDocumentNarrowingGuardTests`, `ExternalInvoiceVisibilityGuardTests`, `AccessTableReaderScanTests`, `BillingExportClaimWriterOnlyGuardTests` | Routes, reads and the export claim | No new route, read or claim |
+  | `DryRunNoWriteGuardTests`, `RemovalSweepSharedRemovalGuardTests` | Matched only on `DeleteAsync` (no Stored File reference) | Pass |
+
+- **Runs:**
+  - ArchTests `--filter "RouteAuthorization|StoredFile|InvoicePdfWriter|WriterOnlyTablesDelete|RecordOwnerAssignmentCensus|HardDenyOwnershipQuestion|DryRunNoWrite|RemovalSweepSharedRemoval|AccessTableReaderScan|ExternalFileStoreRouteCensus|ExternalDocumentNarrowing|BillingExportClaimWriterOnly|ExternalInvoiceVisibility"`: 254 passed, 0 failed.
+  - ArchTests `RouteAuthorization|StoredFile|InvoicePdfWriter`: 109 passed, 0 failed. `WriterOnlyTablesDelete` alone: 3 passed, 0 failed.
+  - Unit tests, `--filter "InvoiceFileUpload|StoredFileEndpoints|InvoiceFilesList|StoredFileService|SubmissionCommitGate"`: 332 passed, 0 failed.
+  - Builds of the BFF, the unit tests and the ArchTests: 0 warnings, 0 errors.
+- **No separate service test:** the route tests drive the real `StoredFileService` over the fakes. `Race_…` covers the removal's withdraw, blob and row; `RemovalFault_…` covers a failed step leaving the row Removed; `RecountFault_…` covers the removal after a faulted count.
 
 **Not tested here.** No test cancels a request between the write and step (5). The test host has no seam to cancel a request at that point. The rule is structural instead: every call in step (5) passes `CancellationToken.None`, and the request's `ct` is not in scope in either helper.
