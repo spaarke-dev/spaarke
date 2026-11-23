@@ -55,6 +55,10 @@ public class WriterOnlyTablesDeleteGuardTests
             "Removes a stored-file row (StoredFileSchema.Entity)."),
         (typeof(Sprk.Bff.Api.Services.Finance.Files.StoredFileService), "RemoveOwnUploadAsync",
             "Removes the stored-file row (StoredFileSchema.Entity) an upload just wrote, when it left its invoice over the file limit (ebilling-r1 task 123 fix round 2)."),
+        // ebilling-r1 task 117 (O-17): uac-r2 core-record-delete design §14 — "an assignment row left with no core lookup ... is removed by
+        // ebilling's O-17 sweep". uac-r2 to agree this entry in its review of the 117 hand-off.
+        (typeof(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService), "DeleteOrphanAssignmentsAsync",
+            "Removes a sprk_procedureassignment row (AssignmentTable) left with every core lookup null, after a re-read (the O-17 sweep, task 117)."),
         (typeof(Sprk.Bff.Api.Services.Finance.RateCardImportService), "CompensateAsync",
             "Rolls back rate-card rows this import just created; the tables are the import's own."),
         (typeof(Sprk.Bff.Api.Services.Finance.RuleSetService), "CreateDraftRuleAsync",
