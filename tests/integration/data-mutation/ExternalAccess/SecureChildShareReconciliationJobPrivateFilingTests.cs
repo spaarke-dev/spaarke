@@ -371,7 +371,7 @@ public class SecureChildShareReconciliationJobPrivateFilingTests
     // Reference columns absent from metadata: the job runs as before
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    public static TheoryData<string> AbsentOrUnreadable() => new() { "absent", "a filing column absent", "unreadable" };
+    public static TheoryData<string> AbsentOrUnreadable() => new() { "absent", "unreadable" };
 
     [Theory]
     [MemberData(nameof(AbsentOrUnreadable))]
@@ -380,7 +380,6 @@ public class SecureChildShareReconciliationJobPrivateFilingTests
         _metadata = metadata switch
         {
             "absent" => () => Columns(DirectMessageOwnerStep.PrivateFilingColumns),
-            "a filing column absent" => () => Columns(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns.Skip(1))),
             _ => () => throw new InvalidOperationException("Test: metadata cannot be read."),
         };
         var recent = Message(reference: null, (T0 - TimeSpan.FromMinutes(5)).UtcDateTime);
@@ -399,6 +398,24 @@ public class SecureChildShareReconciliationJobPrivateFilingTests
         _queries.Should().ContainSingle(q => IsListing(q)).Which.ColumnSet.Columns.Should().Equal("modifiedon");
         _queries.Where(q => q.EntityName == Communication).SelectMany(q => q.ColumnSet.Columns)
             .Should().NotContain(PrivateContextColumns.All, "a select naming a missing column fails the whole read");
+    }
+
+    [Fact]
+    public async Task AFilingColumnAbsentFromMetadata_DoesNotStopTheOthersBeingCleared()
+    {
+        // One filing column the environment lacks must not leave a private message filed under the columns it has: the reads select
+        // (and the clear clears) the columns that exist, and never name the absent one.
+        const string absent = "sprk_regardingorganization";
+        _metadata = () => Columns(PrivateContextColumns.All.Concat(DirectMessageOwnerStep.PrivateFilingColumns.Where(c => c != absent)));
+        var message = Message(PrivateContextColumns.Matter, (T0 - TimeSpan.FromMinutes(5)).UtcDateTime, RegardingMatter());
+
+        var run = await RunAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _clears.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo(new[] { "sprk_regardingmatter" });
+        Value(message, "sprk_regardingmatter").Should().BeNull("the filing is cleared though another filing column is absent");
+        _queries.Where(q => q.EntityName == Communication).SelectMany(q => q.ColumnSet.Columns)
+            .Should().NotContain(absent, "a select naming a missing column fails the whole read");
     }
 
     [Fact]

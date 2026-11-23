@@ -470,6 +470,32 @@ internal class PrivateMessageSendGate
         return true;
     }
 
+    /// <summary>
+    /// Which of <paramref name="columns"/> exist on <c>sprk_communication</c> (published metadata, one read through
+    /// <paramref name="entities"/>), in the order given; <c>null</c> when the metadata gave no answer. Like
+    /// <see cref="CommunicationColumnsPresentAsync"/> a yes is remembered per connection and a no never is. A fault propagates.
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>?> PresentCommunicationColumnsAsync(
+        IGenericEntityService entities, IReadOnlyCollection<string> columns, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (ColumnsConfirmedOn.TryGetValue(entities, out var confirmed) && columns.All(confirmed.ContainsKey))
+            return columns.ToArray();
+
+        var metadata = await entities.GetColumnMetadataAsync(CommunicationTable, ct).ConfigureAwait(false);
+        if (metadata is null)
+            return null;
+
+        var present = columns.Where(metadata.ContainsKey).ToArray();
+        var remembered = ColumnsConfirmedOn.GetValue(
+            entities, _ => new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
+        foreach (var column in present)
+            remembered.TryAdd(column, 0);
+        return present;
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>One seam's answer, or the fault it threw. Only the caller's cancellation propagates.</summary>
