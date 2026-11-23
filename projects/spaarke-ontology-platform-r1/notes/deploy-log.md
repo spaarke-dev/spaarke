@@ -1,5 +1,28 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-23 ~20:40–21:55Z — task 202 (SprkModal focus return) to dev (spaarkedev1), master `9d08576e63`
+
+- **Owner go:** "yes await CI and task 202 check and deploy" (2026-11-23, chat).
+- **Source:** detached worktree `C:\wtdep202` at `9d08576e63` (contains 202 `6311cd0a69` and follow-up `738648c7fb`). Shared libs built in the pcf-deploy order; builds one at a time, caches cleared.
+- **Console:** auto-deploys; not part of this job.
+- **State after the session restart:** the first run was stopped before any import. Dev still held the previous deploy's versions and every code page its 16:03Z content, except `sprk_communicationconversationpage.html`: someone else deployed it at 20:52Z, and its live content is byte-identical to the fresh build of master (it already carries 202), so it was not redeployed.
+- **No tenant-wide publish.** PCFs via `Import-SolutionScoped.ps1` (no `--publish-changes`); code pages by `Deploy-WizardCodePages.ps1` (only the 8 wizard dists present, the rest skip) and by PATCH plus `PublishXml` naming only the four ids. No BFF, data, schema, role or Azure change.
+- **PCFs** (versions on master verified, not bumped again; every dev old version was a master version, so nothing clobbered). Each: `Invoke-PcfBuildProd.ps1` judged by output, fresh `out/` copied into Solution, `pack.ps1`, solution version equals ZIP `<Version>`, importjob progress 100, served `cc_…/bundle.js` SHA-256 equals the build:
+  - CommunicationActionsSolution 1.3.25 → **1.3.26** (`5310a7ec4bf0`).
+  - CommunicationConversationPanelSolution 1.18.6 → **1.18.7** (`65a1d0413902`).
+  - SpaarkeSemanticSearch 1.1.92 → **1.1.93** (`e23de03b9ff4`).
+  - TrackingFieldTrioSolution 1.0.67 → **1.0.68** (`63406a99c0dc`); its build writes `out/controls/` directly (no control subfolder).
+  - SpaarkeRelatedDocumentCount 1.21.7 → **1.21.8** (`9458360af37c`).
+  - CommunicationAttachmentsSolution 1.3.4 → **1.3.5** (`3cc2ca86b092`).
+- **Other PCFs that import `@spaarke/ui-components`** (built, compared with dev's served bundle; none deployed, none bumped, none bundles SprkModal): identical to dev: RecordHeader, RegardingResolver, ScopeConfigEditor, CommunicationConnections. Differ from dev for reasons unrelated to 202 (no SprkModal in the bundle): CommunicationTimeline, CommunicationTimelineRegarding, MatterHeader, DocumentRelationshipViewer, CommunicationMessageActions, UpdateRelatedButton. VisualHost does not build on master (TS error in `Spaarke.Visuals/src/components/LineChart.tsx(9,88)`, not caused by 202); it imports only `cleanGuid` and `themeStorage` from ui-components, so it carries no SprkModal.
+- **Code pages (12 deployed + 1 already current), D-126 clobber check passed for each** (no live user-facing string missing from the build; live re-read just before deploy equalled the snapshot). Read-back: API content and served `/WebResources/…` SHA-256 equal the build for all 13.
+  - `Deploy-WizardCodePages.ps1`: create matter (`8a10008bcd83`), project (`16374a3b424d`), event (`972384bf780c`), todo (`fec6fb953803`), work assignment (`02a824e900b5`), report card (`0b0b550c68bb`) wizards; `sprk_summarizefileswizard` (`7d6598ea4e50`); `sprk_documentuploadwizard` (`bf9a86137d46`) (+ unchanged `sprk_wizard_commands`).
+  - PATCH by id + `PublishXml` of those four ids: `sprk_smarttodo` (`616c3c0aefa0`), `sprk_emailpage` (`a6656b5cc434`), `sprk_dailyupdate` (`161faab4eb7e`), `sprk_documentrelationshipviewer` (`1634ad42b86a`).
+  - Already current, not redeployed: `sprk_communicationconversationpage.html` (`b079135d939a`).
+- **Not deployed, and now carrying changed SprkModal code on dev (needs an owner decision; not in the 13):** `sprk_createinvoicewizard`, `sprk_communicationreconciliation` (also differs from live by ~50 KB and lacks the live string "Link Invoice", so check before any deploy), `sprk_findsimilar`, `sprk_recordfamily`, `sprk_speadmin`, `sprk_alldocuments`. Built, no SprkModal in the bundle: `sprk_communicationspage.html`, `sprk_eventdetailsidepane.html`, `sprk_semanticsearch`. Not on dev: RuleReview, InvoiceReview, CommunicationPage.
+- **Bundle record:** chore PR #3021 commits the six rebuilt Solution `bundle.js` files (not merged).
+- **Dev focus checks:** main session.
+
 ## 2026-11-23 ~15:31–16:04Z — tasks 199 + 200 (lookup focus return) to dev (spaarkedev1), master `973d72b67e`
 
 - **Owner go:** "Wait for 200 - continue working on 200" (2026-11-23, answering "deploy 199's controls now or with 200's").
