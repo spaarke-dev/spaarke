@@ -69,6 +69,21 @@ card shows `effectLines[0]` on the Next-step chooser, before any fields exist): 
   (reads the TS file and requires the server's sentence in it), so they cannot drift apart.
 - Fail before: the guard, the agreement test and the client test fail on the previous head's source (3); 385/385 BFF, 832/832 jest, ArchTests 2775/2775 after.
 
+## Follow-up 3: review findings (no contract defects)
+- F1: `RuleBodyDescriber.EntityLabels` (now `internal`) gains `sprk_invoice` = "invoice" and `sprk_memo` = "memo"; every table in
+  `PredicateCompiler.EvaluatorGlobalReadableEntities` now has a label. Tests: invoice/memo state sentence, and the guard
+  `EveryTableTheEvaluatorMayRead_HasAnEntityLabel_...` (fails when a readable table lacks a label).
+- F4: the object form of `statecode` ({"=": 0}, {"<>": 1}; what `ruleDraft.ts` writes) reads "the matter is active" / "is not inactive"; formal line keeps the
+  operator. Tests: `AStateCodeOperatorTest_...` (=0, <>1, <>0).
+- Same class: the admin Rules page showed `(unknown_action)` etc. for a stored plan that does not resolve (`OntologyAdminRulesService.ResolvePlan`). The text is now
+  "The stored plan can't be used with the actions this rule's lane offers. Edit the rule and choose its actions again."; `DecisionPlanService` still counts and logs
+  the reason, and no API reason field changed. `Get_APlanOutsideTheClosedCatalog_ShowsTheRefusal` pins the sentence and the absence of the code.
+- Optional: the single past-due branch ("1 Work Item: 1 to do. It is past due.") is pinned in `worklistNarrative.test.tsx` (characterisation of existing
+  behaviour; it passes on the previous head, so there is no fail-before).
+- Fail before (previous head's RuleBodyDescriber / OntologyAdminRulesService, EntityLabels made internal so the guard compiles): 7 fail (2 invoice/memo, 1 label guard,
+  3 operator form, 1 stored plan sentence). After: 454 / 454 filtered BFF, ArchTests 2775 / 2775, jest 833 / 833, tsc clean, client-lint ui-components + spaarkeai ok,
+  Console build OK.
+
 ## Follow-up commit results
 - Filtered BFF tests (RuleBodyDescriber, DecisionActionCatalog, OntologyAdminAuthoringEndpoint, AuthoringCatalog): 384 / 384. Against the previous head's
   source (HEAD, before this commit's source edits) 3 fail: `NoPersonEffectLine_...DI159`, `Validate_ACodeInBothActionsAndNextSteps_...`,

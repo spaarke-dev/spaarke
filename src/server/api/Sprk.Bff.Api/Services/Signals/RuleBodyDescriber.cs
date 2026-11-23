@@ -62,7 +62,9 @@ public sealed class RuleBodyDescriber
             [("sprk_event", "sprk_eventtype_ref")] = ("sprk_eventtype_ref", "sprk_name"),
         };
 
-    private static readonly IReadOnlyDictionary<string, string> EntityLabels = new Dictionary<string, string>(StringComparer.Ordinal)
+    /// <summary>One label per table in <see cref="PredicateCompiler.EvaluatorGlobalReadableEntities"/> (pinned by a guard test): a table with none would be
+    /// said by its logical name, "Each sprk_invoice where the sprk_invoice is active".</summary>
+    internal static readonly IReadOnlyDictionary<string, string> EntityLabels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["sprk_matter"] = "matter",
         ["sprk_project"] = "project",
@@ -72,6 +74,8 @@ public sealed class RuleBodyDescriber
         ["sprk_communication"] = "communication",
         ["sprk_budgetrevision"] = "budget revision",
         ["sprk_budget"] = "budget",
+        ["sprk_invoice"] = "invoice",
+        ["sprk_memo"] = "memo",
     };
 
     private static readonly IReadOnlyDictionary<string, string> ColumnLabels = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -375,6 +379,14 @@ public sealed class RuleBodyDescriber
                     var isNull = ops[0].Name == PredicateCompiler.NullTestMember;
                     words.Add(isNull ? $"it has no {label}" : $"it has a {label}");
                     formal.Add($"{field.Name} is {(isNull ? "null" : "not null")}");
+                    continue;
+                }
+
+                // DI-159: the object form of a state test ({"=": 0}, {"<>": 1}, which the rule wizard writes) is said by the state's label too.
+                if (field.Name == StateCodeColumn && ops.Count == 1 && ops[0].Name is ("=" or "<>") && StateWord(ops[0].Value) is { } opState)
+                {
+                    words.Add($"the {Label(EntityLabels, entity)} is {(ops[0].Name == "<>" ? "not " : string.Empty)}{opState}");
+                    formal.Add($"{field.Name} {ops[0].Name} {Raw(ops[0].Value)}");
                     continue;
                 }
 

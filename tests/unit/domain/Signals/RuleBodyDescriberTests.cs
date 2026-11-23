@@ -162,6 +162,52 @@ public class RuleBodyDescriberTests
         line.Formal.Should().Be(formal);
     }
 
+    // Review F1: every table the evaluator may read has its own label, so a state test never says "Each sprk_invoice where the sprk_invoice is active".
+    [Theory]
+    [InlineData("sprk_invoice", "invoice")]
+    [InlineData("sprk_memo", "memo")]
+    public async Task AStateCodeTest_OnAnInvoiceOrMemo_NamesTheTableByItsLabel_NotItsLogicalName(string table, string label)
+    {
+        var (describer, _) = WithAllRows();
+
+        var result = await describer.DescribeAsync(
+            $$"""{"type":"Existence","subject":"{{table}}","when":{"statecode":0},"all":[]}""", CancellationToken.None);
+
+        result.IsRefused.Should().BeFalse(result.Refusal);
+        var line = result.Description!.Clauses.Should().ContainSingle().Subject;
+        line.Text.Should().Be($"Each {label} where the {label} is active.");
+        line.Text.Should().NotContain("sprk_");
+        line.Formal.Should().Be($"{table} where statecode = 0");
+    }
+
+    [Fact]
+    public void EveryTableTheEvaluatorMayRead_HasAnEntityLabel_SoNoSentenceNamesALogicalTable()
+    {
+        PredicateCompiler.EvaluatorGlobalReadableEntities
+            .Where(entity => !RuleBodyDescriber.EntityLabels.ContainsKey(entity))
+            .Should().BeEmpty("a readable table with no label would be described by its logical name");
+        RuleBodyDescriber.EntityLabels.Values.Should().OnlyContain(v => !v.StartsWith("sprk_"));
+    }
+
+    // Review F4: the object form the rule wizard writes ({"=": 0}, {"<>": 1}) reads like the plain form; the formal line keeps the operator.
+    [Theory]
+    [InlineData("=", 0, "Each matter where the matter is active.", "sprk_matter where statecode = 0")]
+    [InlineData("<>", 1, "Each matter where the matter is not inactive.", "sprk_matter where statecode <> 1")]
+    [InlineData("<>", 0, "Each matter where the matter is not active.", "sprk_matter where statecode <> 0")]
+    public async Task AStateCodeOperatorTest_IsDescribedByItsLabel_AndTheFormalLineKeepsTheOperator(string op, int state, string text, string formal)
+    {
+        var (describer, _) = WithAllRows();
+
+        var result = await describer.DescribeAsync(
+            """{"type":"Existence","subject":"sprk_matter","when":{"statecode":{""" + $"\"{op}\":{state}" + """}},"all":[]}""", CancellationToken.None);
+
+        result.IsRefused.Should().BeFalse(result.Refusal);
+        var line = result.Description!.Clauses.Should().ContainSingle().Subject;
+        line.Text.Should().Be(text);
+        line.Text.Should().NotContain("state is");
+        line.Formal.Should().Be(formal);
+    }
+
     [Fact]
     public async Task AStateCodeInASubjectWhen_IsDescribedByItsLabel_ForAThresholdBodyToo()
     {

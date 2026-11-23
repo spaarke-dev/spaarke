@@ -398,7 +398,9 @@ public class OntologyAdminRulesServiceTests
         var plan = (await h.Service.GetAsync(rule.Id, default)).Value!.Plan;
 
         plan.Actions.Should().BeEmpty();
-        plan.Refusal.Should().Contain(DecisionPlanRefusalReason.UnknownAction);
+        // The admin reads a sentence, never the internal reason code (the reason is counted and logged by DecisionPlanService).
+        plan.Refusal.Should().Be("The stored plan can't be used with the actions this rule's lane offers. Edit the rule and choose its actions again.");
+        plan.Refusal.Should().NotContain(DecisionPlanRefusalReason.UnknownAction).And.NotContain("unknown_action").And.NotContain("(");
     }
 
     [Fact]

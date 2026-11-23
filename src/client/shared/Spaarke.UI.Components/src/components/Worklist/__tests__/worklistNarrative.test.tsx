@@ -159,6 +159,19 @@ describe('worklistSummaryLine (DI-161)', () => {
     expect(worklistSummaryLine(withDue('2026-10-30'), TODAY)).not.toMatch(/past due/);
   });
 
+  it('says "It is past due." for a single Do item that is past due, and nothing about past due when that one is not', () => {
+    const data = lanes();
+    const group = data.Do[0];
+    const one = (dueDate: string): WorklistData => ({
+      set: 'lanes',
+      Decide: [],
+      Do: [{ ...group, items: [{ ...group.items[0], dueDate }] }],
+    });
+
+    expect(worklistSummaryLine(one('2026-10-01'), TODAY)).toBe('1 Work Item: 1 to do. It is past due.');
+    expect(worklistSummaryLine(one('2026-10-30'), TODAY)).toBe('1 Work Item: 1 to do.');
+  });
+
   it('is null for no list and for an empty list', () => {
     expect(worklistSummaryLine(undefined, TODAY)).toBeNull();
     expect(worklistSummaryLine({ set: 'lanes', Decide: [], Do: [] }, TODAY)).toBeNull();
