@@ -136,3 +136,55 @@ Two adversarial reviews. Every F item is fixed; each fix has a test that fails o
 - **Lost flip response.** If the flip's write lands but its response is lost, 090's service reads a concurrency answer and the route answers 503 while the row is already Servable (090 service, K4). A retry adds a second copy.
 - **`Path.GetFileName` on Linux** does not strip a Windows backslash path, so a client that sends `C:\dir\file.csv` as the part's file name has that whole string stored as the name.
 - **A Removed Invoice PDF** (an undo in progress or held) also answers `files_pending`. The invoice is being removed; once the undo completes the invoice is gone and the answer becomes the 404. While an undo is held for operator action, the answer stays `files_pending`.
+
+## 11. Fix round 2 (uac-r2 condition 1)
+
+**Defect.** The 50-file limit was checked only by reads before the write. Two concurrent uploads at 49 rows both passed, and the invoice reached 51 rows. From then on `GET /api/finance/invoices/{id}/files` answered 503 for that invoice permanently, because it treats more than `MaxListedFiles` rows as a fault.
+
+**Fix** (`StoredFileEndpoints.UploadInvoiceFile`, new step (5); `RecountAfterUploadAsync`, `RemoveUploadedFileAsync`):
+- After `UploadForCallerAsync` answers Created, the invoice's rows are counted again with the same capped read: `ReadRowsForInvoiceAsync(invoiceId, MaxListedFiles + 1, …)`.
+- At most 50 → 201, as before.
+- More than 50 → this request's own file is removed, and the answer is 409 `ebilling.files.limit_reached`, the existing code, with no `Retry-After`. The removal reuses the submission undo's steps in its order (`SubmissionCommitGate.CompensateAsync`), with no new delete logic:
+  1. the row is read for its row version;
+  2. it is withdrawn with `WithdrawForUndoAsync` (Removed, so it is never served again);
+  3. its blob is deleted with `DeleteBlobForUndoAsync`;
+  4. the row is deleted (`IGenericEntityService.DeleteAsync`, the single-row form of the undo's `DeleteRequest`; a row already gone counts as done).
+- Concurrent uploads that are all over the limit each remove their own file, so more than one may be removed. Each can send its file again.
+- The re-count read faults → this file is removed in the same way, and the answer is 503 `file_store_unavailable` with `Retry-After: 30`. The route's 503 means nothing was stored, so a retry does not add a second copy.
+- The removal faults (after an over-limit count or a faulted count) → 503 `file_store_unavailable` with `Retry-After: 30`. The fault is logged with the step that failed.
+- Step (5) runs on `CancellationToken.None`. The row already exists, so a cancelled request must not skip its removal. This is the rule `StoredFileService.FlipToServableAsync` and the replace path follow for their committed steps.
+- The ordering is documented on `UploadInvoiceFile` (step 5) and on both helpers. The `WithdrawForUndoAsync` comment now names its callers. The route description adds the after-the-write 409.
+
+**Residue on failure.**
+- **The removal fails after the withdraw** (blob delete or row delete): the row stays as Removed, never Servable. Its blob may stay too. The invoice can then stay over 50 rows, so the list answers 503 for it. This is the state before this fix, now reachable only when a concurrent over-limit upload coincides with a store or Dataverse fault. The reconcile job (off by default, K2) or an operator removes the row.
+- **The read or the withdraw fails:** the row may stay Servable, under an invoice that may be over the limit. The client was answered 503 and may retry; a retry then meets the limit check before the write (409) or adds a second copy. This is the same lost-response class as the "Lost flip response" limit in section 10.
+- **The re-count read faults and the removal succeeds:** nothing is left, and the client's retry is clean.
+
+**Tests** (`tests/unit/Sprk.Bff.Api.Tests/Api/Finance/InvoiceFileUploadTests.cs`, "Fix round 2"):
+
+| Test | What it pins |
+|---|---|
+| `Race_OverLimitAfterTheWrite_409_OwnFileRemoved` | 49 rows (Invoice PDF + 48). `Gateway.BeforeOp` lands a concurrent upload's row when this request stages its bytes, after both checks before the write, so 50 rows exist when this file's row lands. Result: 409 `limit_reached` with no `Retry-After`; the invoice ends at exactly 50; this file's row and blob are gone; the concurrent row stays; the withdraw update ran. |
+| `Recount_48Before_Created_RowStays` (must not fire) | 48 rows before, 49 after → 201; the row is Servable, its blob is present, and no delete ran. The boundary (exactly 50 after the write → 201) stays pinned by `FileLimit_49Created_50Refused`. |
+| `RecountFault_503_OwnFileRemoved` | The stored-file query faults from the staging write on, so only the re-count faults → 503 `file_store_unavailable` with `Retry-After`; this file's row and blob are removed, and only the Invoice PDF is left. |
+| `RemovalFault_503_RowLeftRemoved` | The race, with blob deletes faulting → 503 with `Retry-After`; this file's row is Removed, never Servable (the residue above). |
+
+Contract (`tests/integration/contract/Api/Finance/InvoiceFileUploadContractTests.cs`): `RouteRefusal_Shape` gains the row "file limit reached after the file was stored", 409 `ebilling.files.limit_reached` with no `Retry-After`, using the same `Gateway.BeforeOp` race.
+
+**Seeding proofs.** Run with `dotnet test tests/unit/Sprk.Bff.Api.Tests --no-build --filter "FullyQualifiedName~InvoiceFileUpload"` (69 tests). Each version was copied over `StoredFileEndpoints.cs` and built; at the end the fixed file was restored and compared byte for byte (`cmp`: identical).
+
+| Version of `StoredFileEndpoints.cs` | Result |
+|---|---|
+| Fix round 1 (`c15d510af3`, no re-count) | **4 failed**, 65 passed: the race, the re-count fault, the removal fault and the contract row |
+| Must fire: re-count removed (`if (await RecountAfterUploadAsync(` → `if (fileId == Guid.Empty && await RecountAfterUploadAsync(`) | **4 failed**, 65 passed: the same four |
+| Boundary: `count <= MaxListedFiles` → `count < MaxListedFiles` | **1 failed**: `FileLimit_49Created_50Refused` (exactly 50 after the write must stay 201) |
+| Restored | **69 passed** |
+
+The must-not-fire test passes on every version.
+
+**Commands (fix round 2).**
+- `dotnet build` of `src/server/api/Sprk.Bff.Api/`, `tests/unit/Sprk.Bff.Api.Tests` and `tests/Spaarke.ArchTests`: 0 warnings, 0 errors.
+- Unit tests, `--filter "InvoiceFileUpload|StoredFileEndpoints|InvoiceFilesList|StoredFileService|SubmissionCommitGate"`: 332 passed, 0 failed.
+- ArchTests, `--filter "RouteAuthorization|StoredFile|InvoicePdfWriter"`: 109 passed, 0 failed. `InvoicePdfWriterGuardTests` needs no entry: the new code deletes a row and never creates or updates one, and the withdraw is the approved `WithdrawRowsAsync`.
+
+**Not tested here.** No test cancels a request between the write and step (5). The test host has no seam to cancel a request at that point. The rule is structural instead: every call in step (5) passes `CancellationToken.None`, and the request's `ct` is not in scope in either helper.

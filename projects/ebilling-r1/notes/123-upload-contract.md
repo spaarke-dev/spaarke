@@ -34,9 +34,9 @@ Final codes as built by task 123 (2026-11-22). The field is `errorCode` for the 
 | 404 | `sdap.access.deny.record_unavailable` (reasonCode) | the invoice does not exist, or the caller has no Write on it (one body for both); also an invoice removed between the rights check and the upload | no |
 | 409 | `ebilling.invoice.inactive` | the invoice is Inactive: Rejected, Returned to Firm, Cancelled, Superseded **or Paid** (statecode Inactive; see task 123 notes) | no |
 | 409 | `ebilling.invoice.files_pending` (`Retry-After: 30`) | the invoice's own submission is still storing its files (its Invoice PDF is not yet servable); checked before the body is read and again after it | yes |
-| 409 | `ebilling.files.limit_reached` | the invoice already holds 50 files (any status, the invoice file list's limit); checked before the body is read and again after it | no |
+| 409 | `ebilling.files.limit_reached` | the invoice already holds 50 files (any status, the invoice file list's limit); checked before the body is read and again after it. It can also answer after the file was stored: when concurrent uploads passed the limit together, the file is counted again once stored, then removed (row and blob), and nothing of it is left | no |
 | 409 | the owner refusal code (reasonCode) | no owner could be resolved for the file (the platform's one owner-refusal answer, `ProblemDetailsHelper.RecordOwnerRefused`; 503 for its one transient code) | no |
-| 503 | `file_store_unavailable` (`Retry-After: 30`) | staging, the row write or the flip failed, the store is not configured, or the invoice's state could not be read; nothing servable was left | yes |
+| 503 | `file_store_unavailable` (`Retry-After: 30`) | staging, the row write or the flip failed, the store is not configured, or the invoice's state could not be read; nothing servable was left. Also when the count after the write, or the removal of a file over the limit, failed: the file is removed when the store allows it (rarely, a store fault during that removal can leave it, see task 123 notes section 11) | yes |
 | 503 | `ebilling.disabled` | eBilling is off | no |
 
 The final codes follow the code's existing constants where they exist (task 123 reuses them verbatim and reports any rename here before it merges).
@@ -51,3 +51,4 @@ The final codes follow the code's existing constants where they exist (task 123 
 - Fix round 1: the 409 `ebilling.invoice.inactive`, `files_pending` and `limit_reached` checks run before the body is read and again after it, so a long upload can receive any of them after sending its body.
 - Fix round 1: when the upload's own second rights check fails after the first allowed, the answer is 403 `sdap.access.error.system_failure` (retry), not the 404.
 - Fix round 1: a malformed or truncated multipart body is 400 `ebilling.files.file_required` (it was an unhandled 500).
+- Fix round 2 (uac-r2 condition 1): 409 `ebilling.files.limit_reached` can also come after the file was stored and then removed, when concurrent uploads passed the limit together. More than one of them may be refused this way, and each may send its file again. If the count or the removal fails, the answer is 503 `file_store_unavailable` with `Retry-After: 30`.
