@@ -349,6 +349,8 @@ describe('InvoiceSubmitPage — submit', () => {
       expect(await screen.findByText(/Reason: duplicate_invoice/, {}, SLOW)).toBeTruthy();
       const report = await screen.findByTestId('invoice-outcome-report', {}, SLOW);
       expect(report.getAttribute('data-kind')).toBe('SubmissionRejected');
+      // The shared `renderSubmissionReport` (also used by the record's modal wizard) draws the wrapper.
+      expect(screen.getByTestId('submission-outcome-report').contains(report)).toBe(true);
       expect(screen.getByText('Line 4')).toBeTruthy();
       expect(screen.getByText('The billed rate is above the approved rate.')).toBeTruthy();
       expect(screen.queryByTestId('invoice-report-placeholder')).toBeNull();

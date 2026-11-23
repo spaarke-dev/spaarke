@@ -93,3 +93,27 @@ Not run. They need a dev deploy of the SPA and a firm sign-in (task 136). The fo
 
 - Touches `recordTemplate.types.ts`, `recordTemplates.ts` and `sections/index.ts` in single, additive lines only. PR #2929 edits the `sprk_invoice` `headerFacts` and `RecordHeaderFact`; those lines are not touched here, so a merge should be mechanical (the `sprk_invoice` entry's `left` line is two lines below `headerFacts`).
 - The existing layout assertions for `sprk_invoice` in `RecordTemplateModal.test.tsx` and `RecordTemplateSections.test.tsx` changed by one entry each.
+
+## spa-r4 review (2026-11-23) and fix round
+
+Branch `task/ebilling-134-fix1`, from `f70380b196` (work/ebilling-r1 tip). Client-only, `src/client/external-spa`.
+
+### Fixed
+
+- **F1 (Outcome section called the route for callers the route refuses).** `OutcomeSection` now makes no call, and renders nothing (card included), unless `/me` positively says the caller is a firm member: `callerFirmIdsOf(callerContext).length > 0` (the `InvoicesWidget` "Submit invoice" rule, one definition; on this branch it is the same as origin/master's) and `systemUserId` is not set (the BFF filter refuses a systemuser before anything else, so a systemuser is never asked even if `/me` listed firms). A caller context that is not in yet, failed, or has `firms` null/absent (unknown) asks nothing. The read hook sits in an inner component, so a gated caller never starts it.
+  - **Firm of THIS invoice not used.** The invoice record read (`RECORD_DETAIL_ENTITIES.sprk_invoice`) does not carry `sprk_vendororg`, so the section cannot name the invoice's firm; adding the column to the shared read is a contract change outside this fix. So a member of ANOTHER firm on a shared matter still passes the gate and gets the server's 403; that case is the backstop below, and there is no "caller of another firm" must-not-call test (it cannot be expressed). Residual cost: one refused read for that caller, with nothing shown. To close it, add the firm lookup to the invoice read.
+  - **Backstop (b).** A 403 that still happens renders nothing (`return null`, as the disabled state does), not the no-access card. `OutcomeBody` keeps the no-access card for the submission result screen (the submitter is the firm).
+  - Commit `977cd2df47`. Tests (`InvoiceOutcomeReport.test.tsx`): "403 shows the no-access state" is flipped into "spa-r4 F1 backstop: a 403 that still happens renders nothing"; new "who is asked" group: workforce caller (firms `[]` and systemUserId), systemuser with firms listed, caller with no firms, firms null and absent, caller context null, caller context that arrives later (read starts then), and the must-fire (one firm and several firms still get the section and the call). Fail before / pass after: 7 failed with the old section (the flipped 403 test and six must-not-call tests), 64 passed with the new; the must-fire control passes both ways.
+  - Follow-on test fix: `RecordTemplateSections.test.tsx` "FR-01 template sections" for `sprk_invoice` used a `/me` with no firms and so lost its Outcome section; its mock `/me` now takes `firms`, the invoice case sets one and waits for `/me`, and a new test asserts a no-firm caller gets `['information', 'files']` and no `/outcome` request.
+- **F4 (modal wizard showed the placeholder).** `renderSubmissionReport` moved next to `SubmissionOutcomeReport` in `components/ebilling/InvoiceOutcomeReport.tsx` (exported); `InvoiceSubmitPage` and `SubmitInvoiceAction` (`<InvoiceSubmissionWizard renderReport={renderSubmissionReport}>`) both use it. The result screen's own outcome call is unchanged. Commit `5a59385b5b`. Tests: `RecordTemplateSubmitInvoice.test.tsx` "a Rejected result in the modal wizard" (the modal wizard renders `submission-outcome-report` around `invoice-outcome-report`, reads the submission route, no `invoice-report-placeholder`): fails with `SubmitInvoiceAction` restored to its old version, passes after; `InvoiceSubmitPage.test.tsx` "a Rejected result shows the reason code and the outcome report" now also asserts the page draws `submission-outcome-report` around the report.
+
+### Known limits recorded by spa-r4 (no change)
+
+- **K1** No list-empty case.
+- **K2** `outcomePrint.tsx`: the fallback timer is not cleared if `afterprint` fires inside `print()` (no real path in Chrome).
+- **K3** No test mounts the report inside `RecordTemplateModal` / `SprkModal`.
+- **K4** Refresh replaces the report with a spinner.
+
+### Checks
+
+`npx tsc --noEmit -p tsconfig.json` clean; `npx eslint src tests` clean; `npx vitest run` 66 files, 1890 tests passed.

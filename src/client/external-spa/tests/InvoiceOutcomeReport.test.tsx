@@ -21,6 +21,7 @@ vi.mock('../src/auth/bff-client', async () => {
 });
 
 import { ApiError } from '../src/types';
+import type { ExternalUserContextResponse } from '../src/auth/bff-client';
 import {
   getInvoiceOutcome,
   getSubmissionOutcome,
@@ -139,9 +140,26 @@ function renderReport(raw: unknown, theme = webLightTheme) {
   );
 }
 
-/** The section's context: `OutcomeSection` reads only the record id and the refresh signal. */
+/** A `/me` answer: by default a member of one firm (what a firm's own contact gets). */
+function me(over: Partial<ExternalUserContextResponse> = {}): ExternalUserContextResponse {
+  return {
+    contactId: guid(1),
+    email: 'firm.user@example.test',
+    firms: [{ firmId: guid(500), name: 'Firm A' }],
+    projects: [],
+    ...over,
+  } as ExternalUserContextResponse;
+}
+
+/** The section's context: `OutcomeSection` reads the record id, the refresh signal and the caller's `/me` context. */
 function sectionContext(over: Partial<RecordSectionContext> = {}): RecordSectionContext {
-  return { recordId: INVOICE, refreshSignal: 0, full: false, ...over } as unknown as RecordSectionContext;
+  return {
+    recordId: INVOICE,
+    refreshSignal: 0,
+    full: false,
+    callerContext: me(),
+    ...over,
+  } as unknown as RecordSectionContext;
 }
 
 function renderSection(over: Partial<RecordSectionContext> = {}) {
@@ -927,13 +945,98 @@ describe('OutcomeSection', () => {
     expect(h.bffApiCall).toHaveBeenCalledWith(INVOICE_PATH);
   });
 
-  it('403 shows the no-access state, and never the server text', async () => {
+  it('spa-r4 F1 backstop: a 403 that still happens renders nothing: no card, no no-access message, no server text', async () => {
     h.bffApiCall.mockRejectedValue(new ApiError(403, problem(403)));
-    renderSection();
-    const note = await screen.findByTestId('outcome-no-access', undefined, WAIT);
-    expect(note.textContent).toContain(OUTCOME_NO_ACCESS_TEXT);
+    const { container } = renderSection();
+    await waitFor(() => expect(h.bffApiCall).toHaveBeenCalledWith(INVOICE_PATH), WAIT);
+    await waitFor(() => expect(screen.queryByTestId('outcome-loading')).toBeNull(), WAIT);
+    expect(container.textContent).toBe('');
+    expect(screen.queryByTestId('outcome-no-access')).toBeNull();
+    expect(screen.queryByTestId('record-section-outcome')).toBeNull();
+    expect(document.body.textContent).not.toContain(OUTCOME_NO_ACCESS_TEXT);
     expect(document.body.textContent).not.toContain('server detail text');
-    expect(screen.queryByTestId('invoice-outcome-report')).toBeNull();
+  });
+
+  describe('spa-r4 F1: who is asked (R4 FR-06/07, NFR-04: the UI never offers what the server answers 403)', () => {
+    const expectNeverAsked = async (container: HTMLElement) => {
+      // Give an (unwanted) read every chance to start before asserting it did not.
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+      expect(h.bffApiCall).not.toHaveBeenCalled();
+      expect(container.textContent).toBe('');
+      expect(screen.queryByTestId('record-section-outcome')).toBeNull();
+      expect(screen.queryByTestId('outcome-loading')).toBeNull();
+    };
+
+    it('a workforce caller (a systemuser; /me firms is []) makes no outcome call and shows nothing', async () => {
+      h.bffApiCall.mockResolvedValue(outcome());
+      const { container } = renderSection({ callerContext: me({ firms: [], systemUserId: guid(77) }) });
+      await expectNeverAsked(container);
+    });
+
+    it('a systemuser is never asked even if /me were to list firms for it', async () => {
+      h.bffApiCall.mockResolvedValue(outcome());
+      const { container } = renderSection({ callerContext: me({ systemUserId: guid(77) }) });
+      await expectNeverAsked(container);
+    });
+
+    it('a caller with no firms ([]), e.g. a client-side collaborator on a shared matter, makes no call', async () => {
+      h.bffApiCall.mockResolvedValue(outcome());
+      const { container } = renderSection({ callerContext: me({ firms: [] }) });
+      await expectNeverAsked(container);
+    });
+
+    it('firms unknown (null or absent: eBilling off, an older BFF) is never "a member": no call', async () => {
+      h.bffApiCall.mockResolvedValue(outcome());
+      const nulls = renderSection({ callerContext: me({ firms: null }) });
+      await expectNeverAsked(nulls.container);
+      nulls.unmount();
+      const absent = renderSection({ callerContext: me({ firms: undefined }) });
+      await expectNeverAsked(absent.container);
+    });
+
+    it('the caller context not in yet, or failed (null), makes no call', async () => {
+      h.bffApiCall.mockResolvedValue(outcome());
+      const { container } = renderSection({ callerContext: null });
+      await expectNeverAsked(container);
+    });
+
+    it('must-fire: a firm member (one firm, or several) still gets the section and the call', async () => {
+      h.bffApiCall.mockResolvedValue(outcome());
+      const one = renderSection();
+      await screen.findByTestId('invoice-outcome-report', undefined, WAIT);
+      expect(h.bffApiCall).toHaveBeenCalledWith(INVOICE_PATH);
+      expect(screen.getByRole('region', { name: 'Outcome' })).toBeTruthy();
+      one.unmount();
+      h.bffApiCall.mockClear();
+      renderSection({
+        callerContext: me({
+          firms: [
+            { firmId: guid(500), name: 'Firm A' },
+            { firmId: guid(501), name: 'Firm B' },
+          ],
+        }),
+      });
+      await screen.findByTestId('invoice-outcome-report', undefined, WAIT);
+      expect(h.bffApiCall).toHaveBeenCalledWith(INVOICE_PATH);
+    });
+
+    it('a caller context that arrives later starts the read then (never before)', async () => {
+      h.bffApiCall.mockResolvedValue(outcome());
+      const view = renderSection({ callerContext: null });
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 20));
+      });
+      expect(h.bffApiCall).not.toHaveBeenCalled();
+      view.rerender(
+        <FluentProvider theme={webLightTheme}>
+          <OutcomeSection {...sectionContext()} />
+        </FluentProvider>
+      );
+      await screen.findByTestId('invoice-outcome-report', undefined, WAIT);
+      expect(h.bffApiCall).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('503 ebilling.disabled renders nothing at all: no card, no message', async () => {
