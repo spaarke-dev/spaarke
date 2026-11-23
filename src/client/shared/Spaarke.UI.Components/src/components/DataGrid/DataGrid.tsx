@@ -238,6 +238,14 @@ export interface DataGridProps {
   rowNoun?: DataGridRowNoun;
 
   /**
+   * OPTIONAL — what an empty list shows below the column headers, in place of the configuration's
+   * `display.emptyStateMessage` (for example the shared `EmptyState` with a hint that names an action only the host
+   * knows the caller is offered). Shown only when the list is truly empty: never while loading, after a failed
+   * load, or when the host's row source says the list is incomplete. Absent = the configuration's message, unchanged.
+   */
+  emptyState?: React.ReactNode;
+
+  /**
    * OPTIONAL — per-row actions the HOST adds as the grid's LAST column (fixed width, not resizable, not sortable).
    * Each is an icon button whose tooltip equals its aria-label; activating it calls
    * `onRecordAction(action.id, recordId, record, ctx)`. An action whose `isVisible(record)` returns false is NOT
@@ -804,6 +812,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     rowSource,
     rowSourceKey,
     rowNoun,
+    emptyState: hostEmptyState,
     rowActions,
     truncateWithTooltip: truncateWithTooltipProp,
     hiddenBuiltInCommands,
@@ -1801,9 +1810,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
 
             {isEmpty && (
               <div className={styles.emptyState}>
-                <Text size={400} weight="semibold">
-                  {resolved.display.emptyStateMessage ?? 'No records to display'}
-                </Text>
+                {hostEmptyState ?? (
+                  <Text size={400} weight="semibold">
+                    {resolved.display.emptyStateMessage ?? 'No records to display'}
+                  </Text>
+                )}
               </div>
             )}
 

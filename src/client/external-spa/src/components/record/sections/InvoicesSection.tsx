@@ -11,6 +11,7 @@
  */
 import * as React from 'react';
 import { makeStyles, tokens, MessageBar, MessageBarBody, Spinner } from '@fluentui/react-components';
+import { EmptyState } from '@spaarke/ui-components/components/EmptyState';
 import { TruncatedListNotice } from '../../TruncatedListNotice';
 import { EMPTY_VALUE, formatDetailValue, type DetailRecord } from '../../detail/RecordDetailFields';
 import { childRecordAttributesOf, useChildRecordOpener, type OpenChildRecord } from '../childRecord';
@@ -24,12 +25,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
-  },
-  empty: {
-    color: tokens.colorNeutralForeground3,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingVerticalM,
   },
   list: {
     listStyleType: 'none',
@@ -116,6 +111,8 @@ interface RelatedListProps {
   testId: string;
   idAttribute: string;
   noun: string;
+  /** The empty list (shared `EmptyState`, R4 task 024): a short heading, then today's sentence. */
+  emptyHeading: string;
   emptyText: string;
   state: ListState;
   primary: (row: DetailRecord) => string;
@@ -129,6 +126,7 @@ const RelatedList: React.FC<RelatedListProps> = ({
   testId,
   idAttribute,
   noun,
+  emptyHeading,
   emptyText,
   state,
   primary,
@@ -148,9 +146,7 @@ const RelatedList: React.FC<RelatedListProps> = ({
         <>
           <TruncatedListNotice truncated={state.truncated} shown={state.rows.length} noun={noun} />
           {state.rows.length === 0 && !state.truncated && (
-            <div className={styles.empty} role="status">
-              {emptyText}
-            </div>
+            <EmptyState size="compact" heading={emptyHeading} description={emptyText} />
           )}
           {state.rows.length > 0 && (
             <ul className={styles.list}>
@@ -200,6 +196,7 @@ const InvoiceList: React.FC<{ parentAttribute: string; parentId: string }> = ({ 
       testId="record-detail-invoices"
       idAttribute="sprk_invoiceid"
       noun="invoices"
+      emptyHeading="No invoices"
       emptyText="No invoices for this record."
       state={state}
       open={opener ? { entity: 'sprk_invoice', label: 'invoice', opener, section: 'invoices' } : undefined}

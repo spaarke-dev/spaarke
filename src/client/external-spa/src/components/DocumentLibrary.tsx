@@ -48,8 +48,15 @@ import {
   MessageBarBody,
   Divider,
 } from '@fluentui/react-components';
-import { ArrowDownloadRegular, ArrowUploadRegular, DeleteRegular, HistoryRegular } from '@fluentui/react-icons';
+import {
+  ArrowDownloadRegular,
+  ArrowUploadRegular,
+  DeleteRegular,
+  DocumentRegular,
+  HistoryRegular,
+} from '@fluentui/react-icons';
 // Deep component imports — avoids loading Virtualized* components that need react-window
+import { EmptyState } from '@spaarke/ui-components/components/EmptyState';
 import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/components/FileUpload';
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
 import { FormModal, SprkModal } from '@spaarke/ui-components/components/SprkModal';
@@ -142,9 +149,9 @@ const useStyles = makeStyles({
     minWidth: 0,
     maxHeight: 'min(70vh, 720px)',
   },
-  emptyStateText: {
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
+  // The shared EmptyState leaves the icon's colour to its caller (R4 task 024, FR-17).
+  emptyIcon: {
+    color: tokens.colorNeutralForeground4,
   },
   loadingContainer: {
     display: 'flex',
@@ -428,9 +435,12 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
       )}
 
       {!loading && !error && versions.length === 0 && (
-        <Text size={300} className={styles.emptyStateText}>
-          No version history available for this document.
-        </Text>
+        <EmptyState
+          size="compact"
+          icon={<HistoryRegular className={styles.emptyIcon} />}
+          heading="No version history"
+          description="No version history available for this document."
+        />
       )}
 
       {!loading && !error && versions.length > 0 && (
@@ -766,6 +776,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // In the record template the section's Upload replaces this list's button (task 004 / 009), and the dialog stays here.
   const ownUploadButton = onCreateActionChange === undefined;
   useOfferCreateAction(onCreateActionChange, uploadAllowed, upload.show, right);
+  // Whether an Upload is offered at all: this list's own button, or (in the record template) the section's. The empty
+  // state names the action only then (hide, don't disable; task 024).
+  const uploadOffered = ownUploadButton ? showUpload : uploadAllowed;
+  const noun = RECORD_NOUN[root];
   // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
   // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
   const canActOnDocuments = canDownload ?? (writeAccessPerRecord || canUploadOrDownload(accessLevel));
@@ -941,6 +955,20 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           onRecordOpen={handleRecordOpen}
           truncateWithTooltip
           rowNoun={DOCUMENT_NOUN}
+          emptyState={
+            <EmptyState
+              size="compact"
+              icon={<DocumentRegular className={styles.emptyIcon} />}
+              heading="No Documents"
+              description={
+                uploadOffered
+                  ? ownUploadButton
+                    ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
+                    : `No documents have been uploaded to this ${noun} yet. Use Upload above to add your first document.`
+                  : `No documents have been uploaded to this ${noun} yet.`
+              }
+            />
+          }
         />
       </div>
 
