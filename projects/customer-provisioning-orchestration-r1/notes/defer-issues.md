@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed by PR #2993 (merged `5e4cf470d6`, 2026-11-23); ACME seeded live 2026-11-23; dev L2 Worker deploy pending |
+| **Status** | Fixed by PR #2993 (merged `5e4cf470d6`, 2026-11-23); ACME seeded live 2026-11-23; dev L2 Worker deployed from master `ca1684dd2f` 2026-11-23 (owner OK), healthy, package carries all 16 layouts |
 | **Urgency** | before the next stamp run (every new stamp lacks the four workspaces) |
 | **Filed** | 2026-11-23 |
 | **Source** | ACME guest-test prep after run `3b6f7b65`: the Console's Manage Workspaces showed 12 system workspaces, dev 16 |
@@ -30,7 +30,7 @@ Reconciliation were seeded on dev by standalone `scripts/seed-*-workspace-layout
 - ACME (owner OK "Fix both"): the three scripts ran after a `-WhatIf`, and Compose was created from dev's row (sort 5, section `compose-editor`). Read-back: 16 system rows, Daily Briefing the only default.
 - PR #2993: the four layouts are added to `system-layouts.json`, plus a guard test (every standalone seed script's layout is listed with the same section; it fails on master's list).
 
-**Remaining**: deploy the dev L2 Worker from master at or after `5e4cf470d6` (owner OK) so H12b carries the list.
+**Remaining**: none on dev. Any other L2 environment (demo, prod) picks the list up at its next Worker deploy from master; move this entry to Resolved at the next defer-issues review.
 
 ### ISS-036 — intake.schema.json lacks `buildId`, so an upgrade run cannot pin the BFF build from a valid intake
 
