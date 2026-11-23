@@ -308,6 +308,7 @@ public sealed class SecureChildShareSynchronizer
 
     private const string OwningTeamColumn = "owningteam";
     private const string OwningUserColumn = "owninguser";
+    private const string CommunicationTable = "sprk_communication";
     private const string IsSecureColumn = "sprk_issecure";
     private const int OwnerTeamType = SecureRecordOwnerTeam.OwnerTeamType;
 
@@ -883,7 +884,7 @@ public sealed class SecureChildShareSynchronizer
 
         var run = new Run(this, secureTeamId, ct);
         if (readRows is not null)
-            run.Seed(readRows);
+            await run.SeedAsync(readRows).ConfigureAwait(false);
         await run.PrefetchLineagesAsync(groups.SelectMany(g => g)).ConfigureAwait(false);
 
         var answers = new List<SecureRootsAbove>(groups.Count);
@@ -1596,9 +1597,10 @@ public sealed class SecureChildShareSynchronizer
         {
             foreach (var table in SecureChildLineage.Children.Values)
             {
+                await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.LineageColumns.Append(OwningTeamColumn).ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append(OwningTeamColumn).Concat(PrivateColumnsOf(table.LogicalName)).ToArray()),
                     NoLock = true,
                 };
                 query.Criteria.AddCondition(OwningTeamColumn, ConditionOperator.Equal, _secureTeamId);
@@ -1617,6 +1619,7 @@ public sealed class SecureChildShareSynchronizer
         /// </summary>
         public async Task<bool> LoadSecureChildAsync(SecureChildLineage.Table table, Guid id)
         {
+            await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
             var query = new QueryExpression(table.LogicalName)
             {
                 ColumnSet = new ColumnSet(WalkColumns(table)),
@@ -1656,6 +1659,7 @@ public sealed class SecureChildShareSynchronizer
 
                 foreach (var table in SecureChildLineage.Children.Values)
                 {
+                    await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                     // Every (lookup column, parent id) pair of this table that points into the previous level — and, on a
                     // Signal or Decision Record, its core record pair naming a root of it (SecureChildLineage.CorePairMatches).
                     var pairs = table.Lookups
@@ -1733,12 +1737,13 @@ public sealed class SecureChildShareSynchronizer
         /// when it was read with every column the walk reads (<see cref="WalkColumns"/>); a row read with fewer is ignored and
         /// read as usual, so a column the caller did not select never reads as absent.
         /// </summary>
-        public void Seed(IEnumerable<(Entity Row, ColumnSet ReadWith)> rows)
+        public async Task SeedAsync(IEnumerable<(Entity Row, ColumnSet ReadWith)> rows)
         {
             foreach (var (entity, readWith) in rows)
             {
                 if (entity.Id == Guid.Empty || !SecureChildLineage.Children.TryGetValue(entity.LogicalName, out var table))
                     continue;
+                await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                 if (!readWith.AllColumns
                     && !WalkColumns(table).All(c => readWith.Columns.Contains(c, StringComparer.OrdinalIgnoreCase)))
                     continue;
@@ -1793,6 +1798,8 @@ public sealed class SecureChildShareSynchronizer
                 }
 
                 var table = SecureChildLineage.IsRoot(group.Key) ? null : SecureChildLineage.Children[group.Key];
+                if (table is not null)
+                    await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                 foreach (var chunk in group.Chunk(DescendantConditionsPerQuery))
                 {
                     var ids = chunk.Select(r => r.Id).ToHashSet();
@@ -1842,6 +1849,7 @@ public sealed class SecureChildShareSynchronizer
                 return cached;
 
             var table = SecureChildLineage.Children[reference.Table];
+            await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
             var query = new QueryExpression(table.LogicalName)
             {
                 ColumnSet = new ColumnSet(WalkColumns(table)),
@@ -1857,11 +1865,43 @@ public sealed class SecureChildShareSynchronizer
         }
 
         /// <summary>The columns the walk reads of a child row: its lineage columns (lookups, and a core record pair) and its owner.</summary>
-        private static string[] WalkColumns(SecureChildLineage.Table table) =>
-            table.LineageColumns.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
+        private string[] WalkColumns(SecureChildLineage.Table table) =>
+            table.LineageColumns.Append(OwningTeamColumn).Append(OwningUserColumn).Concat(PrivateColumnsOf(table.LogicalName)).ToArray();
 
-        private static Row ToRow(SecureChildLineage.Table table, Entity entity)
+        // fm task 056 (owner 2026-11-22; UAC-r2: fail closed wherever a filing is read): the private-message reference columns
+        // of a sprk_communication read, the ones that exist in this environment (metadata read once per run; a fault propagates).
+        private IReadOnlySet<string>? _communicationColumns;
+
+        private async Task EnsureCommunicationColumnsAsync(string table)
         {
+            if (_communicationColumns is null && string.Equals(table, CommunicationTable, StringComparison.OrdinalIgnoreCase))
+            {
+                var metadata = await _owner._dataverse.GetColumnMetadataAsync(CommunicationTable, _ct).ConfigureAwait(false);
+                _communicationColumns = (metadata ?? throw new InvalidOperationException(
+                    $"The columns of {CommunicationTable} could not be read; the read does not run without that answer."))
+                    .Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private IEnumerable<string> PrivateColumnsOf(string table) =>
+            Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.PresentColumnsOf(
+                table, _communicationColumns ?? new HashSet<string>());
+
+        private Row ToRow(SecureChildLineage.Table table, Entity entity)
+        {
+            // A private message is never filed: whatever it is filed under is not read, so it descends from no root.
+            if (string.Equals(table.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
+                && Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.IsPrivate(entity))
+            {
+                Log.LogWarning("[SECURE-CHILD-SHARES] {Table} {Id} is a private message: it is never filed, so it is placed under no " +
+                    "root and no share is mirrored onto it.", table.LogicalName, entity.Id);
+                return new Row(
+                    new RowRef(table.LogicalName, entity.Id),
+                    entity.GetAttributeValue<EntityReference>(OwningTeamColumn) is { } team && team.Id != Guid.Empty ? team.Id : null,
+                    UserOwned: entity.GetAttributeValue<EntityReference>(OwningUserColumn) is { } user && user.Id != Guid.Empty,
+                    Array.Empty<RowRef>());
+            }
+
             var parents = new List<RowRef>();
             foreach (var (column, target) in table.Lookups)
             {

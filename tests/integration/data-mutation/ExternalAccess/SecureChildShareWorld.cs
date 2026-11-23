@@ -58,6 +58,13 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<Guid> _ignoredOwnerWrites = new();
     private readonly List<(string Table, int AfterCount, Action<SecureChildShareWorld> Change)> _afterQueries = new();
 
+    /// <summary>
+    /// fm task 056: what the metadata read of <c>sprk_communication</c> answers (the synchronizer asks it before it reads the
+    /// private-message reference columns): the table's columns, or a throw for a fault. <c>null</c> (the default) is a table
+    /// without those columns, which is how every other test of this world reads.
+    /// </summary>
+    public Func<IReadOnlyDictionary<string, ColumnMetadata>>? CommunicationColumnMetadata { get; set; }
+
     /// <summary>#2091 round 4: how many single-row reads (<see cref="Retrieve"/>) this world answered.</summary>
     public int RowReads { get; private set; }
 
@@ -679,6 +686,11 @@ internal sealed class SecureChildShareWorld
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(current().Answer(query)));
+        // fm task 056: the columns of sprk_communication (the private-message reference columns are read where they exist).
+        entities
+            .Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult(
+                current().CommunicationColumnMetadata?.Invoke() ?? new Dictionary<string, ColumnMetadata>()));
         // 194b: a single-row read (the record-type catalog row a Signal's or Decision Record's core pair names).
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
