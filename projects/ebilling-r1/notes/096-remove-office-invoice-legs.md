@@ -96,3 +96,10 @@ Known limits:
 ## Peer check (word-add-in-r1, 2026-11-23)
 
 No objection to 98801e9b9f. The live add-in never sends an invoice save target and never calls quickcreate/invoice; slice C removed both, and that has been live since 148ec4dec0. The ribbon's Quick Save drops an Invoice prediction, and any prediction with canFile=false. The pane does not read the OFFICE_002 detail text. word-add-in-r1 range-checks the change once it is on the dev BFF; tell them when it is deployed.
+
+## Tests after the merge into work (98801e9b9f)
+
+- **ArchTests**, filtered to `RecordOwnerAssignmentCensus|FeatureRolePrivilegeGuard|RouteAuthorization|Office|AssociationTypeLockstep`: 243 passed, 0 failed.
+- **Unit**, filtered to `Office|QuickCreate|EntityAccessFilter|Retirement`, under heavy machine load: 1173 passed, 10 failed, 7 skipped. The run was aborted at the 40-minute limit. Each failure was a 3-minute test timeout.
+- **Rerun of those 10 tests' classes alone:** 120 passed, 0 failed. The failures came from machine load, not from the change; the same pattern showed in the review fix's runs, which also hit tests unrelated to this change.
+- **Tests the review fix touches** (`OfficeProblemDetails|OfficeInvoice|EntityAccessFilter|QuickCreateSourceAccess|ProblemDetailsHelper`): 58 passed, 0 failed.

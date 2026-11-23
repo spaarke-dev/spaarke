@@ -12,7 +12,7 @@
 
 - **Running now (agents, background):**
   - **194 ✅** merged 96bcf65dbb; dev forms cleaned, -Verify PASS, uac-r2 notified before and after.
-  - **096**: built on `task/ebilling-096` tip f9bc1465c7; Opus adversarial review running.
+  - **096 ✅** merged into work 98801e9b9f (Opus review: F2 fixed f60f51a2a3); word-add-in-r1 no objection. Tell word-add-in-r1 when it is on the dev BFF (range check).
 - **Exact next actions:**
   1. When an agent reports: Opus adversarial review (one pass for 194; 096 is bff-api, one pass), fix rounds, a scoped re-check, then merge `--no-ff` into work.
   2. **194:** uac-r2 BEFORE notice, then `-Apply` on dev (owner go typed 2026-11-23: "yes proceed with these"), then `-Verify` and the AFTER notice.
