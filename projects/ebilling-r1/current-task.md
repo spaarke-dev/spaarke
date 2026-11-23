@@ -11,10 +11,10 @@
 ## Quick recovery
 
 - **Active task:** 123 (`tasks/123-invoice-supporting-file-upload.poml`), in progress since 2026-11-22. FULL, opus/high, directional; tags bff-api, api, auth, testing.
-  - Step 8: an implementer agent (Opus) works on branch `task/ebilling-123` from base `134f7a15cf`.
-  - Then two Opus adversarial reviews (auth), a fix round, code-review and adr-check.
-  - Then uac-r2 reviews before the `--no-ff` merge into work.
-  - Then word-add-in-r1 gets the final route shape plus any error-code differences from `notes/123-upload-contract.md`.
+  - State 2026-11-23: branch `task/ebilling-123` tip `c15d510af3` (base `134f7a15cf`). Built, two Opus adversarial reviews done, fix round 1 done (every F fixed with fail-before tests; includes a SubmissionCommitGate change: Invoice PDF flipped last, early Passed once it is Servable, route 409 files_pending until then). Scoped Sonnet re-check: K-class only; ADR-002/008/010/018 pass.
+  - word-add-in-r1 agreed the contract at c15d510af3 (both rounds).
+  - **Waiting on:** uac-r2 review (asked 2026-11-23, with the access details by message). On approval: `--no-ff` merge into work, record the approval and word-add-in-r1's agreement in `notes/123-invoice-supporting-file-upload.md`, close the POML/TASK-INDEX, remove both agent worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-a7b5d698809b047ba` and `agent-adaa081eb1afa950c`) with Remove-WorktreeSafe.ps1.
+  - Filed in passing: ISS-043 #2978 (three other multipart routes answer a malformed body with 500).
   - Escalation trigger checked: `UploadForCallerAsync` already takes an invoice parent with purpose InvoiceSupportingFile (`StoredFileContracts.cs:177`).
   - Conflict check: soft pass. No open PR or master change touches the 123 files.
   - Delegated because the work is one coupled change (route, tests, contract test, notes) best done in an isolated worktree, as for 124 and 050b.
