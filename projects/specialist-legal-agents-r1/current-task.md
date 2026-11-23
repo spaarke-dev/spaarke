@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella program)
 
-> **Last Updated**: 2026-11-23 (setup session "Set up the specialist legal agents project")
+> **Last Updated**: 2026-11-23 ~21:40Z (setup session, checkpoint at 87% context)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Phase**: pre-`/design-to-spec`. No POML tasks. Do NOT run `/design-to-spec` until the owner says so.
 
@@ -8,30 +8,53 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | The owner asked (2026-11-23): (1) "I'm still not clear on the structure and core components of the model" — this program must build on accelerator-r1 both for NDA capabilities and **as the pattern for other persona/skill-based agents**; (2) explain the capability differences between Word Copilot and the M365 Copilot app, and within it between Chat and Cowork, and check whether Ignite 2026 collapsed Chat/Cowork, and what "Copilot Home" is |
-| **Step** | G8 test kit ready (phase0/g8/README.md): waiting for the owner to create the A1/A2 Agent Builder agent and upload the P1 package. Then this session checks App Insights and records the result. Inventory rows G8-a and G8-p sent to copilot-platform-coordination. D-A11 still "discuss first" |
-| **Design version** | design.md v0.5 (commit `b5ebb37b3c`) |
-| **Uncommitted** | none |
+| **Active work** | Writing **design.md v0.6**. Owner said 2026-11-23: "and then yes write v0.6". It folds in Copilot's Ask/Do/Practice synopsis (with corrections), the G8 result, the build paths, the existing code inventory, the "Spaarke AI" agent's usefulness and an auth-ADR review |
+| **Step** | §0.5 (Ask/Do/Practice, agent-creation rule, two-path diagram, 6 corrections, decision order) **written, uncommitted**. The synopsis was saved to `notes/source/copilot-synopsis-ask-do-practice-2026-11-23.md` (uncommitted). Waiting on a code-mapper agent (Sonnet): an inventory of the existing DA harness (`src/solutions/CopilotAgent`, `AgentTokenService`), bot/custom-engine code, the BFF orchestration runtime, the MCP server and Work IQ usage |
+| **Design version** | design.md v0.5 + G8 interim result (last commit `9c557d7e95`) |
+| **Uncommitted** | design.md §0.5; the synopsis source note; this file |
 
-## Owner context to keep (2026-11-23)
-- accelerator-r1's purpose: a simple **individual install package, no IT**, a more capable, purpose-built NDA review on top of Microsoft's Copilot for legal (Legal for Cowork + Word legal plugin), as shown in the Cowork redlining video. **It is not done; it completes in parallel with this project.**
-- This program builds on the accelerator in two ways: (a) NDA-specific capabilities; (b) the accelerator's practice-accelerator anatomy (customer layer / practice layer / core, accelerator design §5.1) is the **pattern** for every other persona or skill.
-- Microsoft's 20 Legal for Cowork skills: Microsoft-first, no collisions, ride upgrades (design §3.10, D-A13).
+## Next action (exact)
+1. Read the code-mapper result.
+2. Write these into design.md:
+   - **§3.12 "Agent build paths after G8".** A table: Agent Builder ❌ / Copilot Studio (MCP tool = own tool; agents are Dataverse solution components, fits Spaarke ALM; billing to check) / **coded DA with own MCP action (default Practice vehicle)** / Spaarke runtime agent (custom engine; T3). Plus the existing code, and whether "Spaarke AI" (`src/solutions/CopilotAgent`, D1 in the inventory, v1.1.0 installed, v1.5.0 uploaded) is useful.
+   - The answers to the owner's Q1 and Q2:
+     - Q1: Ask/Do are **not agents**: they are skills + connector in a plugin package, so Copilot Studio is not needed for them.
+     - Q2: Practice = a coded DA (Copilot runtime) or our own runtime. Correct, with Studio as a third option.
+   - **§11 T-7 auth:**
+     - ADR-028 **A10** (on the mcp-r1 branch, not master) already covers connector + plugin package + **declarative agent**, so a coded DA with its own MCP action is covered (same dedicated client).
+     - A Studio MCP tool is covered only if its connection supports a Spaarke-tenant authority + PKCE + the dedicated client; otherwise an A10 follow-up.
+     - A runtime agent is a new plane (channel SSO token) and needs **OBO to Work IQ** (`WorkIQAgent.Ask`, delegated-only), so amendment A11, path B.
+     - Background Practice can't use Work IQ (delegated-only + ADR-052), so T-1/T-2 stand.
+     - Owner principle: "if Microsoft requires an auth approach and it is safe, amend the ADR". Record it; security sign-off still applies.
+   - **§12:** revise **D-A1** (the front door: coded DA default, runtime agent for T3, decided after G9/G10). §8 G8 final:
+     - Agent Builder ❌;
+     - P1 dropped;
+     - **P2** = coded DA with its own MCP action on `/mcp/legal-operations` (does it run once, with no double-fire?).
+   - **G9:** desk research. Can a custom engine agent appear in Chat, Word and Cowork after Ignite (GA vs preview), with SSO? Work IQ GA status, and delegated calls from the BFF.
+   - **G10** (optional): a Copilot Studio MCP-tool comparison.
+   - **Header:** v0.6.
+3. Commit (`export PATH="/c/code_files/spaarke/node_modules/.bin:$PATH"` first: this worktree has no prettier) and push.
+4. Message COPILOT-PLATFORM-COORDINATION [0afb62]:
+   - the G8 result is final;
+   - propose R1 = "one tenant-wide connector per URL; agent-private actions allowed", with Copilot's diagram as the rationale;
+   - P2 needs an R4 row before upload. G8-a is still live (delete by 2026-11-30); G8-p was never uploaded.
+5. Answer the owner: the corrections to Q1/Q2, the Spaarke AI verdict, the ADR verdict, and a link to v0.6.
 
-## Draft core model (to write into design.md)
-- **Components:** Microsoft platform (surfaces + Legal skills + built-ins) · Practice content (accelerator `practices/<p>/`: topics, baseline positions, references, evals, schemas) · Function (skill + engine + output contract + golden set; Python engine in Cowork, C# engine in BFF) · Persona/archetype (set of Spaarke + Microsoft functions, default positions, authority ceiling, role; one per practice area) · Attorney profile/instance (T0/T1 `legal-profile.md` + personal playbooks; T2/T3 Dataverse master, exported) · Delivery wrappers per surface (Word playbook .docx, Cowork skill/plugin, Agent Builder agent, packaged DA, area DA + connector) · Spaarke runtime (T2/T3 only: connector tools, BFF engines, profile compiler + ratchet, gates, ledger, tuning loop).
-- **Tiers:** T0/T1 = accelerator (all four package tiers, no connector) → T2 = connector enters → T3 = platform. Same content at every tier.
+## G8 result (recorded in phase0/g8/README.md, commit 9c557d7e95)
+- An Agent Builder agent cannot use the tenant federated connector (A1 ❌, A2 "No connectors available" ❌, skills inside the agent ❌). Plain Chat works (`spike_whoami` ✅).
+- App Insights shows only `tools/list` from Sydney, with no `tools/call`.
+- Agents reach MCP only through their **own** tool. The owner's Copilot synopsis agrees: one MCP server, tenant connector = the horizontal path, agents = direct MCP clients.
 
 ## Open owner decisions
-- D-A11: NDA ownership. accelerator-r1 proposed a split by tier (it owns the T0/T1 NDA agent content; this program owns the area agent). Claude proposed a **split by layer**: the NDA function content has one owner (the accelerator until its R1 closes, then this program), each project owns its own surface wrappers, and one Spaarke NDA agent per tenant. **The owner chose "Discuss first"; not decided.**
-- D-A12 framing (function vs persona; one agent per practice area); D-A13 Microsoft-first; D-A16 one roadmap; Q7 owner of the Microsoft catalogue snapshot; D-A7 server-side profile and gates (decided at G1). (Resolved 2026-11-23: "Spaarke Legal Review" is the accelerator's owner-built two-function agent from the DA spike, NDA plus legal hold, and the G5 baseline. Design §3.9 and §8.)
-- Ontology-r1 must confirm the "Policy versions" term (Q2).
-
-## Next action
-When the researcher returns: read its note → write design.md §0 "The model in one page" (component table + layer diagram + tier table + "what we reuse from the accelerator as the pattern") and §3.11 "Surfaces: Word vs Chat vs Cowork vs Home" (matrix + convergence verdict + design consequences) → bump to v0.5 → commit and push → explain to the owner with a visual.
+- **D-A11:** NDA ownership. Claude proposed a split by layer. The owner chose "Discuss first"; not decided.
+- **The rest:**
+  - D-A12 framing; D-A13 Microsoft-first; D-A16 one roadmap; Q7 catalogue owner; D-A7 (decided at G1).
+  - D-A1 revision (v0.6); the P2 go; the R1 change (with coordination).
+  - Ontology-r1 must confirm "Policy versions".
 
 ## Standing directives
 - Never `git stash`; never `python3` in Bash; every Agent launch names a model; sub-agents can't write `.claude/`.
-- Don't edit the accelerator or mcp-r1 worktrees; coordinate by message (acclerator-r1 session) only.
-- Copilot tenant artifacts: before uploading ANY agent, plugin, package or connector (Phase 0 tests included), send its inventory row (owner project, removal plan, removal date if throwaway) to the copilot-platform-coordination session (Issue #3006) first. No second connector in our packages (R1). Design §10.
+- Don't edit the accelerator or mcp-r1 worktrees; coordinate by message only.
+- Copilot tenant artifacts: before uploading ANY agent, plugin, package or connector, send its R4 inventory row to COPILOT-PLATFORM-COORDINATION (Issue #3006). Install for the owner and test user only (R7). Tenant clicks are the owner's.
+- App Insights query: use the PowerShell form in `phase0/g8/README.md`. `az` rejects KQL with `name=` aliases.
 - Accelerator constraints: never put `answer-key/` or the real NDAs (Corteva, RPX/Helios) anywhere an agent can read; reuse `FORBIDDEN_IN_PACKAGE`.

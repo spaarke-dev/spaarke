@@ -67,6 +67,47 @@ A new persona (patents, trademarks, employment, …) is built the way the accele
 
 **NDA is the reference implementation** (accelerator `practices/nda/`). Every later persona copies its shape.
 
+### 0.5 User model: Ask, Do, Practice (v0.6, 2026-11-23)
+
+**Source:** adopted, with corrections, from Copilot's architecture synopsis of 2026-11-23 ([notes/source/copilot-synopsis-ask-do-practice-2026-11-23.md](notes/source/copilot-synopsis-ask-do-practice-2026-11-23.md)). The synopsis was written after the G8 Agent Builder test.
+
+| Intent | The attorney's words | Surface | What Spaarke supplies | Build artifact | Who orchestrates |
+|---|---|---|---|---|---|
+| **Ask** | "Help me understand" | Copilot **Chat** | Spaarke tools are **ambient** through the tenant connector. Spaarke skills and Microsoft's legal skills are shared with Cowork | The tenant connector "Spaarke MCP" + a **plugin package of skills** (mcp-r1 task 040). **No agent** | Microsoft (licence) |
+| **Do** | "Carry this out for me" | **Cowork** | The same, plus the Python engines in Cowork's sandbox | The same package | Microsoft (credits per step) |
+| **Practice** | "Do this the firm's way, correctly" | A **named Spaarke agent** (Chat, Word, Teams). In Cowork, where agents can't run, it is the persona's **skills + attorney profile** | The persona: governed method, playbook, attorney profile, gates, structured output, run record | A **coded declarative agent** with its own MCP action (default), or a **Spaarke runtime agent** (T3; G9, G10). See §3.12 | Microsoft's orchestrator under our instructions, or Spaarke's runtime |
+
+Word sits beside these. There, Spaarke supplies the attorney's positions as the playbook for Microsoft's legal plugin (§3.11).
+
+**Agent-creation rule (adopted).** Never create a Spaarke agent just to expose Spaarke data, search or CRUD; those are tools on the connector. An agent exists only where Spaarke adds a **governed professional method**: playbook, process state, verification, controls. In this program that means **one agent per practice-area persona** (D-A12). There are no Matter Search, Document Search or Patent Search agents.
+
+**One MCP server, two ways in** (confirmed by G8):
+
+```
+                         Spaarke MCP server (/mcp/{area}, mcp-r1)  ← the one capability layer
+                          │                                     │
+        tenant connector "Spaarke MCP" (one per tenant)    direct MCP client
+                          │                                     │
+        Chat · Cowork · Word (Ask, Do)                     Spaarke Practice agents
+        "horizontal Microsoft integration"                 (own MCP action, or the Spaarke runtime)
+```
+
+**Corrections to the synopsis** (why this section is not a straight copy):
+1. **It skipped the cheapest direct-MCP agent:** a coded declarative agent with its own MCP action, orchestrated by Copilot within the licence and generated from the persona definition. That is the default Practice vehicle here (G8-P2).
+2. **Practice is not only agents.** The accelerator's NDA review is Practice today: a Cowork skill + tested engine + profile, with no agent. Cowork cannot run declarative agents, so in Cowork a persona *is* its skills and profile.
+3. **Microsoft first comes before "build a Practice agent".** "Review this NDA against our playbook" is Microsoft's Word legal plugin's *Review contract*. Where Microsoft owns the function, Spaarke supplies the positions, data and governance, not a competing agent (§3.10).
+4. **The tiers apply.** T0/T1 (the accelerator) Practice runs with no connector and no runtime (§0.3).
+5. **The "pro-code runtime" largely exists.** The BFF already orchestrates playbooks and actions with a confirmation gate and a Decision Record. The new work is **hosting and surfacing** it as an agent (§3.12).
+6. **The attorney-owned profile** (layers, ratchet, golden-set tuning) is what this program adds over a firm-level agent. The synopsis stops at "organization-specific controls".
+
+**The decision order for any new capability:**
+1. Does Microsoft own it? If so, feed it our content (§3.10).
+2. Is the outcome an answer? Make it a tool or skill on the connector (Ask).
+3. Is it delegated multistep work? Make it skills + tools (Do).
+4. Must it follow a prescribed method? Make it part of a practice-area persona (Practice).
+5. Does it need control that Copilot's orchestrator can't give (profile enforced in code, state, gates)? Make it a Spaarke runtime agent (D-A1).
+6. Is it only search or CRUD? Then it is **not an agent**.
+
 ## 1. Owner decisions (2026-11-23)
 
 | # | Decision | Choice |
