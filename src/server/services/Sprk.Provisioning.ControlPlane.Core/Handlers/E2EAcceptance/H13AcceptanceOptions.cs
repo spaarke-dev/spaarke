@@ -50,6 +50,23 @@ public sealed class H13AcceptanceOptions
     public TimeSpan KeylessProofTimeout { get; set; } = TimeSpan.FromSeconds(90);
 
     /// <summary>
+    /// How long H13 keeps repeating the keyless proof while it reaches no verdict — the call timed out, a gateway or
+    /// throttling status, a transport fault, or a service the BFF could not reach. A refusal or any other failure stops
+    /// at once (fail-closed). ISS-034: a slot swap restarts the BFF on the stamp's single S1 worker, which also runs
+    /// the staging slot; on ACME (2026-11-22) the plan's CPU stayed at 85–97 % for about 45 minutes after each deploy,
+    /// and every proof in that time timed out although the build was healthy. 40 minutes, with the call timeout, keeps
+    /// H13 inside half of the dispatcher's <c>MaxHandlerDuration</c> (DispatcherOptionsBudgetTests). Zero disables the
+    /// retry.
+    /// </summary>
+    public TimeSpan KeylessProofRetryWindow { get; set; } = TimeSpan.FromMinutes(40);
+
+    /// <summary>The first wait between keyless-proof attempts; each later wait doubles, up to <see cref="KeylessProofRetryMaxDelay"/>.</summary>
+    public TimeSpan KeylessProofRetryInitialDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>The longest wait between keyless-proof attempts.</summary>
+    public TimeSpan KeylessProofRetryMaxDelay { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
     /// Expected monthly cost of an EMPTY dedicated customer stamp in whole USD — one envelope for both tenancy
     /// models (spec.md §15 #14; task 229). Model 1 and Model 2 deploy the same <c>customer.bicep</c> (D19), each into
     /// the customer's own subscription (T228), so the subscription-scope Cost Management query H13 runs measures
@@ -104,6 +121,18 @@ public sealed class H13AcceptanceOptions
             // Task 229: a non-positive envelope makes the drift fraction 0, so H13's cost check would always pass.
             throw new InvalidOperationException(
                 $"E2EAcceptance:DedicatedStampEnvelopeUsd must be a positive number of USD (got {DedicatedStampEnvelopeUsd}; default 400).");
+        }
+        if (KeylessProofRetryWindow < TimeSpan.Zero)
+        {
+            throw new InvalidOperationException(
+                $"E2EAcceptance:KeylessProofRetryWindow must not be negative (got {KeylessProofRetryWindow}; default 00:40:00; zero disables the retry).");
+        }
+        if (KeylessProofRetryInitialDelay <= TimeSpan.Zero || KeylessProofRetryMaxDelay < KeylessProofRetryInitialDelay)
+        {
+            // A zero delay would hammer a BFF that is already saturated; a maximum below the first delay is a typo.
+            throw new InvalidOperationException(
+                $"E2EAcceptance:KeylessProofRetryInitialDelay must be positive and KeylessProofRetryMaxDelay at least as long " +
+                $"(got {KeylessProofRetryInitialDelay} and {KeylessProofRetryMaxDelay}; defaults 00:00:30 and 00:05:00).");
         }
     }
 
