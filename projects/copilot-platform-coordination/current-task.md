@@ -28,7 +28,7 @@
 
 - mcp-r1: agreed R1 rationale; R8 already met by `spaarke_complete_decision`. S-1 approved by the owner (per mcp-r1, 2026-11-23): runs after 040, before C2 is deleted. Still waiting: 040 ship date, T10 + S-1 results (mcp-r1 sends both).
 - acclerator-r1: P1 Word probe upload/removal.
-- specialist-legal-agents-r1: S-3 = Phase 0 G8; owner approved running it early (per specialist, 2026-11-23); rows G8-a/G8-p recorded (removal latest 2026-11-30). Waiting: G8 result + removal confirmation; D-A11.
+- specialist-legal-agents-r1: G8 interim = Agent Builder agent cannot use C1 (2026-11-23). R1′ proposed (agent-private actions). Owner: G8-P2 waits until specialist finishes its current steps, then decide. Still to come: G8-p (P1) result, G8-a removal (latest 2026-11-30); D-A11.
 
 ## Standing directives
 
