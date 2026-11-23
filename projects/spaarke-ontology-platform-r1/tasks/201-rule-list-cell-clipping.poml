@@ -4,7 +4,7 @@
     <title>Ontology admin Rules list: the Rule cell clips the rule code and name (fixed 44 px row, too narrow a column)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library (Console ships it).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -47,4 +47,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master; PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-23: PR #2954 merged to master (e957868d38) after independent review (2 F1 fixed in dd525fef21) and re-check. Console auto-deployed to dev (deploy-spaarke-ai.yml on e957868d38). Main-session dev check 2026-11-23 at 1280x720 and 1440x900: Rules rows 57 px, Classification rows 44-139 px, no element clipped (scroll vs client size on every overflow-hidden node), no content past its row, no horizontal overflow; Guidance shows its preview over two lines. Note: "POL-COMMIT-BUDGET" in Read by wraps at its hyphens in the 72 px column (readable, not clipped). Notes: notes/task-201-notes.md on the task branch.</completion>
 </task>
