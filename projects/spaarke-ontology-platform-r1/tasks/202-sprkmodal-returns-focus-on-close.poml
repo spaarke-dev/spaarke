@@ -4,7 +4,7 @@
     <title>SprkModal returns keyboard focus to the element that opened it when it closes (wizards and nested confirms)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies SprkModal.tsx in the shared UI library: every modal in every host; PCF bumps where bundles change.</rigor-reason>
     <model-tier>sonnet</model-tier>
