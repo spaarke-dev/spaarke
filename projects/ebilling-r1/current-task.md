@@ -12,15 +12,15 @@
 
 - **Active task: 193** (FULL, sonnet @ high; owner go to build typed 2026-11-23, "Yes proceed with those items"). Branch `task/ebilling-193` from 7a6c530000.
   - Done so far: one Opus pass, fix round 1 (9e23998f31), a scoped re-check (one F2 plus K items).
-  - Now: fix round 2 is running.
+  - Fix round 2 done (46a89e55f8); sent to uac-r2 for review 2026-11-23.
   - Next: uac-r2 reviews the branch before merge.
   - The dev -Apply (live column delete) needs a SECOND owner go, plus uac-r2 notices before and after.
   - Other environments lose the columns only through a SpaarkeMaster upgrade import: tell provisioning-r1 at merge.
 - **Exact next actions (checkpoint 2026-11-23):**
-  2. Wait for the 193 fix round 2 agent (pushes to `task/ebilling-193`). Then send uac-r2 the branch and SHA for review.
+  2. Wait for uac-r2's review of 193 at 46a89e55f8.
   3. After uac-r2 approves, merge 193 into work and tell provisioning-r1 about the upgrade-import requirement.
   4. Ask the owner for the dev -Apply go.
-  5. Remove agent worktrees with Remove-WorktreeSafe.ps1 (run in pwsh 7, not powershell 5): agent-af889e85dece2f7ba, agent-a45e895bb7b41b6e7 (193), plus the 193 r2 agent's worktree when it is done.
+  5. Remove agent worktrees with Remove-WorktreeSafe.ps1 (run in pwsh 7, not powershell 5): the 193 r2 worktree agent-ae6adbfd41129c582 if its removal did not finish (the others are removed).
 - **117 ✅ just merged (f4a272136c).** Apply stays off until 079 (owner OK). 096 and 121 stay gated.
 - **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
 - `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
