@@ -426,7 +426,7 @@ Supersedes §11 (D-137) and §10's `sprk_ratecard` row (D-120). The owner re-ans
 | Case | Behaviour |
 |---|---|
 | R's own `sprk_ruleset` (its core lookup names R), cited or not | **Kept and unlinked** (the core lookup is cleared). Under S2 it then applies to nothing. Its `sprk_policy` and `sprk_policyversion` rows stay with it, untouched. |
-| R's own `sprk_ratecard` (scoped 1:1 to R) | **Kept and unlinked**. Its `sprk_ratecardrate` lines stay with it, untouched. |
+| R's own `sprk_ratecard` (scoped 1:1 to R) | **Kept and unlinked**. Its `sprk_ratecardrate` lines stay with it, untouched. *Amended by §16 (2026-11-23): the card's core lookups are retired, so on an environment without them the planner never reaches a card through R.* |
 | Firm-scoped or business-unit-scoped sets and cards | Untouched (as before). |
 
 - **No citation check is needed any more.** Nothing is deleted, so §11's "a failed citation read → 503" no longer applies to these tables. The citing-lookup handoff from ebilling 081 step 10 is not needed for delete.
@@ -503,3 +503,18 @@ Why this rule rather than a Stored File special case:
   - a document whose only referencers are in the plan is deleted;
   - a Stored File under an invoice on R still blocks the whole delete (§14).
 - **Pure test over the metadata reader:** every Restrict relationship onto a table with disposition Delete is handled by in-plan ordering or by Keep, so none can reach the executor as a surprise.
+
+---
+
+## 16. Amendment: rate cards carry no core lookup (ebilling 193; owner, 2026-11-23)
+
+The owner decided in uac-r2 on 2026-11-23 to drop the three core lookups on `sprk_ratecard`: "Remove those columns as a separate schema task". ebilling-r1 task 193 did it: uac-r2 reviewed it at `46a89e55f8`, and it was merged to ebilling's work branch as `c21bde55a2`.
+
+- **Source.** The columns `sprk_matter`, `sprk_project` and `sprk_workassignment` on `sprk_ratecard`, and their relationships (`sprk_matter_ratecard_matter`, `sprk_project_ratecard_project`, `sprk_workassignment_ratecard_workassignment`), are gone from SpaarkeMaster and from the ebilling schema scripts. `RateCardCoreLookupRetirementGuardTests` stops them coming back. Since ebilling 085, cards resolve through `sprk_procedureversion` only.
+- **Dev (spaarkedev1).** They were deleted on 2026-11-23 with the owner's go in ebilling's session: 0 rows held a value, `-Verify` PASSED, and uac-r2 independently confirmed that `sprk_ratecard.sprk_matter` no longer exists.
+- **Other environments** lose the columns only through a SpaarkeMaster managed upgrade import. Report mode runs against each target first.
+- **The planner.**
+  - Where the columns are gone, no core-record walk reaches a rate card, so §12's rate-card row and §10's card row have nothing to act on.
+  - Where they remain (until the upgrade), §12 still applies: the card is unlink-only and its rates are untouched.
+  - `sprk_ratecard` and `sprk_ratecardrate` stay in the never-Delete set in both cases: a guard costs nothing and covers an environment that has not been upgraded.
+- **Tests (task 1).** The must-not-fire case "no `Delete` for `sprk_ratecard` / `sprk_ratecardrate`" stays. The must-fire case "R's own card is unlinked" applies only to a fixture that still has the lookup.
