@@ -106,6 +106,18 @@ So the Information field SHOULD show "The client is reviewing this invoice." It 
 
 **Round 2** runs on BFF `a48398746d` (uac-r2 swap, owner-named SHA) after the SPA redeploy.
 
+### D. SPA redeploy (fix round)
+
+- **Owner go:** merge PR #3000 on 2026-11-23 ("Yes, merge"); it was squash-merged as `9d08576e63`. Then the redeploy ("Yes, deploy").
+- **Rollback, stated before the run:** redeploy `2dcbe35e34`.
+- **Before dispatch:** BFF `a48398746d` passed uac-r2's gate. uac-r2 confirmed the build works against it. Master HEAD was re-checked just before dispatch: still `9d08576e63`.
+- **What else the build carries** (told to the owner and uac-r2 beforehand):
+  - ebilling 134, the Outcome report;
+  - the ui-components focus-return fixes #2988, #2996 and #3004;
+  - the communication 055/056b client changes.
+- **The run:** **45260396182**, dispatched 20:32:19Z; succeeded, finishing 20:34:15Z.
+- **Served build check:** `/` answers 200. `/assets/app.js` is 1,607,408 bytes, and the first 16 hex characters of its SHA-256 are `23D3DE2C8F562CCB`. It contains the ebilling 134 strings, the Review detail line and the grid id `286be8b4-…`.
+
 Likely cause: the record and the Invoices-section rows come from the module fetch seam. `FetchService.ProjectEntity` passes SDK values through as objects, so `statuscode` arrives as the serialised `OptionSetValue`, about `{"value":1,...}`. The status label still shows because `formatDetailValue` uses `@formattedValues`. But `reviewDetail.ts` `wholeNumberOf` accepts only a number or a digit string, so the gate always answers blank. The task 020 tests used a bare `statuscode: 1`, so they never saw the live shape.
 
 The same gate feeds all four render points: the grid cell, the section line, the header line and Information. So a real review detail value would be hidden everywhere too. The BFF-side gate (`ExternalInvoiceReviewDetail.IsInReview`) does handle `OptionSetValue`, so the server is right; the SPA is not.
