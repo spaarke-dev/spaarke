@@ -628,6 +628,20 @@ public static partial class ProblemDetailsHelper
     }
 
     /// <summary>
+    /// OFFICE_023: an Office save or quick-create that names an invoice (ebilling-r1 task 096). Invoices are created and filed
+    /// onto only by Submit Invoice; the answer carries no entity data and no input echo.
+    /// </summary>
+    public static IResult OfficeInvoiceTargetRetired(string? correlationId = null)
+    {
+        return OfficeValidationError(
+            "OFFICE_023",
+            "Invoice Target Not Supported",
+            "A document or record cannot be saved or created onto an invoice from Office. Use Submit Invoice to submit an invoice, "
+            + "and save the email or document to its matter, project or work assignment.",
+            correlationId);
+    }
+
+    /// <summary>
     /// OFFICE_004: Attachment too large.
     /// </summary>
     public static IResult OfficeAttachmentTooLarge(long maxSizeBytes, string? correlationId = null)

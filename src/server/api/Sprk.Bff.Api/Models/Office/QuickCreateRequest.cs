@@ -10,8 +10,8 @@ namespace Sprk.Bff.Api.Models.Office;
 /// <remarks>
 /// <para>
 /// Quick Create allows users to create new association target entities
-/// (Matter, Project, Invoice, Account, Contact) inline from the Office add-in
-/// with minimal required fields.
+/// (Matter, Project, Account, Contact) inline from the Office add-in with minimal required fields. An Invoice is NOT created
+/// here: it is created only by submission (ebilling-r1 task 096), and the route answers 400 <c>OFFICE_023</c>.
 /// </para>
 /// <para>
 /// Field requirements vary by entity type - see <see cref="QuickCreateFieldRequirements"/>
@@ -38,7 +38,7 @@ public record QuickCreateRequest
     public string? Description { get; init; }
 
     /// <summary>
-    /// Client/Account ID for Matter, Project, or Invoice entities.
+    /// Client/Account ID for Matter or Project entities.
     /// This creates a relationship to an Account record.
     /// </summary>
     public Guid? ClientId { get; init; }
@@ -106,13 +106,12 @@ public record QuickCreateRequest
     public Guid? ProjectTypeId { get; init; }
 
     /// <summary>
-    /// The contact the new record is assigned to (task 100): <c>sprk_assignedtointernal</c> on a Matter or Project,
-    /// <c>sprk_assignedto1</c> ("Assigned To 1") on an Invoice. Optional (owner decision B). The caller must hold
+    /// The contact the new record is assigned to (task 100): <c>sprk_assignedtointernal</c> on a Matter or Project. Optional
+    /// (owner decision B). The caller must hold
     /// <b>Read</b> on the contact — <c>QuickCreateSourceAccessFilter</c> refuses it otherwise, with one constant
     /// 403 body whether the contact is unreadable or does not exist.
     /// <para>Absent or <see cref="Guid.Empty"/> = the server's default: a Matter or Project names its MAKER's linked
-    /// contact (unified-access-control-r2 task 152), unless a field-mapping rule wrote one; an Invoice has no default
-    /// and is left unassigned.</para>
+    /// contact (unified-access-control-r2 task 152), unless a field-mapping rule wrote one.</para>
     /// </summary>
     public Guid? AssignedToContactId { get; init; }
 
@@ -146,7 +145,8 @@ public enum QuickCreateEntityType
     Project,
 
     /// <summary>
-    /// Invoice entity (sprk_invoice).
+    /// Invoice entity (sprk_invoice). Kept ONLY so the route value still parses and is refused with 400 <c>OFFICE_023</c>
+    /// (ebilling-r1 task 096, owner L: an invoice is created only by submission). Nothing creates, names or validates one.
     /// </summary>
     Invoice,
 
@@ -177,7 +177,6 @@ public static class QuickCreateFieldRequirements
     {
         QuickCreateEntityType.Matter => "sprk_matter",
         QuickCreateEntityType.Project => "sprk_project",
-        QuickCreateEntityType.Invoice => "sprk_invoice",
         QuickCreateEntityType.Account => "account",
         QuickCreateEntityType.Contact => "contact",
         _ => throw new ArgumentOutOfRangeException(nameof(entityType))
@@ -190,7 +189,6 @@ public static class QuickCreateFieldRequirements
     {
         QuickCreateEntityType.Matter => "Matter",
         QuickCreateEntityType.Project => "Project",
-        QuickCreateEntityType.Invoice => "Invoice",
         QuickCreateEntityType.Account => "Account",
         QuickCreateEntityType.Contact => "Contact",
         _ => throw new ArgumentOutOfRangeException(nameof(entityType))
@@ -210,7 +208,6 @@ public static class QuickCreateFieldRequirements
         {
             case QuickCreateEntityType.Matter:
             case QuickCreateEntityType.Project:
-            case QuickCreateEntityType.Invoice:
             case QuickCreateEntityType.Account:
                 // Name is required for these entity types
                 if (string.IsNullOrWhiteSpace(request.Name))

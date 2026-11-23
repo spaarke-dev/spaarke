@@ -215,8 +215,8 @@ public class OfficeCallerDataverseDoubleTests
     [Fact]
     public async Task Overrides_WhoAmIFailureAndMe_AreHonoured()
     {
-        _world.Me = OfficeQuickCreateWorld.Issue1079Caller;
-        (await Body("WhoAmI()")).GetProperty("UserId").GetGuid().Should().Be(OfficeQuickCreateWorld.Issue1079Caller);
+        _world.Me = OfficeQuickCreateWorld.FieldSecurityCaller;
+        (await Body("WhoAmI()")).GetProperty("UserId").GetGuid().Should().Be(OfficeQuickCreateWorld.FieldSecurityCaller);
 
         _world.WhoAmIFailure = DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.UserContextRequired, "No token.");
         (await Get("WhoAmI()")).ErrorCode.Should().Be(DataverseUserClientErrorCodes.UserContextRequired);
@@ -359,7 +359,6 @@ public class OfficeCallerDataverseDoubleTests
         { typeof(OfficeQuickCreateSourceFieldSecurityTests), "MatterTypeId", OfficeQuickCreateWorld.FieldSecurityMatterType },
         { typeof(OfficeQuickCreateSourceFieldSecurityTests), "SourceProjectId", OfficeQuickCreateWorld.FieldSecuritySourceProject },
         { typeof(OfficeQuickCreateSourceFieldSecurityTests), "AccountId", OfficeQuickCreateWorld.FieldSecurityAccount },
-        { typeof(Issue1079_InvoiceQuickCreateNameTests), "CallerSystemUserId", OfficeQuickCreateWorld.Issue1079Caller },
     };
 
     [Theory]
