@@ -10,8 +10,18 @@
 
 ## Quick recovery
 
-- **Task 193 (parallel):** owner go to build typed 2026-11-23 ("Yes proceed with those items"); build agent on `task/ebilling-193` from 7a6c530000. The dev -Apply (live column delete) needs a SECOND owner go plus uac-r2 notices; uac-r2 reviews the PR first.
-- **Active task: 117** (FULL, opus @ high; started 2026-11-23). Build agent on `task/ebilling-117` from b8e6e686c0. uac-r2 CONFIRMED the five delete-list points and added: an age floor (modifiedon margin), the assignment-delete cascade direction check, the Restrict check (§15) and rate-card evidence (dev still has the three RemoveLink core lookups; 085 stopped reading them). Scope also deletes orphan assignment rows (uac-r2 design §14). Next: review (2 Opus passes, tenant isolation), then uac-r2 review of branch + SHA before merge. 096 and 121 stay gated.
+- **Active task: 193** (FULL, sonnet @ high; owner go to build typed 2026-11-23, "Yes proceed with those items"). Branch `task/ebilling-193` from 7a6c530000.
+  - Done so far: one Opus pass, fix round 1 (9e23998f31), a scoped re-check (one F2 plus K items).
+  - Now: fix round 2 is running.
+  - Next: uac-r2 reviews the branch before merge.
+  - The dev -Apply (live column delete) needs a SECOND owner go, plus uac-r2 notices before and after.
+  - Other environments lose the columns only through a SpaarkeMaster upgrade import: tell provisioning-r1 at merge.
+- **Exact next actions (checkpoint 2026-11-23):**
+  2. Wait for the 193 fix round 2 agent (pushes to `task/ebilling-193`). Then send uac-r2 the branch and SHA for review.
+  3. After uac-r2 approves, merge 193 into work and tell provisioning-r1 about the upgrade-import requirement.
+  4. Ask the owner for the dev -Apply go.
+  5. Remove agent worktrees with Remove-WorktreeSafe.ps1 (run in pwsh 7, not powershell 5): agent-a9e721fb44b73fed6, agent-a758614610f0da72e (117), agent-af889e85dece2f7ba, agent-a45e895bb7b41b6e7 (193), plus the 193 r2 agent's worktree when it is done.
+- **117 ✅ just merged (f4a272136c).** Apply stays off until 079 (owner OK). 096 and 121 stay gated.
 - **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
 - `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
 - **For the master PR:** list 134's K2 (Outcome gate is any-firm, not this invoice's firm; agreed with spa-r4) in the PR's known limits. spa-r4's 134 review is done (fix merged 7600c21f65).
@@ -21,6 +31,14 @@
 - **Uncommitted files:** none, after the 134 bookkeeping commit.
 
 ## Recently done (detail in the notes and git)
+
+- **117 ✅** merged into work f4a272136c (branch `task/ebilling-117`, tip becd5b983c). RecordRuleSetRetireJob (O-17 sweep):
+  - What it does: retires unlinked record-scoped Billing rule sets (policies switched Off first) and deletes orphan assignment rows.
+  - When it writes: only with Apply on; it skips while eBilling is off; age floor 15 min.
+  - Reviews: two Opus passes, fix round 1, scoped re-check K-only; uac-r2 APPROVED, including the delete-guard and census-waiver changes.
+  - Found in passing: ISS-044 #2982, handed to ontology-r1 (DI-162).
+  - Notes: `notes/117-core-record-delete-procedures.md`.
+- **#2981 ✅** flaky 084d-3 interleaving test made deterministic (668c0b92d4), closed.
 
 - **123 ✅** merged into work 72c416e948 (branch `task/ebilling-123`, tip 5bb6965b77). POST /api/finance/invoices/{invoiceId}/files (internal supporting-file upload) plus a SubmissionCommitGate change (Invoice PDF flipped last; early Passed once Servable). Two Opus passes, fix rounds 1-2, scoped re-check K-only; uac-r2 approved (condition 2 open at deploy); word-add-in-r1 agreed the contract. ISS-043 #2978 filed in passing. Notes: `notes/123-invoice-supporting-file-upload.md`.
 
@@ -35,7 +53,7 @@
 
 ## Open work
 
-- **Build:** 117, 096 (gated, see above), 121 (waits for uac-r2 191).
+- **Build:** 193 (in progress), 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
   - 164: the live `-Apply` needs the owner's go.
   - 089 and 050a: owner questions are in their notes.

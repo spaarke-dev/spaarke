@@ -203,3 +203,36 @@ Each fix-now item has a test that fails before the fix and passes after; the pro
 **Not re-measured.** Publish size and CVE (§3) were not re-measured in this round. The change adds no package and a few lines of BFF code.
 
 ## uac-r2 hand-off and review
+
+**Hand-off (sent 2026-11-23, before the build):** the five points of model 5.2:
+1. Hard-deny adds sprk_procedure, sprk_procedureversion, sprk_storedfile (the planner's never-Delete set).
+2. Delete sprk_procedureassignment with R through the planner.
+3. Record-scoped sprk_ruleset and its policies and policy versions are unlink-only, retired by this sweep.
+4. The rate-card row stands (§12: sprk_ratecard unlink-only, never Delete; sprk_ratecardrate untouched; both in the planner's never-Delete set). Since 085 the unlink has no rate effect.
+5. A core record with invoices still Blocks the delete.
+
+uac-r2 CONFIRMED all five against core-record-delete-design §12–§15. It added four points, all built in:
+- (a) the age floor;
+- (b) the cascade direction of an assignment delete;
+- (c) the Restrict check;
+- (4) evidence for the rate-card wording.
+
+The live metadata read of 2026-11-23 shows sprk_ratecard still has the three RemoveLink core lookups. The owner then decided to drop them as task 193.
+
+**Review (2026-11-23): uac-r2 APPROVED task/ebilling-117 at becd5b983c.**
+- uac-r2's own runs: build 0/0; unit tests 604/604; ArchTests WriterOnlyTablesDeleteGuard and RecordOwnerAssignmentCensus 73/73.
+- Both guard changes AGREED:
+  - (i) the WriterOnlyTablesDeleteGuardTests entry for DeleteOrphanAssignmentsAsync;
+  - (ii) the RuleSetServicePolicyWaiver 117 exception, plus RuleSetServiceRecordSetRetireWritesStatusOnly.
+- The helper-escape K limit on that guard is accepted.
+- Notes, no change asked:
+  - The platform's RemoveLink clear bumps modifiedon, so the floor delays a just-deleted record's set by 15 minutes (harmless).
+  - Report-only logs each would-be row at Information (fine at the 1,000-per-part cap).
+
+**Scoped re-check of fix round 1 (Sonnet):** no F-class findings. K limits:
+- The new guard reads only the retire method's text.
+- Name narrowing: a case or space variant of the name is skipped harmlessly.
+- The kill switch reads IOptions (a config change needs a restart, as in the sibling job).
+- The removed DI assertions are covered elsewhere.
+
+**Merged** into work/ebilling-r1 as f4a272136c. Post-merge: build 0 warnings 0 errors; unit filter (117, RuleSetService, ProcedureAssignment, upload, commit gate, StoredFile, FinanceModule, dry-run parity) 1071/0; ArchTests filter (WriterOnlyTablesDeleteGuard, RecordOwnerAssignmentCensus, WorkloadPlacement, RouteAuthorizationGuard, SecureChild, IOptionsDrift, FinanceStepZero) 324/0. Apply stays off until task 079 switches it on with the owner's OK.
