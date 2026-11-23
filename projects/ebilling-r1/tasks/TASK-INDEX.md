@@ -255,6 +255,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 190 | 🔲 [open] | Project wrap-up | FULL | sonnet / high | none | all |
 | 191 | ✅ [done; on work e657bfda4c] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |
 | 192 | ✅ [done; on work 25778a59b7] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
+| 193 | 🔲 [open; owner decision 2026-11-23 via uac-r2; build and dev -Apply each need the owner's go here] | Retire sprk_ratecard core-record lookups (matter, project, work assignment): solution source, schema script, docs, guarded dev delete | FULL | sonnet / high | none (p-safe false, SpaarkeMaster) | 085 |
 
 ## Parallel Execution Plan
 
