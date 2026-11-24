@@ -26,6 +26,13 @@ No new service, interface, endpoint, DI registration, package, column or metric.
 - `OntologyAdminAuthoringEndpointTests.Validate_EachPlanRefusal_GetsItsOwnPlainSentence_AndNoInternalCode_3034` (8 cases, validate and save agree, no reasonCode).
 - On origin/master source: 9 of those 13 cases fail (the 3 logging cases and 6 of the 8 sentence cases); the 4 that pass are the controls and the two lane cases, which must not change.
 
+## Verification
+
+- Filtered BFF tests (`OntologyAdmin|DecisionPlan|DecisionActionCatalog|SignalReevaluation`): 975 passed, 0 failed. Never the unfiltered suite.
+- Full `Spaarke.ArchTests`: 2783 passed, 0 failed.
+- BFF build: clean (Debug build inside the test run; Release publish below).
+- BFF hygiene (section 10, NFR-01): `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal`, PDBs included, each from a fresh short-path worktree. Fresh origin/master 43,568,461 bytes (41.55 MiB); this branch 43,568,418 bytes; delta -43 bytes. No package added or changed, so no new CVE surface (`dotnet list package --vulnerable` not re-run; the package set is identical to master).
+
 ## Known limits / observations
 
 - None filed here. Task 204's ordering note in #3034 item 3 is confirmed cosmetic: nothing depends on the order.
