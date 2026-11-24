@@ -78,6 +78,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub? _invoiceDecisionOverride;
     private HttpClient _client = null!;
 
+    /// <summary>ISS-043: replaces the request body and token before the route runs (<see cref="MalformedMultipartBodies.Apply"/>).</summary>
+    private Action<Microsoft.AspNetCore.Http.HttpContext>? _onRequest;
+
     public InvoiceSubmissionEndpointsContractTests()
     {
         // The submission service reads the firm links through the SAME double the filter and the picker use, so one set of links
@@ -150,6 +153,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
                 context.Request.Body = new ReadRecordingStream(context.Request.Body, () => Interlocked.Increment(ref _bodyReads));
             }
 
+            _onRequest?.Invoke(context);
             await next();
         });
         _app.UseRouting();
@@ -266,6 +270,97 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         allocation.FirmId.Should().Be(FirmId);
         ((OptionSetValue)allocation.Fields!["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Spa);
         _h.JobsSent.Should().ContainSingle().Which.JobType.Should().Be(InvoiceSubmissionService.JobType);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ISS-043 (#2978): a malformed multipart body is the route's 400 (not a 500); ISS-035 (#2889): a repeated field is a field error
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private Task<HttpResponseMessage> PostAsync(bool external, HttpContent content)
+    {
+        if (!external)
+        {
+            GrantInternalSubmit();
+        }
+
+        return external ? PostExternalAsync(content) : PostInternalAsync(content);
+    }
+
+    [Theory(DisplayName = "ISS-043 must-fire: a multipart body with no closing boundary is 400 file_required on both channels, not a 500; nothing written")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_body_with_no_closing_boundary_is_400_not_500(bool external)
+    {
+        var response = await PostAsync(external, MalformedMultipartBodies.NoClosingBoundary());
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FileRequired);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-043 must-fire: a body stream that fails with an IOException (token not cancelled) is 400 file_required on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_body_stream_that_fails_is_400(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.Apply(abandoned: false);
+
+        var response = await PostAsync(external, Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FileRequired);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-043 must-not-fire: a body that fails because the client abandoned the request (token cancelled) is not answered as a 400")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_abandoned_request_is_not_a_400(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.Apply(abandoned: true);
+
+        var act = async () => await PostAsync(external, Form());
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().Match(e => e is IOException || e is OperationCanceledException);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-035 must-fire: a firmInvoiceNumber or poNumber sent twice is a 400 field error naming the field, on both channels; nothing written")]
+    [InlineData(true, "firmInvoiceNumber")]
+    [InlineData(false, "firmInvoiceNumber")]
+    [InlineData(true, "poNumber")]
+    [InlineData(false, "poNumber")]
+    public async Task A_repeated_number_field_is_a_400_field_error(bool external, string field)
+    {
+        var form = Form();
+        form.Add(new StringContent(field == "poNumber" ? "PO-1" : "INV-2"), field);
+        if (field == "poNumber")
+        {
+            form.Add(new StringContent("PO-2"), field);
+        }
+
+        var response = await PostAsync(external, form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").GetProperty(field).EnumerateArray().Single().GetString().Should().Be($"{field} is sent at most once.");
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-035 must-not-fire: a firmInvoiceNumber and a poNumber sent once are used as sent (202), on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_single_number_and_po_are_unchanged(bool external)
+    {
+        var form = Form(number: "INV-5");
+        form.Add(new StringContent("PO-9"), "poNumber");
+
+        var response = await PostAsync(external, form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        var allocation = _h.Allocations.Should().ContainSingle().Subject;
+        allocation.Number.Should().Be("INV-5");
+        allocation.Fields!["sprk_ponumber"].Should().Be("PO-9");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

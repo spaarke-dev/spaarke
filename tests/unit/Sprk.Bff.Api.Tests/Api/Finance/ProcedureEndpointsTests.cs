@@ -191,6 +191,7 @@ public sealed class ProcedureEndpointsTests
                     context.Request.Body = new OverTheCapBody();
                 }
 
+                host.OnRequest?.Invoke(context);
                 await next(context);
             });
             host._app.MapProcedureEndpoints();
@@ -228,6 +229,9 @@ public sealed class ProcedureEndpointsTests
 
         /// <summary>Fix round 1 (F4): the request body throws the server's 413 when read, as Kestrel does past its body cap.</summary>
         public bool BodyOverTheServerCap { get; set; }
+
+        /// <summary>ISS-043: replaces the request body and token before the route runs (<see cref="MalformedMultipartBodies.Apply"/>).</summary>
+        public Action<Microsoft.AspNetCore.Http.HttpContext>? OnRequest { get; set; }
 
         private static Mock<RuleSetService> NewRuleSets()
         {
@@ -1176,6 +1180,46 @@ public sealed class ProcedureEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileTooLarge);
+        host.Files.Dataverse.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "ISS-043 must-fire: PUT /file whose multipart body has no closing boundary is 400 file_missing, not a 500")]
+    public async Task File_ABodyWithNoClosingBoundary_Is400_NotA500()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: MalformedMultipartBodies.NoClosingBoundary()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileMissing);
+        host.Files.Dataverse.Calls.Should().BeEmpty("nothing is stored");
+    }
+
+    [Fact(DisplayName = "ISS-043 must-fire: PUT /file whose body stream fails with an IOException (token not cancelled) is 400 file_missing")]
+    public async Task File_ABodyStreamThatFails_Is400()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.OnRequest = MalformedMultipartBodies.Apply(abandoned: false);
+
+        var response = await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeFileMissing);
+    }
+
+    [Fact(DisplayName = "ISS-043 must-not-fire: PUT /file whose body fails because the client abandoned the request (token cancelled) is not answered as a 400")]
+    public async Task File_AnAbandonedRequest_IsNotA400()
+    {
+        await using var host = await Host.StartAsync();
+        TheVersionIsADraft(host);
+        host.OnRequest = MalformedMultipartBodies.Apply(abandoned: true);
+
+        // No response is written for a request that was cancelled: the exception passes through the route (the test server rethrows it).
+        var act = async () => await host.Client.SendAsync(Req("PUT", FileUrl, content: FileBody(10)));
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().Match(e => e is IOException || e is OperationCanceledException);
         host.Files.Dataverse.Calls.Should().BeEmpty();
     }
 

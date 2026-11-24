@@ -386,6 +386,13 @@ public static class RateCardImportEndpoints
         {
             return InvalidProblem(new[] { new RateCardImportError(null, null, "file", "The request body is not valid multipart/form-data.") });
         }
+        catch (IOException) when (!ct.IsCancellationRequested)
+        {
+            // ISS-043: a truncated multipart body or part headers, or a body that is not multipart under a multipart content type, ends the
+            // parser's stream early with an IOException. It is a client error too (the 400 above), unless the client abandoned the request
+            // (its token is cancelled): that one passes through like the cancellation it is, never a 400 logged at Error.
+            return InvalidProblem(new[] { new RateCardImportError(null, null, "file", "The request body is not valid multipart/form-data.") });
+        }
 
         var file = form.Files.GetFile("file") ?? form.Files.FirstOrDefault();
         if (file is null || file.Length == 0)
