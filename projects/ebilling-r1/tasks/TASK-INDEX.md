@@ -64,7 +64,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 050b | ✅ [done] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
 | 051 | ✅ [done] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | ✅ [done; browser ui-tests deferred to 112, notes/052-createinvoicewizard-rewire.md] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
-| 053 | 🟡 [steps 2-5, 7 (unauthenticated), 9 done; BFF and SPA steps superseded by master deploys; closes on owner checklist Q] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
+| 053 | 🔄 [steps 2-5, 7 (unauthenticated), 9 done; BFF and SPA steps superseded by master deploys; closes on owner checklist Q] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
 | 054 | ✅ [done] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
 
 ### Phase 3 — Rules (WP3)
@@ -239,7 +239,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 160 | 🔲 [open] | End-to-end integration and Action seam tests | FULL | sonnet / high | P7-A | 079, 112, 136, 153 |
-| 161 | 🟡 [harness, offline baseline and report (notes/calibration-report.md) done 2026-11-03; DEF-051 filed; live runs S1/S2 pending owner OK] | Calibration report from corrections and the evaluation set | STANDARD | sonnet / high | P7-A | 002, 049, 101 |
+| 161 | 🔄 [harness, offline baseline and report (notes/calibration-report.md) done 2026-11-03; DEF-051 filed; live runs S1/S2 pending owner OK] | Calibration report from corrections and the evaluation set | STANDARD | sonnet / high | P7-A | 002, 049, 101 |
 | 162 | 🔲 [open] | Accuracy and performance evaluation; tuning | STANDARD | opus / high | none | 005, 160, 161 |
 | 163 | 🔲 [open] | UAT with the owner and dev rollout | STANDARD | sonnet / high | none | 162 |
 | 164 | ✅ [done 2026-11-23: 164a-c merged; dev ribbon already in the target state (dry run 0 changes), -Verify PASS, SecureChild -Verify PASS; uac-r2 acked] | Add line (reviewer-added invoice line, EB-D-192/198/199) | FULL | opus / high | none | 100, 103 |

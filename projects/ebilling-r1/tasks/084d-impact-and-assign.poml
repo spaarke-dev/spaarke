@@ -4,7 +4,7 @@
     <title>Procedures on the record (B4): the before/after Impact dry-run read for any proposed override, and the Assign Procedure wizard</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
     <gate>084 and 084b merged into work. ontology-r1 is told before the dry-run read is built (it reviews any change under Services/Signals/**).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF route over the evaluation resolver plus frontend code; FULL review.</rigor-reason>
     <model-tier>opus</model-tier>
