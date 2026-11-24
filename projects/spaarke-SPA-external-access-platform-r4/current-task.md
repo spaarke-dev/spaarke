@@ -14,15 +14,15 @@
 | **Next action** | Owner answers: (1) 033 grid-owner OK (in the PR as pending); (2) #3045 fix now or later. Then the merge go → close 033/035 (POML, TASK-INDEX, drift check, board +2, current-task). Then 038 stays gated on a dev BFF ≥ `bd40b57b03` (and ≥ the #3048 merge for threads). |
 | **Previously** | Wave 8 is closed. |
 | **Last merged** | PR #3033 at 03:17:25Z, merge `bd40b57b03`. It carries tasks 031 (Information fields + 12 ReadableColumns), 032 (grid settings per browser + "Clear all") and 034 (Messages refresh + new-message check). POMLs are completed, TASK-INDEX is ✅, the drift check is clean, and the board shows Tasks Completed = 28. #3010 is closed. |
-| **Next in phase 3** | Group D: **033** (DataGrid Money sort + formatted export, FR-20; 032 ✅) and **035** (message threads, FR-22; 034 ✅). Both are parallel-safe, and neither has started. After them: **038** (P3 dev deploy + E2E), which is gated (see below). 036 is cancelled. |
-| **Waiting on uac-r2** | A dev BFF at `bd40b57b03` or later, prepared by uac-r2, with the owner's go per exact SHA. uac-r2 has the SHA (sent ~03:20Z). |
+| **Next in phase 3** | 033 + 035 are in PR #3048 (owner approved 033's grid change 2026-11-24). Then **038** (P3 dev deploy + E2E), on the owner's per-SHA go. 036 is cancelled. |
+| **uac-r2** | Dev BFF `0362599b94` (contains `bd40b57b03`) LIVE since ~05:21:45Z 2026-11-24 on the owner's go; uac-r2's live notice lifted the SPA hold. It does NOT carry 035 (`threadId`): threads need a later BFF candidate after #3048 merges (the SPA degrades to an ungrouped list without it). uac-r2 did not test external routes with a CIAM token; 038's E2E checks the Information columns. |
 
-## 🔒 HARD DEPLOY ORDER (still in force)
-031 is on master, so **no dev SPA deploy may run until a dev BFF carrying 031's ReadableColumns (`bd40b57b03` or later) is live.** Every SPA deploy builds master HEAD. Without that BFF, every matter, project and work-assignment record read answers 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED`. The current dev BFF `996928732e` (live since ~03:01Z) does NOT carry 031. The same rule is in task 038's `<gate>`.
+## Deploy order (031 condition MET 2026-11-24)
+The hold is lifted: dev BFF `0362599b94` carries 031's ReadableColumns. Every SPA deploy still builds master HEAD and needs the owner's go for the exact SHA, with rollback `9d08576e63`. For 035's threads to show, the BFF must also carry the #3048 merge.
 
 ## Live on dev
 - SPA: master `9d08576e63` (rollback `2dcbe35e34`). It works with today's BFF.
-- BFF: `996928732e`, deployed by uac-r2 (the previous one was `22c42efad6`).
+- BFF: `0362599b94`, live ~05:21:45Z 2026-11-24 (uac-r2; previous `996928732e`).
 
 ## Wave 8 outcome (for 038's E2E)
 - Information shows the new columns:
