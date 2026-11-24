@@ -4,7 +4,7 @@
     <title>ISS-049 (#3057): the chat document, visualization and SPE admin upload routes answer a broken multipart body with 400, and an abandoned upload is not logged as a fault</title>
     <phase>Issue fix; filed 2026-11-24 from the iss043 Opus review</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF endpoint .cs files.</rigor-reason>
     <model-tier>sonnet</model-tier>

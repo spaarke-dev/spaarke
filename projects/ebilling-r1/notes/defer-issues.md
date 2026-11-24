@@ -2583,7 +2583,7 @@ The status-first row pattern lets `[^\s|]+` take the letters of `iss028` as a ma
 
 | Field | Value |
 |---|---|
-| **Status** | Open (AI and SPE admin routes; filed by ebilling-r1, which found it) |
+| **Status** | Done on work/ebilling-r1 at 7affeb4768 (task iss049: 400 for a broken body, 499 for an abandoned or reset upload, on all three routes); closes with the master PR |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | Task iss043 Opus adversarial review (found in passing, outside Finance) |
