@@ -10,6 +10,7 @@
 
 ## Quick recovery
 
+- **In flight (2026-11-24, owner: "proceed with other open tasks in parallel" while testing Q):** four implementer agents in isolated worktrees from base f5ec8b6a20, each on `task/ebilling-<id>`: iss043 (+ISS-035; Sonnet), iss029 (Opus), iss042 (Sonnet), iss027 (Sonnet). Next for each: adversarial review (Opus for the three BFF tasks, Sonnet for iss027), fix round, `--no-ff` merge into work, then one publish-size measurement for the BFF batch. **Do not push those merges to work/ebilling-r1 while #3051 is open** (they would join that PR); push after it merges, then a new master PR. iss042 and iss043's ISS-035 part touch firm-visible output / the external route: copy spa-r4 at the PR.
 - **Master PR #3051 OPEN** (owner said "Yes open pr", 2026-11-24): iss048, iss046 (Closes #3001), the rule-type options script fix and notes. No conflicts with master at open. Not bound, no auto-merge. Merge as a merge commit once CI and the owner agree. After it merges: iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
 - **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
 - **Dev BFF 0362599b94** live since 2026-11-24 (uac-r2's deploy; carries 050c). healthz 200; confirm and reject return 401 unauthenticated. Evidence: `notes/050c-confirm-followups.md`. Owner checklist **R** (Office add-in) is ready to test.
