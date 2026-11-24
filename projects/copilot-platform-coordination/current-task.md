@@ -20,7 +20,7 @@
 
 ## Open owner items
 
-1. End-of-testing removal list written (runbook groups A–F, 2026-11-24). Owner to say yes to group E (D1 "Spaarke AI" + A3 bot), relayed as conditional by the specialist. Name an owner for D5.
+1. End-of-testing removal list written (runbook groups A–F, 2026-11-24). Group E (D1 "Spaarke AI" + A3 bot) approved by the owner 2026-11-24; owner to run it. Name an owner for D5.
 2. Rules: owner decides all rules together after G8-P2 (2026-11-24). Also Q2 (R7), Q3 (customer tenants). The owner rejected "platform limit" for the G8-P2 failure, and they were right. A fresh-id Learn control worked through the org catalog (2026-11-24). The 802fd9cc failures were probably updates tested too soon after upload (V1). G8-P2 PASSED in Chat (G8-p2-sl, one call per turn, App Insights), so all the rules are now with the owner for one decision. Word, the leak check and Teams (by identity) have since passed. V1: catalog updates work after a ~40 min delay. V2 passed: dynamic discovery with OAuth works (G8-p2-dd). The phase-0 agent tests are complete.
 3. The seven inventory screenshots (end of `notes/tenant-inventory.md`).
 

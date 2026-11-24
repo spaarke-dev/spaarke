@@ -14,7 +14,7 @@ Received: Registry "spaarke" (9 rows), Copilot Studio agents, Plugins page, sour
 ## End-of-testing removal list (written 2026-11-24)
 
 > **Owner direction 2026-11-24** (relayed by specialist-legal-agents-r1): "once we get the testing done we need to remove all plugins/agents/skills etc. that will not be part of our production package".
-> Groups A, B and F follow the removal list you approved on 2026-11-23. Group E (Spaarke AI and its bot) waits for your yes.
+> Groups A, B and F follow the removal list you approved on 2026-11-23. Group E (Spaarke AI and its bot) **approved by the owner 2026-11-24** ("Yes, remove both").
 
 **What stays (the production set):**
 - **C1 "Spaarke MCP"**: the federated connector.
@@ -59,7 +59,7 @@ Before you start, ask the specialist session whether any test still needs one of
 |---|---|---|
 | D1 | **D6/D7** "Copilot in Power Apps" drafts | Delete or keep (step 7 below). They aren't production, so under your direction they go unless someone uses them |
 
-### E. Needs your yes: "Spaarke AI" and its bot
+### E. "Spaarke AI" and its bot (approved 2026-11-24)
 
 | # | What | Where / how |
 |---|---|---|
@@ -84,7 +84,7 @@ What E removes, and what it doesn't:
 |---|---|---|---|
 | 1 | **S5 `spaarke-visual-probe`** skill (confirmed present 2026-11-23) | OneDrive › `Documents/Cowork/Skills/spaarke-visual-probe` › delete the folder. Then check it is gone from the skills list (if it is still there: **…** › **Remove**) | Per-user skill folder; only your account sees it. Active Cowork conversations keep it until they end |
 | 2 | ~~D5 duplicate "Spaarke Dataverse MCP"~~ | **Cancelled 2026-11-23**: only one copy exists (Copilot Studio, Registry). Nothing to delete | Still open: which project owns it |
-| 3 | **D1 stale "Spaarke AI" registration**. *Superseded by E1 if you say yes: both rows go* | After the details-pane screenshot, I'll name the row. Then admin center › **Agents › All agents › Registry** › select it › **Uninstall** (if installed) and then **Delete** | Master's manifest is still `1.1.0`. Likely keep the installed v1.1.0 and delete the uploaded-but-not-installed v1.5.0. provisioning-r1 confirmed neither row is theirs (2026-11-23). **Whether "Spaarke AI" stays at all is still your decision** |
+| 3 | **D1 stale "Spaarke AI" registration**. *Superseded by E1 (approved 2026-11-24): both rows go* | After the details-pane screenshot, I'll name the row. Then admin center › **Agents › All agents › Registry** › select it › **Uninstall** (if installed) and then **Delete** | Master's manifest is still `1.1.0`. Likely keep the installed v1.1.0 and delete the uploaded-but-not-installed v1.5.0. provisioning-r1 confirmed neither row is theirs (2026-11-23). **Whether "Spaarke AI" stays at all is still your decision** |
 
 ## On a trigger
 
