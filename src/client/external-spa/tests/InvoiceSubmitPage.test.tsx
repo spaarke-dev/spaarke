@@ -42,6 +42,14 @@ vi.mock('../src/widgets/GridWidgetBody', () => ({
       ),
 }));
 
+// iss052: the shell's record opener, observed. The page is rendered without the shell, so the real one would be a no-op; the
+// stand-in records every target the result screen's links ask for. Everything else in the module is the real one.
+const opener = vi.hoisted(() => ({ openRecord: vi.fn() }));
+vi.mock('../src/components/detail/RecordOpener', async importOriginal => ({
+  ...(await importOriginal<typeof import('../src/components/detail/RecordOpener')>()),
+  useOpenRecord: () => opener.openRecord,
+}));
+
 const SLOW = { timeout: 60000 };
 const MATTER_ID = '3f2c9a10-5b6d-4e7f-8a9b-0c1d2e3f4a5b';
 const PROJECT_ID = '4a2c9a10-5b6d-4e7f-8a9b-0c1d2e3f4a5c';
@@ -141,6 +149,7 @@ const ACCEPTED_202 = () =>
   });
 
 beforeEach(() => {
+  opener.openRecord.mockReset();
   calls = [];
   script = {
     probe: () => json(200, []),
@@ -1011,6 +1020,102 @@ describe('InvoiceSubmitPage — resume (FR-18)', () => {
       renderPage(InvoiceSubmitPage, '/invoices/submit?submissionId=not-a-guid');
       expect(await screen.findByText(/submission id in the link is not valid/i, {}, SLOW)).toBeTruthy();
       expect(calls.some(c => c.url.includes('/invoice-submissions/'))).toBe(false);
+    },
+    SLOW
+  );
+});
+
+describe('InvoiceSubmitPage — iss052 links to the invoice and its record', () => {
+  const INVOICE_ID = '6c2c9a10-5b6d-4e7f-8a9b-0c1d2e3f4a5e';
+  const acceptedWithLinks = (over: Record<string, unknown> = {}) =>
+    statusView({
+      status: 'Accepted',
+      invoiceId: INVOICE_ID.toUpperCase(),
+      coreRecord: { kind: 0, recordId: MATTER_ID },
+      ...over,
+    });
+
+  it(
+    'the wizard result: "Open invoice" opens the invoice and "Open matter" the matter, through the shell record opener',
+    async () => {
+      script.status = [() => json(200, acceptedWithLinks())];
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+      fireEvent.change(await toDetails(), { target: { value: 'INV-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Open invoice' }, SLOW));
+      expect(opener.openRecord).toHaveBeenLastCalledWith(
+        { entityName: 'sprk_invoice', recordId: INVOICE_ID },
+        expect.anything()
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Open matter' }));
+      expect(opener.openRecord).toHaveBeenLastCalledWith(
+        { entityName: 'sprk_matter', recordId: MATTER_ID },
+        expect.anything()
+      );
+      expect(opener.openRecord).toHaveBeenCalledTimes(2);
+      // The page stays (the record view opens over it); no id is shown as text.
+      expect(screen.queryByText('left the page')).toBeNull();
+      expect(screen.queryByText(new RegExp(INVOICE_ID, 'i'))).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'the resume view: the same links for a stored Accepted submission on a project',
+    async () => {
+      script.status = [() => json(200, acceptedWithLinks({ coreRecord: { kind: 1, recordId: PROJECT_ID } }))];
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, `/invoices/submit?submissionId=${SUBMISSION_ID}`);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Open project' }, SLOW));
+      expect(opener.openRecord).toHaveBeenLastCalledWith(
+        { entityName: 'sprk_project', recordId: PROJECT_ID },
+        expect.anything()
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Open invoice' }));
+      expect(opener.openRecord).toHaveBeenLastCalledWith(
+        { entityName: 'sprk_invoice', recordId: INVOICE_ID },
+        expect.anything()
+      );
+    },
+    SLOW
+  );
+
+  it(
+    'a Rejected submission: no "Open invoice" (even if an id came with it), "Open work assignment" still offered',
+    async () => {
+      script.status = [
+        () =>
+          json(
+            200,
+            acceptedWithLinks({
+              status: 'Rejected',
+              outcomeReasonCode: 'po_mismatch',
+              coreRecord: { kind: 2, recordId: MATTER_ID },
+            })
+          ),
+      ];
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, `/invoices/submit?submissionId=${SUBMISSION_ID}`);
+
+      expect(await screen.findByRole('button', { name: 'Open work assignment' }, SLOW)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Open invoice' })).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'an Accepted submission with no invoice id (the server withheld it) and no record: no links at all',
+    async () => {
+      script.status = [() => json(200, statusView({ status: 'Accepted' }))];
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, `/invoices/submit?submissionId=${SUBMISSION_ID}`);
+
+      expect(await screen.findByText(/The invoice was accepted/i, {}, SLOW)).toBeTruthy();
+      expect(screen.queryByTestId('invoice-submission-links')).toBeNull();
+      expect(opener.openRecord).not.toHaveBeenCalled();
     },
     SLOW
   );

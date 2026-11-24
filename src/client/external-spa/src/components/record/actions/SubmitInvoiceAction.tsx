@@ -42,6 +42,15 @@
  * REFRESH. Once the server has accepted the submission (`onSubmitted`), ANY close (Done, Cancel, ×) re-reads the record's
  * Invoices section, so the new invoice shows as soon as it exists. A submission that is accepted after the dialog was
  * closed mid-flight refreshes at once.
+ *
+ * LINKS (ebilling-r1 iss052). The result screen offers "Open invoice" (an Accepted invoice the server named) and "Open {record}".
+ *   - "Open {record}" for the record this modal already shows CLOSES this dialog back to it: the record is the one behind the
+ *     dialog, so nothing is stacked (a second copy of the same record over itself would be confusing). Another record (not
+ *     reachable with the record locked) opens as a child record over this one.
+ *   - "Open invoice" closes this dialog and opens the invoice the way a row of the Invoices section does: a child record over this
+ *     record (`useChildRecordOpener`), which re-reads the Invoices section on close and puts focus on the invoice's row. Not the
+ *     shell's `useOpenRecord`, which would replace the record shown (or stack a second top-level dialog over a grid's modal).
+ *     Inside a child record there is no child opener, and then no "Open invoice" is offered.
  */
 import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
@@ -51,6 +60,7 @@ import type {
   InvoiceCoreRecordList,
   InvoiceCoreRecordOption,
   InvoiceRecordQuery,
+  InvoiceSubmissionRecordRef,
 } from '@spaarke/ui-components/components/InvoiceSubmission';
 import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import {
@@ -62,7 +72,9 @@ import {
 } from '../../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../../auth/bff-client';
 import { renderSubmissionReport } from '../../ebilling/InvoiceOutcomeReport';
+import { coreRecordTarget, INVOICE_ENTITY } from '../../ebilling/submissionLinks';
 import { useChildDialog } from '../../createAction';
+import { useChildRecordOpener } from '../childRecord';
 import { callerFirmIdsOf, invoiceKindOfEntity, submitInvoiceRightOf, type FirmRecordsRead } from '../recordAccess';
 import { recordText } from '../recordTemplates';
 import type { RecordActionHostContext } from '../recordTemplate.types';
@@ -212,6 +224,34 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
     }
   }, [refreshSection]);
 
+  // iss052: the result screen's links (see LINKS above). Each first closes this dialog (a close after a submission re-reads the
+  // Invoices section), and only when no request is in flight.
+  const openChild = useChildRecordOpener();
+  const handleOpenRecord = React.useCallback(
+    (target: InvoiceSubmissionRecordRef): void => {
+      if (inFlight.current) return;
+      const isShown = target.kind === kind && target.recordId.toLowerCase() === recordId.toLowerCase();
+      handleClose();
+      // The record this modal already shows: closing the dialog IS opening it (no second copy is stacked over it).
+      if (isShown || !openChild) return;
+      const child = coreRecordTarget(target);
+      openChild(child.entityName, child.recordId, null);
+    },
+    [kind, recordId, handleClose, openChild]
+  );
+  const handleOpenInvoice = React.useMemo(
+    () =>
+      openChild
+        ? (invoiceId: string): void => {
+            if (inFlight.current) return;
+            handleClose();
+            // As a row of the Invoices section opens one: a child record over this record, re-reading the section on close.
+            openChild(INVOICE_ENTITY, invoiceId.toLowerCase(), null, 'invoices');
+          }
+        : undefined,
+    [handleClose, openChild]
+  );
+
   // The click reads `show` through a ref, so the offered action stays stable across renders.
   const latest = React.useRef({ show: dialog.show });
   latest.current = { show: dialog.show };
@@ -243,6 +283,8 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
           renderReport={renderSubmissionReport}
           onSubmitted={handleSubmitted}
           onClose={handleClose}
+          onOpenInvoice={handleOpenInvoice}
+          onOpenRecord={handleOpenRecord}
         />
       </div>
     </SprkModal>

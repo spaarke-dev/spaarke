@@ -705,6 +705,94 @@ describe('Submit invoice: the click opens a modal over the record', () => {
   );
 });
 
+describe('Submit invoice: the result screen links (ebilling-r1 iss052)', () => {
+  const INVOICE_ID = guid(901);
+
+  /** An Accepted result on this matter, naming its invoice (the server sends the id only for an invoice the caller may see). */
+  function acceptedWithLinks(over: Record<string, unknown> = {}): void {
+    installWizard();
+    h.getInvoiceSubmission.mockResolvedValue({
+      submissionId: SUBMISSION_ID,
+      status: 'Accepted',
+      trackingNumber: 'TRK-1',
+      invoiceId: INVOICE_ID.toUpperCase(),
+      coreRecord: { kind: 0, recordId: MATTER.id },
+      ...over,
+    });
+  }
+
+  /** The record reads of `entity` the network seam answered, by the id each asked for. */
+  const recordReadsOf = (entity: string): string[] =>
+    h.bffApiCall.mock.calls
+      .filter(call => String(call[0]).endsWith('/api/v1/external/api/dataverse/fetch'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string; fetchXml: string })
+      .filter(body => body.entityName === entity)
+      .map(body => /operator="eq" value="([^"]+)"/.exec(body.fetchXml)?.[1] ?? '');
+
+  it(
+    '"Open matter" for the record the modal shows closes the dialog back to it: no second copy, the record stays open',
+    async () => {
+      acceptedWithLinks();
+      const { dialog, child, onClose } = await openWizard();
+      const before = signalOf(dialog);
+      const matterReads = recordReadsOf('sprk_matter').length;
+      await submitThroughWizard(child);
+
+      fireEvent.click(await within(child).findByRole('button', { name: 'Open matter' }, WAIT));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);
+      await waitFor(() => expect(signalOf(dialog)).toBe(before + 1), SLOW);
+      await settle();
+      expect(screen.getAllByRole('dialog')).toHaveLength(1);
+      expect(recordReadsOf('sprk_matter')).toHaveLength(matterReads);
+      expect(onClose).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it(
+    '"Open invoice" closes the dialog and opens that invoice as a child record over the matter, as an Invoices row does',
+    async () => {
+      acceptedWithLinks();
+      const { dialog, child, onClose } = await openWizard();
+      const before = signalOf(dialog);
+      await submitThroughWizard(child);
+
+      fireEvent.click(await within(child).findByRole('button', { name: 'Open invoice' }, WAIT));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);
+      await waitFor(() => expect(recordReadsOf('sprk_invoice')).toEqual([INVOICE_ID]), SLOW);
+      await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(2), SLOW);
+      await waitFor(() => expect(signalOf(dialog)).toBe(before + 1), SLOW);
+      expect(onClose).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it(
+    'a Rejected result offers no "Open invoice"; "Open matter" is still offered',
+    async () => {
+      acceptedWithLinks({ status: 'Rejected', outcomeReasonCode: 'duplicate_invoice' });
+      const { child } = await openWizard();
+      const base = h.bffApiCall.getMockImplementation()!;
+      h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) =>
+        /\/ebilling\/submissions\/[^/]+\/outcome$/.test(path) ? REJECTED_OUTCOME : base(path, options)
+      );
+      await waitFor(() => expect(fileInputOf(child)).not.toBeNull(), SLOW);
+      fireEvent.change(fileInputOf(child)!, { target: { files: [pdf()] } });
+      const next = await within(child).findByRole('button', { name: /^next$/i });
+      await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false), SLOW);
+      fireEvent.click(next);
+      fireEvent.change(await within(child).findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+      fireEvent.click(within(child).getByRole('button', { name: /^submit invoice$/i }));
+
+      expect(await within(child).findByRole('button', { name: 'Open matter' }, { timeout: 20000 })).toBeTruthy();
+      expect(within(child).queryByRole('button', { name: 'Open invoice' })).toBeNull();
+    },
+    SLOW
+  );
+});
+
 describe('Submit invoice: closing the modal', () => {
   it(
     'Done closes it, refreshes the Invoices section once, and puts focus back on the section button; the record stays open',

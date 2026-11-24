@@ -21,6 +21,9 @@
  *     firm step stays first, and the record stays chosen only if the CHOSEN firm's list contains it (the wizard drops a
  *     choice its list does not offer). See {@link usePreselectedRecord}.
  *
+ * iss052: the result screen and the resume view offer "Open invoice" (an Accepted invoice the server named) and "Open {matter|
+ * project|work assignment}", opened through the shell's record opener (`components/ebilling/submissionLinks.ts`).
+ *
  * FR-45: the first thing the page does is the availability probe (`firms` on /me, then the submissions list only when
  * `firms` is absent, to tell an off flag apart from an unknown state). A 503 `ebilling.disabled` replaces the page with a
  * plain "not available" state; the wizard is never shown. The client decides no authorization (ADR-002 / FR-17): it
@@ -39,6 +42,7 @@ import type {
   InvoiceFirmOption,
   InvoiceRecordQuery,
   InvoiceSubmissionAccepted,
+  InvoiceSubmissionRecordRef,
 } from '@spaarke/ui-components/components/InvoiceSubmission';
 
 import {
@@ -50,6 +54,8 @@ import {
 } from '../api/web-api-client';
 import { PageContainer, NavigationBar } from '../components';
 import { renderSubmissionReport } from '../components/ebilling/InvoiceOutcomeReport';
+import { coreRecordTarget, invoiceTarget } from '../components/ebilling/submissionLinks';
+import { useOpenRecord } from '../components/detail/RecordOpener';
 import {
   GUID_PATTERN,
   INVOICE_RECORD_PARAM,
@@ -197,6 +203,27 @@ const useStyles = makeStyles({
   },
 });
 
+/** The control that was just activated (focus returns to it when the record view closes). */
+function activeControl(): HTMLElement | null {
+  return document.activeElement instanceof HTMLElement ? document.activeElement : null;
+}
+
+/** iss052: the result screen's links, opened through the shell's record opener (as `intakeSuccess.tsx` opens a new request). */
+function useSubmissionLinkOpeners(): {
+  onOpenInvoice: (invoiceId: string) => void;
+  onOpenRecord: (record: InvoiceSubmissionRecordRef) => void;
+} {
+  const openRecord = useOpenRecord();
+  return React.useMemo(
+    () => ({
+      onOpenInvoice: (invoiceId: string) => openRecord(invoiceTarget(invoiceId), { returnFocusTo: activeControl() }),
+      onOpenRecord: (record: InvoiceSubmissionRecordRef) =>
+        openRecord(coreRecordTarget(record), { returnFocusTo: activeControl() }),
+    }),
+    [openRecord]
+  );
+}
+
 const BREADCRUMBS = [{ label: 'My Projects', href: '/' }, { label: 'Submit Invoice' }];
 
 type Availability = 'checking' | 'available' | 'disabled';
@@ -233,6 +260,8 @@ export const InvoiceSubmitPage: React.FC = () => {
   const preselect = usePreselectedRecord(recordLink, availability === 'available' && submissionIdParam === null);
 
   const goHome = React.useCallback(() => navigate('/'), [navigate]);
+  // iss052: "Open invoice" / "Open {record}" on the result screen and the resume view, through the shell's record opener.
+  const links = useSubmissionLinkOpeners();
 
   // Rewrite the address to carry the accepted submission's id WITHOUT a router navigation: the wizard stays mounted on
   // its result screen, while a reload or a return to this address lands on the same submission (FR-18).
@@ -303,6 +332,8 @@ export const InvoiceSubmitPage: React.FC = () => {
             submissionId={resumeId}
             getStatus={getInvoiceSubmission}
             renderReport={renderSubmissionReport}
+            onOpenInvoice={links.onOpenInvoice}
+            onOpenRecord={links.onOpenRecord}
           />
           <div className={styles.actions}>
             <Button appearance="primary" onClick={() => navigate(INVOICE_SUBMIT_PATH)}>
@@ -344,6 +375,8 @@ export const InvoiceSubmitPage: React.FC = () => {
           getStatus={getInvoiceSubmission}
           renderReport={renderSubmissionReport}
           onSubmitted={handleSubmitted}
+          onOpenInvoice={links.onOpenInvoice}
+          onOpenRecord={links.onOpenRecord}
         />
       </div>
     </PageContainer>
