@@ -80,10 +80,17 @@ Describe 'Get-IndexMarkers: one id grammar (ISS-047)' {
             foreach ($id in '084h-1', '095f-2e2a', '130-0', '130-0b', '095d-2b-3') { $m.Keys | Should -Contain $id }
             $m['084h-1'] | Should -Match '🔄'
         }
-        It 'does not split a hyphenated id that has a three-digit segment (084h-100)' {
+        It 'does not split a hyphenated id at the hyphen: 084h-100 is not read as id 100' {
             $m = Get-Markers @('| 084h-100 | ✅ | t | x |')
-            $m.Keys | Should -Contain '084h-100'
             $m.Keys | Should -Not -Contain '100'
+        }
+        It 'reads a multi-letter suffix whole (132ui, 132ui-1)' {
+            $m = Get-Markers @('| 132ui | ✅ [done] | t | x |', '| 132ui-1 | ✅ [done] | t | x |')
+            $m.Keys | Should -Contain '132ui'
+            $m.Keys | Should -Contain '132ui-1'
+        }
+        It 'reads a status-first multi-letter suffix (`| ✅ 132ui |`)' {
+            (Get-Markers @('| ✅ 132ui | t | x | y |')).Keys | Should -Contain '132ui'
         }
         It 'parses a bold hyphenated id (**084h-1**)' {
             (Get-Markers @('| **084h-1** | ✅ | t | x |')).Keys | Should -Contain '084h-1'
@@ -120,6 +127,34 @@ Describe 'Get-IndexMarkers: one id grammar (ISS-047)' {
             $m = Get-Markers @('| 090 | ✅ [done] | wrap-up | x |', '| 090-note | wrap-up artifacts DONE ✅ | y | z |')
             $m.Keys | Should -Not -Contain '090-note'
             $m.Count | Should -Be 1
+        }
+        It 'a word before the id keeps the old reading: `| note 001 |`, `| done 001 |`, `| Phase 100 |` give the id after the word' {
+            $m = Get-Markers @('| note 001 | ✅ [done] | t | x |', '| done 002 | ✅ [done] | t | x |', '| Phase 100 | ✅ [done] | t | x |')
+            $m.Keys | Should -Contain '001'
+            $m.Keys | Should -Contain '002'
+            $m.Keys | Should -Contain '100'
+            $m.Keys | Should -Not -Contain 'note001'
+            $m.Count | Should -Be 3
+        }
+        It 'an uppercase letter before the digits keeps the old reading: `| T001 |` gives 001' {
+            $m = Get-Markers @('| T001 | ✅ [done] | t | x |')
+            $m.Keys | Should -Contain '001'
+            $m.Keys | Should -Not -Contain 'T001'
+        }
+        It 'a range in the first cell is not an id (`| 100-200 | Wave | ✅ |`), also bold' {
+            $m = Get-Markers @('| 001 | ✅ [done] | t | x |', '| 100-200 | Wave | ✅ | y |', '| **100-200** | Wave | ✅ | y |')
+            $m.Keys | Should -Not -Contain '100-200'
+            $m.Count | Should -Be 1
+        }
+        It 'a range with a letter suffix is not an id (`| 100a-200 |`)' {
+            (Get-Markers @('| 100a-200 | Wave | ✅ | y |', '| 001 | ✅ | t | x |')).Keys | Should -Not -Contain '100a-200'
+        }
+        It 'the range rule leaves the real hyphenated ids alone (130-0, 084h-1, 095f-2e2a)' {
+            $m = Get-Markers @('| 130-0 | ✅ | t | x |', '| 084h-1 | ✅ | t | x |', '| 095f-2e2a | ✅ | t | x |')
+            $m.Count | Should -Be 3
+        }
+        It 'KNOWN LIMIT: `| 001-2 | ... ✅ |` cannot be told from the real id 130-0 by shape, so it reads as an id' {
+            (Get-Markers @('| 001-2 | Wave | ✅ | y |')).Keys | Should -Contain '001-2'
         }
         It 'a prose line that is not a table row yields nothing' {
             (Get-Markers @('iss028 is mentioned here ✅', '')).Count | Should -Be 0
