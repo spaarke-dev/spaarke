@@ -253,6 +253,13 @@ public static class SecureRecordSetupRejectionCodes
     public const string InviteCodeHashLockOtherAccess = "secure_setup.invite_code_hash_lock_other_access";
 
     /// <summary>
+    /// S22 (ISS-025 / #1803): <c>contact.sprk_externalinvitecodehash</c> is secured and locked, but auditing or Advanced Find is
+    /// ON for it (the package ships both off; Resumable: import SpaarkeMaster (H6) or run
+    /// <c>scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply</c>, then resume). H7b only verifies; it changes no column setting.
+    /// </summary>
+    public const string InviteCodeHashExposureOn = "secure_setup.invite_code_hash_audit_or_find_on";
+
+    /// <summary>
     /// S22 (#2317): a BFF-only column (<c>contact.sprk_externalinvitedemailhash</c>, <c>contact.sprk_externalinvitedtenantid</c>)
     /// exists (ABSENT is the expected state until the SpaarkeMaster release that carries it) but is not secured, or the
     /// Writers profile does not hold 4/4/4 (Resumable: import SpaarkeMaster, H6).

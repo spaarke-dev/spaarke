@@ -222,6 +222,10 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
         => Session(target).IsAttributeSecuredAsync(tableLogicalName, attributeLogicalName, cancellationToken);
 
     /// <inheritdoc/>
+    public Task<SecureSetupAttributeExposure?> GetAttributeExposureAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken)
+        => Session(target).GetAttributeExposureAsync(tableLogicalName, attributeLogicalName, cancellationToken);
+
+    /// <inheritdoc/>
     public Task<SecureSetupTableIdentity> GetTableIdentityAsync(SecureRecordSetupTarget target, string tableLogicalName, CancellationToken cancellationToken)
         => Session(target).GetTableIdentityAsync(tableLogicalName, cancellationToken);
 
@@ -525,6 +529,37 @@ internal sealed class SecureRecordSetupWebApi
         EnsureSuccess(response, $"Reading {tableLogicalName}.{attributeLogicalName}");
         using var document = await ReadJsonAsync(response, ct).ConfigureAwait(false);
         return document.RootElement.TryGetProperty("IsSecured", out var secured) && secured.ValueKind == JsonValueKind.True;
+    }
+
+    /// <summary>
+    /// <c>IsAuditEnabled</c> and <c>IsValidForAdvancedFind</c> are managed properties (<c>{"Value":false,"CanBeChanged":..}</c>); the
+    /// <c>Value</c> is read. A property that is missing or not a boolean throws: an unreadable answer is never "off".
+    /// </summary>
+    internal async Task<SecureSetupAttributeExposure?> GetAttributeExposureAsync(string tableLogicalName, string attributeLogicalName, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get,
+            $"EntityDefinitions(LogicalName='{Literal(tableLogicalName)}')/Attributes(LogicalName='{Literal(attributeLogicalName)}')?$select=IsAuditEnabled,IsValidForAdvancedFind",
+            null, ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        EnsureSuccess(response, $"Reading the audit and Advanced Find settings of {tableLogicalName}.{attributeLogicalName}");
+        using var document = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        return new SecureSetupAttributeExposure(
+            ManagedBoolean(document.RootElement, "IsAuditEnabled", tableLogicalName, attributeLogicalName),
+            ManagedBoolean(document.RootElement, "IsValidForAdvancedFind", tableLogicalName, attributeLogicalName));
+    }
+
+    private static bool ManagedBoolean(JsonElement attribute, string property, string table, string column)
+    {
+        if (attribute.TryGetProperty(property, out var managed) && managed.ValueKind == JsonValueKind.Object
+            && managed.TryGetProperty("Value", out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            return value.GetBoolean();
+        }
+        throw new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other,
+            $"The attribute metadata of {table}.{column} carries no readable {property} value.");
     }
 
     internal async Task<SecureSetupTableIdentity> GetTableIdentityAsync(string tableLogicalName, CancellationToken ct)
