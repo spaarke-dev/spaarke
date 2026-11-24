@@ -1,5 +1,11 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-24 22:02Z — dev write: #3063 re-check after task 207 (dev BFF `20129e985c`, live 21:36:18Z by uac-r2 on owner go)
+
+- **Owner go:** "Yes, run it" (2026-11-24, chat), answering whether to run the #3063 reproduction now.
+- **What was written** (Console Worklist, product path, Claude in Chrome): POL-MATTER-NOBUDGET item on "New Matter Created in Word Add-in 10-3-2026" (rule is Off; the item would have closed at tonight's pass). Create budget skipped; Assign Task to the same contact as the 14:40Z and 15:21Z runs, email notification on; no next steps. Result: task `3f2c3db8-51e7-4147-9fd8-7e1c24988075` (team-owned), Decision Record `e7aa6ab6-52e8-f111-84ea-00224829aef9`, the item closed (183 left for the rule).
+- **Result: PASS.** The commit showed the new task 207 sentence: "The task was assigned, but no email was sent: the assignee's user account is set up for administration only and cannot use the app." No email activity created since 22:02Z (read back). Nothing else written.
+
 ## 2026-11-24 15:21Z — dev write: one Assign Task decision to reproduce #3063 (DI-171)
 
 - **Owner go:** "Yes, reproduce it" (2026-11-24, chat), answering whether to run one Assign Task decision on dev with the reason captured.
