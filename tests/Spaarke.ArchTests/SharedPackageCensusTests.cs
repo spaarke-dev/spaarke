@@ -85,15 +85,17 @@ public class SharedPackageCensusTests
         new CensusEntry("@spaarke/daily-briefing-components", "Spaarke.DailyBriefing.Components", PackageStatus.Sanctioned, "ADR-012",
             "Pattern D feature package for Daily Briefing: imported by the DailyBriefing code page and the "
             + "LegalWorkspace section, and domain-bound (sprk_* schema), so ui-components may not hold it."),
+        new CensusEntry("@spaarke/compose-components", "Spaarke.Compose.Components", PackageStatus.Sanctioned, "ADR-012",
+            "The Compose document-editing model (TipTap document, DOCX bridge, checkout, comments). Quarantines "
+            + "TipTap/ProseMirror away from ui-components and the PCFs; used by SpaarkeAi and LegalWorkspace "
+            + "(2026-11-24 amendment; quarantine and entity-map scans below)."),
 
         // ---- Grandfathered — under review (baseline 2026-11-10; may shrink, never grow) ----------
         new CensusEntry("@spaarke/sdap-client", "Spaarke.SdapClient", PackageStatus.Grandfathered, "ADR-012",
             "SDAP API client used by 18 PCF controls and TS apps. Pre-dates the census; whether it overlaps "
             + "the BFF adapters in @spaarke/ui-components has not been assessed."),
         // smart-todo, communication and daily-briefing components: sanctioned 2026-11-18 (Pattern D amendment).
-        new CensusEntry("@spaarke/compose-components", "Spaarke.Compose.Components", PackageStatus.Grandfathered, "ADR-012",
-            "TipTap-based Compose workspace. TipTap may justify quarantine as a heavy dependency, but the "
-            + "package has not been assessed against the three tests."),
+        // compose-components: sanctioned 2026-11-24 (Compose amendment).
         // @spaarke/document-operations: retired 2026-11-13; useDocumentActions moved to @spaarke/ui-components (src/hooks).
         new CensusEntry("@spaarke/ai-outputs", "Spaarke.AI.Outputs", PackageStatus.Grandfathered, "ADR-012",
             "AI output-pane and source-pane widgets and their registries. Its boundary with the sanctioned "
@@ -113,6 +115,23 @@ public class SharedPackageCensusTests
         "@spaarke/communication-components",
         "@spaarke/daily-briefing-components",
     };
+
+    /// <summary>
+    /// The Compose amendment (ADR-012 2026-11-24). <see cref="ComposeFolder"/> is the only place whose non-test
+    /// source may import TipTap / ProseMirror, and <see cref="ComposeSchemaFile"/> is the only non-test source
+    /// file in it whose code (outside comments) may name a <c>sprk_</c> entity or column (finding P-8). Moving either needs the amendment
+    /// updated in the same change.
+    /// </summary>
+    private const string ComposeFolder = "Spaarke.Compose.Components";
+    private const string ComposeSchemaFile = "src/types/composeDocumentSchema.ts";
+
+    private static readonly Regex EditorEngineImport = new(
+        @"(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['""])(?<module>@tiptap/[^'""]+|prosemirror-[^'""]+)\1",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex DataverseName = new(
+        @"\bsprk_[a-z0-9_]+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private const string ConciseAdrRelativePath = ".claude/adr/ADR-012-shared-components.md";
     private const string CensusStartMarker = "<!-- shared-package-census:start -->";
@@ -237,6 +256,77 @@ public class SharedPackageCensusTests
             + "one decision (ADR-012 2026-11-18 amendment): " + string.Join(", ", notSanctioned));
     }
 
+    [Fact(DisplayName = "ADR-012: TipTap and ProseMirror are imported only by the Compose package")]
+    public void TipTapIsImportedOnlyByTheComposePackage()
+    {
+        // Compose amendment (2026-11-24), the quarantine test. Editor-engine code outside Compose either
+        // pulls TipTap into another bundle (ui-components → every PCF) or starts a second document editor.
+        // Tests may drive a real TipTap editor; production source may not.
+        var composeRoot = Path.Combine(SourceScan.RepoRoot, "src", "client", "shared", ComposeFolder);
+        var roots = new[]
+        {
+            Path.Combine(SourceScan.RepoRoot, "src", "client"),
+            Path.Combine(SourceScan.RepoRoot, "src", "solutions"),
+        };
+
+        var violations = roots
+            .SelectMany(ClientSourceFiles)
+            .Where(f => !IsUnder(f, composeRoot) && !IsTestFile(f))
+            .SelectMany(f => EditorEngineImports(File.ReadAllLines(f))
+                .Select(hit => $"{Rel(f)}:{hit.Line} imports {hit.Module}"))
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Production source outside @spaarke/compose-components imports TipTap or ProseMirror. ADR-012 (2026-11-24 "
+            + "Compose amendment) quarantines the editor engine in that package: document editing goes through "
+            + "ComposeEditor; a rich-text field uses RichTextEditor (Lexical) from @spaarke/ui-components.\n\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact(DisplayName = "ADR-012: no other shared package and no PCF declares TipTap or ProseMirror")]
+    public void NoOtherSharedPackageOrPcfDeclaresTipTap()
+    {
+        var manifests = Directory
+            .EnumerateDirectories(Path.Combine(SourceScan.RepoRoot, "src", "client", "shared"))
+            .Where(d => !string.Equals(Path.GetFileName(d), ComposeFolder, StringComparison.Ordinal))
+            .Select(d => Path.Combine(d, "package.json"))
+            .Where(File.Exists)
+            .Concat(PrunedFiles(Path.Combine(SourceScan.RepoRoot, "src", "client", "pcf"))
+                .Where(f => string.Equals(Path.GetFileName(f), "package.json", StringComparison.Ordinal)));
+
+        var violations = manifests
+            .SelectMany(m => EditorEngineDeclarations(File.ReadAllText(m)).Select(dep => $"{Rel(m)} declares {dep}"))
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "A shared package other than @spaarke/compose-components, or a PCF, declares TipTap or ProseMirror. "
+            + "ADR-012 (2026-11-24 Compose amendment) keeps the editor engine out of their bundles.\n\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact(DisplayName = "ADR-012: Compose keeps its Dataverse names in its one entity map")]
+    public void ComposeKeepsDataverseNamesInItsEntityMap()
+    {
+        // Compose amendment (2026-11-24), finding P-8. ADR-012 forbids entity-name literals in shared packages;
+        // Compose is allowed the sprk_document names it needs, in COMPOSE_DOCUMENT_SCHEMA only.
+        var composeSrc = Path.Combine(SourceScan.RepoRoot, "src", "client", "shared", ComposeFolder, "src");
+        var schemaFile = Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, "src", "client", "shared", ComposeFolder, ComposeSchemaFile));
+        Assert.True(File.Exists(schemaFile), $"The Compose entity map moved or was renamed: {Rel(schemaFile)}. Update ComposeSchemaFile and the amendment.");
+
+        var violations = ClientSourceFiles(composeSrc)
+            .Where(f => !IsTestFile(f) && !string.Equals(Path.GetFullPath(f), schemaFile, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(f => DataverseNamesInCode(File.ReadAllLines(f)).Select(line => $"{Rel(f)}:{line}"))
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "A Compose source file names a sprk_ entity or column in code. ADR-012 (2026-11-24 Compose amendment, P-8): add the "
+            + $"name to COMPOSE_DOCUMENT_SCHEMA in {ComposeSchemaFile} and use it from there.\n\n"
+            + string.Join("\n", violations));
+    }
+
     // =============================================================================================
     // Negative controls: each detector fires on a seeded violation
     // =============================================================================================
@@ -291,6 +381,123 @@ public class SharedPackageCensusTests
 
         Assert.Contains(files, f => f.Contains("/CommunicationConnections/", StringComparison.Ordinal));
         Assert.DoesNotContain(files, f => f.Contains("/node_modules/", StringComparison.Ordinal));
+    }
+
+    // =============================================================================================
+    // Controls (Compose amendment): quarantine and entity-map detectors
+    // =============================================================================================
+
+    [Fact(DisplayName = "ADR-012: negative control — TipTap and ProseMirror imports are reported in every import form")]
+    public void EditorEngineImports_NegativeControl_ReportsEveryForm()
+    {
+        var source = new[]
+        {
+            "import { Editor } from '@tiptap/core';",
+            "import StarterKit from \"@tiptap/starter-kit\";",
+            "export * from '@tiptap/react';",
+            "const ext = await import('@tiptap/extension-table');",
+            "const state = require('prosemirror-state');",
+            "import { EditorView } from 'prosemirror-view';",
+            "import '@tiptap/extension-link';",
+        };
+
+        Assert.Equal(new[] { 1, 2, 3, 4, 5, 6, 7 }, EditorEngineImports(source).Select(h => h.Line).ToArray());
+    }
+
+    [Fact(DisplayName = "ADR-012: positive control — comments, other editors and look-alike names are not TipTap imports")]
+    public void EditorEngineImports_PositiveControl_StaysSilent()
+    {
+        var source = new[]
+        {
+            "// import { Editor } from '@tiptap/core';",
+            " * see '@tiptap/react' for the hook",
+            "import { LexicalComposer } from '@lexical/react/LexicalComposer';",
+            "import { ComposeEditor } from '@spaarke/compose-components';",
+            "const label = 'prosemirror';",
+        };
+
+        Assert.Empty(EditorEngineImports(source));
+    }
+
+    [Fact(DisplayName = "ADR-012: negative control — TipTap and ProseMirror declarations are reported in every dependency block")]
+    public void EditorEngineDeclarations_NegativeControl_ReportsEveryBlock()
+    {
+        const string manifest = """
+            {
+              "name": "@spaarke/x",
+              "dependencies": { "@tiptap/core": "^2.10.3", "react": "^19.0.0" },
+              "devDependencies": { "prosemirror-model": "^1.0.0" },
+              "peerDependencies": { "@tiptap/react": "^2.0.0" }
+            }
+            """;
+
+        Assert.Equal(
+            new[] { "@tiptap/core", "@tiptap/react", "prosemirror-model" },
+            EditorEngineDeclarations(manifest).OrderBy(d => d, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact(DisplayName = "ADR-012: positive control — a manifest without TipTap, or naming it outside a dependency block, is silent")]
+    public void EditorEngineDeclarations_PositiveControl_StaysSilent()
+    {
+        const string manifest = """
+            {
+              "name": "@spaarke/x",
+              "keywords": ["tiptap", "@tiptap/core"],
+              "dependencies": { "lexical": "^0.12.0", "@spaarke/compose-components": "file:../Spaarke.Compose.Components" }
+            }
+            """;
+
+        Assert.Empty(EditorEngineDeclarations(manifest));
+    }
+
+    [Fact(DisplayName = "ADR-012: negative control — sprk_ names in strings, templates, OData and property access are reported")]
+    public void DataverseNamesInCode_NegativeControl_ReportsEveryForm()
+    {
+        var source = new[]
+        {
+            "const ENTITY = 'sprk_document';",
+            "retrieveRecord(\"sprk_matter\", id);",
+            "const select = `?$select=sprk_name`;",
+            "const id = record.sprk_documentid;",
+            "openRecord('sprk_document', id); // trailing comment",
+            "/* a comment */ const e = 'sprk_event';",
+        };
+
+        Assert.Equal(new[] { 1, 2, 3, 4, 5, 6 }, DataverseNamesInCode(source).ToArray());
+    }
+
+    [Fact(DisplayName = "ADR-012: positive control — sprk_ in comments and through the entity map is not reported")]
+    public void DataverseNamesInCode_PositiveControl_StaysSilent()
+    {
+        var source = new[]
+        {
+            "// opens a `sprk_document` record",
+            "/**",
+            " * the `sprk_documentid` after first Save",
+            " */",
+            "{/* \"Memo\" collided with",
+            "    sprk_memo, the Notepad entity */}",
+            "openRecord(COMPOSE_DOCUMENT_SCHEMA.entityName, id); // the sprk_document record",
+            "const x = record[COMPOSE_DOCUMENT_SCHEMA.fields.graphItemId];",
+            "const notAName = 'xsprk_value';",
+        };
+
+        Assert.Empty(DataverseNamesInCode(source));
+    }
+
+    [Fact(DisplayName = "ADR-012: negative control — the Compose scans really reach Compose, SpaarkeAi and the PCFs")]
+    public void ClientSourceFiles_NegativeControl_ReachesTheScannedTrees()
+    {
+        // A scan that silently found no files would pass every Compose rule vacuously.
+        var clientFiles = ClientSourceFiles(Path.Combine(SourceScan.RepoRoot, "src", "client")).Select(f => f.Replace('\\', '/')).ToList();
+        var solutionFiles = ClientSourceFiles(Path.Combine(SourceScan.RepoRoot, "src", "solutions")).Select(f => f.Replace('\\', '/')).ToList();
+
+        Assert.Contains(clientFiles, f => f.EndsWith($"/{ComposeFolder}/src/widgets/ComposeWorkspace.tsx", StringComparison.Ordinal));
+        Assert.Contains(clientFiles, f => f.Contains("/src/client/pcf/", StringComparison.Ordinal));
+        Assert.Contains(solutionFiles, f => f.Contains("/SpaarkeAi/src/", StringComparison.Ordinal));
+        Assert.DoesNotContain(clientFiles.Concat(solutionFiles), f => f.Contains("/node_modules/", StringComparison.Ordinal));
+        Assert.True(IsTestFile(Path.Combine("x", "__tests__", "useEditSupersession.test.tsx")));
+        Assert.False(IsTestFile(Path.Combine("x", "widgets", "ComposeWorkspace.tsx")));
     }
 
     [Fact(DisplayName = "ADR-012: negative control — an unlisted folder, an absent entry and a renamed package are all reported")]
@@ -593,6 +800,167 @@ public class SharedPackageCensusTests
         }
 
         return hits;
+    }
+
+    /// <summary>
+    /// Hand-written client source (<c>.ts</c>/<c>.tsx</c>/<c>.js</c>/<c>.mjs</c>) under <paramref name="root"/>, skipping
+    /// installs, build output and generated files. Test files are included; callers filter with <see cref="IsTestFile"/>.
+    /// </summary>
+    private static IEnumerable<string> ClientSourceFiles(string root) =>
+        PrunedFiles(root)
+            .Where(f => f.EndsWith(".ts", StringComparison.Ordinal)
+                        || f.EndsWith(".tsx", StringComparison.Ordinal)
+                        || f.EndsWith(".js", StringComparison.Ordinal)
+                        || f.EndsWith(".mjs", StringComparison.Ordinal))
+            .Where(f => !f.EndsWith(".d.ts", StringComparison.Ordinal));
+
+    private static readonly HashSet<string> PrunedDirectories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "node_modules", "out", "dist", "build", "bin", "obj", "generated", "Solution", "coverage", ".git",
+    };
+
+    /// <summary>
+    /// Every file under <paramref name="root"/>, never descending into installs or build output. The directories
+    /// are pruned during the walk, not filtered afterwards: enumerating every node_modules under src/client and
+    /// src/solutions takes minutes.
+    /// </summary>
+    private static IEnumerable<string> PrunedFiles(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var dir = pending.Pop();
+            foreach (var file in Directory.EnumerateFiles(dir))
+            {
+                yield return file;
+            }
+
+            foreach (var sub in Directory.EnumerateDirectories(dir))
+            {
+                if (!PrunedDirectories.Contains(Path.GetFileName(sub)))
+                {
+                    pending.Push(sub);
+                }
+            }
+        }
+    }
+
+    private static bool IsTestFile(string path)
+    {
+        var name = Path.GetFileName(path);
+        var sep = Path.DirectorySeparatorChar;
+        return name.Contains(".test.", StringComparison.Ordinal)
+               || name.Contains(".spec.", StringComparison.Ordinal)
+               || path.Contains($"{sep}__tests__{sep}", StringComparison.Ordinal)
+               || path.Contains($"{sep}__mocks__{sep}", StringComparison.Ordinal);
+    }
+
+    private static bool IsUnder(string path, string root) =>
+        Path.GetFullPath(path).StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    private static string Rel(string path) => Path.GetRelativePath(SourceScan.RepoRoot, path).Replace('\\', '/');
+
+    private static bool IsCommentLine(string line)
+    {
+        var trimmed = line.TrimStart();
+        return trimmed.StartsWith("//", StringComparison.Ordinal)
+               || trimmed.StartsWith("*", StringComparison.Ordinal)
+               || trimmed.StartsWith("/*", StringComparison.Ordinal)
+               || trimmed.StartsWith("{/*", StringComparison.Ordinal);
+    }
+
+    /// <summary>Lines that import a <c>@tiptap/*</c> or <c>prosemirror-*</c> module in any import form; comment lines are skipped.</summary>
+    private static List<(int Line, string Module)> EditorEngineImports(IReadOnlyList<string> lines)
+    {
+        var hits = new List<(int, string)>();
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (IsCommentLine(lines[i]))
+            {
+                continue;
+            }
+
+            var match = EditorEngineImport.Match(lines[i]);
+            if (match.Success)
+            {
+                hits.Add((i + 1, match.Groups["module"].Value));
+            }
+        }
+
+        return hits;
+    }
+
+    /// <summary>The <c>@tiptap/*</c> and <c>prosemirror-*</c> names in a manifest's dependency, devDependency and peerDependency blocks.</summary>
+    private static List<string> EditorEngineDeclarations(string manifestJson)
+    {
+        using var json = JsonDocument.Parse(manifestJson);
+        var found = new List<string>();
+
+        foreach (var block in new[] { "dependencies", "devDependencies", "peerDependencies", "optionalDependencies" })
+        {
+            if (!json.RootElement.TryGetProperty(block, out var deps) || deps.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            found.AddRange(deps.EnumerateObject()
+                .Select(p => p.Name)
+                .Where(n => n.StartsWith("@tiptap/", StringComparison.Ordinal) || n.StartsWith("prosemirror-", StringComparison.Ordinal)));
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Line numbers whose code (comments removed) names a <c>sprk_</c> entity or column: in a string, a template,
+    /// an OData <c>$select</c> or a property access.
+    /// </summary>
+    private static List<int> DataverseNamesInCode(IReadOnlyList<string> lines)
+    {
+        var code = WithoutComments(lines);
+        return Enumerable.Range(0, code.Count)
+            .Where(i => DataverseName.IsMatch(code[i]))
+            .Select(i => i + 1)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Each line with <c>//</c> line comments and <c>/* … */</c> block comments (also across lines, also JSX
+    /// <c>{/* … */}</c>) removed. Strings are not parsed: a <c>//</c> or <c>/*</c> inside a string is treated as a
+    /// comment opener, so a string such as <c>'image/*'</c> hides the code after it (up to the next <c>*/</c>) from
+    /// the scan. That is a recall limit, not a false-positive risk; no Compose source has such a string today.
+    /// </summary>
+    private static List<string> WithoutComments(IReadOnlyList<string> lines)
+    {
+        var result = new List<string>(lines.Count);
+        var inBlock = false;
+
+        foreach (var line in lines)
+        {
+            var kept = new System.Text.StringBuilder();
+            var i = 0;
+            while (i < line.Length)
+            {
+                if (inBlock)
+                {
+                    var end = line.IndexOf("*/", i, StringComparison.Ordinal);
+                    if (end < 0) { i = line.Length; } else { inBlock = false; i = end + 2; }
+                    continue;
+                }
+
+                if (string.CompareOrdinal(line, i, "/*", 0, 2) == 0) { inBlock = true; i += 2; continue; }
+                if (string.CompareOrdinal(line, i, "//", 0, 2) == 0) { break; }
+
+                kept.Append(line[i]);
+                i++;
+            }
+
+            result.Add(kept.ToString());
+        }
+
+        return result;
     }
 
     private static string Pad(string seed) => $"{seed}: a control entry whose reason is long enough to pass the explanation rule.";

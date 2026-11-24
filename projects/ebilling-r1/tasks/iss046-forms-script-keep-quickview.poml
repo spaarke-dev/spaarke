@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss046" project="ebilling-r1">
+  <metadata>
+    <title>ISS-046 (#3001): Deploy-EbillingFormsViews.ps1 Section mode keeps cells it does not manage (the invoice form's Batch quick view)</title>
+    <phase>Issue fix; filed 2026-11-23 from the task 194 review (finding 7, pre-existing)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>A PowerShell deploy script and its Pester tests; no BFF or client code; no live run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One script function plus tests, with exact entry points.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>194</deps>
+    <tags>dataverse, scripts, testing</tags>
+  </metadata>
+
+  <prompt>In Section mode, scripts/ebilling/Deploy-EbillingFormsViews.ps1 rebuilds a form section from its Cols list and replaces the whole section (around :350-352; the section builder around :176-186). The invoice main form's section_ebilling also holds the qv_billingexport "Batch" quick view, which 151e added to SpaarkeMaster source (src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/{93aa1c69-0406-f111-8406-7c1e525abd8b}.xml) and which no script creates. A re-run on an environment that has that form therefore deletes the quick view without a word. Fix the script so a Section-mode run keeps every existing cell it does not manage (quick views, subgrids, web resources, spacers that hold them), in place, and changes only the field cells it owns.</prompt>
+
+  <constraints>
+    <constraint>Keep the script's modes, parameters and output. The fix is in how the section is rebuilt: the cells the spec owns are added or updated; other existing cells are kept, in their order.</constraint>
+    <constraint>Keep 194's shared safety checks in the script unchanged: a case-strict "never overwrite another unpublished edit" check, a read-back after each write, and Consistency: Strong on every Dataverse call (the ScriptMetadataStrongConsistencyGuardTests ArchTest).</constraint>
+    <constraint>Pester tests in the script's existing test file, on that file's declared Pester version (5.7.1 or 3.4.0; never plain Invoke-Pester). Tests fail before the fix and pass after: a section holding a quick view keeps it after a Section-mode rebuild; a second run is a no-op (no write); a field cell the spec owns is still added or updated; a spec field already present is not duplicated.</constraint>
+    <constraint>No live Dataverse call, no deploy. Never use --no-verify or git stash. Never run python.</constraint>
+    <constraint>Write notes to projects/ebilling-r1/notes/iss046-forms-script-keep-quickview.md (what changed, tests, fail-before evidence). Commit with the trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;".</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Section-mode run against a section that holds qv_billingexport produces form XML that still holds qv_billingexport, in its place.</criterion>
+    <criterion testable="true">A second Section-mode run with no spec change writes nothing.</criterion>
+    <criterion testable="true">The script's Pester file passes on its declared version, and the new tests fail on the old script.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

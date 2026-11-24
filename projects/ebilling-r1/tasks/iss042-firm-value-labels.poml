@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss042" project="ebilling-r1">
+  <metadata>
+    <title>ISS-042 (#2933): firm rejection findings show firm labels ("Rate"), not raw valuesRead keys ("line.rate")</title>
+    <phase>Issue fix; filed 2026-11-20 from the task 134 review (server side, found in passing)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs that shapes firm-visible output (D-66, EB-D-210).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A closed label table in the projection, with an existing reference (FirmRejectionReasonText).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>130c, 134</deps>
+    <tags>bff-api, api, external-spa, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-042. A rejected submission's firm outcome (task 130c) carries each rejecting finding's valuesRead as { name, value }, where name is the raw internal key the rule read (for example line.rate; see FirmOutcomeScopeTests.cs ~1365). The SPA (task 134, InvoiceOutcomeReport.tsx) shows the list as received, so a firm reads "line.rate: 650" instead of "Rate: 650".
+Entry points: src/server/api/Sprk.Bff.Api/Services/Finance/FirmRejectionFindings.cs (ValueRead, the parse ~288); Services/Finance/FirmFindingsProjection.cs (FirmOutcomeValueRead). Reference for a closed, firm-safe text table with a generic fallback and a guard: FirmRejectionReasonText (grep it and its guard test).</prompt>
+
+  <constraints>
+    <constraint>The projection maps each key to a firm label from a closed table in code: no interpolated data, no key text in the label. Cover every key a reject-eligible rule type can put in valuesRead: derive the list from the evaluator / rule templates (grep where valuesRead keys are produced), not from guesses, and list the source of each key in the notes.</constraint>
+    <constraint>An unknown key never reaches the firm as raw text: use one generic label (for example "Value"), as FirmRejectionReasonText falls back. Add a guard test in the style of FirmRejectionReasonText's guard: every key the producers can emit has a label (a new key without a label fails the build's tests).</constraint>
+    <constraint>The value itself is unchanged. The wire shape ({ name, value }) is unchanged: name now carries the label. No client change: the SPA renders name as received. Check that no internal surface reads FirmOutcomeValueRead.name as a key (grep); if one does, stop and report.</constraint>
+    <constraint>No new endpoint, service, DI registration, package or column. Firm-visible output rules (project CLAUDE.md §2 D-66, EB-D-209/210) still hold; reason codes are never shown.</constraint>
+    <constraint>Tests, failing before and passing after: line.rate projects as the rate label; an unknown key projects as the generic label; the coverage guard. Update existing tests that assert the raw key (FirmOutcomeScopeTests and any SPA test that asserts a raw key in src/client/external-spa/tests) only where the new behaviour requires it. Run only the affected test classes with --filter and -- xUnit.MaxParallelThreads=4; never the whole Sprk.Bff.Api.Tests or ArchTests. For SPA tests touched: npx vitest run on the touched files in src/client/external-spa.</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings. Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss042-firm-value-labels.md (the key → label table with each key's producer).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A firm outcome for a rejected ApprovedRate finding shows "Rate" (or the chosen label), not "line.rate".</criterion>
+    <criterion testable="true">An unknown key shows the generic label, never the key.</criterion>
+    <criterion testable="true">A guard test fails when a producer emits a key with no label.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss027" project="ebilling-r1">
+  <metadata>
+    <title>ISS-027 (#2878): RecordProcedures Reason boxes no longer cut pasted text at 2,000 characters without a message</title>
+    <phase>Issue fix; filed 2026-11-17 from the 084h-4 review (pre-existing)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in a code page.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copy an existing fix (084h-4's Note box) to three textareas.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>084h-4</deps>
+    <tags>react, fluent-ui, frontend, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-027. The Reason textareas set maxLength={MAX_REASON_CHARS}. A paste longer than 2,000 characters is truncated by the browser with no message, and the cut reason is saved as the Procedure change's reason.
+Entry points: src/solutions/RecordProcedures/src/components/wizards/AssignProcedureWizard.tsx (~417), ProcedureWizard.tsx (~213), RuleWizard.tsx (~300). Reference implementation: task 084h-4's fix for the Note box in the same page (grep the Note box's counter and its over-limit validation; notes/084h-4*.md).</prompt>
+
+  <constraints>
+    <constraint>Do exactly what 084h-4 did for the Note box: remove maxLength, show a character counter, and let the existing validation hold Finish (and any submit) while the text is over the limit, with a visible message. Reuse the Note box's counter and message (component or helper) rather than a third copy; if they are local to one file, extract the smallest shared piece inside src/solutions/RecordProcedures only.</constraint>
+    <constraint>Fluent v9 components and tokens only (ADR-021). No change to the limit's value or to what is sent when the text is within the limit.</constraint>
+    <constraint>Tests (the page's existing runner and patterns), failing before and passing after, for each of the three wizards: a 2,600-character paste keeps all 2,600 characters in the box, shows the over-limit message, and Finish sends nothing; trimming to the limit lets Finish send the full text.</constraint>
+    <constraint>Node installs: npm install --legacy-peer-deps --no-audit --no-fund. Run the page's tests and its build (npm run build in src/solutions/RecordProcedures). No deploy. Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss027-reason-box-paste.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">In each of the three wizards a 2,600-character paste is kept whole, the user sees it is over the limit, and nothing is sent.</criterion>
+    <criterion testable="true">Text within the limit is sent unchanged.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

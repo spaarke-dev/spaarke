@@ -120,10 +120,15 @@ export interface InvoiceSubmissionOutcomeProps {
   keepPolling?: (status: InvoiceSubmissionStatusView) => boolean;
   /** Optional (task 052): extra content under the Accepted message (the internal host notes an override here). */
   renderAccepted?: (status: InvoiceSubmissionStatusView) => React.ReactNode;
+  /**
+   * Optional (iss048): called with every status read, so a host that shows something else about this submission (the wizard's
+   * result heading and icon) follows the SAME poll instead of starting a second one. Absent: nothing changes.
+   */
+  onStatusChange?: (status: InvoiceSubmissionStatusView) => void;
 }
 
 /** The warning when it carries a sentence to show; null for a missing, null or blank one (nothing renders). */
-function nonBlank(warning: InvoiceSubmissionWarning | null | undefined): InvoiceSubmissionWarning | null {
+export function nonBlank(warning: InvoiceSubmissionWarning | null | undefined): InvoiceSubmissionWarning | null {
   // The wire is untrusted: a non-string message (a number, null) renders nothing rather than throwing.
   return warning && typeof warning.message === 'string' && warning.message.trim() !== '' ? warning : null;
 }
@@ -133,6 +138,15 @@ function toneFor(status: string | null | undefined): StatusBadgeTone {
   if (status === 'Rejected') return 'critical';
   if (status === 'Failed') return 'warning';
   return 'info';
+}
+
+/** A Failed submission refused by the record's ownership setup (a `record_owner_*` reason): resubmitting cannot fix it. */
+export function isRecordSetupRefusal(view: InvoiceSubmissionStatusView | null | undefined): boolean {
+  return (
+    view?.status === 'Failed' &&
+    typeof view.outcomeReasonCode === 'string' &&
+    view.outcomeReasonCode.startsWith('record_owner_')
+  );
 }
 
 /** Received and Processing (and a status the BFF could not name) all read as Processing. */
@@ -149,6 +163,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   renderReport,
   keepPolling,
   renderAccepted,
+  onStatusChange,
 }) => {
   const styles = useStyles();
   const [view, setView] = React.useState<InvoiceSubmissionStatusView | null>(null);
@@ -162,6 +177,8 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   getStatusRef.current = getStatus;
   const keepPollingRef = React.useRef(keepPolling);
   keepPollingRef.current = keepPolling;
+  const onStatusChangeRef = React.useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -172,6 +189,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
         const next = await getStatusRef.current(submissionId);
         if (cancelled) return;
         setView(next);
+        onStatusChangeRef.current?.(next);
         setLoadError(null);
         setStale(false);
         if (isTerminalStatus(next.status) && !keepPollingRef.current?.(next)) return;
@@ -215,6 +233,9 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   const held = heldWarning !== null;
   const badgeLabel = held ? IN_REVIEW_LABEL : labelFor(status);
   const badgeTone: StatusBadgeTone = held ? 'warning' : toneFor(status);
+  // iss048: every RecordOwnershipResolver refusal (`record_owner_*`) is about the chosen record's setup, so it refuses a resubmission the
+  // same way; "Submit it again" would send the firm in a loop. The reason code itself is not shown to the user.
+  const recordSetupRefusal = isRecordSetupRefusal(view);
 
   return (
     <div className={styles.root} data-testid="invoice-submission-outcome">
@@ -303,8 +324,13 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
         <MessageBar intent="warning" role="alert">
           <MessageBarBody>
             <MessageBarTitle>We could not process this invoice</MessageBarTitle>
-            Submit it again. If it keeps failing, contact the team
-            {tracking ? ` and quote tracking number ${tracking}` : ''}.
+            {recordSetupRefusal
+              ? ` because of how the record you chose is set up. Submitting it again will not help until that is fixed. Contact the team${
+                  tracking ? ` and quote tracking number ${tracking}` : ''
+                }.`
+              : `Submit it again. If it keeps failing, contact the team${
+                  tracking ? ` and quote tracking number ${tracking}` : ''
+                }.`}
           </MessageBarBody>
         </MessageBar>
       )}

@@ -1,12 +1,11 @@
 /**
- * WorkAssignmentService — BU cascade integration tests (FR-WIZ-04 / INV-5)
+ * WorkAssignmentService — the BU cascade is GONE (was FR-WIZ-04 / INV-5)
  *
- * Scope: verify that `WorkAssignmentService.createWorkAssignment` populates
- *   - `sprk_searchindexname`
- * on the create payload, sourced from the current user's owning Business Unit
- * via `EntityCreationService.applyUserBuDefaults` + `resolveUserBuDefaults`,
- * with INV-5 preserved for explicit pre-seeded values — and that it writes NO
- * `sprk_containerid` at all.
+ * Task 026 (field-mapping-server-write-path-r1, FR-16): `sprk_workassignment` is `SearchIndexed` in the server's
+ * RecordTableRules, so `sprk_searchindexname` and the AI search-index lookup are the server's (FR-38, FR-40); the wizard
+ * no longer reads the user's Business Unit or writes either. Every scenario below keeps its set-up (a BU that does or does
+ * not resolve, an Xrm user or none, a host container) and asserts the payload never carries `sprk_searchindexname` or
+ * `sprk_containerid`; the first also asserts the BU is never read.
  *
  * ⚠️ Task 076 (2026-09-03) deleted BOTH container writes on this path: the host-injected
  * `entity['sprk_containerid'] = this._containerId` and the `applyDefaultContainerId` cascade.
@@ -167,8 +166,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     jest.restoreAllMocks();
   });
 
-  // Converted by task 076: was "BU populates BOTH sprk_containerid and sprk_searchindexname".
-  it('cascade: BU populates sprk_searchindexname only — no sprk_containerid — when host did not pre-set container', async () => {
+  // Converted by task 076 (container) and task 026 (index): the BU defaults are never written; the server owns both.
+  it('cascade: a resolvable BU index name is NOT written — no sprk_containerid, no sprk_searchindexname', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
@@ -189,12 +188,15 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
-    expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
+    // The BU is never read (the cascade is gone).
+    expect(dataService.retrieveRecord).not.toHaveBeenCalled();
+    // Task 026 (FR-38/FR-40): sprk_workassignment is SearchIndexed, so the index columns are the server's.
+    expect(payload!).not.toHaveProperty('sprk_searchindexname');
   });
 
   // Converted by task 076: was "INV-5: host-provided containerId is preserved". The host container
   // is no longer written at all, so the surviving assertion is its absence.
-  it('host-provided containerId is NOT written; BU still fills the searchindexname gap', async () => {
+  it('host-provided containerId is NOT written; the BU index name is not written either', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
@@ -215,8 +217,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     expect(payload).toBeDefined();
     // Task 076: the host container never reaches the row — the server derives it from the WA.
     expect(payload!).not.toHaveProperty('sprk_containerid');
-    // BU fills the gap on the field the host did not set
-    expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
+    // Task 026: nor does the BU fill the index name; the server owns it.
+    expect(payload!).not.toHaveProperty('sprk_searchindexname');
   });
 
   // Converted by task 076: was "containerId still cascades, searchindexname left unset".

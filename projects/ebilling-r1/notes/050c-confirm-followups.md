@@ -76,3 +76,7 @@ Adversarial review of the branch (tip `18204c1cea`) found one fix-now defect (F1
 Counts: `Sprk.Bff.Api.Tests` filter `InvoiceReview|FinanceEndpoints|InvoiceSubmission|FinanceUniformNotFound`: 1869 passed, 0 failed. ArchTests `RouteAuthorization|Finance|Ownership|FeatureRolePrivilege|Office`: 226 passed, 0 failed. `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
 
 Stale POML constraint (POML left unchanged): "re-confirm after Failed or Rejected stays 409" is stale since EB-D-167. A Failed attempt starts a new attempt; only Rejected is 409.
+
+## Live on dev (2026-11-24)
+
+uac-r2 deployed dev BFF 0362599b94, which contains #3038, at about 05:21:45Z on the owner's go. Read-only checks: `/healthz` 200; `POST /api/finance/invoice-review/confirm` and `/reject` unauthenticated: 401. No authenticated call was made.

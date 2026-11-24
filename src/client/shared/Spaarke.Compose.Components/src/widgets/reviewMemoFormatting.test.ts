@@ -13,7 +13,34 @@ import {
   MEMO_NO_FINDINGS_MESSAGE,
   MEMO_SESSION_NOT_BOUND_MESSAGE,
   UNSPECIFIED_OVERALL_RISK,
+  buildReviewMemoEmailBody,
 } from './reviewMemoFormatting';
+import { webLightTheme } from '@fluentui/react-components';
+
+// P-14 (DEF-005): the email body is inline-styled HTML for external mail clients, which cannot resolve
+// CSS custom properties. Its border colour is the resolved Fluent token, never a hand-written hex and
+// never a var(--…) reference.
+describe('buildReviewMemoEmailBody — colours', () => {
+  const body = buildReviewMemoEmailBody({
+    analysisId: 'a1',
+    memo: {
+      schemaVersion: '1',
+      overallRisk: 'High',
+      sectionCount: 1,
+      sections: [{ location: '1.1', before: 'b', after: 'a', why: 'w', flaggedClause: 'c', standardRef: 's' }],
+    },
+  });
+
+  it('uses the resolved light-theme stroke token for cell borders', () => {
+    expect(body).toContain(`border:1px solid ${webLightTheme.colorNeutralStroke1};`);
+  });
+
+  it('contains no hand-written hex colour and no CSS custom property', () => {
+    const hexes = body.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+    expect(hexes.every(h => h.toLowerCase() === webLightTheme.colorNeutralStroke1.toLowerCase())).toBe(true);
+    expect(body).not.toContain('var(--');
+  });
+});
 
 describe('selectMemoNegativeMessage — split negative conditions (UAT round-1 #2)', () => {
   it('404 (no code) → "generate first" message', () => {

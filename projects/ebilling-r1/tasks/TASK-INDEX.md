@@ -64,7 +64,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 050b | ✅ [done] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
 | 051 | ✅ [done] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | ✅ [done; browser ui-tests deferred to 112, notes/052-createinvoicewizard-rewire.md] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
-| 053 | 🟡 [steps 2-5, 7 (unauthenticated), 9 done; BFF and SPA steps superseded by master deploys; closes on owner checklist Q] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
+| 053 | 🔄 [steps 2-5, 7 (unauthenticated), 9 done; BFF and SPA steps superseded by master deploys; closes on owner checklist Q] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
 | 054 | ✅ [done] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
 
 ### Phase 3 — Rules (WP3)
@@ -141,6 +141,12 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | iss034b | ✅ [merged into work d5934d6d51; Opus review + round 1 (F1 also fixes Override/Return forms closing when the hold clears)] | ISS-034 #2888 client: Invoice Review "Finish as operator" | STANDARD | sonnet / high | none | iss034a |
 | iss028 | 🔄 [part 1 332515309f, part 2 92e6e5b629 (EB-D-249; Opus + round 1, uac-r2 OK); dev applied 2026-11-17 (EB-D-250/252, verify pass, uac-r2 notices sent); 1.3.2.0 expectations at master merge] | ISS-028 #2879: sprk_invoicecorrection writer-only (EB-D-248) | FULL | sonnet / high | none | 095f-2d2 |
 | iss040 | 🔄 [merged into work; uac-r2 PASS; dev apply waits for owner OK; ships with the 1.3.2.0 (or next) SpaarkeMaster release] | ISS-040 #2901: rule set visibility native write hardening | FULL | sonnet / high | none | ISS-038 |
+| iss046 | ✅ [done 2026-11-24, merged 234828cfb2] | ISS-046 #3001: forms script Section mode keeps cells it does not manage (invoice Batch quick view) | STANDARD | sonnet / high | none | 194 |
+| iss048 | ✅ [done 2026-11-24, merged f4f5b06f52] | Invoice submission result screen: title and icon follow the outcome; no "Submit it again" for a record-setup failure (found in checklist Q) | FULL | sonnet / high | none | 053 |
+| iss043 | 🟡 [wip] | ISS-043 #2978 + ISS-035 #2889: multipart routes answer a malformed body with 400; a repeated firmInvoiceNumber or poNumber is refused | FULL | sonnet / high | none | 123 |
+| iss029 | 🟡 [wip] | ISS-029 #2880: a line decision repeated with other content answers 409 id_reused and writes nothing | FULL | opus / high | none | 095f-2d1 |
+| iss042 | 🟡 [wip] | ISS-042 #2933: firm rejection findings show firm labels, not raw valuesRead keys | FULL | sonnet / high | none | 130c, 134 |
+| iss027 | 🟡 [wip] | ISS-027 #2878: RecordProcedures Reason boxes keep a long paste and hold Finish over the limit | FULL | sonnet / high | none | 084h-4 |
 | 084h-5 | ✅ [squash-merged into work (EB-D-251 option B: derived id only for condition-cleared and Procedure); Opus review + fix rounds on the r1 branch; ontology-r1 PASS; uac-r2 OK; known limit: derivable record id, see uac-r2 thread] | Keyed Decision Records get a derived primary id: Dataverse refuses a duplicate (EB-D-247, ontology-r1 option 1) | FULL | opus / high | none | 084h-3 |
 | iss034c | ✅ [merged into work ee94c7d4ea (server: completer in the stamp, atomic with the completing write); Opus review no F1/F3, F2 note fixed, K1-K4 in notes; AC5 History-tab display deferred: owner question] | Blocked decision stamp records who completed it (iss034a K5, EB-D-253) | FULL | sonnet / high | none | iss034a, iss034b |
 | iss034d | ✅ merged into work | History tab "Finished by" for a blocked decision (EB-D-257; iss034c AC5) | FULL | sonnet / high | none | iss034c |
@@ -239,7 +245,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 160 | 🔲 [open] | End-to-end integration and Action seam tests | FULL | sonnet / high | P7-A | 079, 112, 136, 153 |
-| 161 | 🟡 [harness, offline baseline and report (notes/calibration-report.md) done 2026-11-03; DEF-051 filed; live runs S1/S2 pending owner OK] | Calibration report from corrections and the evaluation set | STANDARD | sonnet / high | P7-A | 002, 049, 101 |
+| 161 | 🔄 [harness, offline baseline and report (notes/calibration-report.md) done 2026-11-03; DEF-051 filed; live runs S1/S2 pending owner OK] | Calibration report from corrections and the evaluation set | STANDARD | sonnet / high | P7-A | 002, 049, 101 |
 | 162 | 🔲 [open] | Accuracy and performance evaluation; tuning | STANDARD | opus / high | none | 005, 160, 161 |
 | 163 | 🔲 [open] | UAT with the owner and dev rollout | STANDARD | sonnet / high | none | 162 |
 | 164 | ✅ [done 2026-11-23: 164a-c merged; dev ribbon already in the target state (dry run 0 changes), -Verify PASS, SecureChild -Verify PASS; uac-r2 acked] | Add line (reviewer-added invoice line, EB-D-192/198/199) | FULL | opus / high | none | 100, 103 |

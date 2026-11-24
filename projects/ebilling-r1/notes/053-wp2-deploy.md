@@ -88,3 +88,15 @@ Read-only checks run 2026-11-23 (~01:40-02:10Z on 11-24):
 What closes 053: checklist section Q (an Accepted and a Rejected submission from the firm portal). After that, 079 has no open dependency.
 
 Deviation: step 3's "-DiffOnly shows no difference" stays unmet for the reasons above. D-101 also changed step 10: a Rejected submission now creates its invoice, in status Rejected. The step's "no invoice" is out of date.
+
+## 2026-11-24: the Rejected check moves to task 079
+
+A read of dev (read-only) found no published rule version with the Reject consequence: 10 policy versions in total, none of them a billing rule that can reject. Rules are first published on dev in 079 step 10. So 053 step 10's Rejected half moved into 079 step 10. There, 079 publishes an InvoiceAge rule (maxAgeDays 180, Reject) and the owner submits evaluation-set B-0082 (INV-2025-34586, invoice date 2025-04-01). 053 now closes on the Accepted portal submission alone (checklist Q, sample B-0050).
+
+## 2026-11-24: owner checklist Q, first run (Failed)
+
+- Submission 3580485b-0a42-4366-93bd-3b81b2fc6a86 (SPA channel, matter MAT-000113, firm Morrison Foerster LLP) ended **Failed**. The job was dead-lettered after one attempt, with reason code `record_owner_restricted_content_team_unresolved`. The same code failed an internal submission on the same matter on 2026-11-16.
+- Cause: how that matter is set up on dev. The detail went to uac-r2 by message, not into this public note. The firm's other matters (for example PAT-792345, which took an internal invoice on 2026-11-23) are not affected. Next: the owner re-runs Q on one of them.
+- Firm invoice number: the submission stored `invoice 2026024892)` as both firm invoice number and PO number, and the tracking number became `invoice 2026024892).1`. The portal stores exactly what is typed into those two fields; this is not an extraction defect.
+- Two portal result-screen defects were found and reported to the owner. (1) The final step's title is always "Invoice received", with a success icon, even when the outcome is Failed (`InvoiceSubmissionWizard.tsx` :494). (2) The Failed message tells the firm to "Submit it again", even when the cause is a permanent refusal that a resubmission repeats.
+- uac-r2 (2026-11-24): the refusal is expected access behaviour, not an eBilling defect. The create-path gap behind it is filed as #3047 (uac-r2's). Re-homing the affected dev records is a live data write that uac-r2 is raising with the owner. The 'Submit it again' wording is ours to fix.

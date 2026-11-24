@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss029" project="ebilling-r1">
+  <metadata>
+    <title>ISS-029 (#2880): a line decision repeated with the same decisionId but other content answers 409 and writes nothing, instead of a 503 "repeat to complete" that can never complete</title>
+    <phase>Issue fix; filed 2026-11-17 from the 095f-2d1 Opus review</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the Invoice Review line-decision write path (.cs): line fields, totals, Signal close and Decision Record.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Write-path ordering and idempotency: the check must run before any write, and a true repeat of the same content must still complete.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2d1</deps>
+    <tags>bff-api, api, dataverse, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-029. A line decision repeated with the same decisionId but another reason, amount or note is refused by the Decision Record writer as other content. The route answers 503 ebilling.decision.incomplete (failedStep record, detail "Repeat the same decision ... to complete it"), but repeating never succeeds. Each refused repeat rewrites the line's reviewed fields, recalculates invoice totals, skips the line's Signal close and counts a writer failure; in a multi-line call the remaining lines take the new content, so the lines disagree.
+Entry points: src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs (the record loop ~802-825, Incomplete(..., "record", ...)); Api/Finance/InvoiceLineReviewEndpoints.cs (route description). Reference: how the adjustment path answers ebilling.adjustment.id_reused (grep it), and DEF-056 in the same file (a repeat after the invoice leaves In Review) which this task must not make worse.</prompt>
+
+  <constraints>
+    <constraint>A repeat whose decisionId already has a Decision Record with other content (another decision, reason, amount or note for any line in the call) is refused 409 with code ebilling.decision.id_reused, BEFORE any line field, total, Signal or Decision Record write. Mirror the adjustment path's id_reused shape. Decide "other content" with the same comparison the Decision Record writer uses (reuse it; do not write a second definition of equality).</constraint>
+    <constraint>A repeat of the same content still completes whatever the first call left unfinished (today's behaviour, including the existing 503 for a retryable fault). A first call (no record for the decisionId) is unchanged. 503 stays only for retryable faults; a read fault in the new pre-check is a retryable 503, never a 409 and never a write.</constraint>
+    <constraint>No new endpoint, service, DI registration, package or Dataverse column. If the pre-check needs a read the service does not yet have, add it to the existing reader the service already uses, and justify it in the notes (root CLAUDE.md §11: existing / extension / cost of doing nothing).</constraint>
+    <constraint>Update the route description in InvoiceLineReviewEndpoints.cs and any operator or architecture doc that lists the route's answers (grep ebilling.decision.incomplete under docs/).</constraint>
+    <constraint>Tests, failing before and passing after: same decisionId + other reason → 409 id_reused and no line, total, Signal or record write (assert the fakes saw no write); same decisionId + other amount and + other note likewise; multi-line call where one line differs → 409 and no line written; same content repeat → completes as today; pre-check read fault → 503 and no write. Run only the affected test classes with --filter and -- xUnit.MaxParallelThreads=4. Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests.</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings. Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss029-line-decision-id-reused.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A repeat with other content answers 409 ebilling.decision.id_reused and writes nothing.</criterion>
+    <criterion testable="true">A repeat with the same content completes as before.</criterion>
+    <criterion testable="true">A fault in the pre-check answers 503 and writes nothing.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
