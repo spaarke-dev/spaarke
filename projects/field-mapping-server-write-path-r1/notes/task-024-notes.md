@@ -121,3 +121,14 @@ Merged into the work branch at 869c6cf494 (`--no-ff` of `task/fm-024` fca6adcf22
 - the live check per the POML ui-tests, including the SmartTodo launch and the To Do widget refetch, with the rollback bundle noted.
 
 The Console's in-app To Do wizard and the Report Card and Analysis follow-ons change only when their own bundles are rebuilt.
+
+## Deploy to dev (2026-11-24 01:35Z, owner's go in this session)
+
+- PR #3031 merged to master at 57a68b06c5. Built from a clean detached worktree at that commit: shared libraries, then `CreateTodoWizard` (`npm run build`, vite caches cleared). The bundle has no `applyFieldMappings` and does have `mappingSourceEntity`.
+- Deployed `sprk_createtodowizard` (id 81bda2e0-d523-f111-88b4-7ced8d1dc988) with `Deploy-WebResourceInline.ps1`, then published it.
+- Read back: the live SHA-256 `C29DA862…B300C` matches the build. The resource is in SpaarkeMaster.
+- The previous live bundle (modified 2026-11-23 21:35Z, SHA-256 `FEC6FB95…78BA7`) is saved in this session's scratchpad, which does not last. It already had no `applyFieldMappings`, so the copy that was live before was not the old client-mapping build.
+- Rollback: rebuild from `57a68b06c5^1` (master before #3031) and redeploy with the same script.
+- Only this web resource changed. The Console's in-app To Do wizard (`sprk_spaarkeai`) and the Report Card and Analysis follow-ons change only when their own bundles are deployed.
+
+**Left (AC5):** the live check in the owner's Chrome.
