@@ -40,14 +40,22 @@ Instruction, starter, description and icon edits may go as a version bump on the
 - treat a production action change as a breaking release;
 - plan it with the customer admin, including a fallback to publishing under a new id.
 
-**V1 result (2026-11-24) [verified]: an admin-center update can leave an agent's action unloaded, and further updates don't recover it.**
-- Steps: `d38f8df8` 1.1.0 ✅ → update 1.1.1 (URL gained `?pkg=1.1.1`) ❌ "action not exposed", no request reached the BFF → update 1.1.2 (byte-for-byte the 1.1.0 content) ❌, same.
-- Whether *any* action-changing update does this (H1), or only the query string did (H2), is open; discriminators are in the G8 README run 3.
-- **The rule until proven otherwise:**
-  - **Never change an action through an update.** The action's URL, auth and `reference_id` are frozen for the life of an app id.
-  - Change tools behind a stable URL instead: that is BR-4 plus **dynamic discovery**, which makes V2 the critical test.
-  - A genuine action change (new URL or new auth) ships as a **new app id**: a new agent, with the old one retired.
-- **No query strings in action URLs** until H2 is ruled out. Log the package version another way, for example a request header if Copilot can send one (unknown), or the tool-call metadata.
+**V1 result (2026-11-24) [verified]: an update that changes the action takes the action offline for a while, then it loads.**
+- **Steps on `d38f8df8`:**
+  - 1.1.0 ✅.
+  - Update 1.1.1 (URL gained `?pkg=1.1.1`): ❌ "action not exposed" when tested about 25 minutes after upload; no request reached the BFF.
+  - Update 1.1.2 (byte-for-byte the 1.1.0 content): ❌ about 3 minutes after upload, then **✅ about 40 minutes after upload** (17:36Z).
+- **Two lags stack:**
+  - **The user's installed copy** lags the catalog version (re-adding the agent forces it).
+  - **The action** then becomes available only after a delay, measured here as under 40 minutes.
+- A first upload on a fresh id loaded at once in our runs. Only updates showed the delay.
+- 802fd9cc's "permanent" failure was most likely five updates, each tested within minutes, so each probably restarted the delay. Hypothesis, untested.
+- **Open:** whether `?pkg=` query strings work (H2). 1.1.1 was never given 40 minutes.
+- **The rules this gives:**
+  - **An action change via update is possible, but it causes an outage.** Plan it as a maintenance window: the action is unavailable for up to about 40 minutes (one observation), on top of the client lag.
+  - **Wait at least an hour before judging any update**, and never stack updates to "fix" one that hasn't loaded yet.
+  - **Prefer stable actions:** a frozen URL, auth and `reference_id`, with tool changes through the server (BR-4 plus **dynamic discovery**, V2). Then customers rarely need an action-changing update at all.
+  - **No query strings in action URLs** until H2 is tested (V1a).
 
 **BR-4. Keep action changes rare by keeping the package thin.** The package carries:
 - the agent's identity, instructions and starters;
@@ -168,7 +176,7 @@ The design covers this in §3.13. For distribution, the differences from 3.3 are
 
 | # | Test | Settles | Cost |
 |---|---|---|---|
-| **V1** | Update the working agent (`d38f8df8`) with an action change (done as a URL change: `?pkg=1.1.1`) | BR-3: are updates with action changes safe in production? | **❌ 2026-11-24:** 1.1.1 lost the action; 1.1.2 (= 1.1.0) did not restore it. See BR-3 |
+| **V1** | Update the working agent (`d38f8df8`) with an action change (done as a URL change: `?pkg=1.1.1`) | BR-3: are updates with action changes safe in production? | **⚠️ 2026-11-24:** the action went offline after each update and came back about 40 minutes after 1.1.2. Updates work, with an outage. See BR-3 |
 | **V1a / V1b** | (a) A fresh id whose first upload uses a `?pkg=` URL. (b) A fresh id, then an update changing only the description | Separate H1 from H2; are non-action updates safe? | 10 minutes each; 2 fresh ids |
 | **V2** | A fresh-id agent with **dynamic discovery + OAuth**, through the org catalog, as a user who has not signed in yet | BR-5: can new tools reach installed agents without package updates? | 10 minutes |
 | **V3** | An agent package uploaded in a **second tenant**, using a Spaarke-tenant auth config set to "Any Microsoft 365 organization" | Model 1 distribution (3.2) | Needs a second tenant |

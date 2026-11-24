@@ -189,8 +189,11 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
     - **If it works:** updates do carry action changes (1.1.0 → 1.1.1 → 1.1.2 each changed the URL), and **query strings break MCP actions** (H2). BR-3 holds, plus a new rule: no query string in action URLs.
     - **If it still says not exposed:** an action broken on an id stays broken through updates (H1, as 802fd9cc). BR-3 fails: action changes need a fresh id.
   - **Run 3 result (~16:55Z): ❌. 1.1.2 (identical to working 1.1.0) also says "not exposed".** Copilot shows 1.1.2; App Insights shows no MCP request of any kind, and no 401/403, from 16:52Z on.
-    - **Established:** once an update leaves an action unloaded on an app id, **later updates do not repair it**, even an exact copy of the working version. That is the 802fd9cc pattern, now reproduced from a known-good start.
-    - **Not yet separated:** whether 1.1.1 broke because **any action-changing update** breaks the action (H1), or because of the `?pkg=` query string (H2). Either way, admin-center updates that touch the action are unsafe today.
+    - ~~Established: later updates do not repair it.~~ **Wrong, corrected the same hour (see Run 4).**
+  - **Run 4 (~17:36Z): ✅ 1.1.2 works.** About 40 minutes after the 1.1.2 upload (~16:53Z), and roughly 40 minutes after the failed run 3, the agent rendered the widget (owner screenshot). The BFF logged Sydney `tools/call` `spaarke_list_decision_page` at 17:36:41 and 17:37:03, on the plain URL. `show_decisions` was missed by the 25% sampling.
+    - **Corrected finding:** after an update that changes the action, the action is **unavailable for a while**, then loads. Observed: still unavailable about 3 minutes after upload (run 3, plus 1.1.1 at about 25 minutes), working at about 40 minutes. It is a **delay, not a permanent break**.
+    - **Likely also explains 802fd9cc:** five updates in close succession, each tested within minutes, so each probably restarted the delay. That is a hypothesis, not tested.
+    - **Still open:** whether 1.1.1 (`?pkg=`) would also have loaded given time (H2). It was tested only about 25 minutes after upload, then replaced.
     - **Discriminators, if wanted (each needs a fresh id and an R4 row):**
       - **(a)** a fresh id whose **first** upload uses the `?pkg=` URL. If it works, query strings are fine and H1 holds.
       - **(b)** a fresh id, then an update that changes **only** the description or version. If the action survives, non-action updates are safe.
