@@ -1,6 +1,9 @@
 using System.Net.Http.Headers;
 using System.Text;
+using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace Sprk.Bff.Api.Tests.Api.Finance;
 
@@ -32,11 +35,49 @@ internal static class MalformedMultipartBodies
         {
             var source = new CancellationTokenSource();
             context.RequestAborted = source.Token;
-            context.Request.Body = new IoFaultBody(abandoned ? source : null);
+            context.Request.Body = new IoFaultBody(abandoned ? source : null, reset: false);
         };
     }
 
-    private sealed class IoFaultBody(CancellationTokenSource? cancelOnRead) : Stream
+    /// <summary>
+    /// ISS-043 fix round 1 (K2): the client reset the connection mid-body. The first read throws Kestrel's
+    /// <see cref="ConnectionResetException"/> (an <see cref="IOException"/>) while the request's token is NOT cancelled; it is not a malformed
+    /// body and must reach the server as before, never a 400.
+    /// </summary>
+    internal static Action<HttpContext> ApplyConnectionReset()
+    {
+        return context =>
+        {
+            context.RequestAborted = new CancellationTokenSource().Token;
+            context.Request.Body = new IoFaultBody(null, reset: true);
+        };
+    }
+
+    /// <summary>The message of the IOException the fault body throws: a test that it never reaches a log or a response looks for this text.</summary>
+    internal const string FaultMessage = "Unexpected end of Stream, the content may have already been read by another component.";
+
+    /// <summary>ISS-043 fix round 1 (F1): records what a host logs (level, formatted message, exception), to assert the Warning a swallowed body fault leaves.</summary>
+    internal sealed class LogCapture : ILoggerProvider
+    {
+        public ConcurrentQueue<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new Logger(this);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Logger(LogCapture owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                owner.Entries.Enqueue((logLevel, formatter(state, exception), exception));
+        }
+    }
+
+    private sealed class IoFaultBody(CancellationTokenSource? cancelOnRead, bool reset) : Stream
     {
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -54,7 +95,7 @@ internal static class MalformedMultipartBodies
         private IOException Fault()
         {
             cancelOnRead?.Cancel();
-            return new IOException("Unexpected end of Stream, the content may have already been read by another component.");
+            return reset ? new ConnectionResetException("The client reset the connection.") : new IOException(FaultMessage);
         }
     }
 }

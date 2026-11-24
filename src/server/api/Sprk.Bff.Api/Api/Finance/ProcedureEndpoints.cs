@@ -544,11 +544,16 @@ public static class ProcedureEndpoints
         {
             return FileMissing("The request body is not valid multipart/form-data.");
         }
-        catch (IOException) when (!ct.IsCancellationRequested)
+        catch (IOException ex) when (!ct.IsCancellationRequested && ex is not Microsoft.AspNetCore.Connections.ConnectionResetException)
         {
             // ISS-043: a truncated multipart body or part headers, or a body that is not multipart under a multipart content type, ends the
             // parser's stream early with an IOException. It is a client error too (the 400 above), unless the client abandoned the request
-            // (its token is cancelled): that one passes through like the cancellation it is, never a 400 logged at Error.
+            // (its token is cancelled) or reset the connection (ConnectionResetException): those pass through like the cancellation they are,
+            // never a 400 logged at Error. Fix round 1 (F1): the same IOException type is a server-side temp-disk fault when the parser
+            // buffers a file part over 64 KB, so the 400 is logged at Warning with the exception type and HResult only (never the message,
+            // which can echo request content).
+            logger.LogWarning(
+                "A multipart request body could not be read ({ExceptionType}, HResult 0x{HResult:X8}); answered 400.", ex.GetType().Name, ex.HResult);
             return FileMissing("The request body is not valid multipart/form-data.");
         }
 

@@ -77,6 +77,9 @@ public sealed class RateCardImportEndpointsTests
         /// <summary>ISS-043: replaces the request body and token before the route runs (<see cref="MalformedMultipartBodies.Apply"/>).</summary>
         public Action<Microsoft.AspNetCore.Http.HttpContext>? OnRequest { get; set; }
 
+        /// <summary>ISS-043 fix round 1 (F1): what the host logged.</summary>
+        public MalformedMultipartBodies.LogCapture Warnings { get; } = new();
+
         public Host()
         {
             Service = new Mock<RateCardImportService>(
@@ -90,6 +93,7 @@ public sealed class RateCardImportEndpointsTests
             var host = new Host();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
+            builder.Logging.AddProvider(host.Warnings);
             builder.Services
                 .AddAuthentication(o =>
                 {

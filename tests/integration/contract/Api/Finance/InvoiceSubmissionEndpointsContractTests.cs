@@ -81,6 +81,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     /// <summary>ISS-043: replaces the request body and token before the route runs (<see cref="MalformedMultipartBodies.Apply"/>).</summary>
     private Action<Microsoft.AspNetCore.Http.HttpContext>? _onRequest;
 
+    /// <summary>ISS-043 fix round 1 (F1): what the host logged.</summary>
+    private readonly MalformedMultipartBodies.LogCapture _warnings = new();
+
     public InvoiceSubmissionEndpointsContractTests()
     {
         // The submission service reads the firm links through the SAME double the filter and the picker use, so one set of links
@@ -98,6 +101,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(_warnings);
         builder.Services
             .AddAuthentication(o =>
             {
@@ -309,6 +313,36 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
         (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FileRequired);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-043 fix round 1 (F1): the 400 for a body stream fault is logged at Warning with the exception type and HResult, never the message, on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_body_stream_fault_logs_a_warning_without_the_exception_message(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.Apply(abandoned: false);
+
+        var response = await PostAsync(external, Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        var entry = _warnings.Entries.Where(e => e.Message.Contains("multipart request body could not be read")).Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(nameof(IOException)).And.Contain("HResult");
+        entry.Message.Should().NotContain(MalformedMultipartBodies.FaultMessage, "the parser's message can echo request content");
+        entry.Exception.Should().BeNull("the exception object (and so its message) is not logged");
+    }
+
+    [Theory(DisplayName = "ISS-043 fix round 1 (K2) must-not-fire: a body that fails with a ConnectionResetException (token not cancelled) is not answered as a 400, on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_connection_reset_is_not_a_400(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.ApplyConnectionReset();
+
+        var act = async () => await PostAsync(external, Form());
+
+        await act.Should().ThrowAsync<Microsoft.AspNetCore.Connections.ConnectionResetException>();
         NothingWritten();
     }
 
