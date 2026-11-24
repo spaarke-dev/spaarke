@@ -138,19 +138,19 @@ describe('item 4: a pin the route would refuse never reaches the removal', () =>
     await waitFor(() => expect(next(d)).toBeEnabled());
   });
 
-  it('the Reason fields stop at the server\'s 2000 characters', async () => {
+  it('the Reason fields do not cut a paste at the server\'s 2000 characters (ISS-027: no maxlength; ReasonPaste.test.tsx holds the limit)', async () => {
     renderHarness();
     const proc = await openProcedure('p-ocg', 'Acme Outside Counsel Guidelines');
     await toChoices(proc);
     chooseRadio(proc, /^Exclude here/);
-    expect(within(proc).getByLabelText(/^Reason/)).toHaveAttribute('maxlength', '2000');
+    expect(within(proc).getByLabelText(/^Reason/)).not.toHaveAttribute('maxlength');
     fireEvent.click(button(proc, 'Cancel'));
     await waitFor(() => expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument());
 
     const rule = await openRule('r-block', 'BLOCK · Block billing');
     await toChoices(rule);
     chooseRadio(rule, /^Exclude here/);
-    expect(within(rule).getByLabelText(/^Reason/)).toHaveAttribute('maxlength', '2000');
+    expect(within(rule).getByLabelText(/^Reason/)).not.toHaveAttribute('maxlength');
   });
 });
 
