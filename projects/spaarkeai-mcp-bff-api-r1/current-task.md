@@ -8,7 +8,7 @@
 ## Quick Recovery (READ THIS FIRST)
 
 **NOW: task 042 (live E2E as the test user), IN PROGRESS, started 2026-11-24.** POML `tasks/042-connector-runbooks-live-e2e.poml` (STANDARD, prescriptive, sonnet@high; Step 9.5 runs because of the `integration-test` tag).
-- **Dev:** BFF `0362599b94` (master: MCP on, no spike; #3043 maximized review), live since ~05:21:45Z. The "Spaarke MCP" Dev Portal connector points at `/mcp/legal-operations`, and the 040 skills-only package "Spaarke" is uploaded. So POML step 1 is already in place, from 040/041.
+- **Dev:** BFF `20129e985c` (master: MCP on, no spike; adds ontology #3068 Administrative-account warning), live since 21:36:18Z 2026-11-24 (uac-r2, owner go; 5 tools, widget SHA matches dist, widget source unchanged). Previous `0362599b94` (#3043 maximized review, live ~05:21:45Z) is the rollback. NFR-01: mark the restart window (first calls after 21:36Z) and report with and without it. The "Spaarke MCP" Dev Portal connector points at `/mcp/legal-operations`, and the 040 skills-only package "Spaarke" is uploaded. So POML step 1 is already in place, from 040/041.
 - **Test user:** `demo@…` (licensed, non-admin, Microsoft 365 Copilot licence). The owner signs in as them; the agent never enters credentials.
 - **Steps done:** 1 (already in place).
 - **Next:** step 2, the seed check. The Decide lane is "every open Signal the caller can read", so only the test user's own lane count answers it. Then steps 3–5 in Cowork and Chat, by the run sheet given to the owner.
