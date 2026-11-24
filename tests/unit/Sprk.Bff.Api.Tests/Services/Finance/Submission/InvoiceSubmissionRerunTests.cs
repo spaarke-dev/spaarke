@@ -654,6 +654,53 @@ public sealed partial class InvoiceSubmissionRerunTests
         changed.Processor.DocumentLoads.Should().Be(0);
     }
 
+    /// <summary>A world whose line 0 is re-coded (its code set changed) and whose task lookup names a row from before.</summary>
+    private static async Task<(World World, Guid Before)> ReCodedLineWorld()
+    {
+        var world = await World.SeedAsync();
+        world.FirmCodeSet = FakeCodeSet;
+        var before = Guid.Parse("05100000-0000-4000-8000-0000000b0f0e");
+        var line0 = world.Row(world.LineIds[0]);
+        var extraction = JsonNode.Parse(line0.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence))!.AsObject();
+        extraction["coding"]!["codeSetId"] = Guid.NewGuid().ToString("D");
+        line0[InvoiceSubmissionPersister.LineExtractionConfidence] = extraction.ToJsonString();
+        line0[InvoiceSubmissionPersister.LineTaskCode] = new EntityReference("sprk_billingcode", before);
+        return (world, before);
+    }
+
+    [Fact(DisplayName = "ISS-051 (fix round 1, F2): a line the re-run re-codes gets the new code's row on its task lookup")]
+    public async Task AReCodedLine_GetsTheNewCodesRow_OnItsLookup()
+    {
+        var (world, before) = await ReCodedLineWorld();
+        var newTask = Guid.Parse("05100000-0000-4000-8000-0000000b0a11");
+        var newActivity = Guid.Parse("05100000-0000-4000-8000-0000000b0a12");
+        world.Processor.Coding.CodeRows = (newTask, newActivity);
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.RecodedLines.Should().Be(1);
+        var row = world.Row(world.LineIds[0]);
+        row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineTaskCode)!.Id.Should().Be(newTask).And.NotBe(before);
+        row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineActivityCode)!.Id.Should().Be(newActivity);
+        JsonNode.Parse(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence))!["coding"]!["task"]!
+            [InvoiceSubmissionPersister.CodeIdMember]!.GetValue<string>().Should().Be(newTask.ToString("D"));
+    }
+
+    [Fact(DisplayName = "ISS-051 (fix round 1, F2): a line the re-run re-codes to no code has its task lookup cleared")]
+    public async Task AReCodedLineWithNoCode_HasItsLookupCleared()
+    {
+        var (world, _) = await ReCodedLineWorld();
+        world.Processor.Coding.NotReturnedKeys = new HashSet<string> { "0" };
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.RecodedLines.Should().Be(1);
+        world.Row(world.LineIds[0]).GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineTaskCode)
+            .Should().BeNull("the re-coded line has no task code, so the lookup no longer names the row from before");
+    }
+
     [Fact(DisplayName = "ISS-051: the re-run sets a line's code lookup from the row its stored coding names, clears a lookup with no code, and leaves a code stored with no row as it is")]
     public async Task TheRerun_KeepsTheCodeLookupsInStepWithTheStoredCoding()
     {
