@@ -21,7 +21,7 @@
 ## Open owner items
 
 1. Step-0 screenshots (runbook); name an owner for D5 "Spaarke Dataverse MCP"; decide whether D1 "Spaarke AI" stays.
-2. Rules: approve R1 and R3–R7 now, R2 later? R8? Q2 (R7), Q3 (customer tenants).
+2. Rules: owner decides all rules together after G8-P2 (2026-11-24). Also Q2 (R7), Q3 (customer tenants).
 3. The seven inventory screenshots (end of `notes/tenant-inventory.md`).
 
 ## Waiting on other sessions

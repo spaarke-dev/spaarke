@@ -71,6 +71,6 @@ Tests S-1 to S-4 are in `copilot-structure.md` §4.
 
 ## Open questions for the owner
 
-- **Q1.** Approve R1 and R3–R7 now, and leave R2 open until S-2/S-3? (Owner 2026-11-23: the structure must be clearer before the rules are confirmed.)
+- **Q1.** Approve the rules? **Owner 2026-11-24: wait for G8-P2** (agents part of R2 and R1′), then decide all rules together. T10 (skills part of R2) passed 2026-11-24.
 - **Q2.** R7 is new (not in the original brief). Keep or drop?
 - **Q3.** Do these rules also bind customer tenants (provisioning, `/provision-environment`), or only the dev tenant for now?
