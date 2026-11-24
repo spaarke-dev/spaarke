@@ -117,13 +117,27 @@ public class ComposeIdentityKeyHealthCheck : IHostedService, IHealthCheck
             // Warning, not Error: the platform still saves existing documents (the item-2 heal).
             // The message names the remedy because the person reading a startup log at 3am is not
             // going to go and find this issue.
+            if (probe.Status is null)
+            {
+                // The metadata was read and the key is not on the table: an incomplete import or a
+                // deleted key. Same case, same remedy as CheckHealthAsync reports (#3030: this line used
+                // to say "unreadable" and send the operator to the dedupe script, which cannot help).
+                _logger.LogWarning(
+                    "ComposeIdentityKeyHealthCheck DEGRADED: {Key} was NOT FOUND on {Entity}. Creating NEW " +
+                    "Compose documents will fail; saves of existing documents are being self-healed by column " +
+                    "query (#781 item 2) and will succeed. Remedy: re-import the Compose solution, then run " +
+                    "scripts/Verify-ComposeIdentityKey.ps1.",
+                    IdentityKeyLogicalName, DocumentEntityLogicalName);
+                return;
+            }
+
             _logger.LogWarning(
                 "ComposeIdentityKeyHealthCheck DEGRADED: {Key} = {Status} (expected Active). " +
                 "Creating NEW Compose documents will fail; saves of existing documents are being " +
                 "self-healed by column query (#781 item 2) and will succeed. Remedy: run " +
                 "scripts/Repair-ComposeIdentityKey.ps1 (report mode first) to dedupe " +
                 "sprk_graphitemid and reactivate the key.",
-                IdentityKeyLogicalName, probe.Status ?? "unreadable");
+                IdentityKeyLogicalName, probe.Status);
         }
         catch (OperationCanceledException)
         {
@@ -213,6 +227,24 @@ public class ComposeIdentityKeyHealthCheck : IHostedService, IHealthCheck
     }
 
     /// <summary>
+    /// The metadata request the probe sends. <b>It must ask for <see cref="EntityFilters.Attributes"/>.</b>
+    /// <see cref="EntityFilters.Entity"/> alone returns an EMPTY <c>Keys</c> collection, so a probe built on it
+    /// reports every key as "not found" whatever its real state. Verified live on <c>spaarkedev1</c>
+    /// (2026-11-24, #3030): <c>RetrieveEntity</c> for <c>sprk_document</c> returned 0 keys with <c>Entity</c>,
+    /// and all 3 keys (including <c>sprk_graphitemid_uk</c> = Active) with <c>Attributes</c> or <c>All</c>.
+    /// Until that fix this check logged DEGRADED at every start in every environment.
+    /// <c>Attributes</c> is the narrowest filter that carries the keys; <c>All</c> also pulls privileges and
+    /// relationships, which the probe does not need. Retrieved as-if-published, so a key that has just been
+    /// reactivated is visible without waiting for a publish.
+    /// </summary>
+    internal static RetrieveEntityRequest BuildKeyStatusRequest() => new()
+    {
+        LogicalName = DocumentEntityLogicalName,
+        EntityFilters = EntityFilters.Attributes,
+        RetrieveAsIfPublished = true,
+    };
+
+    /// <summary>
     /// Reads <c>sprk_graphitemid_uk</c>'s <c>EntityKeyIndexStatus</c> from Dataverse entity metadata.
     /// <c>protected virtual</c> so tests subclass it with a canned status instead of standing up a
     /// <c>ServiceClient</c> — the same seam <c>MembershipFieldDiscoveryService</c> established, and
@@ -229,16 +261,7 @@ public class ComposeIdentityKeyHealthCheck : IHostedService, IHealthCheck
                 null, "Dataverse ServiceClient is not ready (test host, local run, or MI propagation lag)"));
         }
 
-        // EntityFilters.Entity carries the entity's Keys collection. Retrieved as-if-published so a
-        // key that has just been reactivated is visible without waiting for a publish.
-        var request = new RetrieveEntityRequest
-        {
-            LogicalName = DocumentEntityLogicalName,
-            EntityFilters = EntityFilters.Entity,
-            RetrieveAsIfPublished = true,
-        };
-
-        var response = (RetrieveEntityResponse)serviceClient.Execute(request);
+        var response = (RetrieveEntityResponse)serviceClient.Execute(BuildKeyStatusRequest());
         var key = response.EntityMetadata?.Keys?
             .FirstOrDefault(k => string.Equals(k.LogicalName, IdentityKeyLogicalName, StringComparison.OrdinalIgnoreCase));
 

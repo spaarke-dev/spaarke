@@ -6,7 +6,8 @@
  *    and in master-detail; with choices made it asks before discarding
  *  - however the wizard closes, the lane is read again in place; a Work Item found gone says so without asking for anything impossible,
  *    and the lane read on closing no longer lists it
- *  - closing restores the display mode the frame was in before the wizard asked for the room (not always inline)
+ *  - the widget never asks the host for a display mode, opening or closing (owner decision 2026-11-24: the wizard is the in-frame dialog,
+ *    inline over the lane); closing the dialog returns to the lane cards
  *  - master-detail in a frame too narrow to sit beside the lane: the decision comes BEFORE the lane, takes the focus and is scrolled into view
  *  - under React StrictMode (the dev build) the wizard still opens and stays open
  */
@@ -28,9 +29,10 @@ import {
 } from './wizardHarness';
 
 const items = () => oneClickItems(2);
-const MODES: ReadonlyArray<readonly [string, 'fullscreen' | 'inline']> = [
-  ['the dialog', 'fullscreen'],
-  ['master-detail', 'inline'],
+// [name, dialogFails]: the dialog is the first place; master-detail is reached when the dialog fails.
+const MODES: ReadonlyArray<readonly [string, boolean]> = [
+  ['the dialog', false],
+  ['master-detail', true],
 ];
 
 beforeEach(() => {
@@ -42,7 +44,7 @@ describe('Escape closes the wizard without writing', () => {
   it.each(MODES)(
     '%s: nothing is committed, the lane is read again and the focus returns to the row',
     async (_n, mode) => {
-      const host = wizardHost(items(), { displayMode: mode });
+      const host = wizardHost(items(), { dialogFails: mode });
       mount(host);
       await openItem(1);
       const readsBefore = host.callsTo(PAGE_TOOL).length;
@@ -60,7 +62,7 @@ describe('Escape closes the wizard without writing', () => {
   it.each(MODES)(
     '%s: with a choice made it asks before discarding, and Keep deciding keeps the wizard',
     async (_n, mode) => {
-      const host = wizardHost(items(), { displayMode: mode });
+      const host = wizardHost(items(), { dialogFails: mode });
       mount(host);
       await openItem(1);
       await toLastActionStep();
@@ -85,7 +87,7 @@ describe('Escape closes the wizard without writing', () => {
 
 describe('the lane is read again whenever the wizard closes', () => {
   it.each(MODES)('%s: closing with Close reads it again, in place and without the loading state', async (_n, mode) => {
-    const host = wizardHost(items(), { displayMode: mode });
+    const host = wizardHost(items(), { dialogFails: mode });
     mount(host);
     await openItem(1);
     const readsBefore = host.callsTo(PAGE_TOOL).length;
@@ -99,7 +101,7 @@ describe('the lane is read again whenever the wizard closes', () => {
 
   it('an item found gone says so without asking for anything the user cannot do, and closing reads the lane without it', async () => {
     const host = wizardHost(items(), {
-      displayMode: 'inline',
+      dialogFails: true,
       // The plan tool reads the plan but the Work Item has left the caller's lanes (decided elsewhere): no row, no row error.
       plan: (signalId, item) => ({
         structuredContent: { plan: { ...item.plan, signalId }, suppression: null, row: null },
@@ -124,7 +126,7 @@ describe('the lane is read again whenever the wizard closes', () => {
   });
 
   it('a Work Item that has left the lane when it is opened says the list has been read again, and reads it', async () => {
-    const host = wizardHost(items(), { displayMode: 'inline' });
+    const host = wizardHost(items(), { dialogFails: true });
     mount(host);
     await screen.findByTestId('decide-lane');
     const row = rowOf(1);
@@ -140,7 +142,7 @@ describe('the lane is read again whenever the wizard closes', () => {
   });
 });
 
-describe('closing restores the display mode from before', () => {
+describe('the display mode is never requested (owner decision 2026-11-24)', () => {
   const withMode = (displayMode?: string) => ({
     hostContext: {
       theme: 'light',
@@ -149,40 +151,40 @@ describe('closing restores the display mode from before', () => {
     },
   });
 
-  it('a frame that was inline goes back to inline', async () => {
-    const host = wizardHost(items(), { displayMode: 'fullscreen' });
+  it.each(['inline', 'pip', 'fullscreen', undefined])(
+    'a frame that is %s: opening and closing the dialog ask the host for no display mode, and the dialog is inline over the lane',
+    async frameMode => {
+      const host = wizardHost(items());
+      mount(host, withMode(frameMode));
+      await openItem(1);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'dialog');
+      expect(lane()).toBeInTheDocument();
+      fireEvent.click(button('Close'));
+      await waitFor(() => expect(screen.queryByTestId('step-found')).toBeNull());
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(host.requestDisplayMode).not.toHaveBeenCalled();
+    }
+  );
+
+  it('Cancel on the last step closes the dialog back to the lane cards, with no display-mode call', async () => {
+    const host = wizardHost(items());
     mount(host, withMode('inline'));
     await openItem(1);
-    fireEvent.click(button('Close'));
-    await waitFor(() => expect(host.requestDisplayMode).toHaveBeenLastCalledWith('inline'));
-  });
+    await toLastActionStep();
+    fireEvent.click(button('Next'));
+    await screen.findByTestId('step-confirm');
 
-  it('a frame that was picture-in-picture goes back to it, not to inline', async () => {
-    const host = wizardHost(items(), { displayMode: 'fullscreen' });
-    mount(host, withMode('pip'));
-    await openItem(1);
-    expect(host.requestDisplayMode).toHaveBeenLastCalledWith('fullscreen');
-    fireEvent.click(button('Close'));
-    await waitFor(() => expect(host.requestDisplayMode).toHaveBeenLastCalledWith('pip'));
-  });
+    fireEvent.click(button('Cancel'));
+    // A choice was made: the shell asks before discarding.
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard and close' }));
 
-  it('a frame that was already fullscreen stays fullscreen', async () => {
-    const host = wizardHost(items(), { displayMode: 'fullscreen' });
-    mount(host, withMode('fullscreen'));
-    await openItem(1);
-    host.requestDisplayMode.mockClear();
-    fireEvent.click(button('Close'));
-    await waitFor(() => expect(screen.queryByTestId('step-found')).toBeNull());
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await waitFor(() => expect(screen.queryByTestId('step-confirm')).toBeNull());
+    await waitFor(() => expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'idle'));
+    expect(lineIds()).toHaveLength(3);
+    await waitFor(() => expect(document.activeElement).toBe(rowOf(1)));
+    expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(0);
     expect(host.requestDisplayMode).not.toHaveBeenCalled();
-  });
-
-  it('a host that does not say what mode it is in gets inline, as before', async () => {
-    const host = wizardHost(items(), { displayMode: 'fullscreen' });
-    mount(host, withMode());
-    await openItem(1);
-    fireEvent.click(button('Close'));
-    await waitFor(() => expect(host.requestDisplayMode).toHaveBeenLastCalledWith('inline'));
   });
 });
 
@@ -204,7 +206,7 @@ describe('master-detail in a frame too narrow to sit beside the lane', () => {
 
   it('stacked (600 px): the decision comes before the lane, takes the focus and is scrolled into view', async () => {
     setWidth(600);
-    const host = wizardHost(items(), { displayMode: 'inline' });
+    const host = wizardHost(items(), { dialogFails: true });
     mount(host);
     await screen.findByTestId('decide-lane');
     const laneNode = lane();
@@ -220,7 +222,7 @@ describe('master-detail in a frame too narrow to sit beside the lane', () => {
 
   it('side by side (1100 px): the lane stays first, and the decision still takes the focus', async () => {
     setWidth(1100);
-    const host = wizardHost(items(), { displayMode: 'inline' });
+    const host = wizardHost(items(), { dialogFails: true });
     mount(host);
     await screen.findByTestId('decide-lane');
     fireEvent.click(rowOf(1));
@@ -233,7 +235,7 @@ describe('master-detail in a frame too narrow to sit beside the lane', () => {
 
 describe('under React StrictMode (the dev build)', () => {
   it.each(MODES)('%s: the wizard opens and stays open, and records once', async (_n, mode) => {
-    const host = wizardHost(items(), { displayMode: mode });
+    const host = wizardHost(items(), { dialogFails: mode });
     mount(host, {}, true);
     await openItem(1);
     // Past any effect's second run: a wizard that is going to close itself has done so by now.

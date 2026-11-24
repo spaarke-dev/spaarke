@@ -327,7 +327,7 @@ const REASON_FIELD: Readonly<Record<string, { field: string; message: string }>>
   },
   [REASON_DUPLICATE_ACTION]: {
     field: 'decisionPlan',
-    message: 'Each code may appear once, in actions or in next steps, never twice in one list and never in both.',
+    message: 'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.',
   },
   [REASON_POLICY_CODE_TAKEN]: { field: 'policyCode', message: 'Another rule already uses this code.' },
   [REASON_SCOPE_SUBJECT_MISMATCH]: {

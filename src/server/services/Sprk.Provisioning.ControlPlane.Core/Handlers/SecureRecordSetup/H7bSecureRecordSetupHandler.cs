@@ -87,8 +87,9 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// 9 = task 268: S26 — the lock on the invoice amounts and firm (ebilling-r1 task 166, EB-D-200), verified only.
     /// 10 = task 270: S27 — the lock on the invoice family's core-record lookups and invoice links (unified-access-control-r2
     ///      #2799); S28 — the lock on the message-access columns (field-mapping task 054b); both verified only.
+    /// 11 = S28 also verifies the three optional private-context columns where they exist (field-mapping 056b).
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=10";
+    internal const string ProcedureVersion = "secure-setup-procedure=11";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;
@@ -353,12 +354,22 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[gateId ?? $"h7b-{rejectionCode}"] = new GateEntry
+        JsonElement? gateEvidence = evidence is null ? null : JsonDocument.Parse(JsonSerializer.Serialize(evidence)).RootElement.Clone();
+        if (gateId is null)
         {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-            Evidence = evidence is null ? null : JsonDocument.Parse(JsonSerializer.Serialize(evidence)).RootElement.Clone(),
-        };
+            // ISS-035: no named gate -> this is a failure marker, cleared when H7b later succeeds.
+            run.RecordFailureGate($"h7b-{rejectionCode}", HandlerIdentifier, gateEvidence);
+        }
+        else
+        {
+            // A named gate (the plan-approval gate) is a real operator gate, never auto-cleared.
+            run.GateStates[gateId] = new GateEntry
+            {
+                Status = GateState.Pending,
+                VerifierHandler = HandlerIdentifier,
+                Evidence = gateEvidence,
+            };
+        }
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

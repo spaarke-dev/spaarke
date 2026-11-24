@@ -146,7 +146,13 @@ describe('TodoService.createTodo — through the BFF (UAC-r2 task 147 r1)', () =
     const result = await service.createTodo(FORM_VALUES, MATTER_REGARDING);
 
     expect(result.success).toBe(true);
-    expect(childWriteCalls(bff)).toEqual([['POST', '/api/v1/child-records/sprk_todo']]);
+    // Task 024 (FR-16): the regarding parent is the mapping source, named in the query string only.
+    expect(childWriteCalls(bff)).toEqual([
+      [
+        'POST',
+        '/api/v1/child-records/sprk_todo?mappingSourceEntity=sprk_matter&mappingSourceId=abcdef12-3456-7890-abcd-ef1234567890',
+      ],
+    ]);
   });
 
   it('REFUSES the create when the host wired no BFF connection — nothing is created as the user (fail closed)', async () => {

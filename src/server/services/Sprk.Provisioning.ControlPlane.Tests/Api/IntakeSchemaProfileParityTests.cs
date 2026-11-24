@@ -346,6 +346,155 @@ public sealed class IntakeSchemaProfileParityTests
             .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedSolutionPackageTypes);
     }
 
+    // -------------------------------------------------------------------------
+    // ISS-036 (#2987): every IntakeParameterCatalog key an operator may set must be in the schema.
+    // The catalog accepted `buildId` (H9 pin) but intake.schema.json (additionalProperties:false) did not list it,
+    // so the only guard on a Dataverse-only upgrade run could not be written into a schema-valid intake.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Catalog keys the intake FILE names differently. The skill (Step 1.0 / Step 4.0) renames them at the boundary; the
+    /// value is the schema property that carries each. Each target must exist in the schema (asserted below).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> RenamedInTheIntakeFile =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["openAiLocation"] = "openAiRegion",   // Bicep param name vs intake field (SKILL.md Step 4.0)
+            ["usersJson"] = "users",               // the skill serialises the users array to a JSON string
+        };
+
+    /// <summary>
+    /// Catalog keys that are deliberately NOT intake-file properties, each with the reason. A key is here only if no
+    /// operator writes it in a batch intake file; anything an operator supplies belongs in the schema, not here.
+    /// The test fails when an entry is no longer a catalog key or has since been added to the schema, so this list
+    /// can only shrink.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> NotInTheIntakeFile =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // Produced by the /provision-environment skill, not typed by the operator.
+            ["containerTypeId"] = "skill reads it from spaarke-constants.yaml per_env_constants (Step 0.5b)",
+            ["intakeFileSha256"] = "skill computes it from the intake file (audit hash)",
+            ["operatorUpn"] = "skill reads it from `az ad signed-in-user` (an intake value would spoof NFR-11 audit)",
+            // Not sent by the skill: L2 stores the default or the handler owns the default; direct POST /api/runs only.
+            ["environmentName"] = "L2 stores 'prod' (owner D6: customer staging/dev stamps are out of scope; the intake has no override)",
+            ["location"] = "H2a default (westus2); the intake's `region` is the operator-facing region",
+            ["signalrEnabled"] = "H2a default (false); no operator-facing intake field",
+            ["requestedIndexes"] = "H2b default (all indexes); no operator-facing intake field",
+            ["speContainerDisplayName"] = "H8 default; no operator-facing intake field",
+            ["healthCheckPath"] = "H9 default (/healthz); no operator-facing intake field",
+            ["openaiPinFreshnessMinDays"] = "H0 probe-tuning default; no operator-facing intake field",
+            ["rotate"] = "H4 secret rotation switch for a direct POST; the skill never sets it",
+            ["ficOmitSecretNames"] = "H4 secret-free-stamp switch for a direct POST; the skill never sets it",
+            ["msalClientId"] = "H7 env-var override for a direct POST; H7 resolves it itself",
+            ["shareLinkBaseUrl"] = "H7 env-var override for a direct POST; H7 resolves it itself",
+            // Upgrade-mode compatibility inputs: the skill does not send them (it has an `acknowledgeUpgradeMode` flag only).
+            ["provisionedOn"] = "handler upgrade-mode input (H0, H2a, H4, H4b); the skill never sends it until upgrade mode works (ISS-038)",
+            ["upgradeOfProvisionedOn"] = "existing-stamp acknowledgement; never an intake-file value — on an upgrade the skill copies it from the registry row (ISS-031)",
+            ["currentBffVersion"] = "upgrade-mode H0 input; the skill does not send it",
+            ["currentSolutionVersion"] = "upgrade-mode H0 input; the skill does not send it",
+            ["targetBffVersion"] = "upgrade-mode H0 input; the skill does not send it",
+            ["targetSolutionVersion"] = "upgrade-mode H0 input; the skill does not send it",
+        };
+
+    /// <summary>
+    /// The catalog keys that no schema property carries (directly, or through <paramref name="renamed"/>) and that are not
+    /// on the <paramref name="notInTheIntakeFile"/> list. Pure, so the controls below can feed it a synthetic catalog.
+    /// </summary>
+    private static IReadOnlyList<string> CatalogKeysMissingFromSchema(
+        IEnumerable<string> catalogKeys,
+        ISet<string> schemaProperties,
+        IReadOnlyDictionary<string, string> renamed,
+        IReadOnlyDictionary<string, string> notInTheIntakeFile)
+        => catalogKeys
+            .Where(key => !schemaProperties.Contains(renamed.TryGetValue(key, out var schemaName) ? schemaName : key)
+                          && !notInTheIntakeFile.ContainsKey(key))
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToList();
+
+    private static HashSet<string> ReadSchemaPropertyNames()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        return doc.RootElement.GetProperty("properties").EnumerateObject()
+            .Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void EveryCatalogKeyAnOperatorMaySet_IsAPropertyOfTheIntakeSchema()
+    {
+        var missing = CatalogKeysMissingFromSchema(
+            IntakeParameterCatalog.All.Keys, ReadSchemaPropertyNames(), RenamedInTheIntakeFile, NotInTheIntakeFile);
+
+        missing.Should().BeEmpty(
+            "POST /api/runs accepts these IntakeParameterCatalog keys but intake.schema.json (additionalProperties:false) " +
+            "does not list them, so a schema-valid batch intake cannot carry them (ISS-036 — buildId). Add each to the " +
+            "schema (operator-supplied) or to NotInTheIntakeFile with a reason (skill/server-produced).");
+    }
+
+    [Fact]
+    public void ParityLists_HaveNoStaleEntries()
+    {
+        var schemaProperties = ReadSchemaPropertyNames();
+        var catalogKeys = IntakeParameterCatalog.All.Keys.ToHashSet(StringComparer.Ordinal);
+
+        catalogKeys.Should().Contain(RenamedInTheIntakeFile.Keys, "a renamed key must still be a catalog key");
+        schemaProperties.Should().Contain(RenamedInTheIntakeFile.Values, "a rename target must be a schema property");
+        catalogKeys.Should().Contain(NotInTheIntakeFile.Keys, "an allow-listed key must still be a catalog key");
+        schemaProperties.Intersect(NotInTheIntakeFile.Keys).Should().BeEmpty(
+            "a key the schema now carries must come off the NotInTheIntakeFile list — the list only shrinks");
+    }
+
+    /// <summary>Must-fire control: a catalog key absent from the schema and from both lists is reported.</summary>
+    [Fact]
+    public void ParityCheck_ReportsACatalogKeyTheSchemaLacks()
+    {
+        var missing = CatalogKeysMissingFromSchema(
+            ["tenantId", "syntheticOperatorKey"],
+            new HashSet<string>(StringComparer.Ordinal) { "tenantId" },
+            RenamedInTheIntakeFile, NotInTheIntakeFile);
+
+        missing.Should().Equal("syntheticOperatorKey");
+    }
+
+    /// <summary>Must-not-fire control: a direct match, a renamed key and an allow-listed key are all accepted.</summary>
+    [Fact]
+    public void ParityCheck_AcceptsDirectRenamedAndAllowListedKeys()
+    {
+        var missing = CatalogKeysMissingFromSchema(
+            ["tenantId", "usersJson", "operatorUpn"],
+            new HashSet<string>(StringComparer.Ordinal) { "tenantId", "users" },
+            RenamedInTheIntakeFile, NotInTheIntakeFile);
+
+        missing.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// ISS-036: buildId is an OPTIONAL string whose pattern accepts the CI buildId format (publish-bff-artifact.yml:
+    /// `yyyy.MM.dd-{run_number}`) and nothing that could not equal a manifest buildId.
+    /// </summary>
+    [Theory]
+    [InlineData("2026.10.16-2", true)]
+    [InlineData("2026.10.16-123", true)]
+    [InlineData("latest", false)]
+    [InlineData("2026.10.16", false)]
+    [InlineData("2026.10.16-", false)]
+    [InlineData("2026.10.16-2\n", false)]
+    [InlineData("v2026.10.16-2", false)]
+    [InlineData("", false)]
+    public void ISS036_BuildId_IsAnOptionalString_WithTheCiBuildIdPattern(string value, bool accepted)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties").GetProperty("buildId");
+
+        ReadStringArrayFromSchema("required").Should().NotContain("buildId", "an omitted buildId means latest.json");
+        property.GetProperty("type").GetString().Should().Be("string");
+
+        // JSON Schema `pattern` is an unanchored ECMAScript match with `$` at the end of input only; .NET's `$` also
+        // matches before a final newline, so test with the same `\z` semantics ajv applies.
+        var pattern = property.GetProperty("pattern").GetString()!.Replace("$", "\\z");
+        System.Text.RegularExpressions.Regex.IsMatch(value, pattern).Should().Be(accepted);
+    }
+
     /// <summary>
     /// T256: secureRecordSetupDryRun is OPTIONAL (apply is the default), a boolean in the intake file — sent as the
     /// exact lower-case 'true' / 'false' strings SecureRecordSetupIntake accepts, under the same key.

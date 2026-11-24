@@ -63,6 +63,14 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string OpenAiMonthlyLimitUsd = "openAiMonthlyLimitUsd";
 
+    /// <summary>
+    /// A run against an existing stamp: the registry row's current <c>sprk_provisionedon</c>, the operator's
+    /// acknowledgement that the run re-runs THIS provisioned stamp. POST /api/runs requires it, equal to the row's, whenever
+    /// the row records a provisioning (<see cref="Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmissionRule"/>,
+    /// ISS-031). Only the endpoint reads it: unlike <c>provisionedOn</c> it does NOT switch any handler to upgrade mode.
+    /// </summary>
+    public const string UpgradeOfProvisionedOn = "upgradeOfProvisionedOn";
+
     /// <summary>The customer stamp's environment segment — <c>customer.bicep</c> <c>environmentName</c>.</summary>
     public const string EnvironmentName = "environmentName";
 
@@ -200,7 +208,8 @@ public static class IntakeParameterCatalog
         new("buildId", "BFF build to deploy (H9 optional — defaults to latest.json). H13 reads the deployed build from H9's output."),
 
         // --- Upgrade mode (an existing stamp) ---------------------------------------
-        new("provisionedOn", "Set on an upgrade run: when the stamp was first provisioned (H0, H2a, H4)."),
+        new(UpgradeOfProvisionedOn, "A run against an existing stamp: the registry row's current sprk_provisionedon. POST /api/runs requires it, equal to the row's, whenever the row records a provisioning (ISS-031). Read by the endpoint only — no handler runs in upgrade mode on it."),
+        new("provisionedOn", "Upgrade mode: when the stamp was first provisioned (H0, H2a, H4, H4b). H0 then requires the four version keys below."),
         new("currentBffVersion", "Upgrade run: deployed BFF version (H0 compatibility check)."),
         new("currentSolutionVersion", "Upgrade run: deployed solution version (H0 compatibility check)."),
         new("targetBffVersion", "Upgrade run: target BFF version (H0 compatibility check)."),

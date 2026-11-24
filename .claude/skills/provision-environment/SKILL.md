@@ -617,6 +617,7 @@ if ($BatchIntakeFile) {
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
   $secureRecordSetupDryRun = $intake.secureRecordSetupDryRun  # T256 — OPTIONAL: true = H7b dry run (plan only; the run stops at H7b); absent/false = apply (Step 1b-sexies)
+  $buildId        = $intake.buildId             # ISS-036 — OPTIONAL: pin the BFF CI build H9 deploys (e.g. 2026.10.16-2); absent = latest.json. H9 refuses the run when it is not latest.json's buildId — set it on an upgrade that must not change the BFF
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
@@ -763,6 +764,17 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
     }
     $environmentId = $probe.rows[0].sprk_dataverseenvironmentid
     $script:IsUpgradeRun = $true
+    # ISS-031: the confirmation travels to L2 as intake upgradeOfProvisionedOn = the row's CURRENT sprk_provisionedon
+    # (every completed run rewrites it). POST /api/runs (REG-07) admits a run against an existing stamp only with it and
+    # leaves the Ready row as it is (H13 sets Ready again at the end); without it L2 answers 400
+    # registry-upgrade-not-acknowledged, naming the value to send. Read it through the Web API, not the MCP: the MCP may
+    # render the date in local time or without seconds, and L2 compares to the second. It is NOT `provisionedOn` — that key
+    # switches H0/H2a/H4/H4b to upgrade mode, which needs version inputs the skill does not send yet (ISS-038).
+    $dvUrl = $constants.name_templates.registryDvUrl.$environment
+    $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
+    $row = Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)?`$select=sprk_provisionedon" `
+      -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0" }
+    $script:UpgradeProvisionedOn = ([datetime]$row.sprk_provisionedon).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture)
   } else {
     # Prior halt / quarantine / partial (placeholder exists, sprk_provisionedon still null) — recover
     Write-Host "customerId '$customerId' has a prior in-progress row (setupstatus=$($probe.rows[0].sprk_setupstatus)). See Fallback Matrix F1 recovery path."
@@ -770,7 +782,11 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
   ```
 
   Fallback if Dataverse MCP disconnected: `pac data query --entity sprk_dataverseenvironment --filter "sprk_customerid eq '$customerId'"` OR raw Web API GET with operator's `az` token. See Fallback Matrix F1.
-- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
+- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent. The confirmation is sent as
+  `upgradeOfProvisionedOn` (Step 4.0), and L2 admits the run against the Ready row as it is — never PATCH the row to
+  InProgress by hand (ISS-031). On 400 `registry-upgrade-provisioned-on-mismatch` the response names the row's exact
+  value: another run completed in between (it rewrites the value), so re-read it and confirm again. The handlers still
+  run in fresh-provision mode on an existing stamp, as every upgrade so far has (ISS-038).
 - If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
 
 #### 1a-bis. `displayName` (the customer's full name — also its Dataverse business unit)
@@ -1677,10 +1693,20 @@ if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
   $runRequest.nonSecretParameters.solutionPackageType = "$solutionPackageType"
 }
+# ISS-031 — an UPGRADE run (Step 1a) sends the row's sprk_provisionedon as L2's existing-stamp acknowledgement. A fresh run
+# never sends it (L2 refuses it on a never-provisioned row). Never send it as `provisionedOn` (handler upgrade mode, ISS-038).
+if ($script:IsUpgradeRun) {
+  $runRequest.nonSecretParameters.upgradeOfProvisionedOn = "$script:UpgradeProvisionedOn"
+}
 # T256 — the H7b dry run (Step 1b-sexies): sent only when true; absent = apply. Exact lower case — L2 refuses anything
 # else with 400 secure_setup.dry_run_invalid.
 if ($secureRecordSetupDryRun -eq $true) {
   $runRequest.nonSecretParameters.secureRecordSetupDryRun = 'true'
+}
+# ISS-036 — the BFF build pin: sent only when the intake sets it; absent = H9 deploys latest.json's build. H9 is the
+# guard: it refuses the run (before any swap) when the value is not latest.json's own buildId.
+if (-not [string]::IsNullOrWhiteSpace("$buildId")) {
+  $runRequest.nonSecretParameters.buildId = "$buildId"
 }
 $body = $runRequest | ConvertTo-Json -Depth 5
 

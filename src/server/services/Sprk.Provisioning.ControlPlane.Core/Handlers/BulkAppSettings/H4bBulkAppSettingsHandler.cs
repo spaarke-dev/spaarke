@@ -632,11 +632,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 QuarantinedAt = DateTimeOffset.UtcNow,
             };
         }
-        run.GateStates[$"h4b-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h4b-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

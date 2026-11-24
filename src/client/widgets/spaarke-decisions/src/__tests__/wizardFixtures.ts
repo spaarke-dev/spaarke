@@ -159,8 +159,11 @@ export interface WizardHostOptions {
   plan?: (signalId: string, item: ServerItem) => McpToolResult | Promise<McpToolResult> | undefined;
   /** Candidates per parameter code, for `spaarke_search_decision_lookup`. */
   candidates?: Record<string, ReadonlyArray<{ id: string; name: string; email?: string }>>;
-  /** Display modes: what `requestDisplayMode('fullscreen')` answers. Default `fullscreen`. */
-  displayMode?: 'fullscreen' | 'inline' | null;
+  /**
+   * The wizard opens as the in-frame dialog (and never asks the host for a display mode). `true` makes the dialog fail while rendering,
+   * so the wizard falls back to master-detail (see `jest.setup.cjs`). Default `false`.
+   */
+  dialogFails?: boolean;
 }
 
 export interface HostCall {
@@ -273,7 +276,11 @@ export function wizardHost(items: readonly ServerItem[], options: WizardHostOpti
     }
   };
 
-  const requestDisplayMode = jest.fn(async () => options.displayMode ?? 'fullscreen');
+  (globalThis as { __widgetTest?: { dialogFails: boolean } }).__widgetTest = {
+    dialogFails: options.dialogFails ?? false,
+  };
+  // Answers a grant if it is ever asked: the widget must not ask (the tests assert it is never called).
+  const requestDisplayMode = jest.fn(async () => 'fullscreen' as const);
   const openLink = jest.fn(async () => true);
   const callsTo = (name: string) => calls.filter(c => c.name === name);
   return { callTool, calls, callsTo, recorded, requestDisplayMode, openLink };
