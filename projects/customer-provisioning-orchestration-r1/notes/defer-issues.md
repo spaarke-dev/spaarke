@@ -222,7 +222,7 @@ Raise the default `ImportTimeout` to at least 120 min. On a timeout, record the 
 
 | Field | Value |
 |---|---|
-| **Status** | PR #3017 open (2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. #3012 merged and allow-list entry added (`a05a55811d`); merge after #3019 (its suite needs the S28 fix) |
+| **Status** | Fixed by PR #3017 (merged `7dc36ac0f5`, 2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. L2 Worker deploy pending (owner OK) |
 | **Urgency** | now (every upgrade of an existing stamp) |
 | **Filed** | 2026-11-20 |
 | **Source** | ACME upgrade to SpaarkeMaster 1.3.2.0: the first `POST /api/runs` returned 400 `registry-setup-status-not-in-progress` |
