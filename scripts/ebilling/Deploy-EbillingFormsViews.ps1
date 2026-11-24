@@ -421,10 +421,11 @@ function Sync-Form([string]$Table, $S) {
         if (-not $host_) { throw "$Table '$($S.FormName)': no first tab / column / sections node" }
         [void]$host_.AppendChild($doc.ImportNode($wantSec, $true)); $dirty = $true
     }
-    # Existing controls (outside section_ebilling) that must be read-only.
+    # Existing controls that must be read-only, anywhere on the form, section_ebilling included: the section is merged now, so a forced
+    # column that sits there without being in the spec's Cols must still be disabled. The spec's own cells are already disabled
+    # (Get-SpecCells), so the sweep finds nothing to change for them.
     foreach ($col in $force) {
         foreach ($c in @($doc.SelectNodes("//control[@datafieldname='$col']"))) {
-            if ($c.ParentNode.ParentNode.ParentNode.ParentNode.GetAttribute('name') -eq $secName) { continue }
             if ($c.GetAttribute('disabled') -ne 'true') { $c.SetAttribute('disabled', 'true'); $dirty = $true }
         }
     }

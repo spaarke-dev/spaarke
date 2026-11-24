@@ -76,3 +76,49 @@ ArchTest guard: `dotnet test tests/Spaarke.ArchTests --filter "FullyQualifiedNam
 - `Sync-Form` Replace mode still replaces the whole form (by design, for stub forms); a Replace-mode table whose form later gains a
   hand-made cell would lose it the same way. None does today.
 - The script has no read-back after its `PATCH` (task 194's script does); out of scope here.
+
+## Fix round 1
+
+Review of c89596bfd8 found one defect and four doc / test gaps. All fixed on `iss046-fix1`.
+
+### F1 - the ForceReadOnly sweep skipped section_ebilling (fixed)
+
+`Sync-Form` Section mode skipped every control inside `section_ebilling` when it swept `ForceReadOnly`. That was safe only while the
+section was rebuilt from the spec. The section is merged now, so a forced column that sits in it without being in the spec's `Cols`
+(`sprk_vendororg`, `sprk_totalamount` on the invoice form) stayed enabled for good. The section-name skip is gone; the sweep covers the
+whole form. The spec's own cells are already disabled by `Get-SpecCells`, so for them it finds nothing to change and a re-run stays a no-op.
+Tests (new `Describe`, 5 tests): must fire (enabled forced control in the section, not in `Cols` -> disabled, one PATCH), must not fire
+(already disabled -> no PATCH; the spec's own cells -> no PATCH), re-run after the fix writes nothing, and a premise check that the two
+columns are in `ForceReadOnly` and not in `Cols`.
+
+### F2 - docs (fixed)
+
+`Remove-EbillingInvoiceExtractionFormControls.ps1` (comment lines only, no logic) and `scripts/README.md` said Section mode rebuilds the
+whole section and drops `qv_billingexport`. Both now say it merges and keeps cells it does not own, but never removes a control, which is
+why "do not use it to remove a control" still holds.
+
+### F2 - test gaps (fixed)
+
+New `Describe` with 4 tests: a missing Memo spec cell is added wide (colspan 2, rowspan 3, own row) and the re-run is a no-op; a Memo cell
+that is plain on the live form is replaced in place with the wide one; a label containing `& < ' "` is written escaped, reads back the
+same text, and the next run is a no-op (both for an added cell and for an in-place replaced one). The real-SpaarkeMaster-form test now
+asserts the PATCH count: 0 (the source already carries every spec cell and every forced-read-only control).
+
+### Fail-before / pass-after
+
+| Run | Passed | Failed | Total |
+|---|---|---|---|
+| Fix-round tip c89596bfd8 script, new test file | 25 | 2 | 27 |
+| Fixed script | 27 | 0 | 27 |
+
+The 2 failures on the old script are the F1 must-fire test and the re-run test that depends on it. The other new tests (must not fire, Memo,
+escaping, real-form PATCH count) pass on both: they guard behaviour the merge already had. Pester 5.7.1. ArchTests filter
+`FullyQualifiedName~ScriptMetadataStrongConsistency|FullyQualifiedName~InvoiceMoneyFieldSecurity`: 2 passed, 0 failed.
+
+### Known limits (not fixed, recorded)
+
+- A section's own label and attributes are not refreshed on a re-run: only its field cells are merged.
+- An in-place replaced cell (a spec cell that differs from the live one) is replaced whole, so an attribute a designer added to that cell
+  (and its control) is lost. Cells that are in step are never touched.
+- A section that exists but has no `<rows>` node throws mid-run (`Merge-SpecCells`), after earlier tables may already have been written.
+- A spec field that is missing is appended in new rows at the end of the section, not next to its neighbours in `Cols` order.

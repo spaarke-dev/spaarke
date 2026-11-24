@@ -298,9 +298,240 @@ Describe 'Section mode keeps the cells the spec does not own (ISS-046)' {
 
         Invoke-InvoiceSectionRun $meta $formXml
 
+        # The source already carries every spec cell and every forced-read-only control (inside the section too), so the run has nothing to write.
+        $script:FakePatches.Count | Should -Be 0
         $final = Get-EbillingSection $script:FakeForm.formxml
         $sourceQv = $sec.SelectSingleNode("rows/row/cell[control[@id='qv_billingexport']]").OuterXml
         $final.SelectSingleNode("rows/row/cell[control[@id='qv_billingexport']]").OuterXml | Should -BeExactly $sourceQv
         foreach ($col in $script:Spec['sprk_invoice'].Sections[0].Cols) { @((Get-FieldIds $final) | Where-Object { $_ -eq $col }).Count | Should -Be 1 -Because $col }
+    }
+}
+
+# ebilling-r1 ISS-046 fix round 1. F1: the ForceReadOnly sweep used to skip every control inside section_ebilling, which was safe only while
+# Section mode rebuilt the section. The section is merged now, so a forced-read-only column that sits in it without being in the spec's Cols
+# (sprk_vendororg, sprk_totalamount on the invoice form) was never disabled. The sweep now covers the section too.
+Describe 'ForceReadOnly reaches controls inside section_ebilling that the spec does not own (ISS-046 fix round 1)' {
+    BeforeAll {
+        $script:ScriptPath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path 'scripts' 'ebilling' 'Deploy-EbillingFormsViews.ps1'
+        $tokens = $null; $errors = $null
+        $scriptAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errors)
+        foreach ($fn in $scriptAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $fn.Extent.Text }
+        function Invoke-Dv {
+            param([string]$Path, [string]$Method = 'GET', $Body, $ExtraHeaders)
+            if ($Method -eq 'GET' -and $Path -like 'systemforms?*') { return [pscustomobject]@{ value = @($script:FakeForm) } }
+            if ($Path -like 'systemforms(*)' -and $Method -eq 'PATCH') { $script:FakePatches += , $Body.formxml; $script:FakeForm.formxml = $Body.formxml; return $null }
+            throw "fake Invoke-Dv: unexpected call $Method $Path"
+        }
+        $script:Types = @{
+            sprk_matter = 'Lookup'; sprk_project = 'Lookup'; sprk_regardingworkassignment = 'Lookup'; sprk_supersedesinvoice = 'Lookup'; sprk_billingexport = 'Lookup'
+            sprk_billingperiodstart = 'DateTime'; sprk_billingperiodend = 'DateTime'; sprk_invoiceduedate = 'DateTime'
+            sprk_currency = 'String'; sprk_confidence = 'Decimal'; sprk_billingapproverrole = 'MultiSelectVirtual'
+            sprk_feestotal = 'Money'; sprk_expensestotal = 'Money'; sprk_lineadjustmentstotal = 'Money'; sprk_invoiceadjustmentstotal = 'Money'; sprk_approvedtotal = 'Money'
+        }
+        function New-Meta([hashtable]$Labels = @{}, [hashtable]$TypeOverride = @{}) {
+            $attrs = @{}
+            foreach ($col in $script:Spec['sprk_invoice'].Sections[0].Cols) {
+                $type = if ($TypeOverride.ContainsKey($col)) { $TypeOverride[$col] } else { $script:Types[$col] }
+                $label = if ($Labels.ContainsKey($col)) { $Labels[$col] } else { "Label of $col" }
+                $a = @{ LogicalName = $col; AttributeType = $(if ($type -eq 'MultiSelectVirtual') { 'Virtual' } else { $type }); DisplayName = @{ LocalizedLabels = @(@{ Label = $label }) } }
+                if ($type -eq 'MultiSelectVirtual') { $a.AttributeTypeName = @{ Value = 'MultiSelectPicklistType' } }
+                $attrs[$col] = [pscustomobject]$a
+            }
+            return [pscustomobject]@{ Table = 'sprk_invoice'; Otc = 10001; Pk = 'sprk_invoiceid'; Prim = 'sprk_name'; Attrs = $attrs }
+        }
+        # section_ebilling as the script writes it, plus a row holding a plain control for each of $ExtraCols that the spec's Cols do not list.
+        function New-FormXml($meta, [string[]]$ExtraCols = @(), [string[]]$DisabledExtras = @(), [scriptblock]$Mutate) {
+            $S = $script:Spec['sprk_invoice']
+            $sec = New-SectionXml $meta $S.Sections[0] $false @($S.ForceReadOnly) 'section_ebilling'
+            $doc = [xml]"<form><tabs><tab name=""tab_1""><columns><column width=""100%""><sections><section name=""section_summary""><rows><row><cell id=""{AAAAAAAA-0000-0000-0000-000000000001}""><control id=""sprk_name"" datafieldname=""sprk_name"" classid=""{4273EDBD-AC1D-40D3-9FB2-095C621B552D}"" /></cell></row></rows></section>$sec</sections></column></columns></tab></tabs></form>"
+            $rows = $doc.SelectSingleNode("//section[@name='section_ebilling']/rows")
+            $n = 0
+            foreach ($col in $ExtraCols) {
+                $n++
+                $dis = if ($DisabledExtras -contains $col) { ' disabled="true"' } else { '' }
+                $frag = $doc.CreateDocumentFragment()
+                $frag.InnerXml = "<row><cell id=""{CCCCCCCC-0000-0000-0000-00000000000$n}""><labels><label description=""Extra $col"" languagecode=""1033"" /></labels><control id=""$col"" classid=""{533B9E00-756B-4312-95A0-DC888637AC78}"" datafieldname=""$col""$dis /></cell></row>"
+                [void]$rows.AppendChild($frag)
+            }
+            if ($Mutate) { & $Mutate $doc }
+            return $doc.OuterXml
+        }
+        function Invoke-Run($meta, [string]$FormXml) {
+            $script:FakeForm = [pscustomobject]@{ formid = '93aa1c69-0406-f111-8406-7c1e525abd8b'; name = 'Invoice main form'; formxml = $FormXml }
+            $script:FakePatches = @()
+            $script:Metas = @{ sprk_invoice = $meta }
+            $script:LabelCache = @{}
+            $script:EditedIds = [System.Collections.Generic.HashSet[string]]::new()
+            $script:Touched = [System.Collections.Generic.HashSet[string]]::new()
+            $script:Changes = [System.Collections.Generic.List[string]]::new()
+            $script:Unchanged = [System.Collections.Generic.List[string]]::new()
+            $script:Evidence = [ordered]@{}
+            Sync-Form 'sprk_invoice' $script:Spec['sprk_invoice'] 6>$null
+        }
+        function Get-Section([string]$Xml) { return ([xml]$Xml).SelectSingleNode("//section[@name='section_ebilling']") }
+    }
+
+    It 'the forced columns the fixture relies on are in ForceReadOnly and not in the spec Cols (the premise of the test)' {
+        $S = $script:Spec['sprk_invoice']
+        foreach ($col in 'sprk_vendororg', 'sprk_totalamount') {
+            @($S.ForceReadOnly) | Should -Contain $col
+            @($S.Sections[0].Cols) | Should -Not -Contain $col
+        }
+    }
+
+    It 'MUST FIRE: disables an ENABLED forced-read-only control inside section_ebilling that Cols does not list, and writes' {
+        $meta = New-Meta
+        $xml = New-FormXml $meta -ExtraCols 'sprk_vendororg', 'sprk_totalamount'
+        (Get-Section $xml).SelectSingleNode("rows/row/cell/control[@id='sprk_vendororg']").GetAttribute('disabled') | Should -Not -Be 'true'
+
+        Invoke-Run $meta $xml
+
+        $script:FakePatches.Count | Should -Be 1
+        $sec = Get-Section $script:FakeForm.formxml
+        foreach ($col in 'sprk_vendororg', 'sprk_totalamount') {
+            $sec.SelectSingleNode("rows/row/cell/control[@id='$col']").GetAttribute('disabled') | Should -Be 'true' -Because $col
+        }
+        # It was only disabled: the cell is still where it was, once.
+        @($sec.SelectNodes("rows/row/cell/control[@id='sprk_vendororg']")).Count | Should -Be 1
+    }
+
+    It 'MUST NOT FIRE: the same controls already disabled is a no-op (nothing written, nothing touched)' {
+        $meta = New-Meta
+        $xml = New-FormXml $meta -ExtraCols 'sprk_vendororg', 'sprk_totalamount' -DisabledExtras 'sprk_vendororg', 'sprk_totalamount'
+
+        Invoke-Run $meta $xml
+
+        $script:FakePatches.Count | Should -Be 0
+        $script:Changes.Count | Should -Be 0
+        $script:Unchanged | Should -Contain 'sprk_invoice form'
+    }
+
+    It 'a run that disabled the control is followed by a run that writes nothing' {
+        $meta = New-Meta
+        $xml = New-FormXml $meta -ExtraCols 'sprk_vendororg'
+        Invoke-Run $meta $xml
+        $script:FakePatches.Count | Should -Be 1
+        Invoke-Run $meta $script:FakeForm.formxml
+        $script:FakePatches.Count | Should -Be 0
+    }
+
+    It 'MUST NOT FIRE: the spec cells in the section (already disabled by Get-SpecCells) give the sweep nothing to change' {
+        $meta = New-Meta
+        Invoke-Run $meta (New-FormXml $meta)
+        $script:FakePatches.Count | Should -Be 0
+    }
+}
+
+# ISS-046 fix round 1, F2 test gaps: a Memo (wide, colspan) spec cell, and a label that needs XML escaping.
+Describe 'Section merge: wide cells and labels that need escaping (ISS-046 fix round 1)' {
+    BeforeAll {
+        $script:ScriptPath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path 'scripts' 'ebilling' 'Deploy-EbillingFormsViews.ps1'
+        $tokens = $null; $errors = $null
+        $scriptAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errors)
+        foreach ($fn in $scriptAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $fn.Extent.Text }
+        function Invoke-Dv {
+            param([string]$Path, [string]$Method = 'GET', $Body, $ExtraHeaders)
+            if ($Method -eq 'GET' -and $Path -like 'systemforms?*') { return [pscustomobject]@{ value = @($script:FakeForm) } }
+            if ($Path -like 'systemforms(*)' -and $Method -eq 'PATCH') { $script:FakePatches += , $Body.formxml; $script:FakeForm.formxml = $Body.formxml; return $null }
+            throw "fake Invoke-Dv: unexpected call $Method $Path"
+        }
+        $script:Types = @{
+            sprk_matter = 'Lookup'; sprk_project = 'Lookup'; sprk_regardingworkassignment = 'Lookup'; sprk_supersedesinvoice = 'Lookup'; sprk_billingexport = 'Lookup'
+            sprk_billingperiodstart = 'DateTime'; sprk_billingperiodend = 'DateTime'; sprk_invoiceduedate = 'DateTime'
+            sprk_currency = 'String'; sprk_confidence = 'Decimal'; sprk_billingapproverrole = 'MultiSelectVirtual'
+            sprk_feestotal = 'Money'; sprk_expensestotal = 'Money'; sprk_lineadjustmentstotal = 'Money'; sprk_invoiceadjustmentstotal = 'Money'; sprk_approvedtotal = 'Money'
+        }
+        function New-Meta([hashtable]$Labels = @{}, [hashtable]$TypeOverride = @{}) {
+            $attrs = @{}
+            foreach ($col in $script:Spec['sprk_invoice'].Sections[0].Cols) {
+                $type = if ($TypeOverride.ContainsKey($col)) { $TypeOverride[$col] } else { $script:Types[$col] }
+                $label = if ($Labels.ContainsKey($col)) { $Labels[$col] } else { "Label of $col" }
+                $a = @{ LogicalName = $col; AttributeType = $(if ($type -eq 'MultiSelectVirtual') { 'Virtual' } else { $type }); DisplayName = @{ LocalizedLabels = @(@{ Label = $label }) } }
+                if ($type -eq 'MultiSelectVirtual') { $a.AttributeTypeName = @{ Value = 'MultiSelectPicklistType' } }
+                $attrs[$col] = [pscustomobject]$a
+            }
+            return [pscustomobject]@{ Table = 'sprk_invoice'; Otc = 10001; Pk = 'sprk_invoiceid'; Prim = 'sprk_name'; Attrs = $attrs }
+        }
+        function New-FormXml($meta, [scriptblock]$Mutate) {
+            $S = $script:Spec['sprk_invoice']
+            $sec = New-SectionXml $meta $S.Sections[0] $false @($S.ForceReadOnly) 'section_ebilling'
+            $doc = [xml]"<form><tabs><tab name=""tab_1""><columns><column width=""100%""><sections><section name=""section_summary""><rows><row><cell id=""{AAAAAAAA-0000-0000-0000-000000000001}""><control id=""sprk_name"" datafieldname=""sprk_name"" classid=""{4273EDBD-AC1D-40D3-9FB2-095C621B552D}"" /></cell></row></rows></section>$sec</sections></column></columns></tab></tabs></form>"
+            if ($Mutate) { & $Mutate $doc }
+            return $doc.OuterXml
+        }
+        function Invoke-Run($meta, [string]$FormXml) {
+            $script:FakeForm = [pscustomobject]@{ formid = '93aa1c69-0406-f111-8406-7c1e525abd8b'; name = 'Invoice main form'; formxml = $FormXml }
+            $script:FakePatches = @()
+            $script:Metas = @{ sprk_invoice = $meta }
+            $script:LabelCache = @{}
+            $script:EditedIds = [System.Collections.Generic.HashSet[string]]::new()
+            $script:Touched = [System.Collections.Generic.HashSet[string]]::new()
+            $script:Changes = [System.Collections.Generic.List[string]]::new()
+            $script:Unchanged = [System.Collections.Generic.List[string]]::new()
+            $script:Evidence = [ordered]@{}
+            Sync-Form 'sprk_invoice' $script:Spec['sprk_invoice'] 6>$null
+        }
+        function Get-Section([string]$Xml) { return ([xml]$Xml).SelectSingleNode("//section[@name='section_ebilling']") }
+        function Remove-Cell($Doc, [string]$ControlId) { $c = $Doc.SelectSingleNode("//cell[control[@id='$ControlId']]"); [void]$c.ParentNode.RemoveChild($c) }
+    }
+
+    It 'adds a missing Memo cell wide (colspan 2, rowspan 3) in a row of its own, and a re-run is a no-op' {
+        $meta = New-Meta -TypeOverride @{ sprk_currency = 'Memo' }
+        $xml = New-FormXml $meta { param($d) Remove-Cell $d 'sprk_currency' }
+        @((Get-Section $xml).SelectNodes("rows/row/cell/control[@id='sprk_currency']")).Count | Should -Be 0
+
+        Invoke-Run $meta $xml
+
+        $script:FakePatches.Count | Should -Be 1
+        $sec = Get-Section $script:FakeForm.formxml
+        $cell = @($sec.SelectNodes("rows/row/cell[control[@id='sprk_currency']]"))
+        $cell.Count | Should -Be 1
+        $cell[0].GetAttribute('colspan') | Should -Be '2'
+        $cell[0].GetAttribute('rowspan') | Should -Be '3'
+        $cell[0].SelectSingleNode('control').GetAttribute('classid') | Should -Be '{E0DECE4B-6FC8-4A8F-A065-082708572369}'
+        # Alone in its row.
+        @($cell[0].ParentNode.SelectNodes('cell')).Count | Should -Be 1
+
+        Invoke-Run $meta $script:FakeForm.formxml
+        $script:FakePatches.Count | Should -Be 0
+    }
+
+    It 'a Memo cell that is plain on the live form (no span) is replaced in place with the wide cell' {
+        $meta = New-Meta -TypeOverride @{ sprk_currency = 'Memo' }
+        $xml = New-FormXml $meta { param($d) $c = $d.SelectSingleNode("//cell[control[@id='sprk_currency']]"); $c.RemoveAttribute('colspan'); $c.RemoveAttribute('rowspan') }
+
+        Invoke-Run $meta $xml
+
+        $script:FakePatches.Count | Should -Be 1
+        $cell = (Get-Section $script:FakeForm.formxml).SelectSingleNode("rows/row/cell[control[@id='sprk_currency']]")
+        $cell.GetAttribute('colspan') | Should -Be '2'
+    }
+
+    It 'a label containing an ampersand, angle brackets, an apostrophe and a double quote is written escaped, reads back the same, and the next run is a no-op' {
+        $label = 'Fees & <Costs> ''quoted'' "double"'
+        $meta = New-Meta -Labels @{ sprk_currency = $label }
+        $xml = New-FormXml $meta { param($d) Remove-Cell $d 'sprk_currency' }
+
+        Invoke-Run $meta $xml
+        $script:FakePatches.Count | Should -Be 1
+        $read = (Get-Section $script:FakeForm.formxml).SelectSingleNode("rows/row/cell[control[@id='sprk_currency']]/labels/label").GetAttribute('description')
+        $read | Should -BeExactly $label
+
+        Invoke-Run $meta $script:FakeForm.formxml
+        $script:FakePatches.Count | Should -Be 0
+        $script:Changes.Count | Should -Be 0
+    }
+
+    It 'a label with those characters that differs on the live form is replaced in place, and the next run is a no-op' {
+        $label = 'A & B < C ''x'' "y"'
+        $meta = New-Meta -Labels @{ sprk_currency = $label }
+        $xml = New-FormXml $meta { param($d) $d.SelectSingleNode("//cell[control[@id='sprk_currency']]/labels/label").SetAttribute('description', 'Old') }
+
+        Invoke-Run $meta $xml
+        $script:FakePatches.Count | Should -Be 1
+        (Get-Section $script:FakeForm.formxml).SelectSingleNode("rows/row/cell[control[@id='sprk_currency']]/labels/label").GetAttribute('description') | Should -BeExactly $label
+
+        Invoke-Run $meta $script:FakeForm.formxml
+        $script:FakePatches.Count | Should -Be 0
     }
 }
