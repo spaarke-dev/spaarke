@@ -1439,6 +1439,12 @@ public sealed class DecisionRecordWriter
     internal const string BillingContentUnreadableRefusal =
         "This decision id is already recorded on its subject with the same billing action, but the recorded content cannot be read; nothing was written.";
 
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when the decision id is recorded on its subject with ANOTHER billing
+    /// action (the key carries no code). Moved unchanged from <see cref="WriteBillingDecisionAsync(BillingDecisionRecordRequest, Func{CancellationToken, Task{Guid?}}?, CancellationToken)"/>
+    /// (ebilling-r1 iss029) so <see cref="PreflightBillingRepeat"/> refuses with the same words.</summary>
+    internal const string BillingOtherCodeRefusal =
+        "This decision id is already recorded on its subject with another billing action; nothing was written.";
+
     /// <summary>
     /// The billing entry's OWN allowed subjects, one table per billing code: the line for the line codes (accept, reduce, disallow and add-line), the invoice for every other
     /// (D-75; D-101: an override and an automatic rejection file under the invoice the submission created). This list is consulted by
@@ -1525,8 +1531,9 @@ public sealed class DecisionRecordWriter
             // answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot be read proves
             // nothing either, so it is refused the same way (same reason), never written over with a second record; its message says so, so a
             // caller can tell it from proven other content (ebilling-r1 164a fix round K2). The rules are shared with the Procedure entry
-            // (AlreadyRecordedOrRefuse, task 084h-1 fix round 1); the messages are billing's own.
-            const string otherCodeRefusal = "This decision id is already recorded on its subject with another billing action; nothing was written.";
+            // (AlreadyRecordedOrRefuse, task 084h-1 fix round 1); the messages are billing's own. PreflightBillingRepeat applies the same rules,
+            // with the same messages, to a stored record a caller read before its own writes (ebilling-r1 iss029).
+            const string otherCodeRefusal = BillingOtherCodeRefusal;
             var (existing, hash) = AlreadyRecordedOrRefuse(
                 recorded,
                 request.ActionCode,
@@ -1606,6 +1613,28 @@ public sealed class DecisionRecordWriter
         ArgumentNullException.ThrowIfNull(request);
         var plan = ValidateBilling(request);
         _ = Content(BillingReview(request, plan, BillingDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId), core: null), plan);
+    }
+
+    /// <summary>
+    /// ebilling-r1 iss029 (ISS-029): the "already recorded" decision <see cref="WriteBillingDecisionAsync(BillingDecisionRecordRequest, Func{CancellationToken, Task{Guid?}}?, CancellationToken)"/>
+    /// will make, made BEFORE a caller's own first write, against the record <paramref name="stored"/> that the caller already read under this
+    /// request's subject and decision id (<see cref="FindBillingDecisionResolvedSetsAsync"/>). The SAME rules and messages
+    /// (<see cref="AlreadyRecordedOrRefuse"/>, <see cref="BillingDecisionHash"/>): another billing code, or the same code with other readable
+    /// content (<see cref="DecisionRecordRefusedException.IsOtherContent"/>), or a stored content that cannot be read, is refused; the same code
+    /// and content returns (the write will answer AlreadyRecorded). No I/O; writes and logs nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>, as the write would throw it.</exception>
+    internal static void PreflightBillingRepeat(BillingDecisionRecordRequest request, BillingStoredResolvedSet stored)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(stored);
+        _ = AlreadyRecordedOrRefuse(
+            [(stored.RecordId, stored.ConfirmedByUserId, stored.ActionCode ?? string.Empty, stored.ContentHash)],
+            request.ActionCode,
+            () => BillingDecisionHash(request),
+            BillingOtherCodeRefusal,
+            BillingOtherContentRefusal,
+            BillingContentUnreadableRefusal);
     }
 
     private static Guid? NoneIfEmpty(Guid? id) => id is { } value && value != Guid.Empty ? value : null;
@@ -2292,9 +2321,12 @@ public sealed class DecisionRecordWriter
     /// <param name="StoredContentReadable">True only when <see cref="StoredSetOf"/> could read the record's step and its <c>values</c> (a
     /// note that is absent or null is readable and means none). False (the default) means <see cref="Reason"/> and <see cref="Note"/> must not
     /// be trusted: a caller that finishes a decision from the stored content refuses (fail closed).</param>
+    /// <param name="ActionCode">ebilling-r1 iss029: the record's <c>sprk_actioncode</c> (a billing code), for <see cref="PreflightBillingRepeat"/>.</param>
+    /// <param name="ContentHash">ebilling-r1 iss029: the record's stored content hash (<see cref="BillingDecisionHash"/>, <c>sprk_steps.reviewHash</c>);
+    /// null when it cannot be read, which <see cref="PreflightBillingRepeat"/> refuses as the write does.</param>
     internal sealed record BillingStoredResolvedSet(
         Guid RecordId, DateTime? SetReadAtUtc, IReadOnlyList<(Guid SignalId, string PolicyCode)> Signals, Guid? ConfirmedByUserId = null,
-        string? Reason = null, string? Note = null, bool StoredContentReadable = false);
+        string? Reason = null, string? Note = null, bool StoredContentReadable = false, string? ActionCode = null, string? ContentHash = null);
 
     /// <summary>
     /// ebilling-r1 tasks 100 and 105 (D-122, additive; ontology-r1 approved): the set the billing decision <paramref name="decisionId"/> on
@@ -2462,7 +2494,9 @@ public sealed class DecisionRecordWriter
             row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id is { } by && by != Guid.Empty ? by : null,
             row.GetAttributeValue<string>("sprk_reason") is { Length: > 0 } reason ? reason : null,
             note,
-            contentReadable);
+            contentReadable,
+            row.GetAttributeValue<string>("sprk_actioncode"),
+            StoredBillingHashOf(row));
     }
 
     private const string NoteValueKey = "note";

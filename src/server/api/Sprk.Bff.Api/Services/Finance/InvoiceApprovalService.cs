@@ -1865,7 +1865,7 @@ public sealed class InvoiceApprovalService
     {
         LineDecisionStatus.Forbidden => new(ApprovalOutcome.Forbidden, result.Code, result.Detail, FailedStep: step),
         LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.TotalsRefused or LineDecisionStatus.NotInReview
-            or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.FirmRequired => new(ApprovalOutcome.Conflict, result.Code, result.Detail, FailedStep: step),
+            or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.FirmRequired or LineDecisionStatus.IdReused => new(ApprovalOutcome.Conflict, result.Code, result.Detail, FailedStep: step),
         LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => new(ApprovalOutcome.InvoiceNotFound, result.Code),
         LineDecisionStatus.OwnerUnresolved or LineDecisionStatus.InvalidRequest => new(ApprovalOutcome.Failed, result.Code, result.Detail, FailedStep: step),
         // The lines were written and a later line step failed: the caller's next approve completes the bulk accept (F2) before anything

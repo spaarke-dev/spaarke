@@ -290,6 +290,23 @@ public sealed class BillingDecisionRecorder
     /// <exception cref="DecisionRecordRefusedException">The decision as given would be refused.</exception>
     public void Preflight(BillingDecision decision) => _writer.PreflightBillingDecision(ToRequest(decision));
 
+    /// <summary>
+    /// ebilling-r1 iss029 (ISS-029): when <paramref name="stored"/> is the record already written under the decision's subject and decision id
+    /// (read by <see cref="FindStoredResolvedSetsAsync"/>), the writer's own "already recorded" comparison of the decision against it
+    /// (<see cref="DecisionRecordWriter.PreflightBillingRepeat"/>), before the caller's first write: the same rules and refusals <see cref="RecordAsync"/>
+    /// would give, so a caller can refuse a decision id that is recorded with another decision before it changes anything. Null
+    /// <paramref name="stored"/> (a first attempt) passes. Reads and writes nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: another billing code, other content
+    /// (<see cref="DecisionRecordRefusedException.IsOtherContent"/>), or a recorded content that cannot be read.</exception>
+    internal static void PreflightRepeat(BillingDecision decision, DecisionRecordWriter.BillingStoredResolvedSet? stored)
+    {
+        if (stored is not null)
+        {
+            DecisionRecordWriter.PreflightBillingRepeat(ToRequest(decision), stored);
+        }
+    }
+
     private static BillingDecisionRecordRequest ToRequest(BillingDecision decision)
     {
         ArgumentNullException.ThrowIfNull(decision);

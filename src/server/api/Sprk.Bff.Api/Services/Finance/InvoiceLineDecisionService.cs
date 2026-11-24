@@ -86,6 +86,10 @@ public enum LineDecisionStatus
     /// <summary>Task 095d-0 (EB-D-185): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>);
     /// 409, NOTHING was changed.</summary>
     FirmRequired,
+
+    /// <summary>ISS-029: the decision id already has a line's Decision Record holding another decision (another action, reason, amount, note
+    /// or decider, as the writer compares them); 409, NOTHING was changed. A new decision needs a new decision id.</summary>
+    IdReused,
 }
 
 /// <summary>Stable ProblemDetails codes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -108,6 +112,9 @@ public static class LineDecisionCodes
     public const string OwnerUnresolved = "ebilling.decision.owner_unresolved";
     public const string Unavailable = "ebilling.decision.unavailable";
     public const string Incomplete = "ebilling.decision.incomplete";
+
+    /// <summary>409 (ISS-029): the decision id is already recorded on a chosen line with another decision; nothing was changed.</summary>
+    public const string IdReused = "ebilling.decision.id_reused";
     public const string DeciderUnresolved = "ebilling.decider.unresolved";
     public const string NotAuthorized = "ebilling.decision.not_authorized";
 
@@ -169,7 +176,11 @@ public sealed record LineDecisionResult(
 /// Decision Records (one per line, idempotent by decision id). A failure after the lines were written answers 503 <c>ebilling.decision.incomplete</c>
 /// with the committed line ids; the caller repeats the decision with the same decision id through the multi-line route
 /// (<c>POST .../lines/decisions</c> with those line ids), which re-applies the same values, recomputes, upserts the same correction rows and records
-/// only what is missing. Accept all Clean cannot be repeated by itself after its lines left Clean, which is why the committed ids are returned.</para>
+/// only what is missing. Accept all Clean cannot be repeated by itself after its lines left Clean, which is why the committed ids are returned.
+/// A repeat must be the SAME decision: when a chosen line already has a record under the decision id, the writer's own comparison
+/// (<see cref="BillingDecisionRecorder.PreflightRepeat"/>, over the record the stored-set read already found) runs before the first write, and another
+/// action, reason, amount, note or decider is 409 <c>ebilling.decision.id_reused</c> with nothing written (ISS-029), never a 503 no repeat could
+/// complete.</para>
 /// <para><b>Identity.</b> The decider is the caller's <c>systemuserid</c> from the authenticated principal. The linked contact is looked up by the
 /// recorder. Lines are written by the application (D-90: the caller's role cannot write <c>sprk_billingevent</c>); the endpoint filter has already
 /// proven Write on the invoice as the caller (D-77).</para>
@@ -725,6 +736,32 @@ public sealed class InvoiceLineDecisionService
             return new LineDecisionResult(LineDecisionStatus.InvalidRequest, LineDecisionCodes.DecisionInvalid, ex.Reason);
         }
 
+        // ── ISS-029: a line already recorded under this decision id must be recorded with THIS decision, decided by the writer's own comparison
+        //    against the record read above (no new read). Another action, reason, amount, note or decider (or a recorded content that cannot be
+        //    read) would be refused at the record step after the line, the totals and the corrections were rewritten, and every repeat would be
+        //    refused the same way: so it is 409 id_reused here, before any write. The same content passes and the repeat completes as before. ──
+        if (signalSets.Stored is { Count: > 0 } stored)
+        {
+            try
+            {
+                foreach (var decision in decisions)
+                {
+                    BillingDecisionRecorder.PreflightRepeat(decision, stored.GetValueOrDefault(decision.SubjectId));
+                }
+            }
+            catch (DecisionRecordRefusedException ex)
+            {
+                _logger.LogWarning(
+                    "Line decision {DecisionId} on invoice {InvoiceId}: the decision id is already recorded on a chosen line with another decision ({Reason}, other content {OtherContent}); nothing changed.",
+                    command.DecisionId, command.InvoiceId, ex.Reason, ex.IsOtherContent);
+                return new LineDecisionResult(
+                    LineDecisionStatus.IdReused, LineDecisionCodes.IdReused,
+                    ex.IsOtherContent
+                        ? "This decision id was already used on one of these lines with another reason, amount, note or reviewer. Nothing was changed. Use a new decision id."
+                        : "This decision id was already used on one of these lines for another action, or its recorded decision cannot be read. Nothing was changed. Use a new decision id.");
+            }
+        }
+
         // ── The bulk correction rows (D-64) and their owner, resolved before the first write. ──
         List<Entity> corrections = [];
         if (command.Bulk && command.Action == LineDecisionAction.Accept)
@@ -978,7 +1015,11 @@ public sealed class InvoiceLineDecisionService
             .ToList(),
     };
 
-    private sealed record SignalSets(Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet> ByLine, LineDecisionResult? Failure);
+    /// <param name="Stored">ISS-029: the record already written under this decision id, per line that has one (the same read as the stored set);
+    /// <see cref="ApplyAsync"/> checks the decision against it before any write.</param>
+    private sealed record SignalSets(
+        Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet> ByLine, LineDecisionResult? Failure,
+        IReadOnlyDictionary<Guid, DecisionRecordWriter.BillingStoredResolvedSet>? Stored = null);
 
     /// <summary>
     /// D-122 per decided line. A line whose decision is already recorded under this decision id keeps the set stored with that record (a
@@ -989,6 +1030,7 @@ public sealed class InvoiceLineDecisionService
     private async Task<SignalSets> ResolveSignalSetsAsync(LineDecisionCommand command, IReadOnlyList<Proposal> proposals, CancellationToken ct)
     {
         var byLine = new Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet>(proposals.Count);
+        var storedByLine = new Dictionary<Guid, DecisionRecordWriter.BillingStoredResolvedSet>();
         var fresh = new List<Guid>();
         try
         {
@@ -1000,6 +1042,7 @@ public sealed class InvoiceLineDecisionService
                 {
                     if (found.TryGetValue(p.Line.Id, out var stored) && stored is not null)
                     {
+                        storedByLine[p.Line.Id] = stored;
                         byLine[p.Line.Id] = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
                             stored.SetReadAtUtc ?? DateTime.MinValue,
                             stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList());
@@ -1041,7 +1084,7 @@ public sealed class InvoiceLineDecisionService
             }
         }
 
-        return new SignalSets(byLine, null);
+        return new SignalSets(byLine, null, storedByLine);
     }
 
     /// <summary>
