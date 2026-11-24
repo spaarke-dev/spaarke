@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Services.Finance;
+using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Services.Finance.ApprovalWorld;
 
@@ -104,6 +105,44 @@ public sealed class InvoiceLineDecisionIdReusedTests
         Writes(w).Should().Be(before, $"{because}: refused before any write");
         StatusOf(w, line).Should().Be(statusBefore);
         w.H.Created.Should().ContainSingle("no second record");
+        // Which wording: another action is the other-action text (not the other-content text), and the other cases are the other-content text.
+        if (repeatAction != firstAction)
+        {
+            repeat.Detail.Should().Contain("for another action").And.NotContain("another reason, amount, note or reviewer", because);
+        }
+        else
+        {
+            repeat.Detail.Should().Contain("another reason, amount, note or reviewer").And.NotContain("for another action", because);
+        }
+    }
+
+    [Theory(DisplayName = "iss029 F2: a record under the decision id whose stored content cannot be read (no review hash) is 409 id_reused with the 'cannot be read' wording, and nothing is written")]
+    [InlineData(LineDecisionAction.Reduce, "reduce-line")]
+    [InlineData(LineDecisionAction.Disallow, "disallow-line")]
+    public async Task StoredContentUnreadable_Is409_AndWritesNothing(LineDecisionAction action, string recordedCode)
+    {
+        var w = new ApprovalWorld();
+        var line = w.AddLine(InvoiceLineStatus.Flagged, 400m);
+        w.AddLineSignal(line.Id);
+        var decisionId = Guid.NewGuid();
+        // A writer-created line record that carries no content hash (steps has a reviewId and no reviewHash), so the repeat cannot be compared.
+        w.H.Seeded.Add(new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", line.Id),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_billingevent", line.Id, decisionId):D}\",\"resolvedSignalIds\":[]}}",
+            ["sprk_actioncode"] = recordedCode,
+            ["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser),
+        });
+        var before = Writes(w);
+        var statusBefore = StatusOf(w, line);
+
+        var repeat = await Service(w).DecideAsync(Command(w, decisionId, action, [(line.Id, 300m)]), CancellationToken.None);
+
+        AssertIdReused(repeat);
+        repeat.Detail.Should().Contain("cannot be read", "the unreadable-content wording names it");
+        Writes(w).Should().Be(before, "refused before any line, total, Signal close or record write");
+        StatusOf(w, line).Should().Be(statusBefore);
+        w.H.Created.Should().BeEmpty("no record was written beside the unreadable one");
     }
 
     [Fact(DisplayName = "iss029 AC1: a multi-line call where ONE line's recorded decision differs is 409 id_reused, and NO line (the other one included) is written")]
@@ -168,6 +207,29 @@ public sealed class InvoiceLineDecisionIdReusedTests
         problem.StatusCode.Should().Be(409);
         problem.ProblemDetails.Extensions["errorCode"].Should().Be("ebilling.decision.id_reused");
         problem.ProblemDetails.Extensions.Should().NotContainKey("failedStep");
+    }
+
+    [Fact(DisplayName = "iss029 K: an approve whose derived bulk-accept id is recorded with other content is 409 id_reused with neutral text (no 'use a new decision id': an approver cannot choose one)")]
+    public async Task Approve_AcceptCleanIdReused_Is409_WithNeutralText()
+    {
+        var w = new ApprovalWorld();
+        var clean = w.AddLine(InvoiceLineStatus.Clean, 400m);
+        var acceptCleanId = InvoiceApprovalService.AcceptCleanDecisionIdFor(w.ApprovalId);
+        // A writer-created accept-line record under the approver's derived id whose content cannot be read, so the repeat cannot match it.
+        w.H.Seeded.Add(new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", clean.Id),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_billingevent", clean.Id, acceptCleanId):D}\",\"resolvedSignalIds\":[]}}",
+            ["sprk_actioncode"] = "accept-line",
+            ["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser),
+        });
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Conflict, result.Code + " " + result.Detail);
+        result.Code.Should().Be("ebilling.decision.id_reused");
+        result.Detail.Should().NotBeNullOrWhiteSpace().And.NotContain("new decision id");
+        result.Detail.Should().Contain("already recorded with other content");
     }
 
     // ── AC2: the same content still completes ──

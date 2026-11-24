@@ -72,3 +72,14 @@ After the change, the class has 18 tests, all passing (one route-rendering test 
   - N/A: ADR-013.
 - **Re-run after the cleanup:** the affected suites (adding `RecordProcedure`) passed 2616 / 2616. BFF build: 0 warnings, 0 errors.
 - **Publish-size delta (root §10 bullet 4): not measured in this sub-agent run.** The change is code-only: no package, asset or DI change. The main session measures it at the PR against a fresh master build.
+
+## Fix round 1
+
+Review of 534b87a152. Wording only in `src`; new tests only otherwise. No runtime behaviour change.
+
+1. **F2 - untested "stored content cannot be read -> 409" path.** Added `StoredContentUnreadable_Is409_AndWritesNothing` (Reduce and Disallow cases) in `tests/integration/data-mutation/Ebilling/InvoiceLineDecisionIdReusedTests.cs`. It seeds a writer-created line record with a `reviewId` and no `reviewHash` (`w.H.Seeded`), repeats under that decisionId, and asserts 409 `ebilling.decision.id_reused` with the "cannot be read" wording, `Writes(w)` (write log, row versions, totals writes, closes, records, corrections) and the line status unchanged, and no record created. The "another decision (action)" theory case now also asserts the wording: other-action text and not the other-content text (and the reverse for the other-content cases).
+   - **Mutation evidence:** `DecisionRecordWriter.PreflightBillingRepeat` temporarily changed to pass `stored.ContentHash ?? BillingDecisionHash(request)`: the new test failed (2 of 2 cases); the 18 other tests in the class passed. Reverted; the class passes 21 / 21 on the real code.
+2. **F2 - route descriptions** (`InvoiceLineReviewEndpoints.cs`). Multi-line: the decision must match every *chosen* line already recorded under that decisionId; lines not in the call are not checked. Single-line: dropped "503 is only for a retryable fault"; it now says a 503 on the lookup of the recorded decision writes nothing and is safe to repeat, and that other 503 codes (for example `ebilling.decision.incomplete`) say which step to repeat or that the step needs a fix first.
+3. **K - approver text** (`InvoiceApprovalService.FromLineResult`). `IdReused` now maps to Conflict with "This decision was already recorded with other content; nothing was changed. Reload the invoice." (same code `ebilling.decision.id_reused`). The line route's text ("Use a new decision id") is unchanged. New test `Approve_AcceptCleanIdReused_Is409_WithNeutralText` (fails with the old pass-through text, passes now).
+
+Results: affected suites (`InvoiceLineDecision|DecisionRecordWriterTests|BillingDecisionRecorder|InvoiceApproval|InvoiceLineReviewEndpoints`, MaxParallelThreads=4) 1009 / 1009; BFF build 0 warnings, 0 errors.

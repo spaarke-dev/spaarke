@@ -73,7 +73,8 @@ public static class InvoiceLineReviewEndpoints
                 "characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters, checked before any read) is saved on this line's own " +
                 "Decision Record and nowhere else. A repeat with the same decisionId must be the same decision: once the line's record exists, another " +
                 "action, reason, amount, note (or none) or reviewer is refused 409 ebilling.decision.id_reused before anything is written, and the first " +
-                "decision and note stay. Use a new decisionId for a new decision. 503 is only for a retryable fault (repeat the same request).")
+                "decision and note stay. Use a new decisionId for a new decision. A 503 on the lookup of the recorded decision writes nothing and is safe " +
+                "to repeat; other 503 codes (for example ebilling.decision.incomplete) say which step to repeat or that the step needs a fix first.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -92,9 +93,9 @@ public static class InvoiceLineReviewEndpoints
                 "The selected lines get the same action and reason; a Reduce carries its own approvedAmount per line (apply a suggestion to n " +
                 "lines). All or nothing: one invalid line writes nothing. An Accept writes the 'Accepted in bulk' correction rows (never a label). " +
                 "An optional note (the single-line route's rules) is saved on every selected line's own Decision Record, one record per line, and " +
-                "nowhere else. A repeat with the same decisionId must be the same decision on every line already recorded under it: one line recorded " +
-                "with another action, reason, amount, note or reviewer refuses the whole call 409 ebilling.decision.id_reused and no line is written " +
-                "(see the single-line route).")
+                "nowhere else. A repeat with the same decisionId must be the same decision as every chosen line already recorded under that decisionId: " +
+                "if one of those lines was recorded with another action, reason, amount, note or reviewer, the whole call is refused 409 " +
+                "ebilling.decision.id_reused and no line is written (see the single-line route). Lines not in the call are not checked.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
