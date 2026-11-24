@@ -254,8 +254,8 @@ public static class SecureRecordSetupRejectionCodes
 
     /// <summary>
     /// S22 (ISS-025 / #1803): <c>contact.sprk_externalinvitecodehash</c> is secured and locked, but auditing or Advanced Find is
-    /// ON for it (the package ships both off; Resumable: import SpaarkeMaster (H6) or run
-    /// <c>scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply</c>, then resume). H7b only verifies; it changes no column setting.
+    /// ON for it (the package ships both off; Resumable: run <c>scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply</c>, then
+    /// resume — a SpaarkeMaster re-import does not clear a hand-set value). H7b only verifies; it changes no column setting.
     /// </summary>
     public const string InviteCodeHashExposureOn = "secure_setup.invite_code_hash_audit_or_find_on";
 
