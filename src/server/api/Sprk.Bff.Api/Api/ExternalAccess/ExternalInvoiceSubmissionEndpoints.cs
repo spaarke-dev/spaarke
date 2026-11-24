@@ -243,8 +243,24 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         // Task 097f (EB-D-180): the replaced-by-correction note, named only when the caller may see the correcting submission as they see this one.
         var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(scope, hideSubmissions, logger, hideInvoices), ct);
-        return Results.Ok(ExternalView(shown[0]));
+        return Results.Ok(ExternalReadView(shown[0], view));
     }
+
+    /// <summary>
+    /// ebilling-r1 iss052 (#3082): the single read's answer. <see cref="ExternalView"/>, plus <c>invoiceId</c> when <paramref name="decided"/>
+    /// (the submission the filter decided, <see cref="ExternalInvoiceSubmissionScope.Submission"/>) is Accepted and has an invoice.
+    /// <para>No new check: this handler runs only after <see cref="ExternalInvoiceSubmissionAuthorizationFilter"/> put the submission on the
+    /// scope, which it does only when <see cref="VisibleSubmissionsAsync"/> kept it, and for a submission with an invoice that decision includes
+    /// the caller-aware invoice predicate (<see cref="ExternalInvoiceHiding"/>: D-70 firm match, (a')) for EXACTLY this invoice id. A hidden
+    /// invoice is the uniform 404 and a failed decision the 503 before this runs, so neither reaches here. A Received, Processing, Rejected or
+    /// Failed submission (a Rejected one has an invoice too, D-101) carries no id.</para>
+    /// </summary>
+    internal static InvoiceSubmissionView ExternalReadView(InvoiceSubmissionView shown, InvoiceSubmissionView decided) =>
+        ExternalView(shown) with { OpenableInvoiceId = OpenableInvoiceOf(decided) };
+
+    /// <summary>The invoice of an Accepted submission; null for every other status and for a submission with no invoice.</summary>
+    internal static Guid? OpenableInvoiceOf(InvoiceSubmissionView view) =>
+        view.Status == nameof(InvoiceSubmissionStatus.Accepted) && view.InvoiceId is { } id && id != Guid.Empty ? id : null;
 
     /// <summary>
     /// ebilling-r1 task 097f: which correcting submissions the external caller may be told, by the SAME rule that lets them see a submission
