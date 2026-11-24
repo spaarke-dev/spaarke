@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss048" project="ebilling-r1">
+  <metadata>
+    <title>Invoice submission result screen: the title and icon follow the outcome; a Failed submission that a resubmission cannot fix does not say "Submit it again"</title>
+    <phase>Issue fix; found 2026-11-24 in owner checklist Q (task 053)</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in a shared package consumed by the external SPA and internal surfaces.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two scoped UI changes with exact entry points and tests.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>053</deps>
+    <tags>react, fluent-ui, frontend, external-spa</tags>
+  </metadata>
+
+  <prompt>Owner checklist Q (2026-11-24): a firm-portal submission ended Failed, yet the result screen showed a success icon and the title "Invoice received" above the Failed bar, and the Failed bar told the firm "Submit it again" although the cause (the record's setup; reason code record_owner_restricted_content_team_unresolved) refuses every resubmission the same way. Two defects in @spaarke/ui-components:
+(1) InvoiceSubmissionWizard.tsx (~:492-506) returns a fixed success config: icon DocumentCheckmarkRegular and title 'Invoice received', set before the outcome is known. The outcome (InvoiceSubmissionOutcome.tsx) is polled afterwards, so the heading never follows it.
+(2) InvoiceSubmissionOutcome.tsx (~:302-310) shows one Failed text for every reason.</prompt>
+
+  <constraints>
+    <constraint>The heading follows the polled status. Received or Processing (or not yet known): "Invoice received" with the current icon. Accepted: "Invoice accepted" with the checkmark icon. Accepted but held (the existing held warning): "Invoice received". Rejected: "Invoice rejected" with an error-style document icon. Failed: "Invoice not processed" with a warning-style document icon. Fluent v9 icons only (@fluentui/react-icons), tokens only, no hard-coded colours (ADR-021).</constraint>
+    <constraint>WizardShell: widen IWizardSuccessConfig.title from string to React.ReactNode (string stays valid; WizardSuccessScreen already renders it inside a Text as h2). No other change to WizardShell. Every existing caller keeps compiling unchanged.</constraint>
+    <constraint>The heading and the outcome body share ONE status source per submission (no second poll). Choose the smallest mechanism: for example the outcome component takes an optional onStatusChange callback that a small per-submission store or state holder feeds to heading and icon components. The outcome component's existing props and behaviour stay as they are when the new prop is absent.</constraint>
+    <constraint>Failed text: when outcomeReasonCode starts with "record_owner_" (every RecordOwnershipResolver refusal), say: "We could not process this invoice because of how the record you chose is set up. Submitting it again will not help until that is fixed. Contact the team and quote tracking number {tracking}." (without the tracking clause when there is no tracking number). Every other Failed keeps today's text. Never show the reason code itself to the user.</constraint>
+    <constraint>Apply to every surface that shows InvoiceSubmissionOutcome under a fixed "Invoice received" success config (grep the package; CreateInvoiceWizard if it does). Report each surface changed.</constraint>
+    <constraint>Tests (React Testing Library in a FluentProvider, the package's existing runner), failing before and passing after: Failed with a record_owner_ code shows "Invoice not processed" and the setup text and no "Submit it again"; Failed with another code keeps the old text; Accepted shows "Invoice accepted"; Rejected shows "Invoice rejected"; Processing shows "Invoice received". Update existing tests that assert 'Invoice received' only where the new behaviour requires it (in the package and in src/client/external-spa/tests).</constraint>
+    <constraint>Build the package (npm run build in src/client/shared/Spaarke.UI.Components) and run its tests for the InvoiceSubmission, CreateInvoiceWizard and Wizard folders, plus the external-spa tests that name 'Invoice received'. Node installs: npm install --legacy-peer-deps --no-audit --no-fund. No deploy.</constraint>
+    <constraint>Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss048-submission-result-screen.md (what changed, surfaces, tests, fail-before evidence).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Failed submission with reason record_owner_restricted_content_team_unresolved shows the title "Invoice not processed", a non-success icon, the setup text, and no "Submit it again".</criterion>
+    <criterion testable="true">A Failed submission with any other reason shows today's text.</criterion>
+    <criterion testable="true">The title reads "Invoice accepted" for Accepted, "Invoice rejected" for Rejected, and "Invoice received" while Received or Processing.</criterion>
+    <criterion testable="true">Every other WizardShell caller compiles and its tests pass unchanged.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
