@@ -41,4 +41,30 @@ uac-r2 had already said (earlier that day) that `b64d988625` will be in its next
 ## Step 3: uac-r2 after-notice
 
 - uac-r2 reply (2026-11-24): candidate **master `20129e985c`** (built in its worktree). It contains `b64d988625`, sits on top of the live `0362599b94` (031 stays), and adds ebilling ISS-029/042/043, ontology 207 and a signals test. CI shards are running. uac-r2 names the SHA to the owner in its own session once it is green. After the deploy it runs checks (a)–(c) and then sends the after-notice and the GATE result.
-- After-notice: pending.
+- BEFORE notice (uac-r2, 2026-11-24): the owner gave the go for `20129e985c` in uac-r2's session; the swap from `0362599b94` started. Checks (a)–(c) follow once it is up.
+- LIVE notice (uac-r2): dev BFF `20129e985c` live since 21:36:18Z 2026-11-24. Results:
+  - hashes 4/4, package 42 MB, `/healthz` 200;
+  - signed-in route checks as expected (preview-url 403, unknown route 404);
+  - startup clean.
+- Checks (a)–(c) were **not run live**. They need an external contact token, which uac-r2's session does not hold. uac-r2 confirmed instead that the served DLLs are hash-identical to the `20129e985c` build, and that build carries 031's `ReadableColumns`, the allow-list refusal and the `threadId` field.
+- (a)–(c) move into this task's E2E with a partner sign-in. A 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED` on an allow-listed column, or a missing `threadId`, blocks the SPA: roll it back to `9d08576e63` with owner approval. Report the result to uac-r2.
+- **GATE PASS** (uac-r2, window 21:36:18Z–22:07Z). Results:
+  - 70 requests. The only 5xx is `/healthz/catalog` 503, a known drift. The other 4xx were uac-r2's own probes or the platform ping.
+  - External traffic: 16 requests, all 2xx; 0 `DV_FETCHXML_COLUMN_NOT_PERMITTED`; 0 exceptions on external routes.
+  - One Redis lease-renewal blip, pre-existing.
+  - uac-r2's side of the deploy-order rule is satisfied.
+
+## Step 4: SPA deploy plan (owner go pending)
+
+- Master HEAD at the check (2026-11-24 ~22:10Z): `fa96792811` (merge of #3073 ebilling-r1).
+- External-SPA source since the live SPA `9d08576e63`, one item beyond Step 1:
+  - ebilling #3051 `cf1b7027ce` (submission result screen).
+  - #3073 changes nothing under `src/client/external-spa` or `Api/ExternalAccess`.
+- New shared ui-components commits since the Step 1 list, all in components the SPA does not use:
+  - Report Card wizard (`b29bb1f5f5`) and WA wizard (`2156330275`);
+  - Decision Wizard (`20129e985c`);
+  - `regardingRowStyles` (`a452afe110`);
+  - EmailComposer (`525a1dfe10`);
+  - SprkChat types (`a83f5b629d`);
+  - `mountWizardPage` (`3471c31b7e`).
+- Rollback: redeploy `9d08576e63`.
