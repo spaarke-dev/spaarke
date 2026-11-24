@@ -264,6 +264,36 @@ describe('exportCsv — end-to-end', () => {
     expect(blob.type).toBe('text/csv;charset=utf-8');
   });
 
+  // Task 033 (FR-20, #2447): the optional cellText hook. Absent, every case above is unchanged.
+  describe('cellText (host-supplied cell text)', () => {
+    const records = [
+      { name: 'Alice', status: 'Open', amount: { value: 1200, extensionData: null } },
+      { name: 'Bob', status: 'Closed', amount: 9 },
+    ];
+    // What the grid supplies for a Money column: the displayed text; nothing for any other column.
+    const displayedMoney = (r: Record<string, unknown>, c: ResolvedColumn): string | undefined =>
+      c.renderer === 'currency' ? (r.amount === 9 ? '$9.00' : '$1,200.00') : undefined;
+
+    it('writes the supplied text for a cell (RFC 4180 quoted), and the default formatting where it returns undefined', async () => {
+      const text = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event', displayedMoney));
+      expect(text).toBe(`${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,"$1,200.00"\r\nBob,Closed,$9.00`);
+    });
+
+    it('an empty string from the hook is an empty cell, not the raw value', async () => {
+      const text = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event', () => ''));
+      expect(text).toBe(`${UTF8_BOM}Name,Status,Amount\r\n,,\r\n,,`);
+    });
+
+    it('a hook that always returns undefined gives the same file as no hook', async () => {
+      const without = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event'));
+      const declined = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event', () => undefined));
+      expect(declined).toBe(without);
+      expect(without).toBe(
+        `${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,"{""value"":1200,""extensionData"":null}"\r\nBob,Closed,9`
+      );
+    });
+  });
+
   it('round-trips UTF-8 characters (non-ASCII payload renders intact)', async () => {
     const records = [{ name: 'Naïve café — résumé', status: '✓', amount: 1 }];
     const blob = exportCsv(records, columns, 'View', 'sprk_event');

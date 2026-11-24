@@ -130,6 +130,7 @@ export {
 export type { DefaultHandler, DefaultHandlerContext, DefaultActionMeta } from './commandBar/defaults';
 
 export { exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from './commandBar/csvExport';
+export type { ExportCellText } from './commandBar/csvExport';
 
 export {
   registerCommandHandler,

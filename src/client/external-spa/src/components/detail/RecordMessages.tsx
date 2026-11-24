@@ -52,6 +52,11 @@
  * failure, or `MAX_BACKGROUND_FAILURES` failures in a row, stops the checks until a read the user asked for succeeds. The
  * indicator clears on a successful read, on a successful send and on a record change.
  *
+ * THREADS (R4 task 035, FR-22). Messages that share the server's `threadId` are shown together as one conversation
+ * (`groupMessagesByThread`, by that key only: never the subject, sender or time); a message with no thread stands alone. The
+ * list keeps its orientation (oldest to newest), a conversation sitting where its latest message is. Every HTML body still goes
+ * through `sanitizeEmailHtml` with no options, so remote images are never loaded (`allowRemoteImages` is never passed).
+ *
  * ADR-021: Fluent UI v9 semantic tokens only (no hard-coded colours) — the section inherits the host FluentProvider, so
  * light, dark and the Teams themes work. ADR-012: composes Fluent primitives and the shared sanitizer; the shared
  * EmailComposer / NewThreadModal are internal-plane and Xrm-bound, so only their look is mirrored.
@@ -88,6 +93,7 @@ import { BffAccessState, accessFailureOf, type BffAccessFailure } from '../auth/
 import { TruncatedListNotice } from '../TruncatedListNotice';
 import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from '../createAction';
 import { createRightOf } from '../record/recordAccess';
+import { groupMessagesByThread, type MessageGroup } from './groupMessagesByThread';
 
 // ---------------------------------------------------------------------------
 // Copy
@@ -226,6 +232,32 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorBrandBackground2,
     border: `${tokens.strokeWidthThin} solid ${tokens.colorBrandStroke2}`,
   },
+  // Task 035 (FR-22): a conversation of two or more messages. Semantic tokens only; the brand-coloured start edge is the
+  // visual grouping, the messages inside keep the ordinary item look.
+  threadItem: {
+    listStyleType: 'none',
+  },
+  thread: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    paddingBlock: tokens.spacingVerticalXS,
+    paddingInlineStart: tokens.spacingHorizontalS,
+    borderInlineStartWidth: tokens.strokeWidthThick,
+    borderInlineStartStyle: 'solid',
+    borderInlineStartColor: tokens.colorBrandStroke1,
+  },
+  threadCount: {
+    color: tokens.colorNeutralForeground3,
+  },
+  threadList: {
+    listStyleType: 'none',
+    margin: 0,
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
   header: {
     display: 'flex',
     alignItems: 'baseline',
@@ -361,6 +393,29 @@ const MessageItem: React.FC<{ message: ExternalMessage }> = ({ message }) => {
         )}
       </div>
       <MessageBody message={message} />
+    </li>
+  );
+};
+
+/**
+ * Task 035 (FR-22): two or more messages the server says share a thread, shown together as one bordered conversation with its
+ * reply count, oldest first (the read's order). A message with no thread, or alone in its thread, is a plain `MessageItem`.
+ */
+const MessageThreadGroup: React.FC<{ group: MessageGroup }> = ({ group }) => {
+  const styles = useStyles();
+  const count = group.messages.length;
+  return (
+    <li className={styles.threadItem} data-testid="record-message-thread" data-thread-size={count}>
+      <div role="group" aria-label={`Conversation, ${count} messages`} className={styles.thread}>
+        <Text size={200} className={styles.threadCount} data-testid="record-message-thread-count">
+          {`${count} messages in this conversation`}
+        </Text>
+        <ul className={styles.threadList}>
+          {group.messages.map((m, i) => (
+            <MessageItem key={m.sprk_communicationid || i} message={m} />
+          ))}
+        </ul>
+      </div>
     </li>
   );
 };
@@ -629,6 +684,12 @@ const MessageThread: React.FC<MessageThreadProps> = ({
     await read('refresh', true);
   };
 
+  // Task 035 (FR-22): the shown messages as threads, by the server's `threadId` only.
+  const groups = React.useMemo(
+    () => (thread.status === 'ready' ? groupMessagesByThread(thread.messages) : []),
+    [thread]
+  );
+
   const showCompose = thread.status !== 'access' && thread.status !== 'unavailable';
   const overBy = text.length - MAX_MESSAGE_BODY_LENGTH;
 
@@ -751,9 +812,13 @@ const MessageThread: React.FC<MessageThreadProps> = ({
               </div>
             ) : (
               <ul className={styles.list} aria-label="Message thread" data-testid="record-messages-list">
-                {thread.messages.map((m, i) => (
-                  <MessageItem key={m.sprk_communicationid || i} message={m} />
-                ))}
+                {groups.map((g, i) =>
+                  g.messages.length > 1 ? (
+                    <MessageThreadGroup key={g.threadId ?? i} group={g} />
+                  ) : (
+                    <MessageItem key={g.messages[0].sprk_communicationid || i} message={g.messages[0]} />
+                  )
+                )}
               </ul>
             )}
             {/* Task 034: under the thread, in a polite live region that is mounted with it (so the text is announced when it
