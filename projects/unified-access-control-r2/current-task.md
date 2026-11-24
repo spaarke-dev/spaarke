@@ -34,7 +34,8 @@
   - Notices sent: spa-r4 (SPA hold LIFTED on the uac side; a SPA deploy still needs the owner's per-SHA go there), mcp-r1, ebilling-r1, ontology-r1.
   - **Gate PASS 05:52Z:** 28 req, 0 5xx, 0 external, 0 exceptions; markers and ID-LINK as before.
   - Rollback: `996928732e` (`C:/wtdep20`).
-  - Next: spa-r4 #3048 (033 + 035 threadId, diff APPROVED), once merged on the owner's go.
+  - Next: candidate `20129e985c` below.
+- **NEXT CANDIDATE `20129e985cf315110c5c50b2362dd6bbf9caf8a4`** (master, `C:/wtdep22`, clean; live 0362599b94 is an ancestor). Server delta since live, reviewed 2026-11-24, no authorization-chain change: spa-r4 #3048 (`b64d988625`, external message `threadId`, approved); ebilling ISS-029 (409 `ebilling.decision.id_reused` before any write), ISS-042 (firm labels), ISS-043/035 (multipart IOException → 400 at Warning; repeated field → 400) via #3051/#3065; ontology 207 (#3068, `assignee_email_not_sent_admin_account`, option (a) of #3063); signals test #3054. Decisions widget source unchanged. Verified at the tip: sln 0 warnings / 0 errors; shards 583 + 4049 + 6748 + 4045 + 38490 (1 = ProvisionProjectIdempotencyTests load timeout; class re-run 55/55 ×3); seam 18/18; ArchTests 2793/2793; widget build OK (dist sha256 9b64821c…ba1d) + jest 353/353. WAITING on owner "BFF deploy 20129e985c". After: spa-r4 checks (a) a P3 column readable, (b) a column off the allow-list → DV_FETCHXML_COLUMN_NOT_PERMITTED, (c) external messages carry `threadId`; then AFTER notices to spa-r4 (SPA follows only after GATE PASS), ontology-r1 (re-runs #3063 repro), ebilling-r1, mcp-r1. Ping mcp-r1 + spa-r4 before the swap.
 - **Previous candidate record `0362599b94f76f2486ba3b6cb7f60d95b3fce7cf`** (master, `C:/wtdep21`, clean), on top of live 996928732e. It carries:
   - spa-r4 031 (#3033, bd40b57b03): ReadableColumns; merged diff checked against the approval; LIFTS spa-r4's SPA hold once live;
   - ontology 206 (#3035);
