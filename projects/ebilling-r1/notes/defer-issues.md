@@ -2611,3 +2611,30 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 **Related**: task iss043, ISS-043 (#2978). `IFormFile`-bound routes are not affected. Not a security issue.
 
 ---
+
+### ISS-050 — Line-decision lock expires after 2 minutes while a 1,000-line call can still be writing
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Task iss029 Opus adversarial review (found in passing, pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3059 |
+
+**Description**
+
+A line-decision call holds the invoice's processing lock for a fixed 2 minutes and never renews it. One call can cover up to 1,000 lines (Accept all Clean), and the record step writes one Decision Record per line with several Dataverse round trips each. If a large call outlives the lock, a second reviewer's decision can write a line the bulk call already updated but has not recorded; the bulk call then records "accept" on a line that shows Reduced, so line and record disagree. The real duration of a 1,000-line call on dev is not measured.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs:194` (`MaxLinesPerRequest`), `:210` (`LockDuration`), `:315` (acquire), the record loop (~843)
+- The approval path shares the lock (`RunAsync`)
+
+**Suggested fix**: measure a 1,000-line Accept all Clean on dev; then renew the lock per record chunk, size it to the call, or cap lines per call to what fits.
+
+**Estimated effort**: half a day plus the measurement.
+**Blockers**: none.
+**Related**: task iss029 (its pre-check relies on the lock between check and write). Not a security issue.
+
+---
