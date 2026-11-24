@@ -78,3 +78,17 @@ have no `dist` until built, so a fresh `npm run build` / four Wizard suites (`In
 `CreateEventAndAddTodoFollowOn.sidePane`) fail with "Cannot find module" until `Spaarke.Auth` and `Spaarke.SdapClient` are installed
 and built (`npm install --legacy-peer-deps --no-audit --no-fund && npm run build` in each). I did that; nothing from it is committed
 (`node_modules`, `dist` are ignored). Without it, the first baseline showed 391 passed with those 4 suites unable to run.
+
+## Review (Sonnet adversarial-reviewer, 2026-11-24)
+
+No F-class finding. The reviewer ran 243/0 in 15 suites on 1ed3fd8422. Known limits, recorded and not fixed:
+- K1: the `record_owner_` prefix also covers two codes the resolver documents as retryable (`record_owner_direct_team_unavailable`, `record_owner_unsettled`). No invoice path emits them as Failed today; if one ever does, the firm is told a resubmission will not help.
+- K2: an internal blocked submission (status Rejected, held for Override or Return) now reads "Invoice rejected". The body bar already said Rejected.
+- K3: several tests whose status answer is Accepted assert the pre-poll "Invoice received". They pass because the assertion samples before the mocked poll lands.
+- K4: no table tests for null, unknown or Received statuses, a failed status read, or a different-case prefix. These were traced by hand and behave correctly.
+- K5: the heading keeps its last status when the body shows a load error. Not reachable today.
+- K6: a submission superseded by a correction reads "Invoice accepted".
+- K7 (pre-existing, EB-D-210): the Rejected bar shows the reason code.
+- K8: the Failed sentence starts with a leading space after the bar title.
+
+Merged into work at f4f5b06f52. The portal picks it up at the next external-SPA build from master.

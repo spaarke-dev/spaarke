@@ -4,7 +4,7 @@
     <title>Invoice submission result screen: the title and icon follow the outcome; a Failed submission that a resubmission cannot fix does not say "Submit it again"</title>
     <phase>Issue fix; found 2026-11-24 in owner checklist Q (task 053)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in a shared package consumed by the external SPA and internal surfaces.</rigor-reason>
     <model-tier>sonnet</model-tier>
