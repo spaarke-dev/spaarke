@@ -49,6 +49,7 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
     private const string CorrelationId = "iss025-correlation";
     private const string SessionId = "iss025-session";
     private const long SequenceNumber = 4242;
+    private const long OriginalSequenceNumber = 1001;
 
     private static readonly DateTimeOffset Now = new(2026, 11, 24, 9, 0, 0, TimeSpan.Zero);
 
@@ -187,7 +188,64 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
         var act = () => h.ProcessAsync(h.Message(brokerDeliveryCount: 1));
 
         await act.Should().NotThrowAsync();
-        h.Calls.Should().Equal("schedule", "complete", $"cancel:{SequenceNumber}");
+        h.Calls.Should().Equal("schedule", "complete", $"peek:{OriginalSequenceNumber}", $"cancel:{SequenceNumber}");
+        h.ReceiverQueues.Should().Equal(JobsQueue);
+        h.Logs.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("still on the queue; cancelling retry copy"));
+    }
+
+    [Fact(DisplayName = "Round 2: a failed complete whose original is no longer on the queue (peek returns nothing) keeps the copy")]
+    public async Task CompleteFails_OriginalAbsent_KeepsCopy()
+    {
+        var h = new Harness(_ => HandlerResult.Fail)
+        {
+            CompleteFault = new ServiceBusException("lock lost", ServiceBusFailureReason.MessageLockLost),
+            Peek = PeekResult.Absent,
+        };
+
+        var act = () => h.ProcessAsync(h.Message(brokerDeliveryCount: 1));
+
+        await act.Should().NotThrowAsync();
+        h.Calls.Should().Equal("schedule", "complete", $"peek:{OriginalSequenceNumber}");
+        h.Scheduled.Should().ContainSingle();
+        h.ReceiverQueues.Should().Equal(JobsQueue);
+        h.Logs.Should().Contain(e => e.Level == LogLevel.Warning
+            && e.Message.Contains("no longer on the queue") && e.Message.Contains($"keeping retry copy {SequenceNumber}")
+            && e.Message.Contains(IdempotencyKey));
+        h.Logs.Should().NotContain(e => e.Level == LogLevel.Error);
+    }
+
+    [Fact(DisplayName = "Round 2: a failed complete where the peek returns a later message (the original is gone) keeps the copy")]
+    public async Task CompleteFails_PeekReturnsLaterMessage_KeepsCopy()
+    {
+        var h = new Harness(_ => HandlerResult.Fail)
+        {
+            CompleteFault = new ServiceBusException("lock lost", ServiceBusFailureReason.MessageLockLost),
+            Peek = PeekResult.Later,
+        };
+
+        var act = () => h.ProcessAsync(h.Message(brokerDeliveryCount: 1));
+
+        await act.Should().NotThrowAsync();
+        h.Calls.Should().Equal("schedule", "complete", $"peek:{OriginalSequenceNumber}");
+        h.Logs.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains($"keeping retry copy {SequenceNumber}"));
+    }
+
+    [Fact(DisplayName = "Round 2: a failed complete whose peek also fails keeps the copy (a duplicate beats a lost job) and logs at Warning")]
+    public async Task CompleteFails_PeekThrows_KeepsCopy()
+    {
+        var h = new Harness(_ => HandlerResult.Fail)
+        {
+            CompleteFault = new ServiceBusException("lock lost", ServiceBusFailureReason.MessageLockLost),
+            Peek = PeekResult.Throws,
+        };
+
+        var act = () => h.ProcessAsync(h.Message(brokerDeliveryCount: 1));
+
+        await act.Should().NotThrowAsync();
+        h.Calls.Should().Equal("schedule", "complete", $"peek:{OriginalSequenceNumber}");
+        h.Logs.Should().Contain(e => e.Level == LogLevel.Warning
+            && e.Message.Contains("could not be peeked") && e.Message.Contains($"keeping retry copy {SequenceNumber}"));
+        h.Logs.Should().NotContain(e => e.Level == LogLevel.Error);
     }
 
     [Fact(DisplayName = "A failed cancel after a failed complete is logged at Error (a duplicate may run) and does not throw")]
@@ -202,7 +260,7 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
         var act = () => h.ProcessAsync(h.Message(brokerDeliveryCount: 1));
 
         await act.Should().NotThrowAsync();
-        h.Calls.Should().Equal("schedule", "complete", $"cancel:{SequenceNumber}");
+        h.Calls.Should().Equal("schedule", "complete", $"peek:{OriginalSequenceNumber}", $"cancel:{SequenceNumber}");
         h.Logs.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("Could not cancel retry copy") && e.Message.Contains("may both run"));
     }
 
@@ -348,7 +406,26 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
         var act = () => h.ProcessAsync(h.Message(brokerDeliveryCount: 1, jobType: IncomingCommunicationJobHandler.JobTypeName));
 
         await act.Should().NotThrowAsync();
-        h.Calls.Should().Equal("schedule", "complete", $"cancel:{SequenceNumber}");
+        h.Calls.Should().Equal("schedule", "complete", $"peek:{OriginalSequenceNumber}", $"cancel:{SequenceNumber}");
+        h.ReceiverQueues.Should().Equal(CommunicationQueue);
+    }
+
+    [Fact(DisplayName = "Round 2, communication queue: a failed complete whose original is gone keeps the copy; the peek targets sdap-communication")]
+    public async Task Communication_CompleteFails_OriginalAbsent_KeepsCopy()
+    {
+        var h = new Harness(_ => HandlerResult.Fail)
+        {
+            Communication = true,
+            Admins = [Guid.NewGuid()],
+            CompleteFault = new ServiceBusException("lock lost", ServiceBusFailureReason.MessageLockLost),
+            Peek = PeekResult.Absent,
+        };
+
+        var act = () => h.ProcessAsync(h.Message(brokerDeliveryCount: 1, jobType: IncomingCommunicationJobHandler.JobTypeName));
+
+        await act.Should().NotThrowAsync();
+        h.Calls.Should().Equal("schedule", "complete", $"peek:{OriginalSequenceNumber}");
+        h.ReceiverQueues.Should().Equal(CommunicationQueue);
     }
 
     // =====================================================================================
@@ -360,6 +437,15 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
         Succeed,
         Fail,
         Poison
+    }
+
+    /// <summary>What the peek at the original's sequence number finds after a failed complete.</summary>
+    private enum PeekResult
+    {
+        Present,
+        Absent,
+        Later,
+        Throws
     }
 
     private sealed record Observation(int DeliveryCount, bool IsFinalDelivery);
@@ -379,6 +465,8 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
 
         public List<(ServiceBusMessage Message, DateTimeOffset DueAt)> Scheduled { get; } = [];
         public List<string> SenderQueues { get; } = [];
+        public List<string> ReceiverQueues { get; } = [];
+        public PeekResult Peek { get; init; } = PeekResult.Present;
         public List<string> Calls { get; } = [];
         public List<Observation> Seen { get; } = [];
         public List<Entity> Notifications { get; } = [];
@@ -429,7 +517,8 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
                 contentType: "application/json",
                 replyTo: "iss025-reply-to",
                 properties: properties,
-                deliveryCount: brokerDeliveryCount);
+                deliveryCount: brokerDeliveryCount,
+                sequenceNumber: OriginalSequenceNumber);
         }
 
         public async Task ProcessAsync(ServiceBusReceivedMessage message)
@@ -454,7 +543,29 @@ public sealed class Issue2876_ServiceBusJobProcessorRetryBackoffTests
                     return CancelFault is null ? Task.CompletedTask : throw CancelFault;
                 });
 
+            var receiver = new Mock<ServiceBusReceiver>();
+            receiver.Setup(r => r.PeekMessageAsync(It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+                .Returns((long? from, CancellationToken _) =>
+                {
+                    Calls.Add($"peek:{from}");
+                    return Peek switch
+                    {
+                        PeekResult.Present => Task.FromResult<ServiceBusReceivedMessage?>(
+                            ServiceBusModelFactory.ServiceBusReceivedMessage(messageId: IdempotencyKey, sequenceNumber: from ?? -1)),
+                        PeekResult.Later => Task.FromResult<ServiceBusReceivedMessage?>(
+                            ServiceBusModelFactory.ServiceBusReceivedMessage(messageId: "another-job", sequenceNumber: (from ?? 0) + 7)),
+                        PeekResult.Absent => Task.FromResult<ServiceBusReceivedMessage?>(null),
+                        _ => throw new ServiceBusException("peek refused", ServiceBusFailureReason.ServiceTimeout),
+                    };
+                });
+
             var client = new Mock<ServiceBusClient>();
+            client.Setup(c => c.CreateReceiver(It.IsAny<string>()))
+                .Returns((string queue) =>
+                {
+                    ReceiverQueues.Add(queue);
+                    return receiver.Object;
+                });
             client.Setup(c => c.CreateSender(It.IsAny<string>()))
                 .Returns((string queue) =>
                 {
