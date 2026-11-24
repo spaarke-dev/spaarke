@@ -1,6 +1,6 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-23, starting task 024. Desktop session `field-mapping-r1`.
+> **Last updated**: 2026-11-24, starting task 026. Desktop session `field-mapping-r1`.
 > Previous version (055/056 build, deploy and live checks): `notes/handoff-history/current-task-2026-11-23-pre-024.md`.
 > State only here; decisions in `notes/decisions.md`, standing rules in the project `CLAUDE.md`.
 
@@ -9,15 +9,24 @@
 | Field | Value |
 |---|---|
 | **Session / worktree** | `field-mapping-r1`, `C:\code_files\spaarke-wt-field-mapping-server-write-path-r1`, on `work/field-mapping-server-write-path-r1`. |
-| **Work branch** | 98b2084536 (local; origin at 8b816e10b3). 055 and 056 are on master via #2984 (889b0ea94d). |
-| **Dev** | BFF a48398746d (carries #2984). Web resources `sprk_communicationconversationpage.html` and `sprk_spaarkeai` from master 738648c7fb. `RecordRepair:Pass:GoLive` unset everywhere. |
-| **Active task** | **024** To Do wizard migration (FR-16), FULL rigor, sonnet @ high, STEP MODE directional. Gate met: 023 live check PASS 2026-11-23 (dark-mode look left for the owner). |
-| **024 approach** | Copy the 023 Event wizard migration: `CreateEventWizard/eventService.ts` + `__tests__/eventService.fieldMapping.test.ts`, notes `notes/task-023-notes.md`. Implementation delegated to one Sonnet implementer in a worktree on `task/fm-024` (branched from 98b2084536); this session reviews, runs gates, merges `--no-ff`. |
-| **024 current step** | Code merged into the work branch at 869c6cf494 (task/fm-024 fca6adcf22). Review + gates PASS (jest 16/119, tsc 0, client-lint ok, ADR clean). Agent worktree to remove later: `C:\code_files\spaarke\.claude\worktrees\agent-a451c05c09d18c1b9` (Remove-WorktreeSafe.ps1). |
-| **Files modified (024)** | All committed (merge 869c6cf494). |
-| **Deployed** | `sprk_createtodowizard` on dev from master 2566d561e0 (#3041 merge), 2026-11-24 03:46Z, SHA-256 AD2955B3…1B50, in SpaarkeMaster. |
-| **Next action** | 024 live check PASS incl. the Assignee re-check (2026-11-24); 024 stays 🔄 only for the owner's dark-mode look, like 023. Next: start 025 (Invoice wizard) through task-execute. |
+| **Work branch** | 917595b58e + uncommitted 025 closure (see below). Origin at 0c3f397d9b; master has #3031 (57a68b06c5) and #3041 (2566d561e0). |
+| **Dev** | BFF 996928732e (UAC-r2, 2026-11-24 03:01Z). `sprk_createtodowizard` from master 2566d561e0 (03:46Z, SHA-256 AD2955B3…1B50). `RecordRepair:Pass:GoLive` unset everywhere. |
+| **Active task** | **026** Work Assignment wizard (FR-16), FULL rigor, sonnet @ high, STEP MODE directional. Step 0 in progress (re-grep done). |
+| **026 findings so far** | `workAssignmentService.ts`: `applyFieldMappings` import :38, call ~:447 (comment ~:445); WA create via `createRecordViaBffWithWarnings` ~:502 (a root, ontology 046); follow-on `sprk_event` via `this._dataService.createRecord` ~:669 (wrapped by `withBffChildWrites` :106, so it already goes to the BFF route, but with no mapping source). Follow-on event Assigned To already binds by exact column (comment ~:650-655). `ChildRecordEndpoints.InferMappingSourceTables` = {sprk_matter, sprk_project} only (:102). **Prefer an explicit `mappingSource` from the client for the follow-on event (client-only) over adding `sprk_event` to InferMappingSourceTables (a BFF change needing publish delta and an exact-SHA owner go).** Dev profiles: "Matter to Work Assignment (Attorney Matrix)" 7b147316-7f96-f111-b8db-3833c5e5d030 active; "Matter to Event (Attorney Matrix)" 24dc0ed2-537b-f111-ab0e-7ced8ddc4a05 active. |
+| **026 approach** | As 024: one Sonnet implementer in an `isolation: worktree` agent, first command `git switch -c task/fm-026 <work-branch tip>` (gotcha 2026-10-20); copy `CreateTodoWizard/todoService.ts` + `__tests__/todoService.fieldMapping.test.ts` (024) and `CreateEventWizard/eventService.ts` (023). This session reviews, runs gates, merges `--no-ff`; then master PR, deploy `sprk_createworkassignmentwizard`, live check (incl. a secure Matter) — each on the owner's go. |
+| **Uncommitted** | 025 closure: `tasks/025-invoice-wizard-migration.poml` (status cancelled + notes), `tasks/032-invoice-extraction.poml` (notes: 032b-3 live check gains the wizard-submitted invoice case), `tasks/TASK-INDEX.md` (025 🚫 [cancelled]), this file. Drift check clean. Commit these first. |
+| **Next action** | Commit the 025 closure. Then 026 Step 1: inventory the WA and follow-on event payload keys (read workAssignmentService.ts :340-680), write the implementer brief, launch it. |
 
+## 024 (done except the owner's dark-mode look)
+
+- Live check PASS 2026-11-24 incl. the Assignee re-check (notes/task-024-notes.md). Assignee fix via #3041; Event wizard's latent twin filed as DI-039 / #3039.
+- Dev test rows: To Dos 7d1cba50-dfd9-4920-8e5e-6842e788cbac, 354ffd82-ade9-4a02-9c4d-ebd39a21ca08, 2c53f9cc-686d-4048-94e2-d95ec694b761; inactive temporary profile 6a6d6cab-b2e7-f111-84ea-7ced8dda31f8 (+2 rules).
+- Agent worktree to remove: `C:\code_files\spaarke\.claude\worktrees\agent-a451c05c09d18c1b9` (Remove-WorktreeSafe.ps1).
+- The Smart To Do `action=createTodo` launch and the Console in-app wizard pick up 024 only when `sprk_smarttodo` / `sprk_spaarkeai` are next deployed.
+
+## 025: cancelled 2026-11-24 (owner) as superseded
+
+ebilling-r1 052 moved the invoice wizard to internal submission; invoice mapping is 032b's step in `InvoiceSubmissionPersister`; the wizard live check moves to 032b-3.
 ## Done 2026-11-23 (for context)
 
 - 055 and 056 ✅: live checks PASS on dev, confirmed by UAC-r2. Test rows on dev: communications c0dfc7b4-8be7-f111-84ea-00224829aef9, cd34edc0-8be7-f111-84ea-00224829aef9. Follow-ups: DI-038 / #3023 (refusal title); #3024 is the messaging owner's.

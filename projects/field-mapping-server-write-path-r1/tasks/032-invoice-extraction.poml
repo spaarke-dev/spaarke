@@ -106,7 +106,9 @@
     <criterion testable="true">BFF build 0 errors; InvoiceReviewWritePathTests, ConditionalLinkWriteTests, SecureChildOwnershipAiToolTests* and RecordOwnerAssignmentCensusTests pass; publish-size delta and CVE result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-20. Office Invoice quick-create is task 018; the Invoice wizard is task 025. Live check is task 036.</notes>
+  <notes>Spec FR-20. Office Invoice quick-create is task 018; the Invoice wizard is task 025. Live check is task 036.
+
+Added 2026-11-24 (025 cancelled as superseded): 032b-3's live check includes an invoice submitted from the Create Invoice wizard (channel Internal) under a Matter with an active Matter-to-Invoice profile; the mapped columns must be on the invoice at first load and a user-entered value kept.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
