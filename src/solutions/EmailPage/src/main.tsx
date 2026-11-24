@@ -43,10 +43,6 @@ import {
   XrmDataverseClient,
   getXrm,
   ensureNavigatorSidePane,
-  cleanGuid,
-  parseComposeRegarding,
-  type ComposeRegarding,
-  type OpenEmailComposeMode,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider, getTelemetryConnectionString } from '@spaarke/auth';
 import {
@@ -56,6 +52,7 @@ import {
 } from '@spaarke/communication-components';
 import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
+import { resolveEmailLaunch, type ComposeLaunch, type HostFormXrm } from './emailLaunch';
 
 const useStyles = makeStyles({
   centered: {
@@ -119,121 +116,6 @@ function buildXrmWebApi(): EmailWorkspaceWebApi {
   };
 }
 
-const COMMUNICATION_ENTITY = 'sprk_communication';
-
-/**
- * Minimal structural shape of the cross-frame Xrm surface this file reads for
- * Pattern A (embedded host form) record resolution. `getXrm()` is loosely typed
- * and the ambient `@types/xrm` `XrmStatic` doesn't expose `getPageContext` /
- * the legacy `Page`, so we cast to this local shape (all optional — every access
- * is null-guarded).
- */
-interface HostFormXrm {
-  Utility?: {
-    getPageContext?: () => { input?: { entityName?: string; entityId?: string } } | undefined;
-  };
-  Page?: { data?: { entity?: { getId?: () => string | undefined } } };
-}
-
-/**
- * Resolve the incoming `sprk_communication` record id + view mode from the
- * launch context, in precedence order:
- *   (a) `data` query param — Pattern B (`Xrm.Navigation.navigateTo({ data })`,
- *       e.g. the launcher `openEmailRecord`). Carries the bare communication id,
- *       optionally with a folded `&single=1` (or `view=record`) flag.
- *   (b) `id` query param — direct-link / dev fallback.
- *   (c) the embedded host form's record — Pattern A (Email page embedded on a
- *       `sprk_communication` form), read via the cross-frame Xrm.
- *
- * Single-record ("form") mode is derived from a `single=1` / `view=record` flag,
- * which may arrive as its own top-level param OR folded into the `data` value.
- * `hideList` is only meaningful when an id resolves. When nothing resolves →
- * list mode (id `undefined`, `hideList` false) — i.e. behaves exactly as before.
- */
-function resolveEmailLaunch(): {
-  initialSelectedId?: string;
-  hideList: boolean;
-  compose?: ComposeLaunch;
-} {
-  const normalizeId = (raw: string | null | undefined): string | undefined => {
-    const v = cleanGuid(raw ?? '');
-    return v.length > 0 ? v : undefined;
-  };
-  const isSingleFlag = (params: URLSearchParams): boolean =>
-    params.get('single') === '1' || params.get('view') === 'record';
-
-  // (0) COMPOSE mode (Pattern B via `openEmailCompose`) — short-circuits the reading
-  //     surface entirely. `compose=<mode>` (+ optional `&id=<source>`) arrives either
-  //     as its own top-level param or folded into `data`. Parsing `data` as
-  //     URLSearchParams is safe for the record case too: a bare-guid `data` yields no
-  //     `compose` key.
-  try {
-    const search = typeof window !== 'undefined' ? window.location.search : '';
-    const top = new URLSearchParams(search);
-    const rawData = top.get('data');
-    const dataParams = rawData ? new URLSearchParams(rawData) : null;
-    const rawCompose = top.get('compose') ?? dataParams?.get('compose') ?? '';
-    if (rawCompose) {
-      const valid: OpenEmailComposeMode[] = ['new', 'reply', 'replyAll', 'forward'];
-      const mode = (valid as string[]).includes(rawCompose) ? (rawCompose as OpenEmailComposeMode) : 'new';
-      const sourceId = normalizeId(top.get('id') ?? dataParams?.get('id'));
-      // "Related to" seed for a New email (#2908): from the same scope the `compose` key came from.
-      const regarding = mode === 'new' ? parseComposeRegarding(top.get('compose') ? top : (dataParams ?? top)) : undefined;
-      return { hideList: false, compose: { mode, sourceId, regarding } };
-    }
-  } catch {
-    /* URL parse failure → fall through to record/list resolution */
-  }
-
-  let id: string | undefined;
-  let single = false;
-
-  try {
-    const search = typeof window !== 'undefined' ? window.location.search : '';
-    const top = new URLSearchParams(search);
-
-    // single / view may arrive as their own top-level param.
-    single = isSingleFlag(top);
-
-    // (a) data param (Pattern B). The value is either `<guid>` or, when the flag
-    //     was folded in by the launcher, `<guid>&single=1` — split the id from
-    //     any trailing flags (Dataverse surfaces the whole `data` string).
-    const rawData = top.get('data');
-    if (rawData) {
-      const [idPart, ...rest] = rawData.split('&');
-      id = normalizeId(idPart);
-      if (rest.length > 0 && isSingleFlag(new URLSearchParams(rest.join('&')))) single = true;
-    }
-
-    // (b) id fallback param.
-    if (!id) id = normalizeId(top.get('id'));
-  } catch {
-    /* URL parse failure → fall through to host-form / list mode */
-  }
-
-  // (c) embedded host form (Pattern A) — only when no param supplied an id.
-  // `getXrm()` is loosely typed; the cross-frame `getPageContext()` and the
-  // legacy `Page` surfaces aren't on the ambient `@types/xrm` `XrmStatic`, so
-  // cast to a minimal local shape (repo `as unknown as` idiom) rather than any.
-  if (!id) {
-    try {
-      const xrm = getXrm((x: any) => typeof x.Utility?.getPageContext === 'function' || !!x.Page?.data) as unknown as HostFormXrm | null;
-      const input = xrm?.Utility?.getPageContext?.()?.input;
-      if (input?.entityId && (!input.entityName || input.entityName === COMMUNICATION_ENTITY)) {
-        id = normalizeId(input.entityId);
-      }
-      if (!id) {
-        const pageId = xrm?.Page?.data?.entity?.getId?.();
-        id = normalizeId(pageId);
-      }
-    } catch {
-      /* not embedded on a form — list mode */
-    }
-  }
-
-  return { initialSelectedId: id, hideList: Boolean(id) && single };
-}
-
 /** Loading state shown while `bootstrapAuth()` resolves config + MSAL init. */
 const EmailPageLoading: React.FC = () => {
   const s = useStyles();
@@ -265,13 +147,6 @@ const EmailPageAuthError: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
   );
 };
 EmailPageAuthError.displayName = 'EmailPageAuthError';
-
-/** Compose-mode launch: which composer, its source email, and (New only) the "Related to" record. */
-interface ComposeLaunch {
-  mode: OpenEmailComposeMode;
-  sourceId?: string;
-  regarding?: ComposeRegarding;
-}
 
 interface EmailComposeStandaloneProps {
   compose: ComposeLaunch;
@@ -453,7 +328,14 @@ function Root() {
   // Resolve the incoming record + view mode ONCE from the launch context (URL
   // `data`/`id` param → embedded host form). Drives `initialSelectedId` (pre-select)
   // and `hideList` (single-record "form" mode). Absent → list mode (unchanged).
-  const launch = React.useMemo(resolveEmailLaunch, []);
+  const launch = React.useMemo(
+    () =>
+      resolveEmailLaunch(typeof window !== 'undefined' ? window.location.search : '', () =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        getXrm((x: any) => typeof x.Utility?.getPageContext === 'function' || !!x.Page?.data) as unknown as HostFormXrm | null
+      ),
+    []
+  );
 
   const handleRetry = React.useCallback(() => setAttempt(n => n + 1), []);
 
