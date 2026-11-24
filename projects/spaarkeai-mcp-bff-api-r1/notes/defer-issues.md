@@ -157,7 +157,7 @@ Owner decision first (validate on `/mcp/*`, against which allow-list). Copilot a
 
 | Field | Value |
 |---|---|
-| **Status** | Open — offered to spaarke-ontology-platform-r1 (owns the Decision wizard) |
+| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-170, accepted 2026-11-24, commit 5f4453db1d) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | Owner, live Copilot run on dev `0362599b94` (Assign Task step) |
@@ -188,7 +188,7 @@ Extend the shared `ILookupItem` with an optional secondary line and render it un
 
 | Field | Value |
 |---|---|
-| **Status** | Open — offered to spaarke-ontology-platform-r1 (owns `AssignTaskRecipientGate`, D-199) |
+| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-171, accepted 2026-11-24, commit 5f4453db1d) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | Owner, live Copilot run on dev `0362599b94`: the commit at 2026-11-24 14:40:38Z warned `assignee_email_not_sent_no_access` |
