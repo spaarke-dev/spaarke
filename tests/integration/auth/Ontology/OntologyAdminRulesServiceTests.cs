@@ -1,4 +1,6 @@
+using System.Diagnostics.Metrics;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
@@ -34,7 +36,7 @@ public class OntologyAdminRulesServiceTests
         public required List<Guid> ClosureCalls { get; init; }
     }
 
-    private static Harness Build(Func<int, SignalClosureOutcome>? closure = null)
+    private static Harness Build(Func<int, SignalClosureOutcome>? closure = null, ILogger<OntologyAdminRulesService>? logger = null)
     {
         var world = new OntologyAdminRulesWorld();
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 16, 12, 0, 0, TimeSpan.Zero));
@@ -56,7 +58,7 @@ public class OntologyAdminRulesServiceTests
             return Task.FromResult(closure?.Invoke(count) ?? new SignalClosureOutcome(Closed: 3, ChangedSinceRead: 0, Failed: 0));
         };
 
-        var service = new OntologyAdminRulesService(world, rates, describer, close, NullLogger<OntologyAdminRulesService>.Instance);
+        var service = new OntologyAdminRulesService(world, rates, describer, close, logger ?? NullLogger<OntologyAdminRulesService>.Instance);
         return new Harness { World = world, Service = service, ClosureCalls = calls };
     }
 
@@ -398,9 +400,112 @@ public class OntologyAdminRulesServiceTests
         var plan = (await h.Service.GetAsync(rule.Id, default)).Value!.Plan;
 
         plan.Actions.Should().BeEmpty();
-        // The admin reads a sentence, never the internal reason code (the reason is counted and logged by DecisionPlanService).
+        // The admin reads a sentence, never the internal reason code (the reason is logged and counted by the service: see the Get_ARefusedStoredPlan test).
         plan.Refusal.Should().Be("The stored plan can't be used with the actions this rule's lane offers. Edit the rule and choose its actions again.");
         plan.Refusal.Should().NotContain(DecisionPlanRefusalReason.UnknownAction).And.NotContain("unknown_action").And.NotContain("(");
+    }
+
+    // #3034: the static Resolve records nothing; the page must log and count a refused stored plan itself, once per page load.
+    [Theory]
+    [InlineData("{\"actions\":[\"not-in-the-catalog\"]}", DecisionPlanRefusalReason.UnknownAction)]
+    [InlineData("{not json", DecisionPlanRefusalReason.PlanMalformed)]
+    [InlineData("{\"actions\":[\"assign-work\"]}", DecisionPlanRefusalReason.ActionNotAllowed)]
+    public async Task Get_ARefusedStoredPlan_IsLoggedWithItsReason_AndCountedOnce(string plan, string reason)
+    {
+        var logger = new Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<OntologyAdminRulesService>();
+        var h = Build(logger: logger);
+        var rule = h.World.AddPolicy("POL-PLAN");
+        var version = h.World.AddVersion(rule, decisionPlan: plan);
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenRefusals(scope);
+        using var _ = listener;
+
+        var page = (await h.Service.GetAsync(rule.Id, default)).Value!;
+
+        page.Plan.Refusal.Should().NotBeNullOrWhiteSpace();
+        var entry = logger.Entries.Where(e => e.EventId.Id == OntologyWriterEvents.DecisionPlanRefused.Id).Should().ContainSingle().Subject;
+        entry.Field("Reason").Should().Be(reason);
+        entry.Field("PolicyVersionId").Should().Be(version.Id);
+        entry.Message.Should().NotContain("not-in-the-catalog", "neither the plan nor a rejected code is logged");
+        reasons().Should().Equal(reason);
+    }
+
+    [Fact]
+    public async Task Get_AResolvedStoredPlan_IsNeitherLoggedNorCounted()
+    {
+        var logger = new Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<OntologyAdminRulesService>();
+        var h = Build(logger: logger);
+        var rule = h.World.AddPolicy("POL-PLAN-OK");
+        h.World.AddVersion(rule, decisionPlan: "{\"actions\":[\"mark-complete\"]}");
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenRefusals(scope);
+        using var _ = listener;
+
+        var page = (await h.Service.GetAsync(rule.Id, default)).Value!;
+
+        page.Plan.Refusal.Should().BeNull();
+        logger.Entries.Should().NotContain(e => e.EventId.Id == OntologyWriterEvents.DecisionPlanRefused.Id);
+        reasons().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Get_ARuleWithNoVersionInForce_HasNoPlanToRefuse_SoNothingIsLoggedOrCounted()
+    {
+        var logger = new Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<OntologyAdminRulesService>();
+        var h = Build(logger: logger);
+        var rule = h.World.AddPolicy("POL-NO-VERSION");
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenRefusals(scope);
+        using var _ = listener;
+
+        await h.Service.GetAsync(rule.Id, default);
+
+        logger.Entries.Should().NotContain(e => e.EventId.Id == OntologyWriterEvents.DecisionPlanRefused.Id);
+        reasons().Should().BeEmpty();
+    }
+
+    // OntologyWriterTelemetry's Meter is process-global; scope the listener per test like DecisionActionCatalogTests does.
+    private static readonly AsyncLocal<Guid> MetricScope = new();
+
+    private static (MeterListener Listener, Func<IReadOnlyList<string>> Reasons) ListenRefusals(Guid scope)
+    {
+        var reasons = new List<string>();
+        var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, l) =>
+            {
+                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == "ontology.decisionplan.refused")
+                {
+                    l.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            if (MetricScope.Value != scope) return;
+            foreach (var tag in tags)
+            {
+                if (tag.Key == "reason" && tag.Value is string reason)
+                {
+                    lock (reasons)
+                    {
+                        reasons.Add(reason);
+                    }
+                }
+            }
+        });
+        listener.Start();
+        return (listener, () =>
+        {
+            lock (reasons)
+            {
+                return reasons.ToArray();
+            }
+        }
+        );
     }
 
     [Fact]

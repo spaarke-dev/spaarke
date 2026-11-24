@@ -1250,8 +1250,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <b>Complete or reported (#2982).</b> Read by the shared id-cursor reader (<see cref="SignalClosureService.ReadPolicyPagesAsync"/>): one
     /// <c>RetrieveMultipleAsync</c> is one Dataverse page (5,000 rows), so the unpaged read evaluated only the first 5,000 enabled policies and
     /// reported success. A read that faults or runs past <paramref name="maxPages"/> pages comes back incomplete, with the policies read so far
-    /// (logged at Error with the counts); the callers count a policy failure. The result is ordered by policy code, as before the cursor needed
-    /// the id order.
+    /// (logged at Error with the counts); the callers count a policy failure. The result is sorted by policy code in memory, ordinal and
+    /// case-insensitive (<see cref="StringComparer.OrdinalIgnoreCase"/>; task 204), because the cursor reads in id order. That is not Dataverse's
+    /// collation, so codes with punctuation can come out in a different order than before; nothing depends on the order.
     /// </remarks>
     /// <param name="pageSize">Policies per read; a test lowers it. Production uses <see cref="SignalClosureService.NotInForcePageSize"/> (5,000).</param>
     /// <param name="maxPages">Pages before the read is reported truncated; a test lowers it.</param>
