@@ -4,7 +4,8 @@
  * Configuration-driven Dataverse grid built on Fluent v9 native `DataGrid` primitives:
  * - Three-tier config resolution (explicit `overrides` → `sprk_configjson` → metadata + layoutXml → framework defaults)
  * - Native selection (`selectionMode="multiselect"`) — NO hand-rolled checkbox column
- * - Native sort (`sortable` + `createTableColumn({ compare })`) — NO manual sort state
+ * - Native sort (`sortable` + `createTableColumn({ compare })`) — NO manual sort state (unless the host opts in to
+ *   persisted settings: `initialSettings` / `onSettingsChange` / `settingsResetKey`, which control Fluent's sort state)
  * - Native column resize (`resizableColumns` + `columnSizingOptions`) — NO drag handles
  * - Native keyboard nav (`focusMode="composite"`) — NO `onKeyDown` switch
  * - Lazy infinite-scroll paging (FetchXML paging-cookie chain via {@link useLazyLoad})
@@ -100,6 +101,24 @@ export interface DataGridHostContext {
   entityName: string;
   parentContext?: DataGridParentContext;
   selectedIds: string[];
+}
+
+/** A column sort: the column's name (its logical name, as in the grid configuration) and the direction. */
+export interface DataGridSortSetting {
+  columnId: string;
+  direction: 'ascending' | 'descending';
+}
+
+/**
+ * The part of a grid's look a user can change and a host may want to keep: the widths of columns the user dragged and the
+ * column the user sorted by. Plain data, so the host decides where and whether it is stored (ADR-012: no storage in the
+ * shared lib). Used both ways: `initialSettings` hands it to the grid, `onSettingsChange` reports it back.
+ */
+export interface DataGridSettings {
+  /** Column name → width in px, for the columns the user resized. A column not listed keeps the grid's own fit. */
+  widths?: Readonly<Record<string, number>>;
+  /** The sorted column. Absent: not sorted by the user (the configured order). */
+  sort?: DataGridSortSetting;
 }
 
 /**
@@ -261,6 +280,39 @@ export interface DataGridProps {
    * over the configuration's `display.truncateWithTooltip`; when absent, the configuration decides (default off).
    */
   truncateWithTooltip?: boolean;
+
+  /**
+   * OPTIONAL — the column widths and sort to START with (spaarke-SPA-external-access-platform-r4 task 032, FR-19).
+   * Read once, when the grid mounts; a later change to it is ignored (use `settingsResetKey` to return to the defaults).
+   * A width is a width the user dragged: it is kept (never below the column's minimum) and the grid stops fitting
+   * columns to the container once any is present, exactly as after a drag. A column name the configuration does not
+   * have, a width that is not a positive finite number of at most 2000 px and a sort on an unknown column are dropped. Absent = the
+   * configured widths and order, unchanged. See {@link DataGridSettings}.
+   */
+  initialSettings?: DataGridSettings;
+
+  /**
+   * OPTIONAL — reports the user's current {@link DataGridSettings} every time they change: the user resizes a column or
+   * sorts, or a `settingsResetKey` reset clears something (then with empty widths and no sort), so the host can store
+   * them. Never called with settings equal to the last ones reported or handed in, so it is not called just because
+   * the grid mounted with `initialSettings`; but a stored width for a column the configuration does not have is pruned
+   * once the columns load, and that prune IS reported (the settings then differ from the ones handed in). While a
+   * column is being dragged it can fire on every pointer step: a host that stores them should be cheap or debounce.
+   * Absent = nothing is reported; note the sort is controlled by the grid (not Fluent's own uncontrolled sort) whenever
+   * ANY of `initialSettings`, `onSettingsChange` or `settingsResetKey` is passed, and uncontrolled, unchanged, only when
+   * none is. The grid never stores anything itself.
+   */
+  onSettingsChange?: (settings: DataGridSettings) => void;
+
+  /**
+   * OPTIONAL — "Clear all": when this value CHANGES (not on mount), the grid returns to its configured widths
+   * (the container fit comes back) and its configured order (no user sort), clears every column filter (the filter
+   * chip state, so the header filter indicators go and the query runs unfiltered), and reports the empty settings
+   * through `onSettingsChange` (the filters are not part of the settings: the host stores widths and sort only).
+   * The host owns the command that triggers it (see `hostCommands`) and clears its own store.
+   * Absent = no reset signal.
+   */
+  settingsResetKey?: number | string;
 
   /**
    * OPTIONAL — built-in actions this HOST does not offer, whatever the configuration says (e.g. `['create-form']`
@@ -796,6 +848,43 @@ const INITIAL_LOAD_STATE: ConfigLoadState = {
  *
  * See module-level JSDoc for the full feature list and ADR references.
  */
+/** Task 032 (review fix round 1): the widest column a stored width may ask for, in px; wider is dropped as tampered. */
+const MAX_INITIAL_COLUMN_WIDTH_PX = 2000;
+
+/**
+ * Task 032: keeps only usable widths (positive, finite, at most {@link MAX_INITIAL_COLUMN_WIDTH_PX}) from a host's
+ * `initialSettings.widths`.
+ */
+function sanitizeInitialWidths(widths: DataGridSettings['widths']): Partial<Record<string, number>> {
+  const out: Partial<Record<string, number>> = {};
+  if (!widths || typeof widths !== 'object') return out;
+  for (const [id, w] of Object.entries(widths)) {
+    if (typeof w === 'number' && Number.isFinite(w) && w > 0 && w <= MAX_INITIAL_COLUMN_WIDTH_PX) {
+      out[id] = Math.round(w);
+    }
+  }
+  return out;
+}
+
+/** Task 032: the settings the user's current widths and sort add up to, in the shape the host stores. */
+function settingsOf(
+  widths: Readonly<Partial<Record<string, number>>>,
+  sort: DataGridSortSetting | undefined
+): DataGridSettings {
+  const w: Record<string, number> = {};
+  for (const [id, v] of Object.entries(widths)) if (v !== undefined) w[id] = v;
+  return sort ? { widths: w, sort: { ...sort } } : { widths: w };
+}
+
+/** Task 032: a stable string for {@link settingsOf}, so "did anything change" is a comparison, not an object identity. */
+function settingsKeyOf(
+  widths: Readonly<Partial<Record<string, number>>>,
+  sort: DataGridSortSetting | undefined
+): string {
+  const entries = Object.entries(widths).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([entries, sort ? [sort.columnId, sort.direction] : null]);
+}
+
 export const DataGrid: React.FC<DataGridProps> = props => {
   const {
     configId,
@@ -815,6 +904,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     emptyState: hostEmptyState,
     rowActions,
     truncateWithTooltip: truncateWithTooltipProp,
+    initialSettings,
+    onSettingsChange,
+    settingsResetKey,
     hiddenBuiltInCommands,
     overrides,
     pageSize: pageSizeOverride,
@@ -1449,8 +1541,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // and it re-reads the options on every change to them or to the column definitions — a 1px container change, a row
   // selection, chip state, a host's inline callbacks. So the dragged width is recorded here and fed back as that
   // column's ideal width below; the columns the user has not dragged keep the proportional fit. Ids of columns that no
-  // longer exist are dropped; nothing else clears the map (a "Reset columns" command is later work).
-  const [userColumnWidths, setUserColumnWidths] = React.useState<Readonly<Partial<Record<string, number>>>>({});
+  // longer exist are dropped; the host's `settingsResetKey` (task 032, "Clear all") is the only other thing that clears it.
+  // Task 032: the widths a host hands over (`initialSettings`) are dragged widths that were kept, so they seed this map.
+  const [userColumnWidths, setUserColumnWidths] = React.useState<Readonly<Partial<Record<string, number>>>>(() =>
+    sanitizeInitialWidths(initialSettings?.widths)
+  );
   const handleColumnResize = React.useCallback<NonNullable<FluentDataGridProps['onColumnResize']>>((_ev, data) => {
     const id = String(data.columnId);
     // The row-actions column has a fixed width and no resize handle.
@@ -1478,6 +1573,58 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     () => ({ autoFitColumns: !hasUserColumnWidths }),
     [hasUserColumnWidths]
   );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Task 032 (FR-19, #2489): opt-in persisted settings. The grid keeps the user's sort in state ONLY when the host opted
+  // in (any of the three props); otherwise Fluent's sort stays uncontrolled, exactly as before. The grid stores nothing:
+  // `onSettingsChange` hands the host the widths + sort, `initialSettings` takes them back, `settingsResetKey` clears them.
+  // ─────────────────────────────────────────────────────────────────────────
+  const settingsEnabled =
+    initialSettings !== undefined || onSettingsChange !== undefined || settingsResetKey !== undefined;
+  const [userSort, setUserSort] = React.useState<DataGridSortSetting | undefined>(() =>
+    initialSettings?.sort && initialSettings.sort.columnId ? { ...initialSettings.sort } : undefined
+  );
+  const handleSortChange = React.useCallback<NonNullable<FluentDataGridProps['onSortChange']>>((_ev, data) => {
+    setUserSort(
+      data.sortColumn === undefined ? undefined : { columnId: String(data.sortColumn), direction: data.sortDirection }
+    );
+  }, []);
+  // A sort on a column the configuration does not have (or on a grid with sorting off) is not applied or reported.
+  const enableSorting = resolved?.behavior.enableSorting ?? false;
+  const effectiveSort = React.useMemo<DataGridSortSetting | undefined>(() => {
+    if (!userSort) return undefined;
+    if (visibleColumns.length === 0) return userSort; // columns still loading: keep it until they are known
+    return enableSorting && visibleColumns.some(c => c.name === userSort.columnId) ? userSort : undefined;
+  }, [userSort, visibleColumns, enableSorting]);
+  const fluentSortState = React.useMemo(
+    () => ({ sortColumn: effectiveSort?.columnId, sortDirection: effectiveSort?.direction ?? ('ascending' as const) }),
+    [effectiveSort]
+  );
+
+  // Report a change. Compared with what was last reported (or handed in), so nothing is reported on mount, in StrictMode,
+  // or when a state update produced the same settings. The latest callback is read from a ref (an inline one is fine).
+  const onSettingsChangeRef = React.useRef(onSettingsChange);
+  React.useEffect(() => {
+    onSettingsChangeRef.current = onSettingsChange;
+  }, [onSettingsChange]);
+  const lastReportedRef = React.useRef<string>(settingsKeyOf(userColumnWidths, effectiveSort));
+  React.useEffect(() => {
+    const key = settingsKeyOf(userColumnWidths, effectiveSort);
+    if (key === lastReportedRef.current) return;
+    lastReportedRef.current = key;
+    onSettingsChangeRef.current?.(settingsOf(userColumnWidths, effectiveSort));
+  }, [userColumnWidths, effectiveSort]);
+
+  // "Clear all" (owner 2026-11-23): a CHANGED key returns to the configured widths (auto-fit comes back) and order,
+  // and clears the column filters too (the chip state; it is not part of the persisted settings).
+  const lastResetKeyRef = React.useRef(settingsResetKey);
+  React.useEffect(() => {
+    if (lastResetKeyRef.current === settingsResetKey) return;
+    lastResetKeyRef.current = settingsResetKey;
+    setUserColumnWidths(prev => (Object.keys(prev).length === 0 ? prev : {}));
+    setUserSort(undefined);
+    setChipState(prev => (Object.keys(prev).length === 0 ? prev : {}));
+  }, [settingsResetKey]);
 
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
@@ -1789,6 +1936,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               selectedItems={selectedRowIds}
               onSelectionChange={handleSelectionChange}
               sortable={resolved.behavior.enableSorting}
+              // Task 032: controlled sort only when the host opted in; otherwise Fluent's own uncontrolled sort.
+              {...(settingsEnabled ? { sortState: fluentSortState, onSortChange: handleSortChange } : {})}
               resizableColumns={resolved.behavior.enableColumnResize}
               columnSizingOptions={columnSizingOptions}
               resizableColumnsOptions={resizableColumnsOptions}

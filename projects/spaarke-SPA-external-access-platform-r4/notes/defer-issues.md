@@ -397,3 +397,27 @@ This under-lists, which fails closed.
 **Why it matters.** The same "no items" state looks different from page to page in the external SPA, and some of these do not announce the state to assistive tech (no role="status"), so a screen-reader user is not told a list is empty. The local copy in OutsideCounselDashboard.tsx duplicates a shared component and drifts from it.
 
 **Fix.** Replace each with EmptyState (size compact for lists and panels), keeping wording and any action-conditional hint; delete the local copy and its emptyState* styles. Keep loading, error and truncated states as they are. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2975 (board Type=Idea).
+
+## D-31 — Shared DataGrid: column minimums cut short header labels at narrow widths (#3008)
+
+**What.** The shared DataGrid's column minimum is `max(80, 0.5 x configured width)`, applied to the border box. That leaves about 30px for the label once padding and the sort chevron are taken off. With the 128px row-actions column, or in a narrow container, every column sits at its minimum. In the external record Documents grid at 1000px, the headers read "Ty…"/"D…" and dates are cut. The fitting only started running with task 028's PR #3000, so every host now shows this squeeze at narrow widths.
+
+**Why it matters.** Users can't read the narrow columns' header names or dates without dragging them wider.
+
+**Fix.** Base the minimum on the header label (about label width + 56px). Give wide free-text columns a lower floor (e.g. 0.35 x width). Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3008 (board Type=Bug).
+
+## D-32 — External record Documents grid: empty band above the grid header (#3009)
+
+**What.** In the record modal, an empty rounded band is drawn above the Documents section's grid header (shared DataGrid with host row source). It was seen in the task 028 E2E on 2026-11-23. Not investigated yet. The likely cause is an empty toolbar or message wrapper rendered when the host turns the command bar off.
+
+**Why it matters.** It looks broken and wastes height in the record modal.
+
+**Fix.** Don't render the wrapper when it has no content, and add a test that nothing empty is drawn above the header. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3009 (board Type=Bug).
+
+## D-33 — FetchService comment says the client normalizes SDK values; it does not (#3010)
+
+**What.** The comment above `FetchService.ProjectEntity` (about lines 141-144) says `BffDataverseClient` normalizes SDK values. `BffDataverseClient.ts` (~:403) returns the JSON as is. So module-fetch rows carry option-set and Money values as `{ value: n, extensionData: null }`.
+
+**Why it matters.** The comment led task 020 to read bare numbers, which was the cause of the Review detail and closed-request Delete defects fixed in PR #3000. The next reader could repeat the mistake.
+
+**Fix.** Correct the comment and point it to `rawWholeNumberOf`. It's comment-only, so make it part of the next R4 BFF PR. Status: Done (task 031, 2026-11-23: the `ProjectEntity` remarks now state the wire shape and point to `rawWholeNumberOf`; its summary's wrong key name, `FormattedValues` for `@formattedValues`, is fixed too. The issue is closed by the main session). Issue: https://github.com/spaarke-dev/spaarke/issues/3010 (board Type=Bug).

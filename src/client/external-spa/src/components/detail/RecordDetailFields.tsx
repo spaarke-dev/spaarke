@@ -116,6 +116,11 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_projectname', label: 'Name' },
       { attribute: 'sprk_projectnumber', label: 'Number' },
       { attribute: 'statuscode', label: 'Status' },
+      // R4 task 031 (FR-18): the columns task 030 verified live and the owner approved, allow-listed for the Information section.
+      { attribute: 'sprk_practicearea', label: 'Practice area', kind: 'lookup' },
+      { attribute: 'sprk_assignedattorney1', label: 'Assigned attorney', kind: 'lookup' },
+      { attribute: 'sprk_assignedparalegal1', label: 'Assigned paralegal', kind: 'lookup' },
+      { attribute: 'sprk_projectdescription', label: 'Description' },
       { attribute: 'modifiedon', label: 'Last modified', kind: 'date' },
     ],
     documentsRoot: 'projects',
@@ -131,6 +136,16 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_mattername', label: 'Name' },
       { attribute: 'sprk_matternumber', label: 'Number' },
       { attribute: 'statuscode', label: 'Status' },
+      // R4 task 031 (FR-18): the columns task 030 verified live and the owner approved, allow-listed for the Information section.
+      // There is no open-date column; the owner chose `createdon` as the matter's open date (2026-11-23).
+      { attribute: 'createdon', label: 'Open date', kind: 'date' },
+      // Already on the matter allow-list before task 031; shown on the owner's go (2026-11-23).
+      { attribute: 'sprk_mattertype', label: 'Matter type', kind: 'lookup' },
+      { attribute: 'sprk_practicearea', label: 'Practice area', kind: 'lookup' },
+      { attribute: 'sprk_assignedattorney1', label: 'Assigned attorney', kind: 'lookup' },
+      { attribute: 'sprk_assignedparalegal1', label: 'Assigned paralegal', kind: 'lookup' },
+      { attribute: 'sprk_matterdescription', label: 'Description' },
+      { attribute: 'modifiedon', label: 'Last modified', kind: 'date' },
     ],
     documentsRoot: 'matters',
     invoicesBy: 'sprk_matter',
@@ -148,9 +163,17 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_responseduedate', label: 'Response due', kind: 'date' },
       { attribute: 'statuscode', label: 'Status' },
       { attribute: 'sprk_regardingproject', label: 'Project', kind: 'lookup' },
+      // R4 task 031 (FR-18): the columns task 030 verified live and the owner approved, allow-listed for the Information section.
+      { attribute: 'sprk_regardingmatter', label: 'Matter', kind: 'lookup' },
+      // Already on the work-assignment allow-list before task 031; shown on the owner's go (2026-11-23).
+      { attribute: 'sprk_mattertype', label: 'Matter type', kind: 'lookup' },
+      { attribute: 'sprk_assignedto', label: 'Assigned to', kind: 'lookup' },
+      { attribute: 'sprk_description', label: 'Description' },
     ],
     documentsRoot: 'workassignments',
-    // sprk_invoice has no work-assignment lookup (ExternalAccessModule.cs "invoices" dimensions: matter, project).
+    // No `invoicesBy`: the work assignment's template has no Invoices section (FR-01 layout). The invoices module does reach an
+    // invoice through its work assignment (scope dimension sprk_regardingworkassignment, ebilling-r1 130-0), so an Invoices
+    // section here would be a layout decision, not a missing lookup.
     showsEventsAndTasks: true,
   },
   sprk_document: {

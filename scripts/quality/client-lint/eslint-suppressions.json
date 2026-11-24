@@ -741,7 +741,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/HeaderCellContent.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/BoolFilterChip.tsx": {

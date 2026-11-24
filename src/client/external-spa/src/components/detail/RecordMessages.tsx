@@ -40,6 +40,18 @@
  * thread) keeps the messages shown but withdraws New message: the right is no longer known. The inline box of a host without a section action keeps R3's rule (no such host in
  * the app since the template replaced R3's modal).
  *
+ * REFRESH AND THE NEW-MESSAGE INDICATOR (R4 task 034, FR-21). Inside the record template the thread offers its own Refresh to
+ * the section header (`onRefreshActionChange`): it is `read('refresh')` (re-read, replace, never append), and a second click
+ * while one read is in flight does nothing. While the thread is on screen and ready, a lightweight background check re-reads
+ * it every `NEW_MESSAGE_CHECK_INTERVAL_MS` and, when that read holds a message newer than the ones shown, raises a polite
+ * live-region indicator under the thread ("Show new messages" runs the same refresh). The check NEVER replaces the visible
+ * list (nothing jumps), reads with `auth.noInteraction` (a timer must not start a sign-in), and is silent when it fails: only
+ * a read the user asked for shows the error, sign-in and refresh-failed states above. The same rules as the notification
+ * bell's poll apply: one request at a time, at least one interval between two reads of any kind, no read while the tab is
+ * hidden or the section is collapsed, and none after unmount or once the record changes (`readSeq`). A sign-in or access
+ * failure, or `MAX_BACKGROUND_FAILURES` failures in a row, stops the checks until a read the user asked for succeeds. The
+ * indicator clears on a successful read, on a successful send and on a record change.
+ *
  * ADR-021: Fluent UI v9 semantic tokens only (no hard-coded colours) — the section inherits the host FluentProvider, so
  * light, dark and the Teams themes work. ADR-012: composes Fluent primitives and the shared sanitizer; the shared
  * EmailComposer / NewThreadModal are internal-plane and Xrm-bound, so only their look is mirrored.
@@ -64,6 +76,7 @@ import { sanitizeEmailHtml } from '@spaarke/ui-components/utils/sanitizeEmailHtm
 import {
   BODY_FORMAT_HTML,
   MAX_MESSAGE_BODY_LENGTH,
+  hasNewerMessages,
   listMessages,
   messageProblemOf,
   messageRootFor,
@@ -93,10 +106,35 @@ const DENIED_TEXT = 'You do not have permission to view messages on this record.
 const SEND_FAILED = 'The message could not be sent just now. Your message has been kept - please try again.';
 const SEND_DENIED = 'You do not have permission to post messages on this record. Your message has been kept.';
 const SEND_THROTTLED = 'You have sent too many messages. Please try again shortly. Your message has been kept.';
-const REFRESH_FAILED = 'Your message was sent, but the thread could not be refreshed just now.';
+// Review fix round 1 (task 034, F1): the "was sent" copy is true only for the re-read that follows a send; any other re-read
+// (the header Refresh, "Show new messages", the record toolbar Refresh) says only that the thread could not be refreshed.
+const REFRESH_FAILED_AFTER_SEND = 'Your message was sent, but the thread could not be refreshed just now.';
+const REFRESH_FAILED = 'The messages could not be refreshed just now.';
 
 /** The server's generic 403 detail ("Access denied") says nothing; a specific detail (insufficient rights) is shown. */
 const GENERIC_DENIED_DETAIL = 'Access denied';
+
+const NEW_MESSAGES_TEXT = 'New messages are available.';
+const SHOW_NEW_MESSAGES = 'Show new messages';
+
+/**
+ * R4 task 034 (FR-21). The gap between two reads of the thread of any kind, and so the period of the background new-message
+ * check: at most ONE request a minute for an open, visible Messages section (the same budget as the notification bell, whose
+ * poll shares the BFF's 50/min `dataverse-query` limit with these reads). One named value; the notes record why 60 s.
+ */
+export const NEW_MESSAGE_CHECK_INTERVAL_MS = 60_000;
+/** Background checks in a row that may fail before they stop (a sign-in or access failure stops them at once). */
+const MAX_BACKGROUND_FAILURES = 3;
+
+function tabHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+/** What the thread offers the section header as its Refresh (`onRefreshActionChange`); `busy` = a read is in flight. */
+export interface ThreadRefreshAction {
+  onClick: () => void;
+  busy: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -226,6 +264,25 @@ const useStyles = makeStyles({
     // min-height:0 ancestor would cut the end of a long email with no scrollbar.
     flexShrink: 0,
   },
+  // The live region is mounted with the thread and empty until something is announced (a region added with its text is not
+  // reliably announced); empty, it has no height, and the indicator sits UNDER the thread, so nothing the reader is looking at moves.
+  newMessagesRegion: {
+    minWidth: 0,
+  },
+  newMessages: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalS,
+    marginTop: tokens.spacingVerticalS,
+    paddingBlock: tokens.spacingVerticalXS,
+    paddingInline: tokens.spacingHorizontalM,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorBrandBackground2,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorBrandStroke2}`,
+    color: tokens.colorNeutralForeground1,
+  },
   compose: {
     display: 'flex',
     flexDirection: 'column',
@@ -319,6 +376,7 @@ interface MessageThreadProps {
   refreshSignal?: number;
   embedded?: boolean;
   onCreateActionChange?: CreateActionReporter;
+  onRefreshActionChange?: (action: ThreadRefreshAction | null) => void;
 }
 
 const MessageThread: React.FC<MessageThreadProps> = ({
@@ -328,10 +386,12 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   refreshSignal = 0,
   embedded = false,
   onCreateActionChange,
+  onRefreshActionChange,
 }) => {
   const styles = useStyles();
   const [thread, setThread] = React.useState<ThreadState>({ status: 'loading' });
-  const [refreshFailed, setRefreshFailed] = React.useState(false);
+  // Why the last re-read failed: `afterSend` = it followed a send (the message WAS sent), `plain` = any other re-read.
+  const [refreshFailed, setRefreshFailed] = React.useState<'afterSend' | 'plain' | null>(null);
   const [attempt, setAttempt] = React.useState(0);
   const [draft, setDraft] = React.useState('');
   const [sending, setSending] = React.useState(false);
@@ -339,11 +399,23 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   // The New message dialog (record template only): its open state and the control that opened it.
   const composeDialog = useChildDialog();
 
+  // Task 034: a background read found messages newer than the ones shown (the indicator), and a read for the user is in flight.
+  const [newAvailable, setNewAvailable] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+
   // Only the latest read may update the thread, and none may once this record is left (stale / out-of-order reads).
   const readSeq = React.useRef(0);
   const dropPendingReads = React.useCallback((): void => {
     readSeq.current++;
   }, []);
+  // Task 034: the messages on screen (what a background read is compared with), a user-facing read in flight (a second
+  // Refresh click does nothing), when the last read of any kind started (the gap between two reads), the background
+  // checks that failed in a row, and the live region (is the section collapsed?).
+  const shownRef = React.useRef<ExternalMessage[]>([]);
+  const readInFlight = React.useRef(false);
+  const lastReadAt = React.useRef(0);
+  const backgroundFailures = React.useRef(0);
+  const regionRef = React.useRef<HTMLDivElement | null>(null);
   // Closes the gap between a click and React re-rendering the disabled button: a second click in the same tick.
   const sendLock = React.useRef(false);
 
@@ -362,19 +434,28 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   );
 
   const read = React.useCallback(
-    async (mode: 'initial' | 'refresh'): Promise<void> => {
+    async (mode: 'initial' | 'refresh', afterSend = false): Promise<void> => {
       const seq = ++readSeq.current;
+      readInFlight.current = true;
+      lastReadAt.current = Date.now();
+      if (mode === 'refresh') setRefreshing(true);
       try {
         const result = await listMessages(root, recordId);
         if (seq !== readSeq.current) return;
+        const messages = result.value ?? [];
+        shownRef.current = messages;
         setThread({
           status: 'ready',
-          messages: result.value ?? [],
+          messages,
           truncated: result.truncated === true,
           // Task 006: the POST's own decision for this caller (task 002); a missing one is "not said", never "can".
           canCreate: typeof result.canCreate === 'boolean' ? result.canCreate : null,
         });
-        setRefreshFailed(false);
+        setRefreshFailed(null);
+        // Task 034: what is on screen is now what the server holds, so nothing newer is waiting, and the background
+        // checks may run again.
+        setNewAvailable(false);
+        backgroundFailures.current = 0;
       } catch (err: unknown) {
         if (seq !== readSeq.current) return;
         const failure = accessFailureOf(err);
@@ -388,7 +469,8 @@ const MessageThread: React.FC<MessageThreadProps> = ({
           // came with is no longer known (task 006 fix round 1: a 403 here may mean it was withdrawn), so it is
           // forgotten and New message withdrawn until a read answers again. A refresh that overtook the initial read
           // must not leave the spinner up for ever: that read is dropped.
-          setRefreshFailed(true);
+          // A plain re-read that fails while the notice already says a message was sent keeps saying so (it still is true).
+          setRefreshFailed(prev => (afterSend || prev === 'afterSend' ? 'afterSend' : 'plain'));
           setThread(t =>
             t.status === 'loading' ? { status: 'error' } : t.status === 'ready' ? { ...t, canCreate: null } : t
           );
@@ -397,6 +479,12 @@ const MessageThread: React.FC<MessageThreadProps> = ({
         if (failure) setThread({ status: 'access', failure });
         else if (err instanceof ApiError && err.statusCode === 404) setThread({ status: 'unavailable' });
         else setThread({ status: 'error' });
+      } finally {
+        // Only the latest read owns these (an overtaken one leaves them to the read that overtook it).
+        if (seq === readSeq.current) {
+          readInFlight.current = false;
+          setRefreshing(false);
+        }
       }
     },
     [root, recordId]
@@ -404,10 +492,105 @@ const MessageThread: React.FC<MessageThreadProps> = ({
 
   React.useEffect(() => {
     setThread({ status: 'loading' });
+    // A record change (or Try again) starts from nothing: no indicator, no checks pending from the record before.
+    setNewAvailable(false);
+    setRefreshing(false);
+    shownRef.current = [];
+    backgroundFailures.current = 0;
     void read('initial');
     return dropPendingReads;
     // `attempt` re-runs the initial read for "Try again".
   }, [read, attempt, dropPendingReads]);
+
+  // The Refresh a person asks for (the section header, "Show new messages"): `read('refresh')`, one at a time.
+  const userRefresh = React.useCallback((): void => {
+    // A send in flight holds Refresh too (the section header no longer disables the button, so the guard lives here).
+    if (readInFlight.current || sendLock.current) return;
+    void read('refresh');
+  }, [read]);
+
+  // The background check (task 034): re-reads the thread WITHOUT touching what is shown, and only raises the indicator. It
+  // does not start a read of its own sequence number: it is dropped when any other read starts after it (a refresh, a send's
+  // re-read, a record change, unmount), so it can neither overwrite a newer answer nor outlive the record. It reads with
+  // `noInteraction` and is silent: nothing here sets the thread, error, sign-in or refresh-failed states.
+  const checkForNewMessages = React.useCallback(async (): Promise<void> => {
+    const seq = readSeq.current;
+    lastReadAt.current = Date.now();
+    try {
+      const result = await listMessages(root, recordId, { noInteraction: true });
+      if (seq !== readSeq.current) return;
+      backgroundFailures.current = 0;
+      if (hasNewerMessages(shownRef.current, result.value ?? [])) setNewAvailable(true);
+    } catch (err: unknown) {
+      if (seq !== readSeq.current) return;
+      // A sign-in or access failure will not clear by itself: stop at once. Anything else may be a blip: allow a few more.
+      backgroundFailures.current = accessFailureOf(err) ? MAX_BACKGROUND_FAILURES : backgroundFailures.current + 1;
+    }
+  }, [root, recordId]);
+
+  // The check loop (one timer, armed after the previous read, never `setInterval`). It runs only while the thread is shown.
+  const threadReady = thread.status === 'ready';
+  React.useEffect(() => {
+    if (!threadReady) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let parked = false;
+
+    // Time left before the next read is allowed: one interval from the last read of any kind.
+    const waitMs = (): number => Math.max(0, NEW_MESSAGE_CHECK_INTERVAL_MS - (Date.now() - lastReadAt.current));
+    const arm = (delay: number): void => {
+      if (timer) clearTimeout(timer);
+      parked = false;
+      timer = setTimeout(() => void tick(), delay);
+    };
+    const tick = async (): Promise<void> => {
+      timer = null;
+      if (cancelled) return;
+      if (tabHidden()) {
+        parked = true; // no request in the background; `visibilitychange` re-arms
+        return;
+      }
+      const wait = waitMs();
+      if (wait > 0) {
+        arm(wait); // a read of another kind happened since: keep the gap
+        return;
+      }
+      // A collapsed section (its body is `hidden`) cannot show the indicator: skip the read and look again next interval.
+      const collapsed = regionRef.current?.closest('[hidden]') != null;
+      if (!collapsed && !readInFlight.current && backgroundFailures.current < MAX_BACKGROUND_FAILURES) {
+        await checkForNewMessages();
+      }
+      if (!cancelled) arm(waitMs() || NEW_MESSAGE_CHECK_INTERVAL_MS);
+    };
+    const onVisibility = (): void => {
+      if (cancelled || tabHidden() || !parked) return;
+      arm(waitMs());
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    arm(waitMs());
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [threadReady, checkForNewMessages]);
+
+  // Task 034: the Refresh offered to the section header. Offered while the thread is shown; `busy` while a read or a send
+  // is in flight (the header icon stays enabled so focus is not lost; a click then does nothing, via `readInFlight`).
+  const refreshReporter = React.useRef(onRefreshActionChange);
+  refreshReporter.current = onRefreshActionChange;
+  const reportsRefresh = onRefreshActionChange !== undefined;
+  React.useEffect(() => {
+    if (!reportsRefresh) return;
+    refreshReporter.current?.(threadReady ? { onClick: userRefresh, busy: refreshing || sending } : null);
+  }, [reportsRefresh, threadReady, refreshing, sending, userRefresh]);
+  React.useEffect(
+    () => () => {
+      refreshReporter.current?.(null);
+    },
+    []
+  );
 
   // A host that posted to this thread itself (the service request recall) bumps `refreshSignal`: re-read, never append.
   // The first value is the initial read's own, so only a later change refreshes.
@@ -441,7 +624,9 @@ const MessageThread: React.FC<MessageThreadProps> = ({
     sendLock.current = false;
     setSending(false);
     composeDialog.hide();
-    await read('refresh');
+    // Task 034: a sent message clears the indicator, whether or not the re-read below succeeds (it shows the whole thread).
+    setNewAvailable(false);
+    await read('refresh', true);
   };
 
   const showCompose = thread.status !== 'access' && thread.status !== 'unavailable';
@@ -530,7 +715,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
           successful send can be followed by a failed re-read there too. */}
       {refreshFailed && thread.status !== 'access' && (
         <MessageBar intent="warning" data-testid="record-messages-refresh-failed">
-          <MessageBarBody>{REFRESH_FAILED}</MessageBarBody>
+          <MessageBarBody>{refreshFailed === 'afterSend' ? REFRESH_FAILED_AFTER_SEND : REFRESH_FAILED}</MessageBarBody>
           {thread.status === 'ready' && (
             <MessageBarActions>
               <Button appearance="secondary" size="small" onClick={() => void read('refresh')}>
@@ -555,21 +740,52 @@ const MessageThread: React.FC<MessageThreadProps> = ({
       {thread.status === 'ready' && (
         <>
           <TruncatedListNotice truncated={thread.truncated} shown={thread.messages.length} noun="messages" />
-          {thread.messages.length === 0 && !thread.truncated ? (
-            <div data-testid="record-messages-empty">
-              <EmptyState
-                size="compact"
-                heading={EMPTY_HEADING}
-                description={composeInDialog ? (offered ? EMPTY_HINT_DIALOG : undefined) : EMPTY_HINT}
-              />
+          <div>
+            {thread.messages.length === 0 && !thread.truncated ? (
+              <div data-testid="record-messages-empty">
+                <EmptyState
+                  size="compact"
+                  heading={EMPTY_HEADING}
+                  description={composeInDialog ? (offered ? EMPTY_HINT_DIALOG : undefined) : EMPTY_HINT}
+                />
+              </div>
+            ) : (
+              <ul className={styles.list} aria-label="Message thread" data-testid="record-messages-list">
+                {thread.messages.map((m, i) => (
+                  <MessageItem key={m.sprk_communicationid || i} message={m} />
+                ))}
+              </ul>
+            )}
+            {/* Task 034: under the thread, in a polite live region that is mounted with it (so the text is announced when it
+                appears). It never replaces the list; "Show new messages" runs the same refresh. Focus moves to the region first, so
+                the button going away does not drop focus to the page. */}
+            <div
+              ref={regionRef}
+              className={styles.newMessagesRegion}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              tabIndex={-1}
+              data-testid="record-messages-new-region"
+            >
+              {newAvailable && (
+                <div className={styles.newMessages} data-testid="record-messages-new">
+                  <Text size={300}>{NEW_MESSAGES_TEXT}</Text>
+                  <Button
+                    appearance="primary"
+                    size="small"
+                    disabled={refreshing}
+                    onClick={() => {
+                      regionRef.current?.focus();
+                      userRefresh();
+                    }}
+                  >
+                    {SHOW_NEW_MESSAGES}
+                  </Button>
+                </div>
+              )}
             </div>
-          ) : (
-            <ul className={styles.list} aria-label="Message thread" data-testid="record-messages-list">
-              {thread.messages.map((m, i) => (
-                <MessageItem key={m.sprk_communicationid || i} message={m} />
-              ))}
-            </ul>
-          )}
+          </div>
         </>
       )}
 
@@ -639,6 +855,12 @@ export interface RecordMessagesProps {
    * `canCreate: true`) and renders the compose box in a `FormModal` of its own. Omit it for R3's own page.
    */
   onCreateActionChange?: CreateActionReporter;
+  /**
+   * Record template only (task 034, FR-21): the thread's own Refresh for the section header. Called with the action while the
+   * thread is shown (`busy` while a read or send is in flight), with `null` when it is not and on unmount. Omit it and the
+   * thread offers none (the background new-message check and its indicator still run).
+   */
+  onRefreshActionChange?: (action: ThreadRefreshAction | null) => void;
 }
 
 export const RecordMessages: React.FC<RecordMessagesProps> = ({
@@ -648,6 +870,7 @@ export const RecordMessages: React.FC<RecordMessagesProps> = ({
   refreshSignal,
   embedded,
   onCreateActionChange,
+  onRefreshActionChange,
 }) => {
   const root = messageRootFor(entity);
   if (!root) return null;
@@ -659,6 +882,7 @@ export const RecordMessages: React.FC<RecordMessagesProps> = ({
       refreshSignal={refreshSignal}
       embedded={embedded}
       onCreateActionChange={onCreateActionChange}
+      onRefreshActionChange={onRefreshActionChange}
     />
   );
 };

@@ -1,0 +1,4 @@
+{
+  "@odata.context": "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/$metadata#EntityDefinitions('sprk_invoice')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata(LogicalName,Targets)",
+  "value": []
+}

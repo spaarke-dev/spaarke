@@ -7,7 +7,7 @@
  * as bff-client builds it - the raw ProblemDetails body is the message) and MSAL's `useMsal` (BffAccessState reads it).
  */
 import * as React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
@@ -27,7 +27,11 @@ import { setActiveLoginScope } from '../src/auth/msal-auth';
 import { TeamsHostProvider } from '../src/components/auth/TeamsHostContext';
 import { BffAccessState } from '../src/components/auth/BffAccessState';
 import { RecordMessages } from '../src/components/detail/RecordMessages';
-import { MAX_MESSAGE_BODY_LENGTH, MESSAGE_ROOTS } from '../src/api/messages-client';
+import { MAX_MESSAGE_BODY_LENGTH, MESSAGE_ROOTS, hasNewerMessages } from '../src/api/messages-client';
+import { NEW_MESSAGE_CHECK_INTERVAL_MS, type ThreadRefreshAction } from '../src/components/detail/RecordMessages';
+import { MessagesSection } from '../src/components/record/sections/MessagesSection';
+import { getRecordDetailEntity } from '../src/components/detail/RecordDetailFields';
+import type { RecordSectionContext } from '../src/components/record/recordTemplate.types';
 
 // ---------------------------------------------------------------------------
 // Fixtures + helpers
@@ -929,6 +933,552 @@ describe('"Sign in again" follows the host App provides (no prop is passed throu
       fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
       expect(loginRedirect).toHaveBeenCalledTimes(1);
       expect(reload).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R4 task 034 (FR-21): Refresh, and the "new message" indicator
+// ---------------------------------------------------------------------------
+
+describe('hasNewerMessages (what a background read is compared on)', () => {
+  const m = (n: number, over: Partial<Dto> = {}) => dto(n, over);
+
+  it('an empty thread on screen: any message found is new; nothing found is not', () => {
+    expect(hasNewerMessages([], [m(1)])).toBe(true);
+    expect(hasNewerMessages([], [])).toBe(false);
+  });
+
+  it('the same messages are not new, nor are fewer (a message that went away is not a new message)', () => {
+    expect(hasNewerMessages([m(1), m(2)], [m(1), m(2)])).toBe(false);
+    expect(hasNewerMessages([m(1), m(2)], [m(1)])).toBe(false);
+  });
+
+  it('a message that is not on screen and was created after the newest one on screen is new', () => {
+    expect(hasNewerMessages([m(1), m(2)], [m(1), m(2), m(3)])).toBe(true);
+  });
+
+  it('a message that is not on screen but is OLDER than the newest one shown is not new', () => {
+    expect(hasNewerMessages([m(2), m(3)], [m(1), m(2), m(3)])).toBe(false);
+  });
+
+  it('a message created in the SAME second as the newest one on screen (second precision) is new when its id is not on screen', () => {
+    const at = '2026-03-05T10:00:00Z';
+    expect(hasNewerMessages([m(1, { createdon: at })], [m(1, { createdon: at }), m(2, { createdon: at })])).toBe(true);
+    // The message already on screen is still not new, whatever its date.
+    expect(hasNewerMessages([m(1, { createdon: at })], [m(1, { createdon: at })])).toBe(false);
+  });
+
+  it('a message with no usable date never raises the indicator over a dated thread', () => {
+    expect(hasNewerMessages([m(1)], [m(1), m(2, { createdon: null })])).toBe(false);
+    expect(hasNewerMessages([m(1)], [m(1), m(2, { createdon: 'not a date' })])).toBe(false);
+  });
+});
+
+describe('Refresh and the new-message check (task 034, FR-21)', () => {
+  const INTERVAL = NEW_MESSAGE_CHECK_INTERVAL_MS;
+  let visibility: 'visible' | 'hidden';
+
+  /** Runs pending promise continuations and advances the fake clock by `ms`. */
+  const flush = (ms = 0): Promise<void> =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  const setVisibility = async (value: 'visible' | 'hidden'): Promise<void> => {
+    visibility = value;
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  };
+  /** The reads the timer made: the ones that asked for `auth.noInteraction`. */
+  const backgroundReads = (): unknown[][] =>
+    gets().filter(c => (c[2] as { noInteraction?: boolean } | undefined)?.noInteraction === true);
+  const region = (): HTMLElement => screen.getByTestId('record-messages-new-region');
+  const indicator = (): HTMLElement | null => screen.queryByTestId('record-messages-new');
+  const shownBodies = (): string[] => screen.queryAllByTestId('record-message').map(li => li.textContent ?? '');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  async function open(props: Partial<React.ComponentProps<typeof RecordMessages>> = {}) {
+    const report = vi.fn<(action: ThreadRefreshAction | null) => void>();
+    const view = renderMessages({ onRefreshActionChange: report, ...props });
+    await flush();
+    const action = (): ThreadRefreshAction | null => report.mock.calls.at(-1)?.[0] ?? null;
+    return { view, report, action };
+  }
+  /** Lets the user press the thread's Refresh. */
+  const press = async (action: () => ThreadRefreshAction | null): Promise<void> => {
+    await act(async () => {
+      action()?.onClick();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  };
+
+  // ---- Refresh ----
+
+  it('Refresh is offered once the thread is shown, re-reads it and REPLACES the list (never appends)', async () => {
+    thread = [dto(1), dto(2)];
+    const { action } = await open();
+    expect(action()).toEqual({ onClick: expect.any(Function), busy: false });
+    expect(shownBodies()).toHaveLength(2);
+
+    thread = [dto(3)];
+    await press(action);
+    expect(gets()).toHaveLength(2);
+    expect(shownBodies()).toHaveLength(1);
+    expect(shownBodies()[0]).toContain('body 3');
+    // A read the user asked for is the ordinary read: no `auth` argument.
+    expect(gets()[1]).toEqual([LIST_PATH]);
+  });
+
+  it('Refresh is not offered while the thread is not shown (a failed load)', async () => {
+    bffApiCall.mockImplementation(async () => {
+      throw new ApiError(500, 'boom');
+    });
+    const { action } = await open();
+    expect(screen.getByTestId('record-messages-error')).toBeTruthy();
+    expect(action()).toBeNull();
+  });
+
+  it('a second Refresh while one read is in flight makes no second read; it works again once the read settles', async () => {
+    let reads = 0;
+    let release!: () => void;
+    bffApiCall.mockImplementation(async () => {
+      reads++;
+      if (reads === 2) await new Promise<void>(resolve => (release = resolve));
+      return { value: thread };
+    });
+    const { action } = await open();
+    expect(reads).toBe(1);
+
+    await press(action);
+    expect(reads).toBe(2);
+    expect(action()?.busy).toBe(true);
+    await press(action);
+    await press(action);
+    expect(reads).toBe(2);
+
+    release();
+    await flush();
+    expect(action()?.busy).toBe(false);
+    await press(action);
+    expect(reads).toBe(3);
+  });
+
+  // ---- A failed re-read says only what is true (review fix round 1, F1) ----
+
+  describe('a failed refresh says only what is true', () => {
+    const PLAIN_COPY = 'The messages could not be refreshed just now.';
+    const failReadsFromNow = (): void => {
+      bffApiCall.mockImplementation(async () => {
+        throw new ApiError(500, 'boom');
+      });
+    };
+    const noticeText = (): string => screen.getByTestId('record-messages-refresh-failed').textContent ?? '';
+
+    it('the header Refresh failing does not claim a message was sent', async () => {
+      thread = [dto(1)];
+      const { action } = await open();
+      failReadsFromNow();
+      await press(action);
+
+      expect(noticeText()).toContain(PLAIN_COPY);
+      expect(noticeText()).not.toMatch(/was sent/);
+      expect(shownBodies()).toHaveLength(1);
+    });
+
+    it('"Show new messages" failing does not claim a message was sent', async () => {
+      thread = [dto(1)];
+      await open();
+      thread = [dto(1), dto(2)];
+      await flush(INTERVAL);
+      expect(indicator()).toBeTruthy();
+
+      failReadsFromNow();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Show new messages' }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(noticeText()).toContain(PLAIN_COPY);
+      expect(noticeText()).not.toMatch(/was sent/);
+    });
+
+    it('the record toolbar Refresh (refreshSignal) failing does not claim a message was sent', async () => {
+      thread = [dto(1)];
+      const { view } = await open({ refreshSignal: 0 });
+      failReadsFromNow();
+      view.rerender(
+        <FluentProvider theme={webLightTheme}>
+          <RecordMessages entity="sprk_matter" recordId={RECORD_ID} refreshSignal={1} />
+        </FluentProvider>
+      );
+      await flush();
+
+      expect(noticeText()).toContain(PLAIN_COPY);
+      expect(noticeText()).not.toMatch(/was sent/);
+    });
+
+    it('a re-read that fails right after a send still says the message was sent', async () => {
+      thread = [dto(1)];
+      let posted = false;
+      bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+        if (options?.method === 'POST') {
+          posted = true;
+          return dto(99);
+        }
+        if (posted) throw new ApiError(500, 'boom');
+        return { value: thread };
+      });
+      await open();
+      await act(async () => {
+        fireEvent.change(box(), { target: { value: 'sent' } });
+      });
+      await act(async () => {
+        fireEvent.click(sendButton());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(noticeText()).toContain('Your message was sent');
+    });
+  });
+
+  // ---- The indicator ----
+
+  it('a background read that finds a newer message raises the indicator in a polite live region and leaves the list alone', async () => {
+    thread = [dto(1)];
+    await open();
+    const live = region();
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(live.textContent).toBe('');
+    expect(indicator()).toBeNull();
+
+    thread = [dto(1), dto(2)];
+    await flush(INTERVAL - 1);
+    expect(gets()).toHaveLength(1);
+    await flush(1);
+
+    expect(gets()).toHaveLength(2);
+    expect(backgroundReads()).toHaveLength(1);
+    // The initial read is the ordinary one; the background one is the same route with `auth.noInteraction` and nothing else.
+    expect(gets()[0]).toEqual([LIST_PATH]);
+    expect(gets()[1]).toEqual([LIST_PATH, {}, { noInteraction: true }]);
+    // The region that announces was already there, and now holds the text; the list on screen is untouched.
+    expect(region()).toBe(live);
+    expect(live.textContent).toContain('New messages are available.');
+    expect(shownBodies()).toHaveLength(1);
+    expect(shownBodies()[0]).toContain('body 1');
+  });
+
+  it('"Show new messages" runs the refresh: the list shows the new message, the indicator clears, focus stays in the section', async () => {
+    thread = [dto(1)];
+    await open();
+    thread = [dto(1), dto(2)];
+    await flush(INTERVAL);
+    expect(indicator()).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Show new messages' }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(shownBodies()).toHaveLength(2);
+    expect(indicator()).toBeNull();
+    expect(document.activeElement).toBe(region());
+    // Exactly one read for the click (plus the initial and the background one).
+    expect(gets()).toHaveLength(3);
+  });
+
+  it('Refresh in the section header clears the indicator too', async () => {
+    thread = [dto(1)];
+    const { action } = await open();
+    thread = [dto(1), dto(2)];
+    await flush(INTERVAL);
+    expect(indicator()).toBeTruthy();
+
+    await press(action);
+    expect(indicator()).toBeNull();
+    expect(shownBodies()).toHaveLength(2);
+  });
+
+  it('a background read with nothing new shows nothing', async () => {
+    thread = [dto(1), dto(2)];
+    await open();
+    await flush(INTERVAL);
+    expect(backgroundReads()).toHaveLength(1);
+    expect(indicator()).toBeNull();
+    expect(region().textContent).toBe('');
+    expect(shownBodies()).toHaveLength(2);
+  });
+
+  it('a successful send clears the indicator, even when the re-read after it fails', async () => {
+    thread = [dto(1)];
+    let posted = false;
+    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        posted = true;
+        return dto(99);
+      }
+      if (posted) throw new ApiError(500, 'boom');
+      return { value: thread };
+    });
+    await open();
+    thread = [dto(1), dto(2)];
+    await flush(INTERVAL);
+    expect(indicator()).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(box(), { target: { value: 'sent' } });
+    });
+    await act(async () => {
+      fireEvent.click(sendButton());
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(posts()).toHaveLength(1);
+    expect(screen.getByTestId('record-messages-refresh-failed')).toBeTruthy();
+    expect(indicator()).toBeNull();
+  });
+
+  it('a record change clears the indicator and stops the checks for the record before', async () => {
+    const OTHER = '00000000-0000-4000-8000-000000000202';
+    const OTHER_PATH = `/api/v1/external/matters/${OTHER}/messages`;
+    thread = [dto(1)];
+    bffApiCall.mockImplementation(async (path: string) => ({ value: path === LIST_PATH ? thread : [] }));
+    const { view } = await open();
+    thread = [dto(1), dto(2)];
+    await flush(INTERVAL);
+    expect(indicator()).toBeTruthy();
+
+    view.rerender(
+      <FluentProvider theme={webLightTheme}>
+        <RecordMessages entity="sprk_matter" recordId={OTHER} />
+      </FluentProvider>
+    );
+    await flush();
+    expect(indicator()).toBeNull();
+    const before = gets().length;
+
+    await flush(3 * INTERVAL);
+    const after = gets().slice(before - 1);
+    expect(after.length).toBeGreaterThan(1);
+    expect(after.every(c => c[0] === OTHER_PATH)).toBe(true);
+  });
+
+  it('a background answer that arrives after a refresh started is dropped', async () => {
+    let reads = 0;
+    let releaseBackground!: () => void;
+    bffApiCall.mockImplementation(async () => {
+      reads++;
+      if (reads === 2) {
+        // The background read: slow, and it saw three messages.
+        await new Promise<void>(resolve => (releaseBackground = resolve));
+        return { value: [dto(1), dto(2), dto(3)] };
+      }
+      return { value: [dto(1)] };
+    });
+    const { action } = await open();
+    await flush(INTERVAL);
+    expect(reads).toBe(2);
+
+    // The user refreshes while it is in flight (the server now says one message); then the old answer lands.
+    await press(action);
+    expect(reads).toBe(3);
+    releaseBackground();
+    await flush();
+    expect(indicator()).toBeNull();
+    expect(shownBodies()).toHaveLength(1);
+  });
+
+  // ---- When the checks run ----
+
+  it('makes no read while the document is hidden, and checks once it is visible again', async () => {
+    thread = [dto(1)];
+    await open();
+    await setVisibility('hidden');
+    thread = [dto(1), dto(2)];
+    await flush(3 * INTERVAL);
+    expect(gets()).toHaveLength(1);
+
+    await setVisibility('visible');
+    await flush();
+    expect(gets()).toHaveLength(2);
+    expect(indicator()).toBeTruthy();
+  });
+
+  it('keeps one interval between two reads of any kind: a refresh moves the next check back', async () => {
+    const { action } = await open();
+    await flush(INTERVAL - 10_000);
+    await press(action);
+    expect(gets()).toHaveLength(2);
+
+    // The timer fires at the original time (10 s on): too soon after the refresh, so it waits.
+    await flush(10_000);
+    expect(gets()).toHaveLength(2);
+    await flush(INTERVAL - 10_001);
+    expect(gets()).toHaveLength(2);
+    await flush(1);
+    expect(gets()).toHaveLength(3);
+  });
+
+  it('stops after the component unmounts', async () => {
+    const { view } = await open();
+    view.unmount();
+    await flush(5 * INTERVAL);
+    expect(gets()).toHaveLength(1);
+  });
+
+  // ---- A failing background read ----
+
+  it('a failing background read is silent: no error, no refresh-failed notice, no sign-in state, the list stays', async () => {
+    thread = [dto(1)];
+    let fail = false;
+    bffApiCall.mockImplementation(async () => {
+      if (fail) throw new ApiError(500, 'boom');
+      return { value: thread };
+    });
+    await open();
+    fail = true;
+    await flush(INTERVAL);
+
+    expect(backgroundReads()).toHaveLength(1);
+    expect(screen.queryByTestId('record-messages-error')).toBeNull();
+    expect(screen.queryByTestId('record-messages-refresh-failed')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expect(indicator()).toBeNull();
+    expect(shownBodies()).toHaveLength(1);
+  });
+
+  it('stops after three failures in a row, and starts again when a refresh the user asked for succeeds', async () => {
+    thread = [dto(1)];
+    let fail = false;
+    bffApiCall.mockImplementation(async () => {
+      if (fail) throw new ApiError(503, 'unavailable');
+      return { value: thread };
+    });
+    const { action } = await open();
+    fail = true;
+    await flush(10 * INTERVAL);
+    expect(backgroundReads()).toHaveLength(3);
+
+    fail = false;
+    await press(action);
+    thread = [dto(1), dto(2)];
+    await flush(INTERVAL);
+    expect(backgroundReads()).toHaveLength(4);
+    expect(indicator()).toBeTruthy();
+  });
+
+  it('a 401 on a background read stops the checks at once and shows no sign-in state', async () => {
+    let fail = false;
+    bffApiCall.mockImplementation(async () => {
+      if (fail) throw new ApiError(401, 'expired');
+      return { value: thread };
+    });
+    await open();
+    fail = true;
+    await flush(5 * INTERVAL);
+
+    expect(backgroundReads()).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expect(screen.queryByTestId('record-messages-error')).toBeNull();
+  });
+
+  // ---- The record template's section ----
+
+  describe('in the record template (MessagesSection)', () => {
+    const section = (over: Partial<RecordSectionContext> = {}): RecordSectionContext => ({
+      config: undefined as never,
+      detail: getRecordDetailEntity('sprk_matter')!,
+      recordId: RECORD_ID,
+      record: {} as never,
+      title: 'Matter MAT-1',
+      callerContext: null,
+      caller: null,
+      onBusyChange: vi.fn(),
+      onRecordDeleted: vi.fn(),
+      refreshSection: vi.fn(),
+      refreshRecord: vi.fn(),
+      full: false,
+      refreshSignal: 0,
+      offerAction: () => undefined,
+      headerActions: [],
+      readOnlyNote: null,
+      ...over,
+    });
+    const renderSection = () =>
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <MessagesSection {...section()} />
+        </FluentProvider>
+      );
+    const refreshButton = (): HTMLButtonElement =>
+      screen.getByRole('button', { name: 'Refresh messages' }) as HTMLButtonElement;
+
+    it('shows Refresh in the section header with no create right, and it re-reads and replaces the thread', async () => {
+      thread = [dto(1), dto(2)];
+      renderSection();
+      await flush();
+      // No `canCreate` on the read: New message is not offered, Refresh still is (a read action, FR-06).
+      expect(screen.queryByRole('button', { name: 'New message' })).toBeNull();
+      expect(shownBodies()).toHaveLength(2);
+
+      thread = [dto(3)];
+      await act(async () => {
+        fireEvent.click(refreshButton());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(shownBodies()).toHaveLength(1);
+      expect(shownBodies()[0]).toContain('body 3');
+    });
+
+    it('keeps Refresh enabled and focused while its read is in flight, and a second click makes no second read', async () => {
+      let reads = 0;
+      let release!: () => void;
+      bffApiCall.mockImplementation(async () => {
+        reads++;
+        if (reads === 2) await new Promise<void>(resolve => (release = resolve));
+        return { value: thread };
+      });
+      renderSection();
+      await flush();
+
+      // A keyboard user has the button focused when they press it: focus must stay on it while the read runs.
+      refreshButton().focus();
+      await act(async () => {
+        fireEvent.click(refreshButton());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(reads).toBe(2);
+      expect(refreshButton().disabled).toBe(false);
+      expect(document.activeElement).toBe(refreshButton());
+      fireEvent.click(refreshButton());
+      expect(reads).toBe(2);
+
+      release();
+      await flush();
+      expect(refreshButton().disabled).toBe(false);
+      expect(document.activeElement).toBe(refreshButton());
+    });
+
+    it('makes no background read while the section is collapsed, and resumes when it is expanded', async () => {
+      renderSection();
+      await flush();
+      fireEvent.click(screen.getByTestId('section-toggle-messages'));
+      await flush(3 * INTERVAL);
+      expect(gets()).toHaveLength(1);
+
+      fireEvent.click(screen.getByTestId('section-toggle-messages'));
+      await flush(INTERVAL);
+      expect(backgroundReads()).toHaveLength(1);
     });
   });
 });

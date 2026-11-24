@@ -1,0 +1,25 @@
+{
+  "@odata.context": "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/$metadata#EntityDefinitions('sprk_matter')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata(LogicalName,Targets)",
+  "value": [
+    {
+      "MetadataId": "4d66d5a1-1b2d-4ef8-b87c-c81c2760cbfc",
+      "LogicalName": "sprk_assignedattorney1",
+      "Targets": ["contact"]
+    },
+    {
+      "MetadataId": "f6eaaa18-ae55-4c6e-85b9-373c85fdfe94",
+      "LogicalName": "sprk_assignedparalegal1",
+      "Targets": ["contact"]
+    },
+    {
+      "MetadataId": "400814cd-e0ca-4021-9f5b-a2aa103aa609",
+      "LogicalName": "sprk_mattertype",
+      "Targets": ["sprk_mattertype_ref"]
+    },
+    {
+      "MetadataId": "f50aba1d-e59c-40b0-bb08-972f8026cc00",
+      "LogicalName": "sprk_practicearea",
+      "Targets": ["sprk_practicearea_ref"]
+    }
+  ]
+}
