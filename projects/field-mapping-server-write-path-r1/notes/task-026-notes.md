@@ -131,3 +131,57 @@ Left unchanged (not `bindLookup` fragments; resolved already by exact column): `
   - ADR-002: no plugin, the server owns mapping.
 - **Dead code:** the cascade removal leaves none. The Work Assignment host does not call `resolveUserBuDefaults`.
 - **Stale comment** (`ChildRecordEndpoints.InferMappingSourceTables`, sprk_event "joins with task 026"): wording only. It is fixed the next time that BFF file is touched, like 045e K8, and gets no PR of its own.
+
+## On master (2026-11-24)
+
+- **#3049 merged** as dc33f14d35 (a merge commit).
+- **One Tier 1 flake on the way:**
+  - What failed: `DataGrid.persistedSettings` "Clear all also clears the column filters" (`Unable to find role="textbox"`). It failed on attempt 1 and passed on the re-run, on the same commit.
+  - Cause: the test's `applyTextFilter` helper waited a fixed 120 ms for the filter popover.
+  - Tracking: filed as #3064. Already fixed on master by spa-r4's #3055 (8dd44cf528), which waits for the popover's textbox and Apply button and reopens it up to 3 times. #3064 is closed against #3055.
+  - Nothing of this project's needed changing.
+
+## Deploy to dev (2026-11-24 15:37Z, owner go in this session)
+
+- **Built from:** master d0453e583a (contains #3049), in a temporary worktree (`C:\wt026`, since removed): SharedLibs, then `src/solutions/CreateWorkAssignmentWizard` (`npm install --legacy-peer-deps`, clean `dist`, `npm run build`).
+- **Bundle checks:**
+  - it has `mappingSourceEntity`, `sprk_assignedattorney1`, `sprk_assignedlawfirm1` and `sprk_regardingworkassignment`;
+  - it has neither `applyFieldMappings` nor the `/field-mappings/` route.
+- **Deployed:** `sprk_createworkassignmentwizard` (84bda2e0-d523-f111-88b4-7ced8d1dc988) via `Deploy-WebResourceInline.ps1`, then published.
+  - Read-back SHA-256 `E8DE9527…4B60A1` equals the build.
+  - The web resource is in SpaarkeMaster.
+- **Rollback:** the previous bundle was saved before the deploy. It was 1,506,031 bytes, SHA-256 `02A824E9…AB45F46`, modified 2026-11-23 21:35Z, and still had the client mapping. Saved in this session's scratchpad as `wr026/rollback-sprk_createworkassignmentwizard.html`. Redeploying it is the rollback.
+- **Next:** the live check ("Left for the live part" item 2).
+
+## Live check on dev (AC5), 2026-11-24 15:46–15:52Z (owner go in this session)
+
+- **How it was run:** in the owner's signed-in Chrome, in this session's own tab group. The wizard was opened as a dialog via `Xrm.Navigation.navigateTo` (`sprk_createworkassignmentwizard`, the workspace launcher's call), because the Matter form has no Create Work Assignment command.
+- **How rows were checked:** read back with the Web API as an admin, with request timings from App Insights. The read script and logs are in this session's scratchpad (`live026/`).
+- **Mapping profile:** "Matter to Work Assignment (Attorney Matrix)" (7b147316…), already active on dev. No temporary profile was needed.
+
+| Check | A: under MAT-000110 (`4dbaa0c7-79ec-4c9f-8b3f-6a8eb2479adc`), Attorney = Jane Smith, Law Firm = Morrison Foerster LLP, Assigned To blank, follow-on event | B: under secure PAT-908068 (`adff04f4-157e-405a-9d15-2bc76b2f976a`), follow-on event | C: no parent (`9891e505-b71c-4c51-ab92-0270ce9e226b`) |
+|---|---|---|---|
+| Created on the route, by the BFF | **PASS**: 201 with `mappingSourceEntity=sprk_matter`; created and modified by `# mi-bff-api-dev`; one write | **PASS**: 201 with the matter as source | **PASS**: no query string |
+| Mapped values at first load | **PASS**: Attorney 2 (Jessica Broyles), Paralegal 1 (Eyal Iffergan), Paralegal 2, Assigned To Internal (Test User 1) and Assigned To External all come from the matter; Assigned To = Test User 1 (the server default from Internal) | n/a: the matter has no person values (warning `copied_default_source_unset`, as expected) | **PASS**: none, and no warning |
+| User value kept (fill-only) | **PASS**: Attorney 1 = Jane Smith (the wizard's pick), not the matter's Test User 1 | n/a | n/a |
+| Primary slots | **PASS**: Attorney → `sprk_assignedattorney1`, Law Firm → `sprk_assignedlawfirm1` | n/a | n/a |
+| Owner (FR-09) | **PASS**: Spaarke Business Unit 1, the matter's owner team | **PASS**: Secure Record Owners, `sprk_issecure` = true (created into isolation) | **PASS**: Spaarke, the maker's business-unit team. The maker's account is homed in the root business unit, so a record with no parent takes the root team (the #3047 shape; UAC-r2 confirmed it and left this row as it is) |
+| Follow-on event | Created under the work assignment, owner = the work assignment's team. **DEFECT (fixed):** regarding pair blank | Created, owner Secure Record Owners. Same defect | n/a |
+| Duration (server) | 4.7 s | 24.6 s: secure provisioning (SPE container 5.5 s, about 90 sharing calls 9.3 s). This is UAC-r2's secure path; the latency verdict is UAT's (owner) | about 2 s |
+
+**Defect found and fixed in scope (2156330275):**
+- **What:** the follow-on event bound only `sprk_regardingworkassignment`, so its regarding pair and display columns were empty and the event showed no Regarding.
+- **Not new:** every follow-on event on dev back to 2026-03 lacks the pair or has only part of it. It is not a 026 regression.
+- **Fix:** `createFollowOnEvent` now files the event through `applyResolverFields`, the same way the work assignment is filed (ADR-024). The dialog passes the work assignment's name as the fallback.
+- **Tests:** the payload tests assert the pair keys. 3 tests fail on the old code. Jest 19 suites / 140 tests pass, `tsc` 0, client-lint `ui-components` ok.
+- **Left:** a PR to master, a redeploy of `sprk_createworkassignmentwizard`, and a re-check that a new follow-on event shows its work assignment as Regarding. Each needs the owner's go.
+
+**Not covered:**
+- Send Email and file uploads were not exercised; 026 did not change them.
+- The Console's in-app wizard and the Report Card wizard need their own bundles rebuilt.
+- Dark mode is left for the owner, as in 023 and 024.
+
+**Rows left on dev:**
+- work assignments A, B and C (above);
+- events `a9b1aaee-d5dd-473a-a021-cdf5f3a864b6` and `d5d8d35b-0d64-48c3-8adf-62bcc3045bf7`;
+- B's SPE container "Secure Work Assignment – FMSWP-026 live check B secure".

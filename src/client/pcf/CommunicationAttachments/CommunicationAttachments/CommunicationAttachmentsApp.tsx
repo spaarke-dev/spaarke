@@ -39,7 +39,6 @@ import { RichFilePreviewDialog } from '@spaarke/ui-components/dist/components/Fi
 import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
-import { authenticatedFetch } from '@spaarke/auth';
 import { IInputs } from './generated/ManifestTypes';
 // Task 021: the Layer-1 attachments logic + the promoted AttachmentList
 // presentational core now live in `@spaarke/communication-components` — the
@@ -49,10 +48,10 @@ import {
   IAttachmentItem,
   CommunicationAttachmentsService,
   IAttachmentsWebApi,
-  fileTypeLabel,
   AttachmentApiService,
 } from '@spaarke/communication-components/logic/attachments';
 import { AttachmentList } from '@spaarke/communication-components/components/AttachmentList';
+import { useAttachmentPreview } from '@spaarke/communication-components/components/AttachmentPreview';
 import { initializeAuth } from './authInit';
 import { getApiBaseUrl, resolveSignInIdentity } from '../../shared/utils/environmentVariables';
 
@@ -276,45 +275,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
     };
   }, [service, communicationId]);
 
-  // ── Preview modal ─────────────────────────────────────────────────────────
-  const [previewItem, setPreviewItem] = React.useState<IAttachmentItem | null>(null);
-
-  // A11-1 (double-header fix): the double header was a SHARED-LIB issue — in
-  // navigation mode `RichFilePreviewDialog` wraps the renderer in
-  // `RecordNavigationModalShell` (smart-todo-r4 task 011), and BOTH the shell
-  // and the renderer drew the document title (two identical `<h2>`s). Fixed in
-  // `@spaarke/ui-components` by having the dialog pass `showTitle={false}` to
-  // the renderer in shell mode (shell owns the single title). With that fix we
-  // KEEP the prev/next "N of M" browse (the A1 nicety) AND a single title.
-  //
-  // `navItems` = the modal-previewable attachments. Every row with a resolvable
-  // `sprk_document` participates in the prev/next browse — INCLUDING `.eml`/`.msg`
-  // (UAT R4 B12-4 REVERSES the earlier decision #4: SharePoint/Graph previews
-  // `message/rfc822` via the same `/preview-url` embed as any other file, so email
-  // messages open the same in-modal `RichFilePreviewDialog`). Rows without a
-  // documentId can't preview and are excluded to keep every index resolvable.
-  const navItems = React.useMemo(() => items.filter(i => !!i.documentId), [items]);
-  const previewIndex = React.useMemo(
-    () => (previewItem ? navItems.findIndex(i => i.documentId === previewItem.documentId) : -1),
-    [navItems, previewItem]
-  );
-  const handlePreviewNavigate = React.useCallback(
-    (nextIndex: number): void => {
-      if (nextIndex < 0 || nextIndex >= navItems.length) return;
-      setPreviewItem(navItems[nextIndex]);
-    },
-    [navItems]
-  );
-
-  const handleRowActivate = React.useCallback((item: IAttachmentItem): void => {
-    if (!item.documentId) return;
-    // Every attachment with a resolvable document — including `.eml`/`.msg` —
-    // opens the shared in-modal `RichFilePreviewDialog` (UAT R4 B12-4). The
-    // modal still exposes open-in-desktop/web affordances for anything the
-    // embed viewer can't render, so there is no forced external-open path.
-    setPreviewItem(item);
-  }, []);
-
+  // ── Preview modal (state, browse list and open/copy actions are shared with EmailReadingAttachments: #2967) ──
   const openDocumentRecord = React.useCallback((documentId: string): void => {
     // Shared cross-frame walker (task 081 / C-8).
     const xrm = getXrm('openForm');
@@ -328,6 +289,20 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
       console.warn('[CommunicationAttachments] openDocumentRecord failed:', err);
     }
   }, []);
+
+  const { handleRowActivate, dialogProps } = useAttachmentPreview({
+    items,
+    apiService,
+    apiBaseUrl: resolvedApiBaseUrl,
+    openInDesktopApp,
+    openInDesktopFailedMessage: OPEN_IN_DESKTOP_FAILED_MESSAGE,
+    logTag: 'CommunicationAttachments',
+    onOpenRecord: openDocumentRecord,
+    openExternal,
+    onOpenDesktopError: message => {
+      if (message) void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message });
+    },
+  });
 
   // ── Render gates ──────────────────────────────────────────────────────────
   const versionFooter = showVersionFooter ? (
@@ -392,59 +367,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
 
       {versionFooter}
 
-      {previewItem && previewItem.documentId && (
-        <RichFilePreviewDialog
-          open={!!previewItem}
-          documentName={previewItem.name || previewItem.documentName || 'Attachment'}
-          documentId={previewItem.documentId}
-          documentType={fileTypeLabel(previewItem.name)}
-          onClose={() => setPreviewItem(null)}
-          navigationTotal={navItems.length}
-          currentIndex={previewIndex}
-          onNavigate={handlePreviewNavigate}
-          fetchPreviewUrl={() => apiService.getPreviewUrl(previewItem.documentId as string)}
-          onOpenFile={mode => {
-            void (async () => {
-              const documentId = previewItem.documentId as string;
-              const links = await apiService.getOpenLinks(documentId);
-              if (mode !== 'desktop') {
-                openExternal(links?.webUrl ?? null);
-                return;
-              }
-              // Office files open in the Office app; anything else downloads through the BFF (shared
-              // behaviour, ISS-004) — not the SharePoint webUrl, which a read-only user cannot open.
-              try {
-                if (!links) throw new Error('The open-links request returned nothing.');
-                await openInDesktopApp({
-                  bffBaseUrl: resolvedApiBaseUrl,
-                  documentId,
-                  links,
-                  fetch: authenticatedFetch,
-                  fallbackFileName: previewItem.name || previewItem.documentName || undefined,
-                });
-              } catch (err) {
-                console.error('[CommunicationAttachments] Open in desktop failed:', err);
-                void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({
-                  message: OPEN_IN_DESKTOP_FAILED_MESSAGE,
-                });
-              }
-            })();
-          }}
-          onOpenRecord={() => openDocumentRecord(previewItem.documentId as string)}
-          onEmailDocument={() => {
-            /* Emailing an attachment as a new communication is out of scope for this surface. */
-          }}
-          onCopyLink={() => {
-            void (async () => {
-              const links = await apiService.getOpenLinks(previewItem.documentId as string);
-              const url = links?.webUrl;
-              if (url && navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(url);
-              }
-            })();
-          }}
-        />
-      )}
+      {dialogProps && <RichFilePreviewDialog {...dialogProps} />}
     </div>
   );
 };

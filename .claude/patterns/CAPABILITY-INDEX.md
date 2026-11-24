@@ -55,4 +55,4 @@ These are facts, not decisions. They are where a second implementation already e
 - **Row 18** — 10 endpoint files under `src/server/api/Sprk.Bff.Api/Api` set `text/event-stream` by hand; there is no shared SSE writer.
 - **Row 23** — three other components are also named `LookupField` (in `CreateMatterWizard`, `EmailStep` and `RecordHeader/fields`).
 - **Row 24** — `ChoiceModal` (a `SprkModal` preset) overlaps `ChoiceDialog`.
-- **Row 28** — `src/client/external-spa/src/registry/widgetRegistry.ts` and the output/source registries in `src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts` are separate widget registries.
+- **Row 28** — `src/client/external-spa/src/registry/widgetRegistry.ts` and the output/source registries in `src/client/shared/Spaarke.AI.Widgets/src/outputs/types/widget-types.ts` are separate widget registries.

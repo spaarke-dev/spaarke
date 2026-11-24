@@ -58,6 +58,13 @@ public enum AssignTaskRefusal
 
     /// <summary>A check could not be made (a read fault, an unreadable flag or wall, no answer from Dataverse): fail closed.</summary>
     Unverified,
+
+    /// <summary>
+    /// Task 207 (#3063, DI-171): the one eligible user's account is in Administrative access mode and Dataverse's own answer lacks Read
+    /// on the task, so the account cannot use the app at all. A reason refinement of <see cref="NoAccess"/>, chosen only at the
+    /// "cannot read the task" refusal; never an early refusal on access mode.
+    /// </summary>
+    AdministrativeAccount,
 }
 
 /// <summary>The gate's verdict for one assignee.</summary>
@@ -75,6 +82,9 @@ public sealed record AssignTaskRecipient(AssignTaskRecipientKind Kind, AssignTas
     /// <summary>Commit warning: no email, whether the assignee may see the record could not be checked.</summary>
     internal const string UnverifiedWarning = "assignee_email_not_sent_unverified";
 
+    /// <summary>Commit warning: no email, the assignee's user account is set up for administration only and cannot use the app.</summary>
+    internal const string AdministrativeAccountWarning = "assignee_email_not_sent_admin_account";
+
     internal static AssignTaskRecipient ForInternal(Guid userId) => new(AssignTaskRecipientKind.Internal, AssignTaskRefusal.None, userId);
 
     internal static AssignTaskRecipient ForExternal() => new(AssignTaskRecipientKind.External, AssignTaskRefusal.None, null);
@@ -87,6 +97,7 @@ public sealed record AssignTaskRecipient(AssignTaskRecipientKind Kind, AssignTas
         AssignTaskRefusal.NoAccess => NoAccessWarning,
         AssignTaskRefusal.SeveralUsers => SeveralUsersWarning,
         AssignTaskRefusal.Unverified => UnverifiedWarning,
+        AssignTaskRefusal.AdministrativeAccount => AdministrativeAccountWarning,
         _ => null,
     };
 }
@@ -121,6 +132,9 @@ public class AssignTaskRecipientGate
 {
     /// <summary>The task table's entity set, as <c>RetrievePrincipalAccess</c> names it.</summary>
     internal const string TaskEntitySet = "sprk_events";
+
+    /// <summary>systemuser <c>accessmode</c> Administrative (the same value as <c>FlaggedUserPlacementJob.AdministrativeAccessMode</c>).</summary>
+    private const int AdministrativeAccessMode = 1;
 
     private readonly IContactIdentityStore _identities;
     private readonly AssignedAccessStore _links;
@@ -272,7 +286,15 @@ public class AssignTaskRecipientGate
         if (rights is not { } answered)
             return Refuse(AssignTaskRefusal.Unverified, contactId, taskId, "Dataverse gave no answer for the user's Read on the task");
         if (!answered.HasFlag(AccessRights.Read))
-            return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "the user cannot read the task");
+        {
+            // Task 207 (#3063, DI-171): Dataverse's answer is still the decider. For an Administrative-mode account it answers 403
+            // (filtered privileges), which the probe maps to "no rights"; the refusal is right, but "no access to this record" misleads,
+            // so this one reason names the account. Only here: no early refusal on access mode, and who is emailed does not change.
+            return user.AccessMode == AdministrativeAccessMode
+                ? Refuse(AssignTaskRefusal.AdministrativeAccount, contactId, taskId,
+                    "the user cannot read the task, and the user account is in Administrative access mode")
+                : Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "the user cannot read the task");
+        }
 
         return AssignTaskRecipient.ForInternal(user.SystemUserId);
     }

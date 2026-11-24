@@ -28,7 +28,6 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
-    path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
     // Task 114 (2026-05-22): @spaarke/events-components hosts the
     // CalendarSection/GridSection/filter components consumed by both the
     // standalone EventsPage code page AND the Calendar workspace widget
@@ -116,8 +115,6 @@ export default defineConfig({
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.ts"),
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.ts"),
-        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src/**/*.tsx"),
-        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src/**/*.ts"),
         // Task 114 (2026-05-22): transpile Spaarke.Events.Components source
         // so SpaarkeAi can embed Events components via the
         // @spaarke/events-components alias (Calendar widget — task 115).
@@ -166,8 +163,6 @@ export default defineConfig({
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
       "@spaarke/ai-widgets/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
       "@spaarke/ai-widgets": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
-      "@spaarke/ai-outputs/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
-      "@spaarke/ai-outputs": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
       // Task 114 (2026-05-22): @spaarke/events-components is the shared
       // library that hosts CalendarSection/GridSection/filters/etc consumed
       // by both EventsPage and the SpaarkeAi Calendar workspace widget

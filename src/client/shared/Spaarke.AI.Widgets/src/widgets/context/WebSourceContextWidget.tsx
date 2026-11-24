@@ -15,8 +15,8 @@
  */
 
 import { createContextWidgetAdapter, createNoOpHighlighter } from './ContextWidgetAdapter';
-import { WebSourceWidget } from '@spaarke/ai-outputs';
-import type { WebSourceData } from '@spaarke/ai-outputs';
+import { WebSourceWidget } from '../../outputs';
+import type { WebSourceData } from '../../outputs';
 
 // Re-export the payload type for consumers.
 export type { WebSourceData };

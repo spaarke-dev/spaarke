@@ -56,7 +56,10 @@ import {
   getXrm,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
-import { initializeAuth, resolveDataverseUrl } from './authInit';
+import {
+  usePcfAuthBootstrap,
+  resolveDataverseUrl as resolveDataverseUrlFrom,
+} from '@spaarke/communication-components/logic/pcf-host';
 import { archiveFailureMessage } from './archiveFailure';
 import { readSourceIsInternalOnly } from './sourceInternalOnly';
 // Task 022: the Layer-1 action-bar / composer-prefill / suggested-create logic now
@@ -80,6 +83,14 @@ import {
   type SubmitInvoiceDialogProps,
 } from '@spaarke/communication-components/components/SubmitInvoice';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
+
+/** The environment-variable readers the shared auth bootstrap resolves its settings with. */
+/** The Dataverse org URL (MSAL redirect URI / document links). */
+const resolveDataverseUrl = (): string => resolveDataverseUrlFrom(getClientUrl);
+
+const PCF_ENV = { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId };
+// getXrm is never passed as a value (the Xrm capability guard follows every getXrm value to its uses).
+const getClientUrl = (): unknown => getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl();
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
 // whose FC return type is incompatible with React 16's JSX element type. Cast at
@@ -282,9 +293,6 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const communicationId = React.useMemo(() => getHostRecordId(), []);
   const webApi = context.webAPI;
 
-  const [authReady, setAuthReady] = React.useState(false);
-  const [authError, setAuthError] = React.useState<string | null>(null);
-  const [bffBaseUrl, setBffBaseUrl] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
   // PR #2248: a Save to SharePoint that refused an attachment is a warning, not a success.
@@ -314,35 +322,15 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // then falls back to the Dataverse environment variables (sprk_MsalClientId /
   // sprk_BffApiAppId / sprk_BffApiBaseUrl) — the same pattern SemanticSearch uses, so
   // the control works with zero form config where those env vars are set.
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const clientAppId = manifestClientAppId || (await getMsalClientId(webApi));
-        const bffAppId = manifestBffAppId || (await getBffApiAppId(webApi));
-        // getApiBaseUrl returns host-only (strips /api); @spaarke/auth re-adds /api.
-        const baseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-        if (!clientAppId || !bffAppId || !baseUrl) {
-          if (!cancelled) {
-            setAuthError(
-              'Communication actions are not configured. Set the sprk_MsalClientId / sprk_BffApiAppId / ' +
-                'sprk_BffApiBaseUrl Dataverse environment variables (or the PCF Client App ID / BFF App ID / API URL inputs).'
-            );
-          }
-          return;
-        }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
-        if (cancelled) return;
-        setBffBaseUrl(baseUrl);
-        setAuthReady(true);
-      } catch (err) {
-        if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, webApi]);
+  const { authReady, authError, bffBaseUrl } = usePcfAuthBootstrap({
+    controlLabel: 'Communication actions are',
+    webApi,
+    manifestClientAppId,
+    manifestBffAppId,
+    manifestApiBaseUrl,
+    env: PCF_ENV,
+    getClientUrl,
+  });
 
   // Load the record fields the composer needs for reply/forward pre-fill.
   React.useEffect(() => {

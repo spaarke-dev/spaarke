@@ -21,7 +21,7 @@
  *     { ... },
  *     () => import('./WorkspaceWidgetWrapper').then(m => ({
  *       default: m.createWorkspaceWrapper(
- *         () => import('@spaarke/ai-outputs/dist/output-widgets/BudgetDashboardWidget'),
+ *         () => import('../../outputs/output-widgets/BudgetDashboardWidget'),
  *         'BudgetDashboard',
  *       ),
  *     }))

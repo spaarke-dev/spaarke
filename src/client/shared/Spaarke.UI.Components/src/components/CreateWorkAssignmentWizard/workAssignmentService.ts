@@ -571,7 +571,8 @@ export class WorkAssignmentService {
    */
   async createFollowOnEvent(
     workAssignmentId: string,
-    eventState: ICreateFollowOnEventState
+    eventState: ICreateFollowOnEventState,
+    workAssignmentName?: string
   ): Promise<{ success: boolean; warning?: string; warnings?: string[] }> {
     try {
       const navProps = await discoverNavProps('sprk_event');
@@ -600,11 +601,25 @@ export class WorkAssignmentService {
       // launch the CreateTodoWizard separately and select the event as
       // the regarding record.
 
-      // Link to work assignment
-      const waNavProp = findNavProp(navProps, 'sprk_workassignment', 'sprk_regardingworkassignment');
-      if (waNavProp) {
-        entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${cleanGuid(workAssignmentId)})`;
-      }
+      // File under the work assignment with the shared Polymorphic Resolver (ADR-024), as the work assignment itself is
+      // filed: the typed lookup `sprk_regardingworkassignment` (full name: `sprk_relatedworkassignment` is a look-alike)
+      // plus the regarding pair and its display columns (id, url, record type, name, number). Binding only the lookup left
+      // the event's Regarding blank (live check 2026-11-24). The name falls back to the wizard's work assignment name when
+      // the new row cannot be read yet.
+      const polyWebApi = {
+        retrieveMultipleRecords: (entityLogicalName: string, query: string) =>
+          this._dataService.retrieveMultipleRecords(entityLogicalName, query),
+      };
+      await applyResolverFields(
+        polyWebApi,
+        entity,
+        navProps,
+        'sprk_workassignment',
+        'sprk_workassignments',
+        workAssignmentId,
+        workAssignmentName?.trim() ?? '',
+        'sprk_regardingworkassignment'
+      );
 
       // Assigned To (contact) -- task 097. `sprk_event.sprk_assignedto` targets CONTACT
       // in the live schema (nav prop `sprk_AssignedTo`). The former
