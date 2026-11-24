@@ -28,7 +28,7 @@ Every route: ADR-008 `AddFinanceAuthorizationFilter` (core-record access through
 
 ## 3. Serialisation and exactly-once
 
-Named mechanism: a per-invoice processing lock (`IIdempotencyService.TryAcquireProcessingLockAsync`, key `ebilling-line-decision:{invoice:N}`, 2 minute lease) held for the whole request, plus a row-version-conditional all-or-nothing line write (`BulkUpdateIfRowVersionsMatchAsync`; a `DBConcurrencyException` is 409 `ebilling.line.changed`).
+Named mechanism: a per-invoice processing lock (`IIdempotencyService.TryAcquireProcessingLockAsync`, key `ebilling-line-decision:{invoice:N}`, 2 minute lease) held for the whole request (renewed during the call since ISS-050: see `iss050-line-decision-lock-renewal.md`), plus a row-version-conditional all-or-nothing line write (`BulkUpdateIfRowVersionsMatchAsync`; a `DBConcurrencyException` is 409 `ebilling.line.changed`).
 
 - A second request on the same invoice while the first holds the lock gets 409 `ebilling.invoice.busy`, before it reads anything.
 - Defence in depth: with the lock defeated, two concurrent same-id requests still produce exactly one applied request and one 409, and one Decision Record (test `ConcurrentSameDecisionId_WithoutTheLock_IsStillExactlyOnce_ByTheConditionalWrite`).
