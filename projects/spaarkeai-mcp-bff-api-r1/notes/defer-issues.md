@@ -153,6 +153,68 @@ Owner decision first (validate on `/mcp/*`, against which allow-list). Copilot a
 
 ---
 
+### ISS-008 — Decision wizard person picker shows only the name, so same-name contacts cannot be told apart
+
+| Field | Value |
+|---|---|
+| **Status** | Open — offered to spaarke-ontology-platform-r1 (owns the Decision wizard) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Owner, live Copilot run on dev `0362599b94` (Assign Task step) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3062 |
+
+**Description**
+
+In the Assign Task step, "Assign to" lists matching contacts by name only. Dev has three active contacts with the same full name (different email domains), and the owner could not tell which one they were picking. The Confirm step's summary ("Assign to: …") also shows the name only. The server already returns the contact's email on every Person candidate (`DecisionLookupCandidate.Email`), so the data is there: the inline field drops it. Concrete failure: the decision assigns the task to the wrong person, and the summary does not let the assigner catch it before or after recording.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx:726` (an option renders `item.name` only)
+- `src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx:80-94, 221` (`LookupParameter` maps search results to `ILookupItem` { id, name })
+- `src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionLookupSearch.cs:59` (`Email` already on the candidate)
+- The Confirm summary of a Person parameter (decision draft keeps `{ id, name }`)
+
+**Suggested fix**
+
+Extend the shared `ILookupItem` with an optional secondary line and render it under the name (reuse, no fork). Carry the email from the lookup result into the draft label so the Confirm summary reads "Name (email)". The Console's side-pane picker is unaffected; check it shows the email too.
+
+**Estimated effort**: 2–4 hours plus tests
+**Blockers**: none
+**Related**: D-182 (side-pane lookup), task 168 (Assign Task)
+
+---
+
+### ISS-009 — Assign Task email refused as "no access" for an assignee whom Dataverse lets read the task
+
+| Field | Value |
+|---|---|
+| **Status** | Open — offered to spaarke-ontology-platform-r1 (owns `AssignTaskRecipientGate`, D-199) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Owner, live Copilot run on dev `0362599b94`: the commit at 2026-11-24 14:40:38Z warned `assignee_email_not_sent_no_access` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3063 |
+
+**Description**
+
+The task was created and assigned; the email was not sent, with "the assignee does not have access to this record". Read-only checks the same day found nothing that refuses: the contact is active and linked (`sprk_primarycontact`) to exactly one enabled systemuser whose Entra oid matches the contact's binding; the user is Administrative access mode, unlicensed, with no security roles of its own, and is a member of its business-unit team (role "Spaarke Basic User"), which owns the task and the matter; the matter is not secure; no No Access entry names the matter or the user; and `RetrievePrincipalAccess` answers Read for that user on both the task and the matter. The gate's reason line (`[ASSIGN-TASK-NOTIFY] … no email, {Reason}`) was dropped by App Insights sampling, so which check refused is unknown. Concrete failure: an assignee who can see the record gets no email, and the assigner is told they lack access, which sends them looking for a security-role problem that may not exist.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs:174-278` (internal path; every `NoAccess` exit logs its reason at Information)
+- `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ContactUserRepresentation.cs:61-155`
+- App Insights: `traces | where message startswith '[ASSIGN-TASK-NOTIFY]'` (the 14:40Z line is missing; sampling ~33%)
+- Dev task `67913cae-2f3d-4184-a40b-1921f826f6b7`, assignee contact `65e3a2c9-d1be-f111-a05b-3833c5e9614d`
+
+**Suggested fix**
+
+Reproduce it: run the gate for that contact and task (a test over dev data, or a repeat assignment with the reason line captured), name the check that refused, then decide whether it is a defect or intended (for example, if Administrative-mode users should not be emailed, the warning should say so rather than "no access"). Consider excluding the gate's reason line from sampling, since it is the only record of why an email was withheld.
+
+**Estimated effort**: 2–4 hours to reproduce; fix unknown
+**Blockers**: none
+**Related**: D-199, task 168, uac-r2 task 193 (`ContactUserRepresentation`)
+
+---
+
 ### ISS-004 — The decision commit does not require a prior plan read, although the spec says it must
 
 | Field | Value |
