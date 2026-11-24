@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | **G8-P2 live test** (owner go 2026-11-23). This is the Practice-agent build path, so the owner said it must be RESOLVED, not just recorded. Run log: `phase0/g8/README.md` § "G8-P2 run log" |
-| **Step** | **G8-P2 ✅** (Chat, Word, plain Chat no leak, Teams = Chat). **V1 ⚠️:** an action-changing update takes the action offline for a while (1.1.2 back after ~40 min); BR-3 revised. **V2 ✅** (`cb5afd1c`, dynamic discovery + OAuth, owner + `demo@`); This includes a brand-new user's first sign-in. BR-5 now proposes dynamic discovery as the default. Design §3.13: MCP Apps widgets are the default UI (owner, D-A17); SPFx is the exception. **Next:** removals by 30 Nov; open: V1a (`?pkg=`), V3, V5, first sign-in |
+| **Step** | **G8-P2 ✅** (Chat, Word, plain Chat no leak, Teams = Chat). **V1 ⚠️:** an action-changing update takes the action offline for a while (1.1.2 back after ~40 min); BR-3 revised. **V2 ✅** (`cb5afd1c`, dynamic discovery + OAuth, owner + `demo@`); This includes a brand-new user's first sign-in. BR-5 now proposes dynamic discovery as the default. Design §3.13: MCP Apps widgets are the default UI (owner, D-A17); SPFx is the exception. **Next:** removals by 30 Nov; open: V3 deferred until D3; V1a dropped; G11 optional |
 | **Design version** | design.md v0.6 + G9 (`4ed12dbee3`); latest commit `e48dc2e012` (pushed) |
 | **Uncommitted** | none |
 
@@ -21,7 +21,7 @@
    - V3: Model 1, second tenant.
    - V5 dropped: owner direction 2026-11-24 to remove the "Spaarke AI" agent (D1) and its bot backend (A3); coordination writes the removal steps.
    - V1a (`?pkg=`) recommended to drop: dynamic discovery makes package-version logging low value.
-   - V3 tenant: candidates ACME / Dewey Cheatham & Howe / Lee & Hayes (not `spaarkeextid`, which is CIAM). It needs a user with a Microsoft 365 Copilot licence and admin upload rights there. Only needed if Model 1 stays in play (provisioning D3).
+   - V3 DEFERRED (not runnable yet, no package built): the connector app `04f37fe4` is single-tenant (`AzureADMyOrg`) and A10 pins OAuth to the Spaarke tenant, so an ACME user cannot sign in. It needs a multitenant app, a new OAuth registration, ACME consent and a BFF issuer change (T-7, ADR-028 path B). Run it only if provisioning D3 keeps Model 1; candidate tenant ACME.
    - G11 is optional (MCP Apps widgets are the default).
    Build rules BR-1–BR-7: the note and the `declarative-agent` skill Step 5.5.
 4. App Insights: BFF requests are sampled at about 25–33% now, and caller identity isn't logged. Use several turns per check.
