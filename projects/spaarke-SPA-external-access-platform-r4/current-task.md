@@ -13,7 +13,7 @@
 | **Last merged** | PR #3048 at 06:14:00Z, merge `b64d988625`: tasks 033 (Money sort + export) and 035 (message threads, `threadId`). POMLs completed, TASK-INDEX ✅, drift check clean, board Tasks Completed = 30. |
 | **Next in phase 3** | **038** (P3 dev deploy + E2E). 036 is cancelled. |
 | **uac-r2** | Dev BFF `0362599b94` LIVE since ~05:21:45Z 2026-11-24; it does NOT carry 035's `threadId` (the SPA then shows ungrouped messages). Threads need a later BFF candidate that includes `b64d988625`, through uac-r2 with the owner's per-SHA go. |
-| **ebilling-r1 FYI** | Master PR #3051 changes the shared invoice submission result screen (title/icon follow the polled status); one external-spa test assertion changes. It reaches the portal with the next SPA build from master after it merges. No action needed. |
+| **ebilling-r1 FYI** | #3051 (submission result screen title/icon follow the outcome) merged `cf1b7027ce`; it ships with 038's SPA build. Master PR #3065 open: rejected-outcome `valuesRead` names become firm labels (SPA renders `name` as received, `InvoiceOutcomeReport.tsx:440`), and the submission route rejects a repeated `firmInvoiceNumber`/`poNumber` with 400 (SPA appends each once, `web-api-client.ts:954-955`). No SPA change. |
 
 ## Deploy order
 Every SPA deploy builds master HEAD and needs the owner's go for the exact SHA, with rollback `9d08576e63`. For 035's threads to show, the BFF must also carry `b64d988625`.
