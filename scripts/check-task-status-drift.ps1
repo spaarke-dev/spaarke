@@ -131,7 +131,21 @@ function Get-IndexMarkers {
     # and reported a phantom drift on task 001. Do not reintroduce a cell-spanning pattern.
     # The id takes the same grammar as the id-first layout below (`102a`, `081.5`); before 2026-10-17
     # it took three digits only, so a suffixed task in a status-first index read as "no row".
-    $rowPattern = '^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(\d{3}(?:\.\d+)?[a-z]?)\*{0,2}\s*\|'
+    #
+    # TASK ID GRAMMAR (ISS-047 / #3042, 2026-11-24) — ONE grammar, used by both row patterns:
+    #   [letters] 3-digits [.N] [letter] [-segment]...      `028`, `081.5`, `102a`, `iss028`, `084h-1`, `095f-2e2a`, `130-0`
+    # Before this, a row `| iss028 | ✅ |` was read as marker `iss` + id `028` (the lazy `[^\s|]+` marker took the
+    # letters), so the iss rows overwrote the real 028/040 rows with a phantom drift; and `084h-1`, `130-0` matched
+    # neither pattern, so their POMLs read as "no index row". Two guards keep the id whole:
+    #   - `(?<![a-z])` before the id: a lowercase letter right before the digits belongs to the id, never to the marker.
+    #   - a first cell that is, on its own, a letter-prefixed or hyphenated id goes straight to the id-first layout,
+    #     so the status-first pattern cannot split `084h-100` at the hyphen. Plain ids (`028`, `102a`) take the old path.
+    # The POML side needs no second grammar: it pairs on the `<task id="...">` attribute verbatim.
+    # Each hyphenated segment starts with a digit (`-1`, `-2e2a`, `-0b`): a letters-only tail such as the
+    # annotation row `| 090-note |` (email-communication-intelligence-r2) is not a task id.
+    $idGrammar = '(?:[a-z]+)?\d{3}(?:\.\d+)?[a-z]?(?:-\d[a-z0-9]*)*'
+    $plainIdPattern = '^\d{3}(?:\.\d+)?[a-z]?$'
+    $rowPattern = "^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(?<![a-z])($idGrammar)\*{0,2}\s*\|"
 
     # SECOND LAYOUT — id first, status in a LATER cell (added 2026-10-01,
     # customer-provisioning-orchestration-r1 T245a follow-up). This is the layout task-create
@@ -143,7 +157,7 @@ function Get-IndexMarkers {
     #     `245a`) — the ids `<task id="...">` actually carries in such projects.
     #   - The status cell is the first later cell holding a status token or glyph; a row with none
     #     is not a status row (dependency / reference tables) and is skipped.
-    $idFirstPattern = '^\|\s*\*{0,2}(\d{3}(?:\.\d+)?[a-z]?)\*{0,2}\s*\|'
+    $idFirstPattern = "^\|\s*\*{0,2}($idGrammar)\*{0,2}\s*\|"
     $statusTokenPattern = '\[(?:open|wip|done|escalated|blocked|cancelled|deferred)\]'
     $statusCellPattern = "$statusTokenPattern|✅|🔲|🔄|⚠️|🟡"
 
@@ -159,7 +173,10 @@ function Get-IndexMarkers {
     $candidates = @()
     foreach ($line in (Get-Content -LiteralPath $IndexPath -Encoding UTF8)) {
         $cells = Get-RowCells -Line $line
-        $m = [regex]::Match($line, $rowPattern)
+        if (-not $line.StartsWith('|')) { continue }   # not a table row; the old code reached the same result via its `^\|` patterns
+        $firstCell = @($cells)[0] -replace '[\*\s]', ''
+        $wholeExoticId = ($firstCell -match "^$idGrammar$") -and ($firstCell -notmatch $plainIdPattern)
+        $m = if ($wholeExoticId) { [regex]::Match('', '(?!)') } else { [regex]::Match($line, $rowPattern) }
         if ($m.Success) {
             # RULE 1 — a first cell naming more than one task id is a dependency list, not a status row.
             if (([regex]::Matches($cells[0], '\d{3}')).Count -ne 1) { continue }
