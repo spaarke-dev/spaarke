@@ -387,6 +387,34 @@ public static class ChatDocumentEndpoints
                 title: "Bad Request",
                 detail: "Request body is not valid multipart/form-data.");
         }
+        catch (System.IO.IOException ex) when (!httpContext.RequestAborted.IsCancellationRequested
+            && ex is not Microsoft.AspNetCore.Connections.ConnectionResetException)
+        {
+            // ISS-049 (the ISS-043 handling): a truncated multipart body (no closing boundary, cut part headers) or a body that is not
+            // multipart under a multipart content type ends the parser's stream early with an IOException. An IOException of a request the
+            // client abandoned (the token is cancelled) or of a reset connection passes through like the cancellation it is. The same type is
+            // a server-side temp-disk fault when the parser buffers a large file part, so the 400 is logged at Warning with the exception
+            // type and HResult only (never the message, which can echo request content, nor the file name).
+            logger.LogWarning(
+                "Document upload rejected: a multipart request body could not be read ({ExceptionType}, HResult 0x{HResult:X8}); answered 400. SessionId={SessionId}, TraceId={TraceId}",
+                ex.GetType().Name, ex.HResult, sessionId, httpContext.TraceIdentifier);
+
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Request body is not valid multipart/form-data.");
+        }
+        catch (System.IO.IOException ex) when (httpContext.RequestAborted.IsCancellationRequested
+            || ex is Microsoft.AspNetCore.Connections.ConnectionResetException)
+        {
+            // ISS-049 fix round 1 (F1): the client abandoned the upload or reset the connection. Not a malformed body (no 400) and not a fault: it
+            // must not escape to the global handler (500, logged at Error). 499 (client closed request), logged at Debug with type and HResult only.
+            logger.LogDebug(
+                "Document upload abandoned by the client ({ExceptionType}, HResult 0x{HResult:X8}); answered 499. SessionId={SessionId}, TraceId={TraceId}",
+                ex.GetType().Name, ex.HResult, sessionId, httpContext.TraceIdentifier);
+
+            return Results.StatusCode(499);
+        }
 
         var file = form.Files.GetFile("file");
 
