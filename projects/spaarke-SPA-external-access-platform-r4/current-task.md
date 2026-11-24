@@ -7,7 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Active task** | None. Wave 8 is closed. |
+| **Active (wave 9, owner "Yes, start them" 2026-11-24)** | **033** (FULL, sonnet @ high): Money sort + formatted CSV export in the shared DataGrid, run by an implementer agent in this worktree. **035** (FULL, sonnet): STOPPED at step 1, its escalation. The external message DTO has NO thread key (re-verified 2026-11-24: `ExternalMessageDtos.cs` and `messages-client.ts` have none). The owner must choose (A) add the thread key (`_sprk_communicationthread_value`) to the external DTO, with uac-r2 review, or (B) defer FR-22. No 035 code before the answer. 033 also needs the owner's OK on behalf of the dataset-grid owners (recorded in `notes/task-033-notes.md`). |
+| **033 status** | COMMITTED `1f7bb5d006` (not yet in a PR). Review done (opus, one pass); fix round 2 applied (F2 unused eslint-disables, K1 overflow → Infinity). Jest 261 pass, tsc/eslint/client-lint clean. Pre-existing defects filed: D-34 #3045 (option-set/lookup CSV as JSON; the POML escalation, asked of the owner), D-35 #3046 (unlabelled currency = USD). Waiting on the owner's OK on behalf of the grid owners (`notes/task-033-notes.md` line 6). |
+| **Next action** | Owner answers: (1) 035 A or B; (2) 033 grid-owner OK; (3) D-34 fix now or later. Then: 035 (A → implementer + uac-r2 review request; B → defer) → wave-9 PR → owner's merge go → close tasks. |
+| **Previously** | Wave 8 is closed. |
 | **Last merged** | PR #3033 at 03:17:25Z, merge `bd40b57b03`. It carries tasks 031 (Information fields + 12 ReadableColumns), 032 (grid settings per browser + "Clear all") and 034 (Messages refresh + new-message check). POMLs are completed, TASK-INDEX is ✅, the drift check is clean, and the board shows Tasks Completed = 28. #3010 is closed. |
 | **Next in phase 3** | Group D: **033** (DataGrid Money sort + formatted export, FR-20; 032 ✅) and **035** (message threads, FR-22; 034 ✅). Both are parallel-safe, and neither has started. After them: **038** (P3 dev deploy + E2E), which is gated (see below). 036 is cancelled. |
 | **Waiting on uac-r2** | A dev BFF at `bd40b57b03` or later, prepared by uac-r2, with the owner's go per exact SHA. uac-r2 has the SHA (sent ~03:20Z). |
