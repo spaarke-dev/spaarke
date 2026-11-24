@@ -83,3 +83,17 @@ Review of 534b87a152. Wording only in `src`; new tests only otherwise. No runtim
 3. **K - approver text** (`InvoiceApprovalService.FromLineResult`). `IdReused` now maps to Conflict with "This decision was already recorded with other content; nothing was changed. Reload the invoice." (same code `ebilling.decision.id_reused`). The line route's text ("Use a new decision id") is unchanged. New test `Approve_AcceptCleanIdReused_Is409_WithNeutralText` (fails with the old pass-through text, passes now).
 
 Results: affected suites (`InvoiceLineDecision|DecisionRecordWriterTests|BillingDecisionRecorder|InvoiceApproval|InvoiceLineReviewEndpoints`, MaxParallelThreads=4) 1009 / 1009; BFF build 0 warnings, 0 errors.
+
+## Review and merge (2026-11-24)
+
+One Opus adversarial pass over f5ec8b6a20..534b87a152: no F1. The pre-check makes the same comparison as the record step (same request object, same hash inputs, same stored row, same rules). Fixed in round 1 (6da3c95e70): F2 (no test for the unreadable-stored-content 409; now covered, with mutation evidence) and F2 (route descriptions overpromised); the approval path's IdReused text made neutral. Scoped re-check of the fix diff by the main session. Merged into work as 5f75e3e930.
+
+Known limits:
+- K2: stored content that cannot be read (old records written without a hash) is 409, not 503. The record step refuses it on every repeat, so 503 could never complete; a new decision id gets out. On the approval path the id is derived, so such a record would block that approve until fixed by hand; the reviewer found no current path that reaches it (Accept all Clean picks only lines with no record).
+- K4: another action under the same id is 409 (the write would refuse it every time).
+- K4: a multi-line repeat checks only the lines in the call; an id can end up holding X on one line and Y on another, each matching its own line. Catching it needs a new read.
+- K4: the InvoiceReview client has no specific handling for id_reused; no current client path can reach it (a new id per submit; Repeat resends the same request).
+- K4 (pre-existing): an unrecorded line's record step can still be refused permanently with 503 incomplete.
+- K3: no id_reused test for bulk Accept with correction rows; the code order covers it.
+- Found in passing, filed: ISS-050 (#3059), the 2-minute line-decision lock under a large call.
+- Process: the fix-round agent ran a stray `python -` once (it hung on stdin and did nothing); the main session stopped that task.

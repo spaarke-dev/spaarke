@@ -4,7 +4,7 @@
     <title>ISS-029 (#2880): a line decision repeated with the same decisionId but other content answers 409 and writes nothing, instead of a 503 "repeat to complete" that can never complete</title>
     <phase>Issue fix; filed 2026-11-17 from the 095f-2d1 Opus review</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the Invoice Review line-decision write path (.cs): line fields, totals, Signal close and Decision Record.</rigor-reason>
     <model-tier>opus</model-tier>

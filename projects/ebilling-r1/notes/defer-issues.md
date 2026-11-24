@@ -2152,7 +2152,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (5f75e3e930, 2026-11-24); #2880 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Opus adversarial review of task 095f-2d1 (extends existing behaviour for a changed reason or amount) |
