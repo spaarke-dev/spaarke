@@ -16,7 +16,10 @@
               rate card form gets a rates subgrid, the code set form a codes subgrid, the approval form an "Eligible approvers" (N:N
               contact) subgrid.
               On the EXISTING sprk_timekeeper, sprk_invoice and sprk_billingevent main forms only the section "section_ebilling" is
-              added or refreshed (everything else on those forms is left byte for byte). Read-only (task 014/016 constraint):
+              added or refreshed (everything else on those forms is left byte for byte). The section is MERGED, not replaced (ISS-046):
+              a field cell the spec lists is added when missing and updated when it differs; every other cell in the section (a quick view,
+              a subgrid, a web resource) stays where it is. A control the spec no longer lists is NOT removed by this script: retiring one
+              is its own guarded script (Remove-EbillingInvoiceExtractionFormControls.ps1). Read-only (task 014/016 constraint):
               the five invoice totals and sprk_billingevent.sprk_amount (the Adjustment line amount is computed by
               IInvoiceTotalsService; Fee / Expense lines are written by the extraction pipeline, not typed) are disabled controls.
               Forms carry no script and no business rule (ADR-002).
@@ -257,24 +260,41 @@ function New-CellXml($meta, [string]$Col, [bool]$Disabled, [string]$Seed, [bool]
     return "<cell id=""$(Get-DetGuid "$Seed/cell/$Col")""$span><labels><label description=""$label"" languagecode=""1033"" /></labels><control id=""$Col"" classid=""$cls"" datafieldname=""$Col""$dis /></cell>"
 }
 
-function New-SectionXml($meta, $Section, [bool]$AllReadOnly, [string[]]$ForceReadOnly, [string]$SectionName) {
+# The field cells a spec section owns, in spec order: Col, Wide (a Memo takes its own row) and Xml (the <cell>). One place computes them, so a
+# Replace-mode rebuild and a Section-mode merge cannot disagree about a cell.
+function Get-SpecCells($meta, $Section, [bool]$AllReadOnly, [string[]]$ForceReadOnly, [string]$SectionName) {
     $seed = "$($meta.Table)/$SectionName"
-    $rows = [System.Text.StringBuilder]::new()
-    $pending = $null
+    $cells = [System.Collections.Generic.List[object]]::new()
     foreach ($col in $Section.Cols) {
         if ($col -eq 'ownerid' -and -not $meta.Attrs.ContainsKey('ownerid')) { continue }   # organization-owned table (no owner column)
         [void](Get-Label $meta $col)   # fails with a clear message when a WP1 column is missing in dev
         $ro = $AllReadOnly -or ($Section.ContainsKey('ReadOnly') -and ($Section.ReadOnly -contains $col)) -or ($ForceReadOnly -contains $col)
         $wide = ($meta.Attrs[$col].AttributeType -eq 'Memo')
-        if ($wide) {
+        $cells.Add([pscustomobject]@{ Col = $col; Wide = $wide; Xml = (New-CellXml $meta $col $ro $seed $wide) })
+    }
+    return , $cells.ToArray()
+}
+
+# <row> elements for the cells, two plain cells to a row and a wide cell alone (the layout every section here uses).
+function New-RowsXml($Cells) {
+    $rows = [System.Text.StringBuilder]::new()
+    $pending = $null
+    foreach ($c in $Cells) {
+        if ($c.Wide) {
             if ($pending) { [void]$rows.Append("<row>$pending</row>"); $pending = $null }
-            [void]$rows.Append("<row>$(New-CellXml $meta $col $ro $seed $true)</row>")
+            [void]$rows.Append("<row>$($c.Xml)</row>")
             continue
         }
-        $cell = New-CellXml $meta $col $ro $seed $false
-        if ($null -eq $pending) { $pending = $cell } else { [void]$rows.Append("<row>$pending$cell</row>"); $pending = $null }
+        if ($null -eq $pending) { $pending = $c.Xml } else { [void]$rows.Append("<row>$pending$($c.Xml)</row>"); $pending = $null }
     }
     if ($pending) { [void]$rows.Append("<row>$pending</row>") }
+    return $rows.ToString()
+}
+
+function New-SectionXml($meta, $Section, [bool]$AllReadOnly, [string[]]$ForceReadOnly, [string]$SectionName) {
+    $seed = "$($meta.Table)/$SectionName"
+    $rows = [System.Text.StringBuilder]::new()
+    [void]$rows.Append((New-RowsXml (Get-SpecCells $meta $Section $AllReadOnly $ForceReadOnly $SectionName)))
     $label = Esc $Section.Label
     return "<section name=""$SectionName"" id=""$(Get-DetGuid "$seed/section")"" IsUserDefined=""1"" showlabel=""true"" showbar=""false"" columns=""11"" celllabelposition=""Top"" labelwidth=""115"" celllabelalignment=""Left"" layout=""varwidth""><labels><label description=""$label"" languagecode=""1033"" /></labels><rows>$($rows.ToString())</rows></section>"
 }
@@ -332,6 +352,47 @@ function Write-Form([string]$Table, $Form, [string]$NewXml, [string]$What) {
     $Changes.Add("$What ($Table form $($Form.formid))"); Write-Host "  CHANGED  $What" -ForegroundColor Green
 }
 
+# The cell of a section that holds the plain field control for $Col (control id and datafieldname both the column). A quick view bound to
+# the same column (id qv_..., datafieldname = the lookup) or a subgrid is NOT a field cell: the script does not own it and never matches it.
+function Get-FieldCells($Section, [string]$Col) {
+    return @($Section.SelectNodes("rows/row/cell[control[@id='$Col' and @datafieldname='$Col']]"))
+}
+
+# True when the existing field cell already says what the spec says: control class, disabled flag, label and span. Compared on those
+# attributes (not on the whole text), so a form Dataverse re-serialised on save still counts as in step. Label compare is case-strict.
+function Test-FieldCellInStep($Have, $Want) {
+    $hc = $Have.SelectSingleNode('control'); $wc = $Want.SelectSingleNode('control')
+    if ($hc.GetAttribute('classid') -ne $wc.GetAttribute('classid')) { return $false }
+    if (($hc.GetAttribute('disabled') -eq 'true') -ne ($wc.GetAttribute('disabled') -eq 'true')) { return $false }
+    foreach ($a in 'colspan', 'rowspan') { if ($Have.GetAttribute($a) -ne $Want.GetAttribute($a)) { return $false } }
+    $hl = $Have.SelectSingleNode("labels/label[@languagecode='1033']"); $wl = $Want.SelectSingleNode("labels/label[@languagecode='1033']")
+    $hd = if ($hl) { $hl.GetAttribute('description') } else { '' }
+    return $hd -ceq $wl.GetAttribute('description')
+}
+
+# Merges the spec's field cells into an existing section, in place. A spec field already in the section as a field cell is left alone
+# (or, when it differs, replaced where it stands); one that is missing is appended in new rows at the end. Nothing else in the section is
+# touched. Returns true when the section changed.
+function Merge-SpecCells($Doc, $Section, $Cells) {
+    $rowsNode = $Section.SelectSingleNode('rows')
+    if (-not $rowsNode) { throw "section '$($Section.GetAttribute('name'))' has no <rows> node" }
+    $dirty = $false
+    $missing = [System.Collections.Generic.List[object]]::new()
+    foreach ($c in $Cells) {
+        $want = ([xml]$c.Xml).DocumentElement
+        $have = @(Get-FieldCells $Section $c.Col)
+        if ($have.Count -eq 0) { $missing.Add($c); continue }
+        if (Test-FieldCellInStep $have[0] $want) { continue }
+        [void]$have[0].ParentNode.ReplaceChild($Doc.ImportNode($want, $true), $have[0]); $dirty = $true
+    }
+    if ($missing.Count -gt 0) {
+        $frag = $Doc.CreateDocumentFragment()
+        $frag.InnerXml = New-RowsXml $missing.ToArray()
+        [void]$rowsNode.AppendChild($frag); $dirty = $true
+    }
+    return $dirty
+}
+
 function Sync-Form([string]$Table, $S) {
     $meta = $script:Metas[$Table]
     $form = Get-MainForm $Table $S.FormName
@@ -352,7 +413,9 @@ function Sync-Form([string]$Table, $S) {
     $oldSec = $doc.SelectSingleNode("//section[@name='$secName']")
     $dirty = $false
     if ($oldSec) {
-        if ($oldSec.OuterXml -ne $wantSec.OuterXml) { [void]$oldSec.ParentNode.ReplaceChild($doc.ImportNode($wantSec, $true), $oldSec); $dirty = $true }
+        # ISS-046: the section is MERGED, never replaced. Every cell the spec does not own (a quick view, a subgrid, a web resource, the
+        # rows that hold them) stays where it is; only the spec's own field cells are added or brought up to date.
+        if (Merge-SpecCells $doc $oldSec (Get-SpecCells $meta $sec $false $force $secName)) { $dirty = $true }
     } else {
         $host_ = $doc.SelectSingleNode('//tabs/tab[1]/columns/column[1]/sections')
         if (-not $host_) { throw "$Table '$($S.FormName)': no first tab / column / sections node" }
