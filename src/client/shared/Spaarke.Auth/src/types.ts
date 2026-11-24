@@ -130,7 +130,7 @@ export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<
  * add-ins' `authenticatedJsonFetch`. An {@link AuthenticatedFetchFn} is
  * assignable to it, so a helper typed with it accepts either kind of fetch;
  * such a helper must handle BOTH failure shapes: a returned `!res.ok` and a
- * thrown `ApiError`/`AuthError` (pattern: `Spaarke.SdapClient`
+ * thrown `ApiError`/`AuthError` (pattern: `Spaarke.UI.Components/src/services/sdap/`
  * `operations/httpFailure.ts` `requestOrThrow`).
  *
  * Prefer {@link AuthenticatedFetchFn} wherever only the real

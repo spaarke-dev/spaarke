@@ -66,33 +66,20 @@ describe('SdapApiClient', () => {
     });
   });
 
-  describe('downloadFile', () => {
-    it('should be defined', () => {
+  // DEF-001 (2026-11-24, owner decision on review finding P-2): downloadFile, deleteFile and
+  // getFileMetadata are DELETED. They called `/api/obo/drives/{driveId}/items/{itemId}[/content]`,
+  // which the BFF retired on 2026-08-26 (task 071, OboDriveKeyedRouteRetirementTests) or never mapped.
+  // Reads and deletes go through the document-id-keyed routes, which authorize per document.
+  describe('drive-keyed methods', () => {
+    it('exposes no download, delete or metadata method keyed by drive and item id', () => {
       const client = new SdapApiClient({
         baseUrl: 'https://api.example.com',
       });
+      const surface = client as unknown as Record<string, unknown>;
 
-      expect(client.downloadFile).toBeDefined();
-    });
-  });
-
-  describe('deleteFile', () => {
-    it('should be defined', () => {
-      const client = new SdapApiClient({
-        baseUrl: 'https://api.example.com',
-      });
-
-      expect(client.deleteFile).toBeDefined();
-    });
-  });
-
-  describe('getFileMetadata', () => {
-    it('should be defined', () => {
-      const client = new SdapApiClient({
-        baseUrl: 'https://api.example.com',
-      });
-
-      expect(client.getFileMetadata).toBeDefined();
+      expect(surface.downloadFile).toBeUndefined();
+      expect(surface.deleteFile).toBeUndefined();
+      expect(surface.getFileMetadata).toBeUndefined();
     });
   });
 

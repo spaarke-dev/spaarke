@@ -53,6 +53,27 @@ export type {
   IEntityMetadataProbe,
 } from './RecordContainerResolver';
 
+// SDAP client — SPE upload, attach and index (the retired `@spaarke/sdap-client`, folded in here
+// 2026-11-24, DEF-001). Main barrel only, never `pcf-safe.ts`. Its `AuthenticatedFetchFn` is not
+// re-exported: `EntityCreationService` exports a type of that name, and the two are structurally
+// the same fetch.
+export {
+  SdapApiClient,
+  UploadNameConflictError,
+  UploadReplaceNotSupportedError,
+  SdapHttpError,
+  describeHttpFailure,
+} from './sdap';
+export type {
+  ConflictBehaviorOption,
+  SdapClientConfig,
+  DriveItem,
+  ParentEntityContext,
+  IndexFileRequest,
+  IndexFileResult,
+  AttachDocumentFileResult,
+} from './sdap';
+
 export { EntityCreationService } from './EntityCreationService';
 export type {
   IFileUploadResult,

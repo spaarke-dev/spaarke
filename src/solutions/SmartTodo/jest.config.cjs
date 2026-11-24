@@ -23,8 +23,6 @@ module.exports = {
       '<rootDir>/../../client/shared/Spaarke.UI.Components/dist/$1',
     '^@spaarke/auth/(.*)$':
       '<rootDir>/../../client/shared/Spaarke.Auth/dist/$1',
-    '^@spaarke/sdap-client/(.*)$':
-      '<rootDir>/../../client/shared/Spaarke.SdapClient/dist/$1',
     '^@spaarke/smart-todo-components/(.*)$':
       '<rootDir>/../../client/shared/Spaarke.SmartTodo.Components/dist/$1',
   },

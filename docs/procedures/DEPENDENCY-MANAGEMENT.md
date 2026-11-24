@@ -11,7 +11,7 @@
 ## When to Follow This Procedure
 
 - Adding, updating, or removing any NuGet or npm package
-- Updating shared library versions (`@spaarke/ui-components`, `@spaarke/auth`, `@spaarke/sdap-client`)
+- Updating shared library versions (`@spaarke/ui-components`, `@spaarke/auth`)
 - Resolving vulnerability audit findings from the nightly health report (`nightly-health.yml`'s `dep-audit` / `vuln-scan` jobs)
 - Updating Kiota packages (requires special coordination)
 
@@ -73,13 +73,12 @@ The Microsoft.Graph SDK depends on Kiota packages transitively. If you update on
 
 ### Shared Libraries (Internal)
 
-Three internal shared libraries are consumed by PCF controls, code pages, and solutions via `file:` references:
+Two internal shared libraries are consumed by PCF controls, code pages, and solutions via `file:` references:
 
 | Library | Path | Consumers | Peer Dependencies |
 |---------|------|-----------|-------------------|
 | `@spaarke/ui-components` | `src/client/shared/Spaarke.UI.Components` | Code pages, solutions, PCF (via workspace) | React >=16.14.0, Fluent UI v9 packages, Lexical |
 | `@spaarke/auth` | `src/client/shared/Spaarke.Auth` | Code pages, external SPA | `@azure/msal-browser` ^3.0.0 |
-| `@spaarke/sdap-client` | `src/client/shared/Spaarke.SdapClient` | PCF controls | None |
 
 **Consumption pattern** (code pages and solutions):
 ```json
@@ -146,7 +145,6 @@ Root (package.json)
 
 PCF Controls (src/client/pcf/*)
   ├── @spaarke/ui-components (workspace:*)
-  ├── @spaarke/sdap-client (file: reference)
   ├── pcf-scripts (build tooling)
   └── Platform provides: React 16/17, Fluent UI v9
 

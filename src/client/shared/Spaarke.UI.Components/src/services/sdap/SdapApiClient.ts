@@ -1,15 +1,12 @@
 import {
   SdapClientConfig,
   DriveItem,
-  FileMetadata,
   AuthenticatedFetchFn,
   IndexFileRequest,
   IndexFileResult,
   AttachDocumentFileResult,
 } from './types';
 import { UploadOperation, type ConflictBehaviorOption } from './operations/UploadOperation';
-import { DownloadOperation } from './operations/DownloadOperation';
-import { DeleteOperation } from './operations/DeleteOperation';
 import { IndexFileOperation } from './operations/IndexFileOperation';
 import { requireAuthenticatedFetch, requestOrThrow } from './operations/httpFailure';
 
@@ -18,9 +15,15 @@ import { requireAuthenticatedFetch, requestOrThrow } from './operations/httpFail
  *
  * Supports:
  * - Single-request file uploads (Graph simple PUT — up to 250 MB)
- * - File downloads
- * - File deletion
+ * - Attaching an uploaded file to its `sprk_document` row
  * - Sync OBO indexing into Azure AI Search
+ *
+ * It does NOT download, delete or read file metadata. `downloadFile`, `deleteFile` and
+ * `getFileMetadata` were DELETED 2026-11-24 (DEF-001, owner decision on review finding
+ * P-2): they called `/api/obo/drives/{driveId}/items/{itemId}[/content]`, routes the BFF retired on
+ * 2026-08-26 (unified-access-control-r2 task 071) or never mapped, and nothing called them. Reads
+ * and deletes go through the document-id-keyed routes (`FileAccessEndpoints`,
+ * `DocumentOperationsEndpoints`), which authorize per document. Do not re-add a drive-keyed method.
  *
  * 🔴 **Corrected 2026-09-02.** This list used to advertise "Small file uploads (< 4MB)" and
  * "Chunked uploads (≥ 4MB) with progress tracking". Both were false: the chunked path was DELETED
@@ -40,9 +43,6 @@ import { requireAuthenticatedFetch, requestOrThrow } from './operations/httpFail
  * const item = await client.uploadFileForRecord('sprk_matter', matterId, file, {
  *   onProgress: (percent) => console.log(`${percent}% uploaded`)
  * });
- *
- * // Download file
- * const blob = await client.downloadFile(driveId, itemId);
  * ```
  */
 export class SdapApiClient {
@@ -50,15 +50,13 @@ export class SdapApiClient {
   private readonly timeout: number;
   private readonly authenticatedFetch?: AuthenticatedFetchFn;
   private readonly uploadOp: UploadOperation;
-  private readonly downloadOp: DownloadOperation;
-  private readonly deleteOp: DeleteOperation;
   private readonly indexFileOp?: IndexFileOperation;
 
   /**
    * Creates a new SDAP API client instance.
    *
    * @param config - Client configuration. `authenticatedFetch` (from `@spaarke/auth`, ADR-028) is
-   *   required by EVERY operation on this client — upload, download, delete and {@link indexFile}.
+   *   required by EVERY operation on this client — upload, attach and {@link indexFile}.
    *   Operations throw a named error if it is absent rather than issuing an unauthenticated
    *   request. It is typed optional only so a consumer can construct the client before auth is
    *   initialised; there is no unauthenticated mode.
@@ -73,10 +71,9 @@ export class SdapApiClient {
     // Every operation now authenticates through `authenticatedFetch` (ADR-028). Previously
     // upload/download/delete shared a `TokenProvider` shim that returned '' — so they sent NO
     // Authorization header to a RequireAuthorization BFF. Passing it here (rather than only to
-    // indexFile) is what makes those three operations usable at all.
+    // indexFile) is what made those operations usable at all. (Download and delete are deleted
+    // since — see the class summary.)
     this.uploadOp = new UploadOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
-    this.downloadOp = new DownloadOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
-    this.deleteOp = new DeleteOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
 
     if (this.authenticatedFetch) {
       this.indexFileOp = new IndexFileOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
@@ -217,7 +214,7 @@ export class SdapApiClient {
     file: { id: string; driveId?: string }
   ): Promise<AttachDocumentFileResult> {
     const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'attachDocumentFile');
-    if (!file?.id || !file.driveId) {
+    if (!file.id || !file.driveId) {
       throw new Error(
         'attachDocumentFile needs the uploaded file\'s item id and drive id (the upload response) — nothing was attached.'
       );
@@ -237,56 +234,6 @@ export class SdapApiClient {
     );
 
     return (await response.json()) as AttachDocumentFileResult;
-  }
-
-  /**
-   * Downloads a file from SDAP.
-   *
-   * @param driveId - Drive ID
-   * @param itemId - Item ID
-   * @returns File blob
-   * @throws Error if download fails
-   */
-  public async downloadFile(driveId: string, itemId: string): Promise<Blob> {
-    return await this.downloadOp.download(driveId, itemId);
-  }
-
-  /**
-   * Deletes a file from SDAP.
-   *
-   * @param driveId - Drive ID
-   * @param itemId - Item ID
-   * @throws Error if deletion fails
-   */
-  public async deleteFile(driveId: string, itemId: string): Promise<void> {
-    return await this.deleteOp.delete(driveId, itemId);
-  }
-
-  /**
-   * Gets file metadata from SDAP.
-   *
-   * @param driveId - Drive ID
-   * @param itemId - Item ID
-   * @returns File metadata
-   * @throws Error if retrieval fails
-   */
-  public async getFileMetadata(driveId: string, itemId: string): Promise<FileMetadata> {
-    // The FOURTH site with the same dead-auth defect — this one inline in the client rather than in
-    // an operation class, which is why converting the three operations did not cover it. Same fix:
-    // `authenticatedFetch` (ADR-028), and a named failure instead of an unauthenticated request.
-    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'getFileMetadata');
-
-    const response = await requestOrThrow(
-      authFetch,
-      `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`,
-      {
-        method: 'GET',
-        signal: AbortSignal.timeout(this.timeout),
-      },
-      'Failed to get file metadata'
-    );
-
-    return await response.json();
   }
 
   private validateConfig(config: SdapClientConfig): void {

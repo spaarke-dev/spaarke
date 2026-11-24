@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// Add @spaarke/sdap-client and @spaarke/smart-todo-components to every Vite
-// solution's package.json that depends on @spaarke/ui-components.
+// Add @spaarke/smart-todo-components to every Vite solution's package.json
+// that depends on @spaarke/ui-components.
 //
-// Why: PR #369 (multi-container) added `@spaarke/sdap-client` as a TRANSITIVE
-// import via UI.Components/services/EntityCreationService.ts. PR #377
+// It used to add @spaarke/sdap-client too: PR #369 (multi-container) made it a
+// TRANSITIVE import via UI.Components/services/EntityCreationService.ts. That
+// package was folded into ui-components on 2026-11-24 (DEF-001), so it is no
+// longer a separate dependency and this script must not re-add it. PR #377
 // (smart-todo-r4) added `@spaarke/smart-todo-components` via LegalWorkspace's
 // todo.registration.ts. Neither PR updated CONSUMING surfaces' package.json
 // files. Without explicit declaration, vite/rollup fails with "Rollup failed
@@ -20,7 +22,6 @@ const repoRoot = 'c:/code_files/spaarke';
 const solutionsRoot = join(repoRoot, 'src/solutions');
 
 const TRANSITIVE_DEPS = {
-  '@spaarke/sdap-client': 'file:../../client/shared/Spaarke.SdapClient',
   '@spaarke/smart-todo-components': 'file:../../client/shared/Spaarke.SmartTodo.Components',
 };
 

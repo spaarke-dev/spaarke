@@ -35,7 +35,7 @@
  * 0 regardless — see task-092 PR body for the `pcf-scripts` exit-code gap).
  *
  * Unlike the Communication PCFs, VisualHost uses React 18 and needs none of
- * their `react/jsx-runtime` aliasing or `@spaarke/sdap-client` stub — the
+ * their `react/jsx-runtime` aliasing — the
  * pre-fix build here produced exactly ONE error (the pdf.mjs one), so this
  * file stays minimal.
  */

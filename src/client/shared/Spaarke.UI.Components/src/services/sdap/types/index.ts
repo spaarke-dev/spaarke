@@ -76,17 +76,6 @@ export interface UploadSession {
 }
 
 /**
- * File metadata.
- */
-export interface FileMetadata extends DriveItem {
-  /** Download URL */
-  downloadUrl?: string;
-
-  /** Web URL for browser viewing */
-  webUrl?: string;
-}
-
-/**
  * Upload progress callback.
  */
 export type UploadProgressCallback = (percent: number) => void;
@@ -127,7 +116,7 @@ export interface Container {
  * `ResponseFetchFn`, structurally). `@spaarke/auth.authenticatedFetch` (which throws on failure and
  * resolves only with a success) is assignable to it, and so is a fetch that RETURNS failures; the
  * operations handle both shapes (`operations/httpFailure.ts` `requestOrThrow`).
- * Consumers inject this so `sdap-client` operations can call BFF endpoints with
+ * Consumers inject this so the SDAP client operations can call BFF endpoints with
  * the canonical Spaarke Auth v2 contract (ADR-028) without taking a direct
  * dependency on `@spaarke/auth`. The function MUST attach a valid Bearer token
  * for the BFF API audience (`api://{bff-client-id}/SDAP.Access`).
