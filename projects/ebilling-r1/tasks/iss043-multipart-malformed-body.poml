@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss043" project="ebilling-r1">
+  <metadata>
+    <title>ISS-043 (#2978) + ISS-035 (#2889): multipart upload routes answer a malformed body with 400, and refuse a repeated firmInvoiceNumber or poNumber</title>
+    <phase>Issue fix; filed 2026-11-23 (task 123 review) and 2026-11-17 (095f-2e2a review), both found in passing</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on BFF routes, one of them the external (firm) submission route.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two small, exactly located input-validation fixes with a reference implementation in the same code base.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>123</deps>
+    <tags>bff-api, api, testing</tags>
+  </metadata>
+
+  <prompt>Two input defects in the BFF's multipart routes (full entries: projects/ebilling-r1/notes/defer-issues.md, ISS-043 and ISS-035).
+(1) ISS-043: three routes catch only InvalidDataException and BadHttpRequestException around ReadFormAsync. A malformed multipart body (no closing boundary, truncated part headers, or a non-multipart body sent with a multipart content type) throws System.IO.IOException, which reaches the global handler: the client gets 500 server_error, logged at Error, instead of the route's 400. Entry points: Api/Finance/InvoiceSubmissionHttp.cs:~60, Api/Finance/ProcedureEndpoints.cs:~543, Api/Finance/RateCardImportEndpoints.cs:~385. Reference: task 123's upload route already handles it (grep InvoiceSupportingFile / the 123 route's ReadFormAsync catch).
+(2) ISS-035: InvoiceSubmissionHttp.ReadSubmissionFormAsync reads firmInvoiceNumber and poNumber with form[...].ToString(), so a field sent twice becomes "A,B" and is stored as one value (and gets a tracking number from it). Reference rule: InvoiceSubmissionCorrectionFields.ReadForm in InvoiceSubmissionEndpoints.cs ("sent at most once").</prompt>
+
+  <constraints>
+    <constraint>ISS-043: add IOException to each of the three routes' existing 400 mapping, using that route's existing 400 shape and code. A cancelled request (OperationCanceledException, or IOException while the request's abort token is cancelled) keeps today's behaviour; do not turn a client disconnect into a 400 log line at Error. If the three routes share or can share one small helper without a new public surface, prefer that; otherwise change each catch in place.</constraint>
+    <constraint>ISS-035: a firmInvoiceNumber or poNumber sent more than once is refused with the reader's existing field-error (400) path, naming the field, before anything is written. A field sent once, or not sent (poNumber is optional), behaves as today. Reuse the correction fields' rule or its helper; do not invent a second convention.</constraint>
+    <constraint>No new endpoint, service, DI registration, package or Dataverse column. No change to response shapes other than the 500 that becomes the route's 400.</constraint>
+    <constraint>Tests (existing test projects and patterns for these routes; find them by grepping the route names): per route, a body with no closing boundary answers 400 not 500, failing before the fix; for the submission reader, a repeated firmInvoiceNumber and a repeated poNumber each answer 400 and write nothing, failing before; a single value still succeeds. Run only the affected test classes with --filter and -- xUnit.MaxParallelThreads=4. Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests.</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings. Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss043-multipart-input.md (what changed, tests, fail-before evidence).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the three routes answers a body with no closing boundary with its 400, not 500.</criterion>
+    <criterion testable="true">A cancelled request is not reported as a 400.</criterion>
+    <criterion testable="true">A repeated firmInvoiceNumber or poNumber is refused with a field error and nothing is written; a single value succeeds as before.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
