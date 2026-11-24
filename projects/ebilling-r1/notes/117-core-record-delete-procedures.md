@@ -180,6 +180,8 @@ Redone after fix round 1 (the filter now selects 34 tests).
 - **An app-created assignment row with no core lookup is deleted.** A `sprk_procedureassignment` row created in the model-driven app with no core lookup, older than the age floor, is deleted. Model 5.2: such a row applies to nothing.
 - **Record-set shape.** The sweep takes a set only when its name is exactly `RecordRuleSet.Name`, which 089's creator always writes. A set renamed in the app after its record's delete is not retired. A read-only scope on the rule-set form is a further option, not taken here (no form or script edit).
 
+- **Signals are closed by D-170, not by the sweep (precondition for Apply).** The sweep switches the sets policies Off and retires the set; it closes no Signal. Open Signals of those policies are closed by ontology-r1s nightly D-170 close in SignalClosureService, whose not-in-force policy read is unpaged and stops past 5,000 rows (#2982, ontology DI-162). Before task 079 turns RecordRuleSetRetireSweep:Apply on, #2982 is fixed, or the dev count of not-in-force Billing policies is read and recorded as well under 5,000 (ontology-r1 #2992 review, 2026-11-23).
+
 ## 5. Review passes A and B, fix round 1
 
 Each fix-now item has a test that fails before the fix and passes after; the proof is named. Fix commits are on `task/ebilling-117`.
@@ -236,3 +238,5 @@ The live metadata read of 2026-11-23 shows sprk_ratecard still has the three Rem
 - The removed DI assertions are covered elsewhere.
 
 **Merged** into work/ebilling-r1 as f4a272136c. Post-merge: build 0 warnings 0 errors; unit filter (117, RuleSetService, ProcedureAssignment, upload, commit gate, StoredFile, FinanceModule, dry-run parity) 1071/0; ArchTests filter (WriterOnlyTablesDeleteGuard, RecordOwnerAssignmentCensus, WorkloadPlacement, RouteAuthorizationGuard, SecureChild, IOptionsDrift, FinanceStepZero) 324/0. Apply stays off until task 079 switches it on with the owner's OK.
+
+**Update 2026-11-23 (ontology-r1).** #2982 is fixed on master by PR #3011 (merge `33d7c6a6ad`). The D-170 close now reads not-in-force policies by id-cursor paging, with no 5,000 cap. A truncated or failed read is counted as a PolicyFailure, so the job fails loudly. The 079 precondition is met once the deployed BFF contains `33d7c6a6ad` (check by content). It reaches dev with the next uac-r2 dev BFF build from master. Related cost item: DI-164 #3014, one Signal query per not-in-force policy, which grows with the sweep's Off switches.

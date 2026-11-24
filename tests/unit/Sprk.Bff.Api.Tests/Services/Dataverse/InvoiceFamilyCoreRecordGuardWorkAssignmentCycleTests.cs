@@ -126,7 +126,7 @@ public class InvoiceFamilyCoreRecordGuardWorkAssignmentCycleTests
         noReader.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, "no app-only reader is never \"no cycle\"");
     }
 
-    // ── CheckGenericUpdateAsync (the playbook update, output orchestrator and field-mapping push) ─────────────────────
+    // ── CheckGenericUpdateAsync (the playbook update, the update handler and the field-mapping push) ─────────────────────
 
     private static Dictionary<string, object?> MoveToTheWorkAssignment() => new()
     {

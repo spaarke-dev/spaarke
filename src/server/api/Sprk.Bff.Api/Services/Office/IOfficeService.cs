@@ -122,7 +122,7 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Creates a new entity (Matter, Project, Invoice, Account, Contact) with minimal fields.
+    /// Creates a new entity (Matter or Project; ebilling-r1 task 096: never an Invoice, which only submission creates) with minimal fields.
     /// </summary>
     /// <param name="entityType">Type of entity to create.</param>
     /// <param name="request">Quick create request with entity fields.</param>
@@ -141,7 +141,7 @@ public interface IOfficeService
     /// </para>
     /// <para>
     /// Field requirements vary by entity type:
-    /// - Matter/Project/Invoice/Account: Name required
+    /// - Matter/Project/Account: Name required
     /// - Contact: FirstName and LastName required
     /// </para>
     /// </remarks>
@@ -156,7 +156,7 @@ public interface IOfficeService
     /// The contact the pane's "+ New" form prefills in Assigned To (task 100, owner decision B): the caller's own
     /// linked contact with its display name, or <see langword="null"/> when the caller is unresolved, has no linked
     /// contact, or the contact could not be read. For a Matter or Project it is exactly the contact the create assigns
-    /// when the request names none; an Invoice has no server default, so there the pane sends it explicitly.
+    /// when the request names none.
     /// </summary>
     /// <param name="callerSystemUserId">The caller's resolved <c>systemuserid</c> (never from the client).</param>
     /// <param name="cancellationToken">Cancellation token.</param>

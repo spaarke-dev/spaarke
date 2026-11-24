@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 045f on the two app-only update paths that write a record URL they are sent (the
-/// playbook update and the output orchestrator): on a pair table outside the invoice family, the URL names the record the row's
+/// playbook update and the update handler): on a pair table outside the invoice family, the URL names the record the row's
 /// regarding pair names after the write — the pair the same write sends, else the stored one, read app-only — and is written in
 /// canonical form. A URL naming another table or record, or no record, is refused through the path's existing form (a
 /// <see cref="RecordOwnerUnresolvedException"/> carrying <see cref="RegardingPairWrite.RecordUrlMismatchCode"/>), and nothing is
@@ -26,7 +26,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public static TheoryData<GenericPath, string> EveryUrlWritingPathAndRuleTable()
     {
         var data = new TheoryData<GenericPath, string>();
-        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.OutputOrchestrator })
+        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.UpdateHandler })
             foreach (var table in new[] { "sprk_todo", "sprk_event" })
                 data.Add(path, table);
         return data;
@@ -154,7 +154,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public static TheoryData<GenericPath, string> AdmittedUrlForms()
     {
         var data = new TheoryData<GenericPath, string>();
-        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.OutputOrchestrator })
+        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.UpdateHandler })
         {
             data.Add(path, $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={Matter:D}");
             data.Add(path, $"https://other.example/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={Matter:D}");
@@ -178,7 +178,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AUrlClear_IsWritten_AndReadsNoPair(GenericPath path)
     {
         var app = StoredPair("sprk_todo", "sprk_matter", Matter);
@@ -193,7 +193,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task APairMoveWithNoUrl_KeepsThePlannersDerivedUrl(GenericPath path)
     {
         // A run as a person: the planner derives the moved pair's display columns as that person (045b/045d).
@@ -207,7 +207,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task APairMoveWithAUrlOfTheNewRecord_IsWritten_InCanonicalForm(GenericPath path)
     {
         var outcome = await RunAsync(path, "sprk_todo", Todo, Lookups(PairType(CatalogRowOf("sprk_project"))),
@@ -233,7 +233,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AsAPerson_ARowThePersonCannotRead_IsTheReadFailedRefusal_NeverTheUrlMismatch(GenericPath path)
     {
         _callerMayNotRead = true;
@@ -248,7 +248,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AsAPerson_ARowNotThereForThePerson_IsTheReadFailedRefusal_NeverTheUrlMismatch(GenericPath path)
     {
         _personAnswer = (_, _, _) => null; // the person's query answers no row
@@ -263,7 +263,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AsAPerson_AReadableRow_AUrlOfAnotherRecord_IsRefused(GenericPath path)
     {
         PersonReadsThePair("sprk_matter", Matter);
@@ -276,7 +276,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AsAPerson_AReadableRow_AUrlOfItsRecord_IsWritten_InCanonicalForm(GenericPath path)
     {
         PersonReadsThePair("sprk_matter", Matter);
@@ -306,7 +306,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public static TheoryData<GenericPath, bool> EveryPersonPathAndUrlId()
     {
         var data = new TheoryData<GenericPath, bool>();
-        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.OutputOrchestrator })
+        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.UpdateHandler })
         {
             data.Add(path, true);
             data.Add(path, false);
@@ -375,7 +375,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task OnAThread_AUrlOfAnotherRecordThanItsAnchor_IsRefused(GenericPath path)
     {
         var outcome = await RunAsync(path, ThreadTable, Thread, NoLookups, SendsUrl(CanonicalUrl("sprk_matter", OtherMatter)),
@@ -386,7 +386,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task OnAThreadAnchoredNowhere_AUrl_IsRefused(GenericPath path)
     {
         var outcome = await RunAsync(path, ThreadTable, Thread, NoLookups, SendsUrl(CanonicalUrl("sprk_matter", Matter)),
@@ -397,7 +397,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task OnAThread_AUrlOfItsAnchor_IsWritten_InCanonicalForm(GenericPath path)
     {
         var outcome = await RunAsync(path, ThreadTable, Thread, NoLookups,
@@ -410,7 +410,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task OnAThread_AUrlOfTheRecordTheSameWriteAnchorsItTo_IsWritten(GenericPath path)
     {
         var outcome = await RunAsync(path, ThreadTable, Thread,

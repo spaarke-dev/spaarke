@@ -5,7 +5,7 @@
     <phase>4 Review (EB-D-188; the number 160 is taken by the end-to-end seam tests)</phase>
     <gate>164a: Q1-Q4 answered in the decisions log, and 095d-0 (InvoiceFirmGate) merged into work. 164c -Apply: Q6 answered and the owner's live go.
       (notes/add-line-brief.md section 4)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>A new write path for invoice lines (app identity, caller rights on the invoice); it changes totals (I-1) and the Decision Record catalog; it writes Signals and the field-secured findings JSON.</rigor-reason>
     <model-tier>opus (164a); sonnet (164b, 164c)</model-tier>

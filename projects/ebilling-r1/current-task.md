@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-23 (117 and 193 complete; master PR next). Session `ebilling-r1` (Claude Desktop) is the only writer to this worktree.
+> **Last Updated:** 2026-11-23 (checkpoint: 194 + 096 agents running; owner questions open)
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,22 +10,25 @@
 
 ## Quick recovery
 
-- **Active: master PR** (owner 2026-11-23: "you can merge when ready").
-  - Steps: merge origin/master into work, run the filtered tests, open the PR (known limits include 134's K2), and send it to ontology-r1.
-  - Merge as a merge commit once Router and Client lint are green.
-- **Exact next actions (checkpoint 2026-11-23):**
-  1. Merge origin/master into work/ebilling-r1, then run the filtered BFF tests, ArchTests and vitest.
-  2. Open the PR and send it to ontology-r1, with the 050b PR owed.
-  3. Merge on green.
-- **117 ✅ just merged (f4a272136c).** Apply stays off until 079 (owner OK). 096 and 121 stay gated.
-- **123 deploy condition (uac-r2 condition 2):** 123's BFF change goes into a LATER dev deploy (not 9df4e5c819). After that deploy, run the read-only dev check in `notes/123-invoice-supporting-file-upload.md` §12 and send uac-r2 the count (ids by message only).
-- `Ebilling:StoredFileReconcileEnabled` stays false: its flip needs F4 merged, DEF-044 fixed and the owner's go through uac-r2.
-- **For the master PR:** list 134's K2 (Outcome gate is any-firm, not this invoice's firm; agreed with spa-r4) in the PR's known limits. spa-r4's 134 review is done (fix merged 7600c21f65).
-- **096 gate:** word-add-in-r1 slice C (PR #2927, merge 148ec4dec0) is live on dev since 2026-11-21. 096 still waits for one add-in release after it (POML gate), then removes `POST /api/office/quickcreate/invoice` and the Invoice target of `/api/office/save`.
-- **Waiting on the owner:** the OK to redeploy the Invoice Review page to dev (checklist M2).
-- **SpaarkeMaster hotfix (2026-11-22, owner chose "Fix in source"):** 1.3.1.0 and 1.3.2.0 could not be imported because the Invoice form (151e) names `sprk_invoicefiles` and the package lacked it. PR #2935 adds the page, bumps to 1.3.2.1, and adds the publish check `Find-MissingWebResourceReferences`. ✅ Merged 2026-11-22 (bc4565a1b5) and published (run 45037908496; latest.json read back as 1.3.2.1). provisioning-r1 has been told; C:\wtsm has been removed. Dev and ACME imports are the owner's call and provisioning-r1's work, not ours. Task 153 no longer needs to add the web resource to the package; it still deploys it to dev.
-- **Uncommitted files:** none, after the 134 bookkeeping commit.
-
+- **Running now (agents, background):**
+  - **194 ✅** merged 96bcf65dbb; dev forms cleaned, -Verify PASS, uac-r2 notified before and after.
+  - **096 ✅** merged into work 98801e9b9f (Opus review: F2 fixed f60f51a2a3); word-add-in-r1 no objection. Tell word-add-in-r1 when it is on the dev BFF (range check).
+- **Exact next actions:**
+  1. When an agent reports: Opus adversarial review (one pass for 194; 096 is bff-api, one pass), fix rounds, a scoped re-check, then merge `--no-ff` into work.
+  2. **194:** uac-r2 BEFORE notice, then `-Apply` on dev (owner go typed 2026-11-23: "yes proceed with these"), then `-Verify` and the AFTER notice.
+  3. **096:** send word-add-in-r1 the merge SHA; it range-checks the change once it is on the dev BFF.
+- **Owner questions asked 2026-11-23 (waiting on answers):**
+  - 050a §9 items 2-4: reject after confirm; drop InvoiceDate/TotalAmount from the confirm request; the confirm privilege.
+  - 089: refuse "change rule" on a rule a newer Procedure version dropped (record not pinned); 089d live child-BU proof on dev, now or later.
+  - M2: the Invoice Review page has NEVER been on dev. Wait for task 112, or a page-only upload after the next dev BFF?
+- **Master PR #3029 OPEN (2026-11-23):** 194 + 096 + ontology-r1 follow-ups; ontology-r1 asked to review; merge needs the owner's go in THIS session. After merge: uac-r2 builds dev BFF from master (the deploy go is the owner naming the exact SHA in uac-r2's session, not here) and checks 096's OFFICE_023 first; uac-r2 sends the live notice to us and word-add-in-r1.
+- **Master PR #2992 ✅ merged 2026-11-23 16:35Z (2d83b246ae).** ontology-r1s follow-ups (cd485c6c5e, 71496ac36c, dc628e7152) go in the NEXT eBilling PR.
+- **164 ✅ 2026-11-23:** dev was already in the target state; -Verify and the SecureChild -Verify PASS; uac-r2 acked.
+- **Dev BFF a48398746d ✅ (uac-r2, 2026-11-23 18:43Z, carries #2992 = 117/123/124/193):** gate PASSED 18:43–19:11Z. 123 check count 0, K1 closed (notes/123 §12). DynamicCommandResolver exceptions are pre-existing (#3005, uac-r2).
+- **Stays off:**
+  - 117s Apply stays off until 079 (owner OK). Precondition #2982 is FIXED on master (#3011, 33d7c6a6ad): it holds once the deployed BFF contains that commit.
+  - `Ebilling:StoredFileReconcileEnabled` stays false (F4, DEF-044, owner go via uac-r2).
+- **Uncommitted files:** none.
 ## Recently done (detail in the notes and git)
 
 - **193 ✅** merged into work c21bde55a2 (branch `task/ebilling-193`, tip 46a89e55f8). sprk_ratecard's sprk_matter, sprk_project and sprk_workassignment lookups and their 3 relationships were retired from the source, the schema scripts and the docs.
@@ -57,7 +60,7 @@
 
 - **Build:** 096 (gated, see above), 121 (waits for uac-r2 191).
 - **Partly done:**
-  - 164: the live `-Apply` needs the owner's go.
+  - 164 ✅ 2026-11-23 (dev already in the target state; -Verify PASS).
   - 089 and 050a: owner questions are in their notes.
 - **Deploy close-outs:** 053, 079, 112, 136, 153. Then 160, 161/162 (live runs need the owner's OK), 163 UAT, 189, 190.
 - **Index tidy-up:** the drift check lists 028, 040, 050a, 084d, 093, 113 and 161. These are pre-existing; resolve each from evidence.

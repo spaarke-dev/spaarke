@@ -2476,7 +2476,7 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 
 | Field | Value |
 |---|---|
-| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-162; label swapped by them 2026-11-23) |
+| **Status** | Done by spaarke-ontology-platform-r1 (DI-162): fixed on master by PR #3011 (merge 33d7c6a6ad), #2982 closed 2026-11-23. Id-cursor paging, no 5,000 cap; a truncated or failed read counts as a PolicyFailure. Follow-up cost item DI-164 #3014 (one Signal query per not-in-force policy). |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 117 adversarial review, pass A (found in passing) |
@@ -2496,3 +2496,53 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 **Estimated effort**: half a day.
 **Blockers**: none; ontology-r1 owns `Services/Signals/**`.
 **Related**: D-170; task 117.
+
+### ISS-045 — Invoice forms still show the retired extraction fields; PB-013 seed and verify script describe the deleted playbook
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed in work 96bcf65dbb, dev forms cleaned 2026-11-23; closes when the next eBilling master PR merges |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | ontology-r1 review of #2992 (050b follow-up 3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2997 |
+
+**Description**
+
+Task 050b deleted the legacy invoice extraction path, so nothing writes `sprk_invoice.sprk_extractionstatus` or `sprk_extractedjson` any more. Both columns are still on the invoice main and quick-create forms, so users see an "Extraction Status" that never changes. The PB-013 playbook seed and `Verify-Finance-Playbook.ps1` still describe the deleted extraction playbook. 050b notes §9 lists the rows, not the forms.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/{93aa1c69-0406-f111-8406-7c1e525abd8b}.xml` (+ `_managed`)
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/quickCreate/{c5e5807d-e20c-f111-8342-7c1e520aa4df}.xml` (+ `_managed`)
+- `scripts/seed-data/playbooks.json` (PB-013), `scripts/seed-data/Verify-Finance-Playbook.ps1`
+
+**Suggested fix**: take both controls off both forms through 079's export-to-temp procedure and publish on dev with the owner's OK; drop PB-013 from the seed and verify script. Deleting the columns is a separate, destructive owner decision.
+
+**Estimated effort**: half a day plus the dev form publish.
+**Blockers**: the dev form change is a live step (owner OK).
+**Related**: 050b, #2263.
+
+### ISS-046 — Deploy-EbillingFormsViews.ps1 Section mode would delete the invoice main form's Batch quick view on re-run
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | Task 194 adversarial review, finding 7 (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3001 |
+
+**Description**
+
+In Section mode the forms script rebuilds `section_ebilling` from its `Cols` list and replaces the whole section, which drops the `qv_billingexport` "Batch" quick view that 151e added to the source and that no script creates. Once the 151e form is on an environment, a later run there silently removes the quick view.
+
+**Entry-points**
+
+- `scripts/ebilling/Deploy-EbillingFormsViews.ps1:350-352`, `:176-186`
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/{93aa1c69-0406-f111-8406-7c1e525abd8b}.xml` (`qv_billingexport`)
+
+**Suggested fix**: keep the existing section's non-managed cells (quick views, subgrids), or list the quick view; add a re-run test.
+
+**Estimated effort**: half a day.
+**Blockers**: none. Task 194 does not use the forms script for its removal.

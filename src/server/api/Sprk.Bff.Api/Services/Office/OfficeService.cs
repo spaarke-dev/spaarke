@@ -68,7 +68,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     // matter-type list, and the sprk_recordtype_ref lookup the To Do writer below stamps. Extracted so this
     // class issues no Dataverse read of its own; the IOfficeService search members delegate to it.
     private readonly OfficeSearchService _search;
-    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Invoice) and the To Do writer.
+    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (before ebilling-r1 task 096, the Invoice leg) and the To Do writer.
     // Required (task 059): registered unconditionally as a singleton (→ IDataverseService, GraphModule.cs).
     private readonly IGenericEntityService _genericEntityService;
     // Field mapping task 018b (FR-13 part 2, FR-12): the Matter and Project quick-create legs create through the ONE server
@@ -2167,8 +2167,9 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <inheritdoc />
     /// <remarks>
     /// <para>Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
-    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
-    /// return null (endpoint 403s) until built out.</para>
+    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project</b>; other types
+    /// return null (endpoint 403s) until built out. An <b>Invoice</b> was in scope until ebilling-r1 task 096 (owner L: an invoice is
+    /// created only by submission); the route refuses it with 400 <c>OFFICE_023</c> and this returns null, writing nothing.</para>
     /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created by the ONE server create,
     /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>, as the caller (field mapping task 018b):
     /// this method is a thin adapter that maps the request to that service's payload and its refusal to the Office codes
@@ -2176,13 +2177,6 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <c>sprk_matternumber</c> / <c>sprk_projectnumber</c> (task 076, interim). A refusal surfaces as
     /// <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row written); see
     /// <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
-    /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
-    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name, the description and the Assigned To contact
-    /// (task 100). It is owned by the caller's business-unit
-    /// default owner team (task 080, invariant I-6), and REFUSED with <see cref="OfficeErrorCodes.RecordOwnerUnresolved"/>
-    /// when no team resolves — no longer best-effort, which left an unresolved caller's invoice app-owned in ROOT.
-    /// There is no impersonated-create helper in the BFF, so ownership is set via the <c>ownerid</c> lookup rather
-    /// than MSCRMCallerID.</para>
     /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
@@ -2196,13 +2190,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             entityType,
             userId);
 
-        // Scope: Matter + Project + Invoice (UI feedback 2026-09-02). Others not yet supported.
-        if (entityType is not (QuickCreateEntityType.Matter
-            or QuickCreateEntityType.Project
-            or QuickCreateEntityType.Invoice))
+        // Scope: Matter + Project. Others are not supported — an Invoice in particular (ebilling-r1 task 096, owner L): an invoice is
+        // created only by submission, so the route refuses it (OFFICE_023) before this runs, and this returns null for it, writing nothing.
+        if (entityType is not (QuickCreateEntityType.Matter or QuickCreateEntityType.Project))
         {
             _logger.LogInformation(
-                "Quick create for {EntityType} is not yet supported (Matter/Project/Invoice only).",
+                "Quick create for {EntityType} is not supported (Matter/Project only).",
                 entityType);
             return null;
         }
@@ -2215,92 +2208,10 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 
         // FR-13: Matter (task 030) and Project (task 031) both go through the shared server-side creation service —
         // load-bearing owner, BU defaults, Field Mapping Framework, plus the matter-type lookup for Matter. Neither
-        // writes its entity's number; a separate on-create numbering component owns both. Invoice stays on the
-        // minimal path below.
-        if (entityType is QuickCreateEntityType.Matter or QuickCreateEntityType.Project)
-        {
-            return await QuickCreateViaCreationServiceAsync(
-                    entityType, name, request, userId, ownerSystemUserId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        // removed by ebilling-r1 task 096
-        // Invoice only: name, description and Assigned To (task 100, owner UAT round 5 item 3).
-        var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
-
-        var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
-        // sprk_name is sprk_invoice's primary name attribute (live metadata, 2026-10-01). This wrote
-        // "sprk_invoicename", which sprk_invoice does not have, so Dataverse refused every invoice quick-create
-        // (#1079, task 085). sprk_billingevent is the entity that has a sprk_invoicename column.
-        entity["sprk_name"] = name;
-
-        // Task 100 — both columns verified against live metadata (spaarkedev1, 2026-10-05): sprk_description (Memo,
-        // "Description") and sprk_assignedto1 (contact lookup, "Assigned To 1" — the invoice's first Assigned To slot;
-        // sprk_invoice has no sprk_assignedtointernal). The contact id was authorized (caller holds Read) by
-        // QuickCreateSourceAccessFilter before this runs. An invoice has NO server default assignee: absent means
-        // unassigned (unlike Matter/Project, which name the maker — unified-access-control-r2 task 152).
-        if (!string.IsNullOrWhiteSpace(request.Description))
-        {
-            entity[InvoiceDescriptionAttribute] = request.Description.Trim();
-        }
-
-        if (request.AssignedToContactId is { } invoiceAssignee && invoiceAssignee != Guid.Empty)
-        {
-            entity[InvoiceAssignedToAttribute] = new Microsoft.Xrm.Sdk.EntityReference("contact", invoiceAssignee);
-        }
-
-        // Ownership (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER
-        // pattern and says nothing about ownerid, a miscitation corrected 2026-09-22). Task 080 (invariant I-6): the
-        // caller's business-unit DEFAULT OWNER TEAM. A new invoice is filed against nothing here, so the acting user's
-        // business unit decides. This used to be best-effort — an unresolved caller left the invoice app-owned in the
-        // ROOT business unit, invisible to its own creator — and is now a refusal, like Matter and Project.
-        var invoiceOwner = await _ownershipResolver.ResolveOwnerAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-            {
-                CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
-                    ? callerSystemUserId
-                    : null,
-                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
-                // Task 146 c1-r1 (owner round 13 item 9): the Office user asked for the invoice the app creates.
-                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(
-                    Guid.TryParse(ownerSystemUserId, out var requesterId) ? requesterId : null,
-                    Guid.TryParse(userId, out var requesterOid) ? requesterOid : null),
-            },
-            cancellationToken).ConfigureAwait(false);
-        var invoiceOwnerTeamId = invoiceOwner.IsOwned ? invoiceOwner.OwningTeamId : null;
-
-        if (invoiceOwnerTeamId is null)
-        {
-            // Rendered by the quick-create endpoint's SdapProblemException catch; no row was written.
-            throw new SdapProblemException(
-                OfficeErrorCodes.RecordOwnerUnresolved,
-                $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created",
-                "The new invoice could not be assigned to your business unit's team, so it was not created. Ask an "
-                + "administrator to check that your user has a business unit and that the unit has its default team.",
-                OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
-        }
-
-        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", invoiceOwnerTeamId.Value);
-        invoiceOwner.StampCreatorOn(entity); // task 146 c1-r1 — the Office user, on the app-created invoice
-
-        var createdId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "Quick create completed: EntityType={EntityType}, Id={Id}, Name={Name}",
-            entityType,
-            createdId,
-            name);
-
-        return new QuickCreateResponse
-        {
-            Id = createdId,
-            EntityType = entityType,
-            LogicalName = logicalName,
-            Name = name,
-            // Org URL isn't known server-side (the add-in must not be org-pinned); the add-in uses
-            // Id + Name to select the new record as the regarding, not the Url.
-            Url = null
-        };
+        // writes its entity's number; a separate on-create numbering component owns both.
+        return await QuickCreateViaCreationServiceAsync(
+                entityType, name, request, userId, ownerSystemUserId, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2683,12 +2594,6 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 
     private static string InternalErrorDetail(string noun) =>
         $"The new {noun} could not be created because of an unexpected server condition. Nothing was created.";
-
-    /// <summary><c>sprk_invoice</c> description column (Memo, "Description"; live metadata 2026-10-05, task 100).</summary>
-    internal const string InvoiceDescriptionAttribute = "sprk_description";
-
-    /// <summary><c>sprk_invoice</c> "Assigned To 1" contact lookup — the invoice's Assigned To (live metadata 2026-10-05, task 100).</summary>
-    internal const string InvoiceAssignedToAttribute = "sprk_assignedto1";
 
     /// <summary>The <see cref="SdapProblemException.Extensions"/> key that carries the Assigned To refusal's <c>reasonCode</c>.</summary>
     internal const string AssigneeReasonCodeExtension = "reasonCode";
