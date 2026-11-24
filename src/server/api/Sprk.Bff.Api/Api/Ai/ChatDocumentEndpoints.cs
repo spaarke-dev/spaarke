@@ -404,6 +404,17 @@ public static class ChatDocumentEndpoints
                 title: "Bad Request",
                 detail: "Request body is not valid multipart/form-data.");
         }
+        catch (System.IO.IOException ex) when (httpContext.RequestAborted.IsCancellationRequested
+            || ex is Microsoft.AspNetCore.Connections.ConnectionResetException)
+        {
+            // ISS-049 fix round 1 (F1): the client abandoned the upload or reset the connection. Not a malformed body (no 400) and not a fault: it
+            // must not escape to the global handler (500, logged at Error). 499 (client closed request), logged at Debug with type and HResult only.
+            logger.LogDebug(
+                "Document upload abandoned by the client ({ExceptionType}, HResult 0x{HResult:X8}); answered 499. SessionId={SessionId}, TraceId={TraceId}",
+                ex.GetType().Name, ex.HResult, sessionId, httpContext.TraceIdentifier);
+
+            return Results.StatusCode(499);
+        }
 
         var file = form.Files.GetFile("file");
 

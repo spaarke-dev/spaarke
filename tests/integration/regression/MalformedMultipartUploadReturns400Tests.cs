@@ -144,28 +144,30 @@ public sealed class MalformedMultipartUploadReturns400Tests : IClassFixture<Malf
         entry.Exception.Should().BeNull();
     }
 
-    [Theory(DisplayName = "ISS-049 must-not-fire: a body that fails because the client abandoned the request, or reset the connection, is not a 400 and logs no multipart Warning")]
+    [Theory(DisplayName = "ISS-049 fix round 1 (F1) must-fire: a body that fails because the client abandoned the request, or reset the connection, is answered 499 (not 400, not 500) and logs no Warning or Error")]
     [InlineData(VisualizationRoute, "abandoned")]
     [InlineData(VisualizationRoute, "reset")]
     [InlineData(ChatDocumentRoute, "abandoned")]
     [InlineData(ChatDocumentRoute, "reset")]
-    public async Task UploadRoute_AbandonedOrReset_IsNotA400_AndLogsNoWarning(string route, string fault)
+    public async Task UploadRoute_AbandonedOrReset_Is499_AndLogsNoFault(string route, string fault)
     {
         using var content = MalformedMultipartBodies.NoClosingBoundary();
 
         // An abandoned request may surface to the test client as the cancellation itself (the test server reports "The application aborted
-        // the request"); any answer it does give must not be a 400.
+        // the request"); any answer it does give must be the route's 499, never the global handler's 500.
         try
         {
             var (response, text) = await PostAsync(route, content, fault);
-            response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest, text);
+            ((int)response.StatusCode).Should().Be(499, text);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (fault == "abandoned")
         {
-            // The route let the abandonment pass through.
         }
 
-        ReadFailureLogs().Should().BeEmpty();
+        _fixture.Warnings.Entries.Where(e => e.Level >= LogLevel.Warning && !e.Message.StartsWith("Bearer token present but unreadable")).Select(e => e.Level + ": " + e.Message)
+            .Should().BeEmpty("an abandoned upload is not a fault and must not reach the global handler (the fake-auth host's own bearer-token warning is unrelated)");
+        // The route itself handled it (the test server can report an abandoned request to the client as a cancellation, so the status alone cannot show that).
+        _fixture.Warnings.Entries.Should().Contain(e => e.Level == LogLevel.Debug && e.Message.Contains("answered 499"));
     }
 
     /// <summary>A well-formed upload still passes the read (here it stops at the extension check, a 422 / 400 of the route, not the body fault).</summary>
@@ -237,6 +239,7 @@ public sealed class MalformedMultipartFixture : CustomWebAppFactory
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<ILoggerProvider>(Warnings);
+            services.AddLogging(logging => logging.AddFilter("Program", LogLevel.Debug).AddFilter("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints", LogLevel.Debug)); // the routes log under ILogger<Program> and the chat route under its own category; ISS-049 asserts a Debug line
             services.AddTransient<IStartupFilter>(_ => new BodyFaultStartupFilter());
 
             services.AddAuthentication()

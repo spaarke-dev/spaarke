@@ -1041,17 +1041,27 @@ public static class ContainerItemEndpoints
             // ISS-049 (the ISS-043 handling): a truncated multipart body, or a non-multipart body under a multipart content type, ends the
             // parser's stream early with an IOException. It is the client's fault, so 400, logged at Warning with the exception type and
             // HResult only (never the message, which can echo request content, nor a stack trace). The same type is a server-side temp-disk
-            // fault when the parser buffers a large file part, which is why the Warning is not dropped. An IOException of an abandoned request
-            // (the token is cancelled) or of a reset connection is caught by neither this clause nor the one below: it passes through.
+            // fault when the parser buffers a large file part, which is why the Warning is not dropped. ISS-049 fix round 1 (K3): a
+            // BadHttpRequestException (an IOException) also logs its StatusCode, so a 413 (body too large) and a truncated body can be told apart.
             logger.LogWarning(
-                "A multipart request body could not be read ({ExceptionType}, HResult 0x{HResult:X8}); answered 400. Container: {ContainerId}, TraceId: {TraceId}",
-                ex.GetType().Name, ex.HResult, id, context.TraceIdentifier);
+                "A multipart request body could not be read ({ExceptionType}, HResult 0x{HResult:X8}, HttpStatusCode {HttpStatusCode}); answered 400. Container: {ContainerId}, TraceId: {TraceId}",
+                ex.GetType().Name, ex.HResult, ex is BadHttpRequestException bad ? bad.StatusCode.ToString() : "n/a", id, context.TraceIdentifier);
             return ProblemDetailsHelper.ValidationError("Failed to read the uploaded file from the request.");
+        }
+        catch (IOException ex) when (ct.IsCancellationRequested || ex is Microsoft.AspNetCore.Connections.ConnectionResetException)
+        {
+            // ISS-049 fix round 1 (F1): the client abandoned the upload or reset the connection. Not a malformed body (no 400) and not a fault: it
+            // must not escape to the global handler (500, logged at Error). 499 (client closed request), logged at Debug with type and HResult only.
+            logger.LogDebug(
+                "SPE admin upload abandoned by the client ({ExceptionType}, HResult 0x{HResult:X8}); answered 499. Container: {ContainerId}, TraceId: {TraceId}",
+                ex.GetType().Name, ex.HResult, id, context.TraceIdentifier);
+            return Results.StatusCode(499);
         }
         catch (Exception ex) when (ex is not (SdapProblemException or OperationCanceledException or IOException))
         {
             // ISS-049: cancellation is no longer caught here (an abandoned upload is not a fault, and was logged with a stack trace and
-            // answered 400). IOException is handled above or passes through; every other exception keeps this handling.
+            // answered 400). IOException is handled above; every other exception keeps this handling. An OperationCanceledException is not
+            // caught anywhere on this route (see the ISS-049 notes, K2).
             logger.LogWarning(ex,
                 "Failed to read multipart form for upload — Container: {ContainerId}, TraceId: {TraceId}",
                 id, context.TraceIdentifier);

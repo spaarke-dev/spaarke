@@ -2,6 +2,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
@@ -39,11 +40,21 @@ public sealed class ContainerItemUploadMultipartTests
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseTestServer();
             builder.Logging.ClearProviders();
+            builder.Logging.SetMinimumLevel(LogLevel.Debug);
             builder.Logging.AddProvider(host.Logs);
             // Never reached on the paths under test (the form is read first); the handler needs only a bound instance.
             builder.Services.AddSingleton((SpeAdminGraphService)RuntimeHelpers.GetUninitializedObject(typeof(SpeAdminGraphService)));
             builder.Services.AddSingleton((SpeAuditService)RuntimeHelpers.GetUninitializedObject(typeof(SpeAuditService)));
             host._app = builder.Build();
+            // ISS-049 fix round 1: like the production pipeline, an exception that escapes the route reaches a global handler that answers 500 and
+            // logs an Error (Infrastructure/DI/MiddlewarePipelineExtensions.cs), so a test can tell an escape from a handled abandonment.
+            host._app.UseExceptionHandler(handler => handler.Run(context =>
+            {
+                context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("GlobalHandler")
+                    .LogError(context.Features.Get<IExceptionHandlerFeature>()?.Error, "Unhandled exception escaped the route");
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                return Task.CompletedTask;
+            }));
             host._app.Use(async (context, next) =>
             {
                 host.OnRequest?.Invoke(context);
@@ -97,16 +108,24 @@ public sealed class ContainerItemUploadMultipartTests
         entry.Exception.Should().BeNull();
     }
 
-    [Fact(DisplayName = "ISS-049 must-not-fire: a body that fails because the client abandoned the request (token cancelled, IOException) is not a 400 and logs no fault")]
-    public async Task AbandonedRequest_IoException_IsNotA400_AndLogsNothing()
+    [Fact(DisplayName = "ISS-049 fix round 1 (F1) must-fire: a body that fails because the client abandoned the request (token cancelled, IOException) is answered 499, nothing escapes, no Warning or Error is logged")]
+    public async Task AbandonedRequest_IoException_Is499_AndLogsNoFault()
     {
         await using var host = await Host.StartAsync();
         host.OnRequest = MalformedMultipartBodies.Apply(abandoned: true);
 
-        var act = async () => await host.Client.SendAsync(Upload(MalformedMultipartBodies.NoClosingBoundary()));
+        // The test server may surface the abandonment to the client as the cancellation itself; either way nothing may escape the route.
+        try
+        {
+            var response = await host.Client.SendAsync(Upload(MalformedMultipartBodies.NoClosingBoundary()));
+            ((int)response.StatusCode).Should().Be(499);
+        }
+        catch (OperationCanceledException)
+        {
+        }
 
-        (await act.Should().ThrowAsync<Exception>()).Which.Should().Match(e => e is IOException || e is OperationCanceledException);
-        host.Logs.Entries.Where(e => e.Level >= LogLevel.Warning).Should().BeEmpty("an abandoned upload is not a fault");
+        host.Logs.Entries.Where(e => e.Level >= LogLevel.Warning).Select(e => e.Level + ": " + e.Message).Should().BeEmpty("an abandoned upload is not a fault and must not reach the global handler");
+        host.Logs.Entries.Should().Contain(e => e.Level == LogLevel.Debug && e.Message.Contains("answered 499"), "the route handled it");
     }
 
     [Fact(DisplayName = "ISS-049 must-not-fire: a body read that is cancelled (OperationCanceledException) is not a 400 and logs no fault")]
@@ -120,22 +139,63 @@ public sealed class ContainerItemUploadMultipartTests
             context.Request.Body = new CancelledBody(source);
         };
 
-        var act = async () => await host.Client.SendAsync(Upload(MalformedMultipartBodies.NoClosingBoundary()));
+        // The route no longer catches the cancellation (it passes through to the global handler, ISS-049 notes K2): not a 400, and the route
+        // logs no "Failed to read multipart form" Warning with a stack trace.
+        try
+        {
+            var response = await host.Client.SendAsync(Upload(MalformedMultipartBodies.NoClosingBoundary()));
+            response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest);
+        }
+        catch (OperationCanceledException)
+        {
+        }
 
-        (await act.Should().ThrowAsync<Exception>()).Which.Should().BeAssignableTo<OperationCanceledException>();
-        host.Logs.Entries.Where(e => e.Level >= LogLevel.Warning).Should().BeEmpty("an abandoned upload is not a fault");
+        host.Logs.Entries.Should().NotContain(e => e.Message.Contains("Failed to read multipart form") || e.Message.Contains(ReadFailureText));
     }
 
-    [Fact(DisplayName = "ISS-049 must-not-fire: a connection reset (token not cancelled) is not a 400 and logs no fault")]
-    public async Task ConnectionReset_IsNotA400_AndLogsNothing()
+    [Fact(DisplayName = "ISS-049 fix round 1 (K3) must-fire: a BadHttpRequestException is a 400 and its StatusCode is logged, so a 413 and a truncated body can be told apart")]
+    public async Task BadHttpRequest_Is400_AndLogsItsStatusCode()
+    {
+        await using var host = await Host.StartAsync();
+        host.OnRequest = context => context.Request.Body = new BadRequestBody();
+
+        var response = await host.Client.SendAsync(Upload(MalformedMultipartBodies.NoClosingBoundary()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var entry = host.ReadFailures().Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain("HttpStatusCode 413").And.Contain(nameof(BadHttpRequestException));
+    }
+
+    /// <summary>A body whose read throws Kestrel's "request body too large" (413).</summary>
+    private sealed class BadRequestBody : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw Fault();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException<int>(Fault());
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromException<int>(Fault());
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        private static BadHttpRequestException Fault() => new("Request body too large.", StatusCodes.Status413PayloadTooLarge);
+    }
+
+    [Fact(DisplayName = "ISS-049 fix round 1 (F1) must-fire: a connection reset (token not cancelled) is answered 499, nothing escapes, no Warning or Error is logged")]
+    public async Task ConnectionReset_Is499_AndLogsNoFault()
     {
         await using var host = await Host.StartAsync();
         host.OnRequest = MalformedMultipartBodies.ApplyConnectionReset();
 
-        var act = async () => await host.Client.SendAsync(Upload(MalformedMultipartBodies.NoClosingBoundary()));
+        var response = await host.Client.SendAsync(Upload(MalformedMultipartBodies.NoClosingBoundary()));
 
-        await act.Should().ThrowAsync<Microsoft.AspNetCore.Connections.ConnectionResetException>();
-        host.Logs.Entries.Where(e => e.Level >= LogLevel.Warning).Should().BeEmpty();
+        ((int)response.StatusCode).Should().Be(499);
+        host.Logs.Entries.Where(e => e.Level >= LogLevel.Warning).Select(e => e.Level + ": " + e.Message).Should().BeEmpty("a reset is not a fault and must not reach the global handler");
     }
 
     [Fact(DisplayName = "ISS-049 must-not-fire: a well-formed multipart body is read as before (the route's own empty-file refusal, not the read failure)")]

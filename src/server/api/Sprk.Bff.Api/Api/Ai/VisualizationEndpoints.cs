@@ -307,6 +307,17 @@ public static class VisualizationEndpoints
                 title: "Bad Request",
                 detail: "Request body is not valid multipart/form-data.");
         }
+        catch (System.IO.IOException ex) when (cancellationToken.IsCancellationRequested
+            || ex is Microsoft.AspNetCore.Connections.ConnectionResetException)
+        {
+            // ISS-049 fix round 1 (F1): the client abandoned the upload or reset the connection. Not a malformed body (no 400) and not a fault: it
+            // must not escape to the global handler (500, logged at Error). 499 (client closed request), logged at Debug with type and HResult only.
+            logger.LogDebug(
+                "Visualization content upload abandoned by the client ({ExceptionType}, HResult 0x{HResult:X8}); answered 499. TraceId={TraceId}",
+                ex.GetType().Name, ex.HResult, httpContext.TraceIdentifier);
+
+            return Results.StatusCode(499);
+        }
 
         var file = form.Files.GetFile("file");
 

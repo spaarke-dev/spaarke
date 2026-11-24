@@ -12,7 +12,7 @@ route (no auth, limit or success-path change, no new endpoint, service, DI regis
 |---|---|---|---|
 | `POST /api/ai/chat/sessions/{sessionId}/documents` | `Api/Ai/ChatDocumentEndpoints.cs` | `IOException` from `ReadFormAsync` reached the global handler: 500, logged at Error | `catch (IOException) when (!RequestAborted.IsCancellationRequested && not ConnectionResetException)` after the existing `InvalidDataException`/`BadHttpRequestException` catch: the route's existing 400 ProblemDetails ("Request body is not valid multipart/form-data."), Warning with type and HResult |
 | `POST /api/ai/visualization/related-from-content` | `Api/Ai/VisualizationEndpoints.cs` | same | same catch (token: the handler's `cancellationToken`) |
-| `POST /api/spe/containers/{containerId}/items/upload` | `Api/SpeAdmin/ContainerItemEndpoints.cs` | one catch-all (every exception but `SdapProblemException`): an abandoned upload (`OperationCanceledException`) was a 400 and a Warning with a stack trace | new `catch (IOException)` with the iss043 filter: the route's existing 400 `ValidationError`, Warning with type and HResult only (no exception object, no stack trace); the catch-all now excludes `OperationCanceledException` and `IOException`, so cancellation, an abandoned/reset IOException pass through; every other exception keeps the catch-all (400, Warning with the exception) |
+| `POST /api/spe/containers/{containerId}/items/upload` | `Api/SpeAdmin/ContainerItemEndpoints.cs` | one catch-all (every exception but `SdapProblemException`): an abandoned upload (`OperationCanceledException`) was a 400 and a Warning with a stack trace | new `catch (IOException)` with the iss043 filter: the route's existing 400 `ValidationError`, Warning with type and HResult only (no exception object, no stack trace); the catch-all now excludes `OperationCanceledException` and `IOException`, so `OperationCanceledException` passes through (K2) and an abandoned/reset IOException is answered 499 quietly (fix round 1 F1); every other exception keeps the catch-all (400, Warning with the exception) |
 
 ## Reuse decision (CLAUDE.md §11)
 
@@ -49,8 +49,26 @@ IOException, cancelled read, connection reset (5; the abandoned/cancelled/reset 
 
 ## Known limits
 
-- K1: on the chat and visualization routes (full host) an abandoned or reset request still reaches the global handler as before (an escaped `IOException` is a 500 with an Error log there); only the 400-and-Warning mapping was
-  changed, as the brief says. The test asserts "not 400 and no multipart Warning".
 - K1: a body whose `ReadFormAsync` raises an `IOException` other than via cancellation or `ConnectionResetException` is a 400 even when it is a server-side temp-disk fault; that is why the Warning (type and HResult) exists (same limit as iss043 F1).
 - K1: SPE admin: a `BadHttpRequestException` (an `IOException`) now takes the new catch (400, Warning without the exception object) rather than the catch-all's (400, Warning with the exception); the response is unchanged.
 - The SPE admin well-formed control stops at the route's own empty-file refusal: a non-empty upload goes on to Graph, which needs a full SPE test host and is out of scope for a read-form change.
+- K2: an `OperationCanceledException` that is NOT caused by the request token (for example an internal timeout token inside the body read) is caught by nothing on the SPE admin route any more, so it reaches the global handler (500, logged at Error). Before ISS-049 the catch-all turned it into a 400 plus a Warning with a stack trace. This is acceptable: a cancellation the client did not cause is a server-side fault, not a malformed body, so a 400 blamed the caller wrongly; and an `OperationCanceledException` of an aborted request is already treated by ASP.NET's exception middleware as a client abort, not a fault.
+
+## Fix round 1 (review of 3bd5df5b95)
+
+### F1 - an abandoned or reset upload escaped to the global handler (500, Error log)
+
+After the first commit an `IOException` with a cancelled request token, or a `ConnectionResetException`, matched no catch on any of the three routes: it reached `UseExceptionHandler` (500, logged at Error).
+Before ISS-049 the SPE admin catch-all answered it 400 plus a Warning, so that route regressed and "not logged as a fault" (AC2) failed.
+
+- Changed: all three routes gained `catch (IOException ex) when (<token>.IsCancellationRequested || ex is ConnectionResetException)`, after the 400 catch (the complement of its filter; the
+  `InvalidDataException`/`BadHttpRequestException` catches on chat and visualization still come first). It logs at Debug with the exception type and HResult only and returns `Results.StatusCode(499)`
+  (client closed request). Nothing escapes; no Warning or Error is logged. The K1 "escaped IOException on chat and visualization" limit is gone.
+- Tests: the `ContainerItemUploadMultipartTests` host gained `UseExceptionHandler` (500 plus an Error log), so an escape is visible; the abandoned and reset tests assert 499, no Warning or Error and the route's Debug line.
+  `MalformedMultipartUploadReturns400Tests.UploadRoute_AbandonedOrReset_Is499_AndLogsNoFault` (chat and visualization, abandoned and reset) asserts 499 (for `abandoned` the test server may report the cancellation to the client instead, accepted),
+  no Warning or Error (ignoring the fake-auth host's unrelated "Bearer token present but unreadable" Warning) and the route's Debug "answered 499" line (the fixture lowers the log filter for the routes' categories).
+- Fail-before (the three source files at 3bd5df5b95, tests kept): 7 failed, 14 passed, 21 total. After: 21 passed, 0 failed.
+
+### K3 - a BadHttpRequestException's StatusCode is logged on SPE admin
+
+The 400 Warning adds `HttpStatusCode {n}` (`n/a` for other IOExceptions). Test: `BadHttpRequest_Is400_AndLogsItsStatusCode` (a 413).
