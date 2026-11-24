@@ -7,6 +7,12 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
+**NOW (2026-11-24 ~00:40Z checkpoint):** a live test session with the owner is running in Copilot (task 041 remainder + 040 live part). Dev BFF is `22c42efad6` (master, no spike) with MCP ON since 00:22Z.
+- **Step 1 PASSED** (owner screenshots): Chat "What decisions are waiting for me in Spaarke?" → the real widget rendered the lane (192 / 186 approve-or-rebudget / 6 invoice). Start review opened the wizard "1 of 186". So widget `resources/read` works.
+- **Owner UX decision** (`notes/decisions.md` 2026-11-24, `59f7573f0d`): Start review opens the wizard INLINE over the lane, not in the host side pane. Fix: `src/client/widgets/spaarke-decisions/src/wizard/WizardDialog.tsx` L237-254 stops calling `requestDisplayMode('fullscreen')` and goes to 'dialog' inline (keeping the fallbacks), plus the jest tests. It goes in a separate PR from master (widget files only), then a uac-r2 dev deploy with the owner's per-SHA go. The implementer is being briefed.
+- **Owner still to do:** (2) Console Worklist + Decision wizard check; (3) upload `src/solutions/CopilotPlugins/spaarke/dist/spaarke-plugin.zip` (admin center Registry, owner + test user only); (4) T10 in Cowork `/spaarke-decisions`; (5) S-1 "list your Spaarke tools" in Cowork + Chat with spike A still connected; (6) owner deletes the spike plugin. Confirm each with App Insights: query file `mcp-live.json` + `q.sh` in the session scratchpad (`requests`/`traces` on `/mcp/` since 00:22Z). Record the results in `notes/phase0-results.md` (T10, S-1 rows) and send them to copilot-platform-coordination.
+- Draft PR #3025 = 040 package + notes (project branch). #2587 is on master. The #1821/#1906 sessions are archived.
+
 **State:** 21/29 tasks ✅ (003 closed 2026-11-23; 040 package built `b19410d9b7`, skills only, gate + 12 tests, schema-valid; T10 still to run live after 041). **PR #2587 MERGED to master `6129a7856f` (2026-11-23 21:56Z)**; ontology-r1 pinged. Follow-up draft PR #3025 (040 package + notes). **041 requested from uac-r2** (session ref [73f242]): dev deploy from master WITHOUT the spike, `Mcp:Enabled=true`, owner per-SHA go there; rollback `a48398746d`. Next: when it's live, T10 + S-1 with the owner (040 live part). #1821/#1906 side sessions archived (all work on master). Branch `work/spaarkeai-mcp-bff-api-r1`. Draft PR #2587: next is ready-for-review → CI (Tier 1 `Router` is the verdict, Tier 2 advisory) → owner master go. Coordinator session proposed (card `task_c499ae81`, "Copilot coordination and tenant tidy-up").
 
 **Done 2026-11-15:**
