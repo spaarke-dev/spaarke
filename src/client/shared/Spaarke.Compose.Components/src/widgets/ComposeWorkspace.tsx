@@ -225,6 +225,7 @@ import type {
 // `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
 // against, so both ends agree on the contract shape.
 import { COMPOSE_OPERATION_SCHEMA_VERSION } from '../types/compose-operations';
+import { COMPOSE_DOCUMENT_SCHEMA } from '../types/composeDocumentSchema';
 
 // Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
 // follow-up task; this workspace only receives + stores what LoadAsync's response carries).
@@ -588,13 +589,12 @@ const COMPOSE_BLANK_TEMPLATE_HTML =
 // ---------------------------------------------------------------------------
 // FR-02 (task 011) — `sprk_document` field constants for the Search lookup
 // ---------------------------------------------------------------------------
-// Mirrors the field constants in `src/solutions/SpaarkeAi/src/ribbon/DocumentComposeLaunch.ts`
-// (the 1c ribbon launcher) — same schema, same resolution shape. Update both if the
-// schema is ever renamed.
-const SEARCH_FIELD_DOCUMENT_ID = 'sprk_documentid';
-const SEARCH_FIELD_GRAPH_ITEM_ID = 'sprk_graphitemid';
-const SEARCH_FIELD_DRIVE_ID = 'sprk_graphdriveid';
-const SEARCH_FIELD_DISPLAY_NAME = 'sprk_filename';
+// The names live in `../types/composeDocumentSchema` (ADR-012 Compose amendment, P-8), which also
+// names the ribbon launcher that mirrors them.
+const SEARCH_FIELD_DOCUMENT_ID = COMPOSE_DOCUMENT_SCHEMA.fields.documentId;
+const SEARCH_FIELD_GRAPH_ITEM_ID = COMPOSE_DOCUMENT_SCHEMA.fields.graphItemId;
+const SEARCH_FIELD_DRIVE_ID = COMPOSE_DOCUMENT_SCHEMA.fields.graphDriveId;
+const SEARCH_FIELD_DISPLAY_NAME = COMPOSE_DOCUMENT_SCHEMA.fields.fileName;
 const SEARCH_DOCUMENT_SELECT = `?$select=${SEARCH_FIELD_DOCUMENT_ID},${SEARCH_FIELD_GRAPH_ITEM_ID},${SEARCH_FIELD_DRIVE_ID},${SEARCH_FIELD_DISPLAY_NAME}`;
 
 // ---------------------------------------------------------------------------
@@ -4011,7 +4011,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     let lookupResults: LookupResult[];
     try {
       const navigationService = createXrmNavigationService();
-      lookupResults = await navigationService.openLookup({ entityType: 'sprk_document' });
+      lookupResults = await navigationService.openLookup({ entityType: COMPOSE_DOCUMENT_SCHEMA.entityName });
     } catch (err) {
       // No Dataverse-hosted context (e.g. a standalone non-MDA host) — the standard
       // lookup dialog is unavailable. Fail soft: leave the empty state as-is.
@@ -4033,7 +4033,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     let record: Record<string, unknown>;
     try {
       const dataService = createXrmDataService();
-      record = await dataService.retrieveRecord('sprk_document', picked.id, SEARCH_DOCUMENT_SELECT);
+      record = await dataService.retrieveRecord(COMPOSE_DOCUMENT_SCHEMA.entityName, picked.id, SEARCH_DOCUMENT_SELECT);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'loadFailed', errorMessage: `Failed to resolve the selected document: ${message}` });
@@ -5433,7 +5433,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           onEmailDocument={() => undefined}
           onCopyLink={() => undefined}
           onOpenRecord={() => {
-            void previewNavigationService.openRecord('sprk_document', previewDocumentId);
+            void previewNavigationService.openRecord(COMPOSE_DOCUMENT_SCHEMA.entityName, previewDocumentId);
           }}
         />
       ) : null}
