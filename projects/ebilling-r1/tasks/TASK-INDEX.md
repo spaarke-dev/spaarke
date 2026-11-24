@@ -60,7 +60,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 048 | ✅ [done] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
 | 049 | ✅ [done] | `InvoiceSubmissionProcessing` job | FULL | opus / high | none | 014, 016, 043, 044, 046, 047, 072, 073 |
 | 050a | ✅ [implemented, on master; owner answered §9 items 2-4 on 2026-11-23 (EB-D-262..264); the follow-ups are task 050c] | Redirect the review-confirm route into the submission operation (D-134) | FULL | opus / high | none | 042, 049 |
-| 050c | 🟡 [wip 2026-11-23] | 050a follow-ups: Reject after a Failed confirm submission (EB-D-262); drop InvoiceDate/TotalAmount from the confirm request (EB-D-263); confirm stops asking Create on sprk_invoice (EB-D-264) | FULL | sonnet / high | none | 050a |
+| 050c | ✅ [done; merged into work f36b7ee7ef; Opus review + fix round 1 (F1 reject during an unfinished undo is 503); uac-r2 APPROVED the authorization] | 050a follow-ups: Reject after a Failed confirm submission (EB-D-262); drop InvoiceDate/TotalAmount from the confirm request (EB-D-263); confirm stops asking Create on sprk_invoice (EB-D-264) | FULL | sonnet / high | none | 050a |
 | 050b | ✅ [done] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
 | 051 | ✅ [done] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | ✅ [done; browser ui-tests deferred to 112, notes/052-createinvoicewizard-rewire.md] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |

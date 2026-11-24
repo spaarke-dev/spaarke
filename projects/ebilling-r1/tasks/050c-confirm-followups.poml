@@ -4,7 +4,7 @@
     <title>050a follow-ups (owner 2026-11-23): Reject after a Failed confirm submission; drop InvoiceDate/TotalAmount from the confirm request; confirm stops asking Create on sprk_invoice</title>
     <phase>050 follow-up; added 2026-11-23 from the owner's answers to 050a section 9 (EB-D-262, EB-D-263, EB-D-264)</phase>
     <gate>startable (owner answers typed in the ebilling-r1 session 2026-11-23)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code on an authorization filter (the confirm route's checks) and a write-path refusal; tags bff-api, auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
