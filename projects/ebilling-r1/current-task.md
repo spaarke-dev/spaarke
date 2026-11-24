@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-23 (checkpoint: 194 + 096 agents running; owner questions open)
+> **Last Updated:** 2026-11-23 (checkpoint: owner answered 050a/089/M2; next is 050c, 089 close-out, 053 → 079 → 112)
 > Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,25 +10,28 @@
 
 ## Quick recovery
 
-- **Running now (agents, background):**
-  - **194 ✅** merged 96bcf65dbb; dev forms cleaned, -Verify PASS, uac-r2 notified before and after.
-  - **096 ✅** merged into work 98801e9b9f (Opus review: F2 fixed f60f51a2a3); word-add-in-r1 no objection. Tell word-add-in-r1 when it is on the dev BFF (range check).
+- **Owner answers 2026-11-23 (record them in the notes; not yet recorded except M2):**
+  - **050a Q2 = (b):** allow Reject of a confirmed document only after its submission ended **Failed** (no invoice). After a Rejected submission an invoice exists, so the document is linked and reject stays 409.
+  - **050a Q3 = (b):** drop `InvoiceDate` and `TotalAmount` from the confirm request contract AND from the Invoice Review page.
+  - **050a Q4:** the owner said "a user (which can be a reviewer) can manually create an invoice; we need a manual invoice create option; whichever option supports this". Manual create today = CreateInvoiceWizard (052) → `POST /api/finance/{core}/{id}/invoice-submissions`, which checks `finance.submit_invoice` = Read + AppendTo on the core record, NOT Create on sprk_invoice (`OperationAccessPolicy.cs:195-201`). Confirm checks Write on the document plus a Create-on-sprk_invoice table privilege. So **(b)**: confirm uses the same check as the manual submit. This keeps working after 096b D3 removes user Create on sprk_invoice. Tell the owner that a "manual create" with NO PDF (typed invoice) does not exist today; ask whether it is needed.
+  - **089 Q4 = (a):** keep allowing "Change for this record" on a rule that a newer Procedure version dropped (flexibility, rare case). No code change; record it as a decision.
+  - **089 Q5 = (b):** the 089d live child-unit proof waits for the first customer with child units. The owner notes that billing admins generally have access to all rules.
+  - **M2:** wait for 112 (recorded, 02d3477efc).
+  - **112:** "ok; what is holding up 079? proceed".
 - **Exact next actions:**
-  1. When an agent reports: Opus adversarial review (one pass for 194; 096 is bff-api, one pass), fix rounds, a scoped re-check, then merge `--no-ff` into work.
-  2. **194:** uac-r2 BEFORE notice, then `-Apply` on dev (owner go typed 2026-11-23: "yes proceed with these"), then `-Verify` and the AFTER notice.
-  3. **096:** send word-add-in-r1 the merge SHA; it range-checks the change once it is on the dev BFF.
-- **Owner questions asked 2026-11-23 (waiting on answers):**
-  - 050a §9 items 2-4: reject after confirm; drop InvoiceDate/TotalAmount from the confirm request; the confirm privilege.
-  - 089: refuse "change rule" on a rule a newer Procedure version dropped (record not pinned); 089d live child-BU proof on dev, now or later.
-  - M2: ANSWERED 2026-11-23, wait for task 112 (the Invoice Review page reaches dev with the WP4 deploy, after 079).
-- **Master PR #3029 OPEN (2026-11-23):** 194 + 096 + ontology-r1 follow-ups; ontology-r1 asked to review; merge needs the owner's go in THIS session. After merge: uac-r2 builds dev BFF from master (the deploy go is the owner naming the exact SHA in uac-r2's session, not here) and checks 096's OFFICE_023 first; uac-r2 sends the live notice to us and word-add-in-r1.
-- **Master PR #2992 ✅ merged 2026-11-23 16:35Z (2d83b246ae).** ontology-r1s follow-ups (cd485c6c5e, 71496ac36c, dc628e7152) go in the NEXT eBilling PR.
-- **164 ✅ 2026-11-23:** dev was already in the target state; -Verify and the SecureChild -Verify PASS; uac-r2 acked.
-- **Dev BFF a48398746d ✅ (uac-r2, 2026-11-23 18:43Z, carries #2992 = 117/123/124/193):** gate PASSED 18:43–19:11Z. 123 check count 0, K1 closed (notes/123 §12). DynamicCommandResolver exceptions are pre-existing (#3005, uac-r2).
+  1. Record the answers: 050a notes §9, 089 notes (K1 row 4 and 089d), decisions-log (new EB-D ids), and the TASK-INDEX rows 050a and 089. 089 can then close ✅. Its stale-Signals close stays a known limit; the message to the reviewer says so.
+  2. Create POML **050c** (050a follow-ups Q2/Q3/Q4: BFF confirm/reject, the Invoice Review page, tests; FULL, sonnet/high; uac-r2 reviews the privilege change). Run it through an implementer, then an Opus review.
+  3. **079 is blocked only by 053** (WP2 deploy; steps 2-3 done 2026-11-03; steps 1 and 4-13 open: app settings, field security script, BFF, route smoke, SPA, solution source, end to end). 089 closes with (1). Then 053 → 079 → 112.
+     - The deploy model has changed since the POMLs were written: dev BFF builds come from master, by uac-r2, on the owner's exact-SHA go in uac-r2's session.
+     - 053 step 4 names retired settings (ProcedureLibraryContainerId and EbillingOutputContainerId are retired by 092 and 124). Re-plan 053's remaining steps against the current state before running anything live.
+     - Live Dataverse writes need the owner's typed OK in this session plus uac-r2 notices.
+- **Master PR #3029:** auto-merge ON (owner go 2026-11-23), merge commit, pinned to head e734071ba5. ontology-r1 approved; uac-r2 096 check PASS. **Do NOT push work/ebilling-r1 until #3029 merges.** Local commits are waiting: 02d3477efc plus this checkpoint. After the merge, uac-r2 builds the dev BFF from master and sends the live notice to us and word-add-in-r1 (096 range check).
+- **Dev BFF a48398746d ✅** (uac-r2, carries #2992 = 117/123/124/193). The gate passed; the 123 check count was 0, so K1 is closed.
 - **Stays off:**
-  - 117s Apply stays off until 079 (owner OK). Precondition #2982 is FIXED on master (#3011, 33d7c6a6ad): it holds once the deployed BFF contains that commit.
-  - `Ebilling:StoredFileReconcileEnabled` stays false (F4, DEF-044, owner go via uac-r2).
-- **Uncommitted files:** none.
+  - 117's Apply stays off until 079 (owner OK). Precondition #2982 is FIXED on master (#3011, 33d7c6a6ad); it holds once the deployed BFF contains that commit.
+  - `Ebilling:StoredFileReconcileEnabled` stays false.
+- **Uncommitted files:** none (the checkpoint is committed locally, not pushed).
+- **Machine load:** BFF unit runs time out (3-minute per-test timeouts) under load. Rerun the failing classes with `-- xUnit.MaxParallelThreads=4`.
 ## Recently done (detail in the notes and git)
 
 - **193 ✅** merged into work c21bde55a2 (branch `task/ebilling-193`, tip 46a89e55f8). sprk_ratecard's sprk_matter, sprk_project and sprk_workassignment lookups and their 3 relationships were retired from the source, the schema scripts and the docs.
