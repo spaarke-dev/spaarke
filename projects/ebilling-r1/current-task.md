@@ -1,7 +1,7 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-23 (checkpoint: owner answered 050a/089/M2; next is 050c, 089 close-out, 053 → 079 → 112)
-> Older detail: `notes/handoff-history/current-task-2026-11-20a.md` (the previous state, verbatim), plus `-2026-11-16a`, `-15a` and `-13a`.
+> **Last Updated:** 2026-11-24 (checkpoint: master PR #3051 open with iss048 + iss046; checklist Q first run Failed on a dev data gap, re-run pending)
+> Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
 
@@ -10,29 +10,27 @@
 
 ## Quick recovery
 
-- **Owner answers 2026-11-23 (record them in the notes; not yet recorded except M2):**
-  - **050a Q2 = (b):** allow Reject of a confirmed document only after its submission ended **Failed** (no invoice). After a Rejected submission an invoice exists, so the document is linked and reject stays 409.
-  - **050a Q3 = (b):** drop `InvoiceDate` and `TotalAmount` from the confirm request contract AND from the Invoice Review page.
-  - **050a Q4:** the owner said "a user (which can be a reviewer) can manually create an invoice; we need a manual invoice create option; whichever option supports this". Manual create today = CreateInvoiceWizard (052) → `POST /api/finance/{core}/{id}/invoice-submissions`, which checks `finance.submit_invoice` = Read + AppendTo on the core record, NOT Create on sprk_invoice (`OperationAccessPolicy.cs:195-201`). Confirm checks Write on the document plus a Create-on-sprk_invoice table privilege. So **(b)**: confirm uses the same check as the manual submit. This keeps working after 096b D3 removes user Create on sprk_invoice. Tell the owner that a "manual create" with NO PDF (typed invoice) does not exist today; ask whether it is needed.
-  - **089 Q4 = (a):** keep allowing "Change for this record" on a rule that a newer Procedure version dropped (flexibility, rare case). No code change; record it as a decision.
-  - **089 Q5 = (b):** the 089d live child-unit proof waits for the first customer with child units. The owner notes that billing admins generally have access to all rules.
-  - **M2:** wait for 112 (recorded, 02d3477efc).
-  - **112:** "ok; what is holding up 079? proceed".
-- **Exact next actions:**
-  1. Record the answers: 050a notes §9, 089 notes (K1 row 4 and 089d), decisions-log (new EB-D ids), and the TASK-INDEX rows 050a and 089. 089 can then close ✅. Its stale-Signals close stays a known limit; the message to the reviewer says so.
-  2. Create POML **050c** (050a follow-ups Q2/Q3/Q4: BFF confirm/reject, the Invoice Review page, tests; FULL, sonnet/high; uac-r2 reviews the privilege change). Run it through an implementer, then an Opus review.
-  3. **079 is blocked only by 053.** 053 was re-planned on 2026-11-23 (`notes/053-wp2-deploy.md`, last section). Every read-only check on dev passes, and the BFF and SPA steps are superseded by the master deploys. 053 now closes on owner checklist **Q** (firm portal submissions: one Accepted, one Rejected). Then 079 → 112. 089 and 050a are closed.
-  4. **050c ✅** merged into work f36b7ee7ef. **Master PR #3038 is open** (owner go 2026-11-24; no auto-merge). It carries origin/master 44c4cd5b01, merged in aba7284ed8. Tests: ArchTests filtered 347/0, unit filtered 1,870/0. uac-r2 APPROVED; ontology-r1 asked to review. The PR body has the before/after authorization table ontology-r1 wanted. **ontology-r1 asks** that the PR body state what the manual-submit check grants and refuses compared with the Create check it replaces, and point to the must-fail tests: no Write on the document, no Append on the document, no Read or AppendTo on the core record, no AppendTo on the firm (FinanceEndpointsAuthorizationContractTests).
-     - The deploy model has changed since the POMLs were written: dev BFF builds come from master, by uac-r2, on the owner's exact-SHA go in uac-r2's session.
-     - 053 step 4 names retired settings (ProcedureLibraryContainerId and EbillingOutputContainerId are retired by 092 and 124). Re-plan 053's remaining steps against the current state before running anything live.
-     - Live Dataverse writes need the owner's typed OK in this session plus uac-r2 notices.
-- **Master PR #3029 MERGED** 2026-11-24 00:51Z at f1e2fc6cce. #2997 is closed and the work branch is pushed. uac-r2 has f1e2fc6cce in its next dev BFF candidate (master after #3032). On the owner's SHA go in its session, it will send the live notice to us and to word-add-in-r1 (096 range check). ontology-r1 and word-add-in-r1 have been told.
-- **Dev BFF a48398746d ✅** (uac-r2, carries #2992 = 117/123/124/193). The gate passed; the 123 check count was 0, so K1 is closed.
+- **Master PR #3051 OPEN** (owner said "Yes open pr", 2026-11-24): iss048, iss046 (Closes #3001), the rule-type options script fix and notes. No conflicts with master at open. Not bound, no auto-merge. Merge as a merge commit once CI and the owner agree. After it merges: iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
+- **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
+- **Dev BFF 0362599b94** live since 2026-11-24 (uac-r2's deploy; carries 050c). healthz 200; confirm and reject return 401 unauthenticated. Evidence: `notes/050c-confirm-followups.md`. Owner checklist **R** (Office add-in) is ready to test.
+- **Checklist Q first run (2026-11-24) Failed** on MAT-000113: the matter is root-BU owned on dev, so the submission was refused `record_owner_restricted_content_team_unresolved`. Not an eBilling defect; uac-r2 confirmed and filed the gap as #3047 (149 root-owned dev records; re-homing is an owner decision uac-r2 raises). Private detail stays with uac-r2. **Re-run:** PAT-792345, invoice number `2026024892`, PO blank (other BU1 matters are listed in checklist Q). Avoid MAT-000113 and MAT-000065.
+- **iss048 ✅** merged into work f4f5b06f52 (result screen title and icon follow the outcome; record-setup Failed text). Sonnet review: no F-class, K1-K8 in `notes/iss048-submission-result-screen.md`.
+- **053:** every read-only check passes, and its BFF and SPA steps are superseded by the master deploys. It closes on owner checklist **Q**: one Accepted firm-portal submission with sample B-0050. The Rejected check moved into **079 step 10**, because dev has no published Reject rule: publish an InvoiceAge rule (maxAgeDays 180, Reject), then the owner submits B-0082 (dated 2025-04-01). Both PDFs were sent to the owner; the copies are in the session scratchpad `samples\`, and the originals in `notes/evaluation-set/local/synthetic/` (gitignored).
+- **079 prep (read-only, 2026-11-24), step 2:**
+  - These scripts report nothing to create: Procedure schema, Stored File schema, AddedFee/Discount options, rejection-reason schema.
+  - Deploy-EbillingRuleTypeOptions.ps1 fixed (d566d01136): it tolerates AddedFee/Discount; -WhatIf exits 0.
+  - Step 3: settings, the three containers and the container-scope role are already on dev; live step (b) has nothing to set.
+  - Step 4: both -Verify PASS. Evidence: `notes/079-wp3-deploy.md`.
+- **ISS-046 (#3001) ✅** merged into work 234828cfb2 (Sonnet review, fix round 1, Pester 27/0). #3001 closes when #3051 merges.
+- **ISS-047 (#3042) filed:** the drift-check script misreads `iss028`/`iss040` as 028/040 and does not parse hyphen-suffixed ids. The real drifts were reconciled by hand (084d, 093, 113 completed; 053 and 161 set to 🔄). Two phantom drifts remain (028, 040).
+- **Decisions:** EB-D-267 (owner): no typed (no-PDF) invoice create is needed.
+- **Blocked chain:** 053 (owner Q) → 079 → 112, 189 and 160. 121 waits for uac-r2 191. 136 and 153 are deploy close-outs after 079/112.
 - **Stays off:**
-  - 117's Apply stays off until 079 (owner OK). Precondition #2982 is FIXED on master (#3011, 33d7c6a6ad); it holds once the deployed BFF contains that commit.
+  - 117's Apply stays off until 079, with the owner's OK. #2982 is fixed on master.
   - `Ebilling:StoredFileReconcileEnabled` stays false.
-- **Uncommitted files:** none (the checkpoint is committed locally, not pushed).
-- **Machine load:** BFF unit runs time out (3-minute per-test timeouts) under load. Rerun the failing classes with `-- xUnit.MaxParallelThreads=4`.
+- **Clean-up:** the iss048 agent worktree is removed. The agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-afe7e9fefac5f933f` is locked by the app (pid 39572). Remove it with Remove-WorktreeSafe once the lock is gone. Its branch was fully pushed.
+- **Machine load:** rerun timed-out classes with `-- xUnit.MaxParallelThreads=4`.
+
 ## Recently done (detail in the notes and git)
 
 - **193 ✅** merged into work c21bde55a2 (branch `task/ebilling-193`, tip 46a89e55f8). sprk_ratecard's sprk_matter, sprk_project and sprk_workassignment lookups and their 3 relationships were retired from the source, the schema scripts and the docs.

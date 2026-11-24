@@ -8,8 +8,9 @@
     more, yet the invoice main form (eBilling section) and the quick-create form still show them, so users see an "Extraction Status"
     that never changes. The SpaarkeMaster source of both forms and the eBilling section in Deploy-EbillingFormsViews.ps1 no longer name
     them (task 194). This script brings the LIVE dev forms in step, and it is the ONLY way this task does it: do NOT re-run
-    Deploy-EbillingFormsViews.ps1 to remove the main-form control. In Section mode that script rebuilds the whole section_ebilling and
-    would drop the qv_billingexport quick view (a pre-existing defect, filed separately), so it is not a safe tool for this change.
+    Deploy-EbillingFormsViews.ps1 to remove the main-form control. In Section mode that script now MERGES section_ebilling (it keeps
+    cells it does not own, the qv_billingexport quick view included, ISS-046), but it never removes a control, so it cannot remove this
+    one either.
 
     The COLUMNS and the sprk_extractionstatus option set are NOT touched (deleting them is a separate, destructive owner decision).
     Nothing but the two controls (their cell, and the row, section and column they leave empty) is removed from the two forms.

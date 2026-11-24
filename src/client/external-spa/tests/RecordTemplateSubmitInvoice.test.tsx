@@ -855,7 +855,8 @@ describe('Submit invoice: closing the modal', () => {
       expect(screen.getByRole('dialog', { name: 'Submit invoice' })).toBeTruthy();
 
       await act(async () => accept({ submissionId: SUBMISSION_ID, trackingNumber: 'TRK-1' }));
-      await within(child).findByText('Invoice received', undefined, { timeout: 20000 });
+      // iss048: the result heading follows the polled status; the status answers Accepted within the act above.
+      await within(child).findByText('Invoice accepted', undefined, { timeout: 20000 });
       expect(signalOf(dialog)).toBe(before);
       fireEvent.click(within(child).getByRole('button', { name: /^done$/i }));
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);

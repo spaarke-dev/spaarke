@@ -2527,7 +2527,7 @@ Task 050b deleted the legacy invoice extraction path, so nothing writes `sprk_in
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work/ebilling-r1 (task iss046, merge 234828cfb2; Sonnet review + fix round 1). #3001 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 194 adversarial review, finding 7 (found in passing; pre-existing) |
@@ -2546,3 +2546,33 @@ In Section mode the forms script rebuilds `section_ebilling` from its `Cols` lis
 
 **Estimated effort**: half a day.
 **Blockers**: none. Task 194 does not use the forms script for its removal.
+
+### ISS-047 — Task-status drift check misreads iss-prefixed and hyphen-suffixed task ids
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Index tidy-up (2026-11-24): running `scripts/check-task-status-drift.ps1` on this project |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3042 |
+
+**Description**
+
+The status-first row pattern lets `[^\s|]+` take the letters of `iss028` as a marker and reads `028` as the id. So the `iss028` and `iss040` rows overwrite the real `028` and `040` rows, which gives a phantom status drift on 028 and 040. Ids with hyphenated suffixes (`084h-1`, `095f-2e2a`, `130-0`) match neither pattern, so their POMLs are reported as having no index row: 62 unpaired entries here, mostly phantoms. The check is the task-completion gate, and noise hides real drift. The 7 real drifts were resolved by hand on 2026-11-24:
+- POML set to completed: 084d, 093, 113.
+- 053: the POML is now in-progress, and its index marker is now 🔄 (the script reads 🟡 as done).
+- 161: index marker now 🔄.
+
+**Entry-points**
+
+- `scripts/check-task-status-drift.ps1` around :134 (`$rowPattern`) and :146 (`$idFirstPattern`)
+- `pwsh scripts/check-task-status-drift.ps1` on `work/ebilling-r1`
+
+**Suggested fix**: forbid a letter right before the id (lookbehind), extend the id grammar to a letter prefix and hyphenated suffixes, add must-fire and must-not-fire cases, and compare `-All` parse counts before and after.
+
+**Estimated effort**: half a day.
+**Blockers**: none.
+**Related**: the shared script is used by every project's task-execute Steps 10-11.
+
+---

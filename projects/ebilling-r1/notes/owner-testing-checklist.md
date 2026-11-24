@@ -173,10 +173,12 @@ Merged into the work branch 2026-11-22 (18b02cbdcf). Nothing visible changes; th
 
 ## Q. A firm submits through the external portal (task 053): ready to test on dev now
 This closes task 053. After it, task 079 has no open dependency. The dev BFF and the external portal both run master (the portal was deployed 2026-11-23).
-- [ ] Sign in to the external portal as a firm user who has access to a matter. Submit a sample invoice PDF on that matter. The portal shows **Processing**, then **Accepted**, with a tracking number such as `INV-123.1`.
+- 2026-11-24, first run: **Failed** on matter MAT-000113. The cause is that matter's dev setup, not the invoice: MAT-000113 and MAT-000065 cannot take invoices on dev. Re-run on another of the firm's matters, e.g. PAT-792345. In the form, type the invoice number as `2026024892` (the portal stores exactly what is typed in Invoice number and PO number) and leave PO number blank.
+- [ ] Sign in to the external portal as a firm user who has access to a matter. Submit the sample `Accepted-sample-B-0050-INV-2026024892.pdf` (sent in the session; evaluation-set B-0050, invoice 2026024892) on that matter. The portal shows **Processing**, then **Accepted**, with a tracking number such as `INV-123.1`.
 - [ ] In Spaarke, that invoice is **In Review** on the matter. Its lines are filled in with codes, and it has an approval portion.
-- [ ] Submit a second sample that breaks a published **Reject** rule on that matter. The portal shows **Rejected** with a reason. In Spaarke the invoice exists, in status Rejected (D-101: every submission that is read creates its invoice).
+- Moved to task 079 (2026-11-24): the **Rejected** check. Dev has no published Reject rule yet; 079 step 10 publishes the first rules. Once it does, you submit `Rejected-sample-B-0082-INV-2025-34586-dated-2025-04-01.pdf` (sent in the session), which breaks a 180-day invoice-age rule, and the portal should show **Rejected**.
 - [ ] The portal's submission screens look right in dark mode too.
+- [ ] After the next portal deploy from master (iss048): the result screen's title follows the outcome ("Invoice accepted", "Invoice rejected", "Invoice not processed"). A failure caused by the record's setup no longer says "Submit it again".
 
 ## R. Office add-in no longer files to an invoice (task 096): live on dev since 2026-11-24 (BFF 996928732e)
 - [ ] In the Outlook add-in, open Save and search for an invoice. It appears in the search results, but it cannot be chosen as the place to save the email.
