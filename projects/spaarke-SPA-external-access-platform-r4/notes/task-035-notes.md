@@ -13,6 +13,7 @@
   - a) Project only the id: no thread name, subject or other thread column. `ToExternalDto` sets one property, `ThreadId = message.ThreadId?.ToString("D")`; `ExternalMessageDto` gained exactly one property (`threadId`); the thread name is not read on this path.
   - b) No external route may accept `threadId` as input; posts keep deriving the thread from the record. No route, request DTO or query parameter was added or changed; `PostExternalMessageRequest` is untouched, and the post's 201 body leaves `threadId` null.
   - c) Never serialize `ThreadMessageDto` straight to an external caller; keep the allow-list projection. `ThreadMessageDto.ThreadId` is `[JsonIgnore]` (internal wire unchanged, test below) and the only external reader is `ToExternalDto`.
+- 2026-11-24: uac-r2 checked the final diff (`8c08c7bcd1`) against the conditions: **APPROVED** (value from the same parsed row the filters and the open-thread gate decided on; no route or request change; internal wire unchanged).
 - Tests added for the verdict: a filtered private-thread / internal-only message's thread id appears nowhere in the serialized body; a row with no thread lookup answers `threadId: null` (not a failure); the `ExternalNotificationDto` property set is pinned (reflection); the `ExternalMessageDto` allow-list is pinned twice (serialized and reflection).
 
 ## Files changed
