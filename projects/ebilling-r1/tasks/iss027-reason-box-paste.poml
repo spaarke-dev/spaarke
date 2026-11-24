@@ -4,7 +4,7 @@
     <title>ISS-027 (#2878): RecordProcedures Reason boxes no longer cut pasted text at 2,000 characters without a message</title>
     <phase>Issue fix; filed 2026-11-17 from the 084h-4 review (pre-existing)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in a code page.</rigor-reason>
     <model-tier>sonnet</model-tier>

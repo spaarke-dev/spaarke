@@ -16,7 +16,7 @@ import { Button, Caption1, Field, MessageBar, MessageBarBody, MessageBarTitle, R
 import type { RemovalPreview, WriteFailure } from '../../services/overridesApi';
 import type { DryRunView } from '../../services/dryRunApi';
 import { MAX_NOTE_CHARS, noteToSend } from '../../services/overridesApi';
-import { NOT_ALLOWED_BOTH } from './plan';
+import { MAX_REASON_CHARS, NOT_ALLOWED_BOTH, reasonProblem } from './plan';
 import { ADVISORY_LINE, NOT_LISTED, UNCHECKED_CLOSE_LINE, affectedLine, dryRunFailureText, impactChanges, previewFailureText, type ImpactChange } from './impact';
 
 export const useWizardStyles = makeStyles({
@@ -329,6 +329,25 @@ export const NOT_RECORDED_LINE = 'The change was saved, but its decision record 
 
 /** The characters a note counts, after trimming (what the server counts), with a thousands separator: "2,145". */
 const noteCount = (value: string): string => (noteToSend(value)?.length ?? 0).toLocaleString('en-US');
+
+/**
+ * ISS-027: the Reason box of every wizard (Assign, Procedure, Rule). Like the Note box it never cuts a paste (no `maxLength`): the count shows the
+ * trimmed length against the limit, a reason over it says so under the box, and the wizard's own check (`reasonValid`) keeps Next off.
+ */
+export const ReasonField: React.FC<{ value: string; onChange: (value: string) => void }> = ({ value, onChange }) => {
+  const problem = reasonProblem(value);
+  return (
+    <Field
+      label="Reason"
+      required
+      hint={`${noteCount(value)} / ${MAX_REASON_CHARS.toLocaleString('en-US')} characters.`}
+      validationState={problem ? 'error' : 'none'}
+      validationMessage={problem ?? undefined}
+    >
+      <Textarea value={value} onChange={(_, d) => onChange(d.value)} resize="vertical" />
+    </Field>
+  );
+};
 
 export const ConfirmStep: React.FC<{
   rows: ReadonlyArray<readonly [string, React.ReactNode]>;

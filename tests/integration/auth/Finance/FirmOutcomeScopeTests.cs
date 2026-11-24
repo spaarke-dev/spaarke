@@ -1362,9 +1362,10 @@ public sealed partial class FirmOutcomeScopeTests : IAsyncLifetime
         var line = items[0];
         line.GetProperty("decision").GetString().Should().Be("RejectionFinding");
         line.GetProperty("lineNumber").GetInt32().Should().Be(3);
-        line.GetProperty("valuesRead")[0].GetProperty("name").GetString().Should().Be("line.rate");
+        line.GetProperty("valuesRead")[0].GetProperty("name").GetString().Should().Be("Rate");
         line.GetProperty("valuesRead")[0].GetProperty("value").GetString().Should().Be("450.00");
         line.GetProperty("valuesRead").GetArrayLength().Should().Be(2, "the approved rate is a reference value, not one extracted from the invoice");
+        line.GetProperty("valuesRead")[1].GetProperty("name").GetString().Should().Be("Hours");
         line.GetProperty("valuesRead")[1].GetProperty("value").GetString().Should().Be("2.5");
         line.GetProperty("firmReasons").EnumerateArray().Select(r => r.GetString()).Should().Equal("Your rate is above the agreed rate.");
         var citation = line.GetProperty("citations").EnumerateArray().Should().ContainSingle().Subject;
@@ -1375,7 +1376,8 @@ public sealed partial class FirmOutcomeScopeTests : IAsyncLifetime
 
         items[1].TryGetProperty("lineNumber", out _).Should().BeFalse("an invoice-level finding names no line");
         text.Should().NotContain(ForgedReason).And.NotContain(InternalStoredClause).And.NotContain("INTERNAL").And.NotContain("0.42")
-            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain("400.00").And.NotContain(version.ToString("D")).And.NotContain(invoice.ToString("D"));
+            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain("400.00").And.NotContain(version.ToString("D")).And.NotContain(invoice.ToString("D"))
+            .And.NotContain("line.rate").And.NotContain("line.hours", "ISS-042: the firm reads a label, never the internal key the rule read");
         _clauseInvoices.Should().NotBeEmpty().And.OnlyContain(id => id == invoice);
         _projectionReads.Should().NotContain("sprk_billingevent", "a rejected submission's live lines are never read");
     }

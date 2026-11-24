@@ -372,6 +372,40 @@ public sealed class InvoiceFileUploadTests
         AssertNothingStored(host);
     }
 
+    [Fact(DisplayName = "ISS-043 fix round 1 (F1): a body stream fault answered 400 ebilling.files.file_required is logged at Warning with the exception type and HResult, never the message")]
+    public async Task BodyStreamFault_400_LogsAWarning_WithoutTheExceptionMessage()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.OnRequest = MalformedMultipartBodies.Apply(abandoned: false);
+
+        var response = await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("ebilling.files.file_required");
+        var entry = host.Warnings.Entries.Where(e => e.Message.Contains("multipart request body could not be read")).Should().ContainSingle().Subject;
+        entry.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+        entry.Message.Should().Contain(nameof(IOException)).And.Contain("HResult");
+        entry.Message.Should().NotContain(MalformedMultipartBodies.FaultMessage, "the parser's message can echo request content");
+        entry.Exception.Should().BeNull("the exception object (and so its message) is not logged");
+        AssertNothingStored(host);
+    }
+
+    [Fact(DisplayName = "ISS-043 fix round 1 (K2) must-not-fire: a body that fails with a ConnectionResetException (token not cancelled) is not answered as a 400")]
+    public async Task ConnectionReset_IsNotA400()
+    {
+        await using var host = await Host.StartAsync();
+        SeedInvoice(host);
+        GrantWrite(host);
+        host.OnRequest = MalformedMultipartBodies.ApplyConnectionReset();
+
+        var act = async () => await host.PostAsync(InvoiceId, OneFile(Csv));
+
+        await act.Should().ThrowAsync<Microsoft.AspNetCore.Connections.ConnectionResetException>();
+        AssertNothingStored(host);
+    }
+
     [Fact(DisplayName = "Fix round 1 (F2): the 201 fileName is the name exactly as the row stores it (one truncation rule): a 450-character name answers the row's 400")]
     public async Task LongName_201FileName_IsTheRowsName()
     {

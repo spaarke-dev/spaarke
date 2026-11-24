@@ -2112,7 +2112,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (fbba523806, 2026-11-24); #2878 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Sonnet review of task 084h-4 (the Note box had the same flaw and was fixed in 084h-4's fix round; the Reason boxes are pre-existing) |
@@ -2152,7 +2152,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (5f75e3e930, 2026-11-24); #2880 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Opus adversarial review of task 095f-2d1 (extends existing behaviour for a changed reason or amount) |
@@ -2280,7 +2280,7 @@ The invoice stays held for good. Before ISS-031 the other verb was a wrong but w
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (263aa4c674, 2026-11-24, task iss043); closes when it reaches master |
 | **Urgency** | someday |
 | **Filed** | 2026-11-17 |
 | **Source** | 095f-2e2a review (Opus), found in passing |
@@ -2422,7 +2422,7 @@ A reject or return carrying the reviewer-confirmed notice can stop part way: a 5
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (1b756a83d3, 2026-11-24); #2933 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-20 |
 | **Source** | Adversarial review of task 134 (found in passing, server side) |
@@ -2448,7 +2448,7 @@ A rejected submission's firm outcome (130c) carries each rejecting finding's `va
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (263aa4c674, 2026-11-24, task iss043); closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 123 adversarial review, pass B (found in passing) |
@@ -2574,5 +2574,67 @@ The status-first row pattern lets `[^\s|]+` take the letters of `iss028` as a ma
 **Estimated effort**: half a day.
 **Blockers**: none.
 **Related**: the shared script is used by every project's task-execute Steps 10-11.
+
+---
+
+### ISS-049 — Chat document, visualization and SPE admin upload routes mishandle a broken multipart body
+
+(ISS-048 is not used: the task id `iss048` was a checklist-Q fix, not an issue entry, and reusing the number would read as related.)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (AI and SPE admin routes; filed by ebilling-r1, which found it) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Task iss043 Opus adversarial review (found in passing, outside Finance) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3057 |
+
+**Description**
+
+Task iss043 fixed the Finance multipart routes. Three routes elsewhere in the BFF still mishandle a broken upload body:
+- `ChatDocumentEndpoints` and `VisualizationEndpoints` catch nothing around `ReadFormAsync`. A truncated multipart body throws `IOException`, which reaches the global handler: 500 logged at Error, instead of 400.
+- The SPE admin upload catches every exception except `SdapProblemException`, including `OperationCanceledException`, so an abandoned upload is logged at Warning with a stack trace and answered 400.
+
+Concrete failure: an authenticated caller who sends a truncated upload gets a server error, and the BFF logs an Error for a client fault.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs:377`
+- `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs:281`
+- `src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerItemEndpoints.cs:1036-1039`
+- Reference: the Finance routes after iss043 (`Api/Finance/InvoiceSubmissionHttp.cs`, `StoredFileEndpoints.cs`)
+
+**Suggested fix**: the iss043 catch (`IOException` when the request is not cancelled and is not a connection reset, answering 400 and logging a Warning with type and HResult only) on the first two; add `and not OperationCanceledException` plus the request-token check to the SPE admin catch-all. One regression test per route with a body that has no closing boundary.
+
+**Estimated effort**: 2–3 hours.
+**Blockers**: none.
+**Related**: task iss043, ISS-043 (#2978). `IFormFile`-bound routes are not affected. Not a security issue.
+
+---
+
+### ISS-050 — Line-decision lock expires after 2 minutes while a 1,000-line call can still be writing
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Task iss029 Opus adversarial review (found in passing, pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3059 |
+
+**Description**
+
+A line-decision call holds the invoice's processing lock for a fixed 2 minutes and never renews it. One call can cover up to 1,000 lines (Accept all Clean), and the record step writes one Decision Record per line with several Dataverse round trips each. If a large call outlives the lock, a second reviewer's decision can write a line the bulk call already updated but has not recorded; the bulk call then records "accept" on a line that shows Reduced, so line and record disagree. The real duration of a 1,000-line call on dev is not measured.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs:194` (`MaxLinesPerRequest`), `:210` (`LockDuration`), `:315` (acquire), the record loop (~843)
+- The approval path shares the lock (`RunAsync`)
+
+**Suggested fix**: measure a 1,000-line Accept all Clean on dev; then renew the lock per record chunk, size it to the call, or cap lines per call to what fits.
+
+**Estimated effort**: half a day plus the measurement.
+**Blockers**: none.
+**Related**: task iss029 (its pre-check relies on the lock between check and write). Not a security issue.
 
 ---
