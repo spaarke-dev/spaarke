@@ -143,7 +143,7 @@ public sealed class FinanceUniformNotFoundForRecordTests
             group.MapGet("/record/{id:guid}", host.Handle).AddFinanceAuthorizationFilter(
                 ctx => Check(ctx, FinanceCheckPath.Record, "finance.read"), FinanceDenial.UniformNotFoundForRecord);
             group.MapGet("/privilege/{id:guid}", host.Handle).AddFinanceAuthorizationFilter(
-                ctx => Check(ctx, FinanceCheckPath.Privilege, FinanceAuthorizationFilter.CreateInvoicePrivilege), FinanceDenial.UniformNotFoundForRecord);
+                ctx => Check(ctx, FinanceCheckPath.Privilege, "prvCreatesprk_Invoice"), FinanceDenial.UniformNotFoundForRecord);
             group.MapGet("/throws/{id:guid}", host.Handle).AddFinanceAuthorizationFilter(
                 _ => throw new InvalidOperationException("declaration fault"), FinanceDenial.UniformNotFoundForRecord);
 

@@ -595,8 +595,9 @@ public partial class RouteAuthorizationGuardTests
             + "(source-access filters), the impersonated entity search, reference data and an anonymous health check. "
             + "QuickCreateSourceAccessFilter gates the SOURCE read and passes through when no source is named; since task 166 "
             + "(S-69) the SAME filter also requires the caller's live CREATE privilege for the target table "
-            + "(prvCreatesprk_Matter / prvCreatesprk_Project / prvCreatesprk_Invoice, CallerRecordAccessProbe."
-            + "CallerHoldsPrivilegeAsync); the create stays app-only and team-owned (owner G5). POST /todo's "
+            + "(prvCreatesprk_Matter / prvCreatesprk_Project, CallerRecordAccessProbe."
+            + "CallerHoldsPrivilegeAsync); an invoice quick-create is refused first (400 OFFICE_023, ebilling-r1 task 096), before "
+            + "any privilege question; the create stays app-only and team-owned (owner G5). POST /todo's "
             + "TodoSourceAccessFilter likewise requires prvCreatesprk_Todo since task 166 (amendment c)."),
         new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
             "/api/office/communications/* — every read runs through IDataverseUserClient as the caller (task 127)."),
