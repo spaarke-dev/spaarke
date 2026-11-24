@@ -391,6 +391,43 @@ public class Issue2750_HeldWindowPastThePageBoundTests
     }
 
     /// <summary>
+    /// The same capped listing when the Secure Record owner team is gone by the time the synchronizer looks for the roots above the
+    /// changed rows (the job's own check saw it; it was removed in between): the walk answers "not applicable" and nothing is
+    /// reconciled, but the listing still read only up to its cap, so the report keeps it and the window moves only there. Losing
+    /// it on this path would move the window past rows the listing never read, and they would never be listed.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_ACappedRecentChangesListing_WhenTheSecureTeamVanishesBeforeTheWalk_StillReportsTheCap()
+    {
+        var harness = new Harness(this);
+        await harness.RunAsync(recentWrites: true, ordinaryWrites: false);
+        _world.MaxRowsPerPage = 1; // the 20-page bound is 20 rows
+        for (var i = 0; i < Rows; i++)
+        {
+            var id = Guid.NewGuid();
+            _world.Add("sprk_todo", id, ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam)));
+            _world.Modified("sprk_todo", id, At(i));
+        }
+
+        // Rows owned by the General team survive the listing's filter, so the synchronizer is asked about them — and by then
+        // the Secure team is gone (the job's own check already saw it, before the first to-do listing).
+        _world.AfterQueriesOf("sprk_todo", _world.QueriedTables.Count(t => t == "sprk_todo") + 1,
+            w => w.Remove("team", SecureChildShareWorld.SecureTeam));
+
+        _time.Advance(TimeSpan.FromMinutes(5));
+        var capped = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: false), Pass.RecentChanges);
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var next = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: false), Pass.RecentChanges);
+
+        using var scope = new FluentAssertions.Execution.AssertionScope();
+        capped.GetProperty("failure").ValueKind.Should().Be(JsonValueKind.Null, "a team that is gone leaves nothing to decide, it is not a failure");
+        capped.GetProperty("rowsChanged").GetInt32().Should().Be(20, "the listing read to the page bound, none of its rows owned by the Secure team");
+        capped.GetProperty("rootsFound").GetInt32().Should().Be(0);
+        capped.GetProperty("cappedAt").ValueKind.Should().Be(JsonValueKind.String, "the listing reached the page bound, and the report says so");
+        next.GetProperty("since").GetDateTime().Should().Be(At(19), "the window moves only to the cap, so the rows past it are listed next");
+    }
+
+    /// <summary>
     /// Two roots at one instant in different tables, the project's id below the matter's: past a carry of one, the key order (instant,
     /// then TABLE, then id) leaves the project out and keeps the matter, so the matter is walked first next run and the window
     /// resumes at the project's key. Ordering by id alone would swap them.
