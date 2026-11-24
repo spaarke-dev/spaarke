@@ -10,6 +10,21 @@
 
 ## Quick recovery
 
+- **NOW (2026-11-24 ~22:30Z): owner ran checklist Q; answering owner questions + issue batch 3 running.**
+  - **Q result:** accepted on MAT-000113. Invoice `5d9d271b-5f4e-c3b3-8543-981f2d947710`, "Morrison Foerster LLP - INV-123.1", tracking INV-123.1.1. It is In Review with 42 lines (41 Clean, 1 Flagged) and 1 approval portion. Coding JSON says Coded (UTBMS Litigation, FirmCodes). **053 can close.** Still TODO: mark the Q items, set 053 to ✅, and say that 079 is unblocked; 079 needs the owner's OK for its live steps.
+  - **Finding to investigate and file (not yet filed):** no BFF code writes the resolved-code lookups `sprk_taskcode`, `sprk_activitycode` and `sprk_expensecode` on `sprk_billingevent`; 0 lines on dev have them. The review reads the resolved code from the `coding` JSON in `sprk_extractionconfidence` (`InvoiceReviewReadService` ~275, ~846). `ApExportService.CodeAsync` (~1287) falls back to the as-billed text when the lookup is empty, so the AP export probably sends the firm's as-billed code, not the resolved one. Check the spec for FR-22, FR-30 and the AP export section, then fix or file.
+  - **Owner questions to answer:**
+    - (1) The "Invoice received" screen needs links to the invoice and to the related record. This is a new SPA feature (external SPA, result screen from iss048); propose a task, and copy spa-r4.
+    - (2) Where are the line items? The Invoice Review page.
+    - (3) Reject and flag checks: published billing rules with a Reject consequence (FR-26); dev has none until 079 step 10. Flags are findings on lines (1 Flagged here).
+    - (4) The Invoice Review page is blank because the web resource `sprk_invoicereviewpage` does NOT exist on dev (never deployed; that is task 112). The Console worklist (`openInvoiceReview.ts`) opens it. Option: deploy the page early, with the owner's go.
+  - **Batch 3 agents (base 72f2e54503):**
+    - iss049 (Sonnet): multipart handling on the chat, visualization and SPE admin routes;
+    - iss015 (Sonnet): client-lint for the 5 eBilling pages, plus the drift Pester in CI;
+    - iss025 (Opus): job retry back-off (also covers DEF-055 #2600).
+
+    Branches are `task/ebilling-iss049`, `-iss015` and `-iss025`. Next: review each (Sonnet for iss049/iss015, Opus for iss025), fix rounds, `--no-ff` merge, master PR.
+  - **Reconciled 095d-1 and 095d-2** as done (15398ea098). The 095d parent stays 🔄 because the 095d-3 UI is unverified (the Set firm UI exists in the Office add-in pane).
 - **Dev BFF 20129e985c** live since 2026-11-24 21:36Z (uac-r2's deploy, owner's go). It carries #3038, #3051 and #3065 (ISS-029, -042, -043/035), but not #3073 (ISS-050). Read-only checks at about 21:45Z: `/healthz` 200; unauthenticated `POST .../invoice-review/confirm` and `.../lines/decisions` both 401. The ISS-029 and ISS-050 behaviour shows only in the Invoice Review page (task 112). The firm labels (ISS-042) show in the portal after the external SPA deploy (checklist O).
 - **Master PR #3073 MERGED** 2026-11-24 21:32Z at fa96792811 (owner: "Yes, auto-merge"; required checks passed; the advisory Tier 2 api-office shard shows "fail" because its job was cancelled after its tests ran: verdict artifact = pass, 583/0). #3059, #2930, #3042 closed. Work fast-forwarded to master. Batch 2:
   - iss050 (#3059): lock renewal; merged 7da8f29320 after an Opus review, fix rounds 1-2 and a Sonnet re-check.
