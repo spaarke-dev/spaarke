@@ -132,3 +132,13 @@ Review of 3ffb780a76. Source and test changes are on `task/ebilling-iss043` (the
   MalformedMultipartUploadReturns400Tests, ExternalInvoiceFileRoutesTests (`xUnit.MaxParallelThreads=4`): 750 passed, 0 failed.
 - `Spaarke.ArchTests` filtered to RouteAuthorizationGuardTests and ExternalFileStoreRouteCensus: 114 passed, 0 failed.
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+
+## Review and merge (2026-11-24)
+
+One Opus adversarial pass over f5ec8b6a20..3ffb780a76: the 500-to-400 mapping and the repeated-field refusal are correct on every route and channel. Fixed in round 1 (a4a70b27ca): F2 (the pre-existing rate-card regression theory posted to a URL that failed on its query first, so it proved nothing), F1 (a server temp-disk IOException inside ReadFormAsync became a silent 400: now logged at Warning, type and HResult only; StoredFileEndpoints, the task-123 reference, too) and K2 taken (a connection reset propagates instead of a 400). Scoped re-check of the fix diff by the main session. Merged into work as 263aa4c674.
+
+Known limits:
+- K1: on the external route the repeated-field 400 is a validation problem with no top-level errorCode, unlike the route's other refusals. No first-party client sends a field twice (the SPA and the internal wizard each append once). spa-r4 is told at the PR.
+- K1: a request that repeats both a number field and a correction field gets only the number field's error first; nothing is written either way.
+- K1 (pre-existing): an earlier BadHttpRequestException catch already answers some client aborts ("Unexpected end of request content") with 400.
+- Found in passing, filed: ISS-049 (#3057), the chat document, visualization and SPE admin upload routes.

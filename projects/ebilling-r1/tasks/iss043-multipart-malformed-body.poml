@@ -4,7 +4,7 @@
     <title>ISS-043 (#2978) + ISS-035 (#2889): multipart upload routes answer a malformed body with 400, and refuse a repeated firmInvoiceNumber or poNumber</title>
     <phase>Issue fix; filed 2026-11-23 (task 123 review) and 2026-11-17 (095f-2e2a review), both found in passing</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on BFF routes, one of them the external (firm) submission route.</rigor-reason>
     <model-tier>sonnet</model-tier>

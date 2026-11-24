@@ -2280,7 +2280,7 @@ The invoice stays held for good. Before ISS-031 the other verb was a wrong but w
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (263aa4c674, 2026-11-24, task iss043); closes when it reaches master |
 | **Urgency** | someday |
 | **Filed** | 2026-11-17 |
 | **Source** | 095f-2e2a review (Opus), found in passing |
@@ -2448,7 +2448,7 @@ A rejected submission's firm outcome (130c) carries each rejecting finding's `va
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (263aa4c674, 2026-11-24, task iss043); closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 123 adversarial review, pass B (found in passing) |

@@ -143,7 +143,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | iss040 | 🔄 [merged into work; uac-r2 PASS; dev apply waits for owner OK; ships with the 1.3.2.0 (or next) SpaarkeMaster release] | ISS-040 #2901: rule set visibility native write hardening | FULL | sonnet / high | none | ISS-038 |
 | iss046 | ✅ [done 2026-11-24, merged 234828cfb2] | ISS-046 #3001: forms script Section mode keeps cells it does not manage (invoice Batch quick view) | STANDARD | sonnet / high | none | 194 |
 | iss048 | ✅ [done 2026-11-24, merged f4f5b06f52] | Invoice submission result screen: title and icon follow the outcome; no "Submit it again" for a record-setup failure (found in checklist Q) | FULL | sonnet / high | none | 053 |
-| iss043 | 🟡 [wip] | ISS-043 #2978 + ISS-035 #2889: multipart routes answer a malformed body with 400; a repeated firmInvoiceNumber or poNumber is refused | FULL | sonnet / high | none | 123 |
+| iss043 | ✅ [done 2026-11-24, merged 263aa4c674] | ISS-043 #2978 + ISS-035 #2889: multipart routes answer a malformed body with 400; a repeated firmInvoiceNumber or poNumber is refused | FULL | sonnet / high | none | 123 |
 | iss029 | 🟡 [wip] | ISS-029 #2880: a line decision repeated with other content answers 409 id_reused and writes nothing | FULL | opus / high | none | 095f-2d1 |
 | iss042 | ✅ [done 2026-11-24, merged 1b756a83d3] | ISS-042 #2933: firm rejection findings show firm labels, not raw valuesRead keys | FULL | sonnet / high | none | 130c, 134 |
 | iss027 | ✅ [done 2026-11-24, merged fbba523806] | ISS-027 #2878: RecordProcedures Reason boxes keep a long paste and hold Finish over the limit | FULL | sonnet / high | none | 084h-4 |
