@@ -37,9 +37,10 @@ public sealed class SolutionImportOptions
 
     /// <summary>
     /// How long the importer keeps waiting after the async operation reports Failed or Canceled while the import job
-    /// has not completed and no solution-history entry is open (ISS-032: the async operation is advisory — Dataverse
-    /// can fail a retry of the operation while the first attempt is still importing). Past this, the reported failure
-    /// stands. An open solution-history entry always keeps the importer waiting. Defaults to 10 minutes.
+    /// cannot be read and the (readable) solution history shows no open entry (ISS-032: the async operation is advisory
+    /// — Dataverse can fail a retry of the operation while the first attempt is still importing). Past this, the
+    /// reported failure stands. A readable, not-completed import job, an open solution-history entry, or an unreadable
+    /// history always keeps the importer waiting (only <see cref="ImportTimeout"/> ends that). Defaults to 10 minutes.
     /// </summary>
     public TimeSpan AsyncOperationFailureGrace { get; set; } = TimeSpan.FromMinutes(10);
 

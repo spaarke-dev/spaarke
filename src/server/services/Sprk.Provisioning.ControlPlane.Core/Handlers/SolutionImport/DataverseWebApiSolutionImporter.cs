@@ -410,7 +410,7 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                 "H6 {Solution}: an import is already in flight (import job {ImportJobId}, started {Started:O}) — waiting on it, not starting another.",
                 SpaarkePackage.SolutionUniqueName, running.ImportJobId, running.Since);
             var attachedResult = await PollImportAsync(
-                envUri, FreshTokenAsync, asyncOperationId: null, running.ImportJobId, running.Since, deadline, cancellationToken)
+                envUri, FreshTokenAsync, asyncOperationId: null, running.ImportJobId, running.Since, requiredVersion: null, deadline, cancellationToken)
                 .ConfigureAwait(false);
             if (attachedResult is ImportPollResult.Failed attachedFailed)
             {
@@ -450,7 +450,7 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
 
         var started = (ActionInvokeResult.Started)invokeResult;
         var pollResult = await PollImportAsync(
-            envUri, FreshTokenAsync, started.AsyncOperationId, importJobId, importStartedAt - ClockSkew, deadline, cancellationToken)
+            envUri, FreshTokenAsync, started.AsyncOperationId, importJobId, importStartedAt - ClockSkew, packageVersion, deadline, cancellationToken)
             .ConfigureAwait(false);
 
         if (pollResult is ImportPollResult.Failed pollFailed)
@@ -655,8 +655,12 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     /// advisory — Dataverse can retry the operation, and the retry fails ("Cannot start another [Import] … previous
     /// [Import] running") while the first attempt is still importing and then succeeds. An async operation that reports
     /// Failed while the import job is still running, or a solution-history entry is still open, therefore does not end
-    /// the wait; it ends only when the job completes, the data shows a failure, nothing is running any more, or the
-    /// <see cref="SolutionImportOptions.AsyncOperationFailureGrace"/> passes with no sign of life.
+    /// the wait; it ends only when the job completes, the data shows a failure, or nothing is running any more: the job
+    /// is gone or unreadable AND the history is readable with no open entry (an unreadable history is never "nothing
+    /// open"). A readable, uncompleted job is never ended on the
+    /// <see cref="SolutionImportOptions.AsyncOperationFailureGrace"/>; the overall deadline bounds a dead one.
+    /// For an import this run started, the solution history decides only once the job has been seen (or the operation is
+    /// terminal) and only through entries of the package version being imported.
     /// Throttling (429), server errors (5xx), an expired token (401), a not-yet-visible row (404) and transport errors
     /// are retried until <paramref name="deadline"/>; only a failure Dataverse REPORTED is
     /// <see cref="ImportPollResult.Failed.ReportedByDataverse"/>.
@@ -664,16 +668,26 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     /// <param name="asyncOperationId">The async operation this run started; <c>null</c> when attaching to an import already running.</param>
     /// <param name="importJobId">The import job to read; <c>null</c> when attaching to a running import whose job is not known yet (found by solution name).</param>
     /// <param name="since">Solution-history entries that started before this are not this import's.</param>
+    /// <param name="requiredVersion">
+    /// The package version this run is importing: solution-history entries of another version are not this import's.
+    /// <c>null</c> when attaching to an import already running (its version is checked by the caller afterwards).
+    /// </param>
     private async Task<ImportPollResult> PollImportAsync(
         Uri envUri,
         Func<CancellationToken, Task<string>> freshToken,
         Guid? asyncOperationId,
         Guid? importJobId,
         DateTimeOffset since,
+        string? requiredVersion,
         DateTimeOffset deadline,
         CancellationToken cancellationToken)
     {
         var solutionName = SpaarkePackage.SolutionUniqueName;
+        // An import THIS run started has its own job row and history entry only some seconds after the POST. Until the
+        // job has been seen (or the async operation is terminal) the history inside the skew window may be a previous
+        // attempt's, so it cannot decide. An attach (no async operation of ours) trusts the history from the start.
+        var ownImport = asyncOperationId is not null;
+        var jobSeen = false;
         DateTimeOffset? failedOperationSeenAt = null;
         var failedOperationLogged = false;
         double? lastProgress = null;
@@ -733,8 +747,9 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                     ? await ReadImportJobAsync(envUri, bearerToken, jobId, cancellationToken).ConfigureAwait(false)
                     : ImportJobSnapshot.Missing;
                 lastProgress = job.Progress ?? lastProgress;
+                jobSeen |= job.State is ImportJobState.Running or ImportJobState.Completed;
                 var history = SummarizeHistory(
-                    await ReadSolutionHistoryAsync(envUri, bearerToken, cancellationToken).ConfigureAwait(false), since);
+                    await ReadSolutionHistoryAsync(envUri, bearerToken, cancellationToken).ConfigureAwait(false), since, requiredVersion);
 
                 var now = _timeProvider.GetUtcNow();
 
@@ -775,18 +790,27 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                     }
 
                     failedOperationSeenAt ??= now;
-                    var stillRunning = job.State is ImportJobState.Running or ImportJobState.Unreadable;
-                    if (history.HasOpen || stillRunning)
+
+                    // The import is alive while its job is readable and not completed, or an entry of the solution
+                    // history is open. An UNREADABLE history says nothing — it is never "nothing open" (one 429/5xx
+                    // on that read used to end a still-running import as failed). Only the overall deadline ends a
+                    // wait on a live import.
+                    if (job.State == ImportJobState.Running || history.HasOpen || history.Unreadable)
                     {
                         if (!failedOperationLogged)
                         {
                             failedOperationLogged = true;
                             _logger.LogWarning(
                                 "H6 async operation {AsyncOperationId} for {Solution} reports statuscode {StatusCode} while the import is not finished " +
-                                "(job {JobState}, open history entry: {HasOpen}) — the operation status is advisory, waiting on the import.",
-                                asyncOperationId, solutionName, operation.StatusCode, job.State, history.HasOpen);
+                                "(job {JobState}, open history entry: {HasOpen}, history readable: {HistoryReadable}) — the operation status is advisory, waiting on the import.",
+                                asyncOperationId, solutionName, operation.StatusCode, job.State, history.HasOpen, !history.Unreadable);
                         }
-                        if (!history.HasOpen && now - failedOperationSeenAt.Value >= _options.AsyncOperationFailureGrace)
+                    }
+                    else if (job.State == ImportJobState.Unreadable)
+                    {
+                        // The job cannot be read, the history is readable and shows nothing open: allow the grace for
+                        // the job to become readable, then the reported failure stands.
+                        if (now - failedOperationSeenAt.Value >= _options.AsyncOperationFailureGrace)
                         {
                             return ReportedFailure(solutionName, operation, job, jobDiagnostic, importJobId, asyncOperationId);
                         }
@@ -802,9 +826,11 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                         return ReportedFailure(solutionName, operation, job, jobDiagnostic, importJobId, asyncOperationId);
                     }
                 }
-                else if (job.State == ImportJobState.Missing && !history.HasOpen)
+                else if (job.State == ImportJobState.Missing && !history.HasOpen && (!ownImport || jobSeen))
                 {
                     // (3) No readable job and the operation is not terminal (or is not ours to read): the history decides.
+                    //     For an import this run started only once its job has been seen — before that, an entry inside
+                    //     the skew window can belong to an earlier attempt.
                     if (history.HasSuccess)
                     {
                         LogSucceeded(operation, "solution history reports the import completed successfully");
@@ -1059,7 +1085,7 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
         var filter = $"msdyn_name eq '{SpaarkePackage.SolutionUniqueName}'";
         var uri = new Uri(envUri,
             "/api/data/v9.2/msdyn_solutionhistories?$select=msdyn_name,msdyn_operation,msdyn_suboperation,msdyn_status," +
-            $"msdyn_result,msdyn_starttime,msdyn_endtime,msdyn_exceptionmessage&$filter={Uri.EscapeDataString(filter)}" +
+            $"msdyn_result,msdyn_starttime,msdyn_endtime,msdyn_exceptionmessage,msdyn_solutionversion&$filter={Uri.EscapeDataString(filter)}" +
             "&$orderby=msdyn_starttime desc&$top=25");
         try
         {
@@ -1117,6 +1143,9 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                     EndTime: ReadDate(element, "msdyn_endtime"),
                     ExceptionMessage: element.TryGetProperty("msdyn_exceptionmessage", out var exEl) && exEl.ValueKind == JsonValueKind.String
                         ? exEl.GetString()
+                        : null,
+                    SolutionVersion: element.TryGetProperty("msdyn_solutionversion", out var verEl) && verEl.ValueKind == JsonValueKind.String
+                        ? verEl.GetString()
                         : null));
             }
         }
@@ -1124,17 +1153,22 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     }
 
     /// <summary>
-    /// What the solution history says about the import that started at or after <paramref name="since"/>. An entry
-    /// that failed does not outweigh one that succeeded (a retried operation leaves a failed entry beside the first
-    /// attempt's). Exposed <c>internal</c> for unit testing.
+    /// What the solution history says about the import that started at or after <paramref name="since"/>, limited to
+    /// entries of <paramref name="requiredVersion"/> when given (an entry without a readable version never matches).
+    /// An entry that failed does not outweigh one that succeeded (a retried operation leaves a failed entry beside the
+    /// first attempt's). Unreadable history (<c>null</c> entries) is <see cref="HistorySummary.Unknown"/>, which is
+    /// not "nothing open". Exposed <c>internal</c> for unit testing.
     /// </summary>
-    internal static HistorySummary SummarizeHistory(IReadOnlyList<SolutionHistoryEntry>? entries, DateTimeOffset since)
+    internal static HistorySummary SummarizeHistory(IReadOnlyList<SolutionHistoryEntry>? entries, DateTimeOffset since, string? requiredVersion = null)
     {
         if (entries is null)
         {
             return HistorySummary.Unknown;
         }
-        var mine = entries.Where(e => e.StartTime is { } t && t >= since).ToList();
+        var mine = entries
+            .Where(e => e.StartTime is { } t && t >= since
+                        && (requiredVersion is null || SpaarkePackage.CompareVersions(e.SolutionVersion, requiredVersion) == 0))
+            .ToList();
         return new HistorySummary(
             HasOpen: mine.Any(e => e.IsOpen),
             HasSuccess: mine.Any(e => e.Status == 1 && e.Result == true),
@@ -1331,17 +1365,17 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
 
     /// <summary>One import entry of <c>msdyn_solutionhistories</c> (Status 0 Started, 1 Completed, 2 Queued; Result true = Success).</summary>
     internal sealed record SolutionHistoryEntry(
-        int? Status, bool? Result, DateTimeOffset? StartTime, DateTimeOffset? EndTime, string? ExceptionMessage)
+        int? Status, bool? Result, DateTimeOffset? StartTime, DateTimeOffset? EndTime, string? ExceptionMessage, string? SolutionVersion = null)
     {
         /// <summary>Started or queued and not ended.</summary>
         public bool IsOpen => Status is 0 or 2 || (Status is null && EndTime is null);
     }
 
     /// <summary>What the solution history says about one import.</summary>
-    internal sealed record HistorySummary(bool HasOpen, bool HasSuccess, bool HasFailure, string? FailureText)
+    internal sealed record HistorySummary(bool HasOpen, bool HasSuccess, bool HasFailure, string? FailureText, bool Unreadable = false)
     {
-        /// <summary>History unreadable: says nothing.</summary>
-        public static readonly HistorySummary Unknown = new(false, false, false, null);
+        /// <summary>History unreadable: says nothing — in particular it is NOT "no open entry".</summary>
+        public static readonly HistorySummary Unknown = new(false, false, false, null, Unreadable: true);
     }
 
     /// <summary>Result of the in-flight check made before an import is started.</summary>

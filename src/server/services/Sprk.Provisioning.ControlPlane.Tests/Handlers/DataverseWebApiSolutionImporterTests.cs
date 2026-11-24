@@ -709,10 +709,14 @@ public sealed class DataverseWebApiSolutionImporterTests
     private static string ImportJobListJson(Guid jobId, TimeSpan startedAgo)
         => $$"""{"value":[{"importjobid":"{{jobId:D}}","createdon":"{{NowIso(startedAgo)}}","startedon":"{{NowIso(startedAgo)}}","completedon":null}]}""";
 
+    /// <summary>History entries of the package version being imported (<c>1.2.0.0</c> in these tests).</summary>
     private static string HistoryJson(params (int Status, bool? Result, TimeSpan StartedAgo)[] entries)
+        => HistoryJsonOfVersion("1.2.0.0", entries);
+
+    private static string HistoryJsonOfVersion(string? version, params (int Status, bool? Result, TimeSpan StartedAgo)[] entries)
     {
         var items = entries.Select(e =>
-            $$"""{"msdyn_name":"SpaarkeMaster","msdyn_operation":0,"msdyn_suboperation":5,"msdyn_status":{{e.Status}},"msdyn_result":{{(e.Result is null ? "null" : e.Result.Value ? "true" : "false")}},"msdyn_starttime":"{{NowIso(e.StartedAgo)}}","msdyn_endtime":{{(e.Status == 1 ? $"\"{NowIso()}\"" : "null")}},"msdyn_exceptionmessage":null}""");
+            $$"""{"msdyn_name":"SpaarkeMaster","msdyn_solutionversion":{{(version is null ? "null" : $"\"{version}\"")}},"msdyn_operation":0,"msdyn_suboperation":5,"msdyn_status":{{e.Status}},"msdyn_result":{{(e.Result is null ? "null" : e.Result.Value ? "true" : "false")}},"msdyn_starttime":"{{NowIso(e.StartedAgo)}}","msdyn_endtime":{{(e.Status == 1 ? $"\"{NowIso()}\"" : "null")}},"msdyn_exceptionmessage":null}""");
         return $$"""{"value":[{{string.Join(",", items)}}]}""";
     }
 
@@ -794,8 +798,10 @@ public sealed class DataverseWebApiSolutionImporterTests
     }
 
     [Fact]
-    public async Task ImportAsync_AsyncOperationFailed_ImportJobRunning_NothingOpen_FailsOnceTheGracePasses()
+    public async Task ImportAsync_AsyncOperationFailed_ImportJobStillRunning_NothingOpen_KeepsWaiting_NeverEndsOnTheGrace()
     {
+        // A readable, not-completed import job is the import running: the grace must not end the wait. Only the
+        // overall ImportTimeout bounds a genuinely dead job, and a timeout is never promoted to PartialImport.
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
@@ -805,13 +811,205 @@ public sealed class DataverseWebApiSolutionImporterTests
         };
 
         var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
+                importTimeout: TimeSpan.FromMilliseconds(400), pollInterval: TimeSpan.FromMilliseconds(5), failureGrace: TimeSpan.FromMilliseconds(40))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.FailureKind.Should().Be(SolutionImportFailureKind.Timeout,
+                "the running job outlived the grace; only the overall timeout ends it, and a timeout is resumable");
+    }
+
+    [Fact]
+    public async Task ImportAsync_AsyncOperationFailed_ImportJobUnreadable_HistoryReadableNothingOpen_FailsOnceTheGracePasses()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
                 importTimeout: TimeSpan.FromSeconds(5), pollInterval: TimeSpan.FromMilliseconds(5), failureGrace: TimeSpan.FromMilliseconds(40))
             .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
 
         var failure = outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Subject;
         failure.FailureKind.Should().Be(SolutionImportFailureKind.PartialImport,
-            "a reported failure of a managed upgrade, with no sign of the import running, stands after the grace");
+            "a reported failure of a managed upgrade stands once the grace passes with no readable sign of the import running");
     }
+
+    [Fact]
+    public async Task ImportAsync_AsyncOperationFailed_ImportJobMissing_HistoryReadFailsOnce_DoesNotCountAsNothingOpen()
+    {
+        // An unreadable history says nothing: one throttled read must not end the wait as "no open entry".
+        var started = false;
+        var historyReads = 0;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ =>
+            {
+                started = true;
+                return JsonResponse(HttpStatusCode.OK, StartedJson());
+            },
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+            OnHistoryGet = _ => !started
+                ? JsonResponse(HttpStatusCode.OK, """{"value":[]}""")
+                : ++historyReads == 1
+                    ? new HttpResponseMessage((HttpStatusCode)429)
+                    : JsonResponse(HttpStatusCode.OK, HistoryJson((1, true, TimeSpan.FromSeconds(30)))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>();
+        historyReads.Should().BeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public async Task ImportAsync_HistoryReadFailsAfterTheGrace_WhileTheImportJobRuns_KeepsWaitingAndSucceeds()
+    {
+        // The real ACME timeline: the async retry failed, the first attempt's job completed 10m44s later; a 429 on the
+        // history read after the grace used to read as "nothing open" and ended the wait with PartialImport.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var started = false;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ =>
+            {
+                started = true;
+                sw.Restart();
+                return JsonResponse(HttpStatusCode.OK, StartedJson());
+            },
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => sw.ElapsedMilliseconds < 400
+                ? JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: false))
+                : JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, CleanJobData)),
+            OnHistoryGet = _ => !started
+                ? JsonResponse(HttpStatusCode.OK, """{"value":[]}""")
+                : sw.ElapsedMilliseconds is > 150 and < 170
+                    ? new HttpResponseMessage((HttpStatusCode)429)
+                    : JsonResponse(HttpStatusCode.OK, HistoryJson((0, null, TimeSpan.FromSeconds(10)))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")),
+                importTimeout: TimeSpan.FromSeconds(5), pollInterval: TimeSpan.FromMilliseconds(5), failureGrace: TimeSpan.FromMilliseconds(100))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>(
+            (outcome as SolutionImportOutcome.Failure)?.FailureKind + " :: " + (outcome as SolutionImportOutcome.Failure)?.Diagnostic);
+    }
+
+    [Fact]
+    public async Task ImportAsync_PriorFailedEntryInsideTheSkewWindow_BeforeTheOwnJobIsVisible_DoesNotDecide()
+    {
+        // A quickly failed earlier attempt (same version) started 2 minutes ago; this import's own job row (404 on the
+        // first read) and own history entry are not visible yet. The history must not decide before the job is seen.
+        var jobReads = 0;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(InProgress, 20)),
+            OnImportJobGet = _ => ++jobReads == 1
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: jobReads > 3, jobReads > 3 ? CleanJobData : null)),
+            OnHistoryGet = _ => JsonResponse(HttpStatusCode.OK, HistoryJson((1, false, TimeSpan.FromMinutes(2)))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>(
+            (outcome as SolutionImportOutcome.Failure)?.FailureKind + " :: " + (outcome as SolutionImportOutcome.Failure)?.Diagnostic);
+    }
+
+    [Fact]
+    public async Task ImportAsync_StaleSuccessEntryOfAnOlderVersionInsideTheSkewWindow_DoesNotYieldSuccessBeforeTheJobIsSeen()
+    {
+        // History holds a success of 1.1.0.0 from 2 minutes ago. The import of 1.2.0.0 then fails: the stale success
+        // must not turn that into Success (neither before the job is seen nor by version).
+        var jobReads = 0;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(InProgress, 20)),
+            OnImportJobGet = _ => ++jobReads == 1
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, FailureDataXml("component failed"))),
+            OnHistoryGet = _ => JsonResponse(HttpStatusCode.OK,
+                HistoryJsonOfVersion("1.1.0.0", (1, true, TimeSpan.FromMinutes(2)))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Subject;
+        failure.FailureKind.Should().Be(SolutionImportFailureKind.PartialImport);
+        failure.Diagnostic.Should().Contain("component failed");
+    }
+
+    [Fact]
+    public async Task ImportAsync_StaleSuccessOfTheSameVersionInsideTheSkewWindow_DoesNotYieldSuccessBeforeTheJobIsSeen()
+    {
+        var jobReads = 0;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(InProgress, 20)),
+            OnImportJobGet = _ => ++jobReads == 1
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: true, FailureDataXml("component failed"))),
+            OnHistoryGet = _ => JsonResponse(HttpStatusCode.OK, HistoryJson((1, true, TimeSpan.FromMinutes(2)))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Which.Diagnostic.Should().Contain("component failed");
+    }
+
+    [Fact]
+    public async Task ImportAsync_HistoryEntryOfADifferentVersion_IsIgnored_EvenWhenTheOperationIsTerminal()
+    {
+        // Async operation Failed, job never readable, and the only history entry is a success of another version.
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+            OnHistoryGet = _ => JsonResponse(HttpStatusCode.OK,
+                HistoryJsonOfVersion("1.1.0.0", (1, true, TimeSpan.FromMinutes(1)))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Which.FailureKind.Should().Be(SolutionImportFailureKind.PartialImport);
+    }
+
+    [Fact]
+    public void SummarizeHistory_WithARequiredVersion_KeepsOnlyEntriesOfThatVersion()
+    {
+        var since = DateTimeOffset.UtcNow.AddHours(-1);
+        var entries = DataverseWebApiSolutionImporter.ParseSolutionHistory(JsonDocument.Parse(
+            HistoryJsonOfVersion("1.1.0.0", (1, true, TimeSpan.FromMinutes(2)))).RootElement);
+
+        DataverseWebApiSolutionImporter.SummarizeHistory(entries, since, "1.2.0.0").HasSuccess.Should().BeFalse();
+        DataverseWebApiSolutionImporter.SummarizeHistory(entries, since, "1.1").HasSuccess.Should().BeTrue("1.1 == 1.1.0.0");
+        DataverseWebApiSolutionImporter.SummarizeHistory(entries, since, null).HasSuccess.Should().BeTrue("no version filter on the attach path");
+    }
+
+    [Fact]
+    public void SummarizeHistory_UnreadableHistory_IsMarkedUnreadable_NotJustEmpty()
+        => DataverseWebApiSolutionImporter.SummarizeHistory(null, DateTimeOffset.UtcNow, "1.2.0.0").Unreadable.Should().BeTrue();
 
     [Fact]
     public async Task ImportAsync_ImportJobCompletedWithFailure_StillFails_WhateverTheAsyncOperationSays()
@@ -833,14 +1031,18 @@ public sealed class DataverseWebApiSolutionImporterTests
     }
 
     [Fact]
-    public async Task ImportAsync_ImportJobMissing_HistoryShowsOnlyAFailedImport_Fails()
+    public async Task ImportAsync_ImportJobSeenThenGone_HistoryShowsOnlyAFailedImport_Fails()
     {
+        // History decides an import this run started only after the job has been seen (or the operation is terminal).
+        var jobReads = 0;
         var dv = new FakeDataverseHandler
         {
             OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson(("1.1.0.0", true))),
             OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
             OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(InProgress, 20)),
-            OnImportJobGet = _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+            OnImportJobGet = _ => ++jobReads == 1
+                ? JsonResponse(HttpStatusCode.OK, ImportJobJson(completed: false))
+                : new HttpResponseMessage(HttpStatusCode.NotFound),
             OnHistoryGet = _ => JsonResponse(HttpStatusCode.OK, HistoryJson((1, false, TimeSpan.FromMinutes(1)))),
         };
 
