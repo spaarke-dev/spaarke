@@ -21,7 +21,6 @@
 
 - Live check PASS 2026-11-24 incl. the Assignee re-check (notes/task-024-notes.md). Assignee fix via #3041; Event wizard's latent twin filed as DI-039 / #3039.
 - Dev test rows: To Dos 7d1cba50-dfd9-4920-8e5e-6842e788cbac, 354ffd82-ade9-4a02-9c4d-ebd39a21ca08, 2c53f9cc-686d-4048-94e2-d95ec694b761; inactive temporary profile 6a6d6cab-b2e7-f111-84ea-7ced8dda31f8 (+2 rules).
-- Agent worktree to remove: `C:\code_files\spaarke\.claude\worktrees\agent-a451c05c09d18c1b9` (Remove-WorktreeSafe.ps1).
 - The Smart To Do `action=createTodo` launch and the Console in-app wizard pick up 024 only when `sprk_smarttodo` / `sprk_spaarkeai` are next deployed.
 
 ## 025: cancelled 2026-11-24 (owner) as superseded
