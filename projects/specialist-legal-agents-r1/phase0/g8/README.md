@@ -88,26 +88,25 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 **The question.** G8 showed an agent cannot use the tenant connector (C1). Copilot's recommended Practice vehicle is a **coded declarative agent whose own action calls the MCP server**. Three things to establish:
 1. **Does it work?** It should run our tools in Chat, Word and Teams, signing the user in through the existing OAuth registration (A1).
 2. **Does each call run exactly once?** That means once inside the agent, and no extra call in plain Chat because the agent is installed. This decides coordination's **R1′**: "one tenant-wide connector per URL; agent-private actions allowed".
-3. **Is the caller right?** `spike_whoami` should return the user's Dataverse `systemuserid` (OBO as the caller, ADR-028 A10).
+3. **Is the caller right?** `spaarke_show_decisions` should return **the signed-in user's own** Decide lane, the same counts as their Console category cards. That shows the call ran on-behalf-of the caller (ADR-028 A10). An unauthenticated call returns `UserContextRequired`.
+
+**The live server (2026-11-24).** The dev BFF runs master `22c42efad6` with MCP on (mcp-r1 041, live since 00:22Z per coordination), and **the spike tools are gone**.
+- The only tool the model can see is **`spaarke_show_decisions`**: read-only, no required input, renders the decisions widget.
+- `spaarke_complete_decision`, `spaarke_list_decision_page`, `spaarke_get_decision_plan` and `spaarke_search_decision_lookup` are **app-only** (`_meta.ui.visibility = ["app"]`): the widget can call them, the model cannot (verified in master source).
 
 **The package** (`package-p2/`, app id `802fd9cc-feae-425a-aaef-8e97aba87ff5`, short name `spaarke-legal-g8p2-test`):
 - one declarative agent (v1.6) with one action, `ai-plugin.json`;
 - the action uses plugin manifest v2.4 with runtime `RemoteMCPServer` on `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations`;
-- auth is `OAuthPluginVault` with A1's `reference_id`, the same one the spike used;
-- **dynamic tool discovery** (`functions: []`, `run_for_functions: ["*"]`, Learn's default). The agent sees whatever the server lists: the spike tools today, the real tools after mcp-r1 task 041 deploys dev without the spike;
-- all three manifests validate against Microsoft's published schemas (2026-11-23).
+- auth is `OAuthPluginVault` with A1's `reference_id`;
+- **dynamic tool discovery** (`functions: []`, `run_for_functions: ["*"]`, Learn's default): the agent sees whatever the server lists to the model;
+- all three manifests validate against Microsoft's published schemas.
 
-**Hazard (accepted for a throwaway):** dynamic discovery also exposes the server's non-read-only tools. Today those are `spike_write` and `spike_write_app`, which record nothing. After 041 it is `spaarke_complete_decision`, a real write. To contain this:
-- the instructions limit the agent to tools the user names;
-- the prompts below name read-only tools only;
-- installation is the owner and test user only;
-- the agent is removed by 2026-11-30.
+**Hazard (accepted for a throwaway):** the widget can call the app-only write `spaarke_complete_decision`, and Copilot shows **no** confirmation for widget-initiated writes (mcp-r1 T3). So **do not decide, complete or dismiss anything in the widget.** Only look at it. Installation is the owner and test user only, and the agent is removed by 2026-11-30.
 
 ### Steps for the owner
 
-1. **Baseline, before uploading.** In **plain Chat** (no agent), as the test user, with Spaarke MCP connected and C2 switched off as now:
-   `Call the Spaarke MCP tool spike_echo with the message g8-P2-base`. Note the time.
-2. **Build the zip** in PowerShell from this folder. It is gitignored, and a built copy is already here.
+1. **Baseline, before uploading.** In **plain Chat** (no agent), as the test user, with Spaarke MCP connected and C2 switched off as now: `Show my Spaarke decisions` (it should call `spaarke_show_decisions`). Note the time and the counts shown.
+2. **The zip** is already built here (`spaarke-legal-g8p2-test.zip`, gitignored). To rebuild it, run in PowerShell from this folder:
 
    ```powershell
    Compress-Archive -Path .\package-p2\* -DestinationPath .\spaarke-legal-g8p2-test.zip -Force
@@ -115,18 +114,13 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 
 3. **Upload in the dev tenant only, installed for the owner and the test user only, never All users (R7).** Use the same routes as before: admin center › Agents › Registry (or Integrated apps) with **Specific users/groups**, or Teams Developer Portal › Apps › Import app and install for yourself. If the route can't be scoped that way, don't upload; tell this session instead.
 4. **In the agent (Chat)**, as the test user, each prompt in a new chat with the agent:
-   1. `Call spike_echo with the message g8-P2-chat`
-   2. `Call spike_whoami`
-   3. `List every tool and source you can use in this conversation`
+   1. `Call spaarke_show_decisions` and note the time, the counts, whether the widget rendered, and whether a **sign-in** prompt appeared. A1 is shared with C1, so the user may already be signed in.
+   2. `List every tool and source you can use in this conversation`
+5. **Plain Chat again** (agent installed but not selected): `Show my Spaarke decisions`. Note the time.
+6. **Word (web):** open a **blank test document**, never a real NDA or anything in `answer-key/`. In the Copilot pane, pick the agent (agent list or @mention) and send `Call spaarke_show_decisions`.
+7. **Teams:** open the agent's chat and send `Call spaarke_show_decisions`.
 
-   Note whether a **sign-in** prompt appeared. A1 is shared with C1, so the user may already be signed in.
-5. **Plain Chat again** (agent installed but not selected): `Call the Spaarke MCP tool spike_echo with the message g8-P2-plain`.
-6. **Word (web):** open a **blank test document**, never a real NDA or anything in `answer-key/`. In the Copilot pane, pick the agent (agent list or @mention) and send `Call spike_echo with the message g8-P2-word`.
-7. **Teams:** open the agent's chat and send `Call spike_echo with the message g8-P2-teams`.
-
-**If an approval card appears at any step, click Cancel.** None of these prompts should need one; a card means the model chose a non-read-only tool (for example `spike_write`; Copilot shows a per-call card for it, mcp-r1 T4). Cancel means nothing runs. Note the step and the tool the card names, because it is a result too.
-
-**If the spike tools are gone** (041 has deployed), use `Call spaarke_show_decisions` in place of `spike_echo` everywhere. It is read-only and has no required input. Skip `spike_whoami` in that case.
+**If an approval card appears at any step, click Cancel.** None of these prompts should need one. Note the step and the tool the card names, because that is a result too.
 
 **Afterwards:** tell this session you are done, with the times and screenshots. This session checks App Insights per minute and records the result. Then remove the agent where you uploaded it (by **2026-11-30**, latest) and tell copilot-platform-coordination it is gone.
 
@@ -134,8 +128,8 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 
 | Check | Pass |
 |---|---|
-| Works in Chat | Step 4.1: exactly **one** `tools/call` in that minute, and the agent shows the echo |
-| Caller | Step 4.2: `spike_whoami` returns the user's `systemuserid` and the expected claims |
+| Works in Chat | Step 4.1: exactly **one** `tools/call` in that minute (plus any widget `resources/read`), and the agent shows the decisions |
+| Caller | Step 4.1: the counts match the user's Console Decide lane, not someone else's and not an auth error |
 | No leak into plain Chat | Step 5: the same number of `tools/call` as the step 1 baseline |
 | Word / Teams | Steps 6 and 7: one `tools/call` each, or a clear "agent not offered here" |
 
@@ -171,9 +165,8 @@ az monitor app-insights query --apps $id --offset 3h --analytics-query "requests
 | Control | Chat, **plain Copilot** (no agent) | same | Copilot listed "discover available connector tools through `api_tool.list_resources` … a Spaarke MCP tool such as `spike_whoami` or a Spike echo tool". So outside an agent, the connector is reachable by discovery (as mcp-r1 T1/T5 showed) | (the `tools/list` calls above) | ✅ control |
 | P1 | — | — | **Dropped** when G8 became final (its `GraphConnectors` capability is the knowledge list A2 showed empty) | — | — |
 | P2-1 baseline | Chat, plain | | | | |
-| P2-4.1 echo | Chat, agent | | | | |
-| P2-4.2 whoami | Chat, agent | | | | |
-| P2-4.3 list | Chat, agent | | | | |
+| P2-4.1 show decisions | Chat, agent | | | | |
+| P2-4.2 list | Chat, agent | | | | |
 | P2-5 leak check | Chat, plain | | | | |
 | P2-6 | Word (web), agent | | | | |
 | P2-7 | Teams, agent | | | | |
