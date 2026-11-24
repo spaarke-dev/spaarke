@@ -188,7 +188,7 @@ Extend the shared `ILookupItem` with an optional secondary line and render it un
 
 | Field | Value |
 |---|---|
-| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-171, accepted 2026-11-24, commit 5f4453db1d) |
+| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-171, accepted 2026-11-24, commit 5f4453db1d). Owner's fix (ontology task 207): new warning code `assignee_email_not_sent_admin_account` for an Administrative-access assignee. No widget change here: the widget uses the shared `describeWarning`, and `spaarke_complete_decision` passes `warnings[]` through verbatim; the sentence reaches Copilot with the next dev BFF build that includes their PR. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | Owner, live Copilot run on dev `0362599b94`: the commit at 2026-11-24 14:40:38Z warned `assignee_email_not_sent_no_access` |
