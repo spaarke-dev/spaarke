@@ -178,13 +178,13 @@ public class FeatureRolePrivilegeGuardTests
         .. Wizard("To Do wizard", "prvCreatesprk_Todo", "prvAppendsprk_Todo"),
         // Invoice (ebilling-r1 task 096b, EB-D-201): the Create Invoice wizard no longer creates through the child-records route (an
         // invoice is created only by submission, by the application). Create stays held, and this row stays, until the role change
-        // (096b notes, D3), for the reason that still asks it of the caller: R1, the confirm route (finance.confirm) asks the caller's
-        // Create (FinanceEndpoints.cs:179-182, FinanceAuthorizationFilter.cs:348). R4 (the wizard launcher's Mscrm.CreateSelectedEntityPermission
-        // display rule, sprk_Invoice RibbonDiff) is a second reason for as long as that rule stays. R2, the Office quick-create's invoice
-        // Create ask, is closed (ebilling-r1 task 096: the route refuses an invoice before any privilege question). Append: no create route asks it for an
-        // invoice; it is not removed here (D3, R5).
-        .. For("Invoice confirm route (finance.confirm; R1) and the wizard launcher's display rule (R4)", [Core], "Basic",
-            Bff + "Api/Finance/FinanceEndpoints.cs:179-182; " + Bff + "Api/Filters/FinanceAuthorizationFilter.cs:348", "prvCreatesprk_Invoice"),
+        // (096b notes, D3), for the reason that still asks it of the caller: R4 (the wizard launcher's Mscrm.CreateSelectedEntityPermission
+        // display rule, sprk_Invoice RibbonDiff). R1, the confirm route's own ask of the caller's Create, is closed (ebilling-r1 task 050c,
+        // EB-D-264: confirm asks what the manual submission asks, finance.submit_invoice and finance.attach_invoice, and no table privilege).
+        // R2, the Office quick-create's invoice Create ask, is closed (ebilling-r1 task 096: the route refuses an invoice before any privilege
+        // question). Append: no create route asks it for an invoice; it is not removed here (D3, R5).
+        .. For("The Create Invoice wizard launcher's display rule (R4; R1, the confirm route, closed by 050c)", [Core], "Basic",
+            "src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/RibbonDiff.xml:162-167 (sprk.SecureChild.sprk_invoice.New.Command DisplayRules)", "prvCreatesprk_Invoice"),
         .. For("Invoice Append (not removed by 096b; the role change is D3, see the 096b notes R5)", [Core], "Basic",
             Bff + "Api/ChildRecordEndpoints.cs:116 (RefileTables: the one child-records route that still names the invoice)", "prvAppendsprk_Invoice"),
         .. Wizard("Work Assignment wizard", "prvCreatesprk_WorkAssignment", "prvAppendsprk_WorkAssignment"),

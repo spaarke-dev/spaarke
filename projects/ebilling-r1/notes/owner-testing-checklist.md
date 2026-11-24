@@ -124,7 +124,7 @@ These states are hard to cause by hand; they need a fault during a decision. If 
 
 ## M. Notifications (task 132): ready to test on dev (BFF 5ae2804884 live ~02:01Z 2026-11-19; firm notice Action seeded ~02:05Z)
 
-Firm emails come from the shared mailbox. Reject and Return emails go only when the reviewer confirms a notice. The step that does that is built (132ui) but is not on dev until the Invoice Review page is redeployed (see M2).
+Firm emails come from the shared mailbox. Reject and Return emails go only when the reviewer confirms a notice. The step that does that is built (132ui) but is not on dev until task 112 deploys the Invoice Review page (see M2).
 - [ ] Submit an invoice that the checks reject. The submitter (and the firm's billing contact, if they can open that matter) gets one email with the findings table in the body.
 - [ ] Approve an invoice with an adjustment. The same two people get one email; approving with no adjustment sends none.
 - [ ] A billing contact who has no access to a secure matter gets no email for that matter's invoice.
@@ -133,7 +133,7 @@ Firm emails come from the shared mailbox. Reject and Return emails go only when 
 - [ ] With eBilling switched off, the portal bell shows no billing items.
 - [ ] The "notice text" field is locked (applied to dev 2026-11-17, ready to test now). As a non-admin user, the submission form shows the field masked (\*\*\*\*\*) and you can't edit it. It disappears from the form once the SpaarkeMaster release with task 132's form change is imported.
 
-### M2. Notice to the firm on Reject / Return (task 132ui): after the Invoice Review page is redeployed to dev (your OK)
+### M2. Notice to the firm on Reject / Return (task 132ui): after task 112 deploys the Invoice Review page to dev (owner 2026-11-23: wait for 112; the page has never been on dev)
 
 On an In Review invoice, choose Decide → Reject or Return to firm, give a reason, then Next:
 - [ ] A **Notify firm** step shows the drafted subject and message, and says whether the AI wrote it or the standard wording was used. Approve never shows this step.
@@ -170,3 +170,14 @@ Merged into the work branch 2026-11-22 (18b02cbdcf). Nothing visible changes; th
 - [ ] In Invoice Review, **Confirm** an invoice document from the review queue: it still creates the invoice through the submission (as 050a).
 - [ ] The BFF starts with no warnings about `Finance:InvoiceExtractionPlaybookId` or `Finance:ExtractionDeploymentName` (both keys are gone).
 - Owner choice, no test: the old **FinanceExtraction** (PB-013) playbook rows in dev Dataverse are now unused. Leave them, or tell me to deactivate them (a live change).
+
+## Q. A firm submits through the external portal (task 053): ready to test on dev now
+This closes task 053. After it, task 079 has no open dependency. The dev BFF and the external portal both run master (the portal was deployed 2026-11-23).
+- [ ] Sign in to the external portal as a firm user who has access to a matter. Submit a sample invoice PDF on that matter. The portal shows **Processing**, then **Accepted**, with a tracking number such as `INV-123.1`.
+- [ ] In Spaarke, that invoice is **In Review** on the matter. Its lines are filled in with codes, and it has an approval portion.
+- [ ] Submit a second sample that breaks a published **Reject** rule on that matter. The portal shows **Rejected** with a reason. In Spaarke the invoice exists, in status Rejected (D-101: every submission that is read creates its invoice).
+- [ ] The portal's submission screens look right in dark mode too.
+
+## R. Office add-in no longer files to an invoice (task 096): live on dev since 2026-11-24 (BFF 996928732e)
+- [ ] In the Outlook add-in, open Save and search for an invoice. It appears in the search results, but it cannot be chosen as the place to save the email.
+- [ ] Saving an email to a matter or a project still works, and so does quick-create of a matter or a project.

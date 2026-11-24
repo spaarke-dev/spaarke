@@ -177,8 +177,9 @@ public static class OperationAccessPolicy
         // confirm and /reject, through the document path (AuthorizeAsync). Both MUTATE the document's own
         // state (review status → Confirmed / RejectedNotInvoice), so Write is the requirement. NOT Create
         // on the document: confirm creates an sprk_invoice, which is a DIFFERENT entity. The caller's
-        // Create privilege on sprk_invoice IS consulted for confirm (owner decision G5, 2026-10-01), but as
-        // a table privilege, not through this key — see FinanceAuthorizationFilter's Privilege path.
+        // Create privilege on sprk_invoice was consulted for confirm (owner decision G5, 2026-10-01) until
+        // ebilling-r1 task 050c (EB-D-264): confirm now asks what the manual internal submission asks
+        // ("finance.submit_invoice" on the core record, "finance.attach_invoice" on the firm) and no table privilege.
         ["finance.confirm"] = AccessRights.Write,
 
         // "finance.attach_invoice" — AppendTo on each PARENT record the new sprk_invoice's own lookups point

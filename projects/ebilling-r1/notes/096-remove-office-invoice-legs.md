@@ -103,3 +103,7 @@ No objection to 98801e9b9f. The live add-in never sends an invoice save target a
 - **Unit**, filtered to `Office|QuickCreate|EntityAccessFilter|Retirement`, under heavy machine load: 1173 passed, 10 failed, 7 skipped. The run was aborted at the 40-minute limit. Each failure was a 3-minute test timeout.
 - **Rerun of those 10 tests' classes alone:** 120 passed, 0 failed. The failures came from machine load, not from the change; the same pattern showed in the review fix's runs, which also hit tests unrelated to this change.
 - **Tests the review fix touches** (`OfficeProblemDetails|OfficeInvoice|EntityAccessFilter|QuickCreateSourceAccess|ProblemDetailsHelper`): 58 passed, 0 failed.
+
+## Live on dev (2026-11-24)
+
+The dev BFF `996928732e` has been live since about 03:01Z on 2026-11-24. uac-r2 deployed it on the owner's go, and it carries #3029 (f1e2fc6cce). After the deploy, `/healthz` returns 200 Healthy, and `POST /api/office/quickcreate/invoice` without a token returns 401. uac-r2 posted word-add-in-r1's 096 range-check notice as a GitHub comment, because word-add-in-r1 was offline. The known limits from review still apply: a cached replay for up to 24 h, and a save queued before the deploy.

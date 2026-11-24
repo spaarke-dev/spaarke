@@ -218,7 +218,7 @@ Invoice classification, field extraction, and financial aggregation.
 
 **Endpoints**:
 ```
-/api/finance/invoice-review/confirm       Confirm + enqueue extraction
+/api/finance/invoice-review/confirm       Confirm + submit as an invoice (202; the job creates the invoice)
 /api/finance/invoice-review/reject        Reject as non-invoice
 /api/finance/invoices/search              Semantic invoice search
 /api/finance/matters/{matterId}/summary   Financial summary per matter
