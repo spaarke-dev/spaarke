@@ -1,15 +1,15 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-24 ~07:40Z (wave 9 merged and closed: 033, 035; #3045 follow-up committed)
+> **Last Updated**: 2026-11-24 ~15:20Z (#3055 merged; D-34 done)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Active** | **#3045 follow-up (D-34)**, the shared DataGrid export: every cell exports the text it shows; host-rendered columns export the renderer's text; dates export as shown (owner 2026-11-24); export text hardening (owner 2026-11-24: "fix the excel formula risk"; detail tracked outside the repo, never in public text). Committed `6dc5eba5ed` on top of merge `e288c59dc0`. Notes: `notes/task-033-followup-3045-notes.md` (round 3 is current). |
-| **Status** | **PR #3055** open (fix `6dc5eba5ed` + review fixes `b4968491ac`). Local: grid jest 299/299, tsc, eslint 0 errors, prettier, client-lint ok, external-spa tsc + 44/44. Opus review done: F1 (guard after separators) and F2 (Date Only test in the New York env) fixed; Ks in the notes. Residual hardening detail reported to the owner in chat only. Open owner question: Date Only export as shown vs `yyyy-mm-dd` (locale misread risk). |
-| **Next action** | Owner's merge go for #3055 (and the Date Only answer). After merge: D-34 → Done in `notes/defer-issues.md` (#3045 auto-closes via "Fixes"). Then tell uac-r2 the #3048 merge `b64d988625` for a later BFF candidate (threads), and plan **038** (P3 dev deploy + E2E) on the owner's per-SHA go. |
+| **Active** | None in progress. Next is **038** (P3 dev deploy + E2E). |
+| **Status** | **PR #3055 merged** 2026-11-24 15:15:44Z, squash `8dd44cf528` (#3045 export: cells export shown text, dates as shown, export text hardening). #3045 closed; D-34 Done. Notes: `notes/task-033-followup-3045-notes.md`. Open owner questions: Date Only export as shown vs `yyyy-mm-dd` (locale misread risk; currently as shown); whether to track the residual hardening gaps privately (chat only, never in the repo). |
+| **Next action** | Plan **038** (P3 dev deploy + E2E) on the owner's per-SHA go; SPA deploy builds master HEAD (now includes `8dd44cf528`). uac-r2 told the #3048 merge `b64d988625` for a later BFF candidate (threads). |
 | **Last merged** | PR #3048 at 06:14:00Z, merge `b64d988625`: tasks 033 (Money sort + export) and 035 (message threads, `threadId`). POMLs completed, TASK-INDEX ✅, drift check clean, board Tasks Completed = 30. |
 | **Next in phase 3** | **038** (P3 dev deploy + E2E). 036 is cancelled. |
 | **uac-r2** | Dev BFF `0362599b94` LIVE since ~05:21:45Z 2026-11-24; it does NOT carry 035's `threadId` (the SPA then shows ungrouped messages). Threads need a later BFF candidate that includes `b64d988625`, through uac-r2 with the owner's per-SHA go. |
@@ -34,7 +34,7 @@ Every SPA deploy builds master HEAD and needs the owner's go for the exact SHA, 
 
 ## Filed
 - D-24 #2939 … D-30 #2975; D-31 #3008; D-32 #3009; D-33 #3010 closed.
-- D-34 #3045 (fix in progress, above); D-35 #3046 (unlabelled currency = USD); D-36 #3050 (MDA grids don't read OData label annotations; not verified live).
+- D-34 #3045 done (PR #3055); D-35 #3046 (unlabelled currency = USD); D-36 #3050 (MDA grids don't read OData label annotations; not verified live).
 
 ## Merge trap (seen 2026-11-22)
 When merging master after a squash of our own work, watch for a line that one task changed and a later task changed back. It looks unchanged from the merge base, so git takes master's text. For files where `origin/master` equals the pre-squash branch tip, restore `HEAD^1`'s copy. 2026-11-24 merge `e288c59dc0`: every touched file was identical on both sides (clean).
