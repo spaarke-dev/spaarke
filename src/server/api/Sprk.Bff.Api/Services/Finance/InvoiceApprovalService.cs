@@ -784,7 +784,10 @@ public sealed class InvoiceApprovalService
             return FromLineResult(unreviewed, invoiceId, "unreviewed", lineDecisionId: null, approveWrote);
         }
 
+        approveWrote |= unreviewed.CommittedLineIds is { Count: > 0 };
+
         // ── The approved total to freeze (016 recomputes it from the decided lines). ──
+        // ISS-050 fix round 2: from here on a refusal after this approve wrote says so (ApproveNotFinishedText), never "nothing was changed".
         InvoiceTotalsCalculation totals;
         try
         {
@@ -792,7 +795,7 @@ public sealed class InvoiceApprovalService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Unavailable(invoiceId, "totals", ex);
+            return Unavailable(invoiceId, "totals", ex, approveWrote);
         }
 
         if (totals.IsRefused)
@@ -816,7 +819,8 @@ public sealed class InvoiceApprovalService
         var version = portion.TryGetAttributeValue<long>("versionnumber", out var v) ? v : 0L;
         if (version <= 0)
         {
-            return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable, "The approval version could not be read; nothing was changed.");
+            return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable,
+                approveWrote ? ApproveNotFinishedText : "The approval version could not be read; nothing was changed.");
         }
 
         try
@@ -831,7 +835,7 @@ public sealed class InvoiceApprovalService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Unavailable(invoiceId, "claim", ex);
+            return Unavailable(invoiceId, "claim", ex, approveWrote);
         }
 
         // ── 014: the only status writer. Only Transitioned records. 095f-2a (EB-D-240): a note goes to the decision note column in the same
@@ -1856,10 +1860,13 @@ public sealed class InvoiceApprovalService
 
     // ── Results ──
 
-    private ApprovalResult Unavailable(Guid invoiceId, string step, Exception ex)
+    /// <param name="approveWrote">ISS-050 fix round 2: this approve already wrote (the bulk accept or the Unreviewed rows), so the text is
+    /// <see cref="ApproveNotFinishedText"/>, never "nothing was changed". The outcome and code are the same either way.</param>
+    private ApprovalResult Unavailable(Guid invoiceId, string step, Exception ex, bool approveWrote = false)
     {
         _logger.LogWarning("Approve of invoice {InvoiceId}: the {Step} step failed ({ExceptionType}); nothing was changed by this step.", invoiceId, step, ex.GetType().Name);
-        return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable, "The approval could not be completed; nothing was changed. Try again.", FailedStep: step);
+        return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable,
+            approveWrote ? ApproveNotFinishedText : "The approval could not be completed; nothing was changed. Try again.", FailedStep: step);
     }
 
     private ApprovalResult Incomplete(Guid invoiceId, Guid decisionId, string step, string detail)
@@ -1870,10 +1877,10 @@ public sealed class InvoiceApprovalService
             "The invoice was approved but a later step did not finish. Approve again to complete it.", DecisionId: decisionId, FailedStep: step);
     }
 
-    /// <summary>A refusal of the bulk accept or the Unreviewed rows: nothing was approved.</summary>
     /// <summary>ISS-050 fix round 1: the text of a refusal after this approve already wrote (the line service's "nothing was changed" is then false).</summary>
     internal const string ApproveNotFinishedText = "The approval did not finish; part of it was saved. Approve again to complete it.";
 
+    /// <summary>A refusal of the bulk accept or the Unreviewed rows: nothing was approved.</summary>
     /// <param name="approveWrote">ISS-050 fix round 1: this approve already wrote (an earlier chunk, the completion of an earlier bulk accept, or
     /// the bulk accept itself). Every answer but Incomplete (whose text already says the lines were updated) and not-found then gets
     /// <see cref="ApproveNotFinishedText"/>, never the line service's "nothing was changed".</param>

@@ -34,6 +34,7 @@ Task: `tasks/iss050-line-decision-lock-renewal.poml`. Rigor FULL. Branch `task/e
 - `Services/Finance/InvoiceApprovalService.cs`
   - The approval's owner id is passed down: `ApproveHeldAsync` → `CompleteEarlierBulkAcceptAsync` / `AcceptCleanHeldAsync` / `WriteUnreviewedAsync` with `LockDuration`. The class remarks and the step comment are updated.
   - Fix round 1 (F1-low): an Unavailable line answer is no longer passed through as "nothing was changed" once this approve has written. `CompleteEarlierBulkAcceptAsync` now also returns whether it wrote. `FromLineResult` takes `approveWrote`, and when it is true, any answer other than Incomplete or InvoiceNotFound gets `ApproveNotFinishedText` ("The approval did not finish; part of it was saved. Approve again to complete it."). The outcome and code are unchanged.
+  - Fix round 2 (F1-low): the same applies to the approval's own steps after the line steps. These are the totals failure, the unreadable approval version and the claim failure. Once this approve has written (the bulk accept, the completion of an earlier one, or Unreviewed rows), each answers `ApproveNotFinishedText` instead of "nothing was changed", with the outcome and code unchanged. To tell whether Unreviewed rows were written, `WriteUnreviewedAsync` now returns Applied with `CommittedLineIds` set to the lines that got rows.
 - `notes/100-review-read-model.md` §3 points here.
 - `LockDuration` (2 minutes) and `MaxLinesPerRequest` (1,000) are unchanged.
 
@@ -106,24 +107,42 @@ With the change, all 23 lock-renewal tests passed.
 
 `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` gave 0 warnings and 0 errors.
 
+### Fix round 2 (scoped re-check)
+
+These are approval tests (`InvoiceApprovalServiceTests.LockRenewal.cs`). The worlds in F2 have no Clean lines, so `WriteUnreviewedAsync` is the only held line step.
+
+- F2a, `Approve_UnreviewedLosesTheLockFirst_IsUnavailable_NothingWritten`: the first renewal fails. The answer is Unavailable at `unreviewed`, saying "nothing was changed", with no write. The repeat approves with 21 Unreviewed rows.
+- F2b, `Approve_Unreviewed_RenewsWithTheApprovalsOwnerAndDuration`: at 40 seconds per owner question, every renewal uses the line key, the approval's owner and `InvoiceApprovalService.LockDuration`, never 2 minutes. No gap reaches the lock.
+- Optional branch, `Approve_UnreviewedLosesTheLockAfterAChunk_IsIncomplete`: 406 rows, and the lock is lost after the first 400-row chunk. The answer is Incomplete at `unreviewed` with 400 rows written, and the repeat writes all 406.
+- F1-low, `Approve_TotalsFailAfterTheBulkAcceptWrote_NeverSaysNothingWasChanged` and `Approve_TotalsFailAfterTheUnreviewedRowsWrote_NeverSaysNothingWasChanged`: the answer is Unavailable at `totals` with `ApproveNotFinishedText`.
+- The must-not-fire check is `Approve_TotalsFailBeforeAnyWrite_SaysNothingWasChanged`: the old text stays when nothing was written.
+
+**Fail-before.** Against `a5e853c515`'s service files, 2 failed and 4 passed. The 2 failures are the two "after a write" totals tests. The 4 passes:
+- the 3 F2 tests, because they cover code already in `a5e853c515`, which was a test gap;
+- the must-not-fire check, which guards unchanged behaviour.
+
+The F2 tests were then shown to bite by mutation:
+- F2b fails when the Unreviewed lease uses the line service's 2-minute duration.
+- The chunk test fails when the chunk checkpoint is removed.
+
 ## Known limits
 
 - **K1: the duration of a 1,000-line call on dev is still not measured.** The renewal makes the measurement less urgent but does not replace it. Nobody knows yet whether one step can approach 90 seconds on dev. The steps in question are the 1,000-line conditional transaction and a 400-row correction chunk.
 - **K2: no lease covers one long step.** If a single step outlasts the rest of the lock, the next checkpoint finds the lock lost and stops. The decision is not corrupted. The line write is still guarded by row versions, and the stop is the existing incomplete answer, which a repeat completes. Only that one step ran unlocked. A background heartbeat would close this gap and can be added if K1's measurement shows long steps.
-- **K2: renewal is read-then-write, not atomic.** `IdempotencyService.RenewProcessingLockAsync` reads the lock, checks the owner and writes the new expiry. Another owner that takes an expired lock between the read and the write can be overwritten. This is pre-existing, in the shared API (task 166), and ISS-050 only calls it.
-- **K3: the invoice-decision lock is not renewed, but an Override cannot overlap an approve on a real path.**
+- **K3: renewal is read-then-write, not atomic.** `IdempotencyService.RenewProcessingLockAsync` reads the lock, checks the owner and writes the new expiry. Another owner that takes an expired lock between the read and the write can be overwritten. This is pre-existing, in the shared API (task 166), and ISS-050 only calls it.
+- **K4: the invoice-decision lock is not renewed, but an Override cannot overlap an approve on a real path.**
   - The invoice-decision lock is `SubmissionOverrideService.LockKey`, 5 minutes. Submission Override takes only that lock, not the line lock.
   - Override acts only on a held submission.
   - Approve refuses a held invoice before any write (its hold checks in `CheckApprovableAsync`).
   - Every path that makes an invoice held in the middle of an approve takes the line lock (the re-run and Assign Firm do), and approve keeps that lock.
   - The line lock is renewed through the held bulk accepts and the Unreviewed rows. The totals, claim, transition and record after them are bounded and run inside the remaining 4.5 minutes or more.
-- **K4: during a lock-store outage, acquiring fails open but renewal fails closed.** `IdempotencyService` answers a lock-store fault on acquire as "acquired" (the pre-existing fail-open), while a fault on renewal is a lost lock. The effects:
+- **K5: during a lock-store outage, acquiring fails open but renewal fails closed.** `IdempotencyService` answers a lock-store fault on acquire as "acquired" (the pre-existing fail-open), while a fault on renewal is a lost lock. The effects:
   - An approve with Clean lines or decided AI fields renews at the first checkpoint of its held calls, so it answers 503.
   - A line decision that runs past 30 seconds answers 503.
   - Short line decisions still run.
   - This is by design: never continue on a lock that cannot be confirmed.
-- **K4: before the first write a lost lock answers 503 `ebilling.decision.unavailable`, not `incomplete`.** Nothing was committed, so "the lines were updated" would be false. The POML's "incomplete" outcome applies once something is written, which is the "part way" case. Both are 503 and never 409, and a same-content repeat completes either.
-- **K4: the invoice index enqueue (task 152) has no checkpoint before it.** It runs after the totals, is best effort, and is keyed by the decision id, so a repeat reuses it. A lost lock is caught at the next checkpoint, before the correction chunks.
-- **K4: the line read is checkpointed after the whole paged read, not per page.** A page is 5,000 rows, more than `MaxLinesPerRequest`, so a line decision reads one page. The shared reader (`InvoiceReviewReadService.ReadPagedAsync`) was left unchanged.
-- **K5: `InvoiceAdjustmentService`, `InvoiceLineAddService` and the other holders of the line lock are unchanged.** Each holds it for a short, bounded operation. `notes/102-invoice-adjustments.md` K3, "the lock lease is not renewed", still holds for adjustments.
+- **K6: before the first write a lost lock answers 503 `ebilling.decision.unavailable`, not `incomplete`.** Nothing was committed, so "the lines were updated" would be false. The POML's "incomplete" outcome applies once something is written, which is the "part way" case. Both are 503 and never 409, and a same-content repeat completes either.
+- **K7: the invoice index enqueue (task 152) has no checkpoint before it.** It runs after the totals, is best effort, and is keyed by the decision id, so a repeat reuses it. A lost lock is caught at the next checkpoint, before the correction chunks.
+- **K8: the line read is checkpointed after the whole paged read, not per page.** A page is 5,000 rows, more than `MaxLinesPerRequest`, so a line decision reads one page. The shared reader (`InvoiceReviewReadService.ReadPagedAsync`) was left unchanged.
+- **K9: `InvoiceAdjustmentService`, `InvoiceLineAddService` and the other holders of the line lock are unchanged.** Each holds it for a short, bounded operation. `notes/102-invoice-adjustments.md` K3, "the lock lease is not renewed", still holds for adjustments.
 - **Publish-size delta (root §10 bullet 4) was not measured in this sub-agent run.** The change is code only: no package, asset or DI change.

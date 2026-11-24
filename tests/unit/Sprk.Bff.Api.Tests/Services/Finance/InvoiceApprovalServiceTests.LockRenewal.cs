@@ -173,6 +173,174 @@ public sealed partial class InvoiceApprovalServiceTests
         w.RecordsOf("accept-line").Should().HaveCount(4);
     }
 
+    /// <summary>
+    /// ISS-050 fix round 2 (F2): an approval world with NO Clean lines, only individually decided lines with AI fields, so the only held line
+    /// step is <see cref="InvoiceLineDecisionService.WriteUnreviewedAsync"/> (7 Unreviewed rows per Fee line). The amounts sum to the billed 1,000.
+    /// </summary>
+    private static (ApprovalWorld W, FakeTimeProvider Clock, InvoiceLineDecisionServiceTests.LeaseLocks Locks, List<Entity> Decided) UnreviewedWorld(int lines)
+    {
+        var w = new ApprovalWorld();
+        var clock = new FakeTimeProvider(Now);
+        var locks = new InvoiceLineDecisionServiceTests.LeaseLocks(clock);
+        w.LineClock = clock;
+        w.LockService = locks;
+        var each = decimal.Floor(1000m / lines);
+        var decided = Enumerable.Range(0, lines)
+            .Select(i => { var amount = i == lines - 1 ? 1000m - (each * (lines - 1)) : each; return w.AddLine(InvoiceLineStatus.Accepted, amount, extraction: Extraction, approved: amount); })
+            .ToList();
+        return (w, clock, locks, decided);
+    }
+
+    private static List<Entity> UnreviewedRows(ApprovalWorld w) =>
+        w.Corrections.Where(r => r.GetAttributeValue<OptionSetValue>("sprk_outcometype").Value == 100000003).ToList();
+
+    [Fact(DisplayName = "ISS-050 fix 2 (F2a): approve's Unreviewed rows lose the held line lock at their first checkpoint: 503 unavailable at 'unreviewed', nothing was changed, no write; the repeat approves")]
+    public async Task Approve_UnreviewedLosesTheLockFirst_IsUnavailable_NothingWritten()
+    {
+        var (w, _, locks, _) = UnreviewedWorld(3);
+        locks.RenewAnswer = n => n == 0 ? false : null;
+
+        var result = await w.ApproveAs(AliceUser);
+
+        locks.Renewals.Should().ContainSingle("the Unreviewed step stopped at its first (failed) renewal");
+        result.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        result.Code.Should().Be(InvoiceApprovalCodes.Unavailable);
+        result.FailedStep.Should().Be("unreviewed");
+        result.Detail.Should().Contain("nothing was changed");
+        w.Writes.Should().Be(0);
+        w.Corrections.Should().BeEmpty();
+        w.ApproveRecords.Should().BeEmpty();
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved);
+        UnreviewedRows(w).Should().HaveCount(21, "7 AI fields on each of the 3 decided lines");
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 2 (F2b): approve's Unreviewed rows renew the held line lock as the approval's owner at the approval's 5-minute duration (not the line route's 2), and it never lapses")]
+    public async Task Approve_Unreviewed_RenewsWithTheApprovalsOwnerAndDuration()
+    {
+        var (w, clock, locks, _) = UnreviewedWorld(3);
+        // 40 s per owner question: the Unreviewed step itself renews past its first checkpoint.
+        w.Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                clock.Advance(TimeSpan.FromSeconds(40));
+                return Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Owned(Guid.Parse("03000000-0000-4000-8000-0000000000f0"));
+            });
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Approved);
+        var key = InvoiceLineDecisionService.LockKeyFor(w.InvoiceId);
+        var owner = LineLockOwner(w, locks);
+        locks.Renewals.Should().HaveCountGreaterThanOrEqualTo(2, "the first checkpoint, then again once 30 s have passed")
+            .And.OnlyContain(r => r.Key == key && r.Owner == owner && r.Duration == InvoiceApprovalService.LockDuration);
+        locks.Renewals.Should().NotContain(r => r.Duration == TimeSpan.FromMinutes(2), "never shortened to the line route's 2 minutes");
+        locks.Gaps(key, owner).Should().OnlyContain(gap => gap < InvoiceApprovalService.LockDuration);
+        UnreviewedRows(w).Should().HaveCount(21);
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 2 (F2, optional branch): approve's Unreviewed rows lose the lock after their first 400-row chunk: 503 incomplete at 'unreviewed'; the repeat writes the rest and approves")]
+    public async Task Approve_UnreviewedLosesTheLockAfterAChunk_IsIncomplete()
+    {
+        var (w, clock, locks, _) = UnreviewedWorld(58); // 58 x 7 = 406 rows: two chunks
+        clock.AutoAdvanceAmount = TimeSpan.FromSeconds(31); // every checkpoint renews
+        var failed = false;
+        locks.RenewAnswer = _ =>
+        {
+            if (!failed && w.Corrections.Count > 0)
+            {
+                failed = true;
+                return false;
+            }
+
+            return null;
+        };
+
+        var result = await w.ApproveAs(AliceUser);
+
+        failed.Should().BeTrue();
+        result.Outcome.Should().Be(ApprovalOutcome.Incomplete, "503 incomplete, never 409, never continued unlocked");
+        result.Code.Should().Be(LineDecisionCodes.Incomplete);
+        result.FailedStep.Should().Be("unreviewed");
+        UnreviewedRows(w).Should().HaveCount(400, "the first chunk only; nothing after the failed renewal");
+        w.ApproveRecords.Should().BeEmpty();
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+
+        clock.AutoAdvanceAmount = TimeSpan.Zero;
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved);
+        UnreviewedRows(w).Should().HaveCount(406);
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 2 (F1-low): Accept all Clean wrote, then the approval's totals step fails: the 503 says part of it was saved, never 'nothing was changed'; the repeat approves")]
+    public async Task Approve_TotalsFailAfterTheBulkAcceptWrote_NeverSaysNothingWasChanged()
+    {
+        var (w, _, _, clean) = RenewalWorld();
+        // Fail the approval's own recalculation: the first totals read after the bulk accept recorded its lines (the line service's own
+        // recalculation runs before its records).
+        var faulted = false;
+        w.Records.Setup(r => r.RetrieveRecordFieldsAsync("sprk_invoice", w.InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (!faulted && w.RecordsOf("accept-line").Count == clean.Count)
+                {
+                    faulted = true;
+                    return Task.FromException<Dictionary<string, object?>>(new InvalidOperationException("dataverse down"));
+                }
+
+                return Task.FromResult(new Dictionary<string, object?> { ["sprk_totalamount"] = 1000m, ["versionnumber"] = 5L });
+            });
+
+        var result = await w.ApproveAs(AliceUser);
+
+        faulted.Should().BeTrue();
+        result.Outcome.Should().Be(ApprovalOutcome.Unavailable, "the outcome and code are unchanged");
+        result.Code.Should().Be(InvoiceApprovalCodes.Unavailable);
+        result.FailedStep.Should().Be("totals");
+        result.Detail.Should().Be(InvoiceApprovalService.ApproveNotFinishedText).And.NotContain("nothing was changed");
+        clean.Should().OnlyContain(l => w.Row("sprk_billingevent", l.Id).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value == (int)InvoiceLineStatus.Accepted);
+
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.ApproveRecords.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 2 (F1-low): only the Unreviewed rows were written, then the approval's totals step fails: the 503 says part of it was saved")]
+    public async Task Approve_TotalsFailAfterTheUnreviewedRowsWrote_NeverSaysNothingWasChanged()
+    {
+        var (w, _, _, _) = UnreviewedWorld(3);
+        w.FaultsOnce["totals"] = new InvalidOperationException("dataverse down");
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        result.FailedStep.Should().Be("totals");
+        UnreviewedRows(w).Should().HaveCount(21, "written before the totals step");
+        result.Detail.Should().Be(InvoiceApprovalService.ApproveNotFinishedText);
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 2 (F1-low, must not fire): the approval's totals step fails before this approve wrote anything: the old 'nothing was changed' text stays")]
+    public async Task Approve_TotalsFailBeforeAnyWrite_SaysNothingWasChanged()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, 1000m, approved: 1000m); // no AI fields, no Clean line: no line-step write
+        w.FaultsOnce["totals"] = new InvalidOperationException("dataverse down");
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        result.Code.Should().Be(InvoiceApprovalCodes.Unavailable);
+        result.FailedStep.Should().Be("totals");
+        result.Detail.Should().Be("The approval could not be completed; nothing was changed. Try again.");
+        w.Writes.Should().Be(0);
+        w.Corrections.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "ISS-050 fix 1 (F1-low): a lock lost before this approve wrote anything still says nothing was changed")]
     public async Task Approve_LostBeforeAnyWrite_SaysNothingWasChanged()
     {

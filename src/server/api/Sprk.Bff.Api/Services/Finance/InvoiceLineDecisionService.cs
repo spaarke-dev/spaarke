@@ -475,8 +475,9 @@ public sealed class InvoiceLineDecisionService
     /// Task 103 (D-72): every AI-sourced field of a decided Fee or Expense line (Accepted, Reduced, Disallowed) that has no correction row yet
     /// gets one "Unreviewed" row (<c>sprk_islabel</c> false), attributed to the approver. Fields that already have a row (Accepted in bulk,
     /// Corrected, Confirmed individually) are left alone. Row ids are deterministic per (<paramref name="scopeId"/>, line, field), so a repeat
-    /// upserts the same rows. The caller holds <see cref="LockKeyFor"/>. Returns Applied, or Unavailable / OwnerUnresolved with nothing
-    /// written, or Incomplete when a later chunk failed (a repeat completes it).
+    /// upserts the same rows. The caller holds <see cref="LockKeyFor"/>. Returns Applied (with <see cref="LineDecisionResult.CommittedLineIds"/>
+    /// set to the lines that got rows, when any did), or Unavailable / OwnerUnresolved with nothing written, or Incomplete when a later chunk
+    /// failed (a repeat completes it).
     /// </summary>
     /// <param name="lockOwner">ISS-050: as on <see cref="AcceptCleanHeldAsync"/>: the caller's lock is renewed while the owners are resolved and
     /// before each chunk; a lost lock stops before the next chunk (Unavailable when none was written, Incomplete otherwise).</param>
@@ -562,7 +563,10 @@ public sealed class InvoiceLineDecisionService
         }
 
         _logger.LogInformation("Unreviewed correction rows of invoice {InvoiceId}: {Count} written.", invoiceId, rows.Count);
-        return new LineDecisionResult(LineDecisionStatus.Applied, "ok");
+
+        // ISS-050 fix round 2: the lines that got rows, so the approval knows it wrote (a later refusal then never says "nothing was changed").
+        var writtenLines = rows.Select(row => row.GetAttributeValue<EntityReference>("sprk_invoiceline").Id).Distinct().ToList();
+        return new LineDecisionResult(LineDecisionStatus.Applied, "ok", CommittedLineIds: writtenLines);
     }
 
     /// <summary>The (line, field) pairs that already have a correction row on the invoice (any outcome).</summary>
