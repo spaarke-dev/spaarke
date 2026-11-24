@@ -72,12 +72,22 @@ const DRIVE_ID = 'drive-1';
 // back to empty bytes if the fixture path can't be resolved — the no-target insertion
 // redline renders either way, since it does not depend on the loaded document's own text).
 function loadSampleDocxBase64(): string {
+  const p = path.resolve(__dirname, '../../../../../../tests/integration/Spe.Integration.Tests/fixtures/sample.docx');
+  let bytes: Buffer;
   try {
-    const p = path.resolve(__dirname, '../../../../../../tests/integration/Spe.Integration.Tests/fixtures/sample.docx');
-    return fs.readFileSync(p).toString('base64');
+    bytes = fs.readFileSync(p);
   } catch {
     return '';
   }
+  // The fixture is stored in Git LFS. A checkout without the LFS object has a ~130-byte text pointer
+  // here; fed to the workspace as "docx bytes" it mounts the reference-only state and 25 tests fail
+  // with a misleading "Unable to find role=textbox". Say what is wrong instead.
+  if (bytes.subarray(0, 40).toString('utf8').startsWith('version https://git-lfs')) {
+    throw new Error(
+      `${p} is a Git LFS pointer, not the .docx fixture. Run: git lfs pull --include="tests/integration/Spe.Integration.Tests/fixtures/sample.docx"`
+    );
+  }
+  return bytes.toString('base64');
 }
 const SAMPLE_DOCX_B64 = loadSampleDocxBase64();
 
