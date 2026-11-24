@@ -222,7 +222,7 @@ Raise the default `ImportTimeout` to at least 120 min. On a timeout, record the 
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed by PR #3017 (merged `7dc36ac0f5`, 2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. needs the dev L2 **API** deploy (CreateRun is in the API app; the Worker deploy of 2026-11-23 does not carry it) |
+| **Status** | Fixed by PR #3017 (merged `7dc36ac0f5`, 2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. dev L2 API deployed from master `7dc36ac0f5` and swapped to production 2026-11-23 (owner OK), healthy |
 | **Urgency** | now (every upgrade of an existing stamp) |
 | **Filed** | 2026-11-20 |
 | **Source** | ACME upgrade to SpaarkeMaster 1.3.2.0: the first `POST /api/runs` returned 400 `registry-setup-status-not-in-progress` |
