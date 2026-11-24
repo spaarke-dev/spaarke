@@ -61,3 +61,43 @@ Updated (raw key replaced by label, or an arbitrary stored name replaced by a re
 
 - Not run: the whole `Sprk.Bff.Api.Tests` or ArchTests (by instruction). Run: the filtered classes listed in the task report, plus `FirmFindingsProjectionCallerBoundaryGuardTests` and `FindingsJsonAppOnlyReadGuardTests` (ArchTests, 12 pass).
 - The SPA was not touched; no SPA test run was needed.
+
+## Fix round 1
+
+Review findings at b7c5fc8393. Test and guard changes only; `FirmValueReadLabel`'s table and runtime behaviour are unchanged (one doc-comment sentence in `FirmValueReadLabel.cs` now says what the guard does).
+
+### F2 (1): `FirmValueReadLabelGuardTests` failed open on ordinary call shapes
+
+Change, all in `Scan` (`FirmValueReadLabelGuardTests.cs`):
+
+- (a) Every non-definition call matching `\b(?:LineField|HeaderField|Extracted)\s*\(` is counted per file and must equal the calls the scan parsed; a mismatch fails (`N LineField/HeaderField/Extracted call(s) but M the scan can read`). A definition is a call whose list starts with a typed parameter (`string name`, `BillingLineFacts line`, `FieldRef field`), so `Extracted(string.Format(...))` is not mistaken for one. A reference to a producer that is not a call (`var pick = context.LineField;`) fails. The call patterns now allow whitespace before `(`, so a spaced call is read, not missed.
+- (b) `with\s*\{[^}]*\bName\s*=` fails.
+- (c) A `name` argument is allowed only in `HandlerContext.cs`; the `"line." + field` and `"invoice." + field` expansion only in `RequiredDataHandler.cs`. Either shape elsewhere fails. A local `name = ...` declaration in `HandlerContext.cs` fails too (elsewhere a forwarded `name` already fails; a blanket ban hit two unrelated files, `ProcedureResolver.cs` and `DailyHoursCapHandler.cs`).
+- The class remarks and the `FirmValueReadLabel.cs` remark now list exactly what the guard catches and what it does not read.
+
+New cases (all in `FirmValueReadLabelGuardTests`):
+
+| Case | Test |
+|---|---|
+| indexer first argument, method-call first argument, named arguments, spaced `LineField (`, spaced `HeaderField (`, bare method-group reference | `MustFire_AnUnreadableCallShape_Fails` (Theory, 6 rows) |
+| `context.LineHours(line) with { Name = ... }` | `MustFire_AWithExpressionThatSetsName_Fails` |
+| forwarding wrapper outside `HandlerContext.cs` | `MustFire_AForwardingWrapper_OutsideHandlerContext_Fails` |
+| local `name` with a computed value, passed to a producer | `MustFire_ALocalNameWithAComputedValue_Fails` |
+| local `name` inside `HandlerContext.cs` | `MustFire_ALocalNameWithAComputedValue_InHandlerContext_Fails` |
+| `"line." + field`, `"invoice." + field` outside `RequiredDataHandler.cs` | `MustFire_AConcatenatedName_OutsideRequiredData_Fails` (Theory, 2 rows) |
+
+Must-not-fire: the real producer tree (`TheTable_CoversExactlyTheNamesTheProducersEmit`) is clean; `MustNotFire_ReadableProducers_ReportNothing` now puts the helper definitions in `HandlerContext.cs` and adds a `with { Value = ... }` (a `with` that does not rename).
+
+Must-fire evidence: the 12 new test cases above were spliced into the round-0 guard (b7c5fc8393 `Scan` and `Violations`) and run: 12 failed, 7 passed (the 7 are the round-0 tests that were already there). With the new guard restored, all pass.
+
+### F2 (2): `Rejected_EveryExtractedFieldConstant_StillShows_IncludingCaseAndPaddingVariants`
+
+It now collects `expectedValues` (`SHOWN-{c}-{i}`, in order) next to `expectedNames` (all `GenericLabel`) and asserts both `Select(v => v.Name).Should().Equal(expectedNames)` and `Select(v => v.Value).Should().Equal(expectedValues)`. A projection that dropped or re-ordered a value, or showed another value, now fails (the count of names alone passed).
+
+### Nit: `FirmNoticeComposerTests`
+
+The label `"Billed rate"` is now `"Rate"` (the projection's label for `line.rate`), in the value read and in the HTML assertion.
+
+### Run
+
+Filtered `FirmValueReadLabel*`, `FirmFindingsProjectionTests`, `FirmNoticeComposerTests`: 323 passed, 0 failed. `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.

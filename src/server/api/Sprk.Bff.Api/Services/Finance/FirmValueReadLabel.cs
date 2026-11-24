@@ -12,8 +12,8 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <para><b>Only extracted values reach a firm.</b> <see cref="FirmRejectionFindings"/> drops a value that carries no extracted-field reference
 /// (an approved rate, a core-record date, a duplicate's earlier invoice) before the projection sees it, so the table lists only the names the
 /// producers (the Billing handlers and the evaluator) give an extracted value of the firm's own invoice. A name outside the table falls back to
-/// <see cref="GenericLabel"/>; the raw name never reaches the firm. <c>FirmValueReadLabelGuardTests</c> scans the producers and fails when one
-/// emits an extracted name with no entry here.</para>
+/// <see cref="GenericLabel"/>; the raw name never reaches the firm. <c>FirmValueReadLabelGuardTests</c> scans the producers, fails when one
+/// emits an extracted name with no entry here, and fails closed on a call or name shape it cannot read (see the guard's remarks for the exact list).</para>
 /// <para><b>Why a separate file.</b> It is the same closed-table-with-fallback shape as <see cref="FirmRejectionReasonText"/>, for a different
 /// key (a value name, not a reason code) and a different reason to change (a new extracted field, not a new rule reason).</para>
 /// </remarks>

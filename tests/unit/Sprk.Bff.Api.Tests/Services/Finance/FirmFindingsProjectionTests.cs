@@ -2498,7 +2498,8 @@ public sealed partial class FirmFindingsProjectionTests
         var fields = extracted.SelectMany(n => new[] { n, n.ToUpperInvariant(), "  " + n.ToLowerInvariant() + " " }).ToList();
         var chunks = fields.Chunk(FirmRejectionFindings.MaxValuesPerFinding).ToList();
         var entries = new List<JsonNode?>();
-        var expected = new List<string>();
+        var expectedNames = new List<string>();
+        var expectedValues = new List<string>();
         for (var c = 0; c < chunks.Count; c++)
         {
             var entry = Stored("ApprovedRate", VersionA, c, values: chunks[c].Select((f, i) => ($"c{c}v{i}", (string?)$"SHOWN-{c}-{i}")).ToArray());
@@ -2506,7 +2507,8 @@ public sealed partial class FirmFindingsProjectionTests
             for (var i = 0; i < chunks[c].Length; i++)
             {
                 ((JsonObject)array[i]!)["field"] = chunks[c][i];
-                expected.Add(FirmValueReadLabel.GenericLabel);
+                expectedNames.Add(FirmValueReadLabel.GenericLabel);
+                expectedValues.Add($"SHOWN-{c}-{i}");
             }
 
             entries.Add(entry);
@@ -2517,7 +2519,9 @@ public sealed partial class FirmFindingsProjectionTests
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
-        outcome!.Items.SelectMany(item => item.ValuesRead ?? []).Select(v => v.Name).Should().Equal(expected);
+        var shown = outcome!.Items.SelectMany(item => item.ValuesRead ?? []).ToList();
+        shown.Select(v => v.Name).Should().Equal(expectedNames);
+        shown.Select(v => v.Value).Should().Equal(expectedValues);
     }
 
     [Fact(DisplayName = "130c fix 3 (K-b, must-fire): 3 valid and 1 malformed rejecting entry show 3 and count 1 not shown")]
