@@ -29,6 +29,8 @@ import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../
 
 /** The environment-variable readers the shared auth bootstrap resolves its settings with. */
 const PCF_ENV = { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId };
+// getXrm is never passed as a value (the Xrm capability guard follows every getXrm value to its uses).
+const getClientUrl = (): unknown => getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl();
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -37,7 +39,14 @@ const useStyles = makeStyles({
   notice: { paddingInline: tokens.spacingHorizontalM, paddingBlock: tokens.spacingVerticalXS },
 });
 
-const { getHostRecordId, getHostEntityName } = createHostContext({ getXrm, cleanGuid });
+// The typed Xrm page declares no data.entity, so each reader casts to the one member it calls.
+type HostEntity = { getId?: () => unknown; getEntityName?: () => unknown };
+type HostPage = { data?: { entity?: HostEntity } };
+const { getHostRecordId, getHostEntityName } = createHostContext({
+  readEntityId: () => (getXrm('page')?.Page as HostPage | undefined)?.data?.entity?.getId?.(),
+  readEntityName: () => (getXrm('page')?.Page as HostPage | undefined)?.data?.entity?.getEntityName?.(),
+  cleanGuid,
+});
 
 /**
  * Round-7 item 11: detects the `sprk_openconversation=1` deep-link param the
@@ -113,7 +122,7 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
     manifestBffAppId,
     manifestApiBaseUrl,
     env: PCF_ENV,
-    getXrm,
+    getClientUrl,
   });
 
   const regardingContext = React.useMemo(

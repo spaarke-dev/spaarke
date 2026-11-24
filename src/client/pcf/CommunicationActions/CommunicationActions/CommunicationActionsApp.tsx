@@ -86,9 +86,11 @@ import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../
 
 /** The environment-variable readers the shared auth bootstrap resolves its settings with. */
 /** The Dataverse org URL (MSAL redirect URI / document links). */
-const resolveDataverseUrl = (): string => resolveDataverseUrlFrom(getXrm);
+const resolveDataverseUrl = (): string => resolveDataverseUrlFrom(getClientUrl);
 
 const PCF_ENV = { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId };
+// getXrm is never passed as a value (the Xrm capability guard follows every getXrm value to its uses).
+const getClientUrl = (): unknown => getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl();
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
 // whose FC return type is incompatible with React 16's JSX element type. Cast at
@@ -327,7 +329,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     manifestBffAppId,
     manifestApiBaseUrl,
     env: PCF_ENV,
-    getXrm,
+    getClientUrl,
   });
 
   // Load the record fields the composer needs for reply/forward pre-fill.

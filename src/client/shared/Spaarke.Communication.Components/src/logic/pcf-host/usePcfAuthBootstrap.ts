@@ -16,10 +16,10 @@ export function usePcfAuthBootstrap<TWebApi>(opts: IPcfAuthBootstrapOptions<TWeb
   const [authReady, setAuthReady] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
   const [bffBaseUrl, setBffBaseUrl] = React.useState('');
-  const { controlLabel, webApi, manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, env, getXrm } = opts;
+  const { controlLabel, webApi, manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, env, getClientUrl } = opts;
 
   React.useEffect(() => {
-    let cancelled = false;
+    const run = { cancelled: false };
     void (async () => {
       try {
         const result = await bootstrapPcfAuth({
@@ -29,9 +29,9 @@ export function usePcfAuthBootstrap<TWebApi>(opts: IPcfAuthBootstrapOptions<TWeb
           manifestBffAppId,
           manifestApiBaseUrl,
           env,
-          getXrm,
+          getClientUrl,
         });
-        if (cancelled) return;
+        if (run.cancelled) return;
         if (result.status === 'not-configured') {
           setAuthError(result.message);
           return;
@@ -39,13 +39,13 @@ export function usePcfAuthBootstrap<TWebApi>(opts: IPcfAuthBootstrapOptions<TWeb
         setBffBaseUrl(result.baseUrl);
         setAuthReady(true);
       } catch (err) {
-        if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
+        if (!run.cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
       }
     })();
     return () => {
-      cancelled = true;
+      run.cancelled = true;
     };
-    // env / getXrm / controlLabel are module-level constants, stable for the control's life.
+    // env / getClientUrl / controlLabel are module-level constants, stable for the control's life.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, webApi]);
 

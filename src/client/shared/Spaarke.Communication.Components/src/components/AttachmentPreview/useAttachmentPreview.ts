@@ -153,6 +153,7 @@ export function useAttachmentPreview(opts: IUseAttachmentPreviewOptions): IUseAt
       void (async () => {
         const links = await apiService.getOpenLinks(documentId);
         const url = links?.webUrl;
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- navigator.clipboard is absent in insecure contexts and some hosts, though the DOM lib types it as always present
         if (url && navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(url);
         }

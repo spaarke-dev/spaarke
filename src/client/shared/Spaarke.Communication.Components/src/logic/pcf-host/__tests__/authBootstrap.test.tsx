@@ -22,9 +22,7 @@ jest.mock('@spaarke/auth', () => ({
 const initAuthMock = initAuth as unknown as jest.Mock;
 const TENANT = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 const webApi = {};
-const getXrm = () => ({
-  Utility: { getGlobalContext: () => ({ getClientUrl: () => 'https://org.crm.dynamics.com' }) },
-});
+const getClientUrl = () => 'https://org.crm.dynamics.com';
 
 function env(over: Partial<Record<keyof IPcfEnvironmentReaders<object>, string>> = {}): IPcfEnvironmentReaders<object> {
   const v = {
@@ -46,7 +44,7 @@ beforeEach(() => initAuthMock.mockClear());
 
 describe('bootstrapPcfAuth', () => {
   it('resolves from the Dataverse environment variables and initialises auth', async () => {
-    const result = await bootstrapPcfAuth({ controlLabel: 'X is', webApi, env: env(), getXrm });
+    const result = await bootstrapPcfAuth({ controlLabel: 'X is', webApi, env: env(), getClientUrl });
     expect(result).toEqual({ status: 'ready', baseUrl: 'https://bff.example' });
     expect(initAuthMock).toHaveBeenCalledTimes(1);
     expect(initAuthMock.mock.calls[0][0]).toMatchObject({
@@ -69,7 +67,7 @@ describe('bootstrapPcfAuth', () => {
       manifestBffAppId: 'm-bff',
       manifestApiBaseUrl: 'https://m.example',
       env: e,
-      getXrm,
+      getClientUrl,
     });
     expect(e.getMsalClientId).not.toHaveBeenCalled();
     expect(e.getBffApiAppId).not.toHaveBeenCalled();
@@ -84,7 +82,7 @@ describe('bootstrapPcfAuth', () => {
         controlLabel: 'Message actions are',
         webApi,
         env: env({ [missing]: '' }),
-        getXrm,
+        getClientUrl,
       });
       expect(result).toEqual({ status: 'not-configured', message: notConfiguredMessage('Message actions are') });
       expect(notConfiguredMessage('Message actions are')).toMatch(
@@ -115,7 +113,7 @@ describe('resolveDataverseUrl', () => {
 
 describe('usePcfAuthBootstrap', () => {
   function Probe(props: { e: IPcfEnvironmentReaders<object> }): React.ReactElement {
-    const s = usePcfAuthBootstrap({ controlLabel: 'The panel is', webApi, env: props.e, getXrm });
+    const s = usePcfAuthBootstrap({ controlLabel: 'The panel is', webApi, env: props.e, getClientUrl });
     return (
       <div>
         <span data-testid="ready">{String(s.authReady)}</span>

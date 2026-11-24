@@ -20,8 +20,11 @@ export interface IPcfEnvironmentReaders<TWebApi> {
   getTenantId(webApi: TWebApi): Promise<string>;
 }
 
-/** `getXrm` from `@spaarke/ui-components`, narrowed to what the redirect-URI lookup reads. */
-export type GetXrmForClientUrl = (capability: 'clientUrl') => unknown;
+/**
+ * Reads the Dataverse client URL. Each PCF passes `() => getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl()`,
+ * so `getXrm` itself is never passed around (the Xrm capability guard follows every `getXrm` value to its uses).
+ */
+export type GetClientUrl = () => unknown;
 
 /** Initialise `@spaarke/auth` for a PCF. `tenantId` is optional: absent or invalid, `@spaarke/auth` discovery decides. */
 export async function initializeAuth(
@@ -45,15 +48,13 @@ export async function initializeAuth(
 }
 
 /** The Dataverse org URL for the MSAL redirect URI (frame-walk to Xrm), else this window's origin. */
-export function resolveDataverseUrl(getXrm: GetXrmForClientUrl): string {
+export function resolveDataverseUrl(getClientUrl: GetClientUrl): string {
   try {
-    const xrm = getXrm('clientUrl') as
-      | { Utility?: { getGlobalContext?: () => { getClientUrl?: () => unknown } } }
-      | undefined;
-    const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+    const url = getClientUrl();
     if (typeof url === 'string' && url.length > 0) return url;
+    // eslint-disable-next-line no-restricted-syntax -- no Xrm frame, or a throwing probe: fall back to the window origin
   } catch {
-    /* ignore */
+    /* fall through to window.location.origin */
   }
   return window.location.origin;
 }
@@ -66,7 +67,7 @@ export interface IPcfAuthBootstrapOptions<TWebApi> {
   manifestBffAppId?: string;
   manifestApiBaseUrl?: string;
   env: IPcfEnvironmentReaders<TWebApi>;
-  getXrm: GetXrmForClientUrl;
+  getClientUrl: GetClientUrl;
 }
 
 export type PcfAuthBootstrapResult =
@@ -95,6 +96,12 @@ export async function bootstrapPcfAuth<TWebApi>(
   if (!clientAppId || !bffAppId || !baseUrl) {
     return { status: 'not-configured', message: notConfiguredMessage(opts.controlLabel) };
   }
-  await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(opts.getXrm), await env.getTenantId(webApi));
+  await initializeAuth(
+    clientAppId,
+    bffAppId,
+    baseUrl,
+    resolveDataverseUrl(opts.getClientUrl),
+    await env.getTenantId(webApi)
+  );
   return { status: 'ready', baseUrl };
 }
