@@ -643,6 +643,10 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       if (!eventResult.success && eventResult.warning) {
         warnings.push(eventResult.warning);
       }
+      // The route's non-fatal warnings for the event (a mapped value the server did not write), shown like the work assignment's.
+      if (eventResult.success && eventResult.warnings?.length) {
+        warnings.push(...eventResult.warnings);
+      }
     }
 
     const hasWarnings = warnings.length > 0;
