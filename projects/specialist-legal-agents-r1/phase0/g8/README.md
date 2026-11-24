@@ -148,7 +148,30 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 | 1.1.0 **real action** (`package-p2-sideload/` id `d38f8df8-…`) | The real G8-P2 package with a fresh id, installed through the **org catalog** like the control (the "sideload" folder name is historical). This upload ran the admin center's **full first-publish wizard** (Upload › Publish to users › Security policy: default template, no custom policies › Accept permissions: "No required permissions" › Review); the earlier updates to `802fd9cc` never showed it. The Learn org control did **not** get this wizard and still worked, so the wizard is not the cause; the fresh app id is | ✅ **PASS in Copilot Chat (2026-11-24, verified).** "What decisions are waiting for me in Spaarke?" → the agent rendered the real **decisions widget** (191 / 185 approve-or-rebudget / 6 invoice, matching the live lane) and summarised the counts. App Insights: client **Sydney** `tools/list` → `resources/read` (the widget) → **one** `tools/call spaarke_show_decisions` (5.2 s, ok) per turn, then the widget's own app-only `spaarke_list_decision_page` page loads. Runs at 14:34Z and 14:49Z each show exactly one `spaarke_show_decisions`. No sign-in card was needed (the A1 OAuth token was already held). **R1′ one call per turn: ✅ in Chat** |
 | ~~1.1.0 sideload Learn control~~ (`control-learn-sideload/` id `125c3b10-…`) | Not needed: the org-catalog control already passed | Not uploaded |
 
-**G8-P2 Chat result: ✅ the default Practice build path works** (coded declarative agent + its own MCP action on the BFF, existing OAuth registration, org-catalog install). Still open for G8-P2: Word and Teams surfaces.
+**G8-P2 Chat result: ✅ the default Practice build path works** (coded declarative agent + its own MCP action on the BFF, existing OAuth registration, org-catalog install).
+
+**Surfaces (2026-11-24 ~14:58–15:00Z, owner screenshots + App Insights):**
+
+| Surface | What ran | Calls per turn | Result |
+|---|---|---|---|
+| **Word**, agent `spaarke-legal-g8p2-sl` (found through agent search in the Copilot pane) | "what invoice related decisions are in spaarke" → the agent rendered the **decisions widget** inside Word | 1 `spaarke_show_decisions` (14:59:24Z), then the widget's 4 app-only page loads | ✅ |
+| **Plain Chat / Copilot in Word without the agent** (leak check) | The **`/spaarke-decisions` skill** from mcp-r1's plugin package. The trace reads "Used Spaarke Decisions". It calls through the tenant connector **"Spaarke MCP"** (C1), whose host approval card names that connector, not this agent's action | 1 `spaarke_show_decisions` (14:57:58Z) | ✅ **No leak.** With the agent installed, plain Copilot still makes exactly one call through its own path; the agent's action is not pulled in |
+| **Teams** | The Copilot app inside Teams is the same M365 Copilot app as Chat (owner) | Same as Chat | ✅ by identity with Chat. The agent was not separately opened from a Teams agent chat |
+
+Attribution: the owner gave no times. The two calls are told apart by order and by the widget page loads that only the agent turn produced. Both came from client `Sydney`, and App Insights does not record which action path made each call. **R1′ (one call per turn): ✅ in Chat, Word and plain Copilot.**
+
+**V1 update test (prepared 2026-11-24; see `notes/agent-package-identity-and-distribution.md` §5):**
+- **Package:** `package-p2-v1/` → `spaarke-legal-g8p2-sl-1.1.1.zip`. It is the **same app id `d38f8df8-…`**, version **1.1.1**.
+- **The one change is in the action:** the MCP URL gets `?pkg=1.1.1` (`…/mcp/legal-operations?pkg=1.1.1`). The BFF routes it the same way; an unauthenticated probe gives 401 on all three URL forms. The OAuth Base URL still prefix-matches.
+- **Steps:**
+  - (1) Admin center: upload it as an **update** to the existing `spaarke-legal-g8p2-sl` (no new app). Approve it if it appears as **Update pending** in Agents › All agents › Requests, and note whether it did.
+  - (2) Wait 5 minutes.
+  - (3) New chat with the agent: "Show my Spaarke decisions". Note the time.
+- **Read the result in App Insights `requests.url`:**
+  - **`…?pkg=1.1.1` ✅:** the update carried the action change, so BR-3 (production updates) is safe.
+  - **URL without `?pkg` ❌:** the old action is still bound; updates do not refresh actions. BR-3 becomes "action changes need a new app id or a re-publish", and that is a D-A1 deployment cost.
+  - **No call at all ❌❌:** the update broke the action, as in 802fd9cc.
+- **Side benefit:** `?pkg=<version>` in the action URL is a cheap way for the BFF to log **which package version** is calling (the note's version-skew row).
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.
 

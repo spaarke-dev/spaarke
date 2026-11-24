@@ -1,0 +1,30 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+  "schema_version": "v2.4",
+  "name_for_human": "Spaarke MCP G8-P2",
+  "namespace": "spaarkeg8sl",
+  "description_for_human": "Phase 0 test action on the Spaarke MCP server.",
+  "description_for_model": "Spaarke legal operations tools. Use spaarke_show_decisions when the user wants to see their Spaarke decisions, Decide lane, or work items waiting for their decision.",
+  "functions": [
+    {
+      "name": "spaarke_show_decisions",
+      "description": "Use for: showing the signed-in user's Spaarke Decide lane, the Work Items waiting for their decision: the count per category (as the Spaarke Console's category cards show them) and the top items, each with a link to open it in Spaarke. Where the host shows widgets, the decisions widget lists the whole lane and is where items are decided. The optional category narrows the top items to one card: all, invoiceDecisions, askOutsideCounsel, approveOrRebudget, chaseReply or other. Privileged items are only counted, as 'N privileged items — open to review'; they are reviewed in the widget or in Spaarke. Not for: completing, dismissing or changing a decision (that happens in the widget or in Spaarke); the Do lane or items already decided or closed; searching documents, matters or email; the details of one item."
+    }
+  ],
+  "runtimes": [
+    {
+      "type": "RemoteMCPServer",
+      "auth": {
+        "type": "OAuthPluginVault",
+        "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI="
+      },
+      "spec": {
+        "url": "https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations?pkg=1.1.1",
+        "mcp_tool_description": {
+          "file": "mcp-tools.json"
+        }
+      },
+      "run_for_functions": ["spaarke_show_decisions"]
+    }
+  ]
+}
