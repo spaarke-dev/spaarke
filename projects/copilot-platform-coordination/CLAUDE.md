@@ -17,6 +17,7 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
 - Package connectors work in Cowork; in Chat a package connector call failed before reaching the BFF (mcp-r1 T2/T13/T14, 2026-11-23).
 - Cowork shows the **plugin** name, not the connector name (T13).
 - Two package connectors sharing one OAuth `referenceId` share one sign-in (T14).
+- An org-catalog **update** of an existing app id may not refresh a declarative agent's action. Five versions of `802fd9cc` never loaded theirs, while the same package on a fresh app id worked (G8-P2, 2026-11-24; working hypothesis). When an agent's action doesn't appear, try a fresh app id before blaming the server or the tenant.
 
 ## Key sources
 
