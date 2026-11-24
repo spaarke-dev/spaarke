@@ -10,6 +10,46 @@
 
 ## Open (in priority order)
 
+### ISS-039 — New stamps get no product-configuration reference rows, while product code hard-codes dev event-type row ids
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | now (ACME, the demo stamp, has no event types; Events page, Daily Briefing and Portfolio depend on them) |
+| **Filed** | 2026-11-24 |
+| **Source** | Data-setup review 2026-11-24 (read-only row counts, spaarkedev1 vs spaarke-acme); plan `notes/data-setup-plan.md` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3075 |
+
+**Description**
+
+Provisioning seeds `sprk_recordtype_ref` (H12b, 14 rows) and the AI type lookups (H12a), but no other reference table.
+Three tables are product configuration, not customer taxonomy: `sprk_eventtype_ref` (17 rows on dev: per-type field
+configuration JSON, side-pane form id, colour, due-date rules), `sprk_agreementtype` (10: AI classification cues,
+confidence thresholds, knowledge-pack refs) and `sprk_triagecategory` (10: classifier guidance, priority weights). ACME
+has 0 rows in each (read 2026-11-24). Product code also hard-codes dev row ids of `sprk_eventtype_ref`: the "Task" type
+`124f5fc9-98ff-f011-8406-7c1e525abd8b` in `DailyBriefingCollector.cs:128` and `PortfolioService.cs:99`, and 11 type ids
+in `src/solutions/EventsPage/src/config/eventConfig.ts:34-96` and `src/solutions/EventDetailSidePane/src/config/eventTypeConfigs.ts:282-286`.
+So on any stamp, events cannot be typed, and the Daily Briefing / Portfolio task counts and the Events page form routing
+match nothing — even after event types are added by hand, unless they carry the dev ids.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiRecordTypeSeeder.cs` (the create-if-missing pattern to extend)
+- `git grep -nE "[0-9a-f]{8}-[0-9a-f]{4}-f011-8406-" -- src/server src/solutions src/client` (hard-coded dev row ids)
+- Read-only check: `GET https://spaarke-acme.crm.dynamics.com/api/data/v9.2/sprk_eventtype_refs?$select=sprk_name` → 0 rows
+
+**Suggested fix**
+
+Export the three tables from spaarkedev1 into source-controlled seed files that keep each row's primary key, and seed
+them in H12b create-if-missing with the same ids (report drift on changed rows; never overwrite). Add an ArchTest that
+every Dataverse row id hard-coded in product code exists in a seed file. Same pattern as L56 (AI content).
+
+**Estimated effort**: 1–2 days with tests
+**Blockers**: none (applying it to ACME is a live run, owner OK)
+**Related**: L56 (H12a AI content, `notes/t186-acme-run-log.md`); `notes/data-setup-plan.md`; ISS-037 (H12b workspaces)
+
+---
+
 ### ISS-038 — Handler upgrade mode (`provisionedOn`) is unusable
 
 | Field | Value |
