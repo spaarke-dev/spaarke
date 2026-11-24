@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: #3038 merged; ISS-046 done; 079 read-only prep done; 053 waits for owner check Q)
+> **Last Updated:** 2026-11-24 (checkpoint: master PR #3051 open with iss048 + iss046; checklist Q first run Failed on a dev data gap, re-run pending)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,23 +10,25 @@
 
 ## Quick recovery
 
-- **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c. work/ebilling-r1 pushed (tip 8cefa96054). uac-r2 told that 050c is in master for its next dev BFF build (the owner's SHA go is given in uac-r2's session).
-- **Dev BFF 996928732e** has been live since 2026-11-24 ~03:01Z. It carries #3029 (096, 194, 164). 096 is recorded as live, and owner checklist **R** (Office add-in) is ready to test.
+- **Master PR #3051 OPEN** (owner said "Yes open pr", 2026-11-24): iss048, iss046 (Closes #3001), the rule-type options script fix and notes. No conflicts with master at open. Not bound, no auto-merge. Merge as a merge commit once CI and the owner agree. After it merges: iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
+- **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
+- **Dev BFF 0362599b94** live since 2026-11-24 (uac-r2's deploy; carries 050c). healthz 200; confirm and reject return 401 unauthenticated. Evidence: `notes/050c-confirm-followups.md`. Owner checklist **R** (Office add-in) is ready to test.
+- **Checklist Q first run (2026-11-24) Failed** on MAT-000113: the matter is root-BU owned on dev, so the submission was refused `record_owner_restricted_content_team_unresolved`. Not an eBilling defect; uac-r2 confirmed and filed the gap as #3047 (149 root-owned dev records; re-homing is an owner decision uac-r2 raises). Private detail stays with uac-r2. **Re-run:** PAT-792345, invoice number `2026024892`, PO blank (other BU1 matters are listed in checklist Q). Avoid MAT-000113 and MAT-000065.
+- **iss048 ✅** merged into work f4f5b06f52 (result screen title and icon follow the outcome; record-setup Failed text). Sonnet review: no F-class, K1-K8 in `notes/iss048-submission-result-screen.md`.
 - **053:** every read-only check passes, and its BFF and SPA steps are superseded by the master deploys. It closes on owner checklist **Q**: one Accepted firm-portal submission with sample B-0050. The Rejected check moved into **079 step 10**, because dev has no published Reject rule: publish an InvoiceAge rule (maxAgeDays 180, Reject), then the owner submits B-0082 (dated 2025-04-01). Both PDFs were sent to the owner; the copies are in the session scratchpad `samples\`, and the originals in `notes/evaluation-set/local/synthetic/` (gitignored).
 - **079 prep (read-only, 2026-11-24), step 2:**
   - These scripts report nothing to create: Procedure schema, Stored File schema, AddedFee/Discount options, rejection-reason schema.
   - Deploy-EbillingRuleTypeOptions.ps1 fixed (d566d01136): it tolerates AddedFee/Discount; -WhatIf exits 0.
   - Step 3: settings, the three containers and the container-scope role are already on dev; live step (b) has nothing to set.
   - Step 4: both -Verify PASS. Evidence: `notes/079-wp3-deploy.md`.
-  - Owner said "not yet" to checklist Q on 2026-11-24.
-- **ISS-046 (#3001) ✅** merged into work 234828cfb2 (Sonnet review, fix round 1, Pester 27/0). #3001 closes when the change reaches master.
+- **ISS-046 (#3001) ✅** merged into work 234828cfb2 (Sonnet review, fix round 1, Pester 27/0). #3001 closes when #3051 merges.
 - **ISS-047 (#3042) filed:** the drift-check script misreads `iss028`/`iss040` as 028/040 and does not parse hyphen-suffixed ids. The real drifts were reconciled by hand (084d, 093, 113 completed; 053 and 161 set to 🔄). Two phantom drifts remain (028, 040).
 - **Decisions:** EB-D-267 (owner): no typed (no-PDF) invoice create is needed.
 - **Blocked chain:** 053 (owner Q) → 079 → 112, 189 and 160. 121 waits for uac-r2 191. 136 and 153 are deploy close-outs after 079/112.
 - **Stays off:**
   - 117's Apply stays off until 079, with the owner's OK. #2982 is fixed on master.
   - `Ebilling:StoredFileReconcileEnabled` stays false.
-- **Clean-up:** the agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-afe7e9fefac5f933f` is locked by the app (pid 39572). Remove it with Remove-WorktreeSafe once the lock is gone. Its branch was fully pushed.
+- **Clean-up:** the iss048 agent worktree is removed. The agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-afe7e9fefac5f933f` is locked by the app (pid 39572). Remove it with Remove-WorktreeSafe once the lock is gone. Its branch was fully pushed.
 - **Machine load:** rerun timed-out classes with `-- xUnit.MaxParallelThreads=4`.
 
 ## Recently done (detail in the notes and git)
