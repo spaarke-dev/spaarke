@@ -101,3 +101,14 @@ The label `"Billed rate"` is now `"Rate"` (the projection's label for `line.rate
 ### Run
 
 Filtered `FirmValueReadLabel*`, `FirmFindingsProjectionTests`, `FirmNoticeComposerTests`: 323 passed, 0 failed. `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+
+## Review and merge (2026-11-24)
+
+One Opus adversarial pass over f5ec8b6a20..b7c5fc8393: no runtime defect; every key a reject-eligible producer emits has a label and no firm surface shows a raw key. Two F2 test findings (the guard failed open on several code shapes; one updated test checked only the count) and a nit ("Billed rate" in a composer test) were fixed in round 1 (19d7859902); the scoped re-check of the fix diff (main session) found it test-only plus one doc comment, with must-fire evidence. Merged into work.
+
+Known limits:
+- K2: firm notices composed before the deploy keep the raw key; nothing re-renders them. The stored findings keep the raw key, which the internal readers need.
+- K4: the AI notice drafter never receives values read, so it is unaffected.
+- K4: the unknown-key Warning logs only a code-defined key; no producer can trigger it today.
+- K4: `invoice.currency` has a label but can never reach a firm (both its reasons are flag-only).
+- Wording to confirm with the owner: "Line date" and "Description".

@@ -2422,7 +2422,7 @@ A reject or return carrying the reviewer-confirmed notice can stop part way: a 5
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (1b756a83d3, 2026-11-24); #2933 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-20 |
 | **Source** | Adversarial review of task 134 (found in passing, server side) |
