@@ -131,7 +131,22 @@ function Get-IndexMarkers {
     # and reported a phantom drift on task 001. Do not reintroduce a cell-spanning pattern.
     # The id takes the same grammar as the id-first layout below (`102a`, `081.5`); before 2026-10-17
     # it took three digits only, so a suffixed task in a status-first index read as "no row".
-    $rowPattern = '^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(\d{3}(?:\.\d+)?[a-z]?)\*{0,2}\s*\|'
+    #
+    # TASK ID GRAMMAR (ISS-047 / #3042, 2026-11-24) — ONE grammar, used by both row patterns:
+    #   [letters] 3-digits [.N] [letter] [-segment]...      `028`, `081.5`, `102a`, `iss028`, `084h-1`, `095f-2e2a`, `130-0`
+    # Before this, a row `| iss028 | ✅ |` was read as marker `iss` + id `028` (the lazy `[^\s|]+` marker took the
+    # letters), so the iss rows overwrote the real 028/040 rows with a phantom drift; and `084h-1`, `130-0` matched
+    # neither pattern, so their POMLs read as "no index row". Two guards keep the id whole:
+    #   - `(?<![a-z])` before the id: a lowercase letter right before the digits belongs to the id, never to the marker.
+    #   - a first cell that is, on its own, a letter-prefixed or hyphenated id goes straight to the id-first layout,
+    #     so the status-first pattern cannot split `084h-1` at the hyphen. Plain ids (`028`, `102a`) take the old path.
+    # The POML side needs no second grammar: it pairs on the `<task id="...">` attribute verbatim.
+    # Each hyphenated segment starts with a digit (`-1`, `-2e2a`, `-0b`): a letters-only tail such as the
+    # annotation row `| 090-note |` (email-communication-intelligence-r2) is not a task id.
+    # The letter suffix may be several letters (`132ui`, `095f-2ui` already had a digit-led segment).
+    $idGrammar = '(?:[a-z]+)?\d{3}(?:\.\d+)?[a-z]*(?:-\d[a-z0-9]*)*'
+    $plainIdPattern = '^\d{3}(?:\.\d+)?[a-z]?$'
+    $rowPattern = "^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(?<![a-z])($idGrammar)\*{0,2}\s*\|"
 
     # SECOND LAYOUT — id first, status in a LATER cell (added 2026-10-01,
     # customer-provisioning-orchestration-r1 T245a follow-up). This is the layout task-create
@@ -143,7 +158,7 @@ function Get-IndexMarkers {
     #     `245a`) — the ids `<task id="...">` actually carries in such projects.
     #   - The status cell is the first later cell holding a status token or glyph; a row with none
     #     is not a status row (dependency / reference tables) and is skipped.
-    $idFirstPattern = '^\|\s*\*{0,2}(\d{3}(?:\.\d+)?[a-z]?)\*{0,2}\s*\|'
+    $idFirstPattern = "^\|\s*\*{0,2}($idGrammar)\*{0,2}\s*\|"
     $statusTokenPattern = '\[(?:open|wip|done|escalated|blocked|cancelled|deferred)\]'
     $statusCellPattern = "$statusTokenPattern|✅|🔲|🔄|⚠️|🟡"
 
@@ -159,7 +174,12 @@ function Get-IndexMarkers {
     $candidates = @()
     foreach ($line in (Get-Content -LiteralPath $IndexPath -Encoding UTF8)) {
         $cells = Get-RowCells -Line $line
-        $m = [regex]::Match($line, $rowPattern)
+        if (-not $line.StartsWith('|')) { continue }   # not a table row; the old code reached the same result via its `^\|` patterns
+        # Case-sensitive on purpose (-cmatch): the id grammar is lowercase, so `| T001 |` stays the old marker `T` + id `001`.
+        # Inner whitespace is kept: `| note 001 |` is a marker + id, not the id `note001`.
+        $firstCell = (@($cells)[0] -replace '\*', '').Trim()
+        $wholeExoticId = ($firstCell -cmatch "^$idGrammar$") -and ($firstCell -cnotmatch $plainIdPattern)
+        $m = if ($wholeExoticId) { [regex]::Match('', '(?!)') } else { [regex]::Match($line, $rowPattern) }
         if ($m.Success) {
             # RULE 1 — a first cell naming more than one task id is a dependency list, not a status row.
             if (([regex]::Matches($cells[0], '\d{3}')).Count -ne 1) { continue }
@@ -180,6 +200,10 @@ function Get-IndexMarkers {
         }
         $m = [regex]::Match($line, $idFirstPattern)
         if (-not $m.Success) { continue }
+        # RULE 1 here too: the wider grammar lets a reference row such as `| 100-200 | Wave | ✅ |` (a range) match as an id;
+        # two three-digit runs in the id mean a range or a list, not one task. `001-2` has one run and cannot be told
+        # from the real `130-0` by shape, so it still reads as an id (K2 in notes/iss047-drift-check-id-grammar.md).
+        if (([regex]::Matches($m.Groups[1].Value, '\d{3}')).Count -ne 1) { continue }
         $statusCell = Find-LaterStatusCell $cells
         if ($null -eq $statusCell) { continue }
         $candidates += [pscustomobject]@{
