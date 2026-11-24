@@ -13,8 +13,12 @@
 # Whole-repo mutation is far too slow (the 2026-06-01 pilot measured 75,619 mutants
 # in the BFF alone) and mostly noise. So this workflow mutates only:
 #   - the security / contract-critical paths in the allowlist below, and
-#   - only the lines that changed on the branch in the last 24 hours (Stryker
+#   - only the files that changed on the branch in the last 24 hours (Stryker
 #     `since` mode), so each night's cost is proportional to the day's change.
+#     Stryker's since mode is coarser than "changed lines": it also re-tests every
+#     mutant covered by a test file that changed. The alert counts only mutants on
+#     lines changed in the window (summarize-mutation-report.py --since, #1821); the
+#     rest are reported as a count and kept in the artifact.
 # A night on which nothing in the allowlist changed finishes in about a minute.
 #
 # ADVISORY: nothing gates on this. The outcome is ONE quality alert (check name
@@ -252,6 +256,7 @@ jobs:
         env:
           BFF_COUNT: ${{ steps.scope.outputs.bff_count }}
           DATAVERSE_COUNT: ${{ steps.scope.outputs.dataverse_count }}
+          SINCE_SHA: ${{ steps.scope.outputs.since }}
         run: |
           set -euo pipefail
           verdict=ok
@@ -267,7 +272,9 @@ jobs:
               && args+=(--report "dataverse=$(cat "$RUNNER_TEMP/stryker-out-dataverse/report.path")=src/server/shared/Spaarke.Dataverse")
 
             if [ ${#args[@]} -gt 0 ]; then
-              python3 scripts/ci/summarize-mutation-report.py "${args[@]}" \
+              # --since: count only mutants on lines changed in the window. Stryker's since mode also re-tests the
+              # mutants a changed TEST covers, which are not this check's signal (#1821; see the script docstring).
+              python3 scripts/ci/summarize-mutation-report.py "${args[@]}" --since "$SINCE_SHA" \
                 --out-md "$RUNNER_TEMP/mutation-summary.md" \
                 --out-alert "$RUNNER_TEMP/mutation-alert.md" \
                 --out-verdict "$RUNNER_TEMP/mutation-verdict.txt"
