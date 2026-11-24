@@ -4,7 +4,6 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -1662,14 +1661,36 @@ public sealed partial class OntologyAdminAuthoringService
     /// </summary>
     private static bool NextStepsAreTheProblem(string? planJson, DecisionLane lane)
     {
+        // JsonDocument, as Resolve reads it: a repeated top-level key is accepted (the last value wins) rather than thrown on, and the
+        // copy below repeats every key it keeps, so Resolve sees the same actions it saw the first time.
         try
         {
-            if (JsonNode.Parse(planJson ?? string.Empty) is not JsonObject plan || !plan.Remove("nextSteps"))
+            using var doc = JsonDocument.Parse(planJson ?? string.Empty);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
             {
                 return false;
             }
 
-            return !DecisionPlanService.Resolve(plan.ToJsonString(), lane).IsRefused;
+            var hadNextSteps = false;
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (property.NameEquals("nextSteps"))
+                    {
+                        hadNextSteps = true;
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            return hadNextSteps && !DecisionPlanService.Resolve(Encoding.UTF8.GetString(stream.ToArray()), lane).IsRefused;
         }
         catch (JsonException)
         {

@@ -12,7 +12,7 @@ Rigor FULL, sonnet @ high. Closes #3034 (uac-r2 review of tasks 203-205).
 2. **Authoring names the real refusal** (`OntologyAdminAuthoringService.ValidateDraft`). Resolver refusal reasons and API reason codes are unchanged; no new ReasonCode (none of the sibling branches for PlanMissing set one, and adding a code is the POML escalation trigger).
    - PlanMalformed: "The decision plan can't be read. Choose its actions again in the wizard."
    - UnknownAction: "This plan lists an action that doesn't exist. Choose from the actions the wizard offers for the {lane} lane."
-   - Non-next-step code in `nextSteps`: "This plan lists a Next step that can't be used as one. Choose Next steps from the ones the wizard offers." The resolver reports it as `ActionNotAllowed`, same as an action outside the lane, so a small private `NextStepsAreTheProblem` asks the resolver again with `nextSteps` dropped: if that resolves, the Next steps were the problem. Validation stays in one place.
+   - Non-next-step code in `nextSteps`: "This plan lists a Next step that can't be used as one. Choose Next steps from the ones the wizard offers." The resolver reports it as `ActionNotAllowed`, same as an action outside the lane, so a small private `NextStepsAreTheProblem` asks the resolver again with `nextSteps` dropped: if that resolves, the Next steps were the problem. Validation stays in one place. The helper reads the plan with `JsonDocument`, as `Resolve` does, and copies every key but `nextSteps` into the re-check (review F1): a repeated top-level key is accepted with the last value winning, where a `JsonNode` parse threw `ArgumentException` and turned a 400 into a 503 fault.
    - Lane case (action outside the lane, or a substitution-only action): sentence unchanged. A plan with both a bad action and a bad Next step gets the lane sentence (actions are checked first).
 3. **`SignalReevaluationJob.ReadEnabledPoliciesAsync` comment** now says the result is sorted in memory by code, `OrdinalIgnoreCase`, not in Dataverse collation. Comment only.
 
@@ -24,6 +24,7 @@ No new service, interface, endpoint, DI registration, package, column or metric.
 
 - `OntologyAdminRulesServiceTests`: `Get_ARefusedStoredPlan_IsLoggedWithItsReason_AndCountedOnce` (3 reasons), plus two controls (a resolved plan, and a rule with no version in force, record nothing).
 - `OntologyAdminAuthoringEndpointTests.Validate_EachPlanRefusal_GetsItsOwnPlainSentence_AndNoInternalCode_3034` (8 cases, validate and save agree, no reasonCode).
+- Review F1 added two repeated-key cases (`{"actions":["mark-complete"],"actions":["mark-complete"]}` gets the lane sentence; a repeated `nextSteps` gets the Next step sentence), and the case now asserts validate answers 200, never a fault. Both fail on the first helper (`JsonNode`) and pass on the `JsonDocument` one.
 - On origin/master source: 9 of those 13 cases fail (the 3 logging cases and 6 of the 8 sentence cases); the 4 that pass are the controls and the two lane cases, which must not change.
 
 ## Verification
@@ -34,6 +35,9 @@ No new service, interface, endpoint, DI registration, package, column or metric.
 - BFF hygiene (section 10, NFR-01): `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal`, PDBs included, each from a fresh short-path worktree. Fresh origin/master 43,568,461 bytes (41.55 MiB); this branch 43,568,418 bytes; delta -43 bytes. No package added or changed, so no new CVE surface (`dotnet list package --vulnerable` not re-run; the package set is identical to master).
 
 ## Known limits / observations
+
+- K2: `ontology.decisionplan.refused` also counts admin detail-page views of a rule whose stored plan is refused (one per view); the metric has no source tag and the POML keeps the existing tags.
+- K2: a rule with an empty stored plan (PlanMissing) logs a warning on every admin view of it, as the decision path does for the same plan.
 
 - None filed here. Task 204's ordering note in #3034 item 3 is confirmed cosmetic: nothing depends on the order.
 - Not changed (out of scope): `GetAsync` / `RecordRefusal` log with the caller's category (`OntologyAdminRulesService` for the admin path), so a log query on category alone separates the two sources; the event id and message are the same.

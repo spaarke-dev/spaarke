@@ -406,9 +406,16 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
     // A bad action AND a bad Next step: the action is the one the lane sentence names.
     [InlineData("""{"actions":["mark-complete"],"nextSteps":["assign-task"]}""",
         "This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the Decide lane.")]
+    // A repeated top-level key: Resolve accepts it (the last value wins), so the sentence choice must not throw on it (503, not 400).
+    [InlineData("""{"actions":["mark-complete"],"actions":["mark-complete"]}""",
+        "This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the Decide lane.")]
+    [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["assign-task"],"nextSteps":["assign-task"]}""",
+        "This plan lists a Next step that can't be used as one. Choose Next steps from the ones the wizard offers.")]
     public async Task Validate_EachPlanRefusal_GetsItsOwnPlainSentence_AndNoInternalCode_3034(string plan, string sentence)
     {
-        var validate = await Json(await Validate(Draft(plan: plan)));
+        var validateResponse = await Validate(Draft(plan: plan));
+        validateResponse.StatusCode.Should().Be(HttpStatusCode.OK, "a refused plan is a 200 not-valid answer, never a fault (503)");
+        var validate = await Json(validateResponse);
         var save = await Save(draft: Draft(plan: plan));
 
         validate.GetProperty("valid").GetBoolean().Should().BeFalse();
