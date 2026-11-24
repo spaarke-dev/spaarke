@@ -39,12 +39,10 @@ import {
     consoleLogger,
 } from "@spaarke/ui-components/services/document-upload";
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
-import { cleanGuid, getXrm } from "@spaarke/ui-components";
-
-// The shared upload client. On 2026-09-03 ui-components' own parallel SdapApiClient was deleted in
-// favour of @spaarke/sdap-client's; on 2026-11-24 (DEF-001) that package was folded back into
-// ui-components (services/sdap), so there is still exactly one, now imported from the main barrel.
-import { SdapApiClient, type ConflictBehaviorOption } from "@spaarke/ui-components";
+// SdapApiClient is the shared upload client. On 2026-09-03 ui-components' own parallel SdapApiClient
+// was deleted in favour of @spaarke/sdap-client's; on 2026-11-24 (DEF-001) that package was folded
+// back into ui-components (services/sdap), so there is still exactly one, imported from the main barrel.
+import { cleanGuid, getXrm, SdapApiClient, type ConflictBehaviorOption } from "@spaarke/ui-components";
 
 import { authenticatedFetch } from "@spaarke/auth";
 import { resolveSearchIndexNameForRecord } from "../components/AssociateToStep";
