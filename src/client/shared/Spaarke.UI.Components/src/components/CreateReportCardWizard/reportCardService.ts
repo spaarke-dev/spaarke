@@ -9,9 +9,11 @@
  *   server warnings (never throws for non-fatal side-effects).
  *
  * The client does NOT map fields. The payload holds only what the user entered or picked plus the regarding keys; the
- * server applies the field mapping (fill-only, FR-02) from the filed-under Matter/Project. No `mappingSource` is sent:
- * the report card's regarding parent IS the mapping source and the route infers it (`InferMappingSourceTables` =
- * sprk_matter, sprk_project). Reads still go through IDataService.
+ * server applies the field mapping (fill-only, FR-02) from the filed-under Matter/Project, which the create NAMES as its
+ * `mappingSource` (`?mappingSourceEntity=&mappingSourceId=`), as the Matter, Project, Event, To Do and Work Assignment
+ * wizards do. It must be named: the route infers a source only for the tables in `InferMappingSourceTables` (the
+ * tables BEING CREATED), and `sprk_reportcard` is not one, so a create naming none maps nothing. With no association no
+ * source is named and nothing is mapped. Reads still go through IDataService.
  *
  * NO file pipeline (owner decision — no Add Files step for this wizard; see
  * notes/field-manifests/reportcard.md). No Business-Unit-defaults cascade
@@ -194,7 +196,8 @@ export class ReportCardService {
    *   2. Build payload from the manifest (name required, narrative, due date,
    *      8 assigned-resource lookups).
    *   3. Apply host regarding (Matter/Project) via applyResolverFields.
-   *   4. POST the payload to the BFF child-record route; the server maps (fill-only) from the regarding parent.
+   *   4. POST the payload to the BFF child-record route, naming the regarding parent as the mapping source; the server
+   *      maps (fill-only) from it.
    *
    * @param form         Enter Info manifest field values.
    * @param association  The host record this report card is regarding (from
@@ -246,7 +249,10 @@ export class ReportCardService {
     // Host regarding (Matter or Project only) — ADR-024 Polymorphic Resolver.
     // Writes the entity-specific @odata.bind lookup AND all 5 denormalized
     // resolver fields via the shared `applyResolverFields` primitive.
+    let mappingSource: { entity: string; id: string } | undefined;
     if (association?.recordId && association.entityType) {
+      // The regarding parent is also the mapping source; the server decides whether the caller may read it (FR-04).
+      mappingSource = { entity: association.entityType, id: cleanGuid(association.recordId) };
       const entitySet = _resolveEntitySet(association.entityType);
       const hint = _resolveLookupHint(association.entityType);
       const polyWebApi = {
@@ -268,13 +274,14 @@ export class ReportCardService {
     let reportCardId: string;
     try {
       console.info('[ReportCardService] create payload:', JSON.stringify(entity, null, 2));
-      // No mapping source: the regarding Matter/Project IS the source and the route infers it. A server warning (a
-      // mapped value not written, a source that could not be read) is shown like any other.
+      // The regarding Matter/Project is named as the mapping source (the route infers none for sprk_reportcard). A server
+      // warning (a mapped value not written, a source that could not be read) is shown like any other.
       const created = await createRecordViaBffWithWarnings(
         this._authenticatedFetch,
         this._bffBaseUrl,
         'sprk_reportcard',
-        entity
+        entity,
+        mappingSource ? { mappingSource } : undefined
       );
       reportCardId = created.id;
       warnings.push(...created.warnings);

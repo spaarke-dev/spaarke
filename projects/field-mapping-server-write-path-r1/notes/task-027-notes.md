@@ -69,7 +69,16 @@ Both rows:
 - Task 027 removed the client mapping and sent no `mappingSource`. That rested on a misreading of the set. Its payload test asserted the misreading ("no mappingSource"), and review missed it.
 - Every other wizard already on the server names its parent explicitly: Event, Matter, Project, To Do, and Work Assignment with its follow-on event. The Report Card wizard is the only one that does not.
 
-**Fix (in scope of 027).** `reportCardService.ts` names the regarding Matter or Project as `mappingSource`, the same way the other wizards do. The payload test asserts the query string. No BFF change. Then PR, redeploy, and re-check on dev; each needs the owner's go.
+**Fix (in scope of 027, owner chose fix forward).**
+- `reportCardService.ts` names the regarding Matter or Project as `mappingSource` (`cleanGuid` id), the same way the other wizards do.
+- With no association, no source is named, as before.
+- Test (d) now asserts the exact create URL, `?mappingSourceEntity=sprk_matter&mappingSourceId=<id>`. It fails on the 027 code.
+- New test: with no association, no source is named and the body has no regarding keys.
+- No BFF change.
+- Gates: jest `CreateReportCardWizard` + `CreateWorkAssignmentWizard` + `utils/adapters` pass, 26 suites / 259 tests. `tsc --noEmit` 0 errors. eslint clean on both files.
+- Review: the diff is the source, the call argument and comments. The error path and body are unchanged.
+
+Next: PR to master, then redeploy and re-check on dev; each needs the owner's go.
 
 ## Left (on the owner's go)
 
