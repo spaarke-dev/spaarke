@@ -59,6 +59,12 @@ public sealed record ThreadAttachmentRef(
 /// record returns it. A record the viewer cannot read, or a read that faults, gives <c>null</c>: never a name the viewer
 /// cannot read.
 /// </param>
+/// <param name="ThreadId">
+/// <c>_sprk_communicationthread_value</c> (spaarke-SPA-external-access-platform-r4 task 035 / FR-22): the thread the message sits
+/// in; null when the row has no thread. Server-side only (<c>JsonIgnore</c>, so the internal thread wire contract is unchanged,
+/// as for <see cref="CreatedByContactId"/>). Read from the same row as every other field, after the access filters; the
+/// external endpoint projects it as the opaque <c>threadId</c> grouping key and nothing else about the thread.
+/// </param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
@@ -78,7 +84,8 @@ public sealed record ThreadMessageDto(
     bool IsPrivate,
     IReadOnlyList<ThreadAttachmentRef> Attachments,
     [property: System.Text.Json.Serialization.JsonIgnore] Guid? CreatedByContactId = null,
-    MessagePrivateContext? PrivateContext = null);
+    MessagePrivateContext? PrivateContext = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] Guid? ThreadId = null);
 
 /// <summary>
 /// fm task 056: the core record a private message is about (<see cref="ThreadMessageDto.PrivateContext"/>).

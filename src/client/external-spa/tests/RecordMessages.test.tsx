@@ -52,6 +52,7 @@ interface Dto {
   sendername?: string | null;
   createdon?: string | null;
   isMine: boolean;
+  threadId?: string | null;
 }
 
 const dto = (n: number, over: Partial<Dto> = {}): Dto => ({
@@ -1480,5 +1481,108 @@ describe('Refresh and the new-message check (task 034, FR-21)', () => {
       await flush(INTERVAL);
       expect(backgroundReads()).toHaveLength(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Threads (R4 task 035, FR-22): grouped by the server's `threadId` only; HTML bodies never load remote images
+// ---------------------------------------------------------------------------
+
+describe('message threads (task 035, FR-22)', () => {
+  const T1 = '11111111-1111-4111-8111-111111111111';
+  const T2 = '22222222-2222-4222-8222-222222222222';
+
+  const entries = (): HTMLElement[] => Array.from(screen.getByTestId('record-messages-list').children) as HTMLElement[];
+  const bodyOf = (el: Element): string => el.querySelector('[data-testid="record-message-text"]')?.textContent ?? '';
+
+  it('replies group under their thread, oldest first, the conversation sitting where its latest message is', async () => {
+    thread = [
+      dto(1, { threadId: T1 }),
+      dto(2, { threadId: T2 }),
+      dto(3, { threadId: T1 }),
+      dto(4, { threadId: null }),
+      dto(5, { threadId: T1 }),
+    ];
+    renderMessages();
+
+    await screen.findByTestId('record-messages-list');
+    const list = entries();
+    // T1 (latest message 5) is last; T2 has a single message, so it is a plain item; the unthreaded one stands alone.
+    expect(list.map(el => el.getAttribute('data-testid'))).toEqual([
+      'record-message',
+      'record-message',
+      'record-message-thread',
+    ]);
+    expect(bodyOf(list[0])).toBe('body 2');
+    expect(bodyOf(list[1])).toBe('body 4');
+    const group = list[2];
+    expect(within(group).getByTestId('record-message-thread-count').textContent).toBe(
+      '3 messages in this conversation'
+    );
+    expect(within(group).getAllByTestId('record-message').map(bodyOf)).toEqual(['body 1', 'body 3', 'body 5']);
+    expect(within(group).getByRole('group', { name: 'Conversation, 3 messages' })).toBeTruthy();
+  });
+
+  it('an unthreaded message stands alone, even beside messages with the same subject, sender and time', async () => {
+    const same = { sprk_subject: 'Re: Budget', sendername: 'Pat', createdon: '2026-03-01T10:00:00Z' };
+    thread = [dto(1, { ...same, threadId: null }), dto(2, { ...same }), dto(3, { ...same, threadId: undefined })];
+    renderMessages();
+
+    await screen.findByTestId('record-messages-list');
+    expect(screen.queryByTestId('record-message-thread')).toBeNull();
+    expect(screen.getAllByTestId('record-message')).toHaveLength(3);
+  });
+
+  it('messages on different threads are not merged, and a thread of one is not drawn as a conversation', async () => {
+    thread = [dto(1, { threadId: T1 }), dto(2, { threadId: T2 })];
+    renderMessages();
+
+    await screen.findByTestId('record-messages-list');
+    expect(screen.queryByTestId('record-message-thread')).toBeNull();
+    expect(screen.getAllByTestId('record-message').map(el => bodyOf(el))).toEqual(['body 1', 'body 2']);
+  });
+
+  it('a body with a remote image renders without that image source, inside a conversation too', async () => {
+    thread = [
+      dto(1, { threadId: T1, sprk_body: '<p>First</p>', sprk_bodyformat: HTML }),
+      dto(2, {
+        threadId: T1,
+        sprk_body: '<p>Reply</p><img src="https://example.com/x.png" alt="remote">',
+        sprk_bodyformat: HTML,
+      }),
+    ];
+    renderMessages();
+
+    const hosts = await screen.findAllByTestId('record-message-html');
+    expect(hosts).toHaveLength(2);
+    const img = hosts[1].querySelector('img');
+    expect(img?.hasAttribute('src')).toBe(false);
+    expect(hosts[1].innerHTML).not.toContain('example.com');
+    expect(screen.getByTestId('record-detail-messages').innerHTML).not.toContain('https://example.com/x.png');
+  });
+
+  it('a body with no remote image keeps its markup (must-not-fire pair of the case above)', async () => {
+    thread = [dto(1, { sprk_body: '<p>Hello <b>there</b></p>', sprk_bodyformat: HTML })];
+    renderMessages();
+
+    const host = await screen.findByTestId('record-message-html');
+    expect(host.querySelector('b')?.textContent).toBe('there');
+  });
+
+  it('a re-read replaces the grouping: a new reply joins its thread and nothing is duplicated', async () => {
+    thread = [dto(1, { threadId: T1 }), dto(2, { threadId: T1 })];
+    let refresh: ThreadRefreshAction | null = null;
+    renderMessages({ embedded: true, onRefreshActionChange: a => (refresh = a) });
+    await screen.findByTestId('record-message-thread');
+
+    thread = [...thread, dto(3, { threadId: T1 })];
+    await act(async () => {
+      (refresh as ThreadRefreshAction | null)?.onClick();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('record-message-thread-count').textContent).toBe('3 messages in this conversation')
+    );
+    expect(screen.getAllByTestId('record-message')).toHaveLength(3);
   });
 });

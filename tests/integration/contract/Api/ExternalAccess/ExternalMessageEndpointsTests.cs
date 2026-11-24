@@ -1765,8 +1765,39 @@ public class ExternalMessageEndpointsTests
     {
         var json = JsonSerializer.SerializeToElement(new ExternalMessageDto { SprkCommunicationid = Guid.NewGuid().ToString() });
 
-        json.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon", "isMine");
+        json.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(AllowListedMessageFields);
+    }
+
+    /// <summary>
+    /// The one allow-list of the external message wire shape. Task 035 (FR-22) added exactly one member, <c>threadId</c>, the
+    /// opaque grouping key (UAC-r2 approved 2026-11-24). A property added to <see cref="ExternalMessageDto"/> fails the
+    /// two tests that compare against this list until it is added here on purpose.
+    /// </summary>
+    private static readonly string[] AllowListedMessageFields =
+    {
+        "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon", "isMine",
+        "threadId",
+    };
+
+    [Fact]
+    public void ExternalMessageDto_ClrPropertyJsonNames_EqualTheAllowList()
+    {
+        // The reflection view of the same list, so a property that is [JsonIgnore]d, renamed or added shows here too.
+        typeof(ExternalMessageDto).GetProperties()
+            .Select(p => ((System.Text.Json.Serialization.JsonPropertyNameAttribute?)Attribute.GetCustomAttribute(
+                p, typeof(System.Text.Json.Serialization.JsonPropertyNameAttribute)))?.Name ?? p.Name)
+            .Should().BeEquivalentTo(AllowListedMessageFields);
+    }
+
+    [Fact]
+    public void ThreadMessageDto_SerializedForTheInternalWire_DoesNotCarryTheThreadId()
+    {
+        // The new server-side member must not widen the internal thread wire contract (it is JsonIgnore, like the creator id).
+        var message = new ThreadMessageDto(
+            Guid.NewGuid(), "b", 100000001, null, null, null, Array.Empty<string>(), null, null, null, null, null, null,
+            100000000, false, false, Array.Empty<ThreadAttachmentRef>(), ThreadId: Guid.NewGuid());
+
+        JsonSerializer.Serialize(message).Should().NotContainEquivalentOf("threadid");
     }
 
     [Fact]
@@ -1789,8 +1820,122 @@ public class ExternalMessageEndpointsTests
             .And.NotContain("pat.lawyer@spaarke.test")
             .And.NotContain("someone@spaarke.test");
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("value")[0].EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon", "isMine");
+        doc.RootElement.GetProperty("value")[0].EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(AllowListedMessageFields);
+    }
+
+    // ── threads: the opaque grouping key (task 035, FR-22; UAC-r2 approved 2026-11-24) ───────────────────────────
+    // Only the thread id crosses (no name, no other thread column); the access filters run on the row first, unchanged.
+
+    private const int PrivacyOpen = 100000000;
+    private const int PrivacyPrivate = 100000001;
+
+    /// <summary>Seeds a thread the app-only thread read answers with the given privacy state, and that exists in the filing world.</summary>
+    private Guid AddThreadWithPrivacy(int privacy)
+    {
+        var thread = Guid.NewGuid();
+        _roots.AddFilingRow("sprk_communicationthread", thread);
+        _roots.AddThread(thread, privacy);
+        _threadPrivacy[thread] = privacy;
+        _appOnly
+            .Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult(AppOnlySelectProjection.Project(
+                    _threadPrivacy.Select(t => new Dictionary<string, JsonElement>
+                    {
+                        ["sprk_communicationthreadid"] = El(t.Key.ToString("D")),
+                        ["sprk_privacystate"] = El(t.Value),
+                    }).Concat(AppOnlySelectProjection.OpenThreadAnswer(odata)), odata)));
+        return thread;
+    }
+
+    private readonly Dictionary<Guid, int> _threadPrivacy = new();
+
+    private static Dictionary<string, JsonElement> InThread(Dictionary<string, JsonElement> row, Guid? thread)
+    {
+        row["_sprk_communicationthread_value"] = thread is { } t ? El(t.ToString("D")) : JsonSerializer.SerializeToElement<object?>(null);
+        return row;
+    }
+
+    [Fact]
+    public async Task GetMessages_ThreadedMessages_CarryTheirThreadIdAsTheOnlyThreadField()
+    {
+        var project = Guid.NewGuid();
+        var other = AddThreadWithPrivacy(PrivacyOpen);
+        var first = Guid.NewGuid();
+        var reply = Guid.NewGuid();
+        var elsewhere = Guid.NewGuid();
+        SetupMessages(
+            InThread(MessageRow(first, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), AppOnlySelectProjection.OpenThreadId),
+            InThread(MessageRow(reply, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z"), AppOnlySelectProjection.OpenThreadId),
+            InThread(MessageRow(elsewhere, "sprk_regardingproject", project, internalOnly: false, "2026-10-03T09:00:00Z"), other));
+
+        var result = await Get("projects", project, Ciam(project: project));
+
+        var messages = Messages(result);
+        messages.Select(m => m.ThreadId).Should().Equal(
+            AppOnlySelectProjection.OpenThreadId.ToString("D"), AppOnlySelectProjection.OpenThreadId.ToString("D"), other.ToString("D"));
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!));
+        doc.RootElement.GetProperty("value")[0].GetProperty("threadId").GetString().Should().Be(AppOnlySelectProjection.OpenThreadId.ToString("D"));
+    }
+
+    [Fact]
+    public async Task GetMessages_MessageWithNoThreadLookup_AnswersAMessageWithANullThreadId_NotAFailure()
+    {
+        // An internal systemuser is not subject to the open-thread gate, so a row with no thread is listed (an external
+        // caller never receives one: ExternalRead_ItemWithNoThread_IsHidden). The key is then null: the message stands alone.
+        var project = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        var systemUserId = Guid.NewGuid();
+        _identity.Setup(i => i.IsExternalAsync(systemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        SetupMessages(InThread(MessageRow(id, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), null));
+
+        var result = await Get("projects", project, SystemUser(systemUserId, project));
+
+        var messages = Messages(result);
+        messages.Should().ContainSingle().Which.ThreadId.Should().BeNull();
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!));
+        doc.RootElement.GetProperty("value")[0].GetProperty("threadId").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task GetMessages_PrivateThreadAndInternalOnlyMessages_AreFilteredAndTheirThreadIdsAppearNowhere()
+    {
+        // Must-fire: a message in a Private thread and an internal-only message in an Open thread are not listed, and neither
+        // thread id is anywhere in the serialized response (grouping reveals no thread the filters hid).
+        var project = Guid.NewGuid();
+        var privateThread = AddThreadWithPrivacy(PrivacyPrivate);
+        var internalThread = AddThreadWithPrivacy(PrivacyOpen);
+        var inPrivate = Guid.NewGuid();
+        var internalOnly = Guid.NewGuid();
+        SetupMessages(
+            InThread(MessageRow(inPrivate, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), privateThread),
+            InThread(MessageRow(internalOnly, "sprk_regardingproject", project, internalOnly: true, "2026-10-02T09:00:00Z"), internalThread));
+
+        var result = await Get("projects", project, Ciam(project: project));
+
+        Messages(result).Should().BeEmpty();
+        var json = JsonSerializer.Serialize(((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!);
+        json.Should().NotContainEquivalentOf(privateThread.ToString("D")).And.NotContainEquivalentOf(internalThread.ToString("D"))
+            .And.NotContainEquivalentOf(inPrivate.ToString("D")).And.NotContainEquivalentOf(internalOnly.ToString("D"));
+    }
+
+    [Fact]
+    public async Task GetMessages_NormalMessageBesideFilteredOnes_IsStillListedWithItsThreadId()
+    {
+        // Must-not-fire pair of the case above: the same read, with a normal message in an Open thread, lists exactly it.
+        var project = Guid.NewGuid();
+        var privateThread = AddThreadWithPrivacy(PrivacyPrivate);
+        var openThread = AddThreadWithPrivacy(PrivacyOpen);
+        var normal = Guid.NewGuid();
+        SetupMessages(
+            InThread(MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), privateThread),
+            InThread(MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: true, "2026-10-02T09:00:00Z"), openThread),
+            InThread(MessageRow(normal, "sprk_regardingproject", project, internalOnly: false, "2026-10-03T09:00:00Z"), openThread));
+
+        var messages = Messages(await Get("projects", project, Ciam(project: project)));
+
+        messages.Should().ContainSingle().Which.Should().Match<ExternalMessageDto>(
+            m => m.SprkCommunicationid == normal.ToString("D") && m.ThreadId == openThread.ToString("D"));
     }
 
     // ── canCreate: the thread says whether the post route would admit this caller (R4 task 002, FR-06) ──────────

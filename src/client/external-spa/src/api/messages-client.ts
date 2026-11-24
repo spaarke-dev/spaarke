@@ -56,6 +56,11 @@ export interface ExternalMessage {
   createdon?: string | null;
   /** The CALLER authored this message (server-decided; never inferred client-side from names or direction). */
   isMine: boolean;
+  /**
+   * The id of the thread the message sits in (task 035, FR-22): the one key messages are grouped by, opaque to the client.
+   * Null or absent (a BFF that predates it, or a message with no thread) means the message stands alone.
+   */
+  threadId?: string | null;
 }
 
 /** `ExternalCollectionResponse<ExternalMessageDto>`. */
