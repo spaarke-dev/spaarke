@@ -390,6 +390,38 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         _fixture.World.Writes.Should().BeEmpty();
     }
 
+    // #3034: each refusal names what is wrong; none carries an internal code or a reason code, and each is the same on save.
+    [Theory]
+    [InlineData("""{"actions":"assign-task"}""", "The decision plan can't be read. Choose its actions again in the wizard.")]
+    [InlineData("""{"nextSteps":[]}""", "The decision plan can't be read. Choose its actions again in the wizard.")]
+    [InlineData("{not json", "The decision plan can't be read. Choose its actions again in the wizard.")]
+    [InlineData("""{"actions":["no-such-action"]}""",
+        "This plan lists an action that doesn't exist. Choose from the actions the wizard offers for the Decide lane.")]
+    [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["no-such-action"]}""",
+        "This plan lists an action that doesn't exist. Choose from the actions the wizard offers for the Decide lane.")]
+    [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["assign-task"]}""",
+        "This plan lists a Next step that can't be used as one. Choose Next steps from the ones the wizard offers.")]
+    [InlineData("""{"actions":["mark-complete"]}""",
+        "This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the Decide lane.")]
+    // A bad action AND a bad Next step: the action is the one the lane sentence names.
+    [InlineData("""{"actions":["mark-complete"],"nextSteps":["assign-task"]}""",
+        "This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the Decide lane.")]
+    public async Task Validate_EachPlanRefusal_GetsItsOwnPlainSentence_AndNoInternalCode_3034(string plan, string sentence)
+    {
+        var validate = await Json(await Validate(Draft(plan: plan)));
+        var save = await Save(draft: Draft(plan: plan));
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        var message = ValidateErrors(validate)["decisionPlan"].Single();
+        message.Should().Be(sentence);
+        message.Should().NotContain("plan_malformed").And.NotContain("unknown_action").And.NotContain("action_not_allowed").And.NotContain("refused");
+        (validate.TryGetProperty("reasonCode", out var code) ? code.ValueKind : JsonValueKind.Null).Should().Be(JsonValueKind.Null,
+            "the refusal reasons and API reason codes are unchanged: these sentences carry no code");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(message);
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Validate_TheDuplicateSentence_IsTheSentenceTheClientFallbackShows_SoTheyNeverDisagree()
     {

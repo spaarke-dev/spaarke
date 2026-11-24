@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -1636,11 +1637,44 @@ public sealed partial class OntologyAdminAuthoringService
             }
             else if (plan.IsRefused)
             {
-                errors["decisionPlan"] = [$"This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the {l} lane."];
+                // #3034: one plain sentence for what is actually wrong. The refusal reasons and the API reason codes are unchanged, and none of
+                // these branches carries a ReasonCode (as with PlanMissing above): the sentence is the whole message.
+                errors["decisionPlan"] = [plan.RefusalReason switch
+                {
+                    DecisionPlanRefusalReason.PlanMalformed =>
+                        "The decision plan can't be read. Choose its actions again in the wizard.",
+                    DecisionPlanRefusalReason.UnknownAction =>
+                        $"This plan lists an action that doesn't exist. Choose from the actions the wizard offers for the {l} lane.",
+                    DecisionPlanRefusalReason.ActionNotAllowed when NextStepsAreTheProblem(draft.DecisionPlan, l) =>
+                        "This plan lists a Next step that can't be used as one. Choose Next steps from the ones the wizard offers.",
+                    _ => $"This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the {l} lane.",
+                }];
             }
         }
 
         return errors.Count == 0 ? check : check with { RuleTypeName = null };
+    }
+
+    /// <summary>
+    /// A plan refused as <see cref="DecisionPlanRefusalReason.ActionNotAllowed"/> is refused for an action not offered in the lane or a
+    /// Next step that is not a Next-step creator; the resolver reports both alike. The plan is the second kind when it resolves once its
+    /// <c>nextSteps</c> are dropped (the resolver is asked again, so the rule stays in one place).
+    /// </summary>
+    private static bool NextStepsAreTheProblem(string? planJson, DecisionLane lane)
+    {
+        try
+        {
+            if (JsonNode.Parse(planJson ?? string.Empty) is not JsonObject plan || !plan.Remove("nextSteps"))
+            {
+                return false;
+            }
+
+            return !DecisionPlanService.Resolve(plan.ToJsonString(), lane).IsRefused;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static void RequireText(string? value, string field, int max, Dictionary<string, string[]> errors)

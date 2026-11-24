@@ -94,16 +94,29 @@ public sealed class DecisionPlanService
         {
             RuleBodyJson = version.GetAttributeValue<string>(RuleBodyColumn),
         };
-        if (resolution.IsRefused)
-        {
-            _logger.LogWarning(
-                OntologyWriterEvents.DecisionPlanRefused,
-                "Decision plan refused (policyVersionId={PolicyVersionId}, reason={Reason}).",
-                policyVersionId, resolution.RefusalReason);
-            OntologyWriterTelemetry.RecordDecisionPlanRefused(resolution.RefusalReason!);
-        }
+        RecordRefusal(_logger, policyVersionId, resolution);
 
         return resolution;
+    }
+
+    /// <summary>
+    /// Logs (<see cref="OntologyWriterEvents.DecisionPlanRefused"/>) and counts (<c>ontology.decisionplan.refused</c>, tag <c>reason</c>)
+    /// a refused resolution; a resolved one records nothing. The one place a refusal is recorded: <see cref="GetAsync"/> and the admin
+    /// Rules page (#3034) both call it, because the static <see cref="Resolve"/> is pure and records nothing itself. The caller makes
+    /// the call once per plan it resolves, so one refused plan is one log line and one count.
+    /// </summary>
+    internal static void RecordRefusal(ILogger logger, Guid policyVersionId, DecisionPlanResolution resolution)
+    {
+        if (!resolution.IsRefused)
+        {
+            return;
+        }
+
+        logger.LogWarning(
+            OntologyWriterEvents.DecisionPlanRefused,
+            "Decision plan refused (policyVersionId={PolicyVersionId}, reason={Reason}).",
+            policyVersionId, resolution.RefusalReason);
+        OntologyWriterTelemetry.RecordDecisionPlanRefused(resolution.RefusalReason!);
     }
 
     /// <summary>Pure resolution of a plan JSON string. Never throws for any input.</summary>
