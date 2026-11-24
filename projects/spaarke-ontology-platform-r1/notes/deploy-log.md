@@ -1,5 +1,13 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-24 02:58Z — live change: POL-MATTER-NOBUDGET switched Off on dev (spaarkedev1)
+
+- **Owner go:** "Switch it off" (2026-11-24, chat), answering how to clear the Worklist (192 items, 186 of them this rule: one per test matter with no budget); owner added "and then we can switch it back on if we want to run this particular rule".
+- **How:** Console → Ontology admin → Rules → POL-MATTER-NOBUDGET → On/Off switch to Off (the product path; no direct Dataverse write). Read back: `sprk_enabled` false, statecode Active, modified 02:58:50Z.
+- **Effect:** 187 open Signals of the rule stay open until the next nightly `SignalReevaluationJob` pass (02:30 UTC 2026-11-25), which closes them as PolicyRetired (D-170). The 6 BILL-SYSTEM-SUBMISSION Decide items and the Do-lane items are untouched.
+- **Switching back On** (Ontology policy, D-32) re-raises an item for every matter that still has no budget at the next pass.
+- **Next:** main session checks the open count after 02:30 UTC 2026-11-25 (expect 0 for this rule).
+
 ## 2026-11-24 ~00:20–00:58Z — task 202 follow-up: five more code pages to dev (spaarkedev1), master `33d7c6a6ad` (record family: `56c8acc0e9`)
 
 - **Owner go:** "Yes deploy; we also need to address communication reconciliation being on master" (2026-11-23, chat; answering whether to deploy the other code pages that bundle the changed SprkModal from task 202).
