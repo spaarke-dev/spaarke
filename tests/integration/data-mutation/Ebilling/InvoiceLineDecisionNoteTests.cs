@@ -21,10 +21,10 @@ namespace Sprk.Bff.Api.Tests.DataMutation.Ebilling;
 /// <see cref="FixedSubmission"/>, one Flagged 400 line, decision id <see cref="FixedDecision"/>, decider Alice, reason "Rate above the card", and for
 /// a Reduce an approved amount of 300. A line decision without a note, or with a whitespace-only one, must hash byte-identically, so a retry of a
 /// pre-change decision is never refused by the writer.</para>
-/// <para><b>Repeat with another note.</b> The note is inside the content hash and a line decision's repeat always reaches the writer, so the same
-/// decision id with another note (or with the note dropped) is refused by the writer as other content (the existing behaviour for a changed reason
-/// or amount) and answered as 503 <c>ebilling.decision.incomplete</c>, failed step <c>record</c>, with no second record. The first note stays on the
-/// record. The line is rewritten with the same decision values first, but not untouched: the reviewed-on and reviewed-by fields take the repeat's time and caller (a new row version) and the invoice totals are recalculated (a new invoice version); the line status and amounts do not change.</para>
+/// <para><b>Repeat with another note.</b> The note is inside the content hash, so the same decision id with another note (or with the note dropped)
+/// is other content by the writer's own comparison (as a changed reason or amount is). Since ISS-029 (task iss029) that comparison runs before any
+/// write: the repeat is 409 <c>ebilling.decision.id_reused</c>, the line is not rewritten (same row version), no second record is written and the
+/// first note stays on the record. Full coverage: <see cref="InvoiceLineDecisionIdReusedTests"/>.</para>
 /// </remarks>
 public sealed class InvoiceLineDecisionNoteTests
 {
@@ -327,7 +327,7 @@ public sealed class InvoiceLineDecisionNoteTests
         ValuesOf(record)!["note"]!.GetValue<string>().Should().Be("The first note");
     }
 
-    [Theory(DisplayName = "095f-2d1: a repeat with the same decision id and an EDITED (or dropped) note is refused by the writer as other content: 503 incomplete at 'record', no second record, the first note stays")]
+    [Theory(DisplayName = "095f-2d1 / iss029: a repeat with the same decision id and an EDITED (or dropped) note is other content: 409 id_reused before any write, no second record, the first note stays")]
     [InlineData(LineDecisionAction.Accept, "Another note")]
     [InlineData(LineDecisionAction.Reduce, "Another note")]
     [InlineData(LineDecisionAction.Disallow, "Another note")]
@@ -336,16 +336,17 @@ public sealed class InvoiceLineDecisionNoteTests
     {
         var w = FixedWorld(out var line);
         (await Decide(w, action, line.Id, "The first note")).IsApplied.Should().BeTrue();
+        var version = w.Row("sprk_billingevent", line.Id).GetAttributeValue<long>("versionnumber");
+        var writes = w.Writes;
 
         var repeat = await Decide(w, action, line.Id, secondNote);
 
-        repeat.Status.Should().Be(LineDecisionStatus.Incomplete);
-        repeat.FailedStep.Should().Be("record");
+        repeat.Status.Should().Be(LineDecisionStatus.IdReused);
+        repeat.Code.Should().Be(LineDecisionCodes.IdReused);
         var record = w.RecordsOf(CodeOf(action)).Should().ContainSingle("no second record").Subject;
         ValuesOf(record)!["note"]!.GetValue<string>().Should().Be("The first note");
-        w.Row("sprk_billingevent", line.Id).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should()
-            .Be((int)(action switch { LineDecisionAction.Accept => InvoiceLineStatus.Accepted, LineDecisionAction.Reduce => InvoiceLineStatus.Reduced, _ => InvoiceLineStatus.Disallowed }),
-                "the repeat rewrites the line with the same decision values (its status does not change)");
+        w.Row("sprk_billingevent", line.Id).GetAttributeValue<long>("versionnumber").Should().Be(version, "the line is not rewritten");
+        w.Writes.Should().Be(writes, "nothing is written");
     }
 
     // ── Logs ──
