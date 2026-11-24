@@ -84,6 +84,7 @@ import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
 import { levelVerdictOf, listCreateRightOf } from './record/recordAccess';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { ExternalDataGrid } from '../widgets/ExternalDataGrid';
+import { useGridSettings } from '../widgets/useGridSettings';
 import { useAmbientTheme } from '../widgets/useAmbientTheme';
 import { saveBlobAs } from './saveBlobAs';
 import { AccessLevel, ApiError } from '../types';
@@ -912,6 +913,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     [onOpenDocument]
   );
 
+  // The grid's column widths and sort are remembered per browser and "Clear all" (which also clears the column filters) is a command of its toolbar (FR-19, task 032).
+  const { gridProps: gridSettingsProps, resetCommand } = useGridSettings(RECORD_DOCUMENTS_GRID);
+  const gridCommands = React.useMemo(() => [resetCommand], [resetCommand]);
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -954,6 +959,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           onRecordAction={handleRecordAction}
           onRecordOpen={handleRecordOpen}
           truncateWithTooltip
+          hostCommands={gridCommands}
+          {...gridSettingsProps}
           rowNoun={DOCUMENT_NOUN}
           emptyState={
             <EmptyState

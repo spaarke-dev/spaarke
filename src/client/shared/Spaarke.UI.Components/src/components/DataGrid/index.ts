@@ -24,7 +24,7 @@ export { dataGridCellStyle, dataGridHeaderCellStyle } from './cellStyles';
 
 // ─── Core DataGrid (task 003) ───
 export { DataGrid, default as DataGridDefault } from './DataGrid';
-export type { DataGridProps, DataGridHostContext } from './DataGrid';
+export type { DataGridProps, DataGridHostContext, DataGridSettings, DataGridSortSetting } from './DataGrid';
 
 // ─── DataGridPageShell — canonical Custom Page mount (task 035 hardening) ───
 // Thin wrapper around DataGrid that handles FluentProvider + theme listener +
