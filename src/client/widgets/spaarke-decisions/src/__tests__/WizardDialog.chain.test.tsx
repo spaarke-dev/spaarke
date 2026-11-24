@@ -29,7 +29,12 @@ const stand = {
 jest.mock('@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost', () => {
   const launcher = jest.requireActual('@spaarke/ui-components/components/DecisionWizard/decisionWizardLauncher');
   return {
-    DecisionWizardHost: (props: { embedded?: boolean; collectBecause?: boolean; evidenceLinks?: boolean }) => {
+    DecisionWizardHost: (props: {
+      embedded?: boolean;
+      collectBecause?: boolean;
+      evidenceLinks?: boolean;
+      defaultMaximized?: boolean;
+    }) => {
       const place = props.embedded ? 'detail' : 'dialog';
       if (stand.throwIn.has(place)) throw new Error(`the ${place} failed`);
       React.useEffect(() => {
@@ -48,6 +53,7 @@ jest.mock('@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost',
           data-testid={`stand-in-${place}`}
           data-because={String(props.collectBecause)}
           data-evidence-links={String(props.evidenceLinks)}
+          data-default-maximized={String(props.defaultMaximized === true)}
         />
       );
     },
@@ -153,6 +159,20 @@ describe('the places, in order', () => {
     expect(typeof stand.launches[0].openRecord).toBe('function');
     expect(screen.getByTestId('stand-in-dialog')).toHaveAttribute('data-evidence-links', 'true');
     expect(view.openLink).not.toHaveBeenCalled();
+  });
+
+  it('the dialog opens MAXIMIZED over the lane (owner 2026-11-24); the master-detail place does not ask for it', async () => {
+    const view = mount();
+    view.open(request(1));
+    await waitFor(() => expect(place()).toBe('dialog'));
+    expect(screen.getByTestId('stand-in-dialog')).toHaveAttribute('data-default-maximized', 'true');
+    await act(async () => stand.close?.());
+    await waitFor(() => expect(place()).toBe('idle'));
+    // The same widget, with the dialog failing: the embedded detail place gets no defaultMaximized.
+    stand.throwIn = new Set(['dialog']);
+    view.open(request(2));
+    await waitFor(() => expect(place()).toBe('detail'));
+    expect(screen.getByTestId('stand-in-detail')).toHaveAttribute('data-default-maximized', 'false');
   });
 
   it('the lane stays mounted as the master while the dialog is open over it', async () => {

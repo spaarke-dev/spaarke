@@ -160,6 +160,8 @@ export interface DecisionItemWizardProps {
    * dialog (the MCP widget's master-detail fallback). Absent or false: the SprkModal wizard, as before.
    */
   embedded?: boolean;
+  /** Optional seam: the modal wizard opens maximized (restorable). Ignored when `embedded`. Absent or false: the wizard size, as before. */
+  defaultMaximized?: boolean;
   /**
    * Optional seam: the Confirm step cannot record until it has been showing this many milliseconds (see `CONFIRM_GUARD_MS`), and keyboard
    * focus moves onto it when it appears, so a held Enter or a second tap on the button that brought the user here records nothing.
@@ -298,6 +300,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   uiScale,
   today,
   embedded,
+  defaultMaximized,
   confirmGuardMs,
 }) => {
   const styles = useStyles();
@@ -636,6 +639,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         dismiss="explicit"
         uiScale={uiScale}
         embedded={embedded}
+        defaultMaximized={defaultMaximized}
         nav={nav}
         statusBar={statusBar}
         footer={
