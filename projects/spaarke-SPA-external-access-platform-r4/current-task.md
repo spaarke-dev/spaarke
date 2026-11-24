@@ -8,7 +8,7 @@
 | Field | Value |
 |-------|-------|
 | **Active** | None in progress. Next is **038** (P3 dev deploy + E2E). |
-| **Status** | **PR #3055 merged** 2026-11-24 15:15:44Z, squash `8dd44cf528` (#3045 export: cells export shown text, dates as shown, export text hardening). #3045 closed; D-34 Done. Notes: `notes/task-033-followup-3045-notes.md`. Open owner questions: Date Only export as shown vs `yyyy-mm-dd` (locale misread risk; currently as shown); whether to track the residual hardening gaps privately (chat only, never in the repo). |
+| **Status** | **PR #3055 merged** 2026-11-24 15:15:44Z, squash `8dd44cf528` (#3045 export: cells export shown text, dates as shown, export text hardening). #3045 closed; D-34 Done. Notes: `notes/task-033-followup-3045-notes.md`. Owner 2026-11-24: Date Only exports stay as shown (viewer's locale), not `yyyy-mm-dd`. Open owner question: whether to track the residual hardening gaps privately (chat only, never in the repo). |
 | **Next action** | Plan **038** (P3 dev deploy + E2E) on the owner's per-SHA go; SPA deploy builds master HEAD (now includes `8dd44cf528`). uac-r2 told the #3048 merge `b64d988625` for a later BFF candidate (threads). |
 | **Last merged** | PR #3048 at 06:14:00Z, merge `b64d988625`: tasks 033 (Money sort + export) and 035 (message threads, `threadId`). POMLs completed, TASK-INDEX ✅, drift check clean, board Tasks Completed = 30. |
 | **Next in phase 3** | **038** (P3 dev deploy + E2E). 036 is cancelled. |
