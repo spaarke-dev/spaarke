@@ -32,7 +32,7 @@
 - **LIVE ON DEV since ~05:21:45Z 2026-11-24 (owner "BFF deploy 0362599b94"; ledger 163):** `0362599b94`, deployed from `C:/wtdep21`.
   - Checks: 4/4 hashes, 41.98 MB, healthz 200, preview-url 403, bogus 404, spike 404, MCP 5 tools, served widget sha = dist (3BD9CC62…42A3), Compose `= Active`, only the known routing drift.
   - Notices sent: spa-r4 (SPA hold LIFTED on the uac side; a SPA deploy still needs the owner's per-SHA go there), mcp-r1, ebilling-r1, ontology-r1.
-  - Gate: background `sleep 1800; gate-now.ps1 2026-11-24T05:21:30Z` (~05:52Z).
+  - **Gate PASS 05:52Z:** 28 req, 0 5xx, 0 external, 0 exceptions; markers and ID-LINK as before.
   - Rollback: `996928732e` (`C:/wtdep20`).
   - Next: spa-r4 #3048 (033 + 035 threadId, diff APPROVED), once merged on the owner's go.
 - **Previous candidate record `0362599b94f76f2486ba3b6cb7f60d95b3fce7cf`** (master, `C:/wtdep21`, clean), on top of live 996928732e. It carries:
