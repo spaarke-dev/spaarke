@@ -185,6 +185,18 @@ public sealed class InterStepState
     public string? StorageBlobEndpoint { get; set; }
 
     /// <summary>
+    /// Host name of the stamp's Azure SignalR Service (H2a output — ARM output <c>signalrHostName</c>,
+    /// <c>{name}.service.signalr.net</c>), set ONLY when SignalR was deployed (<c>signalrEnabled</c>); null otherwise.
+    /// H4b builds the keyless managed-identity <c>Notifications__SignalR__ConnectionString</c> from it
+    /// (<see cref="StampSignalRConnection"/>). The resource has local auth disabled, so there is no key to carry.
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (ISS-022, plan D36).</remarks>
+    [JsonPropertyName("signalrHostName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? SignalRHostName { get; set; }
+
+    /// <summary>
     /// Client id of the stamp's ontology writer UAMI (H2a output — ARM output <c>ontologyWriterIdentityClientId</c>,
     /// task 266 / #2605). The BFF's Signal and Decision Record writers authenticate only as this identity
     /// (<c>Ontology__Writer__ManagedIdentityClientId</c>, written by H4b); H10 creates its Dataverse application user
