@@ -2112,7 +2112,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (fbba523806, 2026-11-24); #2878 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Sonnet review of task 084h-4 (the Note box had the same flaw and was fixed in 084h-4's fix round; the Reason boxes are pre-existing) |

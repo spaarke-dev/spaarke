@@ -44,3 +44,15 @@ Results and fail-before evidence are in the section below.
 
 - `npm run lint` for RecordProcedures cannot run (no flat ESLint config); pre-existing, already reported in 084h-4's notes.
 - The Rule wizard's Change path uses the same `ReasonField` (one shared field); it has no separate paste test, the Exclude test covers the shared box.
+
+## Review (2026-11-24)
+
+One Sonnet adversarial pass over f5ec8b6a20..421f40c7d6: no F-class finding. It re-ran the page's suite (23 suites, 488 tests pass) and traced every submit path; the client counts the trimmed length as the server's `CheckReason` does. Merged into work as fbba523806.
+
+Known limits:
+- K1: `ReasonField` and `reasonProblem` parallel the Note box's field and `noteProblem` rather than sharing one counted-field component (the label and messages differ); the counter helper is shared.
+- K2: C# and JS trim different edge characters (U+0085, U+FEFF), so a 2,000-character reason with one of them can be held by the client though the server would accept it. Nothing over the limit reaches the server. The Note box has the same gap.
+- K3: the Rule wizard's Change choice has no paste test of its own; it uses the same `ReasonField`.
+- K4: jsdom does not enforce `maxlength`, so "kept whole" alone would pass on the old code; the tests also pin the absent attribute and the message and count, which fail on the old code.
+- K5: the count sits in the field hint and is not announced while typing (same as the Note box); the error message is announced.
+- K6: over-limit text stays in the form after switching to Follow or Keep; it is not sent, and it shows again on switching back.
