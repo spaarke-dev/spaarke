@@ -219,7 +219,10 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
       - 18:04:34 **one** `tools/call spaarke_show_decisions` (ok, 50 rows, 5.6 s);
       - 18:04:42–18:04:50, 4 × `spaarke_list_decision_page`: the widget's own calls to app-only tools, which still work under dynamic discovery.
     - It worked on the first upload with no delay, consistent with the fresh-id runs.
-    - **Still to run:** step 4, the test user who has never signed in (sign-in card, #16973). Also the agent's answer to "Which Spaarke tools can you use?", which should name only `spaarke_show_decisions`.
+  - **V2 result, test user `demo@demo.spaarke.com` (~18:10Z): ✅** (owner report + App Insights)
+    - 18:09:59 `tools/list` from Sydney, then 18:10:01 **one** `spaarke_show_decisions` (ok, 50 rows, 8.8 s), then a widget `spaarke_list_decision_page`.
+    - The BFF doesn't log caller identity on these requests, so the user is attributed by the owner's report and the timing.
+    - Not proven: the **first sign-in card** (#16973). This user may already have a token for the A1 auth config from mcp-r1 task 042.
   - **Measurement caveat:** BFF requests are now sampled at **25%**, so not every call is logged. The `show_decisions` call for this turn is missing. Any logged call carrying `?pkg=1.1.1` is still proof; the absence of one needs several turns.
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.
