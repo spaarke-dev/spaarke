@@ -1571,13 +1571,13 @@ public sealed partial class FirmFindingsProjectionTests
         line.LineNumber.Should().Be(3, "the stored line index is zero-based; the firm's invoice numbers its lines from one");
         line.LineId.Should().BeNull();
         line.Line.Should().BeNull("a rejected submission's live lines are never read");
-        line.ValuesRead.Should().Equal(new FirmOutcomeValueRead("line.rate", "450.00"), new FirmOutcomeValueRead("line.hours", "2.5"));
+        line.ValuesRead.Should().Equal(new FirmOutcomeValueRead("Rate", "450.00"), new FirmOutcomeValueRead("Hours", "2.5"));
         line.Citations.Should().ContainSingle().Which.Should().BeEquivalentTo(new FirmOutcomeCitation("Travel time", FirmLabel, 3, ClauseSection, ClauseQuote));
 
         var invoiceLevel = outcome.Items[1];
         invoiceLevel.LineNumber.Should().BeNull();
         invoiceLevel.ValuesRead.Should().Equal(
-            [new FirmOutcomeValueRead("invoice.firmInvoiceNumber", "")], "a missing field is shown by its name, with an empty value");
+            [new FirmOutcomeValueRead("Invoice number", "")], "a missing field is shown by its firm label, with an empty value");
         invoiceLevel.Citations.Should().ContainSingle().Which.RuleName.Should().Be("Block billing");
 
         world.Reads("sprk_billingevent").Should().Be(0, "a rejected submission's outcome never reads the live invoice lines");
@@ -1806,7 +1806,7 @@ public sealed partial class FirmFindingsProjectionTests
         var flagged = new World();
         flagged.AddRejectedSubmission(RejectedDocument(
             Stored("ApprovedRate", VersionA, 1, rejects: false, values: ("line.rate", "450.00")),
-            Stored("ExpenseRule", VersionA, 2, values: ("expense", "12.00"))));
+            Stored("ExpenseRule", VersionA, 2, values: ("line.expenseCode", "12.00"))));
         var outcome = await flagged.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
         outcome!.Items.Should().ContainSingle().Which.LineNumber.Should().Be(3);
         Warnings(flagged).Should().BeEmpty("a finding that did not reject is not a defect");
@@ -1819,13 +1819,13 @@ public sealed partial class FirmFindingsProjectionTests
         world.AddRejectedSubmission(RejectedDocument(
             Stored("Duplicate", VersionA, null, values: ("duplicateOf.trackingNumber", "TRK-EARLIER")),
             Stored("ApprovedRate", VersionB, 1, withheld: true, values: ("line.rate", "450.00")),
-            Stored("ExpenseRule", VersionB, 2, values: ("expense", "12.00"))));
+            Stored("ExpenseRule", VersionB, 2, values: ("line.expenseCode", "12.00"))));
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
 
         outcome!.Items.Should().HaveCount(3);
         outcome.Items[0].ValuesRead.Should().BeEmpty(); // line 1, withheld
-        outcome.Items[1].ValuesRead.Should().ContainSingle().Which.Should().BeEquivalentTo(new FirmOutcomeValueRead("expense", "12.00"));
+        outcome.Items[1].ValuesRead.Should().ContainSingle().Which.Should().BeEquivalentTo(new FirmOutcomeValueRead("Expense code", "12.00"));
         outcome.Items[2].ValuesRead.Should().BeEmpty(); // the Duplicate (invoice level, last)
         JsonSerializer.Serialize(outcome).Should().NotContain("TRK-EARLIER").And.NotContain("450.00");
     }
@@ -2069,10 +2069,10 @@ public sealed partial class FirmFindingsProjectionTests
 
         var item = outcome!.Items.Should().ContainSingle().Subject;
         item.LineNumber.Should().Be(3);
-        item.ValuesRead.Should().Contain(new FirmOutcomeValueRead("line.rate", "650.00"), "the rate extracted from the firm's own invoice is shown");
+        item.ValuesRead.Should().Contain(new FirmOutcomeValueRead("Rate", "650.00"), "the rate extracted from the firm's own invoice is shown");
         item.ValuesRead!.Count(v => Guid.TryParse(v.Value, out _)).Should().Be(0, "no value is an identifier");
         item.ValuesRead!.Select(v => v.Name).Should().NotContain(referenceNames, "no value the handler read without an extracted field is projected");
-        item.ValuesRead!.Select(v => v.Name).Should().OnlyContain(n => finding.ValuesRead.Any(v => v.Name == n && v.ExtractedField.HasValue));
+        item.ValuesRead!.Select(v => v.Name).Should().Equal(finding.ValuesRead.Where(v => v.ExtractedField.HasValue).Select(v => FirmValueReadLabel.Table[v.Name]), "each shown value carries its firm label, and only the extracted values are shown");
         var json = JsonSerializer.Serialize(outcome);
         json.Should().NotContain("07100000-0000-4000-8000-0000000000c1").And.NotContain("07100000-0000-4000-8000-0000000000c2");
         Regex.IsMatch(json, "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}").Should().BeFalse();
@@ -2091,7 +2091,7 @@ public sealed partial class FirmFindingsProjectionTests
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
-        outcome!.Items.Single().ValuesRead.Should().Equal(new FirmOutcomeValueRead("line.rate", "450.00"));
+        outcome!.Items.Single().ValuesRead.Should().Equal(new FirmOutcomeValueRead("Rate", "450.00"));
         JsonSerializer.Serialize(outcome).Should().NotContain("REF-1").And.NotContain("X-1").And.NotContain("11111111-2222");
     }
 
@@ -2111,7 +2111,7 @@ public sealed partial class FirmFindingsProjectionTests
 
         outcome!.Items.Should().HaveCount(2);
         outcome.Items.Select(i => i.ValuesRead!.Single()).Should().BeEquivalentTo(
-            [new FirmOutcomeValueRead("invoice.firmInvoiceNumber", ""), new FirmOutcomeValueRead("invoice.invoiceDate", "")]);
+            [new FirmOutcomeValueRead("Invoice number", ""), new FirmOutcomeValueRead("Invoice date", "")]);
     }
 
     [Fact(DisplayName = "130c fix 1 (F1-b): a Duplicate or withheld finding still projects no value, empty or not")]
@@ -2183,7 +2183,56 @@ public sealed partial class FirmFindingsProjectionTests
 
         var item = (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None))!.Items.Single();
 
-        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead(atCap, "1"));
+        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead(FirmValueReadLabel.GenericLabel, "1"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // ISS-042 (#2933): a firm reads a label for each value a rule read, never the internal key
+
+    [Fact(DisplayName = "ISS-042 must-fire: a rejected ApprovedRate finding shows \"Rate\" and \"Hours\", never line.rate or line.hours; the values are unchanged")]
+    public async Task Rejected_ApprovedRateValues_ShowFirmLabels_NotInternalKeys()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 2, values: [("line.rate", "650.00"), ("line.hours", "2.5"), ("approvedRate", "400.00")])));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var item = outcome!.Items.Should().ContainSingle().Subject;
+        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead("Rate", "650.00"), new FirmOutcomeValueRead("Hours", "2.5"));
+        var json = JsonSerializer.Serialize(outcome);
+        json.Should().NotContain("line.rate").And.NotContain("line.hours").And.NotContain("approvedRate");
+        Warnings(world).Should().BeEmpty("a name with a label is not a defect");
+    }
+
+    [Fact(DisplayName = "ISS-042 must-fire: a value name with no label shows the generic label, never the key (and the key is logged server side only)")]
+    public async Task Rejected_AnUnknownValueName_ShowsTheGenericLabel_NeverTheKey()
+    {
+        const string unknownKey = "line.someFutureKey";
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0, values: [("line.rate", "650.00"), (unknownKey, "7")])));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var item = outcome!.Items.Should().ContainSingle().Subject;
+        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead("Rate", "650.00"), new FirmOutcomeValueRead(FirmValueReadLabel.GenericLabel, "7"));
+        JsonSerializer.Serialize(outcome).Should().NotContain(unknownKey).And.NotContain("someFutureKey");
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmValueReadLabel.MissingEntryCode)).Which.Should().Contain(unknownKey);
+    }
+
+    [Fact(DisplayName = "ISS-042 must-not-fire: every labelled name projects its own table label, and no label is the key")]
+    public async Task Rejected_EveryLabelledName_ProjectsItsTableLabel()
+    {
+        var names = FirmValueReadLabel.Table.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray();
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0, values: names.Select(n => (n, (string?)"1")).ToArray())));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Single().ValuesRead!.Select(v => v.Name).Should().Equal(names.Select(n => FirmValueReadLabel.Table[n]));
+        Warnings(world).Should().BeEmpty();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -2220,7 +2269,7 @@ public sealed partial class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
         outcome!.Items.Single().ValuesRead.Should().Equal(
-            new FirmOutcomeValueRead("line.rate", "450.00"), new FirmOutcomeValueRead("line.billedTaskCode", "L110"));
+            new FirmOutcomeValueRead("Rate", "450.00"), new FirmOutcomeValueRead(FirmValueReadLabel.GenericLabel, "L110"));
         JsonSerializer.Serialize(outcome).Should().NotContain("AI-");
     }
 
@@ -2267,7 +2316,7 @@ public sealed partial class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
         var shown = outcome!.Items.Should().ContainSingle("the held ApprovedRate finding is a Flag, not a rejection").Subject;
-        shown.ValuesRead.Should().ContainSingle().Which.Name.Should().Be("invoice.firmInvoiceNumber");
+        shown.ValuesRead.Should().ContainSingle().Which.Name.Should().Be("Invoice number");
         shown.LineNumber.Should().BeNull("the one shown finding is the RequiredData rejection, which is about the invoice, not a line");
     }
 
@@ -2294,7 +2343,7 @@ public sealed partial class FirmFindingsProjectionTests
 
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
-        outcome!.Items.Should().ContainSingle().Which.ValuesRead.Should().Equal(new FirmOutcomeValueRead("invoice.firmInvoiceNumber", ""));
+        outcome!.Items.Should().ContainSingle().Which.ValuesRead.Should().Equal(new FirmOutcomeValueRead("Invoice number", ""));
     }
 
     // ── K6: robustness ──
@@ -2402,7 +2451,7 @@ public sealed partial class FirmFindingsProjectionTests
         var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
 
         outcome!.Items.Single().ValuesRead.Should().Equal(
-            new FirmOutcomeValueRead("line.billed", "L110"), new FirmOutcomeValueRead("line.rate", "450.00"));
+            new FirmOutcomeValueRead(FirmValueReadLabel.GenericLabel, "L110"), new FirmOutcomeValueRead("Rate", "450.00"));
         JsonSerializer.Serialize(outcome).Should().NotContain("AI-").And.NotContain("NO-DOT");
     }
 
@@ -2430,7 +2479,7 @@ public sealed partial class FirmFindingsProjectionTests
 
         var item = outcome!.Items.Should().ContainSingle().Subject;
         item.LineNumber.Should().Be(5);
-        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead("line.rate", "450.00"));
+        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead("Rate", "450.00"));
         JsonSerializer.Serialize(outcome).Should().NotContain("UNKNOWN-FIELD-VALUE").And.NotContain("BLANK-FIELD-VALUE").And.NotContain("PREFIX-VALUE");
     }
 
@@ -2457,7 +2506,7 @@ public sealed partial class FirmFindingsProjectionTests
             for (var i = 0; i < chunks[c].Length; i++)
             {
                 ((JsonObject)array[i]!)["field"] = chunks[c][i];
-                expected.Add($"c{c}v{i}");
+                expected.Add(FirmValueReadLabel.GenericLabel);
             }
 
             entries.Add(entry);

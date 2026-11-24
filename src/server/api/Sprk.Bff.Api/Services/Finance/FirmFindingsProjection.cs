@@ -124,7 +124,8 @@ public sealed record FirmOutcome(
 /// other item (omitted from the JSON). Never a line id, and never read from a live line.
 /// </param>
 /// <param name="ValuesRead">
-/// A rejection finding only (130c): the values the rule read, as the submission stored them (name and value, nothing else); null for every other
+/// A rejection finding only (130c): the values the rule read, as the submission stored them (a firm label and the value, nothing else; ISS-042: the
+/// label comes from <see cref="FirmValueReadLabel.Table"/>, never the internal key); null for every other
 /// item (omitted from the JSON), empty when the finding shows none (a Duplicate, a withheld detail, nothing stored).
 /// </param>
 /// <param name="ReasonCode">
@@ -144,7 +145,7 @@ public sealed record FirmOutcomeItem(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<FirmOutcomeValueRead>? ValuesRead = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ReasonCode = null);
 
-/// <summary>One value a rule read for a rejection finding (130c): its name and the value as the submission stored it.</summary>
+/// <summary>One value a rule read for a rejection finding (130c): its firm label ("Rate", never an internal key; ISS-042) and the value as the submission stored it.</summary>
 public sealed record FirmOutcomeValueRead(string Name, string Value);
 
 /// <param name="DescriptionExcerpt">The first part of the line's description as billed.</param>
@@ -1075,7 +1076,8 @@ public sealed class FirmFindingsProjection
                 [reason],
                 citable.Contains(version) ? [Cite(rules[version], clauses[version])] : [],
                 finding.LineIndex is { } zeroBased ? zeroBased + 1 : null,
-                finding.ValuesRead.Select(v => new FirmOutcomeValueRead(v.Name, v.Value)).ToList(),
+                // ISS-042: the name is the firm label from the closed table ("Rate"), never the internal key the rule read ("line.rate"); the value is unchanged.
+                finding.ValuesRead.Select(v => new FirmOutcomeValueRead(FirmValueReadLabel.For(FirmValueReadLabel.Table, v.Name, _logger, submissionId), v.Value)).ToList(),
                 finding.ReasonCode));
         }
 
