@@ -35,6 +35,12 @@ export const UTF8_BOM = '﻿';
 const CRLF = '\r\n';
 
 /**
+ * Host-side text for one exported cell (see {@link exportCsv}'s `cellText`): the text to write, or `undefined` to
+ * leave the cell to the default formatting.
+ */
+export type ExportCellText = (record: Record<string, unknown>, column: ResolvedColumn) => string | undefined;
+
+/**
  * Render a single cell value into its CSV string form, applying RFC 4180 quoting.
  *
  * Empty / null / undefined → empty string (no quoting).
@@ -139,6 +145,11 @@ export function csvFilename(entityName: string, savedQueryName: string, date: Da
  * @param entityName      Logical name of the primary entity — embedded in the
  *                        downloaded filename (not in the CSV body).
  *
+ * @param cellText        Optional. Returns the exact text to write for a cell, or `undefined` to
+ *                        keep the default formatting of `record[column.name]` for that cell. The
+ *                        DataGrid uses it so a Money column exports the text the cell displays.
+ *                        Absent = every cell uses the default formatting (unchanged).
+ *
  * @returns A `Blob` of type `text/csv;charset=utf-8` ready for download.
  *
  * @example
@@ -156,7 +167,8 @@ export function exportCsv(
   // noUnusedParameters convention) so future callers can rely on this
   // signature when wiring custom filename derivations.
   _savedQueryName: string,
-  _entityName: string
+  _entityName: string,
+  cellText?: ExportCellText
 ): Blob {
   const lines: string[] = [];
 
@@ -164,7 +176,16 @@ export function exportCsv(
     // Header row uses column.label so the CSV is human-readable.
     lines.push(columns.map(c => escapeCsvField(c.label)).join(','));
     for (const record of records) {
-      lines.push(columns.map(c => escapeCsvField(record[c.name])).join(','));
+      lines.push(
+        columns
+          .map(c => {
+            // The grid may supply the text for a cell (a Money cell exports what it displays); a column it
+            // declines (undefined) keeps the raw-value formatting below.
+            const text = cellText?.(record, c);
+            return escapeCsvField(text !== undefined ? text : record[c.name]);
+          })
+          .join(',')
+      );
     }
   }
 

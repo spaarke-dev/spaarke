@@ -421,3 +421,19 @@ This under-lists, which fails closed.
 **Why it matters.** The comment led task 020 to read bare numbers, which was the cause of the Review detail and closed-request Delete defects fixed in PR #3000. The next reader could repeat the mistake.
 
 **Fix.** Correct the comment and point it to `rawWholeNumberOf`. It's comment-only, so make it part of the next R4 BFF PR. Status: Done (task 031, 2026-11-23: the `ProjectEntity` remarks now state the wire shape and point to `rawWholeNumberOf`; its summary's wrong key name, `FormattedValues` for `@formattedValues`, is fixed too. The issue is closed by the main session). Issue: https://github.com/spaarke-dev/spaarke/issues/3010 (board Type=Bug).
+
+## D-34 — Shared DataGrid: CSV export writes option-set and nameless lookup cells as JSON (#3045)
+
+**What.** The shared DataGrid's export writes an option-set cell, and a lookup with no name, as raw JSON (`{"value":1,"extensionData":null}`). Module-fetch rows carry SDK objects; the grid shows the `@formattedValues` label, but `csvExport.ts`'s object fallback (~:80) stringifies the value. Task 033 fixed Money only (FR-20 scope); its render test pins the current behaviour.
+
+**Why it matters.** An exported status or type column holds JSON instead of the label the user sees.
+
+**Fix.** Extend the grid's `exportCellText` (added in task 033) to return the `@formattedValues` label, else the lookup name, for every column with one; update the pinned test. Needs the dataset-grid owners' OK. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3045 (board Type=Bug).
+
+## D-35 — Shared DataGrid: currency cells without a server label are always shown as USD (#3046)
+
+**What.** `renderCellValue`'s `currency` case (`DataGrid.tsx` ~:772-776) formats every amount that has no server label with `currency: 'USD'`. Since task 033 the CSV export reuses that text, so the "$" also reaches exported files.
+
+**Why it matters.** A euro or pound amount without a formatted label is shown and exported as dollars.
+
+**Fix.** Without a label, use the row's currency when known, else show the plain number. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3046 (board Type=Bug).

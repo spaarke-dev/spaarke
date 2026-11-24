@@ -761,7 +761,13 @@ export function renderCellValue(value: unknown, renderer: string, formattedLabel
   }
   switch (renderer) {
     case 'currency': {
-      const num = typeof value === 'number' ? value : Number(value);
+      // A Money value with no server label is the SDK object `{ value, extensionData }` (task 033): read its amount.
+      const num =
+        typeof value === 'object'
+          ? (moneyAmountOf(value) ?? Number.NaN)
+          : typeof value === 'number'
+            ? value
+            : Number(value);
       if (Number.isNaN(num)) return String(value);
       return new Intl.NumberFormat(undefined, {
         style: 'currency',
@@ -811,6 +817,94 @@ export function renderCellValue(value: unknown, renderer: string, formattedLabel
       return String(value);
     }
   }
+}
+
+/** A plain decimal number as text (optional sign, optional exponent); keeps `Number()` from reading `'0x10'` as 16. */
+const NUMERIC_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+
+/** A finite number from a number or a numeric string; otherwise null. */
+function finiteNumberOf(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (!NUMERIC_TEXT.test(text)) return null;
+    const n = Number(text);
+    // An overflowing string ("1e400") is Infinity, not an amount; the comparator must never see Infinity - Infinity.
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * The amount in a raw Money cell value, or null when it has none (spaarke-SPA-external-access-platform-r4 task 033).
+ *
+ * The BFF module fetch returns a Money column as the SDK object `{ value: 100, extensionData: null }` (System.Text.Json
+ * writes the SDK type through its public properties; `FetchService.ProjectEntity`), with the display text under
+ * `@formattedValues`. The grid also meets a plain number (other hosts' clients) and a numeric string. Accepts all three;
+ * `{ Value: n }` is read too. A display label such as "$1,200.00", any other object, an array, `null`, `undefined` and
+ * `''` have no amount.
+ */
+export function moneyAmountOf(raw: unknown): number | null {
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const wrapped = raw as { value?: unknown; Value?: unknown };
+    return finiteNumberOf(wrapped.value ?? wrapped.Value);
+  }
+  return finiteNumberOf(raw);
+}
+
+/**
+ * The comparator behind every sortable column (task 061 display-string key; task 033 Money). Returns the ascending
+ * order; Fluent multiplies it by -1 for a descending sort, so both Fluent's own sort state and the host-controlled one
+ * (`initialSettings.sort`, task 032) reach it the same way.
+ *
+ * - A Money column (renderer 'currency') compares the amount from {@link moneyAmountOf}, never the text, so $9 < $10 <
+ *   $100. A row with no amount (null, undefined, '', or text with no number) sorts LOWEST: first ascending and last
+ *   descending, the same place an empty cell already took when the grid compared display strings. Two empty rows tie.
+ * - Two numbers compare numerically (any renderer).
+ * - Date renderers compare the raw ISO text (the display string is locale order, not time order).
+ * - Everything else compares what the cell shows (an option set or lookup is an object, which would otherwise compare as
+ *   "[object Object]" and never move).
+ */
+export function compareColumnValues(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  column: { name: string; renderer: string }
+): number {
+  const aVal = a[column.name];
+  const bVal = b[column.name];
+  if (column.renderer === 'currency') {
+    const aAmount = moneyAmountOf(aVal);
+    const bAmount = moneyAmountOf(bVal);
+    if (aAmount === null || bAmount === null) {
+      return aAmount === bAmount ? 0 : aAmount === null ? -1 : 1;
+    }
+    return aAmount - bAmount;
+  }
+  if (typeof aVal === 'number' && typeof bVal === 'number') {
+    return aVal - bVal;
+  }
+  // Dates sort on the raw ISO value (their display string is locale order, not time order).
+  if (column.renderer === 'date' || column.renderer === 'dateonly' || column.renderer === 'datetime') {
+    return String(aVal ?? '').localeCompare(String(bVal ?? ''));
+  }
+  // Everything else sorts on what the cell shows (task 061).
+  return renderCellValue(aVal, column.renderer, formattedLabelOf(a, column.name)).localeCompare(
+    renderCellValue(bVal, column.renderer, formattedLabelOf(b, column.name))
+  );
+}
+
+/**
+ * The CSV text for one cell when the grid owns how it is written (task 033): a Money column exports exactly what the
+ * cell displays (the same {@link renderCellValue} + {@link formattedLabelOf} path), so "$1,200.00" is not exported as
+ * `{"value":1200,"extensionData":null}` or a bare `1200`. Every other column returns undefined, which leaves
+ * {@link exportCsv}'s own formatting untouched.
+ */
+export function moneyExportText(
+  record: Record<string, unknown>,
+  column: { name: string; renderer: string }
+): string | undefined {
+  if (column.renderer !== 'currency') return undefined;
+  return renderCellValue(record[column.name], column.renderer, formattedLabelOf(record, column.name));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1377,22 +1471,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     const columns = visibleColumns.map(col =>
       createTableColumn<GridItem>({
         columnId: col.name,
-        compare: (a, b) => {
-          const aVal = a[col.name];
-          const bVal = b[col.name];
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            return aVal - bVal;
-          }
-          // Dates sort on the raw ISO value (their display string is locale order, not time order).
-          if (col.renderer === 'date' || col.renderer === 'dateonly' || col.renderer === 'datetime') {
-            return String(aVal ?? '').localeCompare(String(bVal ?? ''));
-          }
-          // Everything else sorts on what the cell shows (task 061): an option set or lookup arrives as an object,
-          // which would otherwise compare as "[object Object]" and never move.
-          return renderCellValue(aVal, col.renderer, formattedLabelOf(a, col.name)).localeCompare(
-            renderCellValue(bVal, col.renderer, formattedLabelOf(b, col.name))
-          );
-        },
+        compare: (a, b) => compareColumnValues(a, b, col),
         renderHeaderCell: () => (
           <HeaderCellContent
             label={col.label}
@@ -1862,6 +1941,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             selectedIds={Array.from(selectedRowIds).map(String)}
             records={records}
             columns={visibleColumns}
+            exportCellText={moneyExportText}
             currentView={contextValue.currentView}
             refresh={refresh}
             theme={theme}

@@ -27,7 +27,7 @@
  */
 
 import type { ResolvedColumn } from '../configResolution';
-import { exportCsv, csvFilename } from './csvExport';
+import { exportCsv, csvFilename, type ExportCellText } from './csvExport';
 import { cleanGuid } from '../../../utils/guid';
 import { getXrm } from '../../../utils/xrmContext';
 
@@ -50,6 +50,8 @@ export interface DefaultHandlerContext {
   records: ReadonlyArray<Record<string, unknown>>;
   /** Visible columns (post-filtering) — used by `export-excel`. */
   columns: ReadonlyArray<ResolvedColumn>;
+  /** Optional: the text `export-excel` writes for a cell (undefined = default formatting). See {@link exportCsv}. */
+  exportCellText?: ExportCellText;
   /** Display name of the active savedquery / configjson title — used by `export-excel`. */
   currentView: string;
   /** Trigger a hard refresh of the grid (re-fetch page 1, preserve filter/sort state). */
@@ -225,7 +227,13 @@ export const defaultRefreshHandler: DefaultHandler = async ctx => {
  * Filename format: `{entityName}-{savedQueryName}-{yyyymmdd}.csv`.
  */
 export const defaultExportExcelHandler: DefaultHandler = async ctx => {
-  const blob = exportCsv(ctx.records as Record<string, unknown>[], ctx.columns, ctx.currentView, ctx.entityName);
+  const blob = exportCsv(
+    ctx.records as Record<string, unknown>[],
+    ctx.columns,
+    ctx.currentView,
+    ctx.entityName,
+    ctx.exportCellText
+  );
   const filename = csvFilename(ctx.entityName, ctx.currentView);
   downloadBlob(blob, filename);
 };
