@@ -30,7 +30,7 @@
 
 ## Open Owner Questions
 
-- **042 NFR-01 method:** "50 calls each" cannot be made by hand in Copilot (lookup and complete especially). Proposal: compute p95 per tool from the BFF's own `MCP tool … completed` durations over all live 042 traffic, and report n per tool; App Insights samples ~33%. The alternative needs a dev App Service setting change to stop sampling for that log line (owner go, through uac-r2). Early data already misses the 3 s target for show (6.5 s) and plan (4.7 s): record and escalate, do not change tool behaviour in 042.
+- **042 NFR-01 method:** DECIDED 2026-11-24 (owner "yes"): live server timings, n reported per tool (`notes/decisions.md`). Show and plan p95 misses are escalated to the owner at the end of the run.
 - **Wave 8:** Is the 41-entry conformance baseline (36+ fixture-only) "green" for NFR-09? ISS-007 Host/Origin on `/mcp` (#2835) before 042? 032: (1) display chain — fullscreen refused → master-detail beside the lane? (2) bundle 1.54 MB (aim 1 MB): accept or lazy-load the email editor? (3) Console launch parameter so the last fallback opens the Work Item? (4) matter heading stays text — accept? (5) declined `openLink` now shows a status message — OK?
 - **Wave 7:** 010 seeding-proof AC amendment (Stateless is the guard); 031 DEF-001 #2832 "Done today"; core record type + label on `WorklistCoreSummary`; widget lane default open/collapsed (D-195); co-located widget tests under ADR-038.
 - **Wave 6:** (1) privileged count first-page only — lane-wide needs ontology change? (2) worklist 503 hides `too_many_signals`? (3) non-billing items link to the Console root? (4) 024 null `HttpContext` to the capability — keep? (5) 023 partial results — keep? (6) category counts hint at privileged work type — accept?
