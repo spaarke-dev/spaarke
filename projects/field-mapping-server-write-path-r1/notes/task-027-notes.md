@@ -38,8 +38,16 @@ FULL rigor, sonnet @ high, directional. One Sonnet implementer in an `isolation:
   - ADR-002: no plugin.
   - FR-02 / FR-09: no owner or mapped value is sent.
 
-## Left (each on the owner's go)
+## PR and deploy (2026-11-24)
 
-1. PR to master.
-2. Deploy `sprk_createreportcardwizard` from master (temporary worktree build, rollback bundle saved first).
-3. Live check on dev under a Matter whose profile maps Law Firm 1 / External / Internal: pick one of each and confirm the picks are kept; create one leaving them unpicked and confirm they are filled from the matter; owner = the matter's team; mapped values present on first load.
+- PR #3072 merged to master at 20:20Z as 3c1018c97f. Nothing in `src/client/shared` or the wizard changed on master after it.
+- Deployed `sprk_createreportcardwizard` to dev at 22:19Z (owner's go), built in a temporary worktree at 3c1018c97f.
+  - Built bundle: SHA256 3F0701D3…6FC3ABB, 1,542,749 bytes.
+    - No `/field-mappings/` call and no `applyFieldMappings`.
+    - `mappingSourceEntity` appears only because the shared adapter supports it.
+  - Read-back from dev: the same SHA.
+  - Rollback: the previous dev bundle, deployed 2026-11-23, SHA 0B0B550C…36702005, 1,548,994 bytes. It still called `/field-mappings/`. A copy is kept outside the repo; redeploying it is the rollback.
+
+## Left (on the owner's go)
+
+1. Live check on dev under a Matter whose profile maps Law Firm 1 / External / Internal: pick one of each and confirm the picks are kept; create one leaving them unpicked and confirm they are filled from the matter; owner = the matter's team; mapped values present on first load.
