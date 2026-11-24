@@ -79,9 +79,21 @@ Default Spaarke DA composition (cite in commit message):
 
 Use `OAuthPluginVault` (pattern in `declarative-agent-foodbank-mcp/appPackage/`). For the Spaarke MCP server specifically, use the vault entry tied to the BFF's Entra app registration — do NOT inline secrets.
 
+Bind the OAuth registration (Teams Developer Portal) to **Any Teams app**, never to a specific app id. Copilot presents a different app id, so a bound registration fails the pre-flight check, and nothing reaches the server.
+
+### Step 5.5: Package identity: the app id is permanent (binding, 2026-11-24)
+
+The admin center keeps state against a package's app id (`manifest.json` `id`). An action that did not load on the first upload of an id **stayed** unloaded through five later updates; the same packages on a fresh id worked at once (G8-P2, `projects/specialist-legal-agents-r1/phase0/g8/README.md`).
+
+- **Dev:** any change to actions goes on a **fresh app id**. That means the `actions` array, an `ai-plugin.json` runtime (URL, auth, `reference_id`), the function list, dynamic vs pinned discovery, or `mcp-tools.json`. If a change "doesn't show", rebuild on a fresh id before debugging content.
+- **Production:** one stable app id per agent per customer; ship version bumps. Before shipping an action change as an update, prove that an update picks it up (test V1 in the note below).
+- **Keep packages thin:** tool behaviour lives behind the MCP server, and tool names and schemas are a backward-compatible contract.
+- **Verify at the server:** one `tools/call` per turn in App Insights. The model's own account doesn't count.
+- Full rules (BR-1 to BR-7), customer distribution and licensing: `projects/specialist-legal-agents-r1/notes/agent-package-identity-and-distribution.md`.
+
 ### Step 6: Admin approval awareness
 
-- Document which manifest changes trigger re-approval (knowledge source additions/removals, action plugin changes are major; instruction edits are usually minor).
+- Document which manifest changes trigger re-approval (knowledge source additions/removals, action plugin changes are major; instruction edits are usually minor). Updates appear as **Update pending** in Agents › All agents › Requests; users keep the old version until an admin approves.
 - For Spaarke production DAs, route changes through the admin approval flow per the deployment runbook (see `docs/guides/`).
 
 ---

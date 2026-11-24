@@ -18,7 +18,7 @@
 1. Owner opens `spaarke-legal-g8p2-sl` in **Teams** (Copilot app / agent chat) and in **Word** (blank test document, Copilot pane, agent picker): "Show my Spaarke decisions". Cancel any approval card; never decide in the widget. Note times.
 2. Check App Insights for one `tools/call spaarke_show_decisions` per turn from client Sydney; record per surface in the README run log and design §8 G8-P2.
 3. Report to COPILOT-PLATFORM-COORDINATION [0afb62]. Removals by 2026-11-30: G8-a agent + 2 skills, G8-p2 `802fd9cc`, G8-p2-sl `d38f8df8`, G8-p2-org-learn `0421c980`.
-4. Later D-A1 check: does an org-catalog **update** of an installed agent pick up a changed action?
+4. Tests V1 (update with an action change on `d38f8df8`) and V2 (dynamic discovery + OAuth on a fresh id): `notes/agent-package-identity-and-distribution.md` §5. Build rules BR-1–BR-7 are in that note and in the `declarative-agent` skill Step 5.5.
 
 ## G8 result (recorded in phase0/g8/README.md, commit 9c557d7e95)
 - An Agent Builder agent cannot use the tenant federated connector (A1 ❌, A2 "No connectors available" ❌, skills inside the agent ❌). Plain Chat works (`spike_whoami` ✅).
