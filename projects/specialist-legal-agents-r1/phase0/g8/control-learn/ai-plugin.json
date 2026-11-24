@@ -1,0 +1,21 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+  "schema_version": "v2.4",
+  "name_for_human": "Microsoft Learn (control)",
+  "namespace": "learncontrol",
+  "description_for_human": "Searches Microsoft Learn documentation.",
+  "description_for_model": "Searches official Microsoft Learn documentation. Use it for any question about Microsoft products, Microsoft 365 Copilot, declarative agents or Azure.",
+  "functions": [],
+  "runtimes": [
+    {
+      "type": "RemoteMCPServer",
+      "auth": {
+        "type": "None"
+      },
+      "spec": {
+        "url": "https://learn.microsoft.com/api/mcp"
+      },
+      "run_for_functions": ["*"]
+    }
+  ]
+}
