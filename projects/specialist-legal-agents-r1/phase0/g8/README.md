@@ -188,6 +188,12 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
     - `package-p2-v1b/` → `spaarke-legal-g8p2-sl-1.1.2.zip`: same id, **content identical to working 1.1.0** (diff checked), version only.
     - **If it works:** updates do carry action changes (1.1.0 → 1.1.1 → 1.1.2 each changed the URL), and **query strings break MCP actions** (H2). BR-3 holds, plus a new rule: no query string in action URLs.
     - **If it still says not exposed:** an action broken on an id stays broken through updates (H1, as 802fd9cc). BR-3 fails: action changes need a fresh id.
+  - **Run 3 result (~16:55Z): ❌. 1.1.2 (identical to working 1.1.0) also says "not exposed".** Copilot shows 1.1.2; App Insights shows no MCP request of any kind, and no 401/403, from 16:52Z on.
+    - **Established:** once an update leaves an action unloaded on an app id, **later updates do not repair it**, even an exact copy of the working version. That is the 802fd9cc pattern, now reproduced from a known-good start.
+    - **Not yet separated:** whether 1.1.1 broke because **any action-changing update** breaks the action (H1), or because of the `?pkg=` query string (H2). Either way, admin-center updates that touch the action are unsafe today.
+    - **Discriminators, if wanted (each needs a fresh id and an R4 row):**
+      - **(a)** a fresh id whose **first** upload uses the `?pkg=` URL. If it works, query strings are fine and H1 holds.
+      - **(b)** a fresh id, then an update that changes **only** the description or version. If the action survives, non-action updates are safe.
   - **Measurement caveat:** BFF requests are now sampled at **25%**, so not every call is logged. The `show_decisions` call for this turn is missing. Any logged call carrying `?pkg=1.1.1` is still proof; the absence of one needs several turns.
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.

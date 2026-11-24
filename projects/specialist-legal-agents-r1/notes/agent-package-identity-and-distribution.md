@@ -40,6 +40,15 @@ Instruction, starter, description and icon edits may go as a version bump on the
 - treat a production action change as a breaking release;
 - plan it with the customer admin, including a fallback to publishing under a new id.
 
+**V1 result (2026-11-24) [verified]: an admin-center update can leave an agent's action unloaded, and further updates don't recover it.**
+- Steps: `d38f8df8` 1.1.0 ✅ → update 1.1.1 (URL gained `?pkg=1.1.1`) ❌ "action not exposed", no request reached the BFF → update 1.1.2 (byte-for-byte the 1.1.0 content) ❌, same.
+- Whether *any* action-changing update does this (H1), or only the query string did (H2), is open; discriminators are in the G8 README run 3.
+- **The rule until proven otherwise:**
+  - **Never change an action through an update.** The action's URL, auth and `reference_id` are frozen for the life of an app id.
+  - Change tools behind a stable URL instead: that is BR-4 plus **dynamic discovery**, which makes V2 the critical test.
+  - A genuine action change (new URL or new auth) ships as a **new app id**: a new agent, with the old one retired.
+- **No query strings in action URLs** until H2 is ruled out. Log the package version another way, for example a request header if Copilot can send one (unknown), or the tool-call metadata.
+
 **BR-4. Keep action changes rare by keeping the package thin.** The package carries:
 - the agent's identity, instructions and starters;
 - one action pointing at the Spaarke MCP endpoint, with its `reference_id`;
@@ -159,7 +168,8 @@ The design covers this in §3.13. For distribution, the differences from 3.3 are
 
 | # | Test | Settles | Cost |
 |---|---|---|---|
-| **V1** | Upload **1.1.1** of the working agent (`d38f8df8`) as an update. Change the action: add a second pinned tool, e.g. a read-only one. Does the new tool appear after the update is approved, and does the old one still work? | BR-3: are updates with action changes safe in production? | 10 minutes, same tenant |
+| **V1** | Update the working agent (`d38f8df8`) with an action change (done as a URL change: `?pkg=1.1.1`) | BR-3: are updates with action changes safe in production? | **❌ 2026-11-24:** 1.1.1 lost the action; 1.1.2 (= 1.1.0) did not restore it. See BR-3 |
+| **V1a / V1b** | (a) A fresh id whose first upload uses a `?pkg=` URL. (b) A fresh id, then an update changing only the description | Separate H1 from H2; are non-action updates safe? | 10 minutes each; 2 fresh ids |
 | **V2** | A fresh-id agent with **dynamic discovery + OAuth**, through the org catalog, as a user who has not signed in yet | BR-5: can new tools reach installed agents without package updates? | 10 minutes |
 | **V3** | An agent package uploaded in a **second tenant**, using a Spaarke-tenant auth config set to "Any Microsoft 365 organization" | Model 1 distribution (3.2) | Needs a second tenant |
 | **V4** | Word and Teams on `d38f8df8` (G8-P2's remaining surfaces), plus the plain-Chat leak check | G8-P2 / R1′ | In progress |
