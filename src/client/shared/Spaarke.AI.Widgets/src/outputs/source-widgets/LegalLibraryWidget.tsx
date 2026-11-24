@@ -150,13 +150,13 @@ function LegalLibraryWidget(props: SourceWidgetProps<LegalLibraryData>) {
 
         {(data?.court || data?.date) && (
           <div className={styles.metaRow}>
-            {data?.court && (
+            {data.court && (
               <span className={styles.metaItem}>
                 <BuildingBankRegular fontSize={14} />
                 <Text size={200}>{data.court}</Text>
               </span>
             )}
-            {data?.date && (
+            {data.date && (
               <span className={styles.metaItem}>
                 <CalendarRegular fontSize={14} />
                 <Text size={200}>{data.date}</Text>

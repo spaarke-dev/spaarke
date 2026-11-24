@@ -7,7 +7,6 @@ const config: Config = {
   testMatch: ['**/__tests__/**/*.test.{ts,tsx}', '**/*.test.{ts,tsx}'],
   moduleNameMapper: {
     // Map workspace packages to source until dist is built in CI.
-    '^@spaarke/ai-outputs$': '<rootDir>/../Spaarke.AI.Outputs/src/index.ts',
     '^@spaarke/ui-components$': '<rootDir>/../Spaarke.UI.Components/src/index.ts',
     // @spaarke/communication-components — new shared lib (messaging-communication-app-r2
     // task 030); source-mode only, mirrors the pattern above (no dist build).
@@ -37,12 +36,12 @@ const config: Config = {
     // src/solutions/SpaarkeAi/jest.config.ts (R6 Hotfix Wave B-G9c3).
     // Added by ai-architecture-redesign-r2 task 021 (test-repair).
     '^marked$': '<rootDir>/src/__mocks__/marked.ts',
-    // Dedupe React — Spaarke.AI.Outputs (and other sibling shared libs) each
+    // Dedupe React — sibling shared libs (ui-components and others) each
     // have their own node_modules/react copy installed independently. Without
     // forcing a single instance, hooks fail with "Invalid hook call" /
     // "Cannot read properties of null (reading 'useRef')" because the
     // dispatcher pointer lives in the test-runner's React, but a sub-component
-    // (e.g. Spaarke.AI.Outputs' DocumentViewerWidget) imports a SECOND React
+    // (e.g. a ui-components component) imports a SECOND React
     // instance from its own nested node_modules. Mirrors
     // src/solutions/SpaarkeAi/jest.config.ts (R5 task 038).
     // Added by ai-architecture-redesign-r2 task 021 (test-repair).

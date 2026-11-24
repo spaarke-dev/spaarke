@@ -531,7 +531,7 @@ The full mount-glue source is `src/dataverse/forms/sprk_matter/insightCardMount.
 
 **Read this before you wire any host form.**
 
-r1 Task 043 closed Phase 4 with a **documented P1 gap**: there is **no IIFE bundle** of `@spaarke/ai-widgets` for MDA-form WebResource consumption. The package builds with plain `tsc` (CommonJS ESM modules) only. The Dataverse Form WebResource iframe scope does NOT have host-provided React; the bundle must self-contain React 19 + ReactDOM + the card + its transitive deps (`@spaarke/ui-components`, `@spaarke/ai-outputs`).
+r1 Task 043 closed Phase 4 with a **documented P1 gap**: there is **no IIFE bundle** of `@spaarke/ai-widgets` for MDA-form WebResource consumption. The package builds with plain `tsc` (CommonJS ESM modules) only. The Dataverse Form WebResource iframe scope does NOT have host-provided React; the bundle must self-contain React 19 + ReactDOM + the card + its transitive deps (`@spaarke/ui-components`; the output widgets formerly in `@spaarke/ai-outputs` are inside ai-widgets since 2026-11-24).
 
 **Until the IIFE bundle ships**, the card is **NOT visibly rendered** on the host form:
 - The pre-warm OnLoad (#1) fires; the POST happens; the envelope persists.

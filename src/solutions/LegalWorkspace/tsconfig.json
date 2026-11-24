@@ -28,8 +28,6 @@
       "@spaarke/communication-components/*": ["../../client/shared/Spaarke.Communication.Components/src/*"],
       "@spaarke/ai-widgets": ["../../client/shared/Spaarke.AI.Widgets/src/index.ts"],
       "@spaarke/ai-widgets/*": ["../../client/shared/Spaarke.AI.Widgets/src/*"],
-      "@spaarke/ai-outputs": ["../../client/shared/Spaarke.AI.Outputs/src/index.ts"],
-      "@spaarke/ai-outputs/*": ["../../client/shared/Spaarke.AI.Outputs/src/*"],
       "@spaarke/daily-briefing-components": ["../../client/shared/Spaarke.DailyBriefing.Components/src/index.ts"],
       "@spaarke/daily-briefing-components/*": ["../../client/shared/Spaarke.DailyBriefing.Components/src/*"],
       "@spaarke/compose-components": ["../../client/shared/Spaarke.Compose.Components/src/index.ts"],

@@ -1,5 +1,5 @@
 /**
- * @spaarke/ai-outputs — Widget Type Contracts
+ * src/outputs — Widget Type Contracts
  *
  * Enums, generic prop types, and registry entry shapes shared across all
  * output and source pane widgets. Tasks 020, 021, 022, and 031 all reference
@@ -81,8 +81,12 @@ export interface OutputWidgetProps<T> {
  * @template T - The shape of the source widget's data payload.
  */
 export interface SourceWidgetProps<T> {
-  /** Parsed widget payload delivered via the AI streaming response. */
-  data: T;
+  /**
+   * Parsed widget payload from the server's `context_update` event. It is a
+   * server payload, so it can be absent (loading, or an event without data);
+   * the context-widget adapter already treats it as `T | undefined`.
+   */
+  data: T | undefined;
   /** When true the widget should render a loading skeleton instead of data. */
   isLoading?: boolean;
   /** Human-readable error message — widget renders an error state when set. */

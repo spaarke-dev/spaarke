@@ -100,9 +100,9 @@ import { getComposeAiToolbarActions } from './ComposeAiToolbar';
 import { useComposeChangeSummary } from './hooks/useComposeChangeSummary';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
-// widget registration (`register-workspace-widgets.ts` transitively pulls in
+// widget registration (`register-workspace-widgets.ts`; it once pulled in
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
-// cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
+// could not resolve; folded into ai-widgets 2026-11-24). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
 import { useDispatchPaneEvent, usePaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed

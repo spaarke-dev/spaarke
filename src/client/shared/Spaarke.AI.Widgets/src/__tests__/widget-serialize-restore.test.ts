@@ -48,44 +48,39 @@ const createMockWidget = (name: string): React.FC => {
 // NOTE (test-repair task 021, 2026-07-08): these mock paths previously read
 // '@spaarke/ai-outputs/src/output-widgets/...' — an extra '/src/' segment
 // that does NOT match the literal specifier register-workspace-widgets.ts
-// actually imports ('@spaarke/ai-outputs/output-widgets/...', no '/src/').
+// actually imports (no '/src/'). DEF-006 (2026-11-24): the widgets now live in
+// src/outputs, so from this file the path is '../outputs/...', and the mocks are
+// no longer virtual.
 // Corrected to the real import path (see the identical fix + rationale in
 // register-workspace-widgets.test.ts).
-jest.mock(
-  '@spaarke/ai-outputs/output-widgets/BudgetDashboardWidget',
-  () => ({ __esModule: true, default: createMockWidget('BudgetDashboardWidget') }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/ai-outputs/output-widgets/SearchResultsWidget',
-  () => ({ __esModule: true, default: createMockWidget('SearchResultsWidget') }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/ai-outputs/output-widgets/AnalysisEditorWidget',
-  () => ({ __esModule: true, default: createMockWidget('AnalysisEditorWidget') }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/ai-outputs/output-widgets/ContractComparisonWidget',
-  () => ({ __esModule: true, default: createMockWidget('ContractComparisonWidget') }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/ai-outputs/output-widgets/StatusSummaryWidget',
-  () => ({ __esModule: true, default: createMockWidget('StatusSummaryWidget') }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/ai-outputs/output-widgets/RecommendationWidget',
-  () => ({ __esModule: true, default: createMockWidget('RecommendationWidget') }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/ai-outputs/output-widgets/ActionPlanWidget',
-  () => ({ __esModule: true, default: createMockWidget('ActionPlanWidget') }),
-  { virtual: true }
-);
+jest.mock('../outputs/output-widgets/BudgetDashboardWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('BudgetDashboardWidget'),
+}));
+jest.mock('../outputs/output-widgets/SearchResultsWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('SearchResultsWidget'),
+}));
+jest.mock('../outputs/output-widgets/AnalysisEditorWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('AnalysisEditorWidget'),
+}));
+jest.mock('../outputs/output-widgets/ContractComparisonWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('ContractComparisonWidget'),
+}));
+jest.mock('../outputs/output-widgets/StatusSummaryWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('StatusSummaryWidget'),
+}));
+jest.mock('../outputs/output-widgets/RecommendationWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('RecommendationWidget'),
+}));
+jest.mock('../outputs/output-widgets/ActionPlanWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('ActionPlanWidget'),
+}));
 
 // ---------------------------------------------------------------------------
 // Mock R2-native workspace widget modules (widgets 8-11)
@@ -292,7 +287,7 @@ describe('Workspace widget serialize/restore — registration', () => {
   // NOTE (test-repair task 021, 2026-07-08): switched from beforeEach to
   // beforeAll. Every registration call in this file triggers
   // jest.resetModules(), which forces re-instantiation of the entire
-  // @spaarke/ui-components / @spaarke/ai-outputs dependency graph (including
+  // @spaarke/ui-components / src/outputs dependency graph (including
   // the full @fluentui/react-icons barrel) on every call. With beforeEach,
   // the ~34 tests across this file's 6 describe blocks each re-triggered
   // that reload, compounding to a heap-exhaustion crash ("JavaScript heap

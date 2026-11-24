@@ -395,14 +395,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx tsc
 
-      - name: Install Spaarke.AI.Outputs deps
-        working-directory: src/client/shared/Spaarke.AI.Outputs
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Outputs
-        working-directory: src/client/shared/Spaarke.AI.Outputs
-        run: npx tsc
-
       # MUST come after Spaarke.UI.Components: it type-checks against that package's dist.
       - name: Install Spaarke.Communication.Components deps
         working-directory: src/client/shared/Spaarke.Communication.Components

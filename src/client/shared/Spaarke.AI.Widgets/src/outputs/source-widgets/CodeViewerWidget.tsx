@@ -139,6 +139,7 @@ function CodeViewerWidget(props: SourceWidgetProps<CodeViewerData>) {
       await navigator.clipboard.writeText(data.code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      // eslint-disable-next-line no-restricted-syntax -- clipboard access is denied in sandboxed iframes; the code stays selectable, and no "Copied" indicator shows
     } catch {
       // Clipboard API may fail in sandboxed contexts — silently ignore
     }

@@ -1,5 +1,5 @@
 /**
- * @spaarke/ai-outputs — Source Widgets barrel export
+ * src/outputs — Source Widgets barrel export
  *
  * All 6 source pane widget components and their data types.
  * Added by Wave 2 task 022.

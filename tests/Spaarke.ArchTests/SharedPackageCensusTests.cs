@@ -74,7 +74,8 @@ public class SharedPackageCensusTests
             + "poll fallback. ADR-047 defines the contract it implements."),
         new CensusEntry("@spaarke/ai-widgets", "Spaarke.AI.Widgets", PackageStatus.Sanctioned, "ADR-030",
             "Workspace and context widgets for the three-pane shell, built on the pane event bus (ADR-030) and "
-            + "the stage lifecycle (ADR-031)."),
+            + "the stage lifecycle (ADR-031). Since 2026-11-24 it also holds the internal output / source pane "
+            + "widgets (src/outputs) of the retired @spaarke/ai-outputs."),
         // Pattern D feature packages (ADR-012 amendment 2026-11-18; closed list = PatternDFeaturePackages below).
         new CensusEntry("@spaarke/smart-todo-components", "Spaarke.SmartTodo.Components", PackageStatus.Sanctioned, "ADR-012",
             "Pattern D feature package for Smart To Do: imported by the SmartTodo code page and the LegalWorkspace "
@@ -97,9 +98,7 @@ public class SharedPackageCensusTests
         // smart-todo, communication and daily-briefing components: sanctioned 2026-11-18 (Pattern D amendment).
         // compose-components: sanctioned 2026-11-24 (Compose amendment).
         // @spaarke/document-operations: retired 2026-11-13; useDocumentActions moved to @spaarke/ui-components (src/hooks).
-        new CensusEntry("@spaarke/ai-outputs", "Spaarke.AI.Outputs", PackageStatus.Grandfathered, "ADR-012",
-            "AI output-pane and source-pane widgets and their registries. Its boundary with the sanctioned "
-            + "@spaarke/ai-widgets package has not been assessed."),
+        // @spaarke/ai-outputs: retired 2026-11-24; its widgets and types moved into @spaarke/ai-widgets (src/outputs).
         // @spaarke/ai-context: retired 2026-11-13; its types moved to @spaarke/ai-widgets (src/types/aiContext.ts).
         // @spaarke/legal-workspace: retired 2026-11-13; SpaarkeAi depends on the LegalWorkspace solution directly.
     };
