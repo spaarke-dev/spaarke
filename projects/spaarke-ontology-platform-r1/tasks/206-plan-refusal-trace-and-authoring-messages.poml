@@ -4,7 +4,7 @@
     <title>A plan refused on the admin Rules page is logged and counted again; authoring names the real refusal; the policy-order comment tells the truth (#3034, uac-r2 review of 203-205)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF ontology/Signals services (.cs).</rigor-reason>
     <model-tier>sonnet</model-tier>
