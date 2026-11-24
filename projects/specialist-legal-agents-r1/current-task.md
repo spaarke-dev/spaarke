@@ -19,7 +19,9 @@
 3. Open tests:
    - V1a: `?pkg=` on a fresh id; wait an hour before judging.
    - V3: Model 1, second tenant.
-   - V5: the old Spaarke AI agent.
+   - V5 dropped: owner direction 2026-11-24 to remove the "Spaarke AI" agent (D1) and its bot backend (A3); coordination writes the removal steps.
+   - V1a (`?pkg=`) recommended to drop: dynamic discovery makes package-version logging low value.
+   - V3 tenant: candidates ACME / Dewey Cheatham & Howe / Lee & Hayes (not `spaarkeextid`, which is CIAM). It needs a user with a Microsoft 365 Copilot licence and admin upload rights there. Only needed if Model 1 stays in play (provisioning D3).
    - G11 is optional (MCP Apps widgets are the default).
    Build rules BR-1–BR-7: the note and the `declarative-agent` skill Step 5.5.
 4. App Insights: BFF requests are sampled at about 25–33% now, and caller identity isn't logged. Use several turns per check.
