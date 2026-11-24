@@ -309,3 +309,26 @@ The owner accepted (in this session) that the external work-assignments module m
 - **What it does not disclose:** a Restricted parent's name never reaches a partner by this path. Its children are Restricted too, and contacts read no Restricted record. Only the parent's primary name goes out (`@formattedValues`, filtered by `StripToReadableColumns`); no other column of the parent does, and a direct read of the parent is still refused.
 - **Recommendation not taken:** uac-r2 recommended dropping `sprk_regardingmatter` and filing a fix that shows a parent's name only when the caller can read that parent. The owner chose to accept both columns.
 - **Same review:** the other 11 task-031 columns were approved by uac-r2 (see the task-031 notes in the SPA-r4 project).
+
+## 2026-11-24: External messages may carry the thread GUID (spa-r4 task 035, FR-22; owner chose option A)
+
+**Verdict (uac-r2): APPROVED, with conditions.** `ExternalMessageDto` gains exactly one property, `threadId`: the `_sprk_communicationthread_value` GUID, or null. The value is read in the app-only by-regarding read (`CommunicationThreadReadService`) and carried on `ThreadMessageDto` as an optional property, default null.
+
+**Why a raw GUID is acceptable and no per-response opaque key is needed:**
+1. Holding the GUID grants nothing. No external route takes a thread id as input: GET and POST `/api/v1/external/{root}/{id}/messages` key on the record, and the post derives its thread server-side. Record ids are already exposed on this surface (lookup GUIDs, task 031).
+2. The internal-only, private-thread and privilege filters run before the projection, so the only thread ids exposed belong to messages the caller can already read.
+3. The external notification feed (`ExternalNotificationFeedEndpoints`) builds its own `ExternalNotificationDto` from `ThreadMessageDto`, so the new property does not reach it. That stays true only while no external endpoint serializes `ThreadMessageDto` directly.
+
+**Conditions:**
+- (a) Project only the id: no thread name, subject or other thread column.
+- (b) No future external route may accept `threadId` as input. Posts keep deriving the thread from the record. If a thread-keyed route is ever needed, it needs its own UAC review.
+- (c) Never serialize `ThreadMessageDto` straight to an external caller. Every external DTO keeps an explicit allow-list projection.
+
+**Tests:**
+- must-fire: an internal-only message, and a message on a private thread, are still filtered, and their thread id does not appear anywhere in the response;
+- must-not-fire: a normal message is listed with its `threadId`;
+- a message with no thread lookup yields `threadId: null`, not a failure;
+- the serialized `ExternalMessageDto` property set equals the allow-list (a reflection or snapshot test);
+- the notification-feed DTO property set is unchanged.
+
+There is no live change. The work goes into the next dev BFF candidate, on the owner's exact-SHA go.
