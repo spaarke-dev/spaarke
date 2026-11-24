@@ -60,6 +60,9 @@ public class PrivateContextColumnGuardTests
         (Bff + "Services/Communication/Access/DirectMessageOwnerStep.cs", true,
             "ClearPrivateFilingAsync (owner 2026-11-22, no filing): reads the reference only to find a private message filed outside " +
             "the BFF, and clears its filing columns; it never writes the reference"),
+        ("src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs", true,
+            "L2 provisioning H7b S28: verifies the columns' field-security lock (attribute metadata and profile grants) where they " +
+            "exist on a stamp; it never reads or writes a message's reference"),
     };
 
     /// <summary>The registry source files the scan checks by name (rule 1, the parts not read at run time).</summary>
@@ -358,8 +361,10 @@ public class PrivateContextColumnGuardTests
 
     private sealed record AliasRef(string File, string Type, string Name);
 
+    // Test projects under src/server (the L2 provisioning tests) are skipped, as the remarks' Limits say tests are.
     private static List<(string File, IReadOnlyList<string> Lines)> ServerFiles() =>
         SourceScan.ServerSourceFiles()
+            .Where(f => !f.Replace('\\', '/').Contains(".Tests/", StringComparison.Ordinal))
             .Select(f => (File: SourceScan.Relative(f).Replace('\\', '/'), Lines: (IReadOnlyList<string>)File.ReadAllLines(f)))
             .ToList();
 

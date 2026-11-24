@@ -83,14 +83,19 @@ public sealed class H7bSecureRecordSetupHandlerTests
             .Concat(SecureRecordSetupProcedure.BffOnlyColumns)
             .Append(SecureRecordSetupProcedure.AccessRemovedOnColumn)
             .ToArray();
-        // Task 270 (S28): plus the direct recipient, which provisioning never creates — the Direct-message feature stays off.
-        recorded.Should().HaveCount(absentColumns.Length + 1);
+        // Task 270 (S28): plus the optional message-access columns, which provisioning never creates: the direct recipient
+        // (the Direct-message feature stays off) and the three private-context references (field-mapping 056b).
+        recorded.Should().HaveCount(absentColumns.Length + SecureRecordSetupProcedure.OptionalMessageAccessColumns.Count);
         foreach (var column in absentColumns)
         {
             recorded.Should().ContainSingle(n => n.Contains(column) && n.Contains("absent"));
         }
         recorded.Should().ContainSingle(n => n.Contains("sprk_communication.sprk_directrecipient: not in this environment")
                                              && n.Contains("the Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset"));
+        foreach (var (_, column, _) in SecureRecordSetupProcedure.OptionalMessageAccessColumns.Where(o => o.Column != SecureRecordSetupProcedure.DirectRecipientColumnName))
+        {
+            recorded.Should().ContainSingle(n => n.Contains($"sprk_communication.{column}: not in this environment") && n.Contains("Set-PrivateContextSchema.ps1 not run"));
+        }
     }
 
     [Fact]
@@ -477,6 +482,37 @@ public sealed class H7bSecureRecordSetupHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion10_DoesNotShortCircuit_AndChecksThePrivateContextLock()
+    {
+        // Field-mapping 056b: an environment H7b configured before S28 covered the private-context columns, where
+        // Set-PrivateContextSchema.ps1 has since run but the columns' lock is not whole. The re-run reaches S28 and refuses.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.AddPrivateContextColumns();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_privatecontextmatter")] = false;
+        dv.Writes.Clear();
+        var v10Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=10\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v10Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete);
         dv.Writes.Should().BeEmpty();
     }
 

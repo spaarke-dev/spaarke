@@ -254,8 +254,9 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>
     /// S28 (task 270; field-mapping-server-write-path-r1 task 054b): the message-access columns that decide who may read a
     /// message, as (table, column) — field-secured with the BFF-managed Readers/Writers grants in SpaarkeMaster (1.3.1.0 on).
-    /// Exactly the packaged four of scripts/Set-ThreadFlagFieldSecurity.ps1's $Targets; the fifth, <see cref="DirectRecipientColumn"/>,
-    /// is not in the package. BffManagedLinkColumnLockListTests pins this list to the script and the package.
+    /// Exactly the packaged four of scripts/Set-ThreadFlagFieldSecurity.ps1's $Targets; the other four,
+    /// <see cref="OptionalMessageAccessColumns"/>, are not in the package. BffManagedLinkColumnLockListTests pins this list
+    /// and that one to the script and the package.
     /// </summary>
     public static readonly IReadOnlyList<(string Table, string Column)> MessageAccessColumns =
     [
@@ -266,11 +267,23 @@ public sealed class SecureRecordSetupProcedure
     ];
 
     /// <summary>
-    /// S28: the fifth message-access column. It exists only where scripts/Set-DirectRecipientSchema.ps1 ran, which provisioning
-    /// does not run; on a stamp without it the Direct-message feature stays off (DirectMessage:* unset — deployment guide
-    /// §7.4). When it exists, its lock must be whole like the other four.
+    /// S28: the message-access columns that are NOT in the package, as (table, column, the script that creates it). Each
+    /// exists only where that script ran, which provisioning does not do. Where a column is absent S28 notes it and goes on:
+    /// the direct recipient's absence keeps the Direct-message feature off (DirectMessage:* unset — deployment guide §7.4);
+    /// the three private-context references (field-mapping task 056b) belong to a private message, a Direct message that
+    /// names one core record, so without them the environment has no private-message context references. Where a column
+    /// exists, its lock must be whole like the packaged four.
     /// </summary>
-    public static readonly (string Table, string Column) DirectRecipientColumn = ("sprk_communication", "sprk_directrecipient");
+    public static readonly IReadOnlyList<(string Table, string Column, string CreatedBy)> OptionalMessageAccessColumns =
+    [
+        ("sprk_communication", "sprk_directrecipient", "scripts/Set-DirectRecipientSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextmatter", "scripts/Set-PrivateContextSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextproject", "scripts/Set-PrivateContextSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextworkassignment", "scripts/Set-PrivateContextSchema.ps1"),
+    ];
+
+    /// <summary>S28: the direct recipient, the optional column whose absence also keeps the Direct-message feature off.</summary>
+    internal const string DirectRecipientColumnName = "sprk_directrecipient";
 
     /// <summary>S28: the remedy an incomplete message-access lock names.</summary>
     internal const string MessageAccessLockRemedy =
@@ -1013,15 +1026,22 @@ public sealed class SecureRecordSetupProcedure
             }
         }
 
-        // S28 (task 270; field-mapping task 054b) — the message-access lock: the four packaged columns always, the direct
-        // recipient only where it exists (provisioning does not create it; the Direct-message feature then stays off).
-        foreach (var (table, column) in MessageAccessColumns.Append(DirectRecipientColumn))
+        // S28 (task 270; field-mapping tasks 054b, 056b) — the message-access lock: the four packaged columns always; the
+        // direct recipient and the three private-context references only where they exist (provisioning creates none of
+        // them), and where one exists its lock must be whole.
+        var messageAccessChecks = MessageAccessColumns
+            .Select(c => (c.Table, c.Column, CreatedBy: (string?)null))
+            .Concat(OptionalMessageAccessColumns.Select(c => (c.Table, c.Column, CreatedBy: (string?)c.CreatedBy)));
+        foreach (var (table, column, createdBy) in messageAccessChecks)
         {
-            if ((table, column) == DirectRecipientColumn
+            if (createdBy is not null
                 && await dv.IsAttributeSecuredAsync(t, table, column, ct).ConfigureAwait(false) is null)
             {
-                notes.Add($"{table}.{column}: not in this environment (scripts/Set-DirectRecipientSchema.ps1 not run), so the " +
-                          "Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset.");
+                notes.Add(column == DirectRecipientColumnName
+                    ? $"{table}.{column}: not in this environment ({createdBy} not run), so the Direct-message feature stays " +
+                      "off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset."
+                    : $"{table}.{column}: not in this environment ({createdBy} not run), so there is no private-message " +
+                      "context reference of that kind here.");
                 continue;
             }
             var refusal = await CheckBffManagedColumnLockAsync(dv, t, table, column, readerProfileId, writerProfileId,
