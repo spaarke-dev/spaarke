@@ -2,12 +2,12 @@
  * ISS-008 (#2948): how the Email code page reads its launch — compose mode and its "Related to" record (#2908),
  * a single record, or the list. Each test fails if the branch it names is broken.
  */
-import { resolveEmailLaunch, type HostFormXrm } from '../emailLaunch';
+import { resolveEmailLaunch, type HostFormRecord } from '../emailLaunch';
 import { composeRegardingParams } from '@spaarke/ui-components';
 
 const COMM_ID = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
 const MATTER_ID = '9a8b7c6d-1111-2222-3333-444455556666';
-const noHost = (): HostFormXrm | null => null;
+const noHost = (): HostFormRecord | null => null;
 
 const regardingQuery = composeRegardingParams({ entityType: 'sprk_matter', id: MATTER_ID, name: 'MAT-000113' });
 const expectedRegarding = { entityType: 'sprk_matter', id: MATTER_ID, name: 'MAT-000113' };
@@ -79,18 +79,27 @@ describe('record and list mode', () => {
   });
 
   it('reads the embedded sprk_communication form record when no param gives an id', () => {
-    const host: HostFormXrm = {
-      Utility: { getPageContext: () => ({ input: { entityName: 'sprk_communication', entityId: `{${COMM_ID}}` } }) },
-    };
+    const host: HostFormRecord = { pageInput: { entityName: 'sprk_communication', entityId: `{${COMM_ID}}` } };
     expect(resolveEmailLaunch('', () => host)).toEqual({ initialSelectedId: COMM_ID, hideList: false });
   });
 
-  it('ignores a page context for another table and uses the form entity id instead', () => {
-    const host: HostFormXrm = {
-      Utility: { getPageContext: () => ({ input: { entityName: 'sprk_matter', entityId: MATTER_ID } }) },
-      Page: { data: { entity: { getId: () => COMM_ID } } },
-    };
+  it('falls back to the form entity id on a communication form whose page context has no id', () => {
+    const host: HostFormRecord = { formEntityName: 'sprk_communication', formEntityId: COMM_ID };
     expect(resolveEmailLaunch('', () => host).initialSelectedId).toBe(COMM_ID);
+    expect(resolveEmailLaunch('', () => ({ formEntityId: COMM_ID })).initialSelectedId).toBe(COMM_ID);
+  });
+
+  it('never takes the record of a form for another table', () => {
+    // The page context names a matter: neither its id nor the form entity id is a communication id.
+    const matterContext: HostFormRecord = {
+      pageInput: { entityName: 'sprk_matter', entityId: MATTER_ID },
+      formEntityName: 'sprk_matter',
+      formEntityId: MATTER_ID,
+    };
+    expect(resolveEmailLaunch('', () => matterContext)).toEqual({ initialSelectedId: undefined, hideList: false });
+    // Only the form entity names the other table.
+    const matterForm: HostFormRecord = { formEntityName: 'sprk_matter', formEntityId: MATTER_ID };
+    expect(resolveEmailLaunch('', () => matterForm).initialSelectedId).toBeUndefined();
   });
 
   it('shows the list when nothing resolves, even with a single flag, and when the host read throws', () => {

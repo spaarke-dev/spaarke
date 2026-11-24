@@ -27,15 +27,16 @@ export interface EmailLaunch {
 }
 
 /**
- * Minimal structural shape of the cross-frame Xrm surface read for Pattern A (embedded host form) record resolution.
- * `getXrm()` is loosely typed and the ambient `XrmStatic` does not expose `getPageContext` / the legacy `Page`, so
- * callers cast to this local shape (all optional; every access is null-guarded).
+ * What the embedded host form says about its record (Pattern A). The host (`main.tsx`) reads these from the
+ * cross-frame Xrm and passes plain values, so the Xrm reads stay where the `getXrm` capability guard can see them.
  */
-export interface HostFormXrm {
-  Utility?: {
-    getPageContext?: () => { input?: { entityName?: string; entityId?: string } } | undefined;
-  };
-  Page?: { data?: { entity?: { getId?: () => string | undefined } } };
+export interface HostFormRecord {
+  /** `Xrm.Utility.getPageContext().input`. */
+  pageInput?: { entityName?: string; entityId?: string };
+  /** `Xrm.Page.data.entity.getEntityName()`. */
+  formEntityName?: string;
+  /** `Xrm.Page.data.entity.getId()`. */
+  formEntityId?: string;
 }
 
 const COMPOSE_MODES: readonly OpenEmailComposeMode[] = ['new', 'reply', 'replyAll', 'forward'];
@@ -48,12 +49,13 @@ const COMPOSE_MODES: readonly OpenEmailComposeMode[] = ['new', 'reply', 'replyAl
  *   (a) `data` query param — Pattern B (`Xrm.Navigation.navigateTo({ data })`, e.g. `openEmailRecord`). Carries the
  *       bare communication id, optionally with a folded `&single=1` (or `view=record`) flag.
  *   (b) `id` query param — direct-link / dev fallback.
- *   (c) the embedded host form's record — Pattern A (Email page embedded on a `sprk_communication` form).
+ *   (c) the embedded host form's record — Pattern A (Email page embedded on a `sprk_communication` form); never
+ *       the record of a form for another table.
  *
  * Single-record ("form") mode is derived from a `single=1` / `view=record` flag, as its own top-level param or folded
  * into `data`. `hideList` is only meaningful when an id resolves. When nothing resolves → list mode.
  */
-export function resolveEmailLaunch(search: string, readHostFormXrm: () => HostFormXrm | null | undefined): EmailLaunch {
+export function resolveEmailLaunch(search: string, readHostForm: () => HostFormRecord | null | undefined): EmailLaunch {
   const normalizeId = (raw: string | null | undefined): string | undefined => {
     const v = cleanGuid(raw ?? '');
     return v.length > 0 ? v : undefined;
@@ -102,16 +104,19 @@ export function resolveEmailLaunch(search: string, readHostFormXrm: () => HostFo
     /* URL parse failure → fall through to host-form / list mode */
   }
 
-  // (c) embedded host form (Pattern A) — only when no param supplied an id.
+  // (c) embedded host form (Pattern A) — only when no param supplied an id. The form-entity fallback is used only
+  //     when neither source names another table: on, say, a matter form the matter's id is not a communication id,
+  //     so the page shows the list rather than trying to open a record that does not exist.
   if (!id) {
     try {
-      const xrm = readHostFormXrm();
-      const input = xrm?.Utility?.getPageContext?.()?.input;
-      if (input?.entityId && (!input.entityName || input.entityName === COMMUNICATION_ENTITY)) {
+      const host = readHostForm();
+      const input = host?.pageInput;
+      const isOtherTable = (name: string | undefined): boolean => !!name && name.toLowerCase() !== COMMUNICATION_ENTITY;
+      if (input?.entityId && !isOtherTable(input.entityName)) {
         id = normalizeId(input.entityId);
       }
-      if (!id) {
-        id = normalizeId(xrm?.Page?.data?.entity?.getId?.());
+      if (!id && !isOtherTable(input?.entityName) && !isOtherTable(host?.formEntityName)) {
+        id = normalizeId(host?.formEntityId);
       }
     } catch {
       /* not embedded on a form — list mode */

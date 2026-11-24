@@ -48,7 +48,19 @@ import {
 } from '@spaarke/communication-components';
 import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
-import { resolveEmailLaunch, type ComposeLaunch, type HostFormXrm } from './emailLaunch';
+import { resolveEmailLaunch, type ComposeLaunch } from './emailLaunch';
+
+/**
+ * Minimal structural shape of the cross-frame Xrm surface read for Pattern A (embedded host form) record resolution.
+ * `getXrm()` is loosely typed and the ambient `XrmStatic` does not expose `getPageContext` / the legacy `Page`, so
+ * the read casts to this local shape (all optional; every access is null-guarded).
+ */
+interface HostFormXrm {
+  Utility?: {
+    getPageContext?: () => { input?: { entityName?: string; entityId?: string } } | undefined;
+  };
+  Page?: { data?: { entity?: { getId?: () => string | undefined; getEntityName?: () => string | undefined } } };
+}
 
 const useStyles = makeStyles({
   centered: {
@@ -265,10 +277,16 @@ function Root() {
   // and `hideList` (single-record "form" mode). Absent → list mode (unchanged).
   const launch = React.useMemo(
     () =>
-      resolveEmailLaunch(typeof window !== 'undefined' ? window.location.search : '', () =>
+      resolveEmailLaunch(typeof window !== 'undefined' ? window.location.search : '', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        getXrm((x: any) => typeof x.Utility?.getPageContext === 'function' || !!x.Page?.data) as unknown as HostFormXrm | null
-      ),
+        const xrm = getXrm((x: any) => typeof x.Utility?.getPageContext === 'function' || !!x.Page?.data) as unknown as HostFormXrm | null;
+        const entity = xrm?.Page?.data?.entity;
+        return {
+          pageInput: xrm?.Utility?.getPageContext?.()?.input,
+          formEntityName: entity?.getEntityName?.(),
+          formEntityId: entity?.getId?.(),
+        };
+      }),
     []
   );
 

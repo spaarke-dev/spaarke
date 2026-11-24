@@ -20,7 +20,7 @@ import type { IDataService, INavigationService } from '../../types/serviceInterf
 import type { ILookupItem } from '../../types/LookupTypes';
 import { createXrmDataService } from '../../utils/adapters/xrmDataServiceAdapter';
 import { createXrmNavigationService } from '../../utils/adapters/xrmNavigationServiceAdapter';
-import { getXrm } from '../../utils/xrmContext';
+import { getClientUrl } from '../../utils/xrmContext';
 import {
   createXrmEmailComposeHandlers,
   resolveCurrentUserEmail,
@@ -72,10 +72,7 @@ export function useXrmEmailHostProps({
     [authenticatedFetch, bffBaseUrl]
   );
 
-  const dataverseUrl = React.useMemo(
-    () => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '',
-    []
-  );
+  const dataverseUrl = React.useMemo(() => getClientUrl() ?? '', []);
 
   const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
   React.useEffect(() => {

@@ -4,7 +4,8 @@
  * rendering.
  *
  * `@spaarke/ui-components` maps to a small stub that re-exports the real helpers this logic uses (see
- * `src/__tests__/uiComponentsStub.ts`), so no dist build or ui-components install is needed.
+ * `src/__tests__/uiComponentsStub.ts`), so locally the suites need neither the package's dist build nor its own
+ * install. CI's client-tests job (nightly, advisory) installs and builds it anyway, which is harmless.
  *
  * Run: `npm install --legacy-peer-deps --no-audit --no-fund && npm test` from this folder.
  */
