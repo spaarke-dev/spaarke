@@ -140,3 +140,15 @@ Left unchanged (not `bindLookup` fragments; resolved already by exact column): `
   - Cause: the test's `applyTextFilter` helper waited a fixed 120 ms for the filter popover.
   - Tracking: filed as #3064. Already fixed on master by spa-r4's #3055 (8dd44cf528), which waits for the popover's textbox and Apply button and reopens it up to 3 times. #3064 is closed against #3055.
   - Nothing of this project's needed changing.
+
+## Deploy to dev (2026-11-24 15:37Z, owner go in this session)
+
+- **Built from:** master d0453e583a (contains #3049), in a temporary worktree (`C:\wt026`, since removed): SharedLibs, then `src/solutions/CreateWorkAssignmentWizard` (`npm install --legacy-peer-deps`, clean `dist`, `npm run build`).
+- **Bundle checks:**
+  - it has `mappingSourceEntity`, `sprk_assignedattorney1`, `sprk_assignedlawfirm1` and `sprk_regardingworkassignment`;
+  - it has neither `applyFieldMappings` nor the `/field-mappings/` route.
+- **Deployed:** `sprk_createworkassignmentwizard` (84bda2e0-d523-f111-88b4-7ced8d1dc988) via `Deploy-WebResourceInline.ps1`, then published.
+  - Read-back SHA-256 `E8DE9527…4B60A1` equals the build.
+  - The web resource is in SpaarkeMaster.
+- **Rollback:** the previous bundle was saved before the deploy. It was 1,506,031 bytes, SHA-256 `02A824E9…AB45F46`, modified 2026-11-23 21:35Z, and still had the client mapping. Saved in this session's scratchpad as `wr026/rollback-sprk_createworkassignmentwizard.html`. Redeploying it is the rollback.
+- **Next:** the live check ("Left for the live part" item 2).
