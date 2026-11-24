@@ -27,11 +27,11 @@ beforeEach(() => {
 });
 
 describe.each([
-  ['the dialog', 'fullscreen' as const],
-  ['master-detail', 'inline' as const],
-])('Confirm is never reached and recorded in one gesture (%s)', (_name, displayMode) => {
+  ['the dialog', false],
+  ['master-detail', true],
+])('Confirm is never reached and recorded in one gesture (%s)', (_name, dialogFails) => {
   const setup = async () => {
-    const host = wizardHost(items(), { displayMode });
+    const host = wizardHost(items(), { dialogFails });
     mount(host);
     await openItem(1);
     return host;

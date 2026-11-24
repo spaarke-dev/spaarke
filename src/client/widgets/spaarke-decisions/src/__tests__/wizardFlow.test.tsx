@@ -12,7 +12,7 @@
  *    decided_in_invoice_review says 'Decide this in Invoice Review'; a host that does not answer the commit says it may not have been recorded
  *  - success warnings (inquiry_email_not_archived) are worded in the wizard
  *  - negative: nothing but the plan and the lookup is called before Confirm, and the commit is never called on open, step change or close
- *  - the display chain: fullscreen granted -> the dialog; refused -> master-detail beside the lane; too narrow for that -> openLink to the Console
+ *  - the display chain: the dialog inline (no display mode requested); the dialog failing -> master-detail beside the lane; too narrow for that -> openLink to the Console
  */
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from '../App';
@@ -479,8 +479,8 @@ describe('nothing is written before Confirm', () => {
     // The plan, the suppression and the item share ONE plan call per open.
     expect(host.callsTo(PLAN_TOOL)).toHaveLength(1);
     expect(count()).toHaveTextContent('3');
-    // The frame goes back to inline when the wizard closes.
-    expect(host.requestDisplayMode).toHaveBeenLastCalledWith('inline');
+    // The widget never changes the display mode, so closing has none to restore.
+    expect(host.requestDisplayMode).not.toHaveBeenCalled();
   });
 
   it('opening a Work Item again reads its plan again, so the plan-read stamp is fresh', async () => {
@@ -495,21 +495,21 @@ describe('nothing is written before Confirm', () => {
 });
 
 describe('the display chain (O-5)', () => {
-  it('fullscreen granted: the wizard is a dialog in the frame, after asking for fullscreen', async () => {
+  it('the wizard is a dialog in the frame, opened without asking the host for any display mode', async () => {
     const host = wizardHost(items(PLANS.reviseBudget));
     mount(host);
     await openItem(1);
-    expect(host.requestDisplayMode).toHaveBeenCalledWith('fullscreen');
+    expect(host.requestDisplayMode).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'dialog');
     expect(screen.queryByTestId('wizard-detail')).toBeNull();
   });
 
-  it('fullscreen refused: master-detail, the wizard beside the lane with no dialog, and it can still record', async () => {
-    const host = wizardHost(items(PLANS.reviseBudget), { displayMode: 'inline' });
+  it('the dialog failing: master-detail, the wizard beside the lane with no dialog, and no display mode requested', async () => {
+    const host = wizardHost(items(PLANS.reviseBudget), { dialogFails: true });
     mount(host);
     await openItem(1);
-    expect(host.requestDisplayMode).toHaveBeenCalledWith('fullscreen');
+    expect(host.requestDisplayMode).not.toHaveBeenCalled();
     expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'detail');
     expect(screen.queryByRole('dialog')).toBeNull();
     const detail = screen.getByTestId('wizard-detail');
@@ -519,16 +519,17 @@ describe('the display chain (O-5)', () => {
     expect(lineIds()).toHaveLength(3);
   });
 
-  it('the host cannot say yes (no fullscreen offered, or no answer): master-detail too, and fullscreen is not even asked when not offered', async () => {
+  it('a host that offers only inline still gets the dialog, inline: nothing depends on the modes it lists', async () => {
     const host = wizardHost(items(PLANS.reviseBudget));
     mount(host, { hostContext: { theme: 'light', availableDisplayModes: ['inline'] } });
     await openItem(1);
-    expect(host.requestDisplayMode).not.toHaveBeenCalledWith('fullscreen');
-    expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'detail');
+    expect(host.requestDisplayMode).not.toHaveBeenCalled();
+    expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'dialog');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('a frame too narrow for master-detail: the Console is opened through the host (openLink) and the lane stays', async () => {
-    const host = wizardHost(items(PLANS.reviseBudget), { displayMode: 'inline' });
+  it('the dialog failing in a frame too narrow for master-detail: the Console is opened through the host (openLink) and the lane stays', async () => {
+    const host = wizardHost(items(PLANS.reviseBudget), { dialogFails: true });
     const width = window.innerWidth;
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 360 });
     try {
@@ -552,7 +553,7 @@ describe('the display chain (O-5)', () => {
   });
 
   it('a second Work Item opened while one is open is refused, and the open one is not replaced', async () => {
-    const host = wizardHost(items(PLANS.reviseBudget), { displayMode: 'inline' });
+    const host = wizardHost(items(PLANS.reviseBudget), { dialogFails: true });
     mount(host);
     await openItem(1);
     fireEvent.click(lines().find(l => l.getAttribute('data-signal-id') === guid('5', 2))!);
@@ -562,7 +563,7 @@ describe('the display chain (O-5)', () => {
   });
 
   it('a review step taken while a decision is open is refused, and the review keeps naming the item in front of the user', async () => {
-    const host = wizardHost(items(PLANS.reviseBudget), { displayMode: 'inline' });
+    const host = wizardHost(items(PLANS.reviseBudget), { dialogFails: true });
     mount(host);
     await screen.findByTestId('decide-lane');
     fireEvent.click(screen.getByTestId('lane-start-Decide'));
@@ -577,7 +578,7 @@ describe('the display chain (O-5)', () => {
   });
 
   it('once the open decision is closed, the next one opens', async () => {
-    const host = wizardHost(items(PLANS.reviseBudget), { displayMode: 'inline' });
+    const host = wizardHost(items(PLANS.reviseBudget), { dialogFails: true });
     mount(host);
     await openItem(1);
     fireEvent.click(button('Close'));
