@@ -17,6 +17,7 @@
 import {
   ArrowClockwise20Regular,
   ArrowDownload20Regular,
+  ArrowReset20Regular,
   ArrowSwap20Regular,
   ArrowUpload20Regular,
   CalendarAdd20Regular,
@@ -49,6 +50,8 @@ export const RECORD_ACTION_ICONS = Object.freeze({
   // R4 task 015 (FR-36): an event record's Edit and Change status.
   edit: Edit20Regular,
   changeStatus: ArrowSwap20Regular,
+  // R4 task 032 (owner 2026-11-23): the grid's "Clear all" (widths, sort and column filters).
+  reset: ArrowReset20Regular,
 } as const);
 
 /** An action id that has an icon in {@link RECORD_ACTION_ICONS}. */

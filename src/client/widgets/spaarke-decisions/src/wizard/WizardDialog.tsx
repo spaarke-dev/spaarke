@@ -7,7 +7,9 @@
  * and the way a refusal or a failed commit is worded (`decisionDisplay`).
  *
  * Where it shows (O-5; owner decision 2026-11-24, `projects/spaarkeai-mcp-bff-api-r1/notes/decisions.md`), in order:
- *  1. An in-frame dialog, inline in the conversation over the lane: the shared modal shell (`SprkModal` through `WizardShell`, ADR-050),
+ *  1. An in-frame dialog, inline in the conversation over the lane, OPEN MAXIMIZED so it fills the widget frame (owner decision
+ *     2026-11-24, after a live Copilot test found the wizard-size dialog cramped; the shell's restore control returns it to the wizard
+ *     size): the shared modal shell (`SprkModal` through `WizardShell`, ADR-050),
  *     not a host modal (`requestModal` is not supported in Copilot). The widget does NOT ask the host for a display mode: Copilot's
  *     "fullscreen" is a side pane with the dialog over a dimmed lane, which the owner does not want. The dialog opens in whatever mode the
  *     frame is already in (a frame the host or the user put in fullscreen keeps it), and while it is open the widget root has a minimum
@@ -428,7 +430,7 @@ export function WizardDialog({
       {/* The dialog renders in the shared shell's own layer, so it needs no place in the split. */}
       {place.place === 'dialog' && (
         <WizardBoundary key={`dialog-${place.launch}`} onError={() => failed('dialog')}>
-          <DecisionWizardHost {...wizardProps} />
+          <DecisionWizardHost {...wizardProps} defaultMaximized />
         </WizardBoundary>
       )}
 

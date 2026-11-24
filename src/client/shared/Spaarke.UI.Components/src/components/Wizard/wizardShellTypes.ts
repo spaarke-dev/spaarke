@@ -319,6 +319,11 @@ export interface IWizardShellProps {
    */
   dismiss?: SprkModalDismiss;
   /**
+   * Modal mode only, forwarded to `SprkModal`: the dialog opens maximized (the user can still restore it to {@link size}). Embedded
+   * mode ignores it. Default `false`.
+   */
+  defaultMaximized?: boolean;
+  /**
    * The `--sprk-ui-scale` factor (modal mode only), forwarded to `SprkModal`. Pass the same value the
    * host passes to `scaleTheme`. Default 1.
    * @since ontology task 056

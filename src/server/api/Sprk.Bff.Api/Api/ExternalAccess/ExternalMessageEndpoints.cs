@@ -1068,5 +1068,7 @@ public static class ExternalMessageEndpoints
         SenderName = message.SentByName,
         Createdon = message.CreatedOn,
         IsMine = IsAuthoredBy(message, principal),
+        // FR-22: the opaque grouping key only; the thread's name and every other column stay server-side.
+        ThreadId = message.ThreadId?.ToString("D"),
     };
 }

@@ -16,6 +16,10 @@
 # Stryker 5.0.0 facts (2026-06-01 pilot): `coverage-analysis` and `test-case-filter` are
 # accepted only in a config file, `output-path` is rejected there (use --output), and
 # --skip-version-check avoids the newer-version probe.
+#
+# `ignore-methods: ConfigureAwait`: the boolean mutant `ConfigureAwait(false)` -> `(true)` is equivalent in tests (no
+# synchronization context), so it can only survive; the 2026-11-23 run (#1821) had three such survivors on changed
+# lines of SecureChildReconciliationJob.cs. Stryker's own configuration docs give this exact entry as the example.
 set -euo pipefail
 
 label="$1"; project="$2"; prefix="$3"; files="$4"; since="$5"
@@ -131,6 +135,7 @@ jq -n \
       "thresholds": { "high": 80, "low": 60, "break": 0 },
       "concurrency": $concurrency,
       "coverage-analysis": "perTest",
+      "ignore-methods": ["ConfigureAwait"],
       "test-case-filter": $filter,
       "since": { "enabled": true, "target": $since },
       "verbosity": "info"

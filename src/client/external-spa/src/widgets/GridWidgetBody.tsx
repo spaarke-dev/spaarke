@@ -29,6 +29,10 @@
  * Browse order is the grid's loaded order (the server's query order, accumulated page by page); a column the user
  * sorts in the grid's own header is not reflected in it.
  *
+ * GRID SETTINGS (R4 task 032, FR-19). The user's column widths and sort are remembered per browser, per grid configuration id
+ * (`useGridSettings` over `services/gridSettingsStore`), and a "Clear all" command is added to the grid's toolbar after the
+ * host's own commands. The shared grid takes and reports plain settings through its opt-in props; the storage is the SPA's.
+ *
  * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). That is a SECURITY setting, not a
  * cosmetic one. The shared grid enforces it itself inside this SPA (DataGridExternalHost: the provider at the
  * app root and the constant this SPA's Vite build defines), whatever props reach it, and it then never requests
@@ -47,6 +51,7 @@ import { makeStyles } from '@fluentui/react-components';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { useAmbientTheme } from './useAmbientTheme';
 import { ExternalDataGrid } from './ExternalDataGrid';
+import { useGridSettings } from './useGridSettings';
 import { getRecordDetailEntity } from '../components/detail/RecordDetailFields';
 import { RecordTemplateModal } from '../components/record/RecordTemplateModal';
 import { getRecordTemplate } from '../components/record/recordTemplates';
@@ -121,6 +126,14 @@ export function createGridWidgetBody(
     const [gridKey, setGridKey] = React.useState(0);
     const deletedRef = React.useRef(false);
 
+    // FR-19 (task 032): this grid's widths and sort are remembered per browser, and "Clear all" (which also clears the
+    // column filters) is a command of its toolbar, after the host's own (e.g. Submit invoice). The shared grid only reports and accepts the settings.
+    const { gridProps: settingsProps, resetCommand } = useGridSettings(configId);
+    const toolbarCommands = React.useMemo(
+      () => (hostCommands ? [...hostCommands, resetCommand] : [resetCommand]),
+      [hostCommands, resetCommand]
+    );
+
     const handleRecordsLoaded = React.useCallback((records: ReadonlyArray<Record<string, unknown>>) => {
       rowsRef.current = records;
     }, []);
@@ -161,8 +174,9 @@ export function createGridWidgetBody(
           theme={theme}
           onRecordsLoaded={handleRecordsLoaded}
           onRecordOpen={handleRecordOpen}
-          hostCommands={hostCommands}
+          hostCommands={toolbarCommands}
           overrides={overrides}
+          {...settingsProps}
         />
         {detail && (
           <RecordTemplateModal

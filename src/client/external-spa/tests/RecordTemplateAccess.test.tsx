@@ -257,11 +257,23 @@ const actionIdsIn = (el: Element | null): string[] =>
 /** The ids of the record header's buttons (`RecordCommandBar`), in order. */
 const toolbarOf = (dialog: HTMLElement): string[] => actionIdsIn(within(dialog).queryByTestId('record-command-bar'));
 
-/** Task 009: each section's header actions, by section id (sections without one are left out). */
+/**
+ * Task 009: each section's header actions, by section id (sections without one are left out). Task 034: the Messages thread's
+ * own Refresh is a READ action offered to every caller (FR-06), not one of the record's rights-gated actions this file is about,
+ * so it is left out here, for the Messages section only (a stray `refresh` in any other section still fails);
+ * `RecordMessages.test.tsx` covers it.
+ */
 const sectionActionsOf = (dialog: HTMLElement): Record<string, string[]> =>
   Object.fromEntries(
     Array.from(dialog.querySelectorAll('[data-testid^="record-section-"]'))
-      .map(s => [(s.getAttribute('data-testid') ?? '').replace('record-section-', ''), actionIdsIn(s)] as const)
+      .map(s => {
+        const testId = s.getAttribute('data-testid') ?? '';
+        const ids = actionIdsIn(s);
+        return [
+          testId.replace('record-section-', ''),
+          testId === 'record-section-messages' ? ids.filter(id => id !== 'refresh') : ids,
+        ] as const;
+      })
       .filter(([, ids]) => ids.length > 0)
   );
 

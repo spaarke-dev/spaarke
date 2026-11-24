@@ -372,3 +372,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Cosmetic (ProblemDetails title). The status, `reasonCode` and detail are correct, and clients branch on `reasonCode`. |
 | **Need** | `ProblemDetailsHelper.RecordOwnerRefused` picks its title from the code: `not_fileable` and `check_unavailable` get their own titles. Add a contract test for each. |
 | **Status** | Filed. Fix with the next BFF change in this area. |
+
+## DI-039 — The Create Event wizard binds Assigned To by a column-name fragment (found in the 024 live check)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-24, 024 live check on dev. The To Do wizard had the same pattern and stored the Assignee in `sprk_assignedtointernal`; fixed in task 024. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3039 |
+| **Class** | Latent defect. Events are correct today only because Dataverse lists `sprk_assignedto` first among `sprk_event`'s contact lookups. |
+| **Need** | `eventService.ts` (~:191): pass `'sprk_assignedto'` to `findNavProp`, not `'assignedto'`; add a test with another `assignedto` column listed first. |
+| **Status** | Filed. Not fixed here: task 024 must not edit another wizard's files. |

@@ -4,7 +4,7 @@
     <title>DataGrid opt-in persisted widths/sort + Reset columns; SPA localStorage (FR-19, #2489)</title>
     <phase>3 Grids, information, messages</phase>
     <gate>after 028; the option API is agreed with the dataset-grid framework owners first</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared DataGrid (.tsx) used by many surfaces, plus SPA wiring</rigor-reason>
     <model-tier>sonnet</model-tier>

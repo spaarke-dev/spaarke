@@ -4,7 +4,8 @@
  * Configuration-driven Dataverse grid built on Fluent v9 native `DataGrid` primitives:
  * - Three-tier config resolution (explicit `overrides` → `sprk_configjson` → metadata + layoutXml → framework defaults)
  * - Native selection (`selectionMode="multiselect"`) — NO hand-rolled checkbox column
- * - Native sort (`sortable` + `createTableColumn({ compare })`) — NO manual sort state
+ * - Native sort (`sortable` + `createTableColumn({ compare })`) — NO manual sort state (unless the host opts in to
+ *   persisted settings: `initialSettings` / `onSettingsChange` / `settingsResetKey`, which control Fluent's sort state)
  * - Native column resize (`resizableColumns` + `columnSizingOptions`) — NO drag handles
  * - Native keyboard nav (`focusMode="composite"`) — NO `onKeyDown` switch
  * - Lazy infinite-scroll paging (FetchXML paging-cookie chain via {@link useLazyLoad})
@@ -100,6 +101,24 @@ export interface DataGridHostContext {
   entityName: string;
   parentContext?: DataGridParentContext;
   selectedIds: string[];
+}
+
+/** A column sort: the column's name (its logical name, as in the grid configuration) and the direction. */
+export interface DataGridSortSetting {
+  columnId: string;
+  direction: 'ascending' | 'descending';
+}
+
+/**
+ * The part of a grid's look a user can change and a host may want to keep: the widths of columns the user dragged and the
+ * column the user sorted by. Plain data, so the host decides where and whether it is stored (ADR-012: no storage in the
+ * shared lib). Used both ways: `initialSettings` hands it to the grid, `onSettingsChange` reports it back.
+ */
+export interface DataGridSettings {
+  /** Column name → width in px, for the columns the user resized. A column not listed keeps the grid's own fit. */
+  widths?: Readonly<Record<string, number>>;
+  /** The sorted column. Absent: not sorted by the user (the configured order). */
+  sort?: DataGridSortSetting;
 }
 
 /**
@@ -261,6 +280,39 @@ export interface DataGridProps {
    * over the configuration's `display.truncateWithTooltip`; when absent, the configuration decides (default off).
    */
   truncateWithTooltip?: boolean;
+
+  /**
+   * OPTIONAL — the column widths and sort to START with (spaarke-SPA-external-access-platform-r4 task 032, FR-19).
+   * Read once, when the grid mounts; a later change to it is ignored (use `settingsResetKey` to return to the defaults).
+   * A width is a width the user dragged: it is kept (never below the column's minimum) and the grid stops fitting
+   * columns to the container once any is present, exactly as after a drag. A column name the configuration does not
+   * have, a width that is not a positive finite number of at most 2000 px and a sort on an unknown column are dropped. Absent = the
+   * configured widths and order, unchanged. See {@link DataGridSettings}.
+   */
+  initialSettings?: DataGridSettings;
+
+  /**
+   * OPTIONAL — reports the user's current {@link DataGridSettings} every time they change: the user resizes a column or
+   * sorts, or a `settingsResetKey` reset clears something (then with empty widths and no sort), so the host can store
+   * them. Never called with settings equal to the last ones reported or handed in, so it is not called just because
+   * the grid mounted with `initialSettings`; but a stored width for a column the configuration does not have is pruned
+   * once the columns load, and that prune IS reported (the settings then differ from the ones handed in). While a
+   * column is being dragged it can fire on every pointer step: a host that stores them should be cheap or debounce.
+   * Absent = nothing is reported; note the sort is controlled by the grid (not Fluent's own uncontrolled sort) whenever
+   * ANY of `initialSettings`, `onSettingsChange` or `settingsResetKey` is passed, and uncontrolled, unchanged, only when
+   * none is. The grid never stores anything itself.
+   */
+  onSettingsChange?: (settings: DataGridSettings) => void;
+
+  /**
+   * OPTIONAL — "Clear all": when this value CHANGES (not on mount), the grid returns to its configured widths
+   * (the container fit comes back) and its configured order (no user sort), clears every column filter (the filter
+   * chip state, so the header filter indicators go and the query runs unfiltered), and reports the empty settings
+   * through `onSettingsChange` (the filters are not part of the settings: the host stores widths and sort only).
+   * The host owns the command that triggers it (see `hostCommands`) and clears its own store.
+   * Absent = no reset signal.
+   */
+  settingsResetKey?: number | string;
 
   /**
    * OPTIONAL — built-in actions this HOST does not offer, whatever the configuration says (e.g. `['create-form']`
@@ -709,7 +761,13 @@ export function renderCellValue(value: unknown, renderer: string, formattedLabel
   }
   switch (renderer) {
     case 'currency': {
-      const num = typeof value === 'number' ? value : Number(value);
+      // A Money value with no server label is the SDK object `{ value, extensionData }` (task 033): read its amount.
+      const num =
+        typeof value === 'object'
+          ? (moneyAmountOf(value) ?? Number.NaN)
+          : typeof value === 'number'
+            ? value
+            : Number(value);
       if (Number.isNaN(num)) return String(value);
       return new Intl.NumberFormat(undefined, {
         style: 'currency',
@@ -761,6 +819,94 @@ export function renderCellValue(value: unknown, renderer: string, formattedLabel
   }
 }
 
+/** A plain decimal number as text (optional sign, optional exponent); keeps `Number()` from reading `'0x10'` as 16. */
+const NUMERIC_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+
+/** A finite number from a number or a numeric string; otherwise null. */
+function finiteNumberOf(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (!NUMERIC_TEXT.test(text)) return null;
+    const n = Number(text);
+    // An overflowing string ("1e400") is Infinity, not an amount; the comparator must never see Infinity - Infinity.
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * The amount in a raw Money cell value, or null when it has none (spaarke-SPA-external-access-platform-r4 task 033).
+ *
+ * The BFF module fetch returns a Money column as the SDK object `{ value: 100, extensionData: null }` (System.Text.Json
+ * writes the SDK type through its public properties; `FetchService.ProjectEntity`), with the display text under
+ * `@formattedValues`. The grid also meets a plain number (other hosts' clients) and a numeric string. Accepts all three;
+ * `{ Value: n }` is read too. A display label such as "$1,200.00", any other object, an array, `null`, `undefined` and
+ * `''` have no amount.
+ */
+export function moneyAmountOf(raw: unknown): number | null {
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const wrapped = raw as { value?: unknown; Value?: unknown };
+    return finiteNumberOf(wrapped.value ?? wrapped.Value);
+  }
+  return finiteNumberOf(raw);
+}
+
+/**
+ * The comparator behind every sortable column (task 061 display-string key; task 033 Money). Returns the ascending
+ * order; Fluent multiplies it by -1 for a descending sort, so both Fluent's own sort state and the host-controlled one
+ * (`initialSettings.sort`, task 032) reach it the same way.
+ *
+ * - A Money column (renderer 'currency') compares the amount from {@link moneyAmountOf}, never the text, so $9 < $10 <
+ *   $100. A row with no amount (null, undefined, '', or text with no number) sorts LOWEST: first ascending and last
+ *   descending, the same place an empty cell already took when the grid compared display strings. Two empty rows tie.
+ * - Two numbers compare numerically (any renderer).
+ * - Date renderers compare the raw ISO text (the display string is locale order, not time order).
+ * - Everything else compares what the cell shows (an option set or lookup is an object, which would otherwise compare as
+ *   "[object Object]" and never move).
+ */
+export function compareColumnValues(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  column: { name: string; renderer: string }
+): number {
+  const aVal = a[column.name];
+  const bVal = b[column.name];
+  if (column.renderer === 'currency') {
+    const aAmount = moneyAmountOf(aVal);
+    const bAmount = moneyAmountOf(bVal);
+    if (aAmount === null || bAmount === null) {
+      return aAmount === bAmount ? 0 : aAmount === null ? -1 : 1;
+    }
+    return aAmount - bAmount;
+  }
+  if (typeof aVal === 'number' && typeof bVal === 'number') {
+    return aVal - bVal;
+  }
+  // Dates sort on the raw ISO value (their display string is locale order, not time order).
+  if (column.renderer === 'date' || column.renderer === 'dateonly' || column.renderer === 'datetime') {
+    return String(aVal ?? '').localeCompare(String(bVal ?? ''));
+  }
+  // Everything else sorts on what the cell shows (task 061).
+  return renderCellValue(aVal, column.renderer, formattedLabelOf(a, column.name)).localeCompare(
+    renderCellValue(bVal, column.renderer, formattedLabelOf(b, column.name))
+  );
+}
+
+/**
+ * The CSV text for one cell when the grid owns how it is written (task 033): a Money column exports exactly what the
+ * cell displays (the same {@link renderCellValue} + {@link formattedLabelOf} path), so "$1,200.00" is not exported as
+ * `{"value":1200,"extensionData":null}` or a bare `1200`. Every other column returns undefined, which leaves
+ * {@link exportCsv}'s own formatting untouched.
+ */
+export function moneyExportText(
+  record: Record<string, unknown>,
+  column: { name: string; renderer: string }
+): string | undefined {
+  if (column.renderer !== 'currency') return undefined;
+  return renderCellValue(record[column.name], column.renderer, formattedLabelOf(record, column.name));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase A: load + parse the sprk_gridconfiguration record (best-effort)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -796,6 +942,43 @@ const INITIAL_LOAD_STATE: ConfigLoadState = {
  *
  * See module-level JSDoc for the full feature list and ADR references.
  */
+/** Task 032 (review fix round 1): the widest column a stored width may ask for, in px; wider is dropped as tampered. */
+const MAX_INITIAL_COLUMN_WIDTH_PX = 2000;
+
+/**
+ * Task 032: keeps only usable widths (positive, finite, at most {@link MAX_INITIAL_COLUMN_WIDTH_PX}) from a host's
+ * `initialSettings.widths`.
+ */
+function sanitizeInitialWidths(widths: DataGridSettings['widths']): Partial<Record<string, number>> {
+  const out: Partial<Record<string, number>> = {};
+  if (!widths || typeof widths !== 'object') return out;
+  for (const [id, w] of Object.entries(widths)) {
+    if (typeof w === 'number' && Number.isFinite(w) && w > 0 && w <= MAX_INITIAL_COLUMN_WIDTH_PX) {
+      out[id] = Math.round(w);
+    }
+  }
+  return out;
+}
+
+/** Task 032: the settings the user's current widths and sort add up to, in the shape the host stores. */
+function settingsOf(
+  widths: Readonly<Partial<Record<string, number>>>,
+  sort: DataGridSortSetting | undefined
+): DataGridSettings {
+  const w: Record<string, number> = {};
+  for (const [id, v] of Object.entries(widths)) if (v !== undefined) w[id] = v;
+  return sort ? { widths: w, sort: { ...sort } } : { widths: w };
+}
+
+/** Task 032: a stable string for {@link settingsOf}, so "did anything change" is a comparison, not an object identity. */
+function settingsKeyOf(
+  widths: Readonly<Partial<Record<string, number>>>,
+  sort: DataGridSortSetting | undefined
+): string {
+  const entries = Object.entries(widths).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([entries, sort ? [sort.columnId, sort.direction] : null]);
+}
+
 export const DataGrid: React.FC<DataGridProps> = props => {
   const {
     configId,
@@ -815,6 +998,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     emptyState: hostEmptyState,
     rowActions,
     truncateWithTooltip: truncateWithTooltipProp,
+    initialSettings,
+    onSettingsChange,
+    settingsResetKey,
     hiddenBuiltInCommands,
     overrides,
     pageSize: pageSizeOverride,
@@ -1285,22 +1471,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     const columns = visibleColumns.map(col =>
       createTableColumn<GridItem>({
         columnId: col.name,
-        compare: (a, b) => {
-          const aVal = a[col.name];
-          const bVal = b[col.name];
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            return aVal - bVal;
-          }
-          // Dates sort on the raw ISO value (their display string is locale order, not time order).
-          if (col.renderer === 'date' || col.renderer === 'dateonly' || col.renderer === 'datetime') {
-            return String(aVal ?? '').localeCompare(String(bVal ?? ''));
-          }
-          // Everything else sorts on what the cell shows (task 061): an option set or lookup arrives as an object,
-          // which would otherwise compare as "[object Object]" and never move.
-          return renderCellValue(aVal, col.renderer, formattedLabelOf(a, col.name)).localeCompare(
-            renderCellValue(bVal, col.renderer, formattedLabelOf(b, col.name))
-          );
-        },
+        compare: (a, b) => compareColumnValues(a, b, col),
         renderHeaderCell: () => (
           <HeaderCellContent
             label={col.label}
@@ -1449,8 +1620,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // and it re-reads the options on every change to them or to the column definitions — a 1px container change, a row
   // selection, chip state, a host's inline callbacks. So the dragged width is recorded here and fed back as that
   // column's ideal width below; the columns the user has not dragged keep the proportional fit. Ids of columns that no
-  // longer exist are dropped; nothing else clears the map (a "Reset columns" command is later work).
-  const [userColumnWidths, setUserColumnWidths] = React.useState<Readonly<Partial<Record<string, number>>>>({});
+  // longer exist are dropped; the host's `settingsResetKey` (task 032, "Clear all") is the only other thing that clears it.
+  // Task 032: the widths a host hands over (`initialSettings`) are dragged widths that were kept, so they seed this map.
+  const [userColumnWidths, setUserColumnWidths] = React.useState<Readonly<Partial<Record<string, number>>>>(() =>
+    sanitizeInitialWidths(initialSettings?.widths)
+  );
   const handleColumnResize = React.useCallback<NonNullable<FluentDataGridProps['onColumnResize']>>((_ev, data) => {
     const id = String(data.columnId);
     // The row-actions column has a fixed width and no resize handle.
@@ -1478,6 +1652,58 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     () => ({ autoFitColumns: !hasUserColumnWidths }),
     [hasUserColumnWidths]
   );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Task 032 (FR-19, #2489): opt-in persisted settings. The grid keeps the user's sort in state ONLY when the host opted
+  // in (any of the three props); otherwise Fluent's sort stays uncontrolled, exactly as before. The grid stores nothing:
+  // `onSettingsChange` hands the host the widths + sort, `initialSettings` takes them back, `settingsResetKey` clears them.
+  // ─────────────────────────────────────────────────────────────────────────
+  const settingsEnabled =
+    initialSettings !== undefined || onSettingsChange !== undefined || settingsResetKey !== undefined;
+  const [userSort, setUserSort] = React.useState<DataGridSortSetting | undefined>(() =>
+    initialSettings?.sort && initialSettings.sort.columnId ? { ...initialSettings.sort } : undefined
+  );
+  const handleSortChange = React.useCallback<NonNullable<FluentDataGridProps['onSortChange']>>((_ev, data) => {
+    setUserSort(
+      data.sortColumn === undefined ? undefined : { columnId: String(data.sortColumn), direction: data.sortDirection }
+    );
+  }, []);
+  // A sort on a column the configuration does not have (or on a grid with sorting off) is not applied or reported.
+  const enableSorting = resolved?.behavior.enableSorting ?? false;
+  const effectiveSort = React.useMemo<DataGridSortSetting | undefined>(() => {
+    if (!userSort) return undefined;
+    if (visibleColumns.length === 0) return userSort; // columns still loading: keep it until they are known
+    return enableSorting && visibleColumns.some(c => c.name === userSort.columnId) ? userSort : undefined;
+  }, [userSort, visibleColumns, enableSorting]);
+  const fluentSortState = React.useMemo(
+    () => ({ sortColumn: effectiveSort?.columnId, sortDirection: effectiveSort?.direction ?? ('ascending' as const) }),
+    [effectiveSort]
+  );
+
+  // Report a change. Compared with what was last reported (or handed in), so nothing is reported on mount, in StrictMode,
+  // or when a state update produced the same settings. The latest callback is read from a ref (an inline one is fine).
+  const onSettingsChangeRef = React.useRef(onSettingsChange);
+  React.useEffect(() => {
+    onSettingsChangeRef.current = onSettingsChange;
+  }, [onSettingsChange]);
+  const lastReportedRef = React.useRef<string>(settingsKeyOf(userColumnWidths, effectiveSort));
+  React.useEffect(() => {
+    const key = settingsKeyOf(userColumnWidths, effectiveSort);
+    if (key === lastReportedRef.current) return;
+    lastReportedRef.current = key;
+    onSettingsChangeRef.current?.(settingsOf(userColumnWidths, effectiveSort));
+  }, [userColumnWidths, effectiveSort]);
+
+  // "Clear all" (owner 2026-11-23): a CHANGED key returns to the configured widths (auto-fit comes back) and order,
+  // and clears the column filters too (the chip state; it is not part of the persisted settings).
+  const lastResetKeyRef = React.useRef(settingsResetKey);
+  React.useEffect(() => {
+    if (lastResetKeyRef.current === settingsResetKey) return;
+    lastResetKeyRef.current = settingsResetKey;
+    setUserColumnWidths(prev => (Object.keys(prev).length === 0 ? prev : {}));
+    setUserSort(undefined);
+    setChipState(prev => (Object.keys(prev).length === 0 ? prev : {}));
+  }, [settingsResetKey]);
 
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
@@ -1715,6 +1941,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             selectedIds={Array.from(selectedRowIds).map(String)}
             records={records}
             columns={visibleColumns}
+            exportCellText={moneyExportText}
             currentView={contextValue.currentView}
             refresh={refresh}
             theme={theme}
@@ -1789,6 +2016,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               selectedItems={selectedRowIds}
               onSelectionChange={handleSelectionChange}
               sortable={resolved.behavior.enableSorting}
+              // Task 032: controlled sort only when the host opted in; otherwise Fluent's own uncontrolled sort.
+              {...(settingsEnabled ? { sortState: fluentSortState, onSortChange: handleSortChange } : {})}
               resizableColumns={resolved.behavior.enableColumnResize}
               columnSizingOptions={columnSizingOptions}
               resizableColumnsOptions={resizableColumnsOptions}
