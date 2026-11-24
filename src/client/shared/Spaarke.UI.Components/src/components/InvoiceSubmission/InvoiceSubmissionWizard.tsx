@@ -69,6 +69,7 @@ import type {
   InvoiceFirmOption,
   InvoiceSubmissionAccepted,
   InvoiceSubmissionCallbacks,
+  InvoiceSubmissionRecordRef,
   InvoiceSubmissionStatusView,
 } from './types';
 
@@ -213,6 +214,10 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
   keepPolling?: (status: InvoiceSubmissionStatusView) => boolean;
   /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.renderAccepted`). */
   renderAccepted?: (status: InvoiceSubmissionStatusView) => React.ReactNode;
+  /** Optional (iss052): passed to the result screen (`InvoiceSubmissionOutcome.onOpenInvoice`). Absent: no "Open invoice". */
+  onOpenInvoice?: (invoiceId: string) => void;
+  /** Optional (iss052): passed to the result screen (`InvoiceSubmissionOutcome.onOpenRecord`). Absent: no "Open {record}". */
+  onOpenRecord?: (record: InvoiceSubmissionRecordRef) => void;
 }
 
 /**
@@ -264,6 +269,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   correction,
   keepPolling,
   renderAccepted,
+  onOpenInvoice,
+  onOpenRecord,
   loadRecords,
   loadFirms: loadFirmsProp,
   submit,
@@ -503,6 +510,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
           renderReport={renderReport}
           keepPolling={keepPolling}
           renderAccepted={renderAccepted}
+          onOpenInvoice={onOpenInvoice}
+          onOpenRecord={onOpenRecord}
         />
       ),
       actions: (
@@ -528,6 +537,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     renderReport,
     keepPolling,
     renderAccepted,
+    onOpenInvoice,
+    onOpenRecord,
     onClose,
     doneLabel,
   ]);
