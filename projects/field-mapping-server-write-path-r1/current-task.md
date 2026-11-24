@@ -15,8 +15,8 @@
 | **024 approach** | Copy the 023 Event wizard migration: `CreateEventWizard/eventService.ts` + `__tests__/eventService.fieldMapping.test.ts`, notes `notes/task-023-notes.md`. Implementation delegated to one Sonnet implementer in a worktree on `task/fm-024` (branched from 98b2084536); this session reviews, runs gates, merges `--no-ff`. |
 | **024 current step** | Code merged into the work branch at 869c6cf494 (task/fm-024 fca6adcf22). Review + gates PASS (jest 16/119, tsc 0, client-lint ok, ADR clean). Agent worktree to remove later: `C:\code_files\spaarke\.claude\worktrees\agent-a451c05c09d18c1b9` (Remove-WorktreeSafe.ps1). |
 | **Files modified (024)** | All committed (merge 869c6cf494). |
-| **Deployed** | #3031 merged (57a68b06c5). `sprk_createtodowizard` on dev from 57a68b06c5, 2026-11-24 01:35Z, SHA-256 C29DA862…B300C, in SpaarkeMaster (`notes/task-024-notes.md` "Deploy to dev"). |
-| **Next action** | AC5 live check done 2026-11-24 (PASS except the Assignee bind; notes "Live check on dev (AC5)"). Assignee fix committed on the work branch (todoService binds `sprk_assignedto` exactly; DI-039/#3039 for the Event wizard). Next: owner go for a master PR with the fix, then redeploy `sprk_createtodowizard` and re-check that a picked Assignee lands in `sprk_assignedto`; then mark 024 done and start 025. |
+| **Deployed** | `sprk_createtodowizard` on dev from master 2566d561e0 (#3041 merge), 2026-11-24 03:46Z, SHA-256 AD2955B3…1B50, in SpaarkeMaster. |
+| **Next action** | 024 live check PASS incl. the Assignee re-check (2026-11-24); 024 stays 🔄 only for the owner's dark-mode look, like 023. Next: start 025 (Invoice wizard) through task-execute. |
 
 ## Done 2026-11-23 (for context)
 

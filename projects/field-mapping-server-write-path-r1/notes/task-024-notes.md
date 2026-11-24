@@ -160,3 +160,16 @@ Setup (owner's go in this session): dev had no profile from Matter to To Do, so 
 **Left:** the assignee fix needs a PR to master and a redeploy of `sprk_createtodowizard`, then one re-check that a picked Assignee lands in `sprk_assignedto`.
 
 Rows left on dev for cleanup: To Dos `7d1cba50-dfd9-4920-8e5e-6842e788cbac` and `354ffd82-ade9-4a02-9c4d-ebd39a21ca08`; the inactive temporary profile `6a6d6cab-b2e7-f111-84ea-7ced8dda31f8` and its two rules.
+
+## Assignee fix: merged, deployed, re-checked (2026-11-24)
+
+- Fix on master via #3041 (merge 2566d561e0, 03:42Z). Rebuilt from that commit (shared libraries, then `CreateTodoWizard`). The bundle has no fragment match and binds `findNavProp(…, 'contact', 'sprk_assignedto')`.
+- Deployed `sprk_createtodowizard` at 03:46Z. The live SHA-256 `AD2955B3…1B50` matches the build; the resource is in SpaarkeMaster.
+- Re-check, To Do C "FMSWP-024 re-check C" (`2c53f9cc-686d-4048-94e2-d95ec694b761`), from the matter's "Create To Do" command with Assigned To left as the signed-in user. The temporary profile is inactive.
+  - `sprk_assignedto` = Ralph Schroeder; `sprk_assignedtointernal` and `sprk_assignedtoexternal` empty: **PASS**.
+  - Owner Spaarke Business Unit 1, created by `# mi-bff-api-dev` in one write, regarding PAT-176903: **PASS**.
+  - One `sprk_todo:created` broadcast with the new id: **PASS**.
+  - C appears on the signed-in user's Smart To Do board (A, with the wrong column, does not): **PASS**.
+- In this run Chrome clicks inside the wizard frame did not register (window size changed), so the buttons and the title were driven from the page's script. The wizard's own handlers ran; only the input method differs.
+
+AC5 is met. **Left:** the owner's dark-mode look, as for 023. Rows to clean up on dev: To Do `2c53f9cc-686d-4048-94e2-d95ec694b761` in addition to A and B.
