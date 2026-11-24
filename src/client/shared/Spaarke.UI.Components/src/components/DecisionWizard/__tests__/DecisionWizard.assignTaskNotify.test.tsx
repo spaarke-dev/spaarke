@@ -133,7 +133,7 @@ describe('Assign Task: Send email notification', () => {
   it('task 207: an assignee whose user account is Administrative-only reads as its own sentence, with no code', () => {
     const text = describeWarning('assignee_email_not_sent_admin_account');
     expect(text).toBe(
-      "The task was assigned, but no email was sent: the assignee's user account is set up for administration only and can't use the app."
+      "The task was assigned, but no email was sent: the assignee's user account is set up for administration only and cannot use the app."
     );
     expect(text).not.toContain('assignee_email_not_sent');
     // The generic fallback still serves a code this build does not know.

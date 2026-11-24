@@ -581,6 +581,23 @@ public sealed class AssignTaskNotifierTests
         h.NothingWasSent();
     }
 
+    /// <summary>
+    /// Task 207 review (K2 guard): the request path refuses on <c>Warning is not null</c>, so every refusal value must map to a
+    /// warning; a value someone adds without one would be emailed and belled. Must fire for every refusal; must not for None.
+    /// </summary>
+    [Fact]
+    public void EveryRefusalExceptNone_HasAWarning_AndNoneHasNone()
+    {
+        foreach (var why in Enum.GetValues<AssignTaskRefusal>())
+        {
+            var warning = AssignTaskRecipient.Refused(why).Warning;
+            if (why == AssignTaskRefusal.None)
+                warning.Should().BeNull();
+            else
+                warning.Should().NotBeNullOrEmpty($"refusal {why} must carry a commit warning");
+        }
+    }
+
     [Fact]
     public async Task AnAdministrativeUser_WithNoAnswerFromDataverse_KeepsTheUnverifiedWarning_MustNotFire()
     {

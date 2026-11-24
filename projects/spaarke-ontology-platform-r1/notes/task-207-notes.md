@@ -35,10 +35,10 @@ emailed does not change for any input; no other refusal branch changes code.
   path returns `recipient.Warning` in its warning list; the job-path refusal switch). Neither holds text.
 - Client: `decisionDisplay.ts` `WARNING_TEXT` / `describeWarning`, used by `ConfirmStep.tsx`. This is the only text table for
   these codes in this repo.
-- Out-of-repo consumers: none found in this repo. The Copilot/MCP widget (mcp-r1) is the place a second table could live;
-  nothing in `src/` references the codes, so if it keeps its own text for `assignee_email_not_sent_*` it is outside this repo
-  or reads the generic fallback. **For the main session to pass on to mcp-r1:** a new code `assignee_email_not_sent_admin_account`
-  now exists; an unknown code should fall back to generic wording (the shared `describeWarning` does).
+- Other consumers: the Copilot/MCP widget (`src/client/widgets/spaarke-decisions`, mcp-r1) mounts the shared
+  `DecisionWizardHost`, so it has no text table of its own and reads the new sentence through `describeWarning`; confirmed by
+  mcp-r1 2026-11-24. It bundles the shared lib at build time and is embedded in the BFF, so Copilot shows the sentence after the
+  next BFF build from master reaches dev (generic fallback until then). The MCP `CompleteDecisionTool` passes warnings through.
 - Older Console clients that do not know the code read the generic sentence ("The decision was recorded, but one follow-up
   step needs a look."), so no version gate.
 
