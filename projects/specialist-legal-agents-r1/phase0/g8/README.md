@@ -172,6 +172,11 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
   - **URL without `?pkg` ❌:** the old action is still bound; updates do not refresh actions. BR-3 becomes "action changes need a new app id or a re-publish", and that is a D-A1 deployment cost.
   - **No call at all ❌❌:** the update broke the action, as in 802fd9cc.
 - **Side benefit:** `?pkg=<version>` in the action URL is a cheap way for the BFF to log **which package version** is calling (the note's version-skew row).
+- **Run 1 (2026-11-24): 1.1.0 still running, update not applied yet.**
+  - The owner uploaded 1.1.1 (~16:2xZ). The agent details still show **1.1.0**.
+  - At ~16:35Z the agent rendered the widget in a new chat (owner screenshot). The BFF logged 3 Sydney `tools/call` (16:35:30 `spaarke_get_decision_plan`, then 2 × `spaarke_list_decision_page`), all on the **plain URL**, with no `?pkg`.
+  - The catalog and the server agree, so this is not yet a V1 verdict. Next: check Requests for **Update pending**, approve it, and re-run.
+  - **Measurement caveat:** BFF requests are now sampled at **25%**, so not every call is logged. The `show_decisions` call for this turn is missing. Any logged call carrying `?pkg=1.1.1` is still proof; the absence of one needs several turns.
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.
 
