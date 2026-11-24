@@ -356,7 +356,7 @@ So the persona agent may only be able to *recommend* the Microsoft skill. Phase 
 | Hosts a **declarative agent** (our persona front door) | ✅ reads and advises; cannot edit | ✅ | ✅ | ❌ (Frontier preview) | ✅ (classic Outlook, Teams) |
 | **Spaarke connector** tools | ? | ⚠️ after a plugin pick + approval card, no widget | ⚠️ Dev Portal connector ✅; package connector ❌ today | ✅ | ❌ Outlook not offered (our test) |
 | MCP Apps **widgets** | ? (2026-11-24: ✅ in Word through the G8-P2 agent) | ❌ | ✅ | ✅ (later widget hides earlier) | ? |
-| **Copilot UX components** (SPFx 1.24, §3.13) | ❌ not a supported client | ❌ | ✅ inside a declarative agent only | ❌ (GA limitation) | Outlook ❌ · Teams ✅ (browser, desktop; no mobile) |
+| **Copilot UX components** (SPFx 1.24, §3.13) | ? undocumented | ? | ✅ in an agent, or through a plugin (24 Nov) | ✅ through a plugin (24 Nov) | Outlook ? · Teams ✅ (mobile rolling out) |
 | **Tracked changes** | ✅ legal plugin Run Review | ⚠️ edits are "trackable" | ❌ | ? (not mentioned in any source) | ❌ |
 | Billing | Licence | Licence | Licence | **Credits per step** | Licence |
 
@@ -434,20 +434,34 @@ These decide where each function's procedure and engine can run.
 - **The SharePoint Store accepts these solutions** from GA: a store channel besides Microsoft Marketplace.
 - Each tenant still needs its own consent, permissions, agent policy and licences.
 
-**Limits at GA.**
-- **Supported clients:** Microsoft 365 Copilot (browser, desktop) and Copilot in Teams. **Not Word, Outlook or Cowork**, not mobile, and not plain-Chat plug-in packaging. So the components work **only inside a declarative agent**.
+**Limits at GA (28 Oct).**
+- **Supported clients:** Microsoft 365 Copilot (browser, desktop) and Copilot in Teams. Not Word or Outlook. Mobile is rolling out now.
 - **Licence:** the Microsoft 365 Copilot add-on, including for development in the Copilot Workbench. There are no consumption charges.
 
+**Update, 24 Nov 2026: components can now ship in a plugin** (owner heard this in a demo the same day). Sources: Learn, "Manually package a Copilot UX component as a plug-in", and the SPFx roadmap's November update.
+- Components now work in **Copilot Cowork and in standard Copilot Chat through plugins**. They are packaged **together with skills and other assets**. Copilot detects the intent and shows the component **without the user opening an agent**.
+- **There are two artifacts, not one:**
+  - The **`.sppkg`** in the SharePoint App Catalog holds and hosts the code. It must stay deployed.
+  - The **plugin ZIP** goes through admin center **Agents › Tools › Registry › Upload**. Its `agentConnectors` entry points at SharePoint's own MCP endpoint, `https://<tenant>.sharepoint.com/_api/mcp/spfx?solutionId=<id>`, with authorization `None` (SharePoint's own sign-in applies). Tools come by **dynamic discovery**.
+  - The guide's example also includes a declarative agent, with the same URL in its `ai-plugin.json` runtime. That is optional: the guide notes a connector-only plugin is possible.
+- **The plugin ZIP is tenant-specific.** Both URLs name the customer's SharePoint host, so it fits the per-customer package generator (note §3.1).
+- **Packaging is manual on SPFx 1.24.** SPFx 1.25 (target Dec 2026 – Jan 2027) plans an opt-in build setting that packages components **and skills** as plugins.
+- **Not yet documented:** Word and Outlook. Learn says support in one application doesn't establish support in others.
+- **Updates:** component code and tool changes need only a `.sppkg` redeploy (discovery cache: a few minutes). Instructions, starters and icons need a plugin version bump with the **same app id**.
+
 **What this means for Spaarke:**
-1. **Two UI vehicles, chosen by surface.**
-   - **MCP Apps widgets** (today's path: the MCP server serves the UI) reach **Chat, Cowork and Word** (Word ✅ 2026-11-24 through the G8-P2 agent). They work **without an agent**, so they serve **Ask and Do** and the Word front door.
-   - **Copilot UX components** reach **Chat and Teams only**, and only inside an agent. They fit **Practice agents' rich screens** (fullscreen review, tabular review, profile tuning, approvals). They also fit UI we want **in SharePoint or Teams as well**.
-   - Neither replaces the other at GA.
+1. **Two UI vehicles; the main difference is now Word.**
+   - **MCP Apps widgets** (today's path: our MCP server serves the UI) reach **Chat, Cowork and Word** (Word ✅ 2026-11-24 through the G8-P2 agent), with or without an agent.
+   - **Copilot UX components** reach **Chat, Cowork and Teams**, with or without an agent, through a plugin. **Word is undocumented.** They add fullscreen mode, SharePoint hosting, reuse as SharePoint web parts and Teams tabs, and a store channel.
+   - So components fit **rich screens in Chat, Cowork and Teams** (fullscreen review, tabular review, profile tuning, approvals) for Ask, Do and Practice alike. Widgets stay wherever **Word** must show the UI, until Word support is documented.
+   - Neither replaces the other yet.
 2. **Share one view layer, not one package.** The shared React/Fluent v9 views (`@spaarke/ui-components`, per the shared-UI rule) are wrapped by thin host adapters: the MCP Apps widget, `BaseCopilotComponent`, a web part, and our Code Pages.
    - Data comes from one BFF client abstraction, with the host supplying the token.
    - **Constraint:** SPFx pins React **18.3.1**, while our Code Pages use React 19. Shared views must build against React 18, so this adds to the existing React version tension in the shared library.
-3. **"Included in the plugin package" needs a correction.** Copilot UX components ship in a **`.sppkg` through the SharePoint App Catalog**, not in the admin-center agent zip or the skills/connector plugin package. A Practice agent that uses them **is** that `.sppkg`: its agent definition, its MCP action and its components travel together.
-   - That gives Practice agents a different update model: **component and tool changes update without re-sync**, while action and instruction changes still re-sync. G11 checks whether this avoids the stale-action problem we hit on the admin-center path (§8 G8-P2).
+3. **Yes, they can go in our plugin package, alongside a `.sppkg`.** The Spaarke plugin (mcp-r1 task 040: skills + the Spaarke connector) could carry a **second `agentConnectors` entry** for the SPFx endpoint, and so ship skills, our data connector and our UI together. The code itself still lives in the `.sppkg` in the customer's App Catalog. One plugin with both connectors is our inference from the schema (`agentConnectors` is an array), **not yet shown in Microsoft's docs**, so G11 tests it.
+   - **Two MCP servers per turn:** data comes from **our** connector (BFF), and the UI tool comes from **SharePoint's** SPFx endpoint. The model passes data between them as tool properties, unless the component fetches its own data (point 4).
+   - **Two upload steps per customer** (App Catalog, then Tools › Registry), and the plugin ZIP is per tenant.
+   - **Updates:** UI changes need no plugin re-upload, which avoids the stale-catalog problem we hit (§8 G8-P2). Our own connector's URL or auth changes still go through the plugin.
 4. **A new client plane for auth (T-8).** A component calling the BFF directly uses `AadHttpClient` through a tenant-wide SharePoint principal. A10 does not cover that client. The alternative is that components call no API: the agent's MCP action fetches the data and the model passes it to the component as properties. That is bounded by what the model passes, so G11 measures it.
 5. **Distribution and control are unchanged in principle.** The BFF stays the control point (tenant and seat entitlement, kill switch; note §4). A Store listing adds a channel, not a control.
 
@@ -626,10 +640,11 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
 - *Measure:* tool catalogue, auth (can the connection use the Spaarke-tenant authority, PKCE and the dedicated client? T-7(b)), identity claims, approval cards, latency, ALM (Studio agents are Dataverse solution components) and billing.
 - *Run it only* if G8-P2 or G9 leaves a gap that Studio could fill. R4 row first.
 
-**G11: Copilot UX component spike (§3.13, added 2026-11-24).** Build a minimal SPFx 1.24 React component that renders one shared Fluent v9 view (the decisions list), in a `.sppkg` whose declarative agent also carries our MCP action.
+**G11: Copilot UX component spike (§3.13, added 2026-11-24, revised the same day for plugin packaging).** Build a minimal SPFx 1.24 React component that renders one shared Fluent v9 view (the decisions list). Deploy its `.sppkg` to the dev App Catalog. Ship it in a **plugin ZIP** (Tools › Registry) with **two** `agentConnectors` entries: the SPFx endpoint and our Spaarke connector, plus one skill.
 - *Measure:*
-  - whether it renders in Chat and in Teams;
-  - whether it appears in Word at all (expected ❌);
+  - whether one plugin can carry both connectors and a skill (§3.13 point 3; inference to prove);
+  - whether it renders in plain Chat, in Cowork and in Teams, without opening an agent;
+  - whether it appears in Word at all (undocumented);
   - the data path, compared both ways: (i) the component calls the BFF via `AadHttpClient` (T-8), or (ii) the MCP action fetches the data and passes it as properties (size, fidelity, one call per turn);
   - the update model: change a tool schema, redeploy without re-sync, and confirm the new tool in a new conversation; then change the MCP action and confirm a re-sync carries it (compare V1 on the admin-center path);
   - whether the shared view builds under React 18.3.1.
@@ -755,7 +770,7 @@ The paths are proposals. The human chooses the path for each tension before the 
 | D-A15 | Attorney profile round-trip: at T0/T1 the attorney edits `legal-profile.md` freely in prose (`[DEFAULT]` / `[PENDING]` markers). If T3 exports it, those edits need a way back into the Dataverse master, or the exported file must become read-only | Open. Raised by the accelerator (Q2). Decide in Phase 1 with the profile schema (Q3) | Owner, Phase 1 |
 | D-A16 | One roadmap across the accelerator's package tiers and this program's phases (Q8) | One table, with the hand-off "connector available → area agent replaces packaged agent" | **Owner** |
 | **D-A12** | **Framing: function, persona, or both (§3.9)** | Both, in layers: functions (skill + Action, with golden set and position schema) are the machinery; archetypes (persona) are configuration and the Chat front door; instances are per attorney. One agent per **practice area**, with role as a profile dimension; validate routing in G5 | **Owner.** Proposed 2026-11-23, not yet decided |
-| **D-A17** | **Agent UI vehicle (§3.13):** MCP Apps widgets, Copilot UX components (SPFx `.sppkg`), or both by surface | **Both, by surface.** MCP Apps widgets for Ask/Do and anything that must show in Word or Cowork. Copilot UX components for Practice agents' rich or fullscreen screens in Chat and Teams, and for UI also wanted in SharePoint or Teams. **One shared view layer** (React 18-compatible) behind thin host adapters | **Owner**, after G11 |
+| **D-A17** | **Agent UI vehicle (§3.13):** MCP Apps widgets, Copilot UX components (SPFx `.sppkg`), or both by surface | **Both, by surface (revised 24 Nov for plugin packaging).** Copilot UX components, shipped in the Spaarke plugin, for rich or fullscreen screens in Chat, Cowork and Teams, and for UI also wanted in SharePoint. MCP Apps widgets wherever the UI must show in **Word**, until Word support is documented. **One shared view layer** (React 18-compatible) behind thin host adapters | **Owner**, after G11 |
 
 ## 13. Market position `[Synopsis]`, summary
 

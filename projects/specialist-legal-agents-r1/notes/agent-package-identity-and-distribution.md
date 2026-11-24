@@ -121,6 +121,12 @@ The design covers this in §3.13. For distribution, the differences from 3.3 are
 - **Store:** the SharePoint Store accepts these solutions from GA. That is an alternative to 3.4 for a Practice agent that ships components. **[Learn]**
 - **Consent:** API access requests go to SharePoint's tenant-wide principal (design T-8). Each tenant still configures its own permissions, agent policy and licences. **[Learn]**
 - **Open:** whether an MCP-action change in a `.sppkg` agent loads after re-sync. G11 tests this alongside V1.
+- **Update, 24 Nov 2026: plugin packaging.**
+  - Components can also ship in a **plugin ZIP** (admin center Agents › Tools › Registry), usable in Chat and Cowork without an agent. **[Learn]**
+  - The ZIP points `agentConnectors` at `https://<tenant>.sharepoint.com/_api/mcp/spfx?solutionId=<id>` with authorization `None`, so the **ZIP is per tenant**. **[Learn]**
+  - The `.sppkg` must stay deployed in the App Catalog. **[Learn]**
+  - A customer therefore receives a **`.sppkg` (once per release) plus a per-tenant plugin ZIP**, which the package generator writes. **[Learn + inference]**
+  - Packaging is manual until SPFx 1.25. **[Learn]**
 
 ## 4. Our control: access, licensing, updates
 

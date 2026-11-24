@@ -29,7 +29,7 @@ Without this skill, generated DAs drift toward training-data patterns that preda
 - Composing knowledge sources (SPE + Dataverse + Foundry IQ + Web)
 - Configuring `OnlyAllowedSources` / `behavior_overrides` to scope retrieval
 - **NOT applicable** for: server-side agent loops (use `foundry-agent` skill), MCP App widget UI (use `widget-design` skill)
-- **Rich UI choice:** an MCP Apps widget (served by the MCP server; reaches Chat, Cowork and Word, no agent needed) or an SPFx 1.24 **Copilot UX component**. The SPFx `.sppkg` carries the agent itself; it reaches Chat and Teams only, deploys through the SharePoint App Catalog plus Add to Teams, and runs on React 18.3.1. Decide per `projects/specialist-legal-agents-r1/design.md` §3.13 (D-A17)
+- **Rich UI choice:** an MCP Apps widget (served by the MCP server; reaches Chat, Cowork and Word, no agent needed) or an SPFx 1.24 **Copilot UX component**. The component code is a `.sppkg` in the SharePoint App Catalog, on React 18.3.1. It reaches Copilot either inside a declarative agent (Chat, Teams) or, since 2026-11-24, through a per-tenant **plugin** ZIP whose `agentConnectors` points at `https://<tenant>.sharepoint.com/_api/mcp/spfx?solutionId=<id>` (Chat, Cowork, Teams). Word is undocumented. Decide per `projects/specialist-legal-agents-r1/design.md` §3.13 (D-A17)
 
 ---
 
