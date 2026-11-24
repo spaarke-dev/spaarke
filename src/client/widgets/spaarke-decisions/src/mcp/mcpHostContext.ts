@@ -25,7 +25,7 @@ export interface McpHostConnection {
   /** Asks the host to open a link in the user's browser (the widget declares no network origins and never navigates itself). */
   openLink: (url: string) => Promise<boolean>;
   /**
-   * Asks the host to change the display mode (the in-frame wizard asks for fullscreen). Resolves with the mode the host actually set,
+   * Asks the host to change the display mode (the wizard does not use it: it shows inline, owner decision 2026-11-24). Resolves with the mode the host actually set,
    * which may differ from the one asked for, or `null` when the host is not connected or refused the request outright. Never rejects.
    */
   requestDisplayMode: (mode: DisplayMode) => Promise<DisplayMode | null>;
