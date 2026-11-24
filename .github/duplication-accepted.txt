@@ -28,19 +28,12 @@ src/solutions/ApExport/vite.config.ts | src/solutions/InvoiceReview/vite.config.
 src/solutions/ApExport/vite.config.ts | src/solutions/RecordProcedures/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
 src/solutions/InvoiceFiles/src/services/invoiceFilesApi.ts | src/solutions/RecordProcedures/src/services/recordProceduresApi.ts | #2965 | Duplicated toFailure / ApiFailure mapping; one e-billing API-error module planned.
 
-# --- Tracked: wizard code-page bootstrap (#2966) ---
-src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateProjectWizard/src/main.tsx | #2966 | CreateProjectWizard does not use useWizardPageBootstrap yet.
-src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateWorkAssignmentWizard/src/main.tsx | #2966 | CreateWorkAssignmentWizard does not use useWizardPageBootstrap yet.
-src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateTodoWizard/src/main.tsx | #2966 | CreateTodoWizard does not use useWizardPageBootstrap yet.
-src/solutions/CreateProjectWizard/src/main.tsx | src/solutions/CreateTodoWizard/src/main.tsx | #2966 | Neither page uses useWizardPageBootstrap yet.
-src/solutions/CreateTodoWizard/src/main.tsx | src/solutions/PlaybookLibrary/src/main.tsx | #2966 | Neither page uses a shared bootstrap yet.
-src/solutions/CreateEventWizard/src/main.tsx | src/solutions/CreateInvoiceWizard/src/main.tsx | #2966 | Mount code around useWizardPageBootstrap is still per page.
-src/solutions/CreateEventWizard/src/main.tsx | src/solutions/CreateReportCardWizard/src/main.tsx | #2966 | Mount code around useWizardPageBootstrap is still per page.
-src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #2966 | Code-page auth bootstrap; check createCodePageAuthInitializer.
-src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage/src/main.tsx | #2966 | Code-page auth bootstrap; check createCodePageAuthInitializer.
-src/solutions/ApExport/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #2966 | resolveSharedLibDeps plugin and shared-lib aliases copied per page; one shared Vite config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #2966 | resolveSharedLibDeps plugin and shared-lib aliases copied per page; one shared Vite config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #2966 | resolveSharedLibDeps plugin and shared-lib aliases copied per page; one shared Vite config planned.
+# --- Tracked: wizard code-page bootstrap (#2966, remainder #3052) ---
+src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #3052 | bootstrapAuth glue around createCodePageAuthInitializer; shared helper planned.
+src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage/src/main.tsx | #3052 | bootstrapAuth glue around createCodePageAuthInitializer; shared helper planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
+src/solutions/ApExport/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
+src/solutions/ApExport/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
 
 # --- Tracked: Communication PCF boilerplate (#2967) ---
 src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx | src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | #2967 | Copied PCF auth bootstrap; one PCF-safe hook planned.
