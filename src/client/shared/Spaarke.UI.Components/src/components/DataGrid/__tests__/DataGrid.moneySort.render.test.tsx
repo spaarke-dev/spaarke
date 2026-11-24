@@ -6,8 +6,9 @@
  * Covers the two sort paths the grid has: Fluent's own uncontrolled sort (a header click) and the host-controlled sort
  * task 032 added (`initialSettings.sort`), and the Export to Excel command's CSV.
  *
- * Must-not-fire pair: a text column holding digits still sorts as text, and the export of a text column, a lookup and
- * an option set is exactly what it was.
+ * Must-not-fire pair: a text column holding digits still sorts as text, and the export of a text column and a lookup
+ * name is exactly what it was. Every other column (an option set, a lookup with no name) exports the text the cell
+ * shows (D-34, #3045), never JSON.
  */
 
 // Node's Blob has `.arrayBuffer()`; jsdom's does not (same shim as commandBar/__tests__/csvExport.test.ts).
@@ -100,26 +101,35 @@ const ROWS: Array<Record<string, unknown>> = [
   },
 ];
 
-function makeClient(rows: Array<Record<string, unknown>> = ROWS): IDataverseClient {
+function makeClient(
+  rows: Array<Record<string, unknown>> = ROWS,
+  metadata: EntityMetadata = METADATA
+): IDataverseClient {
   return {
     retrieveRecord: jest.fn(async () => ({ sprk_configjson: JSON.stringify(CONFIG) })),
     retrieveSavedQueriesForEntity: jest.fn(async () => []),
-    retrieveEntityMetadata: jest.fn(async () => METADATA),
+    retrieveEntityMetadata: jest.fn(async () => metadata),
     retrieveMultipleRecords: jest.fn(
       async (): Promise<FetchMultipleResult> => ({ entities: rows.map(r => ({ ...r })), moreRecords: false })
     ),
   } as unknown as IDataverseClient;
 }
 
-function renderGrid(initialSettings?: DataGridSettings, rows?: Array<Record<string, unknown>>) {
+function renderGrid(
+  initialSettings?: DataGridSettings,
+  rows?: Array<Record<string, unknown>>,
+  overrides?: React.ComponentProps<typeof DataGrid>['overrides'],
+  metadata?: EntityMetadata
+) {
   return render(
     <FluentProvider theme={webLightTheme}>
       <DataGrid
         configId={CONFIG_ID}
-        dataverseClient={makeClient(rows)}
+        dataverseClient={makeClient(rows, metadata)}
         showViewSelector={false}
         onRecordOpen={() => undefined}
         {...(initialSettings ? { initialSettings } : {})}
+        {...(overrides ? { overrides } : {})}
       />
     </FluentProvider>
   );
@@ -165,7 +175,7 @@ describe('DataGrid — Money column sort', () => {
   });
 });
 
-describe('DataGrid — Export to Excel writes the Money cell as displayed', () => {
+describe('DataGrid — Export to Excel writes every cell as displayed', () => {
   let captured: Blob | undefined;
   const originalCreate = (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
   const originalRevoke = (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
@@ -245,14 +255,255 @@ describe('DataGrid — Export to Excel writes the Money cell as displayed', () =
     expect(screen.queryByText(renderCellValue(1234.5, 'currency'))).not.toBeInTheDocument();
   });
 
-  it('every other column exports as before (must-not-fire): text, lookup name, option set JSON', async () => {
+  /** The CSV text of a grid rendered with these rows (and overrides), split into lines. */
+  async function exportOf(
+    rows: Array<Record<string, unknown>>,
+    overrides?: React.ComponentProps<typeof DataGrid>['overrides'],
+    metadata?: EntityMetadata
+  ): Promise<{ lines: string[]; container: HTMLElement }> {
+    const { container } = renderGrid(undefined, rows, overrides, metadata);
+    await screen.findByText(String(rows[0].sprk_name));
+    fireEvent.click(await screen.findByRole('button', { name: /export to excel/i }));
+    await waitFor(() => expect(captured).toBeDefined());
+    const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await (captured as any).arrayBuffer());
+    return { lines: (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text).split('\r\n'), container };
+  }
+
+  it('an option set exports its formatted label; text and lookup names are as before; the cell shows the same', async () => {
     renderGrid();
     const lines = await exportedLines();
 
-    // INV-ten: option set object with no .name/.label stays JSON (the label is NOT substituted, only Money changed).
-    // That JSON is a known pre-existing defect, D-34 #3045; update these lines when it is fixed.
-    expect(lines[1]).toBe('INV-ten,$10.00,"{""value"":1,""extensionData"":null}",10,"Smith, Jo"');
-    expect(lines[2]).toBe('INV-nine,$9.00,"{""value"":1,""extensionData"":null}",9,Lee');
-    expect(lines[4]).toBe('INV-none,,"{""value"":1,""extensionData"":null}",1000,');
+    // INV-ten: option set -> "Draft" (was the JSON of the SDK object, D-34 #3045); the lookup name "Smith, Jo" is
+    // quoted for its comma; the text column is unchanged.
+    expect(lines[1]).toBe('INV-ten,$10.00,Draft,10,"Smith, Jo"');
+    expect(lines[2]).toBe('INV-nine,$9.00,Draft,9,Lee');
+    expect(lines[3]).toBe('INV-hundred,"$1,200.00",Draft,100,Ng');
+    expect(lines[4]).toBe('INV-none,,Draft,1000,');
+    expect(screen.getAllByText('Draft')).toHaveLength(4); // the cell on screen is the text in the file
+    expect(lines.join('')).not.toContain('extensionData');
+  });
+
+  it('an unlabelled option set and a nameless lookup export nothing, not JSON; the cells are empty too', async () => {
+    const rows = [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_totalamount: null,
+        sprk_status: { value: 7, extensionData: null }, // option set, no @formattedValues label
+        sprk_ref: 'R-1',
+        sprk_owner: { id: 'c-9' }, // lookup with no name and no label
+      },
+    ];
+    const { lines, container } = await exportOf(rows);
+    expect(lines[1]).toBe('INV-a,,,R-1,');
+    expect(lines.join('')).not.toMatch(/value|extensionData|\[object/);
+    expect(container.textContent).not.toContain('extensionData');
+    expect(container.textContent).not.toContain('[object Object]');
+  });
+
+  it('a lookup with a name exports the name; with a label too, the label (the grid shows the label)', async () => {
+    const rows = [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: 'R-1',
+        sprk_owner: { id: 'c-1', name: 'Smith, Jo' },
+        '@formattedValues': { sprk_status: 'Active' },
+      },
+      {
+        sprk_invoiceid: 'i-2',
+        sprk_name: 'INV-b',
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: 'R-2',
+        sprk_owner: { id: 'c-2', name: 'raw name' },
+        '@formattedValues': { sprk_status: 'Active', sprk_owner: 'Jo Smith (formatted)' },
+      },
+    ];
+    const { lines } = await exportOf(rows);
+    expect(lines[1]).toBe('INV-a,,Active,R-1,"Smith, Jo"');
+    expect(lines[2]).toBe('INV-b,,Active,R-2,Jo Smith (formatted)');
+  });
+
+  it('must-not-fire: text and number columns export exactly as before', async () => {
+    const rows = [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_totalamount: 100, // a plain number under the Money renderer keeps its client currency format
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: 'say "hi", ok',
+        sprk_owner: null,
+        '@formattedValues': { sprk_status: 'Draft' },
+      },
+      {
+        sprk_invoiceid: 'i-2',
+        sprk_name: 'INV-b',
+        sprk_totalamount: null,
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: 42, // a number in a text column
+        sprk_owner: null,
+        '@formattedValues': { sprk_status: 'Draft' },
+      },
+    ];
+    const { lines } = await exportOf(rows);
+    const shown = renderCellValue(100, 'currency');
+    const money = shown.includes(',') ? `"${shown}"` : shown;
+    expect(lines[1]).toBe(`INV-a,${money},Draft,"say ""hi"", ok",`);
+    expect(lines[2]).toBe('INV-b,,Draft,42,');
+  });
+
+  // F1 (review): a column the host draws with overrides.columnRenderers is exported as what that renderer returns when it
+  // returns text, as the cell shows it. The Invoices widget does this for sprk_reviewdetail (an option set the BFF sends as
+  // `{ value, extensionData }`), through `reviewDetailCellText`, which also applies the statuscode gate.
+  it('a host renderer that returns a string exports that string (the cell text), not the option-set JSON', async () => {
+    const rows = [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_status: { value: 659490000, extensionData: null },
+        statuscode: 1,
+        sprk_ref: 'R-1',
+        sprk_owner: { id: 'c-1', name: 'Lee' },
+      },
+      {
+        // Gate closed: the renderer returns '' for this row, so the field is empty, not the raw option set.
+        sprk_invoiceid: 'i-2',
+        sprk_name: 'INV-b',
+        sprk_status: { value: 659490000, extensionData: null },
+        statuscode: 2,
+        sprk_ref: 'R-2',
+        sprk_owner: null,
+      },
+    ];
+    const seen: Array<[unknown, Record<string, unknown>]> = [];
+    const { lines, container } = await exportOf(rows, {
+      columnRenderers: {
+        sprk_status: (value, row) => {
+          seen.push([value, row]);
+          return row.statuscode === 1 ? 'Waiting for billing terms' : '';
+        },
+      },
+    });
+    expect(lines[1]).toBe('INV-a,,Waiting for billing terms,R-1,Lee');
+    expect(lines[2]).toBe('INV-b,,,R-2,');
+    expect(lines.join('')).not.toContain('extensionData');
+    // The cell on screen is the text in the file.
+    expect(container.textContent).toContain('Waiting for billing terms');
+    // Called with the arguments the cell render uses: the cell's value and its record.
+    expect(
+      seen.some(([value, row]) => (value as { value: number }).value === 659490000 && row.sprk_name === 'INV-a')
+    ).toBe(true);
+  });
+
+  it('must-not-fire: a host renderer that returns an element keeps the raw export of a primitive value', async () => {
+    const rows = [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: 'R-1', // the column the host draws as an element: a primitive
+        sprk_owner: { id: 'c-1', name: 'Lee' },
+        '@formattedValues': { sprk_status: 'Draft' },
+      },
+    ];
+    const { lines } = await exportOf(rows, {
+      columnRenderers: { sprk_ref: v => React.createElement('em', null, String(v)) },
+    });
+    expect(lines[1]).toBe('INV-a,,Draft,R-1,Lee');
+  });
+
+  it('a host renderer that returns an element for an object value exports its label or name, never JSON', async () => {
+    const rows = [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: 'R-1',
+        sprk_owner: { id: 'c-1', name: 'Lee' },
+        '@formattedValues': { sprk_status: 'Draft' },
+      },
+      {
+        sprk_invoiceid: 'i-2',
+        sprk_name: 'INV-b',
+        sprk_status: { value: 2, extensionData: null }, // no label
+        sprk_ref: 'R-2',
+        sprk_owner: { id: 'c-2' },
+      },
+    ];
+    const { lines } = await exportOf(rows, {
+      columnRenderers: {
+        sprk_status: () => React.createElement('em', null, 'custom'),
+        sprk_owner: () => React.createElement('em', null, 'owner'),
+      },
+    });
+    expect(lines[1]).toBe('INV-a,,Draft,R-1,Lee');
+    expect(lines[2]).toBe('INV-b,,,R-2,');
+    expect(lines.join('')).not.toContain('extensionData');
+  });
+
+  // Owner decision 2026-11-24: a date column exports the date the grid shows, not the raw UTC timestamp.
+  describe('a date column', () => {
+    const AT = '2026-10-02T12:00:00Z';
+    const withRefAs = (attr: Record<string, unknown>): EntityMetadata => ({
+      ...METADATA,
+      attributes: { ...METADATA.attributes, sprk_ref: { displayName: 'Reference', ...attr } as never },
+    });
+    const row = (ref: unknown) => [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: ref,
+        sprk_owner: null,
+        '@formattedValues': { sprk_status: 'Draft', sprk_ref: 'server label' },
+      },
+    ];
+
+    it('a date-time exports the local date and time on screen, not the UTC timestamp or the server label', async () => {
+      const shown = new Date(AT).toLocaleString();
+      const { lines, container } = await exportOf(row(AT), undefined, withRefAs({ attributeType: 'DateTime' }));
+      const cell = shown.includes(',') ? `"${shown}"` : shown;
+      expect(lines[1]).toBe(`INV-a,,Draft,${cell},`);
+      expect(lines.join('')).not.toContain(AT);
+      expect(container.textContent).toContain(shown); // the cell on screen is the text in the file
+    });
+
+    it('a Date Only value exports its calendar day', async () => {
+      const shown = new Date(2026, 9, 2).toLocaleDateString();
+      const { lines } = await exportOf(
+        row('2026-10-02'),
+        undefined,
+        withRefAs({ attributeType: 'DateTime', dateTimeBehavior: 'DateOnly' })
+      );
+      expect(lines[1]).toBe(`INV-a,,Draft,${shown.includes(',') ? `"${shown}"` : shown},`);
+    });
+
+    it('a host renderer that returns an element for a date column still exports the date the grid would draw', async () => {
+      const shown = new Date(AT).toLocaleString();
+      const { lines } = await exportOf(
+        row(AT),
+        { columnRenderers: { sprk_ref: () => React.createElement('em', null, 'when') } },
+        withRefAs({ attributeType: 'DateTime' })
+      );
+      expect(lines[1]).toBe(`INV-a,,Draft,${shown.includes(',') ? `"${shown}"` : shown},`);
+    });
+  });
+
+  it('text that a spreadsheet would evaluate is written with a leading apostrophe; the cell on screen is unchanged', async () => {
+    const rows = [
+      {
+        sprk_invoiceid: 'i-1',
+        sprk_name: 'INV-a',
+        sprk_status: { value: 1, extensionData: null },
+        sprk_ref: '=1+1',
+        sprk_owner: { id: 'c-1', name: '@Lee' },
+        '@formattedValues': { sprk_status: 'Draft' },
+      },
+    ];
+    const { lines, container } = await exportOf(rows);
+    expect(lines[1]).toBe("INV-a,,Draft,'=1+1,'@Lee");
+    expect(container.textContent).toContain('=1+1');
+    expect(container.textContent).not.toContain("'=1+1");
   });
 });

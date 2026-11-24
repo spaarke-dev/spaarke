@@ -9,9 +9,12 @@
  * the project's binding FR-14 constraint — both the .docx download and the email body must derive from
  * the SAME server-persisted record so exports ≡ the durable artifact).
  *
- * Sibling of `../composeResultFormat.ts` / `advisoryNoteFormatting.ts` — small, pure, no-React formatting
- * modules kept next to the widgets that consume them (§11 reuse: no new "formatting library" surface).
+ * Sibling of `../composeResultFormat.ts` / `advisoryNoteFormatting.ts` — small, pure formatting modules
+ * (no components, no I/O) kept next to the widgets that consume them (§11 reuse: no new "formatting
+ * library" surface). The only Fluent import is the `webLightTheme` token values for the email HTML.
  */
+
+import { webLightTheme } from '@fluentui/react-components';
 
 /** One assembled memo row — mirrors `Sprk.Bff.Api.Services.Ai.ReviewMemo.ReviewMemoSection` field-for-field. */
 export interface ReviewMemoSection {
@@ -283,7 +286,8 @@ export function buildReviewMemoEmailSubject(response: ReviewMemoReadResponse): s
  * Inline styles (not Fluent v9 tokens) are deliberate here: this HTML is handed to `<EmailComposer />`
  * as the message body, which downstream travels through Graph `sendMail` to arbitrary external email
  * clients — those do not resolve CSS custom properties, so literal inline styles are the correct,
- * standard approach for email HTML (unlike in-app UI, which ADR-021 governs).
+ * standard approach for email HTML (unlike in-app UI, which ADR-021 governs). The border colour is
+ * still a Fluent token: its resolved light-theme value (`webLightTheme`), not the `var(--…)` reference.
  */
 export function buildReviewMemoEmailBody(response: ReviewMemoReadResponse): string {
   const { memo, analysisName, documentName } = response;
@@ -294,7 +298,7 @@ export function buildReviewMemoEmailBody(response: ReviewMemoReadResponse): stri
   metaParts.push(`Overall Risk: ${escapeHtml(memo.overallRisk)}`);
   metaParts.push(`Sections: ${String(memo.sectionCount)}`);
 
-  const cellStyle = 'padding:6px;border:1px solid #ccc;text-align:left;vertical-align:top;';
+  const cellStyle = `padding:6px;border:1px solid ${webLightTheme.colorNeutralStroke1};text-align:left;vertical-align:top;`;
   const headerCellStyle = `${cellStyle}font-weight:bold;`;
 
   const rows =

@@ -1,8 +1,8 @@
 # ADR-012: Shared Component Library (Concise)
 
-> **Status**: Accepted (Amended 2026-11-18)
+> **Status**: Accepted (Amended 2026-11-24)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-11-18 (Pattern D feature packages sanctioned: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`; previous: 2026-11-13 census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
+> **Last Updated**: 2026-11-24 (`@spaarke/compose-components` sanctioned: Compose document-editing model, TipTap quarantine; previous: 2026-11-18 Pattern D feature packages sanctioned: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`; previous: 2026-11-13 census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
 
 ---
 
@@ -70,7 +70,7 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 | `@spaarke/smart-todo-components` | `Spaarke.SmartTodo.Components` | Sanctioned | Smart To Do feature package: SmartTodo code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
 | `@spaarke/communication-components` | `Spaarke.Communication.Components` | Sanctioned | Communications feature package: 3 PCFs (deep imports), Office add-ins, ai-widgets, 4 code pages (2026-11-18 Pattern D amendment) |
 | `@spaarke/daily-briefing-components` | `Spaarke.DailyBriefing.Components` | Sanctioned | Daily Briefing feature package: DailyBriefing code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
-| `@spaarke/compose-components` | `Spaarke.Compose.Components` | Grandfathered — under review | TipTap Compose workspace; TipTap may justify quarantine, not yet assessed against the three tests |
+| `@spaarke/compose-components` | `Spaarke.Compose.Components` | Sanctioned | The Compose document-editing model (TipTap document, DOCX bridge, checkout, comments); TipTap/ProseMirror quarantine; SpaarkeAi + LegalWorkspace (2026-11-24 amendment) |
 | `@spaarke/ai-outputs` | `Spaarke.AI.Outputs` | Grandfathered — under review | AI output / source pane widgets; boundary with `@spaarke/ai-widgets` not yet assessed |
 <!-- shared-package-census:end -->
 
@@ -79,6 +79,7 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 - 2026-11-13: `@spaarke/legal-workspace` retired. It was a one-line re-export of the LegalWorkspace solution with one consumer. SpaarkeAi now declares a `file:` dependency on that solution (package `legal-workspace`, `exports` `./src/index.ts`). A solution exposing its own entry point to another solution is not a shared package.
 - 2026-11-13: `@spaarke/document-operations` retired. Its one hook, `useDocumentActions`, moved unchanged into `@spaarke/ui-components` (`src/hooks/useDocumentActions.ts`), exported from the main barrel only, not `pcf-safe`. Both consumers (SemanticSearch, Compose) already imported from ui-components.
 - 2026-11-18: `@spaarke/smart-todo-components`, `@spaarke/communication-components` and `@spaarke/daily-briefing-components` sanctioned as Pattern D feature packages (amendment below).
+- 2026-11-24: `@spaarke/compose-components` sanctioned (Compose amendment below).
 
 ---
 
@@ -104,6 +105,26 @@ Every other rule in this ADR applies to them, including React 16/17 compatibilit
 
 ---
 
+## Amendment (2026-11-24): `@spaarke/compose-components` — Compose Document-Editing Model
+
+> Path B amendment per [CLAUDE.md §6.5](../../CLAUDE.md). Owner-approved 2026-11-13 in `projects/reuse-governance-tightening-r1/notes/package-reviews.md` §5 (issue #2805).
+
+**Decision**: `@spaarke/compose-components` (`src/client/shared/Spaarke.Compose.Components`) is sanctioned as the single home of the Compose document-editing model. It passes the three-test bar on its own:
+
+1. **Distinct contract** — the TipTap/ProseMirror document, the DOCX bridge (`src/utils/docxBridge.ts`, the only one; never delete it), checkout / heartbeat, comment threads and re-anchoring, the save op-log the BFF validates (ADR-049).
+2. **Quarantine** — 15 `@tiptap/*` packages plus ProseMirror stay out of `@spaarke/ui-components` and every PCF.
+3. **Cross-surface** — SpaarkeAi and LegalWorkspace (`composeEditor.registration.ts`). Not PCF-safe, by design.
+
+**Editor split.** Document editing (DOCX-backed: save, checkout, comments, redlines) → `ComposeEditor` here. Rich-text fields (email body, note) → `RichTextEditor` (Lexical) in `@spaarke/ui-components`. A third editor needs an amendment.
+
+**TipTap quarantine.** Only non-test source in this package imports `@tiptap/*` or `prosemirror-*`. No other shared package and no PCF declares them; SpaarkeAi and LegalWorkspace declare them only so their bundlers resolve Compose source.
+
+**Entity map (P-8).** Every Dataverse name the package uses is in `src/types/composeDocumentSchema.ts` (`COMPOSE_DOCUMENT_SCHEMA`: `sprk_document` and four columns). No other non-test source file in the package names a `sprk_` entity or column in code (comments may). This is narrower than the Pattern D exception.
+
+**Enforced by**: `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs` — the census row, a TipTap-quarantine scan (imports under `src/client` and `src/solutions`; declarations under `src/client/shared` and `src/client/pcf`) and an entity-map scan of the package, each with must-fire and must-not-fire controls.
+
+---
+
 ## Constraints
 
 ### MUST
@@ -123,7 +144,7 @@ Every other rule in this ADR applies to them, including React 16/17 compatibilit
 
 - **MUST NOT** mix Fluent UI versions (v9 only)
 - **MUST NOT** reference PCF-specific APIs (`ComponentFramework.*`) in shared components
-- **MUST NOT** hard-code Dataverse entity names or schemas as string literals (use configurable entity maps). Exception: the three Pattern D feature packages (2026-11-18 amendment)
+- **MUST NOT** hard-code Dataverse entity names or schemas as string literals (use configurable entity maps). Exceptions: the three Pattern D feature packages (2026-11-18 amendment); `@spaarke/compose-components` keeps its names in one entity map (2026-11-24 amendment)
 - **MUST NOT** use custom CSS (Fluent tokens only)
 - **MUST NOT** use React 18/19-only APIs (`useTransition`, `useDeferredValue`) in components intended for PCF
 - **MUST NOT** export components without tests
@@ -308,4 +329,4 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 ---
 
-**Lines**: ~311
+**Lines**: ~332

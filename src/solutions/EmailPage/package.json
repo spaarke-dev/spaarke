@@ -10,6 +10,7 @@
     "check:html-reset": "node ../../../scripts/check-html-css-reset.mjs",
     "build": "node ../../../scripts/check-html-css-reset.mjs && node ../../../scripts/tsc-surface-gate.mjs && vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/sprk_emailpage.html');\"",
     "preview": "vite preview",
+    "test": "jest",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix"
   },
@@ -24,11 +25,14 @@
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "jest": "^30.5.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "ts-jest": "^29.4.14",
     "typescript": "^5.0.0",
     "vite": "^5.0.0",
     "vite-plugin-singlefile": "^2.3.0"

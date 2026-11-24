@@ -9,7 +9,7 @@
  * Empty rule: a row with no amount sorts LOWEST (first ascending, last descending); two empties tie. Fluent multiplies
  * the comparator by -1 for descending, which `sortRows` below does the same way.
  */
-import { compareColumnValues, moneyAmountOf, moneyExportText, renderCellValue } from '../DataGrid';
+import { cellExportText, compareColumnValues, formattedLabelOf, moneyAmountOf, renderCellValue } from '../DataGrid';
 
 const MONEY = { name: 'sprk_totalamount', renderer: 'currency' };
 
@@ -150,32 +150,129 @@ describe('compareColumnValues — every other column sorts as before (must-not-f
   });
 });
 
-describe('moneyExportText — the CSV text of a Money cell is its displayed text', () => {
+describe('cellExportText — the CSV text of a cell is its displayed text (Money, task 033)', () => {
   it('uses the server label for the SDK object, exactly what renderCellValue shows', () => {
     const record = { sprk_totalamount: money(1200), '@formattedValues': { sprk_totalamount: '$1,200.00' } };
-    expect(moneyExportText(record, MONEY)).toBe('$1,200.00');
-    expect(moneyExportText(record, MONEY)).toBe(renderCellValue(record.sprk_totalamount, 'currency', '$1,200.00'));
+    expect(cellExportText(record, MONEY)).toBe('$1,200.00');
+    expect(cellExportText(record, MONEY)).toBe(renderCellValue(record.sprk_totalamount, 'currency', '$1,200.00'));
   });
 
   it('formats a plain number the way the cell does', () => {
     const record = { sprk_totalamount: 100 };
-    expect(moneyExportText(record, MONEY)).toBe(renderCellValue(100, 'currency'));
+    expect(cellExportText(record, MONEY)).toBe(renderCellValue(100, 'currency'));
   });
 
   it('is empty for an empty amount, as the cell is', () => {
-    expect(moneyExportText({ sprk_totalamount: null }, MONEY)).toBe('');
-    expect(moneyExportText({}, MONEY)).toBe('');
+    expect(cellExportText({ sprk_totalamount: null }, MONEY)).toBe('');
+    expect(cellExportText({}, MONEY)).toBe('');
+  });
+});
+
+describe('cellExportText — every column exports the text the cell shows (D-34, #3045)', () => {
+  const OPTION_SET = { value: 1, extensionData: null };
+  const col = (renderer: string, extra: { isPrimaryName?: boolean } = {}) => ({ name: 'c', renderer, ...extra });
+  /** What the grid draws for the cell. */
+  const shown = (record: Record<string, unknown>, renderer: string) =>
+    renderCellValue(record.c, renderer, formattedLabelOf(record, 'c'));
+
+  it.each(['default', 'badge', 'link'])('an option set exports its formatted label under the %s renderer', renderer => {
+    const record = { c: OPTION_SET, '@formattedValues': { c: 'Draft' } };
+    expect(cellExportText(record, col(renderer))).toBe('Draft');
+    expect(cellExportText(record, col(renderer))).toBe(shown(record, renderer));
   });
 
-  it('declines every other renderer, so their export is left alone', () => {
-    const record = {
-      sprk_note: 'x',
-      status: { value: 1, extensionData: null },
-      '@formattedValues': { status: 'Draft' },
-    };
-    for (const renderer of ['default', 'badge', 'link', 'date', 'datetime', 'dateonly', 'percentage']) {
-      expect(moneyExportText(record, { name: 'status', renderer })).toBeUndefined();
+  it('a lookup with a formatted label exports the label; with only a name exports the name', () => {
+    expect(
+      cellExportText({ c: { id: '1', name: 'raw' }, '@formattedValues': { c: 'Contact One' } }, col('default'))
+    ).toBe('Contact One');
+    expect(cellExportText({ c: { id: '1', name: 'Smith, Jo' } }, col('default'))).toBe('Smith, Jo');
+  });
+
+  it('an object with no label and no name exports an empty string, never JSON, equal to the empty cell', () => {
+    for (const value of [OPTION_SET, { id: 'c-1' }, {}, { value: 5 }]) {
+      const record = { c: value };
+      expect(cellExportText(record, col('default'))).toBe('');
+      expect(cellExportText(record, col('default'))).toBe(shown(record, 'default'));
     }
+    // Other renderers too: an object never reaches the file as JSON or "[object Object]".
+    for (const renderer of ['percentage', 'date', 'datetime', 'dateonly', 'currency']) {
+      expect(cellExportText({ c: { extensionData: null } }, col(renderer))).toBe('');
+    }
+  });
+
+  it('an unlabelled `{ value, label }` object exports its label', () => {
+    expect(cellExportText({ c: { value: 1, label: 'Open' } }, col('default'))).toBe('Open');
+  });
+
+  it('the primary-name column exports as the grid draws it (default renderer, label wins)', () => {
+    expect(cellExportText({ c: 'INV-1' }, col('link', { isPrimaryName: true }))).toBe('INV-1');
+    expect(cellExportText({ c: { name: 'Acme' } }, col('link', { isPrimaryName: true }))).toBe('Acme');
+  });
+
+  it('must-not-fire: plain strings, numbers and booleans export as the default formatting writes them', () => {
+    expect(cellExportText({ c: 'hello, "world"' }, col('default'))).toBe('hello, "world"');
+    expect(cellExportText({ c: 42 }, col('default'))).toBe('42');
+    expect(cellExportText({ c: 0 }, col('default'))).toBe('0');
+    expect(cellExportText({ c: true }, col('default'))).toBe('true');
+    expect(cellExportText({ c: false }, col('default'))).toBe('false');
+    expect(cellExportText({ c: null }, col('default'))).toBe('');
+    expect(cellExportText({}, col('default'))).toBe('');
+  });
+
+  it('a number or boolean the server labelled exports the label the grid shows (D-34 F2a)', () => {
+    const yes = { c: true, '@formattedValues': { c: 'Yes' } };
+    expect(cellExportText(yes, col('default'))).toBe('Yes');
+    expect(cellExportText(yes, col('default'))).toBe(shown(yes, 'default'));
+    const grouped = { c: 1234, '@formattedValues': { c: '1,234' } };
+    expect(cellExportText(grouped, col('default'))).toBe('1,234');
+    expect(cellExportText(grouped, col('default'))).toBe(shown(grouped, 'default'));
+    // The same values with no label are the raw text, as before (must-not-fire pair).
+    expect(cellExportText({ c: true }, col('default'))).toBe('true');
+    expect(cellExportText({ c: 1234 }, col('default'))).toBe('1234');
+  });
+
+  it('an AliasedValue (a link-entity column) exports its inner text, never JSON (K5)', () => {
+    const aliased = (value: unknown) => ({
+      c: { attributeLogicalName: 'name', entityLogicalName: 'account', value },
+    });
+    expect(cellExportText(aliased('Acme'), col('default'))).toBe('Acme');
+    expect(cellExportText(aliased(7), col('default'))).toBe('7');
+    expect(cellExportText(aliased(null), col('default'))).toBe('');
+    expect(cellExportText(aliased({ id: 'x', name: 'Smith' }), col('default'))).toBe('Smith');
+    expect(cellExportText(aliased({ value: 1, extensionData: null }), col('default'))).toBe('');
+  });
+
+  it('a date column exports the date the grid draws, not the raw UTC timestamp (owner decision 2026-11-24)', () => {
+    const labelled = { '@formattedValues': { c: 'Oct 2, 2026' } };
+    for (const renderer of ['date', 'dateonly', 'datetime']) {
+      const record = { c: '2026-10-02T12:00:00Z', ...labelled };
+      const text = cellExportText(record, col(renderer));
+      expect(text).toBe(shown(record, renderer));
+      expect(text).not.toBe('2026-10-02T12:00:00Z');
+      expect(text).not.toBe('Oct 2, 2026'); // the client format wins over the server label, as on screen
+    }
+    expect(cellExportText({ c: '2026-10-02T12:00:00Z' }, col('date'))).toBe(
+      new Date('2026-10-02T12:00:00Z').toLocaleDateString()
+    );
+    expect(cellExportText({ c: '2026-10-02T12:00:00Z' }, col('datetime'))).toBe(
+      new Date('2026-10-02T12:00:00Z').toLocaleString()
+    );
+    const instant = new Date('2026-10-02T12:00:00Z');
+    expect(cellExportText({ c: instant }, col('datetime'))).toBe(instant.toLocaleString());
+  });
+
+  it('an empty or invalid date exports as an empty field, never "Invalid Date"', () => {
+    for (const renderer of ['date', 'dateonly', 'datetime']) {
+      expect(cellExportText({ c: null }, col(renderer))).toBe('');
+      expect(cellExportText({}, col(renderer))).toBe('');
+    }
+    expect(cellExportText({ c: 'not a date' }, col('datetime'))).toBe('');
+    expect(cellExportText({ c: new Date(Number.NaN) }, col('date'))).toBe('');
+  });
+
+  it('must-not-fire: a plain percentage, and a Date in a non-date column, keep the raw value', () => {
+    expect(cellExportText({ c: 0.25, '@formattedValues': { c: '25.00%' } }, col('percentage'))).toBeUndefined();
+    expect(cellExportText({ c: new Date('2026-10-02T12:00:00Z') }, col('default'))).toBeUndefined();
   });
 });
 
