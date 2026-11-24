@@ -245,12 +245,17 @@ public sealed record RegistryCredentialModeUpdate(
 /// with this environment, if any. Populated when SetupStatus is
 /// <c>Running</c> or <c>WaitingOnGate</c>; may be null for terminal states.
 /// </param>
+/// <param name="ProvisionedOn">
+/// <c>sprk_provisionedon</c> — set by H13 when a run completes (the first provisioning, then every upgrade), null while
+/// the stamp has never been provisioned. POST /api/runs uses it to recognise an upgrade of an existing stamp (ISS-031).
+/// </param>
 public sealed record DataverseEnvironmentRegistrySnapshot(
     string EnvironmentId,
     string CustomerId,
     string TenantId,
     string SetupStatus,
-    string? CurrentRunId);
+    string? CurrentRunId,
+    DateTimeOffset? ProvisionedOn = null);
 
 /// <summary>
 /// Inputs to a single <see cref="IDataverseEnvironmentRegistryClient.UpdateSetupStatusAsync"/>
