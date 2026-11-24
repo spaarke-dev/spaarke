@@ -4,7 +4,7 @@
     <title>ISS-015 (#2743) + ISS-026 (#2877): the five eBilling code pages are linted by client-lint, locally and in CI</title>
     <phase>Issue fix; filed 2026-11-12 (084a) and 2026-11-17 (084h-4)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits a CI workflow (hot path) and may edit .ts/.tsx in five code pages.</rigor-reason>
     <model-tier>sonnet</model-tier>

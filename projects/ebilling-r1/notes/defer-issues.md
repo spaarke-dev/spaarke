@@ -749,7 +749,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work/ebilling-r1 at dbbad24b09 (task iss015: InvoiceFiles, InvoiceReview, CreateInvoiceWizard, RuleReview and RecordProcedures under client-lint locally and in CI; 39 found, 2 fixed, 37 ratcheted); closes with the master PR |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 084a quality gate (the Step 9.5 lint check could not run) |
@@ -2092,7 +2092,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work/ebilling-r1 at dbbad24b09 (task iss015: InvoiceFiles, InvoiceReview, CreateInvoiceWizard, RuleReview and RecordProcedures under client-lint locally and in CI; 39 found, 2 fixed, 37 ratcheted); closes with the master PR |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Sonnet review of task 084h-4 (found in passing; pre-existing) |
