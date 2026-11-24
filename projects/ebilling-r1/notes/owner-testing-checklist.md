@@ -124,7 +124,7 @@ These states are hard to cause by hand; they need a fault during a decision. If 
 
 ## M. Notifications (task 132): ready to test on dev (BFF 5ae2804884 live ~02:01Z 2026-11-19; firm notice Action seeded ~02:05Z)
 
-Firm emails come from the shared mailbox. Reject and Return emails go only when the reviewer confirms a notice. The step that does that is built (132ui) but is not on dev until the Invoice Review page is redeployed (see M2).
+Firm emails come from the shared mailbox. Reject and Return emails go only when the reviewer confirms a notice. The step that does that is built (132ui) but is not on dev until task 112 deploys the Invoice Review page (see M2).
 - [ ] Submit an invoice that the checks reject. The submitter (and the firm's billing contact, if they can open that matter) gets one email with the findings table in the body.
 - [ ] Approve an invoice with an adjustment. The same two people get one email; approving with no adjustment sends none.
 - [ ] A billing contact who has no access to a secure matter gets no email for that matter's invoice.
@@ -133,7 +133,7 @@ Firm emails come from the shared mailbox. Reject and Return emails go only when 
 - [ ] With eBilling switched off, the portal bell shows no billing items.
 - [ ] The "notice text" field is locked (applied to dev 2026-11-17, ready to test now). As a non-admin user, the submission form shows the field masked (\*\*\*\*\*) and you can't edit it. It disappears from the form once the SpaarkeMaster release with task 132's form change is imported.
 
-### M2. Notice to the firm on Reject / Return (task 132ui): after the Invoice Review page is redeployed to dev (your OK)
+### M2. Notice to the firm on Reject / Return (task 132ui): after task 112 deploys the Invoice Review page to dev (owner 2026-11-23: wait for 112; the page has never been on dev)
 
 On an In Review invoice, choose Decide → Reject or Return to firm, give a reason, then Next:
 - [ ] A **Notify firm** step shows the drafted subject and message, and says whether the AI wrote it or the standard wording was used. Approve never shows this step.
