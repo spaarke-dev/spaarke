@@ -1036,8 +1036,22 @@ public static class ContainerItemEndpoints
             var form = await request.ReadFormAsync(ct);
             formFile = form.Files["file"];
         }
-        catch (Exception ex) when (ex is not SdapProblemException)
+        catch (IOException ex) when (!ct.IsCancellationRequested && ex is not Microsoft.AspNetCore.Connections.ConnectionResetException)
         {
+            // ISS-049 (the ISS-043 handling): a truncated multipart body, or a non-multipart body under a multipart content type, ends the
+            // parser's stream early with an IOException. It is the client's fault, so 400, logged at Warning with the exception type and
+            // HResult only (never the message, which can echo request content, nor a stack trace). The same type is a server-side temp-disk
+            // fault when the parser buffers a large file part, which is why the Warning is not dropped. An IOException of an abandoned request
+            // (the token is cancelled) or of a reset connection is caught by neither this clause nor the one below: it passes through.
+            logger.LogWarning(
+                "A multipart request body could not be read ({ExceptionType}, HResult 0x{HResult:X8}); answered 400. Container: {ContainerId}, TraceId: {TraceId}",
+                ex.GetType().Name, ex.HResult, id, context.TraceIdentifier);
+            return ProblemDetailsHelper.ValidationError("Failed to read the uploaded file from the request.");
+        }
+        catch (Exception ex) when (ex is not (SdapProblemException or OperationCanceledException or IOException))
+        {
+            // ISS-049: cancellation is no longer caught here (an abandoned upload is not a fault, and was logged with a stack trace and
+            // answered 400). IOException is handled above or passes through; every other exception keeps this handling.
             logger.LogWarning(ex,
                 "Failed to read multipart form for upload — Container: {ContainerId}, TraceId: {TraceId}",
                 id, context.TraceIdentifier);

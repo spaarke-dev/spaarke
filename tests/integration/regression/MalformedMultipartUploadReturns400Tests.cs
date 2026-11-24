@@ -26,6 +26,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -34,6 +35,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Tests.Api.Finance;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Xunit;
@@ -81,6 +83,107 @@ public sealed class MalformedMultipartUploadReturns400Tests : IClassFixture<Malf
         text.Should().NotContain("   at ", "no stack frame may reach the client");
     }
 
+    private const string FaultHeader = MalformedMultipartFixture.FaultHeader;
+
+    private static string PathFor(string route, string session) =>
+        route == VisualizationRoute
+            ? "/api/ai/visualization/related-from-content"
+            : $"/api/ai/chat/sessions/{session}/documents";
+
+    // ISS-049: the ISS-043 handling on the chat document and visualization routes.
+    private async Task<(HttpResponseMessage Response, string Text)> PostAsync(string route, HttpContent content, string? fault = null)
+    {
+        var caller = Guid.NewGuid().ToString();
+        var path = PathFor(route, route == VisualizationRoute ? string.Empty : await _fixture.CreateSessionAsync(caller));
+        using var client = _fixture.CreateClientFor(caller);
+        if (fault is not null)
+        {
+            client.DefaultRequestHeaders.Add(FaultHeader, fault);
+        }
+
+        _fixture.Warnings.Entries.Clear();
+        var response = await client.PostAsync(path, content);
+        return (response, await response.Content.ReadAsStringAsync());
+    }
+
+    private IEnumerable<(LogLevel Level, string Message, Exception? Exception)> ReadFailureLogs() =>
+        _fixture.Warnings.Entries.Where(e => e.Message.Contains("multipart request body could not be read"));
+
+    [Theory(DisplayName = "ISS-049 must-fire: a multipart body with no closing boundary is a 400 (not a 500) and is logged at Warning without the message")]
+    [InlineData(VisualizationRoute)]
+    [InlineData(ChatDocumentRoute)]
+    public async Task UploadRoute_NoClosingBoundary_Is400_AndLogsAWarning(string route)
+    {
+        using var content = MalformedMultipartBodies.NoClosingBoundary();
+
+        var (response, text) = await PostAsync(route, content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, text);
+        text.Should().Contain("Request body is not valid multipart/form-data.");
+        var entry = ReadFailureLogs().Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(nameof(IOException)).And.Contain("HResult");
+        entry.Message.Should().NotContain("x.pdf", "the file name is not logged");
+        entry.Exception.Should().BeNull("the exception object (and so its message) is not logged");
+    }
+
+    [Theory(DisplayName = "ISS-049 must-fire: a body stream that fails with an IOException (token not cancelled) is a 400 logged at Warning without the message")]
+    [InlineData(VisualizationRoute)]
+    [InlineData(ChatDocumentRoute)]
+    public async Task UploadRoute_BodyStreamFault_Is400_AndLogsAWarning(string route)
+    {
+        using var content = MalformedMultipartBodies.NoClosingBoundary();
+
+        var (response, text) = await PostAsync(route, content, fault: "io");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, text);
+        var entry = ReadFailureLogs().Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(nameof(IOException)).And.Contain("HResult");
+        entry.Message.Should().NotContain(MalformedMultipartBodies.FaultMessage, "the parser's message can echo request content");
+        entry.Exception.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "ISS-049 must-not-fire: a body that fails because the client abandoned the request, or reset the connection, is not a 400 and logs no multipart Warning")]
+    [InlineData(VisualizationRoute, "abandoned")]
+    [InlineData(VisualizationRoute, "reset")]
+    [InlineData(ChatDocumentRoute, "abandoned")]
+    [InlineData(ChatDocumentRoute, "reset")]
+    public async Task UploadRoute_AbandonedOrReset_IsNotA400_AndLogsNoWarning(string route, string fault)
+    {
+        using var content = MalformedMultipartBodies.NoClosingBoundary();
+
+        // An abandoned request may surface to the test client as the cancellation itself (the test server reports "The application aborted
+        // the request"); any answer it does give must not be a 400.
+        try
+        {
+            var (response, text) = await PostAsync(route, content, fault);
+            response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest, text);
+        }
+        catch (OperationCanceledException)
+        {
+            // The route let the abandonment pass through.
+        }
+
+        ReadFailureLogs().Should().BeEmpty();
+    }
+
+    /// <summary>A well-formed upload still passes the read (here it stops at the extension check, a 422 / 400 of the route, not the body fault).</summary>
+    [Theory(DisplayName = "ISS-049 must-not-fire: a well-formed multipart upload is read as before (answered by the route's own validation, no multipart Warning)")]
+    [InlineData(VisualizationRoute)]
+    [InlineData(ChatDocumentRoute)]
+    public async Task UploadRoute_WellFormedBody_IsReadAsBefore(string route)
+    {
+        using var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("not an allowed type")), "file", "notes.exe");
+
+        var (response, text) = await PostAsync(route, content);
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.InternalServerError, text);
+        text.Should().NotContain("Request body is not valid multipart/form-data.");
+        ReadFailureLogs().Should().BeEmpty();
+    }
+
     private static HttpContent BuildMalformedBody(string kind)
     {
         if (kind == EmptyMultipart)
@@ -105,6 +208,12 @@ public sealed class MalformedMultipartFixture : CustomWebAppFactory
 {
     public const string TenantId = "tenant-malformed-multipart";
 
+    /// <summary>ISS-049: a request header naming a body fault the host simulates before the route runs: io, abandoned (token cancelled first) or reset.</summary>
+    public const string FaultHeader = "X-Test-Body-Fault";
+
+    /// <summary>ISS-049: what the host logged (level, formatted message, exception).</summary>
+    internal MalformedMultipartBodies.LogCapture Warnings { get; } = new();
+
     public async Task<string> CreateSessionAsync(string ownerOid)
     {
         using var scope = Services.CreateScope();
@@ -127,6 +236,9 @@ public sealed class MalformedMultipartFixture : CustomWebAppFactory
 
         builder.ConfigureTestServices(services =>
         {
+            services.AddSingleton<ILoggerProvider>(Warnings);
+            services.AddTransient<IStartupFilter>(_ => new BodyFaultStartupFilter());
+
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, MalformedMultipartFakeAuthHandler>(MalformedMultipartFakeAuthHandler.SchemeName, _ => { });
             services.PostConfigure<AuthenticationOptions>(options =>
@@ -177,4 +289,33 @@ internal sealed class MalformedMultipartFakeAuthHandler : AuthenticationHandler<
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, SchemeName));
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName)));
     }
+}
+
+/// <summary>
+/// ISS-049: first in the pipeline, replaces the request body (and token) with a faulting one when a test asks for it with
+/// <see cref="MalformedMultipartFixture.FaultHeader"/>. Requests without the header are untouched.
+/// </summary>
+internal sealed class BodyFaultStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, nextMiddleware) =>
+        {
+            switch (context.Request.Headers[MalformedMultipartFixture.FaultHeader].ToString())
+            {
+                case "io":
+                    MalformedMultipartBodies.Apply(abandoned: false)(context);
+                    break;
+                case "abandoned":
+                    MalformedMultipartBodies.Apply(abandoned: true)(context);
+                    break;
+                case "reset":
+                    MalformedMultipartBodies.ApplyConnectionReset()(context);
+                    break;
+            }
+
+            await nextMiddleware(context);
+        });
+        next(app);
+    };
 }
