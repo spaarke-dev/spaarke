@@ -1,5 +1,5 @@
 /**
- * @spaarke/ai-outputs — Output Widgets barrel export
+ * src/outputs — Output Widgets barrel export
  *
  * Output pane widget components added wave by wave.
  * Default exports are re-exported as named exports for consumers that need

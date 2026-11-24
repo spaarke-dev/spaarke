@@ -26,8 +26,8 @@ import type { SourceWidgetProps } from '../types/widget-types';
 export interface DocumentViewerData {
   /** Pre-resolved document URL (from BFF / SpeFileStore). */
   documentUrl: string;
-  /** Display name of the document. */
-  fileName: string;
+  /** Display name of the document. Optional: the viewer falls back to a generic label. */
+  fileName?: string;
   /** MIME type — used to pick iframe vs. object rendering. */
   mimeType?: string;
   /** Whether to show the download button. Defaults to false. */
@@ -148,7 +148,7 @@ function DocumentViewerWidget(props: SourceWidgetProps<DocumentViewerData>) {
             appearance="subtle"
             icon={<ArrowDownloadRegular />}
             onClick={handleDownload}
-            aria-label={`Download ${data?.fileName ?? 'document'}`}
+            aria-label={`Download ${data.fileName ?? 'document'}`}
           >
             Download
           </Button>
@@ -159,16 +159,16 @@ function DocumentViewerWidget(props: SourceWidgetProps<DocumentViewerData>) {
         {isPdf ? (
           <object
             className={styles.objectEl}
-            data={data?.documentUrl}
+            data={data.documentUrl}
             type="application/pdf"
-            aria-label={data?.fileName ?? 'PDF document'}
+            aria-label={data.fileName ?? 'PDF document'}
           >
             {/* Fallback for browsers that cannot render PDF inline */}
             <div className={styles.fallback}>
               <DocumentRegular fontSize={40} />
               <Text>
                 PDF preview unavailable.{' '}
-                {data?.canDownload && (
+                {data.canDownload && (
                   <Button appearance="transparent" onClick={handleDownload}>
                     Download to view.
                   </Button>

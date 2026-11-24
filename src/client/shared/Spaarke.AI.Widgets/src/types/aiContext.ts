@@ -11,6 +11,8 @@
  * Standards: ADR-012 (shared library), ADR-015 (AI data governance).
  */
 
+import type { IAiPaneEvent } from '@spaarke/ui-components';
+
 // ---------------------------------------------------------------------------
 // Entity context
 // ---------------------------------------------------------------------------
@@ -76,28 +78,12 @@ export interface StreamingState {
 
 /**
  * AI pane-routing SSE event forwarded from the BFF stream.
- * Mirrors IAiPaneEvent from @spaarke/ui-components SprkChat types but is
- * re-declared here so this package's public types do not depend on SprkChat's.
+ *
+ * One definition (DEF-006, P-6): this is SprkChat's `IAiPaneEvent`, the type the
+ * SprkChat fetch loop emits. `@spaarke/ui-components` cannot import this package
+ * (ai-widgets depends on it), so the shape lives there and is aliased here.
  */
-export interface AiPaneEvent {
-  /** Discriminates the target pane and event semantics. */
-  event: 'output_pane' | 'source_pane' | 'source_highlight';
-  /**
-   * Widget type string matching OutputWidgetType or SourceWidgetType enum values.
-   * Present on output_pane and source_pane events.
-   */
-  widgetType?: string;
-  /**
-   * Widget-specific data payload (shape is widget-dependent).
-   * Present on output_pane and source_pane events.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload?: any;
-  /** Source reference identifier for source_highlight events. */
-  sourceRef?: string;
-  /** Selection reference within the source widget for source_highlight events. */
-  selectionRef?: string;
-}
+export type AiPaneEvent = IAiPaneEvent;
 
 /**
  * Callbacks for direct SSE streaming into the editor (bypasses BroadcastChannel).
@@ -125,8 +111,8 @@ export interface StreamingCallbacks {
 // Chat session
 // ---------------------------------------------------------------------------
 
-/** A chat session, matching ChatSessionCreatedResponse from the create endpoint. */
-export interface IChatSession {
-  sessionId: string;
-  createdAt: string;
-}
+/**
+ * A chat session, matching ChatSessionCreatedResponse from the create endpoint.
+ * One definition (DEF-006, P-6): SprkChat's `IChatSession`, re-exported.
+ */
+export type { IChatSession } from '@spaarke/ui-components';

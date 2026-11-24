@@ -34,7 +34,6 @@ on:
       - 'src/solutions/SpaarkeAi/**'
       - 'src/client/shared/Spaarke.UI.Components/**'
       - 'src/client/shared/Spaarke.AI.Widgets/**'
-      - 'src/client/shared/Spaarke.AI.Outputs/**'
       - 'src/client/shared/Spaarke.Events.Components/**'
       - 'src/client/shared/Spaarke.SmartTodo.Components/**'
       - 'src/client/shared/Spaarke.DailyBriefing.Components/**'

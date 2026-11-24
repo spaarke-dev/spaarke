@@ -1,5 +1,5 @@
 /**
- * @spaarke/ai-outputs — Type Definitions
+ * AI output and source pane widgets (src/outputs) — Type Definitions
  *
  * Core widget type definitions for the AI output and source pane registries.
  * NOT PCF-safe — requires React 19.
@@ -120,74 +120,7 @@ export interface CrossPaneLink {
   sourceSelectionRef: string;
 }
 
-// ---------------------------------------------------------------------------
-// Chat history
-// ---------------------------------------------------------------------------
-
-/**
- * A single message in the AI chat history.
- * Populated by Wave 3 task 032.
- */
-export interface ChatMessage {
-  /** Unique message identifier. */
-  id: string;
-  /** Message role: user input or AI assistant response. */
-  role: 'user' | 'assistant';
-  /** Message content (may include markdown). */
-  content: string;
-  /** ISO 8601 timestamp when the message was created. */
-  createdAt: string;
-}
-
-/**
- * Chat session data shape (BFF thread + messages).
- * Renamed from ChatSession to ChatSessionData (Wave 3, task 032) to avoid a
- * conflict with the former chat-history ChatSession UI type (deleted 2026-10-03, C-14).
- */
-export interface ChatSessionData {
-  /** Unique session identifier (maps to AI thread ID). */
-  sessionId: string;
-  /** Ordered list of messages in this session. */
-  messages: ChatMessage[];
-  /** ISO 8601 timestamp when the session was created. */
-  createdAt: string;
-  /** ISO 8601 timestamp of the last message. */
-  lastMessageAt: string;
-}
-
-// ---------------------------------------------------------------------------
-// SSE event payload stubs
-// ---------------------------------------------------------------------------
-
-/**
- * Base shape for SSE events directed at the output pane.
- * Refined in Wave 3 task 030.
- */
-export interface OutputPaneEvent {
-  event: 'output_pane';
-  widgetType: OutputWidgetType;
-  payload: unknown;
-}
-
-/**
- * Base shape for SSE events directed at the source pane.
- * Refined in Wave 3 task 030.
- */
-export interface SourcePaneEvent {
-  event: 'source_pane';
-  widgetType: SourceWidgetType;
-  payload: unknown;
-}
-
-/**
- * Base shape for SSE source highlight events.
- * Refined in Wave 3 task 030.
- */
-export interface SourceHighlightEvent {
-  event: 'source_highlight';
-  sourceRef: string;
-  selectionRef: string;
-}
-
-/** Union of all output-pane-related SSE event types. */
-export type AiOutputSseEvent = OutputPaneEvent | SourcePaneEvent | SourceHighlightEvent;
+// Pane-routing SSE events and the chat-session shape are NOT defined here
+// (DEF-006, P-6): the one definition is SprkChat's `IAiPaneEvent` /
+// `IChatSession` in @spaarke/ui-components, aliased by this package's
+// `types/aiContext.ts` as `AiPaneEvent` / `IChatSession`.
