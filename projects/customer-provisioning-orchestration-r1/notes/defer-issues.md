@@ -58,7 +58,7 @@ Reconciliation were seeded on dev by standalone `scripts/seed-*-workspace-layout
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed by PR #3012 (merged `b9a4d6b5a7`, 2026-11-23): schema `buildId` + parity test + skill Step 1.0/4.0 send it; L2 Worker deploy pending (owner OK) |
+| **Status** | Fixed by PR #3012 (merged `b9a4d6b5a7`, 2026-11-23): schema `buildId` + parity test + skill Step 1.0/4.0 send it; no deploy needed (skill / prereq files only) |
 | **Urgency** | before the next upgrade run that must not move the BFF |
 | **Filed** | 2026-11-23 |
 | **Source** | ACME upgrade run `3b6f7b65` (2026-11-20): `buildId = 2026.10.16-2` was added to the POST outside the schema-valid intake — a recorded deviation |
@@ -81,7 +81,7 @@ intake step; add a test that every catalog key has a schema property or is liste
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed by PR #3013 (merged `b76078668c`, 2026-11-23): `RecordFailureGate` tags markers, `MarkPhaseSucceeded` clears them, H13 records its own success; L2 Worker deploy pending (owner OK) |
+| **Status** | Fixed by PR #3013 (merged `b76078668c`, 2026-11-23): `RecordFailureGate` tags markers, `MarkPhaseSucceeded` clears them, H13 records its own success; dev L2 Worker deployed from master `7dc36ac0f5` 2026-11-23 (owner OK), healthy |
 | **Urgency** | before any tooling reads `gateStates` (fleet view, provisioning web UI) |
 | **Filed** | 2026-11-23 |
 | **Source** | ACME upgrade run `3b6f7b65` ended `Completed` with five `Pending` gates and H13 in `failedHandlers` |
@@ -222,7 +222,7 @@ Raise the default `ImportTimeout` to at least 120 min. On a timeout, record the 
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed by PR #3017 (merged `7dc36ac0f5`, 2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. L2 Worker deploy pending (owner OK) |
+| **Status** | Fixed by PR #3017 (merged `7dc36ac0f5`, 2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. needs the dev L2 **API** deploy (CreateRun is in the API app; the Worker deploy of 2026-11-23 does not carry it) |
 | **Urgency** | now (every upgrade of an existing stamp) |
 | **Filed** | 2026-11-20 |
 | **Source** | ACME upgrade to SpaarkeMaster 1.3.2.0: the first `POST /api/runs` returned 400 `registry-setup-status-not-in-progress` |
@@ -256,7 +256,7 @@ on the server.
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed by PR #3015 (merged `22c42efad6`, 2026-11-23): an unavailable name that exists in the stamp RG passes as OWNED (H2a rule); L2 Worker deploy pending (owner OK) |
+| **Status** | Fixed by PR #3015 (merged `22c42efad6`, 2026-11-23): an unavailable name that exists in the stamp RG passes as OWNED (H2a rule); no deploy needed (skill / prereq files only) |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-20 |
 | **Source** | ACME upgrade prechecks (skill Step 1e-ter), 2026-11-20 |
