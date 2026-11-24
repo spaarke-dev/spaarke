@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss015" project="ebilling-r1">
+  <metadata>
+    <title>ISS-015 (#2743) + ISS-026 (#2877): the five eBilling code pages are linted by client-lint, locally and in CI</title>
+    <phase>Issue fix; filed 2026-11-12 (084a) and 2026-11-17 (084h-4)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits a CI workflow (hot path) and may edit .ts/.tsx in five code pages.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows the existing client-lint pattern for other pages; mechanical with a ratchet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, ci-workflows, testing</tags>
+  </metadata>
+
+  <prompt>Full entries: projects/ebilling-r1/notes/defer-issues.md, ISS-015 and ISS-026. src/solutions/{InvoiceFiles,InvoiceReview,CreateInvoiceWizard,RuleReview,RecordProcedures} each declare "lint": "eslint src --ext .ts,.tsx" but have no eslint dependency and no config, so npm run lint fails; .github/workflows/client-lint.yml path filters (~28-37 and ~62-70) and its package list cover only the shared libs, DocumentUploadWizard, SpaarkeAi, LegalWorkspace, Reporting and SemanticSearch. These pages are linted nowhere, so hooks-rule and unused-code errors reach master unchecked.
+Find how Reporting and LegalWorkspace are covered end to end (client-lint.yml filters, the npm cache key's lock-file list ~107, scripts/quality/client-lint/client-lint.mjs package list, eslint.client.config.mjs, eslint-suppressions.json ratchet, and how a developer runs it locally) and add the five pages the same way.
+Also (iss047 K3): tests/scripts/Check-TaskStatusDrift.Tests.ps1 is not run in CI; .github/workflows/ci-standalone-checks.yml lists its Pester files one by one. Add it there the way its neighbours are listed, with the Pester version the file declares (5.7.1).</prompt>
+
+  <constraints>
+    <constraint>Use the existing client-lint mechanism only (no second ESLint setup, no per-page config, no new npm dependency in the pages). Each page's local "lint" script either runs client-lint for that page or is removed; say which in the notes and keep it consistent across the five.</constraint>
+    <constraint>Errors client-lint reports in these pages: fix real defects (hooks-rule violations, unused code that is truly dead) when the fix is local and safe and the page's tests still pass; ratchet the rest into eslint-suppressions.json using the file's existing mechanism (new violations fail, known ones listed). Never add suppressions for packages other than these five, never edit other packages' entries, and never weaken a rule globally. Record counts (found / fixed / ratcheted per page) in the notes. Open PRs #3071 and #3060 also touch client-lint files: keep your suppression diff to your own entries so it merges cleanly.</constraint>
+    <constraint>CI workflow edits: only the path filters, package/lock-file lists and the one Pester entry. Do not change triggers, required-check names, runners or other jobs. Verify the YAML parses (e.g. actionlint if available, or a YAML parse) and that client-lint.mjs run locally on the five pages exits 0 after the ratchet, and non-zero when you introduce a deliberate new violation (then revert it).</constraint>
+    <constraint>Run each touched page's own tests (jest or vitest, whichever the page uses) and npm run build where you changed source. Install with npm install --legacy-peer-deps --no-audit --no-fund where needed. Never use --no-verify or git stash. Never run python. Never kill processes. Do not edit anything under .claude/. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss015-ebilling-pages-client-lint.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">client-lint lints the five pages locally and in CI (path filters and package list), exits 0 on the branch, and fails on a new violation.</criterion>
+    <criterion testable="true">Remaining known violations are ratcheted per page and counted in the notes; no other package's entries change.</criterion>
+    <criterion testable="true">The drift-check Pester file runs in ci-standalone-checks.yml.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
