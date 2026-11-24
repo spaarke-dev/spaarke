@@ -113,4 +113,76 @@ public sealed partial class InvoiceApprovalServiceTests
         clean.Should().OnlyContain(l => w.Row("sprk_billingevent", l.Id).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value == (int)InvoiceLineStatus.Accepted);
         w.ApproveRecords.Should().ContainSingle();
     }
+
+    [Fact(DisplayName = "ISS-050 fix 1 (F1): approve's bulk accept with a slow pre-write phase (2 minutes per owner question, 3 lines = 6 minutes, past the approval's 5-minute lock) renews and approves")]
+    public async Task Approve_SlowPreWritePhase_RenewsTheHeldLineLock_AndApproves()
+    {
+        var (w, clock, locks, clean) = RenewalWorld();
+        w.Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                clock.Advance(TimeSpan.FromMinutes(2));
+                return Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Owned(Guid.Parse("03000000-0000-4000-8000-0000000000f0"));
+            });
+        var start = clock.GetUtcNow();
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Approved);
+        (clock.GetUtcNow() - start).Should().BeGreaterThan(InvoiceApprovalService.LockDuration);
+        var key = InvoiceLineDecisionService.LockKeyFor(w.InvoiceId);
+        var owner = LineLockOwner(w, locks);
+        locks.Gaps(key, owner).Should().OnlyContain(gap => gap < InvoiceApprovalService.LockDuration, "the line lock never lapsed");
+        w.RecordsOf("accept-line").Should().HaveCount(3);
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 1 (F1-low): when this approve already wrote (it completed an earlier bulk accept) and the bulk accept then loses the lock before its own write, the 503 never says 'nothing was changed'; the repeat approves")]
+    public async Task Approve_LostAfterThisApproveWrote_NeverSaysNothingWasChanged()
+    {
+        var (w, _, locks, clean) = RenewalWorld();
+        // An earlier approve's bulk accept wrote this line (Accepted, reviewed by the caller) and stopped before its record.
+        var earlier = w.AddLine(InvoiceLineStatus.Accepted, 100m, approved: 100m);
+        earlier["sprk_reviewedby"] = new EntityReference("systemuser", AliceUser);
+
+        // Fail the first renewal made after the earlier line's record exists: the bulk accept's first checkpoint, before its own write.
+        var failed = false;
+        locks.RenewAnswer = _ =>
+        {
+            if (!failed && w.RecordsOf("accept-line").Count == 1)
+            {
+                failed = true;
+                return false;
+            }
+
+            return null;
+        };
+
+        var result = await w.ApproveAs(AliceUser);
+
+        failed.Should().BeTrue();
+        result.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        result.Code.Should().Be(InvoiceApprovalCodes.Unavailable);
+        result.FailedStep.Should().Be("accept-clean");
+        result.Detail.Should().Be(InvoiceApprovalService.ApproveNotFinishedText).And.NotContain("nothing was changed");
+        w.RecordsOf("accept-line").Should().ContainSingle("the earlier line was recorded by this approve; the Clean lines were not touched");
+        clean.Should().OnlyContain(l => w.Row("sprk_billingevent", l.Id).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value == (int)InvoiceLineStatus.Clean);
+
+        var retried = await w.ApproveAs(AliceUser);
+
+        retried.Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.RecordsOf("accept-line").Should().HaveCount(4);
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 1 (F1-low): a lock lost before this approve wrote anything still says nothing was changed")]
+    public async Task Approve_LostBeforeAnyWrite_SaysNothingWasChanged()
+    {
+        var (w, _, locks, _) = RenewalWorld();
+        locks.RenewAnswer = n => n == 0 ? false : null;
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        result.Detail.Should().Contain("nothing was changed");
+        w.Writes.Should().Be(0);
+    }
 }

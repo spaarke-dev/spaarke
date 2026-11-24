@@ -868,7 +868,8 @@ public sealed partial class InvoiceLineDecisionServiceTests
         w.AddLine(100m, InvoiceLineStatus.Accepted, extraction: Extraction);
         w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
 
-        var result = await w.Service().WriteUnreviewedAsync(w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, CancellationToken.None);
+        var result = await w.Service().WriteUnreviewedAsync(
+            w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, "approval-owner", TimeSpan.FromMinutes(5), CancellationToken.None);
 
         result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
         w.Corrections.Should().BeEmpty();

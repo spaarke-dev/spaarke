@@ -183,6 +183,88 @@ public sealed partial class InvoiceLineDecisionServiceTests
         lines.Should().OnlyContain(l => Status(w, l) == InvoiceLineStatus.Accepted);
     }
 
+    /// <summary>Moves the clock inside each owner question for the correction rows (one per line, before the first write).</summary>
+    private static void OnOwnerQuestion(World w, Action tick) =>
+        w.Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                tick();
+                return w.Owner;
+            });
+
+    // ── Fix round 1 (F1): the read-and-validate phase before the first write renews too ──
+
+    [Fact(DisplayName = "ISS-050 fix 1 (F1): a slow pre-write phase (40 s per owner question, 4 lines = 160 s, past the 2-minute lock) renews before the owner questions and completes")]
+    public async Task SlowPreWritePhase_Renews_AndCompletes()
+    {
+        var (w, clock, locks, lines) = LongWorld(4);
+        var start = clock.GetUtcNow();
+        OnOwnerQuestion(w, () => clock.Advance(TimeSpan.FromSeconds(40)));
+
+        var result = await w.Service().AcceptCleanAsync(w.InvoiceId, Guid.NewGuid(), Decider, CancellationToken.None, CallerToken);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        (clock.GetUtcNow() - start).Should().BeGreaterThan(TwoMinutes, "the pre-write phase alone outlived one lock duration");
+        var key = InvoiceLineDecisionService.LockKeyFor(w.InvoiceId);
+        var owner = locks.Acquires.Should().ContainSingle().Subject.Owner;
+        locks.Renewals.Should().HaveCountGreaterThanOrEqualTo(3).And.OnlyContain(r => r.Key == key && r.Owner == owner && r.Duration == TwoMinutes);
+        locks.Gaps(key, owner).Should().OnlyContain(gap => gap < TwoMinutes, "the lock never lapsed before the first write");
+        w.H.Created.Should().HaveCount(4);
+        lines.Should().OnlyContain(l => Status(w, l) == InvoiceLineStatus.Accepted);
+    }
+
+    [Fact(DisplayName = "ISS-050 fix 1 (F1): a lock lost in a slow pre-write phase is 503 unavailable with nothing written, and a repeat AS SLOW as the first call completes because it renews")]
+    public async Task LostInASlowPreWritePhase_TheEquallySlowRepeatCompletes()
+    {
+        var (w, clock, locks, lines) = LongWorld(4);
+        OnOwnerQuestion(w, () => clock.Advance(TimeSpan.FromSeconds(40)));
+        locks.RenewAnswer = n => n == 0 ? false : null;
+        var decisionId = Guid.NewGuid();
+
+        var lost = await w.Service().AcceptCleanAsync(w.InvoiceId, decisionId, Decider, CancellationToken.None, CallerToken);
+
+        lost.Status.Should().Be(LineDecisionStatus.Unavailable);
+        lost.Detail.Should().Contain("nothing was changed");
+        NothingWritten(w);
+
+        var renewalsBefore = locks.Renewals.Count;
+        var again = await w.Service().AcceptCleanAsync(w.InvoiceId, decisionId, Decider, CancellationToken.None, CallerToken);
+
+        again.Status.Should().Be(LineDecisionStatus.Applied, "the repeat is just as slow, and renews");
+        locks.Renewals.Count.Should().BeGreaterThan(renewalsBefore + 1);
+        var owner = locks.Acquires[1].Owner;
+        locks.Gaps(InvoiceLineDecisionService.LockKeyFor(w.InvoiceId), owner).Should().OnlyContain(gap => gap < TwoMinutes);
+        w.H.Created.Should().HaveCount(4);
+        lines.Should().OnlyContain(l => Status(w, l) == InvoiceLineStatus.Accepted);
+    }
+
+    // ── Fix round 1 (item 3): only the last line's Signal close is left ──
+
+    [Fact(DisplayName = "ISS-050 fix 1: a lock lost after the last line's record, before its Signal close, is 503 incomplete at 'signals'; the repeat closes it without a second record")]
+    public async Task LostBeforeTheLastClose_IsIncompleteAtSignals()
+    {
+        var (w, clock, locks, lines) = LongWorld(1);
+        OnRecord(w, () => clock.Advance(TimeSpan.FromSeconds(40)));
+        locks.RenewAnswer = n => n == 0 ? false : null;
+        var decisionId = Guid.NewGuid();
+
+        var result = await w.Service().AcceptCleanAsync(w.InvoiceId, decisionId, Decider, CancellationToken.None, CallerToken);
+
+        result.Status.Should().Be(LineDecisionStatus.Incomplete);
+        result.Code.Should().Be(LineDecisionCodes.Incomplete);
+        result.FailedStep.Should().Be(InvoiceLineDecisionService.SignalsStep);
+        result.CommittedLineIds.Should().Equal(lines[0].Id);
+        w.H.Created.Should().ContainSingle("the record was written");
+        w.Closes.Should().BeEmpty("the close was not attempted after the lock was lost");
+
+        var again = await w.Service().DecideAsync(
+            Command(w, LineDecisionAction.Accept, [new(lines[0].Id)], decisionId: decisionId, bulk: true), CancellationToken.None);
+
+        again.Status.Should().Be(LineDecisionStatus.Applied);
+        w.H.Created.Should().ContainSingle("no second record");
+        w.ClosedBy.Should().ContainSingle();
+    }
+
     // ── (4) A short call completes as before, with no renewal ──
 
     [Fact(DisplayName = "ISS-050 (4): a short call makes no renewal and completes exactly as before; its lock is released owner-checked")]
