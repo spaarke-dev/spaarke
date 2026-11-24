@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: #3051 merged; master PR #3065 open with the issue batch; checklist Q re-run pending with the owner)
+> **Last Updated:** 2026-11-24 (checkpoint: #3051 and #3065 merged; issue batch 2 (iss050, iss047, iss041) running in agents; checklist Q re-run pending with the owner)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,7 +10,8 @@
 
 ## Quick recovery
 
-- **Master PR #3065 MERGED** 2026-11-24 16:53Z at 6d167e0646 (owner: "Yes, auto-merge"; ontology-r1 approved the DecisionRecordWriter part; the Office add-ins workflow's two server-test runs were cancelled, the same shards passed in CI Tier 2). #2878, #2933, #2978, #2889, #2880 closed. Work merged master after it. Earlier state: issue batch iss027 (#2878), iss042 (#2933), iss043 (#2978 + ISS-035 #2889), iss029 (#2880) + notes. Work merged master cf1b7027ce first (167de5cdb7): BFF build 0 warnings, filtered Sprk.Bff.Api.Tests 3,507/0; no file overlap with 33 open PRs. Not bound, no auto-merge; merge as a merge commit once CI and the owner agree. spa-r4 copied (firm labels; K1 errorCode) and ontology-r1 asked to review `DecisionRecordWriter.PreflightBillingRepeat`. K-limits in each task's notes. Found in passing and filed: ISS-049 #3057, ISS-050 #3059. Label wording "Line date" / "Description" kept (owner, EB-D-268). **Do not push new work to work/ebilling-r1 while #3065 is open** unless it should join that PR.
+- **Issue batch 2 in flight (2026-11-24):** POMLs iss050 (#3059, lock renewal, Opus), iss047 (#3042, drift-check id grammar, Sonnet), iss041 (#2930, finish-decision notify after reload, client-only option a, Sonnet). Implementer agents in worktrees on branches `task/ebilling-iss050`, `-iss047`, `-iss041`, base b4746e24df (work after merging master 20129e985c). Next: adversarial review each (Opus for iss050, Sonnet for the others) → fix rounds → `--no-ff` merge into work.
+- **Master PR #3065 MERGED** 2026-11-24 16:53Z at 6d167e0646 (owner: "Yes, auto-merge"): iss027 (#2878), iss042 (#2933), iss043 (#2978 + #2889), iss029 (#2880), all closed. Found in passing and filed: ISS-049 #3057, ISS-050 #3059. Label wording "Line date" / "Description" kept (owner, EB-D-268).
 - **Master PR #3051 MERGED** 2026-11-24 15:14Z at cf1b7027ce (owner: "Yes, merge #3051"): iss048, iss046 (#3001), the rule-type options script fix. iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
 - **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
 - **Dev BFF 0362599b94** live since 2026-11-24 (uac-r2's deploy; carries 050c). healthz 200; confirm and reject return 401 unauthenticated. Evidence: `notes/050c-confirm-followups.md`. Owner checklist **R** (Office add-in) is ready to test.
