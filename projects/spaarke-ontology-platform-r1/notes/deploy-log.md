@@ -1,5 +1,12 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-24 15:21Z — dev write: one Assign Task decision to reproduce #3063 (DI-171)
+
+- **Owner go:** "Yes, reproduce it" (2026-11-24, chat), answering whether to run one Assign Task decision on dev with the reason captured.
+- **What was written** (Console Worklist, product path): POL-MATTER-NOBUDGET item on "Commercial matter" (rule is Off; the item would have closed at tonight's pass). Create budget skipped; Assign Task to the same contact as the 14:40Z run (picked by its email in the lookup), email notification on; no next steps. Result: task `887c91df-b9a5-47ae-b308-81582a6cdbf8` (team-owned), Decision Record `0c88e1b7-1ae8-f111-84ea-002248359bb2`, the item closed (184 left for the rule). Same warning as before: "The task was assigned, but no email was sent: the assignee does not have access to this record." No email sent; nothing else written.
+- **Reason captured** (App Insights, operation `6d9b3d8e525c69eea462b213f8e11b0c`): `RetrievePrincipalAccess` for the assignee's linked user on the new task, asked app-only AS that user (impersonated), answered **403** with an access-denied code, read as rights `None`; gate line: "[ASSIGN-TASK-NOTIFY] … no email, the user cannot read the task." The same question asked without impersonation answers Read (mcp-r1, earlier). The user is Administrative access mode, unlicensed, no roles of its own; its only role comes through its BU team.
+- **Main session did not** run the impersonated call itself (blocked by this session's permission rules; not worked around).
+
 ## 2026-11-24 ~05:35Z — check: task 206 on dev (dev BFF `0362599b94`, deployed by uac-r2 on owner go, live ~05:21Z)
 
 - Main session, Claude in Chrome, read-only (nothing clicked beyond tabs; nothing saved). Console Worklist and Ontology admin → Rules load on the new build; all 6 rules listed with their lane, On/Off, version, open items and action rate; POL-MATTER-NOBUDGET still Off (187 open until the nightly pass).
