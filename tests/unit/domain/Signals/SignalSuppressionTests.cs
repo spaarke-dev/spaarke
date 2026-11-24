@@ -1250,6 +1250,23 @@ public partial class SignalSuppressionTests
     }
 
     [Fact]
+    [Trait("status", "new")]
+    public async Task Task205_PartitionsOfSignals_ReadsARowsSignalsInOneQuery_AndAMissingSignalStillThrows()
+    {
+        // Ontology task 205 (DI-146): a row decision's families are read with one paged query, not one Retrieve per Signal.
+        var s = new Store();
+        var ids = Enumerable.Range(0, 18).Select(_ => s.Open(MatterId, Guid.NewGuid(), secure: true, family: Store.ProjectA)).ToList();
+
+        var families = await s.Service.PartitionsOfSignalsAsync(ids, default);
+
+        families.Should().HaveCount(18).And.OnlyContain(f => f == FamilyA);
+        s.QueriesOf("sprk_signal").Should().Be(1, "18 Signals are one page");
+
+        await s.Service.Invoking(x => x.PartitionsOfSignalsAsync([ids[0], Guid.NewGuid()], default))
+            .Should().ThrowAsync<InvalidOperationException>("a Signal the read does not return has an unknown family");
+    }
+
+    [Fact]
     public async Task R4_TwoSecureFamilies_UnderOneReadableMatter_EachHaveTheirOwnCount()
     {
         var s = new Store();
