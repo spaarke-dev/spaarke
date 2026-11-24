@@ -56,4 +56,4 @@ Closed 2026-11-23: the owner waived both items when closing Phase 0.
 - ~~What did the test user see at **Connect**: sign-in only, or a consent screen too? (T5 follow-up)~~ Waived.
 - ~~Save the T1 Chat screenshot to `notes/spikes/evidence/`~~ Waived; the evidence stays "shared in session" plus App Insights.
 
-Tenant clean-up after 040: the owner deletes the "Spaarke MCP spike" plugin (connectors A and B) in admin center Agents > Tools > Registry. A tenant-wide Copilot tidy-up and cross-project coordination are proposed as one coordinating project/session.
+Tenant clean-up: ✅ the owner deleted the "Spaarke MCP spike" plugin (connectors A and B) on 2026-11-24, after S-1, and uploaded the 040 package `spaarke-plugin.zip` (skills only) the same day. A tenant-wide Copilot tidy-up and cross-project coordination are proposed as one coordinating project/session.
