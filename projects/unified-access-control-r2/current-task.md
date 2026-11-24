@@ -12,7 +12,7 @@
 | Field | Value |
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). `uac-r2` is authoritative, reviews peers, runs EVERY dev deploy. Live actions need the owner's go IN THIS SESSION; a BFF deploy needs the owner to name the exact SHA here ("BFF deploy <sha>"); a go relayed by another session is not a go. ≤ 2 agents at once. |
-| **Dev BFF** | **`996928732e` LIVE since ~03:01Z 2026-11-24** (`C:/wtdep20`, ledger 162; owner "BFF deploy 996928732e"). MCP ON (unchanged since 00:21:47Z). Rollback: `22c42efad6` (`C:/wtdep19`), then `a48398746d` (`C:/wtdep18`). Detail in Next Actions. |
+| **Dev BFF** | **`0362599b94` LIVE since ~05:21:45Z 2026-11-24** (`C:/wtdep21`, ledger 163; owner "BFF deploy 0362599b94"). MCP ON (unchanged). Rollback: `996928732e` (`C:/wtdep20`), then `22c42efad6` (`C:/wtdep19`). Detail in Next Actions. |
 | **Master** | `996928732e` or later. |
 | **Agents running** | None. |
 | **#3030 (owner: "ensure fully researched and fixed")** | DIAGNOSIS DONE: dev key `sprk_graphitemid_uk` is **Active**, 672 rows / 672 distinct `sprk_graphitemid` (no dupes), key addressing works (GET by key 200, PATCH missing key with If-Match * → 404), BFF creates documents normally (60 since 11-01), no key errors in 30 days. **The health check is a false alarm since it shipped**: `RetrieveEntity` with `EntityFilters.Entity` returns EMPTY Keys (live-verified; Attributes/All return all 3) → probe reports NOT FOUND, startup log says "unreadable" + wrong (dedupe) remedy. NO data repair needed. FIX: **PR #3032** (branch `fix/3030-compose-key-probe`, commit `632557c63e`, from master `33d7c6a6ad`, worktree C:/wt3030; issue #3030 retitled + corrected comment posted): `BuildKeyStatusRequest()` with `EntityFilters.Attributes`; startup log NOT FOUND branch with re-import remedy; 4 new tests in `ComposeIdentityKeyHealthCheckContractTests` (request must ask for Attributes; 3 startup-log cases). Tests 23/23, 0 warnings; must-fire verified (Entity → request test fails). Owner "Merge when green" 2026-11-24 → GitHub auto-merge (squash) ON for head `632557c63e`; master requires Router + Client lint. NEXT: merged → rides next dev BFF candidate → confirm startup log says `= Active` and /healthz/catalog drops the entry. Merge = owner go; deploy rides the next candidate (owner exact-SHA go). |
@@ -29,7 +29,13 @@
 ## Open work (mine)
 - **#2845 latency:** not met (notifications p50 ≈ 2.7 s). Recheck at this gate if external SPA traffic exists. Scratchpad `lat-now.ps1`, `lat-seq.ps1`.
 - **spa-r4 031 FR-18 review 2026-11-23:** 11 columns approved; `sprk_regardingmatter` (+ existing `sprk_regardingproject`) parent-name disclosure ACCEPTED by owner (notes/decisions.md 2026-11-23). Contact lookups also return GUID + logical name: fine (identifier, not access). **DEPLOY-ORDER RULE: once 031 is on master, NO dev SPA deploy (by anyone) until a BFF carrying 031's ReadableColumns is live** (else every matter/project/WA read → 400 DV_FETCHXML_COLUMN_NOT_PERMITTED). 22c42efad6 does not contain 031.
-- **NEXT CANDIDATE `0362599b94f76f2486ba3b6cb7f60d95b3fce7cf`** (master, `C:/wtdep21`, clean), on top of live 996928732e. It carries:
+- **LIVE ON DEV since ~05:21:45Z 2026-11-24 (owner "BFF deploy 0362599b94"; ledger 163):** `0362599b94`, deployed from `C:/wtdep21`.
+  - Checks: 4/4 hashes, 41.98 MB, healthz 200, preview-url 403, bogus 404, spike 404, MCP 5 tools, served widget sha = dist (3BD9CC62…42A3), Compose `= Active`, only the known routing drift.
+  - Notices sent: spa-r4 (SPA hold LIFTED on the uac side; a SPA deploy still needs the owner's per-SHA go there), mcp-r1, ebilling-r1, ontology-r1.
+  - Gate: background `sleep 1800; gate-now.ps1 2026-11-24T05:21:30Z` (~05:52Z).
+  - Rollback: `996928732e` (`C:/wtdep20`).
+  - Next: spa-r4 #3048 (033 + 035 threadId, diff APPROVED), once merged on the owner's go.
+- **Previous candidate record `0362599b94f76f2486ba3b6cb7f60d95b3fce7cf`** (master, `C:/wtdep21`, clean), on top of live 996928732e. It carries:
   - spa-r4 031 (#3033, bd40b57b03): ReadableColumns; merged diff checked against the approval; LIFTS spa-r4's SPA hold once live;
   - ontology 206 (#3035);
   - ebilling 050c (#3038), authorization approved;
