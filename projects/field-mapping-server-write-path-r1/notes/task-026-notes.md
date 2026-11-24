@@ -131,3 +131,12 @@ Left unchanged (not `bindLookup` fragments; resolved already by exact column): `
   - ADR-002: no plugin, the server owns mapping.
 - **Dead code:** the cascade removal leaves none. The Work Assignment host does not call `resolveUserBuDefaults`.
 - **Stale comment** (`ChildRecordEndpoints.InferMappingSourceTables`, sprk_event "joins with task 026"): wording only. It is fixed the next time that BFF file is touched, like 045e K8, and gets no PR of its own.
+
+## On master (2026-11-24)
+
+- **#3049 merged** as dc33f14d35 (a merge commit).
+- **One Tier 1 flake on the way:**
+  - What failed: `DataGrid.persistedSettings` "Clear all also clears the column filters" (`Unable to find role="textbox"`). It failed on attempt 1 and passed on the re-run, on the same commit.
+  - Cause: the test's `applyTextFilter` helper waited a fixed 120 ms for the filter popover.
+  - Tracking: filed as #3064. Already fixed on master by spa-r4's #3055 (8dd44cf528), which waits for the popover's textbox and Apply button and reopens it up to 3 times. #3064 is closed against #3055.
+  - Nothing of this project's needed changing.
