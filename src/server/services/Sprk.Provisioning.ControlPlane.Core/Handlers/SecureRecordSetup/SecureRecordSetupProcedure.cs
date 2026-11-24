@@ -1330,8 +1330,9 @@ public sealed class SecureRecordSetupProcedure
                     $"{InviteTable}.{InviteCodeHashColumn}: IsAuditEnabled={(exposure is null ? "(column not readable)" : exposure.IsAuditEnabled)}, " +
                     $"IsValidForAdvancedFind={(exposure is null ? "(column not readable)" : exposure.IsValidForAdvancedFind)} " +
                     "(expected both false). The package ships the column with auditing and Advanced Find off; turn them off — " +
-                    "import SpaarkeMaster (H6), or run scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply for the environment " +
-                    "and check it with -Verify — then resume. H7b changes no column setting. Nothing was written.");
+                    "run scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply for the environment (it sets both off; it takes " +
+                    "-BffApplicationIds) and check it with -Verify — then resume. A SpaarkeMaster re-import does not clear a " +
+                    "value set by hand. H7b changes no column setting. Nothing was written.");
             }
             notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access, auditing and Advanced Find off.");
         }

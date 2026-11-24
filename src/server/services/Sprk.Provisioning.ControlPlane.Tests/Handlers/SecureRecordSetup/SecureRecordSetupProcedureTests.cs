@@ -1190,7 +1190,9 @@ public sealed class SecureRecordSetupProcedureTests
         var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn, FailureClass.Resumable);
 
         refused.Diagnostic.Should().Contain("contact.sprk_externalinvitecodehash").And.Contain(expectedValues)
-            .And.Contain("Set-ExternalInviteCodeHashSchema.ps1").And.Contain("H7b changes no column setting");
+            .And.Contain("Set-ExternalInviteCodeHashSchema.ps1 -Apply").And.Contain("H7b changes no column setting");
+        // The only remedy is the script: a SpaarkeMaster import (H6) skips an unchanged version and cannot clear a hand-set value.
+        refused.Diagnostic.Should().NotContain("import SpaarkeMaster (H6)");
         dv.Writes.Should().BeEmpty();
     }
 
