@@ -93,6 +93,10 @@ Entra-protected MCP servers can't use dynamic client registration, so the static
 - **Update:**
   - We send a new zip with the same app id and a higher `version`.
   - The admin uploads it, and it shows as **Update pending** in Agents › All agents › Requests. Users keep the old version until the admin approves ([Learn](https://learn.microsoft.com/microsoft-agent-365/admin/agent-requests#requested-agents-pending-update)). **[Learn]**
+  - **Observed 2026-11-24 (V1 run 1) [verified]:**
+    - An **admin's own upload** of an update went straight into the catalog (Version 1.1.1 in agent details), with nothing in Requests. Update pending applies to submissions, not to the admin's own uploads.
+    - Users' **installed copies lag**: the user's Copilot store card still showed 1.1.0, and the agent still called the 1.1.0 action. Plan for **version skew** after every update (hours, by Microsoft Q&A answers up to 24 h).
+    - The BFF must accept the previous package version's calls (BR-4). The `?pkg=` marker measures how fast customers converge.
   - Users may have to consent to the update.
   - Pinned agents may need re-pinning ([Learn](https://learn.microsoft.com/microsoft-365/copilot/extensibility/convert-declarative-agent)). **[Learn]**
   - Our G8-P2 owner saw no pending request for the 802fd9cc updates. We need to confirm whether those updates were applied silently or never applied (V1).
