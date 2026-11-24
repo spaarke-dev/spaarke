@@ -147,7 +147,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | iss029 | ✅ [done 2026-11-24, merged 5f75e3e930] | ISS-029 #2880: a line decision repeated with other content answers 409 id_reused and writes nothing | FULL | opus / high | none | 095f-2d1 |
 | iss042 | ✅ [done 2026-11-24, merged 1b756a83d3] | ISS-042 #2933: firm rejection findings show firm labels, not raw valuesRead keys | FULL | sonnet / high | none | 130c, 134 |
 | iss050 | 🔲 [open] | ISS-050 #3059: the line-decision lock is renewed during a long call; a call that loses it stops and answers incomplete | FULL | opus / high | none | iss029 |
-| iss047 | 🔲 [open] | ISS-047 #3042: drift check reads iss-prefixed and hyphen-suffixed task ids | STANDARD | sonnet / high | none | none |
+| iss047 | ✅ [done 2026-11-24, merged 219c0c6207; Sonnet review, fix round 1 (F1 word-marker rows, 132ui, ranges); Pester 28/0] | ISS-047 #3042: drift check reads iss-prefixed and hyphen-suffixed task ids | STANDARD | sonnet / high | none | none |
 | iss041 | 🔲 [open] | ISS-041 #2930: finishing a stranded reject/return after a reload can still send the firm notice | FULL | sonnet / high | none | 132ui |
 | iss027 | ✅ [done 2026-11-24, merged fbba523806] | ISS-027 #2878: RecordProcedures Reason boxes keep a long paste and hold Finish over the limit | FULL | sonnet / high | none | 084h-4 |
 | 084h-5 | ✅ [squash-merged into work (EB-D-251 option B: derived id only for condition-cleared and Procedure); Opus review + fix rounds on the r1 branch; ontology-r1 PASS; uac-r2 OK; known limit: derivable record id, see uac-r2 thread] | Keyed Decision Records get a derived primary id: Dataverse refuses a duplicate (EB-D-247, ontology-r1 option 1) | FULL | opus / high | none | 084h-3 |
@@ -221,7 +221,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 130g | ✅ [merged into work 6b84fb1db1 2026-11-20; server only, the SPA shows it in 134] | Firm view: show the reviewer-confirmed notice prose as the firm-safe reason (EB-D-259) | STANDARD | sonnet / high | none | 130f, 132 |
 | 132ui | ✅ [merged into work 04718b3224; page deploy to dev needs the owner OK] | Invoice Review notify step: see, edit and confirm the 131 notice before Reject / Return (EB-D-258) | FULL | sonnet / high | none | 132 |
 | 132 | ✅ [server half merged into work 42382e6d9f; Opus review + second access review + 4 fix rounds; uac-r2 PASS; firmnoticetext field-security dev apply waits for the owner's OK; K16 accepted] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 024, 103, 104 |
-| 133 | ⏭️ [withdrawn by EB-D-254 (owner option b): no PDF file in R1; on-screen report (134, printable) and the findings table in the notice email (131/132)] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
+| 133 | ⏭️ [cancelled] withdrawn by EB-D-254 (owner option b): no PDF file in R1; on-screen report (134, printable) and the findings table in the notice email (131/132)] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
 | 134 | ✅ [merged into work 5f7195b9eb 2026-11-21; spa-r4 review held until the PR to master; UI tests at 136] | SPA invoice detail and on-screen report | FULL | sonnet / high | P5-B | 130 |
 | 135 | ✅ [merged; uac-r2 PASS incl. F2 fail-closed test, spa-r4 PASS; BillingGuidelines 57/0] | SPA Billing Guidelines view | STANDARD | sonnet / high | P5-B | 076, 130 |
 | 136 | 🔲 [open] | Deploy WP5 to dev | STANDARD | sonnet / high | none (deploy) | 130, 131, 132, 133, 134, 135, 112 |

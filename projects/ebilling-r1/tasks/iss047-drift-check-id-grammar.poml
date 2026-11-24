@@ -4,7 +4,7 @@
     <title>ISS-047 (#3042): the task-status drift check reads iss-prefixed and hyphen-suffixed task ids correctly</title>
     <phase>Issue fix; filed 2026-11-24 from the index tidy-up</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One shared PowerShell script plus its tests; no product code.</rigor-reason>
     <model-tier>sonnet</model-tier>

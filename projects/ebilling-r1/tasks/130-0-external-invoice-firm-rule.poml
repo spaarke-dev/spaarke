@@ -4,7 +4,7 @@
     <title>External invoices: apply the firm rule on every path</title>
     <phase>5 Partner surfaces; lands before 130b</phase>
     <gate>Branch from origin/work/ebilling-r1 at 13a8c63292 or later</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tenant isolation: decides which invoices an external partner can see on every external path.</rigor-reason>
     <model-tier>opus</model-tier>
