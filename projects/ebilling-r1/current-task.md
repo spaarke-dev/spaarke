@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: issue batch 2 merged into work, master PR #3073 open; checklist Q re-run pending with the owner) running in agents; checklist Q re-run pending with the owner)
+> **Last Updated:** 2026-11-24 (checkpoint: #3073 merged at fa96792811; work synced with master; checklist Q re-run pending with the owner) running in agents; checklist Q re-run pending with the owner)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,12 +10,11 @@
 
 ## Quick recovery
 
-- **Master PR #3073 OPEN (2026-11-24):** issue batch 2, all merged into work and reviewed.
+- **Master PR #3073 MERGED** 2026-11-24 21:32Z at fa96792811 (owner: "Yes, auto-merge"; required checks passed; the advisory Tier 2 api-office shard shows "fail" because its job was cancelled after its tests ran: verdict artifact = pass, 583/0). #3059, #2930, #3042 closed. Work fast-forwarded to master. Batch 2:
   - iss050 (#3059): lock renewal; merged 7da8f29320 after an Opus review, fix rounds 1-2 and a Sonnet re-check.
   - iss041 (#2930): finish-decision notice after a reload; merged efab4736b6 after a Sonnet review, fix round 1 and a re-check PASS.
   - iss047 (#3042): drift-check id grammar; merged 219c0c6207 after a Sonnet review and fix round 1.
   - Work tip: build 0 warnings; filtered InvoiceLineDecision|InvoiceApproval tests 439/0; no overlap with open PRs.
-  - Not bound and no auto-merge. Merge as a merge commit once CI passes and the owner says go. Do not push new work to work/ebilling-r1 while #3073 is open, unless it should join that PR.
 - **Index after the fixed drift check:**
   - 0 status drifts. The 8 POMLs it exposed (084h-1, 095c-5, 130-0, 130-0b, 130e-1, 151c-1a/1b/2) were set to completed; each merge sha was verified as an ancestor.
   - 27 unpaired entries remain: 25 index sub-rows without a POML, plus 095d-1 and 095d-2. The POMLs say not-started, but the 095d row says 1a/1b/1c and 2b-* are merged. Resolve them from evidence.
