@@ -75,3 +75,16 @@ NoAccess), 79 passed (the four controls). Client: with master's `decisionDisplay
 ## Defects found outside this task's scope
 
 None.
+
+## BFF hygiene (section 10)
+
+- Publish size, fresh worktrees at short paths (master `6d167e0646` in `C:\wt207m`, branch commit in `C:\wt207b`), `dotnet publish -c Release
+  src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` (framework-dependent linux-x64), `Compress-Archive -CompressionLevel Optimal`
+  over `deploy/api-publish/*`, PDBs included: master 43,571,517 bytes (41.55 MiB), branch 43,571,223 bytes (41.55 MiB), delta
+  -294 bytes. Files 194 and 194 (4 PDBs each).
+- `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages. No csproj, props or lockfile change.
+- Tests: `AssignTask` filter 170 passed; `Signals` filter 5403 passed, 6 skipped (includes the contract baselines); full
+  `Spaarke.ArchTests` 2793 passed; DecisionWizard jest 19 suites / 278 passed; `client-lint` controls and check exit 0;
+  `dotnet format --verify-no-changes` on the gate file clean. `tsc --noEmit` on Spaarke.UI.Components reports 13 errors
+  (TS2307 for the unbuilt workspace packages `@spaarke/auth` and `@spaarke/sdap-client`, and TS18046 in `FileUploadService.ts`),
+  none in the changed files.
