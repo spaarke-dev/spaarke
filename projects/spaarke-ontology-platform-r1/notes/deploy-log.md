@@ -1,5 +1,10 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-24 ~05:35Z — check: task 206 on dev (dev BFF `0362599b94`, deployed by uac-r2 on owner go, live ~05:21Z)
+
+- Main session, Claude in Chrome, read-only (nothing clicked beyond tabs; nothing saved). Console Worklist and Ontology admin → Rules load on the new build; all 6 rules listed with their lane, On/Off, version, open items and action rate; POL-MATTER-NOBUDGET still Off (187 open until the nightly pass).
+- Not exercisable on dev without test data: no stored plan on dev is refused, so the new DecisionPlanRefused log and `ontology.decisionplan.refused` count on the admin path cannot fire; the three authoring sentences (PlanMalformed, UnknownAction, nextSteps misplacement) are unreachable from the wizard, which builds plans from its own choices (only a direct `POST /authoring/validate` reaches them). Both are covered by 206's unit tests; no further dev check planned.
+
 ## 2026-11-24 ~03:20Z — check: task 203 wording on dev (dev BFF `996928732e`, deployed by uac-r2 on owner go)
 
 - Main session, Claude in Chrome, read-only (wizards opened and cancelled; nothing saved or recorded). All task 203 strings PASS: table display names in the rule wizard; "Choose at least one action."; "where the budget is active"; Assign Task "the person you choose"; Worklist summary names two lanes only. Gap outside scope filed: DI-169 #3040 (column logical names).
