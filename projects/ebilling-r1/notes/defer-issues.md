@@ -1894,7 +1894,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Open: found in the task 095d-2b-1 fix round (adversarial access review); predates the task |
+| **Status** | Done on work/ebilling-r1 at 6e9054434c (task iss025: scheduled re-send with back-off 1, 2, 4, 8 min capped at 15, logical attempt count, on sdap-jobs and sdap-communication; the communication HOLD final branch now fires); closes with the master PR |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-06 |
 | **Source** | ebilling-r1 task 095d-2b-1 fix round |
@@ -2072,7 +2072,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open (job platform; filed by ebilling-r1, which found it) |
+| **Status** | Done on work/ebilling-r1 at 6e9054434c (task iss025: scheduled re-send with back-off 1, 2, 4, 8 min capped at 15, logical attempt count, on sdap-jobs and sdap-communication; the communication HOLD final branch now fires); closes with the master PR |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Opus adversarial review of task 084h-3 (`RecordProcedureDecisionJob`), finding 6 |

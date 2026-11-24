@@ -4,7 +4,7 @@
     <title>ISS-025 (#2876) + DEF-055 (#2600): a failed job is retried with back-off, so a short outage no longer spends every delivery within seconds</title>
     <phase>Issue fix; filed 2026-11-06 (095d-2b-1) and 2026-11-17 (084h-3)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared BFF job processor (every IJobHandler) on the ADR-004 path.</rigor-reason>
     <model-tier>opus</model-tier>

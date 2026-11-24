@@ -153,7 +153,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | iss041 | ✅ [done 2026-11-24, merged efab4736b6; Sonnet review, fix round 1 (stuck form after a refused notice, recorded-stage intro, stale draft), re-check PASS; jest 653/0] | ISS-041 #2930: finishing a stranded reject/return after a reload can still send the firm notice | FULL | sonnet / high | none | 132ui |
 | iss049 | ✅ [done 2026-11-24, merged 7affeb4768] | ISS-049 #3057: chat document, visualization and SPE admin upload routes answer a broken multipart body with 400 | FULL | sonnet / high | none | iss043 |
 | iss015 | 🔲 [open] | ISS-015 #2743 + ISS-026 #2877: the five eBilling code pages are linted by client-lint (local and CI); drift-check Pester in CI | FULL | sonnet / high | none | none |
-| iss025 | 🔲 [open] | ISS-025 #2876 + DEF-055 #2600: failed jobs retried with back-off (scheduled re-send, logical attempt count) | FULL | opus / high | none | none |
+| iss025 | ✅ [done 2026-11-24, merged 6e9054434c] | ISS-025 #2876 + DEF-055 #2600: failed jobs retried with back-off (scheduled re-send, logical attempt count) | FULL | opus / high | none | none |
 | iss051 | 🔲 [open] | ISS-051 #3080: resolved UTBMS codes reach the Invoice Line code lookups (AP export and index carry the resolved code) | FULL | opus / high | none | none |
 | iss052 | 🔲 [open] | ISS-052 #3082: the SPA "Invoice received" screen links to the invoice and its matter / project / work assignment | FULL | opus / high | none | none |
 | iss027 | ✅ [done 2026-11-24, merged fbba523806] | ISS-027 #2878: RecordProcedures Reason boxes keep a long paste and hold Finish over the limit | FULL | sonnet / high | none | 084h-4 |
