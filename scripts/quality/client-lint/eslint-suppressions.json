@@ -271,11 +271,6 @@
       "count": 3
     }
   },
-  "src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/EmailReadingAttachments.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    }
-  },
   "src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/ensureAssociationColumns.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
