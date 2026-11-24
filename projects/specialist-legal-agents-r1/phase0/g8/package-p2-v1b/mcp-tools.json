@@ -1,0 +1,33 @@
+{
+  "tools": [
+    {
+      "name": "spaarke_show_decisions",
+      "title": "Show my decisions",
+      "description": "Use for: showing the signed-in user's Spaarke Decide lane, the Work Items waiting for their decision: the count per category (as the Spaarke Console's category cards show them) and the top items, each with a link to open it in Spaarke. Where the host shows widgets, the decisions widget lists the whole lane and is where items are decided. The optional category narrows the top items to one card: all, invoiceDecisions, askOutsideCounsel, approveOrRebudget, chaseReply or other. Privileged items are only counted, as 'N privileged items — open to review'; they are reviewed in the widget or in Spaarke. Not for: completing, dismissing or changing a decision (that happens in the widget or in Spaarke); the Do lane or items already decided or closed; searching documents, matters or email; the details of one item.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": ["all", "invoiceDecisions", "askOutsideCounsel", "approveOrRebudget", "chaseReply", "other"],
+            "description": "Optional. Narrow the top items to one category card of the Decide lane. Default: all."
+          }
+        },
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Show my decisions",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://spaarke/decisions.html",
+          "visibility": ["model", "app"]
+        }
+      }
+    }
+  ]
+}

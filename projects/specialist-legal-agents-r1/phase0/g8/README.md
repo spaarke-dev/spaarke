@@ -177,6 +177,17 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
   - At ~16:35Z the agent rendered the widget in a new chat (owner screenshot). The BFF logged 3 Sydney `tools/call` (16:35:30 `spaarke_get_decision_plan`, then 2 × `spaarke_list_decision_page`), all on the **plain URL**, with no `?pkg`.
   - The catalog and the server agree, so this is not yet a V1 verdict. Next: check Requests for **Update pending**, approve it, and re-run.
   - **Follow-up (owner, ~16:45Z):** the admin center agent details show **Version 1.1.1**; the user's Copilot store card shows **1.1.0**; nothing in Requests. So the **admin catalog accepted the update with no approval step**, and the **user's installed copy lags**. That is propagation to the client, not a V1 verdict. Microsoft Q&A answers cite up to 24 hours (rarely longer) for app changes to reach clients, which cache. Next: retry in Copilot on the web in a new chat. If it still shows 1.1.0, remove the agent from your Copilot and add it again from Built by your org, then ask again.
+  - **Run 2 (~16:50Z): 1.1.1 installed, action gone ❌.**
+    - The owner removed and re-added the agent (it went through the multi-step new-agent flow). Copilot then showed **1.1.1**.
+    - "show my decisions" got: "the required `spaarke_show_decisions` … action is not currently exposed to me".
+    - App Insights from 16:38:52Z to 16:52Z: **no request from Sydney at all**, on any URL, not even a 401. Only a Cowork `initialize`/`tools/list` at 16:49 (the tenant connector). So the action failed **before** reaching the BFF, the same pattern as 802fd9cc.
+    - **Two causes fit:**
+      - **(H1)** a catalog update that changes an action leaves it unloaded;
+      - **(H2)** Copilot rejects the `?pkg=` query string in an MCP action URL, so my test change itself broke it.
+  - **Run 3 (prepared): 1.1.2 separates H1 and H2.**
+    - `package-p2-v1b/` → `spaarke-legal-g8p2-sl-1.1.2.zip`: same id, **content identical to working 1.1.0** (diff checked), version only.
+    - **If it works:** updates do carry action changes (1.1.0 → 1.1.1 → 1.1.2 each changed the URL), and **query strings break MCP actions** (H2). BR-3 holds, plus a new rule: no query string in action URLs.
+    - **If it still says not exposed:** an action broken on an id stays broken through updates (H1, as 802fd9cc). BR-3 fails: action changes need a fresh id.
   - **Measurement caveat:** BFF requests are now sampled at **25%**, so not every call is logged. The `show_decisions` call for this turn is missing. Any logged call carrying `?pkg=1.1.1` is still proof; the absence of one needs several turns.
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.
