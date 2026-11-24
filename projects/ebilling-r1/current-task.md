@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: master PR #3051 open with iss048 + iss046; checklist Q first run Failed on a dev data gap, re-run pending)
+> **Last Updated:** 2026-11-24 (checkpoint: #3051 merged; master PR #3065 open with the issue batch; checklist Q re-run pending with the owner)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,8 +10,8 @@
 
 ## Quick recovery
 
-- **Issue batch (2026-11-24, owner: "proceed with other open tasks in parallel" while testing Q): all four ✅ merged into work, LOCAL ONLY.** iss027 fbba523806 (Sonnet review, no F), iss042 1b756a83d3, iss043 263aa4c674 (+ISS-035), iss029 5f75e3e930 (each Opus review + fix round 1, scoped re-check). K-limits in each task's notes. No package, project or DI change (publish-size: code-only, not measured, as earlier iss tasks). Found in passing and filed: ISS-049 #3057 (non-Finance upload routes), ISS-050 #3059 (line-decision lock under a large call). **Do not push work/ebilling-r1 while #3051 is open** (the merges would join that PR); after #3051 merges: push, then a new master PR. Copy spa-r4 at that PR (iss042 firm labels; ISS-035's repeated-field 400 on the external route has no top-level errorCode, K1) and ontology-r1 (iss029 adds `PreflightBillingRepeat` to `DecisionRecordWriter`). Owner question open: label wording "Line date" / "Description" (iss042).
-- **Master PR #3051 OPEN** (owner said "Yes open pr", 2026-11-24): iss048, iss046 (Closes #3001), the rule-type options script fix and notes. No conflicts with master at open. Not bound, no auto-merge. Merge as a merge commit once CI and the owner agree. After it merges: iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
+- **Master PR #3065 OPEN (2026-11-24):** issue batch iss027 (#2878), iss042 (#2933), iss043 (#2978 + ISS-035 #2889), iss029 (#2880) + notes. Work merged master cf1b7027ce first (167de5cdb7): BFF build 0 warnings, filtered Sprk.Bff.Api.Tests 3,507/0; no file overlap with 33 open PRs. Not bound, no auto-merge; merge as a merge commit once CI and the owner agree. spa-r4 copied (firm labels; K1 errorCode) and ontology-r1 asked to review `DecisionRecordWriter.PreflightBillingRepeat`. K-limits in each task's notes. Found in passing and filed: ISS-049 #3057, ISS-050 #3059. Owner question open: label wording "Line date" / "Description" (iss042). **Do not push new work to work/ebilling-r1 while #3065 is open** unless it should join that PR.
+- **Master PR #3051 MERGED** 2026-11-24 15:14Z at cf1b7027ce (owner: "Yes, merge #3051"): iss048, iss046 (#3001), the rule-type options script fix. iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
 - **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
 - **Dev BFF 0362599b94** live since 2026-11-24 (uac-r2's deploy; carries 050c). healthz 200; confirm and reject return 401 unauthenticated. Evidence: `notes/050c-confirm-followups.md`. Owner checklist **R** (Office add-in) is ready to test.
 - **Checklist Q first run (2026-11-24) Failed** on MAT-000113: the matter is root-BU owned on dev, so the submission was refused `record_owner_restricted_content_team_unresolved`. Not an eBilling defect; uac-r2 confirmed and filed the gap as #3047 (149 root-owned dev records; re-homing is an owner decision uac-r2 raises). Private detail stays with uac-r2. **Re-run:** PAT-792345, invoice number `2026024892`, PO blank (other BU1 matters are listed in checklist Q). Avoid MAT-000113 and MAT-000065.
