@@ -839,6 +839,31 @@ describe('Review round 1 F1-a: the banner\'s Finish repeats the wizard\'s reques
     }
   });
 
+  it('ISS-041 fix round 1 F1: a notice kept from the wizard that the banner\'s repeat gets refused is editable again, seeded with the text as sent', async () => {
+    const { decision } = strandingPage('Reject');
+    await sendThenStrand(FINISH_REJECT, REJECT, d => {
+      type(subjectBox(d), 'Edited subject (INV-2025-78232.1)');
+      type(proseBox(d), 'Edited message.');
+    });
+    decision.reject.mockResolvedValueOnce(
+      failed(problem(400, 'ebilling.notice_refused', { detail: 'The notice to the firm was not accepted (prose.digit). Nothing was decided. Edit the notice and try again.' }))
+    );
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    expect(within(dialog).queryByTestId('notify-step')).not.toBeInTheDocument();
+    fireEvent.click(finishBtn(dialog));
+    expect(await within(dialog).findByTestId('notice-refused')).toHaveTextContent('(prose.digit)');
+    expect(within(dialog).queryByTestId('finish-decision-locked')).not.toBeInTheDocument();
+    // The Notify step is back, holding the text as the wizard sent it, and no second draft was asked for.
+    expect(subjectBox(dialog).value).toBe('Edited subject (INV-2025-78232.1)');
+    expect(proseBox(dialog).value).toBe('Edited message.');
+    expect(decision.getFirmNoticeDraft).toHaveBeenCalledTimes(1);
+    type(proseBox(dialog), 'A corrected message.');
+    fireEvent.click(finishBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(3));
+    expect(decision.reject.mock.calls[2][3]).toEqual({ subject: 'Edited subject (INV-2025-78232.1)', prose: 'A corrected message.' });
+  });
+
   it('a Finish that comes back unsure again keeps the notice in the lock: the next Finish still carries it', async () => {
     const { decision } = strandingPage('Reject');
     await sendThenStrand(FINISH_REJECT, REJECT);
@@ -865,7 +890,9 @@ describe('Review round 1 F1-a: the banner\'s Finish repeats the wizard\'s reques
     const dialog = await finishDialog();
     const reads = decision.getApproval.mock.calls.length;
     fireEvent.click(finishBtn(dialog));
-    expect(await within(dialog).findByTestId('finish-decision-notice-refused')).toHaveTextContent('(prose.digit)');
+    // Fix round 1 F1 (ISS-041): the refusal is shown under the notice fields, which are editable again (see the next test).
+    expect(await within(dialog).findByTestId('notice-refused')).toHaveTextContent('(prose.digit)');
+    expect(within(dialog).queryByTestId('finish-decision-notice-refused')).not.toBeInTheDocument();
     expect(within(dialog).queryByTestId('finish-decision-error')).not.toBeInTheDocument();
     expect(decision.getApproval.mock.calls.length).toBe(reads);
     expect(finishBtn(dialog)).toBeEnabled();

@@ -50,10 +50,27 @@ Client-only (`src/solutions/InvoiceReview`). No server, route, schema, shared-li
 - Failing before, passing after: with `DecideInvoiceAction.tsx` restored to `b4746e24df` and the new tests in place, `finishIncompleteDecision.test.tsx` + `firmNoticeStep.test.tsx` gave 23 failed, 70 passed; with the change, 93 passed, 0 failed. (The five edited existing tests and the ISS-041 block fail on the old banner; the Approve and kept-notice must-not-fire tests pass on both, as intended.)
 - `npm run typecheck` (surface gate): Surface-owned 0 errors; the 99 shared-library errors are the known pre-existing ones.
 
+## Fix round 1 (adversarial review of `d206838a2a`)
+
+| Finding | Change | Test |
+|---|---|---|
+| F1: an unsure send from the offered form kept the notice in the lock and removed Notify; if the repeat then got 400 `notice_refused`, the form was stuck (reason read-only, Finish resent the refused notice). | `DecideInvoiceAction.tsx` `submit`: on a notice refusal while a notice is kept (`noticeLock`), `locks.clear('wizard')`, `setNoticeLock(undefined)`, `setLocked(false)` unless `recorded` (the record's reason stays read-only), and `offerNotice` is set so the Notify step is offered again. A notice kept from the wizard (never composed in this form) seeds the Notify entry from the lock, so the reviewer edits the text as sent (no second draft). A composed one keeps its `notices` entry. The refusal shows under the fields. Mirrors the wizard's review round 2. | `finishIncompleteDecision.test.tsx` "F1": unsure send, refusal, Notify back, edit, Finish sends the edited notice; turn it off after the refusal sends none; (must-not-fire) an unsure send not refused stays locked. `firmNoticeStep.test.tsx`: the wizard-kept notice refused on the banner repeat becomes editable. |
+| F2: the recorded-stage intro said "nothing can be changed" while a Notify step was offered; with an unreadable recorded reason (Finish off) Notify was still offered and drafted. | `finishDecisionIntro(outcome, repeatsSent, recorded, noticeOffered)` says "The notice to the firm can still be set below." when the step is shown. A recorded reject or return whose reason the page cannot read sets `offerNotice` false at open: no Notify, no draft, no "No email is sent" line; the intro keeps "nothing can be changed". | "F2": the intro (pure, with must-not-fire), a recorded reject shows the new intro with Notify, an unreadable recorded reason offers none and asks for no draft. |
+| K: a draft still in flight from an earlier opening could settle the next opening's loading entry. | `useNoticeDrafts.ts`: a generation counter bumped by `reset`; an answer from an older generation is dropped. Nothing resets the wizard's, so it is unchanged. | "K": cancel while the draft is out, reopen, the old 429 arrives, the new opening is still loading and then gets its own draft. |
+
+Behaviour change to an earlier test: 132ui's "a 400 notice_refused on the banner is shown in the form" (a notice kept from the wizard, refused on the banner repeat) used to expect the read-only refusal bar; it now expects the refusal under the editable Notify fields (the old bar remains for a form that does not offer Notify).
+
+After round 1: `npx jest` 18 suites, **653 passed, 0 failed** (645 after the first commit; +8 round-1 tests); `npm run build` passes (surface gate 0 errors).
+
+Failing before, passing after (round 1): with `DecideInvoiceAction.tsx`, `useNoticeDrafts.ts` and `decisionModel.ts` put back to `d206838a2a`, the round-1 tests gave 7 failed, 1 passed (the must-not-fire test); with the fixes all pass.
+
 ## Known limits
 
 1. **K: a repeat from another tab.** A stranded decision first sent from a different tab or browser has no notice in this page's memory either, so the form offers Notify here; if the reviewer does not fill it in here (turns it off), that repeat carries none. This is the offering, not a guarantee: option (b) (the server stores the first attempt's screened notice) is the only way a repeat could carry the first attempt's notice without the reviewer re-confirming. Not done: new server storage.
 2. **The reviewer re-confirms, the first confirmation is not recovered.** After a reload the draft is the server's fresh draft; any edit made before the reload is lost (it lived only in memory).
 3. **A repeat that answers `alreadyDecided`** (another approver finished it meanwhile) enqueues no notice on the server (`AlreadyDecided` is never enqueued); the form cannot tell this beforehand.
 4. **No Skip.** The wizard's Skip is the shell's; the form's equivalent is the switch (same effect: no notice fields).
-5. The form's `WizardContext` is built from the form's state so the unchanged `NotifyStep` can read it; only `form`, `readOnly`, `loadNotice` and `patchNotice` are used by the step.
+6. **The form grows when Notify appears late.** A refusal of a notice kept from the wizard offers Notify in a form that opened small; the form's size is fixed when it opens, so the fields show in the small size until it is closed and reopened (a reopen asks for a fresh draft, as any opening does).
+7. **A refusal unlocks the reason and note** (not in the recorded stage), the same as the wizard's round 2: the refused request provably decided nothing, so the typed reason may be changed. The 400 comes before the service runs; no unsure outcome can hide behind it.
+8. **The stale-draft guard is per opening.** Retry within one opening is a new request of the same generation; two quick Retry clicks are not de-duplicated beyond the step's own button state.
+9. The form's `WizardContext` is built from the form's state so the unchanged `NotifyStep` can read it; only `form`, `readOnly`, `loadNotice` and `patchNotice` are used by the step.

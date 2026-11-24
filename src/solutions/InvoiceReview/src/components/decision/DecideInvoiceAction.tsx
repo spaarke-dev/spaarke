@@ -208,9 +208,14 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
     // A decision this page sent and that came back unsure (the wizard's or this form's) is repeated as it was sent, locked.
     const kept = locks.get('wizard');
     const same = kept && kept.outcome === stranded ? kept : undefined;
+    // Fix round 1 F2: a recorded reject or return whose reason the page cannot read cannot be finished from here (Finish is off and the form says
+    // to reload), so no notice is offered and no draft is asked for.
+    let reasonUnreadable = false;
     if (recordedStage) {
       // The record exists: its reason (or, failing that, the one this page sent), read-only; no note, which the server would drop.
-      setReason(stranded === 'approve' ? '' : (recordedReason(review, stranded) ?? same?.reason ?? ''));
+      const recordedText = stranded === 'approve' ? '' : (recordedReason(review, stranded) ?? same?.reason ?? '');
+      reasonUnreadable = stranded !== 'approve' && recordedText.trim() === '';
+      setReason(recordedText);
       setNote('');
       setLocked(true);
     } else {
@@ -227,7 +232,15 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
     resetNoticeDrafts();
     setError(null);
     setDialog(prev =>
-      prev?.open ? prev : { open: true, seq: (prev?.seq ?? 0) + 1, outcome: stranded, recorded: recordedStage, offerNotice: stranded !== 'approve' && !keptNotice }
+      prev?.open
+        ? prev
+        : {
+            open: true,
+            seq: (prev?.seq ?? 0) + 1,
+            outcome: stranded,
+            recorded: recordedStage,
+            offerNotice: stranded !== 'approve' && !keptNotice && !reasonUnreadable,
+          }
     );
   };
 
@@ -302,8 +315,20 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
       setNoteError(noteRefusalMessage(r.failure));
       return;
     }
-    // The server refused the notice itself (400, before it decided anything): shown in the form; nothing else changes.
+    // The server refused the notice itself (400, before it decided anything): shown in the form; nothing was decided.
     if (isNoticeRefusal(r.failure)) {
+      // Fix round 1 F1 (as the wizard's review round 2): the route answers this before the service is called, so it proves this request decided
+      // nothing. A notice kept from an unsure send is therefore not a request to repeat any more: drop the lock (page level and form), so the
+      // Notify step is offered again with the text as sent (editable, or turn it off) and the reason and note, as typed, can be edited. In the
+      // recorded stage the reason is the record's and stays read-only.
+      if (noticeLock && needsReason) {
+        locks.clear('wizard');
+        setNoticeLock(undefined);
+        if (!recorded) setLocked(false);
+        // A notice kept from before (not composed in this form) seeds the Notify entry, so its text is what the reviewer edits.
+        if (noticeKind && !dialog.offerNotice) patchNotice(noticeKind, noticeEntryOfLock(noticeLock));
+        setDialog(prev => (prev ? { ...prev, offerNotice: true } : prev));
+      }
       sending.current = false;
       setBusy(false);
       setNoticeError(decisionFailureMessage(r.failure));
@@ -362,7 +387,7 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
           onSubmit={() => void submit()}
         >
           <div className={s.form}>
-            <Text data-testid="finish-decision-intro">{finishDecisionIntro(outcome, locked, recorded)}</Text>
+            <Text data-testid="finish-decision-intro">{finishDecisionIntro(outcome, locked, recorded, offered)}</Text>
             {needsReason && recorded && reasonMissing && (
               <MessageBar intent="warning" layout="multiline" data-testid="finish-decision-no-reason">
                 <MessageBarBody>
@@ -391,7 +416,7 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
                 <NotifyStep />
               </WizardContext.Provider>
             )}
-            {needsReason && !offered && (
+            {needsReason && !offered && !(recorded && reasonMissing) && (
               <Text className={s.muted} data-testid="finish-decision-notice">
                 {sentNotice
                   ? `The firm will be emailed this notice, with the findings table: “${sentNotice.subject}”.`

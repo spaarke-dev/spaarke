@@ -24,13 +24,18 @@ export interface NoticeDraftWriter {
 export function useNoticeDrafts(api: Pick<InvoiceDecisionApi, 'getFirmNoticeDraft'>, invoiceId: string, writer: NoticeDraftWriter) {
   // The kinds already asked for: a kind is asked for once (a step may mount again, or twice under StrictMode).
   const asked = React.useRef<Set<FirmNoticeKind>>(new Set());
+  // Fix round 1 (K): each request carries the generation it was asked in; `reset` starts a new one, and an answer from an older one is dropped, so a
+  // draft still in flight from an earlier opening (cancelled, then reopened) cannot settle the new opening's entry. Nothing resets the wizard's.
+  const generation = React.useRef(0);
   const { patch, settle } = writer;
   const loadNotice = React.useCallback(
     (kind: FirmNoticeKind, retry = false) => {
       if (!retry && asked.current.has(kind)) return;
       asked.current.add(kind);
+      const asking = generation.current;
       patch(kind, { status: 'loading', failure: null });
       void api.getFirmNoticeDraft(invoiceId, kind).then(r => {
+        if (asking !== generation.current) return;
         if (r.ok) {
           // On by default once a draft has loaded; the reviewer turns it off, or skips the step, to send the decision alone.
           settle(kind, { status: 'ready', draft: r.value, subjectSuffix: subjectSuffixOf(r.value.subject), subject: r.value.subject, prose: r.value.prose, send: true, failure: null });
@@ -47,7 +52,10 @@ export function useNoticeDrafts(api: Pick<InvoiceDecisionApi, 'getFirmNoticeDraf
     },
     [api, invoiceId, patch, settle]
   );
-  /** Forget what was asked for, so the next opening of a form asks again. */
-  const reset = React.useCallback(() => asked.current.clear(), []);
+  /** Forget what was asked for, so the next opening of a form asks again; answers still in flight are ignored. */
+  const reset = React.useCallback(() => {
+    asked.current.clear();
+    generation.current += 1;
+  }, []);
   return { loadNotice, reset };
 }
