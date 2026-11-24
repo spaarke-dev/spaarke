@@ -152,3 +152,36 @@ Left unchanged (not `bindLookup` fragments; resolved already by exact column): `
   - The web resource is in SpaarkeMaster.
 - **Rollback:** the previous bundle was saved before the deploy. It was 1,506,031 bytes, SHA-256 `02A824E9…AB45F46`, modified 2026-11-23 21:35Z, and still had the client mapping. Saved in this session's scratchpad as `wr026/rollback-sprk_createworkassignmentwizard.html`. Redeploying it is the rollback.
 - **Next:** the live check ("Left for the live part" item 2).
+
+## Live check on dev (AC5), 2026-11-24 15:46–15:52Z (owner go in this session)
+
+- **How it was run:** in the owner's signed-in Chrome, in this session's own tab group. The wizard was opened as a dialog via `Xrm.Navigation.navigateTo` (`sprk_createworkassignmentwizard`, the workspace launcher's call), because the Matter form has no Create Work Assignment command.
+- **How rows were checked:** read back with the Web API as an admin, with request timings from App Insights. The read script and logs are in this session's scratchpad (`live026/`).
+- **Mapping profile:** "Matter to Work Assignment (Attorney Matrix)" (7b147316…), already active on dev. No temporary profile was needed.
+
+| Check | A: under MAT-000110 (`4dbaa0c7-79ec-4c9f-8b3f-6a8eb2479adc`), Attorney = Jane Smith, Law Firm = Morrison Foerster LLP, Assigned To blank, follow-on event | B: under secure PAT-908068 (`adff04f4-157e-405a-9d15-2bc76b2f976a`), follow-on event | C: no parent (`9891e505-b71c-4c51-ab92-0270ce9e226b`) |
+|---|---|---|---|
+| Created on the route, by the BFF | **PASS**: 201 with `mappingSourceEntity=sprk_matter`; created and modified by `# mi-bff-api-dev`; one write | **PASS**: 201 with the matter as source | **PASS**: no query string |
+| Mapped values at first load | **PASS**: Attorney 2 (Jessica Broyles), Paralegal 1 (Eyal Iffergan), Paralegal 2, Assigned To Internal (Test User 1) and Assigned To External all come from the matter; Assigned To = Test User 1 (the server default from Internal) | n/a: the matter has no person values (warning `copied_default_source_unset`, as expected) | **PASS**: none, and no warning |
+| User value kept (fill-only) | **PASS**: Attorney 1 = Jane Smith (the wizard's pick), not the matter's Test User 1 | n/a | n/a |
+| Primary slots | **PASS**: Attorney → `sprk_assignedattorney1`, Law Firm → `sprk_assignedlawfirm1` | n/a | n/a |
+| Owner (FR-09) | **PASS**: Spaarke Business Unit 1, the matter's owner team | **PASS**: Secure Record Owners, `sprk_issecure` = true (created into isolation) | **PASS**: Spaarke, the maker's business-unit team |
+| Follow-on event | Created under the work assignment, owner = the work assignment's team. **DEFECT (fixed):** regarding pair blank | Created, owner Secure Record Owners. Same defect | n/a |
+| Duration (server) | 4.7 s | 24.6 s: secure provisioning (SPE container 5.5 s, about 90 sharing calls 9.3 s). This is UAC-r2's secure path; the latency verdict is UAT's (owner) | about 2 s |
+
+**Defect found and fixed in scope (2156330275):**
+- **What:** the follow-on event bound only `sprk_regardingworkassignment`, so its regarding pair and display columns were empty and the event showed no Regarding.
+- **Not new:** every follow-on event on dev back to 2026-03 lacks the pair or has only part of it. It is not a 026 regression.
+- **Fix:** `createFollowOnEvent` now files the event through `applyResolverFields`, the same way the work assignment is filed (ADR-024). The dialog passes the work assignment's name as the fallback.
+- **Tests:** the payload tests assert the pair keys. 3 tests fail on the old code. Jest 19 suites / 140 tests pass, `tsc` 0, client-lint `ui-components` ok.
+- **Left:** a PR to master, a redeploy of `sprk_createworkassignmentwizard`, and a re-check that a new follow-on event shows its work assignment as Regarding. Each needs the owner's go.
+
+**Not covered:**
+- Send Email and file uploads were not exercised; 026 did not change them.
+- The Console's in-app wizard and the Report Card wizard need their own bundles rebuilt.
+- Dark mode is left for the owner, as in 023 and 024.
+
+**Rows left on dev:**
+- work assignments A, B and C (above);
+- events `a9b1aaee-d5dd-473a-a021-cdf5f3a864b6` and `d5d8d35b-0d64-48c3-8adf-62bcc3045bf7`;
+- B's SPE container "Secure Work Assignment – FMSWP-026 live check B secure".
