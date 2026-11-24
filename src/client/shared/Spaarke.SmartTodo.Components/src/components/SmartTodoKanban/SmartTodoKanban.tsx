@@ -3,8 +3,8 @@
  * primitive with all SmartTodo-specific wiring (drag-drop column mutations,
  * card rendering, multi-select / open / pin callbacks, orientation prop).
  *
- * R4 task 102 (E-1, 2026-06-18) — hoisted from
- * `src/solutions/SmartTodo/src/components/SmartToDo.tsx` into the
+ * R4 task 102 (E-1, 2026-06-18) — hoisted from the SmartTodo Code Page's
+ * former `SmartToDo.tsx` (removed in #2907) into the
  * `@spaarke/smart-todo-components` peer package. Closes UAT issues 3 + 4 + 6:
  *   3. Widget needs vertical/horizontal orientation toggle (parity with app)
  *   4. Widget needs drag-drop between columns + pin (parity with app)

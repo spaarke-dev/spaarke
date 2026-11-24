@@ -16,8 +16,9 @@
  *
  * Scope: this file verifies the KANBAN RENDER-SIDE guarantee that FR-07
  * requires — that a Completed (statuscode=2) item, once the query layer
- * starts returning it (see `buildTodoItemsQuery`'s `includeCompleted` param
- * in `src/solutions/SmartTodo/src/services/queryHelpers.ts`), is bucketed
+ * starts returning it (no query includes Completed today: the shared
+ * `buildActiveTodosQuery` in `src/services/todoQueries.ts` reads Open and In
+ * Progress only; the old `includeCompleted` switch had no caller), is bucketed
  * into its normal score/due-date-based Today/Tomorrow/Future column with NO
  * special-case exclusion and NO 4th "Completed" column introduced. It does
  * NOT test `buildTodoItemsQuery` itself (that lives in a different package —

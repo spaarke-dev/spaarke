@@ -21,3 +21,10 @@ export type { IUseKanbanColumnsOptions, IUseKanbanColumnsResult } from './useKan
 // migrated sprk_todo.sprk_assignedto Contact lookup.
 export { useCurrentContactId } from './useCurrentContactId';
 export type { IUseCurrentContactIdOptions, IUseCurrentContactIdResult } from './useCurrentContactId';
+
+// #2972 — the Smart To Do data hooks, one copy for every host (were per-host copies in
+// LegalWorkspace and the SmartTodo code page).
+export { useTodoItems } from './useTodoItems';
+export type { IUseTodoItemsOptions, IUseTodoItemsResult } from './useTodoItems';
+export { useTodoKanbanPreferences } from './useTodoKanbanPreferences';
+export type { IUseTodoKanbanPreferencesOptions, IUseTodoKanbanPreferencesResult } from './useTodoKanbanPreferences';

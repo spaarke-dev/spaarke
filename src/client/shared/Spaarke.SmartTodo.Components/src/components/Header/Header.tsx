@@ -95,36 +95,6 @@ import { SearchFilter } from '../SearchFilter';
 import { useHeaderStyles } from './Header.styles';
 
 // ---------------------------------------------------------------------------
-// QuickAdd event contract — RETAINED, not dispatched (task 020 / FR-05 / U-3,
-// 2026-08-16).
-//
-// This Header no longer renders the QuickAdd input group or dispatches this
-// event (removed per FR-05 — "removed, not relabeled"). The constant + type
-// are kept exported SOLELY because `../SmartToDo.tsx` (out of this task's
-// scope — not one of the 4 files task 020 may touch) still imports both for
-// its `handleAdd` window-event listener (`window.addEventListener(
-// QUICK_ADD_TODO_EVENT, ...)`), and deleting them would break that file's
-// compile. That listener is now ORPHANED (no producer fires this event
-// anymore) — a direct, in-scope consequence of FR-05 removing the QuickAdd
-// UI, not a new regression introduced here. Flagged as a follow-up for task
-// 030 (which owns the next create-path decision) in
-// `projects/smart-todo-r5/notes/task-020-topbar.md`.
-// ---------------------------------------------------------------------------
-
-/** @deprecated Retained only for `SmartToDo.tsx`'s type import — see comment above. Not dispatched by this Header. */
-export const QUICK_ADD_TODO_EVENT = 'sprk-smarttodo:quick-add' as const;
-
-/** @deprecated Retained only for `SmartToDo.tsx`'s type import — see comment above. Not dispatched by this Header. */
-export interface QuickAddTodoEventDetail {
-  /** Trimmed, non-empty title for the new to-do. */
-  title: string;
-  /** ISO date string (YYYY-MM-DD) or empty/undefined for "no due date". */
-  dueDate?: string;
-  /** systemuser GUID to set on sprk_assignedto, or empty/undefined to default. */
-  assignedToId?: string;
-}
-
-// ---------------------------------------------------------------------------
 // Orientation flip map — mirrors OrientationToggle.tsx's NEXT_ORIENTATION
 // (not imported: that module doesn't export it, and the map is trivial).
 // Kept in sync manually; both are two-key Record<Orientation, Orientation>.

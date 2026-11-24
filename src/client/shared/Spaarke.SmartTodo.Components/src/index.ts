@@ -12,6 +12,7 @@ export * from './widgets';
 export * from './types';
 export * from './hooks';
 export * from './components';
+export * from './services';
 // Shared client-side To Do search predicate (§11 — single predicate used by
 // BOTH the Code Page and SmartTodoWidget; smart-todo-r5 follow-up 2026-08-17).
 export { matchesTodoSearchQuery, buildTodoDueDateSearchBlob } from './utils/todoSearchUtils';
