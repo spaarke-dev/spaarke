@@ -66,3 +66,25 @@ Invoice 0d9178d3:
   - Two `createRecord` tokens remain, both inside the shared generic Xrm WebApi adapter.
   - modifiedon is 2026-11-14 03:45:05Z.
 - **Server side:** the routes it calls (internal submission, core-record firms, blocked/override/return) are in dev BFF master `c2f366bf52`.
+
+## 2026-11-23: what still holds on dev, and the re-planned close-out
+
+The steps were written before the deploy model changed. Dev BFF builds now come from master, built by uac-r2 on the owner's exact-SHA go in uac-r2's session. The external SPA deploys from master too (`deploy-external-spa.yml`). Every WP2 change is already on master and live. So 053 runs no deploy of its own: what is left is checks.
+
+Read-only checks run 2026-11-23 (~01:40-02:10Z on 11-24):
+
+| Step | Result |
+|---|---|
+| 1 Preconditions | Every dependency is ✅ in TASK-INDEX (050a closed 2026-11-23). No new build is deployed here, so there is no publish-size delta to measure: each task measured its own. |
+| 2, 3 Actions and Bindings | Done 2026-11-03. `Seed-PlaybookConsumers.ps1 -DiffOnly` now shows the same 5 differences as then, none on an invoice row. `billing-rule-draft` is seeded by task 079 (its step 6). The other 4 rows belong to other projects. |
+| 4 App settings | `Ebilling__Enabled` = true. `Ebilling__StoredFileReconcileEnabled` = false. `ContentUnderstanding__Endpoint` = the dev resource. ApiVersion and AnalyzerId are not set, so the code defaults apply: preview `2026-06-01-preview` and `sprk_invoice_v2p` (D-81). `Finance__ProcedureLibraryContainerId`, `Finance__EbillingOutputContainerId` (retired by 124 and 092) and `Finance__InvoiceExtractionPlaybookId` (050b) are absent. The Finance file-store settings (090/091) are set. No setting was changed. |
+| 5 Field security | `Set-EbillingFirmReasonFieldSecurity.ps1 -Verify`: PASS, exit 0. |
+| 6 BFF | Not run: superseded. The live dev BFF (uac-r2, a48398746d) carries all of WP2. `/healthz` = 200 Healthy. |
+| 7 Route smoke | Unauthenticated: all 15 WP2 routes answer 401 (internal submit x3, from-document, from-email, GET list and by id; external submit, list, by id, firm-records; code-set proposals and confirm; invoice-review confirm and reject). Authenticated: the internal route is proven by the owner's live submissions (INV-2025-78232 on 11-03; the Create Invoice wizard since 11-14). The external routes are proven by the owner's SPA check (below). The "non-admin confirm is 403" check is replaced: 050c changes confirm to the manual-submit check (EB-D-264). |
+| 8 External SPA | Not run here: superseded. The SPA was deployed from master on 2026-11-23 (run 45260396182, success). |
+| 9 Solution source | `Test-SolutionCompleteness.ps1`: no eBilling drift. It reports 7 missing components that belong to other projects (contact and systemuser identity columns and key, web resource `sprk_recordfamily`). The escalation rule says not to copy another project's components, so nothing was copied. `Import-SolutionScoped.ps1 -PlanOnly` for SpaarkeMaster: exit 0. D-116's option set and columns are in source. |
+| 10 End to end | Internal: done 2026-11-03 (above). External: the owner's check, checklist section Q. |
+
+What closes 053: checklist section Q (an Accepted and a Rejected submission from the firm portal). After that, 079 has no open dependency.
+
+Deviation: step 3's "-DiffOnly shows no difference" stays unmet for the reasons above. D-101 also changed step 10: a Rejected submission now creates its invoice, in status Rejected. The step's "no invoice" is out of date.

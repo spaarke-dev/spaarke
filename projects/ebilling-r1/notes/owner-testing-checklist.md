@@ -170,3 +170,10 @@ Merged into the work branch 2026-11-22 (18b02cbdcf). Nothing visible changes; th
 - [ ] In Invoice Review, **Confirm** an invoice document from the review queue: it still creates the invoice through the submission (as 050a).
 - [ ] The BFF starts with no warnings about `Finance:InvoiceExtractionPlaybookId` or `Finance:ExtractionDeploymentName` (both keys are gone).
 - Owner choice, no test: the old **FinanceExtraction** (PB-013) playbook rows in dev Dataverse are now unused. Leave them, or tell me to deactivate them (a live change).
+
+## Q. A firm submits through the external portal (task 053): ready to test on dev now
+This closes task 053. After it, task 079 has no open dependency. The dev BFF and the external portal both run master (the portal was deployed 2026-11-23).
+- [ ] Sign in to the external portal as a firm user who has access to a matter. Submit a sample invoice PDF on that matter. The portal shows **Processing**, then **Accepted**, with a tracking number such as `INV-123.1`.
+- [ ] In Spaarke, that invoice is **In Review** on the matter. Its lines are filled in with codes, and it has an approval portion.
+- [ ] Submit a second sample that breaks a published **Reject** rule on that matter. The portal shows **Rejected** with a reason. In Spaarke the invoice exists, in status Rejected (D-101: every submission that is read creates its invoice).
+- [ ] The portal's submission screens look right in dark mode too.
