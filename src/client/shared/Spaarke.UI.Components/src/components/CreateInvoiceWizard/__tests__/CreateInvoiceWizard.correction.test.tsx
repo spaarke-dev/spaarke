@@ -152,7 +152,8 @@ describe('CreateInvoiceWizard — correctionInvoiceId', () => {
     });
     expect(server.calls.filter(c => c.method === 'POST')).toHaveLength(1);
     await act(async () => answer(reply(202, { submissionId: SUBMISSION_ID, trackingNumber: 'INV-9.2' })));
-    expect(await screen.findByText('Invoice received')).toBeInTheDocument();
+    // iss048: the result heading follows the polled status; this server answers Accepted within the act.
+    expect(await screen.findByText('Invoice accepted')).toBeInTheDocument();
     expect(server.calls.filter(c => c.method === 'POST')).toHaveLength(1);
   });
 

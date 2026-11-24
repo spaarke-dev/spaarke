@@ -20,7 +20,9 @@
  *   2. File    — one PDF. Type and size are checked here only as a convenience; the server is the authority.
  *   3. Details — the firm invoice number (REQUIRED, D-91) and an optional PO number. Finish submits.
  *   4. Processing then Result — the success screen mounts {@link InvoiceSubmissionOutcome}, which polls `getStatus`
- *      and shows Accepted (tracking number), Rejected (reason + the host's report slot) or Failed (retry guidance).
+ *      and shows Accepted (tracking number), Rejected (reason + the host's report slot) or Failed (retry guidance). The
+ *      screen's title and icon follow the same poll (iss048): "Invoice received" until a terminal status, then
+ *      accepted / rejected / not processed (see InvoiceSubmissionResultHeading).
  *
  * A corrected invoice (`correction`, ebilling-r1 095f-2e2b): the same flow, replacing an invoice that is In Review. The host reads the
  * invoice's correction prefill and passes it as `correction`; the record and the firm are the invoice's own, so there is no Record step
@@ -51,12 +53,12 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { DocumentCheckmarkRegular } from '@fluentui/react-icons';
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 import { FileUploadZone, UploadedFileList } from '../FileUpload';
 import type { IFileValidationError, IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { InvoiceSubmissionOutcome } from './InvoiceSubmissionOutcome';
+import { createStatusStore, InvoiceResultIcon, InvoiceResultTitle } from './InvoiceSubmissionResultHeading';
 import { invoiceSubmissionErrorMessage } from './messages';
 import { correctionNoteCounterText, correctionNoteProblem, correctionNoteToSend } from './correctionNote';
 import { FIRM_REQUIRED_ERROR_CODE, InvoiceSubmissionError } from './types';
@@ -135,10 +137,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground2,
     overflowWrap: 'anywhere',
-  },
-  successIcon: {
-    fontSize: '48px',
-    color: tokens.colorBrandForeground1,
   },
 });
 
@@ -489,11 +487,14 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     }
     onSubmitted?.(accepted);
 
+    // iss048: the title and icon follow the polled status. One store per submission; the outcome (the only poller) feeds it.
+    const statusStore = createStatusStore();
     return {
-      icon: <DocumentCheckmarkRegular className={styles.successIcon} />,
-      title: 'Invoice received',
+      icon: <InvoiceResultIcon store={statusStore} />,
+      title: <InvoiceResultTitle store={statusStore} />,
       body: (
         <InvoiceSubmissionOutcome
+          onStatusChange={statusStore.set}
           submissionId={accepted.submissionId}
           trackingNumber={accepted.trackingNumber}
           submittedWarning={accepted.warning}
@@ -522,7 +523,6 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     noteProblem,
     submit,
     onSubmitted,
-    styles.successIcon,
     getStatus,
     pollIntervalMs,
     renderReport,
