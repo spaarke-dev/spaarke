@@ -88,7 +88,7 @@ The admin center keeps state against a package's app id (`manifest.json` `id`). 
 
 - **Dev:** any change to actions goes on a **fresh app id**. That means the `actions` array, an `ai-plugin.json` runtime (URL, auth, `reference_id`), the function list, dynamic vs pinned discovery, or `mcp-tools.json`. If a change "doesn't show", rebuild on a fresh id before debugging content.
 - **Production:** one stable app id per agent per customer; ship version bumps. **An update that changes the action takes it offline for a while** (V1, 2026-11-24: back after about 40 minutes), on top of users' installed copies lagging the catalog. Freeze the action's URL, auth and `reference_id` for the life of the id. Wait at least an hour before judging an update, and never stack updates.
-- **Use dynamic tool discovery** (`functions: []`, `run_for_functions: ["*"]`, no `mcp_tool_description`). V2 passed with OAuth through the org catalog: tool changes then ship from the server with no package update. The first sign-in card (#16973) is not yet proven.
+- **Use dynamic tool discovery** (`functions: []`, `run_for_functions: ["*"]`, no `mcp_tool_description`). V2 passed with OAuth through the org catalog, including a brand-new user's first sign-in. Tool changes then ship from the server with no package update.
 - **No query strings in MCP action URLs** until proven safe.
 - **Keep packages thin:** tool behaviour lives behind the MCP server, and tool names and schemas are a backward-compatible contract.
 - **Verify at the server:** one `tools/call` per turn in App Insights. The model's own account doesn't count.

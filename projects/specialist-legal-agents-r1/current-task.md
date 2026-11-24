@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | **G8-P2 live test** (owner go 2026-11-23). This is the Practice-agent build path, so the owner said it must be RESOLVED, not just recorded. Run log: `phase0/g8/README.md` § "G8-P2 run log" |
-| **Step** | **G8-P2 ✅** (Chat, Word, plain Chat no leak, Teams = Chat). **V1 ⚠️:** an action-changing update takes the action offline for a while (1.1.2 back after ~40 min); BR-3 revised. **V2 ✅** (`cb5afd1c`, dynamic discovery + OAuth, owner + `demo@`); BR-5 now proposes dynamic discovery as the default; the first sign-in card is not proven. Design §3.13: MCP Apps widgets are the default UI (owner, D-A17); SPFx is the exception. **Next:** removals by 30 Nov; open: V1a (`?pkg=`), V3, V5, first sign-in |
+| **Step** | **G8-P2 ✅** (Chat, Word, plain Chat no leak, Teams = Chat). **V1 ⚠️:** an action-changing update takes the action offline for a while (1.1.2 back after ~40 min); BR-3 revised. **V2 ✅** (`cb5afd1c`, dynamic discovery + OAuth, owner + `demo@`); This includes a brand-new user's first sign-in. BR-5 now proposes dynamic discovery as the default. Design §3.13: MCP Apps widgets are the default UI (owner, D-A17); SPFx is the exception. **Next:** removals by 30 Nov; open: V1a (`?pkg=`), V3, V5, first sign-in |
 | **Design version** | design.md v0.6 + G9 (`4ed12dbee3`); latest commit `e48dc2e012` (pushed) |
 | **Uncommitted** | none |
 
@@ -18,7 +18,6 @@
 2. Removals by 2026-11-30 (owner, admin center): G8-a agent + 2 skills, G8-p2 `802fd9cc`, G8-p2-sl `d38f8df8`, G8-p2-org-learn `0421c980`, G8-p2-dd `cb5afd1c`.
 3. Open tests:
    - V1a: `?pkg=` on a fresh id; wait an hour before judging.
-   - First sign-in card, with a user who has never used the Spaarke connector.
    - V3: Model 1, second tenant.
    - V5: the old Spaarke AI agent.
    - G11 is optional (MCP Apps widgets are the default).
