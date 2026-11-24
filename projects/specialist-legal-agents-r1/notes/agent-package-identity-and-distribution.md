@@ -107,6 +107,17 @@ Entra-protected MCP servers can't use dynamic client registration, so the static
 - It also brings store validation, a multitenant auth story (Model 1-like, V3), and Microsoft's review cycle on every package change.
 - **Recommendation:** customer-uploaded packages (3.3) for the first customers; Marketplace when we sell self-serve.
 
+### 3.5 A second channel: SPFx `.sppkg` with Copilot UX components (added 2026-11-24)
+
+The design covers this in §3.13. For distribution, the differences from 3.3 are:
+- **Upload path:** the SharePoint App Catalog, then **Add to Teams**, which syncs the baseline agent. The admin-center zip upload isn't used. **[Learn]**
+- **Updates:** redeploy the `.sppkg`. Component code, tool schemas and adding or removing components update **without** re-sync, through dynamic discovery (a few minutes). Agent instructions, knowledge, starters, icon and additional actions (our MCP action) **need** a re-sync. **[Learn]**
+- **Identity:** BR-1 still applies. Keep the solution ID, component IDs and app ID stable; Learn says changing them "can create a separate agent or break the association". **[Learn]**
+- **Rollback:** documented. Redeploy a known-good package, and re-sync the baseline if it changed. **[Learn]**
+- **Store:** the SharePoint Store accepts these solutions from GA. That is an alternative to 3.4 for a Practice agent that ships components. **[Learn]**
+- **Consent:** API access requests go to SharePoint's tenant-wide principal (design T-8). Each tenant still configures its own permissions, agent policy and licences. **[Learn]**
+- **Open:** whether an MCP-action change in a `.sppkg` agent loads after re-sync. G11 tests this alongside V1.
+
 ## 4. Our control: access, licensing, updates
 
 **The package is not a control point.**
