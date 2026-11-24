@@ -132,3 +132,31 @@ The Console's in-app To Do wizard and the Report Card and Analysis follow-ons ch
 - Only this web resource changed. The Console's in-app To Do wizard (`sprk_spaarkeai`) and the Report Card and Analysis follow-ons change only when their own bundles are deployed.
 
 **Left (AC5):** the live check in the owner's Chrome.
+
+## Live check on dev (AC5), 2026-11-24 02:55–03:05Z
+
+Run in the owner's signed-in Chrome (own tab group) from the "Create To Do" command on Matter PAT-176903 (`232852f8-a263-f111-ab0c-000d3a582930`). Rows read back with the Web API as an admin. Log: session scratchpad `live024/`.
+
+Setup (owner's go in this session): dev had no profile from Matter to To Do, so a temporary one was created, "FMSWP-024 live check: Matter to To Do (temporary)" (`6a6d6cab-b2e7-f111-84ea-7ced8dda31f8`), with two Copy rules from the matter's `sprk_assignedtointernal` (Jake Schroeder): to `sprk_assignedtointernal` (`336296bb-b2e7-f111-84ea-7ced8dda31f8`) and to `sprk_assignedto` (`b26412b9-b2e7-f111-84ea-00224820fd20`). It was **deactivated** after the check (statecode 1).
+
+| Check | To Do A "FMSWP-024 live check A" (`7d1cba50-dfd9-4920-8e5e-6842e788cbac`), Assigned To left as the signed-in user | To Do B "FMSWP-024 live check B" (`354ffd82-ade9-4a02-9c4d-ebd39a21ca08`), Assigned To cleared |
+|---|---|---|
+| Created through `POST /api/v1/child-records/sprk_todo`, one write | **PASS**: 201 in App Insights; `createdon` = `modifiedon`; created and modified by `# mi-bff-api-dev` | **PASS** (same) |
+| Mapped values at first load | **PASS**: `sprk_assignedto` = Jake Schroeder (mapped; the wizard did not send that column, see below) | **PASS**: `sprk_assignedto` and `sprk_assignedtointernal` both = Jake Schroeder |
+| User value kept (fill-only) | **PASS**: `sprk_assignedtointernal` = Ralph Schroeder, the wizard's value, not overwritten by the mapped Jake Schroeder | n/a |
+| Owner = the matter's owning team (FR-09) | **PASS**: Spaarke Business Unit 1, the same as the matter | **PASS** |
+| Regarding | **PASS**: the matter, with the regarding pair and record number | **PASS** |
+| `sprk_todo:created` broadcast (widget refetch) | not measured | **PASS**: one message on `sprk_todo:lifecycle` with the new id, heard by a listener on the host page |
+
+**Defect found and fixed in scope:** the wizard bound its Assignee with the fragment `'assignedto'` and took the first matching contact lookup. On dev `sprk_todo` lists `sprk_assignedtointernal` first, so the pick went to that column and the To Do did not appear in the assignee's Smart To Do (checked: A was missing from the signed-in user's board). Without a mapping profile `sprk_assignedto` stays empty. The predicate dates from June (e328beafb1); the internal and external columns were added later (a To Do from 2026-11-15 still has `sprk_assignedto`). Fix: `findNavProp(navProps, 'contact', 'sprk_assignedto')`, exact match first. The test's nav-prop list now puts the two other columns first, in dev's order; it fails on the old code and passes on the fix. Jest 16 suites / 119 tests, `tsc` 0. The same pattern in the Event wizard is latent (DI-039, #3039).
+
+**Environment note:** B's first Finish at 03:00:59Z failed with "Failed to fetch". The dev BFF was restarting for UAC-r2's deploy (996928732e, live about 03:01Z); App Insights shows no request, then "Application started" at 03:01:11Z. The retry succeeded and wrote one row.
+
+**Not covered here:**
+- The Smart To Do `action=createTodo` launch hosts the wizard inside the `sprk_smarttodo` bundle (`LaunchCreateTodoWizardHost`), which was not rebuilt; its "+ New Task" button opens the native form, not the wizard. It picks up task 024 and this fix when `sprk_smarttodo` is next deployed.
+- The Console's in-app wizard (`sprk_spaarkeai`) likewise.
+- Dark mode: left for the owner, as in 023 (stored `spaarke-theme` = light).
+
+**Left:** the assignee fix needs a PR to master and a redeploy of `sprk_createtodowizard`, then one re-check that a picked Assignee lands in `sprk_assignedto`.
+
+Rows left on dev for cleanup: To Dos `7d1cba50-dfd9-4920-8e5e-6842e788cbac` and `354ffd82-ade9-4a02-9c4d-ebd39a21ca08`; the inactive temporary profile `6a6d6cab-b2e7-f111-84ea-7ced8dda31f8` and its two rules.
