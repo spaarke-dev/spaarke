@@ -112,3 +112,22 @@ Left unchanged (not `bindLookup` fragments; resolved already by exact column): `
 - `ChildRecordEndpoints.InferMappingSourceTables` comment says `sprk_event` "joins with task 026". It does not: the event names its source explicitly (this task and 023), so the set is unchanged. The comment is stale; a BFF edit, not made here.
 - Dead code after the cascade removal: the host `resolveUserBuDefaults` plumbing for this wizard, if any, now feeds nothing (as 021 noted for the Matter wizard). Not looked for.
 - Stale comments in `CreateReportCardWizard.tsx` (task 027) that describe the client mapping.
+
+## Main session: review, merge, gates (2026-11-24)
+
+- **Review of 9b60222577: no finding.** Checked against dev metadata (read-only):
+  - every bind names a real column: `sprk_assignedattorney1`, `sprk_assignedparalegal1`, `sprk_assignedlawfirm1`, `sprk_assignedlawfirmattorney1`, `sprk_mattertype`, `sprk_practicearea` on `sprk_workassignment`; `sprk_regardingworkassignment` is the event's only lookup to `sprk_workassignment`;
+  - the "slot 1" choice matches the active Matter-to-Work-Assignment profile (7b147316…), which maps attorney 1/2, paralegal 1/2, law firm 1/2, Assigned To External and Assigned To Internal one to one; in the old fragment behaviour `lawfirm` already resolved to law firm 1, the first column in metadata order;
+  - the adapter cleans the source id and lower-cases the entity before the query string.
+- **Behaviour note:** dev has no active `{work assignment → event}` profile, so the follow-on event gets no mapped value there today. That is unchanged: before 026 the event named no source and got none either. The "Matter to Event" profile does not apply, because the event's source is the work assignment.
+- **Merged** into the work branch with `--no-ff`.
+- **Gates in the main worktree:**
+  - jest (`CreateWorkAssignmentWizard` and `WizardFollowOns`): 19 suites, 139 passed;
+  - `tsc --noEmit`: 0 errors;
+  - client-lint: `ui-components` ok. Eight other packages fail locally, on files this task does not touch (for example `EmailViewSelector.tsx`, last changed 4 months ago), while master's client-lint run is green (72df391fa7). This worktree's local install is behind for those packages. The PR's CI run decides.
+- **ADR check:**
+  - ADR-024: the polymorphic resolver stays;
+  - ADR-012: no new shared surface (only an optional `warnings` on an existing return type);
+  - ADR-002: no plugin, the server owns mapping.
+- **Dead code:** the cascade removal leaves none. The Work Assignment host does not call `resolveUserBuDefaults`.
+- **Stale comment** (`ChildRecordEndpoints.InferMappingSourceTables`, sprk_event "joins with task 026"): wording only. It is fixed the next time that BFF file is touched, like 045e K8, and gets no PR of its own.

@@ -9,13 +9,13 @@
 | Field | Value |
 |---|---|
 | **Session / worktree** | `field-mapping-r1`, `C:\code_files\spaarke-wt-field-mapping-server-write-path-r1`, on `work/field-mapping-server-write-path-r1`. |
-| **Work branch** | 917595b58e + uncommitted 025 closure (see below). Origin at 0c3f397d9b; master has #3031 (57a68b06c5) and #3041 (2566d561e0). |
+| **Work branch** | 025 closure (accd2a4d37) + the 026 merge (task/fm-026 9b60222577) + this notes commit; not pushed. Origin at 0c3f397d9b; master has #3031 (57a68b06c5) and #3041 (2566d561e0). |
 | **Dev** | BFF 996928732e (UAC-r2, 2026-11-24 03:01Z). `sprk_createtodowizard` from master 2566d561e0 (03:46Z, SHA-256 AD2955B3…1B50). `RecordRepair:Pass:GoLive` unset everywhere. |
-| **Active task** | **026** Work Assignment wizard (FR-16), FULL rigor, sonnet @ high, STEP MODE directional. Step 0 in progress (re-grep done). |
+| **Active task** | **026** Work Assignment wizard (FR-16), FULL rigor, sonnet @ high, STEP MODE directional. Code merged on the work branch 2026-11-24; review (no finding) + gates pass (notes/task-026-notes.md "Main session"). Left: PR to master, deploy `sprk_createworkassignmentwizard`, live check: each on the owner's go. |
 | **026 findings so far** | `workAssignmentService.ts`: `applyFieldMappings` import :38, call ~:447 (comment ~:445); WA create via `createRecordViaBffWithWarnings` ~:502 (a root, ontology 046); follow-on `sprk_event` via `this._dataService.createRecord` ~:669 (wrapped by `withBffChildWrites` :106, so it already goes to the BFF route, but with no mapping source). Follow-on event Assigned To already binds by exact column (comment ~:650-655). `ChildRecordEndpoints.InferMappingSourceTables` = {sprk_matter, sprk_project} only (:102). **Prefer an explicit `mappingSource` from the client for the follow-on event (client-only) over adding `sprk_event` to InferMappingSourceTables (a BFF change needing publish delta and an exact-SHA owner go).** Dev profiles: "Matter to Work Assignment (Attorney Matrix)" 7b147316-7f96-f111-b8db-3833c5e5d030 active; "Matter to Event (Attorney Matrix)" 24dc0ed2-537b-f111-ab0e-7ced8ddc4a05 active. |
 | **026 approach** | As 024: one Sonnet implementer in an `isolation: worktree` agent, first command `git switch -c task/fm-026 <work-branch tip>` (gotcha 2026-10-20); copy `CreateTodoWizard/todoService.ts` + `__tests__/todoService.fieldMapping.test.ts` (024) and `CreateEventWizard/eventService.ts` (023). This session reviews, runs gates, merges `--no-ff`; then master PR, deploy `sprk_createworkassignmentwizard`, live check (incl. a secure Matter) — each on the owner's go. |
-| **Uncommitted** | 025 closure: `tasks/025-invoice-wizard-migration.poml` (status cancelled + notes), `tasks/032-invoice-extraction.poml` (notes: 032b-3 live check gains the wizard-submitted invoice case), `tasks/TASK-INDEX.md` (025 🚫 [cancelled]), this file. Drift check clean. Commit these first. |
-| **Next action** | Commit the 025 closure. Then 026 Step 1: inventory the WA and follow-on event payload keys (read workAssignmentService.ts :340-680), write the implementer brief, launch it. |
+| **Uncommitted** | None. |
+| **Next action** | On the owner's go: push the work branch and open the 026 PR to master (body: ADR-008 path A not needed, client-only; list the dev live checks). After the merge: deploy `sprk_createworkassignmentwizard` (owner go; keep the previous bundle), then the live check in notes/task-026-notes.md "Left for the live part" (incl. a secure Matter). |
 
 ## 024 (done except the owner's dark-mode look)
 
