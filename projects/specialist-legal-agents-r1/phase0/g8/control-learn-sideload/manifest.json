@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.25/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.25",
+  "version": "1.1.0",
+  "id": "125c3b10-1833-468f-8141-6c54b8ab2085",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://www.example.com",
+    "privacyUrl": "https://www.example.com/privacy",
+    "termsOfUseUrl": "https://www.example.com/termsofuse"
+  },
+  "name": {
+    "short": "spaarke-legal-g8p2-sl-learn",
+    "full": "Spaarke legal G8-P2 sideload control (Learn MCP, Phase 0)"
+  },
+  "description": {
+    "short": "Phase 0 platform test. Not for real work.",
+    "full": "Phase 0 test G8-P2 for the specialist legal agents program: does a coded declarative agent with its own MCP action run Spaarke tools in Chat, Word and Teams, and does each call run once? It echoes text and records nothing. Throwaway; removed when G8-P2 is recorded."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0F6CBD",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "g8p2Agent",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["spaarke-bff-dev.azurewebsites.net"]
+}

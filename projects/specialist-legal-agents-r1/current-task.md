@@ -9,16 +9,16 @@
 | Field | Value |
 |---|---|
 | **Active work** | **G8-P2 live test** (owner go 2026-11-23). This is the Practice-agent build path, so the owner said it must be RESOLVED, not just recorded. Run log: `phase0/g8/README.md` § "G8-P2 run log" |
-| **Step** | v1.0.0–1.0.3 all ❌: the agent installs; admin center › Data & tools lists the action "Spaarke MCP G8-P2"; the model says the action is "not exposed among my available tools"; **no BFF traffic**; no debug card (owner has M365 Copilot Premium). Ruled out: OAuth registration (Any Teams app, base URL OK), package validation (passed), dynamic vs pinned tools, shared URL (trailing slash), instructions. **Now: control v1.0.4** (`phase0/g8/control-learn/`, zip `spaarke-legal-g8p2-control-learn.zip`, same app id; action on the public Learn MCP `https://learn.microsoft.com/api/mcp`, auth None). Owner uploads it and asks a Learn question |
+| **Step** | v1.0.0–1.0.3 ❌ and the Learn control v1.0.4 (auth None) ❌: the action is listed in admin center but never reaches the model, with no BFF traffic. **Probable cause (GitHub ATK #16643, kuldeepkeshwar):** MCP agents work when **personally sideloaded** but not when **published to the org catalog**. The owner said this is ours to solve, not a support case. **Now: v1.1.0 sideload test**, two fresh-ID packages: `spaarke-legal-g8p2-sideload.zip` (real) and `spaarke-legal-g8p2-sideload-learn.zip` (control). Owner uploads both via Teams › Apps › Manage your apps › Upload an app › **Upload a custom app** (for me). R4 rows sent to coordination 2026-11-24 |
 | **Design version** | design.md v0.6 + G9 (`4ed12dbee3`); latest commit `e48dc2e012` (pushed) |
 | **Uncommitted** | none |
 
 ## Next action (exact)
-1. Owner uploads `phase0/g8/spaarke-legal-g8p2-control-learn.zip` (v1.0.4), opens m365.cloud.microsoft/chat, starts a new chat with the agent, and asks "Search Microsoft Learn for declarative agent MCP plugins".
-2. **Control ✅** means MCP actions in agents work in this tenant, so the fault is our server or OAuth. Next: compare with a Work IQ Dev Tools / Agents Toolkit generated agent (`wiqd agent add action --mcp-server-url`, with its own provisioned OAuth registration; installing WIQD needs the owner's OK). Check whether our server needs something the Learn server doesn't.
-3. **Control ❌** means the tenant or platform blocks MCP actions in agents. Next: tenant settings (Teams app policies / Copilot agent settings) and a Microsoft support case with the package plus the no-traffic evidence. D-A1 fallback: Copilot Studio MCP tool (G10).
-4. Record the result in the README run log and design §8 G8-P2. Send it to COPILOT-PLATFORM-COORDINATION [0afb62], which also wants removal confirmations for G8-a and G8-p2 (latest 2026-11-30).
-5. Afterwards, restore the real G8-P2 package (v1.0.3 is in `package-p2/`) if the control passes.
+1. Owner sideloads both v1.1.0 zips (Upload a custom app, for me). In m365.cloud.microsoft/chat, new chat with each agent: the Learn one gets "Search Microsoft Learn for declarative agent MCP plugins", and `spaarke-legal-g8p2-sl` gets "Show my Spaarke decisions" (sign in if a card appears; Cancel any approval card).
+2. Check App Insights for `initialize` / `tools/list` / `tools/call` from client "Sydney" in that minute.
+3. **Sideload ✅:** the build path works. Record it, and log org-catalog distribution as a D-A1 deployment risk (track #16643). Then G8-P2's real questions: Word/Teams surfaces and one call per turn (R1′).
+4. **Sideload ❌:** if the upload option is missing, custom app upload is off for the owner (Teams app setup policy). Otherwise, generate an agent with Microsoft's own tooling (ATK / WIQD; installing needs the owner's OK) and diff it against ours.
+5. Record the result in the README run log and design §8 G8-P2. Send it to COPILOT-PLATFORM-COORDINATION [0afb62] with removal confirmations (G8-a, G8-p2, both -sl, by 2026-11-30).
 
 ## G8 result (recorded in phase0/g8/README.md, commit 9c557d7e95)
 - An Agent Builder agent cannot use the tenant federated connector (A1 ❌, A2 "No connectors available" ❌, skills inside the agent ❌). Plain Chat works (`spike_whoami` ✅).
