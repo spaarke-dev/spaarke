@@ -218,7 +218,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         var act = () => Handler(app.Object).UpdateAsync(
             Approval, FamilyRow, new Dictionary<string, object?> { ["sprk_invoice"] = new EntityReference("sprk_invoice", OtherInvoice) },
-            Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
+            Sprk.Bff.Api.Services.Dataverse.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         NothingWritten();

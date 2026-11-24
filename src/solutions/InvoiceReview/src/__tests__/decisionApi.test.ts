@@ -6,7 +6,7 @@ import {
   newAdjustmentId,
 } from '../services/decisionApi';
 import { toFailure } from '../services/invoiceReviewApi';
-import { INVOICE_ID, SUBMISSION_ID, approval, blockedSubmission, forbidden, invoiceContext, lineId, problem } from './testKit';
+import { INVOICE_ID, SUBMISSION_ID, approval, blockedSubmission, firmNoticeDraft, forbidden, invoiceContext, lineId, problem } from './testKit';
 
 const BASE = 'https://bff.example.test/';
 
@@ -52,6 +52,45 @@ describe('createInvoiceDecisionApi', () => {
       [decisionRoutes.reject(BASE, INVOICE_ID), 'POST', { reason: 'Not payable' }],
       [decisionRoutes.returnToFirm(BASE, INVOICE_ID), 'POST', { reason: 'Please correct the rates' }],
     ]);
+  });
+
+  it('task 132ui: asks for the draft with the exact kind in the query, POST, no body of its own, and refuses a body that is not a draft', async () => {
+    expect(decisionRoutes.firmNoticeDraft(BASE, INVOICE_ID.toUpperCase(), 'InvoiceRejected')).toBe(
+      `https://bff.example.test/api/finance/invoices/${INVOICE_ID}/firm-notice/draft?kind=InvoiceRejected`
+    );
+    expect(decisionRoutes.firmNoticeDraft(BASE, INVOICE_ID, 'ReturnedToFirm')).toMatch(/\/firm-notice\/draft\?kind=ReturnedToFirm$/);
+    const fetchFn = fetchReturning(firmNoticeDraft());
+    const api = createInvoiceDecisionApi(fetchFn, BASE);
+    const r = await api.getFirmNoticeDraft(INVOICE_ID, 'InvoiceRejected');
+    expect(r).toEqual({ ok: true, value: firmNoticeDraft() });
+    expect(fetchFn.mock.calls[0][0]).toBe(decisionRoutes.firmNoticeDraft(BASE, INVOICE_ID, 'InvoiceRejected'));
+    expect(fetchFn.mock.calls[0][1]?.method).toBe('POST');
+    // (must-not-fire) a body without the notice text is a failure, never an empty draft.
+    const bad = await createInvoiceDecisionApi(fetchReturning({ subject: 5 }), BASE).getFirmNoticeDraft(INVOICE_ID, 'ReturnedToFirm');
+    expect(bad.ok).toBe(false);
+  });
+
+  it('task 132ui: reject and return carry noticeSubject and noticeProse (trimmed) only when both have text; otherwise neither key is in the body', async () => {
+    const fetchFn = fetchReturning({ outcome: 'decided' });
+    const api = createInvoiceDecisionApi(fetchFn, BASE);
+    await api.reject(INVOICE_ID, 'Not payable', undefined, { subject: '  The subject  ', prose: '  The message.  ' });
+    await api.returnToFirm(INVOICE_ID, 'Fix it', 'A note', { subject: 'S', prose: 'P' });
+    // Blank parts are no notice: never empty strings, never one part alone.
+    await api.reject(INVOICE_ID, 'Not payable', undefined, { subject: '   ', prose: 'P' });
+    await api.reject(INVOICE_ID, 'Not payable', undefined, { subject: 'S', prose: '' });
+    await api.reject(INVOICE_ID, 'Not payable');
+    const bodies = fetchFn.mock.calls.map(c => JSON.parse(String(c[1]?.body)));
+    expect(bodies).toEqual([
+      { reason: 'Not payable', noticeSubject: 'The subject', noticeProse: 'The message.' },
+      { reason: 'Fix it', note: 'A note', noticeSubject: 'S', noticeProse: 'P' },
+      { reason: 'Not payable' },
+      { reason: 'Not payable' },
+      { reason: 'Not payable' },
+    ]);
+    for (const b of bodies.slice(2)) {
+      expect('noticeSubject' in b).toBe(false);
+      expect('noticeProse' in b).toBe(false);
+    }
   });
 
   it('adds an adjustment with the client id, method, value, reason and rule only, and removes one with DELETE', async () => {

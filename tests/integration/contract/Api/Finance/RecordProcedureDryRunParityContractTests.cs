@@ -699,12 +699,48 @@ public sealed class RecordProcedureDryRunParityContractTests
         var snapshot = w.Snapshot();
         var writes = w.WriteInvocations().Count;
 
+        // A deterministic turnstile (#2981): flows A and B take turns over their first Turns queries (A, B, A, B), so the
+        // premise below never rests on Task.Yield scheduling, which under CI load produced too few switches. BeforeQuery runs
+        // outside the rig's lock, so a flow waiting its turn never blocks another flow's read. The wait has a generous
+        // deadlock guard: a flow with fewer queries than Turns lets the other go on, and the premise assertion then fails
+        // honestly instead of hanging.
+        const int Turns = 2;
         var trace = new List<string>();
+        var aTurn = new SemaphoreSlim(1);
+        var bTurn = new SemaphoreSlim(0);
+        var turnsTaken = new Dictionary<string, int> { ["A"] = 0, ["B"] = 0 };
         w.BeforeQuery = async _ =>
         {
+            var tag = Flow.Value ?? "?";
+            var (mine, theirs) = tag switch
+            {
+                "A" => (aTurn, bTurn),
+                "B" => (bTurn, aTurn),
+                _ => ((SemaphoreSlim?)null, (SemaphoreSlim?)null),
+            };
+            bool turnTaking;
             lock (trace)
             {
-                trace.Add(Flow.Value ?? "?");
+                turnTaking = mine is not null && turnsTaken[tag] < Turns;
+                if (turnTaking)
+                {
+                    turnsTaken[tag]++;
+                }
+            }
+
+            if (turnTaking)
+            {
+                await mine!.WaitAsync(TimeSpan.FromSeconds(30));
+            }
+
+            lock (trace)
+            {
+                trace.Add(tag);
+            }
+
+            if (turnTaking)
+            {
+                theirs!.Release();
             }
 
             await Task.Yield();
@@ -726,7 +762,24 @@ public sealed class RecordProcedureDryRunParityContractTests
 
         for (var round = 0; round < 3; round++)
         {
-            trace.Clear();
+            lock (trace)
+            {
+                trace.Clear();
+                turnsTaken["A"] = 0;
+                turnsTaken["B"] = 0;
+            }
+
+            while (aTurn.CurrentCount > 0)
+            {
+                aTurn.Wait();
+            }
+
+            while (bTurn.CurrentCount > 0)
+            {
+                bTurn.Wait();
+            }
+
+            aTurn.Release();
             var runs = new[] { Run("A", a), Run("B", b), Run("C", c), Run("A2", a), Run("B2", b) };
             var read = Read();
             var answers = await Task.WhenAll(runs);

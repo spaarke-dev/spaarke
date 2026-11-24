@@ -11,6 +11,7 @@ import { FilesSection } from './FilesSection';
 import { InformationSection } from './InformationSection';
 import { InvoicesSection } from './InvoicesSection';
 import { MessagesSection } from './MessagesSection';
+import { OutcomeSection } from './OutcomeSection';
 import { PreviewSection } from './PreviewSection';
 import { TasksEventsSection } from './TasksEventsSection';
 
@@ -22,6 +23,7 @@ export const RECORD_SECTIONS: Readonly<Record<RecordSectionId, React.FC<RecordSe
   preview: PreviewSection,
   messages: MessagesSection,
   tasksEvents: TasksEventsSection,
+  outcome: OutcomeSection,
 };
 
 /** Renders one section of the shown record (the modal's default `renderSection`). */

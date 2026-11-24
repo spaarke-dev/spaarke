@@ -605,8 +605,8 @@ public static class AnalysisServicesModule
         // Registration Conditionality Symmetry Rule (audit W4 §4.1).
 
         // L1 — IInvoiceAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
-        // Consumed by Finance flows (InvoiceAnalysisService, InvoiceSearchService,
-        // InvoiceIndexingJobHandler) which are unconditional; this Null peer keeps their
+        // Consumed by Finance flows (InvoiceSearchService, InvoiceIndexingJobHandler,
+        // the submission processor) which are unconditional; this Null peer keeps their
         // DI resolution green under compound-OFF and surfaces 503 ProblemDetails to callers.
         services.AddScoped<IInvoiceAi, NullInvoiceAi>();
 
@@ -668,13 +668,8 @@ public static class AnalysisServicesModule
         // IPlaybookLookupService (P3 Fail-Fast on GetByIdAsync; quiet no-op cache-clears).
         // Real impl registered in AddPlaybookServices. Unconditional consumers:
         // ChatEndpoints.ExecutePlaybookAsync, WorkspaceFileEndpoints.HandleSummarize,
-        // WorkspaceAiService + Matter/ProjectPreFillService, InvoiceExtractionJobHandler.
+        // WorkspaceAiService + Matter/ProjectPreFillService.
         services.AddScoped<IPlaybookLookupService, NullPlaybookLookupService>();
-
-        // IOutputOrchestratorService (P3 Fail-Fast). Real impl registered in
-        // AddPlaybookServices. Keeps unconditional InvoiceExtractionJobHandler (IJobHandler
-        // enumeration) resolvable under compound-OFF; dequeue fails fast per ADR-018.
-        services.AddScoped<IOutputOrchestratorService, NullOutputOrchestratorService>();
 
         // IActionResolver + IActionRunner (P3 Fail-Fast peers — FR-P3-05 task 044 wrapper
         // absorption). WorkspaceFileEndpoints.HandleSummarize injects the executor
@@ -1317,17 +1312,9 @@ public static class AnalysisServicesModule
         // service — belongs beside IPlaybookService. Null peer (P3 Fail-Fast) registered in
         // AddNullObjectsForCompoundOff because its consumers include UNCONDITIONAL surfaces:
         // ChatEndpoints.ExecutePlaybookAsync, WorkspaceFileEndpoints.HandleSummarize,
-        // WorkspaceAiService / Matter/ProjectPreFillService (WorkspaceModule, unconditional),
-        // and InvoiceExtractionJobHandler (FinanceModule IJobHandler, unconditional).
+        // and WorkspaceAiService / Matter/ProjectPreFillService (WorkspaceModule, unconditional).
         services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
 
-        // IOutputOrchestratorService: applies playbook outputMapping field updates to
-        // Dataverse (delegates to IDataverseUpdateHandler, which stays unconditional in
-        // FinanceModule). Sole consumer today is InvoiceExtractionJobHandler (unconditional
-        // IJobHandler) → Null peer (P3 Fail-Fast) in AddNullObjectsForCompoundOff keeps
-        // IJobHandler enumeration resolvable under compound-OFF; on dequeue the job fails
-        // fast with FeatureDisabledException and Service Bus retry/DLQ handles it (ADR-018).
-        services.AddScoped<IOutputOrchestratorService, OutputOrchestratorService>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
 
         // Insights Engine r2 Wave D4 (task 033) — runtime per-(area, type) routing for

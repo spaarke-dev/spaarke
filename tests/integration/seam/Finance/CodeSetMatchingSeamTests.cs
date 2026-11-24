@@ -626,7 +626,6 @@ public sealed class CodeSetMatchingSeamTests
                 NullLogger<ActionRunner>.Instance,
                 Options.Create(new DocumentIntelligenceOptions { FastModel = "fast-deployment", StandardModel = "standard-deployment" }));
             _ai = new InvoiceAi(
-                new Mock<IPlaybookService>(MockBehavior.Strict).Object,
                 Model.Object,
                 new ActionResolver(Routing.Object, Catalog.Object, NullLogger<ActionResolver>.Instance),
                 runner,

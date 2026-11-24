@@ -39,6 +39,7 @@ import {
   undecidedSteps,
   visibleActions,
   withAlsoResolve,
+  withBecause,
   withDismissal,
 } from '../decisionDraft';
 import type { StepScope } from '../decisionDraft';
@@ -145,6 +146,7 @@ export const ConfirmStep: React.FC = () => {
     closedIds,
     recordResult,
     today,
+    collectBecause,
   } = useDecisionItem();
   const styles = useStyles();
   const coreName = item.core?.name?.trim() || null;
@@ -373,6 +375,19 @@ export const ConfirmStep: React.FC = () => {
               label={composeIssueLine(o, today).headline}
             />
           ))}
+        </div>
+      ) : null}
+
+      {collectBecause ? (
+        <div data-testid="because">
+          <Field label="Because (optional)" hint="Why you decided this. It is recorded with the decision.">
+            <Textarea
+              rows={3}
+              disabled={locked}
+              value={draft.because ?? ''}
+              onChange={(_e, data) => update(d => withBecause(d, data.value))}
+            />
+          </Field>
         </div>
       ) : null}
 

@@ -17,7 +17,7 @@ import type {
   ReviewLine,
 } from '../services/invoiceReviewApi';
 import type { CorrectionPrefill } from '@spaarke/ui-components';
-import type { ApprovalState, BlockedSubmission, ContextSection, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
+import type { ApprovalState, BlockedSubmission, ContextSection, FirmNoticeDraft, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
 import { toFailure } from '../services/invoiceReviewApi';
 
 export const INVOICE_ID = '0d9178d3-9f32-7f46-ed9a-4dec59f66c1a';
@@ -354,6 +354,21 @@ export function correctionPrefill(overrides: Partial<CorrectionPrefill> = {}): C
 
 export type MockDecisionApi = { [K in keyof InvoiceDecisionApi]: jest.Mock };
 
+/** Task 132ui: a `FirmNoticeDraftResponse` as the draft route answers it (the subject carries the code-written tracking suffix). */
+export function firmNoticeDraft(overrides: Partial<FirmNoticeDraft> = {}): FirmNoticeDraft {
+  const rejected = (overrides.kind ?? 'InvoiceRejected') === 'InvoiceRejected';
+  return {
+    kind: 'InvoiceRejected',
+    subject: rejected ? 'Your invoice was rejected (INV-2025-78232.1)' : 'Your invoice is returned for correction (INV-2025-78232.1)',
+    prose: rejected ? 'We reviewed your invoice and cannot pay it. The findings are below.' : 'We reviewed your invoice and need corrections. The findings are below.',
+    html: '<p>preview</p>',
+    source: 'Action',
+    actionVersion: 'INVOICE-FIRM-NOTICE@v1',
+    fallbackReason: null,
+    ...overrides,
+  };
+}
+
 const emptySection = <T>(data: T): ContextSection<T> => ({ status: 'available', data, code: null, message: null });
 
 export function invoiceContext(overrides: Partial<InvoiceContext> = {}): InvoiceContext {
@@ -389,6 +404,7 @@ export function mockDecisionApi(initial: ApprovalState = approval()): MockDecisi
     approve: jest.fn(async () => ok({ outcome: 'approved', decisionId: 'd1', decisionRecordId: 'rec-9', state: approval({ status: 'Approved', canApprove: false, approvedAmount: 5000 }) })),
     reject: jest.fn(async () => ok({ outcome: 'decided', decision: 'Rejected', decisionId: 'd2', decisionRecordId: 'rec-10' })),
     returnToFirm: jest.fn(async () => ok({ outcome: 'decided', decision: 'Returned', decisionId: 'd3', decisionRecordId: 'rec-11' })),
+    getFirmNoticeDraft: jest.fn(async (_i: string, kind: 'InvoiceRejected' | 'ReturnedToFirm') => ok(firmNoticeDraft({ kind }))),
     listAdjustmentRules: jest.fn(async () =>
       ok({
         asOf: null,

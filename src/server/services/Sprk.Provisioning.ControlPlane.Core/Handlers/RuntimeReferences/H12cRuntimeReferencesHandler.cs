@@ -380,11 +380,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         // CLASSIFICATION table.
         run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
-        run.GateStates[$"h12c-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h12c-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

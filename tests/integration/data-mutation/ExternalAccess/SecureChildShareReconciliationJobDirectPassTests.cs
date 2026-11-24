@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Crm.Sdk.Messages;
@@ -13,6 +14,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -97,7 +99,7 @@ public class SecureChildShareReconciliationJobDirectPassTests
     private DirectMessageOwnerTeam Lookup() => _lookup ??= _directory.Lookup(_time);
 
     /// <summary>The REAL job over the world; <paramref name="without"/> withholds one of the Direct pass's seams.</summary>
-    private Job NewJob(string? without = null, GateDecisionRecordSharing? gate = null)
+    private Job NewJob(string? without = null, GateDecisionRecordSharing? gate = null, AppOnlyExternalVisibility? visibility = null)
     {
         var entities = SecureChildShareWorld.EntitiesOver(() => _world);
         entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -119,6 +121,8 @@ public class SecureChildShareReconciliationJobDirectPassTests
             services.AddSingleton(Lookup());
         if (without != "configuration")
             services.AddSingleton<IConfiguration>(_configuration);
+        if (visibility is not null)
+            services.AddSingleton<AppOnlyExternalVisibility>(visibility);
         if (gate is not null)
             services.AddSingleton(gate);
 
@@ -958,6 +962,397 @@ public class SecureChildShareReconciliationJobDirectPassTests
             new OntologyWriterDataverseClient(() => org.Object, NullLogger<OntologyWriterDataverseClient>.Instance),
             Mock.Of<IRecordOwnershipResolver>(), Mock.Of<IMembershipCacheInvalidator>(), NullLogger<GateDecisionRecordSharing>.Instance,
             Lookup(), _configuration);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // #1821, second round (the finished-message skip #2731, the per-table key set #2745, the overflow #2746)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static DateTime Ago(TimeSpan by) => (T0 - by).UtcDateTime;
+
+    private static readonly TimeSpan HalfMinute = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan TwoMinutes = TimeSpan.FromMinutes(2);
+
+    /// <summary>The rolling sweep answers nothing, so only the recent-changes listing and the carry can reach a message.</summary>
+    private void SweepFindsNothing() => _intercept = query => IsSweep(query) ? (true, new EntityCollection()) : (false, null);
+
+    /// <summary>One attachment row (the Direct team's) naming <paramref name="message"/>, changed at <paramref name="modifiedOn"/>.</summary>
+    private Guid AttachmentRow(Guid id, Guid message, DateTime modifiedOn)
+    {
+        _world.Add(Attachment, id, OwnedBy(DirectTeam), ("sprk_communication", new EntityReference(Communication, message)),
+            ("modifiedon", DateTime.SpecifyKind(modifiedOn, DateTimeKind.Utc)));
+        return id;
+    }
+
+    /// <summary><paramref name="count"/> changed attachment rows at one instant, all naming one message that is no longer there (it
+    /// settles as not found), with ascending ids: the cheapest way to fill one table's listing past its cap.</summary>
+    private List<Guid> AttachmentsAt(int count, DateTime modifiedOn)
+    {
+        var gone = Guid.NewGuid();
+        var ids = SortedIds(count);
+        foreach (var id in ids)
+            AttachmentRow(id, gone, modifiedOn);
+        return ids;
+    }
+
+    /// <summary>The messages of <paramref name="messages"/> the pass read by id, in the order it first read them (the work order).</summary>
+    private List<Guid> ReadOrder(params Guid[] messages) =>
+        messages.Where(m => _directQueries.Any(q => ReadsMessage(q, m)))
+            .OrderBy(m => _directQueries.FindIndex(q => ReadsMessage(q, m))).ToList();
+
+    /// <summary>The id a listing's key set goes on past (null for a listing without one).</summary>
+    private static Guid? AfterKey(QueryExpression listing) =>
+        listing.Criteria.Filters.SingleOrDefault()?.Conditions.Single(c => c.AttributeName == listing.EntityName + "id").Values.Single() as Guid?;
+
+    /// <summary>The job's per-message record of when it finished one (#2731), which no result field names. The only way to reach the
+    /// 5,000-entry cap without finishing 5,000 listed messages, and to see which entries a moving watermark forgets.</summary>
+    private static Dictionary<Guid, DateTimeOffset> FinishedAt(Job job) => (Dictionary<Guid, DateTimeOffset>)typeof(Job)
+        .GetField("_directFinishedAt", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(job)!;
+
+    [Fact]
+    public async Task ExecuteAsync_AMessageChangedInTwoTables_IsWorkedAtItsEarliestChange_AndSkippedByItsLatest()
+    {
+        // Ordering takes the MIN of a message's changes across tables; the finished-skip takes the MAX. The ids run against the
+        // changes, so neither the id tie-break nor the first-listed change can give the order.
+        var ids = SortedIds(2);
+        var thread = DirectThread();
+        var changedOnce = Message(thread, OwnedBy(DirectTeam), Ago(TimeSpan.FromMinutes(20)), ids[0]);
+        var changedTwice = Message(thread, OwnedBy(DirectTeam), Ago(TimeSpan.FromMinutes(10)), ids[1]);
+        ContentRow(Attachment, changedTwice, Ago(TimeSpan.FromMinutes(30)));
+        var latest = Message(thread, OwnedBy(DirectTeam), Ago(TimeSpan.FromMinutes(30)));
+        ContentRow(Attachment, latest, Ago(HalfMinute));
+        var latestOnItsOwnRow = Message(thread, OwnedBy(DirectTeam), Ago(HalfMinute)); // listed first, the newer change
+        ContentRow(Attachment, latestOnItsOwnRow, Ago(TimeSpan.FromMinutes(30)));
+        _intercept = query => IsSweep(query) ? throw new InvalidOperationException("Test: the sweep cannot be read.") : (false, null);
+        var job = NewJob();
+
+        await RunAsync(job);
+
+        ReadOrder(changedOnce, changedTwice).Should().Equal(new[] { changedTwice, changedOnce },
+            "the message whose attachment changed first is the oldest change, whichever table is listed first");
+
+        // The window is held (the sweep faulted), so the next run lists both again; `latest` changed 30 s before the run that
+        // finished it, inside the overlap, so its LATEST change keeps it from being skipped; its earliest change would skip it.
+        _directQueries.Clear();
+        _time.Advance(TwoMinutes);
+        var second = await RunAsync(job);
+
+        Int(second, "skippedFinished").Should().Be(2, "both messages were finished after their latest change, less the overlap, but one");
+        ReadOrder(latest, latestOnItsOwnRow).Should().BeEquivalentTo(new[] { latest, latestOnItsOwnRow }, "a message whose latest change is within the overlap of the run that finished it is worked again");
+        ReadOrder(changedOnce, changedTwice).Should().BeEmpty("finished after their latest change: skipped");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AHeldWindowListedAgain_SkipsOnlyWhatWasFinishedAfterItsLatestChange_LessTheOverlap()
+    {
+        var thread = DirectThread();
+        var beyondTheOverlap = Message(thread, OwnedBy(DirectTeam), Ago(Job.DirectOverlap + TimeSpan.FromSeconds(1)));
+        var atTheOverlap = Message(thread, OwnedBy(DirectTeam), Ago(Job.DirectOverlap));
+        var withinTheOverlap = Message(thread, OwnedBy(DirectTeam), Ago(HalfMinute));
+        _intercept = query => IsSweep(query) ? throw new InvalidOperationException("Test: the sweep cannot be read.") : (false, null);
+        var job = NewJob();
+
+        var first = await RunAsync(job); // finishes all three at T0 and holds the window
+        _directQueries.Clear();
+        _time.Advance(TwoMinutes);
+        var second = await RunAsync(job);
+
+        Int(first, "skippedFinished").Should().Be(0, "nothing was finished before the first run");
+        Int(second, "listed").Should().Be(3);
+        Int(second, "skippedFinished").Should().Be(1, "only a change before the finishing run's start less the overlap is skipped");
+        Int(second, "examined").Should().Be(2);
+        ReadOrder(beyondTheOverlap, atTheOverlap, withinTheOverlap).Should().BeEquivalentTo(new[] { atTheOverlap, withinTheOverlap },
+            "a change exactly at the boundary is not skipped, and neither is one inside the overlap");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AMessageLeftIncompleteAfterItWasFinished_IsNoLongerSkippedWhenListedAgain()
+    {
+        var message = DirectMessages(1, _ => Ago(TimeSpan.FromMinutes(5))).Single();
+        bool listingFaults = false, sweepFaults = true, readsFail = false;
+        _intercept = query =>
+        {
+            if ((listingFaults && IsListing(query)) || (sweepFaults && IsSweep(query)))
+                throw new InvalidOperationException("Test: Dataverse fault.");
+            if (readsFail && ReadsMessage(query, message))
+                throw new InvalidOperationException("Test: this message cannot be read.");
+            return (false, null);
+        };
+        var job = NewJob();
+
+        await RunAsync(job); // listed and finished at T0; the faulting sweep holds the window
+        Granted(message).Should().BeTrue();
+
+        // The listing faults, so the message is reached only by the sweep, and fails: it is incomplete, no longer finished.
+        listingFaults = true;
+        sweepFaults = false;
+        readsFail = true;
+        _time.Advance(TwoMinutes);
+        var failed = await RunAsync(job);
+        Int(failed, "incomplete").Should().Be(1);
+
+        // It lands (carried), in a run whose listing faults again, so nothing records it as finished.
+        readsFail = false;
+        _time.Advance(TwoMinutes);
+        var landed = await RunAsync(job);
+        Int(landed, "incomplete").Should().Be(0);
+
+        listingFaults = false;
+        _time.Advance(TwoMinutes);
+        var listedAgain = await RunAsync(job);
+
+        Int(listedAgain, "listed").Should().Be(1);
+        Int(listedAgain, "skippedFinished").Should().Be(0,
+            "it was left incomplete after the run that finished it, so that earlier finish no longer excuses working it");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AWatermarkThatMovesPastAKeyedInstant_ForgetsTheKey_SoALowerIdAtTheNewWatermarkIsListed()
+    {
+        var since = T0 - Job.DirectInitialLookback;
+        AttachmentsAt(Job.MaxDirectListedPerTable, since.UtcDateTime);
+        SweepFindsNothing();
+        var job = NewJob();
+
+        var first = await RunAsync(job); // capped at the window's start: the watermark stays, keyed by the last row's id
+        _time.Advance(TwoMinutes);
+        var second = await RunAsync(job); // lists nothing past the key: the watermark moves, with no key
+        var reached = Message(DirectThread(), OwnedBy(DirectTeam));
+        AttachmentRow(Guid.Parse("00000000-0000-0000-0000-000000000001"), reached, (T0 + TwoMinutes - Job.DirectOverlap).UtcDateTime);
+        _time.Advance(TwoMinutes);
+        var third = await RunAsync(job);
+
+        Bool(first, "listingCapped").Should().BeTrue();
+        Since(second).Should().Be(since.UtcDateTime, "the capped listing stopped at the window's start");
+        Bool(second, "listingCapped").Should().BeFalse();
+        Since(third).Should().Be((T0 + TwoMinutes - Job.DirectOverlap).UtcDateTime);
+        Int(third, "listed").Should().Be(1, "the old key does not follow the watermark to its new instant: a row at that instant with a lower id is listed");
+        Granted(reached).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TheKeySetListing_IncludesEveryRowChangedAfterTheWatermark_WhateverItsId()
+    {
+        var since = T0 - Job.DirectInitialLookback;
+        AttachmentsAt(Job.MaxDirectListedPerTable, since.UtcDateTime);
+        var reached = Message(DirectThread(), OwnedBy(DirectTeam));
+        // Past the first run's cap (the 500 at the window's start come first), changed after the watermark, with an id below the key.
+        AttachmentRow(Guid.Parse("00000000-0000-0000-0000-000000000002"), reached, since.AddMinutes(10).UtcDateTime);
+        SweepFindsNothing();
+        var job = NewJob();
+
+        var first = await RunAsync(job);
+        _time.Advance(TwoMinutes);
+        var second = await RunAsync(job);
+
+        Bool(first, "listingCapped").Should().BeTrue();
+        Int(first, "listed").Should().Be(1, "only the message the 500 rows name: the late row is past the cap");
+        Since(second).Should().Be(since.UtcDateTime);
+        AfterKey(_directQueries.Where(q => IsListing(q) && q.EntityName == Attachment).Last()).Should().NotBeNull("the second listing goes on past a key");
+        Int(second, "listed").Should().Be(1, "the key set is (modifiedon > since) OR (id > key): the row changed after the watermark is listed");
+        Granted(reached).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AKeyThatDoesNotAdvance_LogsAnErrorNamingTheTableAndTheWindowStart()
+    {
+        var since = T0 - Job.DirectInitialLookback;
+        var rows = AttachmentsAt(Job.MaxDirectListedPerTable, since.UtcDateTime);
+        var job = NewJob();
+        SweepFindsNothing();
+        await RunAsync(job); // capped at the window's start: keyed by rows[^1]
+
+        // A listing that goes on past the key can never end on it; this one does (rows past the key are not in the answer).
+        var gone = Guid.NewGuid();
+        _intercept = query =>
+        {
+            if (IsSweep(query))
+                return (true, new EntityCollection());
+            if (!(IsListing(query) && query.EntityName == Attachment && query.Criteria.Filters.Count > 0))
+                return (false, null);
+            var answer = Enumerable.Range(0, Job.MaxDirectListedPerTable).Select(i => new Entity(Attachment, i == Job.MaxDirectListedPerTable - 1 ? rows[^1] : Guid.NewGuid())
+            {
+                ["modifiedon"] = since.UtcDateTime,
+                ["sprk_communication"] = new EntityReference(Communication, gone),
+            }).ToList();
+            return (true, new EntityCollection(answer));
+        };
+        _time.Advance(TwoMinutes);
+        var context = RunContext();
+
+        var second = await job.ExecuteAsync(context, CancellationToken.None);
+
+        Bool(second, "listingCapped").Should().BeTrue();
+        Since(second).Should().Be(since.UtcDateTime);
+        var error = _log.Single(LogLevel.Error, "[DIRECT-SHARES]", ("RunId", context.RunId), ("Table", Attachment), ("Since", since));
+        error.Format.Should().Contain("the key did not advance");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AKeyThatAdvances_LogsNoError_AndEachListingGoesOnPastTheLastKey()
+    {
+        var since = T0 - Job.DirectInitialLookback;
+        var rows = AttachmentsAt(2 * Job.MaxDirectListedPerTable + 200, since.UtcDateTime);
+        SweepFindsNothing();
+        var job = NewJob();
+
+        var first = await RunAsync(job);
+        _time.Advance(TwoMinutes);
+        var second = await RunAsync(job);
+        _time.Advance(TwoMinutes);
+        var third = await RunAsync(job);
+
+        Bool(first, "listingCapped").Should().BeTrue();
+        Bool(second, "listingCapped").Should().BeTrue("500 more rows past the first key");
+        Bool(third, "listingCapped").Should().BeFalse("the last 200");
+        var keys = _directQueries.Where(q => IsListing(q) && q.EntityName == Attachment).Select(AfterKey).ToList();
+        keys.Should().Equal(null, rows[Job.MaxDirectListedPerTable - 1], rows[2 * Job.MaxDirectListedPerTable - 1]);
+        _log.Matching(LogLevel.Error, "[DIRECT-SHARES]").Should().BeEmpty("the key advanced every run");
+    }
+
+    [Theory]
+    [InlineData("neither")]
+    [InlineData("listing capped")]
+    [InlineData("sweep fault")]
+    public async Task ExecuteAsync_ACarryPastItsCap_SaysWhetherTheListingWasComplete(string situation)
+    {
+        // 1,151 due messages: the budget's 150 and 1,001 carried, past the cap of 1,000.
+        var capped = situation == "listing capped";
+        var recently = Ago(TimeSpan.FromMinutes(5));
+        var thread = DirectThread();
+        var own = capped ? Job.MaxDirectListedPerTable : Job.MaxDirectListedPerTable - 1;
+        var attachments = Job.MaxDirectListedPerTable - 1;
+        var participants = PriorityBudget + Job.MaxDirectCarried + 1 - own - attachments;
+        for (var i = 0; i < own; i++)
+            Message(thread, OwnedBy(DirectTeam), recently);
+        for (var i = 0; i < attachments; i++)
+            ContentRow(Attachment, Message(thread, OwnedBy(DirectTeam)), recently);
+        for (var i = 0; i < participants; i++)
+            ContentRow(Participant, Message(thread, OwnedBy(DirectTeam)), recently);
+        if (situation == "sweep fault")
+            _intercept = query => IsSweep(query) ? throw new InvalidOperationException("Test: the sweep cannot be read.") : (false, null);
+        var context = RunContext();
+
+        var run = await NewJob().ExecuteAsync(context, CancellationToken.None);
+
+        Bool(run, "listingCapped").Should().Be(capped);
+        Int(run, "carried").Should().Be(Job.MaxDirectCarried);
+        Int(run, "carryDropped").Should().Be(1);
+        var warning = _log.Matching(LogLevel.Warning, "[DIRECT-SHARES]").Single(e => e.Properties.ContainsKey("Carry"));
+        warning.Properties["RunId"].Should().Be(context.RunId);
+        warning.Properties["Carry"].Should().Be(Job.MaxDirectCarried + 1);
+        warning.Properties["Cap"].Should().Be(Job.MaxDirectCarried);
+        warning.Properties["Unlisted"].Should().Be(0);
+        warning.Format.Should().StartWith("[DIRECT-SHARES] run={RunId}: {Carry} messages to carry, past the cap of {Cap}; the watermark is held, so ");
+        if (situation == "neither")
+        {
+            warning.Format.Should().Contain("it did not list are reached by the sweep.").And.NotContain("the listing was incomplete",
+                "a complete listing and a read sweep: what this run did not list is reached by the sweep");
+        }
+        else
+        {
+            warning.Format.Should().Contain("the listing was incomplete, so the {Unlisted} dropped message(s)")
+                .And.Contain("are listed again by a later run or reached by the sweep.",
+                    "a capped or faulted read may still list the dropped messages later");
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ACappedListingWhoseLastRowCarriesNoChangeTime_HoldsTheWatermark_NeverThrows()
+    {
+        // Dataverse filters on modifiedon, so a row it lists always carries it; a listing answer that does not must hold the
+        // window, not fail the run (the other capped listing's horizon cannot stand in for it).
+        var gone = Guid.NewGuid();
+        _intercept = query =>
+        {
+            if (IsSweep(query))
+                return (true, new EntityCollection());
+            if (IsListing(query) && query.EntityName == Communication)
+            {
+                return (true, new EntityCollection(Enumerable.Range(0, Job.MaxDirectListedPerTable)
+                    .Select(_ => new Entity(Communication, Guid.NewGuid()) { ["modifiedon"] = Ago(TimeSpan.FromMinutes(5)) }).ToList()));
+            }
+
+            if (IsListing(query) && query.EntityName == Attachment)
+            {
+                return (true, new EntityCollection(Enumerable.Range(0, Job.MaxDirectListedPerTable)
+                    .Select(_ => new Entity(Attachment, Guid.NewGuid()) { ["sprk_communication"] = new EntityReference(Communication, gone) }).ToList()));
+            }
+
+            return (false, null);
+        };
+        var job = NewJob();
+
+        var first = await RunAsync(job);
+        _time.Advance(TwoMinutes);
+        var second = await RunAsync(job);
+
+        Bool(first, "listingCapped").Should().BeTrue();
+        Since(second).Should().Be((T0 - Job.DirectInitialLookback).UtcDateTime, "a capped listing with no change time to move to holds the window");
+    }
+
+    [Theory]
+    [InlineData(Job.MaxDirectFinishedRemembered - 1, true)]
+    [InlineData(Job.MaxDirectFinishedRemembered - 2, false)]
+    public async Task ExecuteAsync_PastTheFinishedRecordsCap_ForgetsTheOldest_TheLowestIdOfATie(int fillers, bool evicts)
+    {
+        var listed = DirectMessages(2, _ => Ago(TimeSpan.FromMinutes(5)));
+        _intercept = query => IsSweep(query) ? throw new InvalidOperationException("Test: the sweep cannot be read.") : (false, null); // holds the window: nothing is pruned
+        var job = NewJob();
+        var others = Enumerable.Range(0, fillers).Select(i => (Id: Guid.NewGuid(), At: T0 + TimeSpan.FromHours(1) + TimeSpan.FromSeconds(i))).ToList();
+        foreach (var (id, at) in others)
+            FinishedAt(job)[id] = at;
+
+        await RunAsync(job); // finishes both listed messages at one instant: a tie for the oldest
+
+        var kept = FinishedAt(job);
+        kept.Count.Should().Be(Job.MaxDirectFinishedRemembered, "no more than the cap is remembered");
+        kept.Keys.Should().Contain(others.Select(o => o.Id), "the newer entries stay");
+        kept.ContainsKey(listed[1]).Should().BeTrue();
+        kept.ContainsKey(listed[0]).Should().Be(!evicts, "exactly one over the cap forgets the oldest, and of a tie the lower id");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AWatermarkThatMoves_ForgetsTheEntriesFinishedWithinTheOverlapOfIt_AndKeepsTheRest()
+    {
+        var finishedNow = DirectMessages(1, _ => Ago(TimeSpan.FromMinutes(5))).Single();
+        var job = NewJob();
+        var longAgo = Guid.NewGuid();
+        var later = Guid.NewGuid();
+        FinishedAt(job)[longAgo] = T0 - TimeSpan.FromMinutes(30);
+        FinishedAt(job)[later] = T0 + TimeSpan.FromHours(1);
+
+        var run = await RunAsync(job); // the watermark moves to T0 - overlap
+
+        Text(run, "status").Should().Be(Job.DirectMessageRun.StatusOk);
+        Granted(finishedNow).Should().BeTrue();
+        FinishedAt(job).Keys.Should().BeEquivalentTo(new[] { later },
+            "an entry finished at or before the new watermark's overlap (this run's own, at exactly that edge, included) can skip nothing");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReportsEveryRevokedShare_IncludingAFlaggedParticipantsOnHiddenRows()
+    {
+        var (message, rows) = DirectMessageWithContent();
+        _users.Flags[Other] = true;
+        var outsider = Guid.NewGuid();
+        _shares.Seed(Communication, message, DataversePrincipalRef.User(outsider), Read);
+        _shares.Seed(Communication, message, DataversePrincipalRef.User(Other), Read);
+        var stub = new ExternalVisibilitySeamStub();
+        stub.Set(Communication, message, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.CommunicationHidden);
+        foreach (var (table, id) in rows)
+        {
+            _shares.Seed(table, id, DataversePrincipalRef.User(Other), Read);
+            stub.Set(table, id, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.CommunicationHidden);
+        }
+
+        var run = await RunAsync(NewJob(visibility: stub.Seam));
+
+        Holds(Communication, message, outsider).Should().BeFalse();
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeFalse($"{table} is hidden: the flagged participant's share is revoked");
+        Int(run, "revoked").Should().Be(1 + 1 + rows.Count,
+            "the non-participant's share, and the flagged participant's on the message and each hidden content row");
     }
 
     // ── Logs, by their structured properties ────────────────────────────────────────────────────────────────────────

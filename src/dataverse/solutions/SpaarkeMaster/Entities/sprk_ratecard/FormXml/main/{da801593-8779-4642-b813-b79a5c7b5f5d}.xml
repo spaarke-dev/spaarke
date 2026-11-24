@@ -48,26 +48,6 @@
                       </cell>
                     </row>
                     <row>
-                      <cell id="{A6A014A7-F9D3-9096-2466-26ABED11418D}">
-                        <labels>
-                          <label description="Matter" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_matter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_matter" />
-                      </cell>
-                      <cell id="{A8D29FCD-0791-5169-1A4D-6894114B24D4}">
-                        <labels>
-                          <label description="Project" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_project" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_project" />
-                      </cell>
-                    </row>
-                    <row>
-                      <cell id="{5618C165-C56D-AB00-B5C9-3681C3E897C7}">
-                        <labels>
-                          <label description="Work Assignment" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_workassignment" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_workassignment" />
-                      </cell>
                       <cell id="{E1B61FA0-7BAB-A9CE-FB17-9DC481B001E1}">
                         <labels>
                           <label description="Source Document" languagecode="1033" />

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>B-1 decision capability: list and plan</title>
+    <phase>A BFF rework</phase>
+    <gate>after 017</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; creates a service and modifies endpoints (.cs)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New abstraction: the transport-free decision capability shared by REST and MCP, extracted on Services/Signals/** owned by ontology-platform</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Shares no file with 002 (owner-run steps and notes only); serial with 014 and 016 through deps</parallel-reason>
+    <deps>011, 017</deps>
+    <tags>bff-api, api, refactoring, di, unit-test, integration-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the self-authorising decision capability (IDecisionCapability) with the Decide-lane list and the decision plan operations. Its methods take the caller from the request: the HttpContext, or the ClaimsPrincipal where that is enough. Make the worklist, decision-plan and suppression REST endpoints thin adapters over it, with their responses unchanged.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in layered ASP.NET Core service design and behaviour-preserving extraction.</role>
+  <goal>IDecisionCapability and DecisionCapability exist in Services/Signals/ with ListDecideAsync and GetPlanAsync (plan + suppression + full row, writes the plan-read stamp); the REST endpoints call them; 011's baselines pass unchanged.</goal>
+
+  <context>
+    <background>Design §7 and §8 B-1; spec FR-10, FR-06. Read rules in SignalReadService (core-record check; 503 too_many_signals instead of a partial list) are unchanged. Category filtering is presentation and lives in 022, not here. The capability layer is IDecisionCapability (list, plan, commit) plus IDecisionLookupSearch (016). Caller context (FR-10 as amended 2026-11-07, owner option C; ICallerContext deferred): B-1 only moves the endpoint bodies into capability methods. ListDecideAsync takes the ClaimsPrincipal and calls SignalReadService.ReadAsync(set, user, ct). GetPlanAsync and GetSuppressionAsync take the HttpContext and run the DecisionPlanEndpoints body unchanged: SignalCoreRecordAccess, DecisionPlanService.GetAsync, DecisionPlanReadStamp.StampAsync(http) and DecisionParameterSources.OptionsAsync(http). REST passes the endpoint's HttpContext; MCP tools (022, 023) pass IHttpContextAccessor.HttpContext.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Signals/SignalReadEndpoints.cs (GetWorklistAsync → capability)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionPlanEndpoints.cs (GetDecisionPlanAsync, GetSuppressionAsync → capability)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs (AddScoped IDecisionCapability)</file>
+      <file role="new">tests/unit/domain/Signals/DecisionCapabilityListPlanTests.cs</file>
+      <file role="new">tests/integration/auth/Signals/DecisionCapabilityCallerTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (worklist pipeline, L308; too_many_signals L661)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionPlanReadStamp.cs (stamp key and 4 h TTL)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs (module registration style)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Golden baselines</dependency>
+      <dependency task="017" status="pending">DecisionResultMapper used by the thin endpoints</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">The REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision stay byte-for-byte unchanged: task 011's contract baseline tests pass with no golden-file edit (FR-09).</constraint>
+    <constraint source="ADR-028">Every operation this task adds or changes takes the caller from the request. Capability methods receive the HttpContext the REST endpoint already has (or its ClaimsPrincipal where that is enough) and pass it to the existing decision services unchanged. A null HttpContext or an unauthenticated caller returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED), and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
+    <constraint source="ADR-002">In every file this task touches, SignalReadService read rules and DecisionCommitService validation, idempotency and execution order are unchanged; DecisionCommitService stays the single owner of completion; SignalWriter, DecisionRecordWriter and DecisionCallerRights are not edited.</constraint>
+    <constraint source="project">IDecisionCapability signatures take the request HttpContext, or a ClaimsPrincipal where that is enough (ListDecideAsync). They contain no HttpRequest, IResult or MCP SDK type, and results are the existing domain result types (SignalReadResult etc.).</constraint>
+    <constraint source="project">GetPlanAsync writes the plan-read stamp exactly as the plan route does today (same key, 4 h TTL, same conditions), and writes none when the plan is refused.</constraint>
+    <constraint source="ADR-010">The capability is registered as Scoped in SignalsModule.cs; no new module.</constraint>
+    <constraint source="project">File ownership for parallel safety: this task creates IDecisionCapability.cs and DecisionCapability.cs; 014 adds the commit members; 015 adds the page member; 016 does not edit them.</constraint>
+    <constraint source="project">Every PR from this task that touches Services/Signals/**, Api/Signals/** or the worklist route is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); run /conflict-check before opening it.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/pre-pipeline-context.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read SignalReadEndpoints.GetWorklistAsync, DecisionPlanEndpoints.GetDecisionPlanAsync/GetSuppressionAsync and the services they call.</step>
+    <step order="2">Create IDecisionCapability (ListDecideAsync(ClaimsPrincipal user, ct), GetPlanAsync(HttpContext http, signalId, ct), GetSuppressionAsync(HttpContext http, signalId, ct)) and DecisionCapability. Move the endpoint bodies into it unchanged, including their calls that take the HttpContext; leave only HTTP result shaping in the endpoints.</step>
+    <step order="3">Reduce the three endpoints to: call capability → DecisionResultMapper.ToHttp.</step>
+    <step order="4">Register the capability in SignalsModule.cs.</step>
+    <step order="5">Write the tests in the acceptance criteria; run 011's baselines and the Signals suites (including the one-batched-BillingEventRead count).</step>
+    <step order="6">Measure the publish-size delta; open the PR for ontology review stating that read rules are unchanged.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If extracting the plan logic would change when or how the plan-read stamp is written, STOP and escalate.</trigger>
+    <trigger>If any 011 baseline changes, STOP (AP-9).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SignalReadService.cs, DecisionPlanReadStamp.cs and the plan/worklist endpoint bodies (DecisionPlanEndpoints.cs, SignalReadEndpoints.cs) hold this logic today.</existing>
+    <extension>Yes, it extends them: the endpoint bodies move into one entry point whose methods take the request HttpContext or ClaimsPrincipal; no new rules.</extension>
+    <cost-of-doing-nothing>MCP tools would have to call endpoint code or re-derive the caller and plan logic, giving the plan-read stamp and read rules a second owner (spec §11 table).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.cs</output>
+    <output type="test">tests/unit/domain/Signals/DecisionCapabilityListPlanTests.cs</output>
+    <output type="test">tests/integration/auth/Signals/DecisionCapabilityCallerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IDecisionCapability exposes ListDecideAsync(ClaimsPrincipal, ct), GetPlanAsync(HttpContext, Guid, ct) and GetSuppressionAsync(HttpContext, Guid, ct), with no HttpRequest, IResult or MCP SDK type in any signature.</criterion>
+    <criterion testable="true">The worklist, decision-plan and suppression endpoints call the capability; 011's baselines pass with no golden change.</criterion>
+    <criterion testable="true">GetPlanAsync writes the plan-read stamp with the same key and TTL as before (test asserts presence after a plan read).</criterion>
+    <criterion testable="true">Negative: for a Signal outside the caller's core-record access, GetPlanAsync returns the same reason code the REST route returns and writes no stamp.</criterion>
+    <criterion testable="true">Negative: with a null HttpContext or an unauthenticated principal, the list and plan operations return UserContextRequired and make no Dataverse call.</criterion>
+    <criterion testable="true">The 503 too_many_signals path and the one-batched-BillingEventRead count are unchanged (existing tests pass).</criterion>
+    <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE) and the ontology review.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §7 names the list operation DecisionCapability.ListDecideAsync. Keep the list unfiltered; category partitioning is 022's (parity with laneCountFilters.ts).
+
+Completion (2026-11-07, commits 51f124bb6d + review fix ffe5b3a84f):
+- DecisionCapability (Services/Signals, sealed partial) + IDecisionCapability: ListDecideAsync(ClaimsPrincipal?, ct, set = Lanes), GetPlanAsync(HttpContext?, Guid, ct), GetSuppressionAsync(HttpContext?, Guid, ct); no HttpRequest, IResult or MCP SDK type in a signature. The worklist, plan and suppression endpoints are thin adapters through DecisionResultMapper (new typed overloads for DecisionPlanReadResult / SuppressionReadResult). Registered scoped in SignalsModule. Caller guard: no context or no authenticated identity is UserContextRequired (401, same reasonCode on the tool error) before any Dataverse call. Deviations and decisions: notes/decisions.md "2026-11-07 — Task 013".
+- Escalation triggers: neither fired. The plan-read stamp call, arguments and position are unchanged (last, only on a returned plan); 011 baselines 63/63 (53 plan/suppression/decision + 10 worklist), no golden file edited.
+- Tests: new DecisionCapabilityCallerTests (tests/integration/auth/Signals), DecisionCapabilityListPlanTests + DecisionCapabilityFixtures (tests/unit/domain/Signals), mapper parity rows. Fail-before: guard removed fails 9/10 caller tests; stamp moved above the inquiry check fails 4 DoLanePrivacy cases; reason-based no-caller match fails the new mapper test. Signals domain/auth/contract filter 2939/2939; SignalReadRouteTests (integration, incl. 10 worklist baselines, 503 too_many_signals, batched count) 128/128; ArchTests 1973/1973 (RouteAuthorizationGuard 93/93 after the ledger fix); full unit suite: stopped after about 80 min on a machine shared with another session's test run; 40 failures, all outside Signals (Compose, Office, Documents, Insights, ExternalAccess, an eval harness), each after 1.5 to 18 min, i.e. host timeouts under contention. A sample of 23 of those re-run alone passed 23/23.
+- Build: Sprk.Bff.Api 0 warnings, 0 errors (TreatWarningsAsErrors).
+- Publish size (dotnet publish -c Release, framework-dependent linux-x64, Compress-Archive Optimal over deploy/api-publish/*, PDBs included, fresh short-path worktrees C:\wt013m / C:\wt013b, 191 files each side): master d53d67f604 = 39.26 MB (41,162,509 B); branch 51f124bb6d = 39.24 MB (41,147,135 B); branch vs master -15,374 B. Task delta vs 017's measured 21882337f7 (41,143,201 B): about +3.9 KB. Under 55/60 MB. dotnet list package --vulnerable --include-transitive: no vulnerable packages.
+- Quality gates: adversarial review (opus), one pass: no production defect; F3 x2 fixed (stamp-not-written on the 503 inquiry paths now pinned; stale ledger line citation), K2 fixed (no-caller worklist matched by reference). Known limits: K1, the guard and stamp read the passed HttpContext while Dataverse reads use IHttpContextAccessor; same object on REST; 020/022 must pass the ambient context over a stateless host (FR-01). K3, the plan/suppression baseline host registers the capability by hand (the worklist host uses the real Program DI). K4, no golden for suppression.200 / partition-undetermined (pre-existing from 011; arms identical by inspection); result records have public constructors. Self review K4: per-request construction of the scoped capability (note for 014); ?? throw in the Ok factories. adr-check: ADR-001/002 WP-6/008/009/013/019/028/029/038/052 compliant; ADR-010 warning: IDecisionCapability has one implementation, kept per the POML and design §8 B-1 as the seam two hosts consume and 022-024 tool tests substitute (path C reasoning, no violation).
+- Not done here: "full Work Item row" (goal text) left to 023 with 015's projection (decisions.md). The PR for ontology review is the main session's (brief: push only); the ontology review is noted in both commit bodies. Master sync: origin/master 23567b2f93 touches DecisionActionCatalogTests, DoLanePrivacyTests, SignalSuppressionTests; a trial merge-tree is clean.
+rework: fix-round-1 task 013</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

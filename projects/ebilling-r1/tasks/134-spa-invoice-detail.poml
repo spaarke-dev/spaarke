@@ -7,7 +7,7 @@
     <title>SPA invoice detail and on-screen report</title>
     <phase>5 Firm feedback (WP5) — wave W5-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Frontend over an existing read route (130) inside existing SPA detail surfaces; no server change, no auth decision on the client.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -15,7 +15,7 @@
     <effort>high</effort>
     <parallel-group>P5-B</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>130</deps>
+    <deps>130, 130g</deps>
     <tags>frontend, external-spa, fluent-ui</tags>
     <estimated-effort>1-2 days</estimated-effort>
   </metadata>
@@ -52,6 +52,7 @@
     <constraint source="project">src/client/external-spa is shared with SPA-r3: change RecordDetailModal minimally (one section) and run /conflict-check before the PR.</constraint>
     <constraint source="076 review round 2 item 5, re-keyed by task 083 (notes/083-firm-clause-applicability.md)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceId, ct). invoiceId is the invoice the finding belongs to, read server-side and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never one derived from the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. GetFirmClauseAsync reads the invoice's firm and its evaluation snapshot itself and returns text only for a policy version that snapshot applied; a displaced or excluded version, an invoice with no snapshot or no firm, a read fault, a non-Billing policy and a rule set with visible-to-firms off all return no text, and it never re-resolves. The result carries FirmFacingName (the Procedure's firm-facing name, or "Billing instructions for this record" for a record rule): show that name, never the Procedure's Name. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
     <constraint source="model 7.4 (R3), task 083">The screen renders only the fields of 130's allow-list DTO; a negative test asserts that no override reason, Procedure name or Procedure id appears in the response or the rendered section.</constraint>
+    <constraint source="130g (EB-D-259) review K">For a Rejected or Returned-to-firm invoice, show FirmOutcome.noticeProse (optional; both the invoice and the submission outcome routes carry it) as the firm-safe reason, as plain text only (a text node; never dangerouslySetInnerHTML or any HTML rendering: HTML-shaped prose can pass the server screen). Absent key: show no reason line. Never show the internal reject or return reason or note.</constraint>
   </constraints>
 
   <knowledge>
@@ -141,6 +142,7 @@
     <criterion testable="true">Every item in a fixture outcome DTO renders with subject, decision, reason and (when present) the firm-facing label (FirmClauseText.FirmFacingName, never sprk_ruleset.sprk_name), version, section reference and clause quote; items without a citation render reason only.</criterion>
     <criterion testable="true">An In Review outcome renders status, billed total and "Under review" and no findings.</criterion>
     <criterion testable="true">Download PDF appears only when the DTO marks a report available and calls 133's route through bffApiCall.</criterion>
+    <criterion testable="true">130g: noticeProse, when present on a Rejected or Returned outcome, renders as plain text (a test with markup in the value shows it literally, unrendered); an absent key shows no reason line.</criterion>
     <criterion testable="true">403 renders the SPA's no-access state; 503 ebilling.disabled hides the section.</criterion>
     <criterion testable="true">051's rejected-submission result screen shows the same component.</criterion>
     <criterion testable="true">npm run build and npm test pass; no new npm dependency in package.json.</criterion>
@@ -148,7 +150,9 @@
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>After 015, invoice status in the generic field list comes from statuscode (015 changes RecordDetailFields); this task does not touch that field. P5-B: 135 owns its own client file and widget, so no file overlap with this task; 131 and 133 are server-only.</notes>
+  <notes>After 015, invoice status in the generic field list comes from statuscode (015 changes RecordDetailFields); this task does not touch that field. P5-B: 135 owns its own client file and widget, so no file overlap with this task; 131 and 133 are server-only.
+    Completed 2026-11-21, merged into work 5f7195b9eb (branch task/ebilling-134, tip b29a9e7c9a). The invoice record modal gains an Outcome section and the submit result screen renders the same report through the renderReport slot; print uses a body-level portal (EB-D-254, no PDF). In Review shows decided and added items (EB-D-202); Rejected / Returned hide the per-line approved amount (130f K6); noticeProse is plain text (130g); the reason code shows (EB-D-210). Opus review: F1 print truncation in hosted surfaces and F4 missing reason code fixed, K4 small items fixed; uac-r2 PASS, N1 print-path K6 test added. Known limits in notes/134-spa-invoice-outcome.md. SPA tests 1881/0, tsc, lint and build clean; no new dependency. UI tests run at the 136 deploy. spa-r4 review of the external-spa diff is held until the PR to master (owner, 2026-11-21).
+    rework: fix-round-1 task 134</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

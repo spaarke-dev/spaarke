@@ -226,7 +226,6 @@ public sealed class AttachmentClassificationJobHandlerTests
                 .ReturnsAsync(modelOutput);
 
             var ai = invoiceAi ?? new InvoiceAi(
-                new Mock<IPlaybookService>(MockBehavior.Strict).Object,
                 new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
                 new ActionResolver(Routing.Object, Catalog.Object, NullLogger<ActionResolver>.Instance),
                 new ActionRunner(Model.Object, new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance), NullLogger<ActionRunner>.Instance),

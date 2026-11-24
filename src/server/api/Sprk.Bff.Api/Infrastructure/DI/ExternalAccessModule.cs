@@ -801,7 +801,7 @@ public static class ExternalAccessModule
 
         // unified-access-control-r2 task 191c (#2179 design §3.4): THE predicate (task 191b) over the BFF's app-only readers —
         // the external plane's OData reader (the 065 rule, thread privacy), task 188's app-only document narrowing, the effective
-        // root flags, ebilling's caller-less (a′) decision and the Procedure Library container — and the External-team mode of the
+        // root flags and ebilling's caller-less (a′) decision — and the External-team mode of the
         // share synchronizer that asks it. The readers are built on the first decision, so a request that never decides builds no
         // client. SCOPED, like the synchronizer, the reconciler and the Restricted remover that take the engine as an optional
         // collaborator (default null in test compositions). Its writes are OFF unless ExternalAccess:ExternalTeamShare:WritesEnabled
@@ -821,7 +821,6 @@ public static class ExternalAccessModule
                         sp.GetRequiredService<AppOnlyDocumentNarrowing>(),
                         rootFlags,
                         (invoiceIds, token) => data.DecideInvoicesWithoutCallerAsync(invoiceIds, rootFlags, token),
-                        sp.GetRequiredService<IOptions<Sprk.Bff.Api.Configuration.FinanceOptions>>().Value.ProcedureLibraryContainerId,
                         sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer>>());
                 }
 

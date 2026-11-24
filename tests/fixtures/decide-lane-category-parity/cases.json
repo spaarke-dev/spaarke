@@ -1,0 +1,148 @@
+{
+  "$comment": [
+    "SHARED DECIDE-LANE CATEGORY PARITY CORPUS (spaarkeai-mcp-bff-api-r1 task 022; spec FR-03).",
+    "",
+    "WHY THIS FILE EXISTS. The Console's Decide-lane category cards are computed in the browser by bucketLaneItems",
+    "(src/client/shared/Spaarke.UI.Components/src/components/Worklist/laneCountFilters.ts). The MCP tool",
+    "spaarke_show_decisions tells Copilot the same counts, computed on the server by DecideLaneCategories",
+    "(src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/DecideLaneCategories.cs). Two hand-kept copies of the",
+    "expectations could drift while both suites stay green; this file is the single set of expectations, and each side",
+    "runs it against its own code, so a divergence fails on the side that lags.",
+    "",
+    "READERS. tests/unit/domain/Mcp/DecideLaneCategoriesParityTests.cs (xunit) and",
+    "src/client/shared/Spaarke.UI.Components/src/components/Worklist/__tests__/laneCountFilters.parity.test.ts (jest).",
+    "Moving this file means moving it in both readers.",
+    "",
+    "SHAPE. Each case lists items (lane, workType, invoiceReview) and the Decide lane's expected cards in display order",
+    "(key, label, count). invoiceReview is null or an object with a guid invoiceId (the server always writes one), so",
+    "'billing' means the same thing on both sides. A key or label change in either partition must change this file.",
+    "",
+    "MAINTENANCE. A new Decide-lane work type, a new card, or a change to which items a card holds adds or changes a case here."
+  ],
+  "cases": [
+    {
+      "name": "empty lane: All and every work-type card at zero, no Invoice decisions or Other card",
+      "items": [],
+      "expected": [
+        { "key": "all", "label": "All", "count": 0 },
+        { "key": "askOutsideCounsel", "label": "Ask outside counsel", "count": 0 },
+        { "key": "approveOrRebudget", "label": "Approve or rebudget", "count": 0 },
+        { "key": "chaseReply", "label": "Chase a reply", "count": 0 }
+      ]
+    },
+    {
+      "name": "one item per work type, no billing, no other",
+      "items": [
+        { "lane": "Decide", "workType": "askOutsideCounsel", "invoiceReview": null },
+        { "lane": "Decide", "workType": "askOutsideCounsel", "invoiceReview": null },
+        { "lane": "Decide", "workType": "approveOrRebudget", "invoiceReview": null },
+        { "lane": "Decide", "workType": "chaseReply", "invoiceReview": null }
+      ],
+      "expected": [
+        { "key": "all", "label": "All", "count": 4 },
+        { "key": "askOutsideCounsel", "label": "Ask outside counsel", "count": 2 },
+        { "key": "approveOrRebudget", "label": "Approve or rebudget", "count": 1 },
+        { "key": "chaseReply", "label": "Chase a reply", "count": 1 }
+      ]
+    },
+    {
+      "name": "billing items go to Invoice decisions right after All and leave the work-type cards, whatever their work type",
+      "items": [
+        {
+          "lane": "Decide",
+          "workType": "approveOrRebudget",
+          "invoiceReview": {
+            "invoiceId": "0b5ad0a8-3f0e-4c7f-9a51-1d2e3f405162",
+            "lineId": "7c1e2d3f-4a5b-4c6d-8e9f-a0b1c2d3e4f5"
+          }
+        },
+        {
+          "lane": "Decide",
+          "workType": "approveOrRebudget",
+          "invoiceReview": { "invoiceId": "1b5ad0a8-3f0e-4c7f-9a51-1d2e3f405162", "lineId": null }
+        },
+        {
+          "lane": "Decide",
+          "workType": null,
+          "invoiceReview": { "invoiceId": "2b5ad0a8-3f0e-4c7f-9a51-1d2e3f405162" }
+        },
+        { "lane": "Decide", "workType": "approveOrRebudget", "invoiceReview": null },
+        { "lane": "Decide", "workType": "chaseReply", "invoiceReview": null }
+      ],
+      "expected": [
+        { "key": "all", "label": "All", "count": 5 },
+        { "key": "invoiceDecisions", "label": "Invoice decisions", "count": 3 },
+        { "key": "askOutsideCounsel", "label": "Ask outside counsel", "count": 0 },
+        { "key": "approveOrRebudget", "label": "Approve or rebudget", "count": 1 },
+        { "key": "chaseReply", "label": "Chase a reply", "count": 1 }
+      ]
+    },
+    {
+      "name": "Other holds every non-billing item whose work type is missing, empty, unknown, of the Do lane or differently cased",
+      "items": [
+        { "lane": "Decide", "workType": null, "invoiceReview": null },
+        { "lane": "Decide", "invoiceReview": null },
+        { "lane": "Decide", "workType": "", "invoiceReview": null },
+        { "lane": "Decide", "workType": "comingDue", "invoiceReview": null },
+        { "lane": "Decide", "workType": "somethingNew", "invoiceReview": null },
+        { "lane": "Decide", "workType": "AskOutsideCounsel", "invoiceReview": null },
+        { "lane": "Decide", "workType": "askOutsideCounsel", "invoiceReview": null }
+      ],
+      "expected": [
+        { "key": "all", "label": "All", "count": 7 },
+        { "key": "askOutsideCounsel", "label": "Ask outside counsel", "count": 1 },
+        { "key": "approveOrRebudget", "label": "Approve or rebudget", "count": 0 },
+        { "key": "chaseReply", "label": "Chase a reply", "count": 0 },
+        { "key": "other", "label": "Other", "count": 6 }
+      ]
+    },
+    {
+      "name": "Do-lane items (billing or not) are not in the Decide lane's cards",
+      "items": [
+        { "lane": "Do", "workType": "finishOrReschedule", "invoiceReview": null },
+        {
+          "lane": "Do",
+          "workType": "askOutsideCounsel",
+          "invoiceReview": { "invoiceId": "3b5ad0a8-3f0e-4c7f-9a51-1d2e3f405162" }
+        },
+        { "lane": "decide", "workType": "chaseReply", "invoiceReview": null },
+        { "lane": "Decide", "workType": "chaseReply", "invoiceReview": null }
+      ],
+      "expected": [
+        { "key": "all", "label": "All", "count": 1 },
+        { "key": "askOutsideCounsel", "label": "Ask outside counsel", "count": 0 },
+        { "key": "approveOrRebudget", "label": "Approve or rebudget", "count": 0 },
+        { "key": "chaseReply", "label": "Chase a reply", "count": 1 }
+      ]
+    },
+    {
+      "name": "every card at once: the non-All cards partition the lane (their counts sum to All)",
+      "items": [
+        { "lane": "Decide", "workType": "askOutsideCounsel", "invoiceReview": null },
+        { "lane": "Decide", "workType": "approveOrRebudget", "invoiceReview": null },
+        { "lane": "Decide", "workType": "approveOrRebudget", "invoiceReview": null },
+        { "lane": "Decide", "workType": "chaseReply", "invoiceReview": null },
+        { "lane": "Decide", "workType": "chaseReply", "invoiceReview": null },
+        { "lane": "Decide", "workType": "chaseReply", "invoiceReview": null },
+        {
+          "lane": "Decide",
+          "workType": "askOutsideCounsel",
+          "invoiceReview": {
+            "invoiceId": "4b5ad0a8-3f0e-4c7f-9a51-1d2e3f405162",
+            "lineId": "8c1e2d3f-4a5b-4c6d-8e9f-a0b1c2d3e4f5"
+          }
+        },
+        { "lane": "Decide", "workType": "finishOrReschedule", "invoiceReview": null },
+        { "lane": "Do", "workType": "comingDue", "invoiceReview": null }
+      ],
+      "expected": [
+        { "key": "all", "label": "All", "count": 8 },
+        { "key": "invoiceDecisions", "label": "Invoice decisions", "count": 1 },
+        { "key": "askOutsideCounsel", "label": "Ask outside counsel", "count": 1 },
+        { "key": "approveOrRebudget", "label": "Approve or rebudget", "count": 2 },
+        { "key": "chaseReply", "label": "Chase a reply", "count": 3 },
+        { "key": "other", "label": "Other", "count": 1 }
+      ]
+    }
+  ]
+}

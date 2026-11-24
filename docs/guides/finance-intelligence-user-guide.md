@@ -141,7 +141,7 @@ Before using Finance Intelligence, ensure:
 - **Location**: Dataverse `sprk_aiplaybook` record with name "Invoice Classification"
 - **Default Prompt**: Analyzes filename, sender, content patterns
 
-**Extraction Playbook (Playbook B)**:
+**Extraction Playbook (Playbook B) - RETIRED (ebilling-r1 050b)**: invoices are now read by Content Understanding in the submission job (ebilling-r1 049); the "Invoice Extraction" playbook is no longer used by code. Historical description:
 - **Model**: gpt-4o
 - **Purpose**: Extracts structured billing data (line items, amounts, dates)
 - **Location**: Dataverse `sprk_aiplaybook` record with name "Invoice Extraction"
@@ -265,7 +265,8 @@ Finance Intelligence Panel (VisualHost)
 ### Stage 5: AI Extraction
 
 **What Happens**:
-- Background job (`InvoiceExtractionJobHandler`) picks up newly confirmed invoices
+- Retired (ebilling-r1 050a/050b): confirm no longer enqueues `InvoiceExtraction`; the `InvoiceExtractionJobHandler` below was deleted. The submission job (`InvoiceSubmissionProcessing`) now reads the invoice through Content Understanding and creates the invoice. Historical description of the old stage follows:
+- Background job (`InvoiceExtractionJobHandler`) picked up newly confirmed invoices
 - Sends invoice document to gpt-4o via Playbook B (Invoice Extraction)
 - AI returns structured `InvoiceExtractionResult` with:
   - Invoice metadata (number, date, due date, amount, vendor)
@@ -906,7 +907,7 @@ Status: Active
 3. Extraction prompt error (JSON schema mismatch)
 
 **Troubleshooting Steps**:
-1. Check BFF API logs for `InvoiceExtractionJobHandler` errors
+1. Check BFF API logs for `InvoiceSubmissionProcessingJobHandler` errors (the old `InvoiceExtractionJobHandler` was deleted by ebilling-r1 050b)
 2. Check Azure OpenAI logs for throttling (429 errors)
 3. Verify document file is accessible (SPE FileStore)
 4. Check if invoice is actually in a parseable format (PDF with text, not scanned image)
@@ -914,8 +915,8 @@ Status: Active
 **Resolution**:
 - If AI throttled: Implement retry with exponential backoff (or increase quota)
 - If document inaccessible: Check SPE permissions, verify container exists
-- If prompt error: Review extraction prompt schema vs. `InvoiceExtractionResult` C# type
-- Manual workaround: Re-enqueue extraction job via admin operation
+- If a read error: check the Content Understanding analyzer configuration (ebilling-r1 043); there is no extraction prompt schema any more
+- Manual workaround: there is no job-replay operation. A submission whose job failed ends Failed; submit the invoice again (another user may re-attempt after a Failed submission, EB-D-165)
 
 #### Issue 3: Finance Panel Not Updating
 

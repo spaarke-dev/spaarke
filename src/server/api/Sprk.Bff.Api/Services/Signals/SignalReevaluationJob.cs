@@ -104,7 +104,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
         IReadOnlyList<PolicyRow> policies;
         try
         {
-            policies = await ReadEnabledPoliciesAsync(cancellationToken).ConfigureAwait(false);
+            var enabled = await ReadEnabledPoliciesAsync(cancellationToken).ConfigureAwait(false);
+            policies = enabled.Policies;
+            if (!enabled.IsComplete)
+            {
+                // #2982: a read cut short (a page fault, or past the page bound; logged at Error with the counts) is not a clean run. The policies
+                // read ARE evaluated (a retry only has the rest to do) and the run is reported failed, as for any policy it could not evaluate.
+                counts.PolicyFailures++;
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -1184,7 +1191,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
         IReadOnlyList<PolicyRow> policies;
         try
         {
-            policies = await ReadEnabledPoliciesAsync(ct).ConfigureAwait(false);
+            var enabled = await ReadEnabledPoliciesAsync(ct).ConfigureAwait(false);
+            policies = enabled.Policies;
+            // #2982: a read cut short (logged at Error with the counts) is reported in the result's PolicyFailures; the policies read are evaluated.
+            if (!enabled.IsComplete) counts.PolicyFailures++;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1236,21 +1246,37 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.
     /// Ontology policies only (ebilling-r1 task 070): <c>sprk_domain</c> empty or Ontology, in the query and again per row
     /// (<see cref="RuleDomains"/>), so a Billing policy is neither evaluated nor counted as invalid.</summary>
-    private async Task<IReadOnlyList<PolicyRow>> ReadEnabledPoliciesAsync(CancellationToken ct)
+    /// <remarks>
+    /// <b>Complete or reported (#2982).</b> Read by the shared id-cursor reader (<see cref="SignalClosureService.ReadPolicyPagesAsync"/>): one
+    /// <c>RetrieveMultipleAsync</c> is one Dataverse page (5,000 rows), so the unpaged read evaluated only the first 5,000 enabled policies and
+    /// reported success. A read that faults or runs past <paramref name="maxPages"/> pages comes back incomplete, with the policies read so far
+    /// (logged at Error with the counts); the callers count a policy failure. The result is ordered by policy code, as before the cursor needed
+    /// the id order.
+    /// </remarks>
+    /// <param name="pageSize">Policies per read; a test lowers it. Production uses <see cref="SignalClosureService.NotInForcePageSize"/> (5,000).</param>
+    /// <param name="maxPages">Pages before the read is reported truncated; a test lowers it.</param>
+    internal async Task<EnabledPolicies> ReadEnabledPoliciesAsync(
+        CancellationToken ct, int pageSize = SignalClosureService.NotInForcePageSize, int maxPages = SignalEvaluator.MaxPages)
     {
-        var query = new QueryExpression("sprk_policy")
-        {
-            ColumnSet = new ColumnSet("sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name",
+        var read = await SignalClosureService.ReadPolicyPagesAsync(
+            _entities, _logger, "enabled policies",
+            new ColumnSet("sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name",
                 "sprk_currentversion", "sprk_tenant", "sprk_matter", "sprk_countstowardsuppression", RuleDomains.PolicyDomainColumn),
-        };
-        query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-        RuleDomains.AddOntologyPolicyAllowlist(query);
-        query.AddOrder("sprk_policycode", OrderType.Ascending);
-        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            query =>
+            {
+                query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+                RuleDomains.AddOntologyPolicyAllowlist(query);
+            },
+            pageSize, maxPages, ct).ConfigureAwait(false);
 
-        return rows.Entities.Where(RuleDomains.IsOntologyPolicy).Select(ToPolicyRow).ToList();
+        var policies = read.Rows.Where(RuleDomains.IsOntologyPolicy).Select(ToPolicyRow)
+            .OrderBy(p => p.Code, StringComparer.OrdinalIgnoreCase).ToList();
+        return new EnabledPolicies(policies, read.IsComplete);
     }
+
+    /// <summary>The enabled policies read, and whether the read reached the end (false: a page faulted or the page bound was hit).</summary>
+    internal sealed record EnabledPolicies(IReadOnlyList<PolicyRow> Policies, bool IsComplete);
 
     private static readonly string[] PolicyColumns =
     {

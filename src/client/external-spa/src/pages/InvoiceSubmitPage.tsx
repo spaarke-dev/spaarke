@@ -49,6 +49,7 @@ import {
   submitInvoice,
 } from '../api/web-api-client';
 import { PageContainer, NavigationBar } from '../components';
+import { renderSubmissionReport } from '../components/ebilling/InvoiceOutcomeReport';
 import {
   GUID_PATTERN,
   INVOICE_RECORD_PARAM,
@@ -297,7 +298,12 @@ export const InvoiceSubmitPage: React.FC = () => {
           <Text as="h1" size={500} weight="semibold">
             Invoice submission
           </Text>
-          <InvoiceSubmissionOutcome key={resumeId} submissionId={resumeId} getStatus={getInvoiceSubmission} />
+          <InvoiceSubmissionOutcome
+            key={resumeId}
+            submissionId={resumeId}
+            getStatus={getInvoiceSubmission}
+            renderReport={renderSubmissionReport}
+          />
           <div className={styles.actions}>
             <Button appearance="primary" onClick={() => navigate(INVOICE_SUBMIT_PATH)}>
               Submit another invoice
@@ -336,6 +342,7 @@ export const InvoiceSubmitPage: React.FC = () => {
           loadFirms={preselect.loadFirms}
           submit={submitInvoice}
           getStatus={getInvoiceSubmission}
+          renderReport={renderSubmissionReport}
           onSubmitted={handleSubmitted}
         />
       </div>

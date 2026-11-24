@@ -51,6 +51,7 @@ describe('the decision wizard: a refused note and an unsure send', () => {
   const cancel = (d: HTMLElement) => within(d).getByRole('button', { name: 'Cancel', hidden: true });
   const radio = (d: HTMLElement, name: RegExp) => within(d).getByRole('radio', { name, hidden: true });
   const finishBtn = (d: HTMLElement, name: RegExp) => within(d).getByRole('button', { name, hidden: true });
+  const skipNotify = (d: HTMLElement) => within(d).getByRole('button', { name: 'Skip', hidden: true });
   const noteBox = (d: HTMLElement) => within(d).getByLabelText('Note for the decision') as HTMLTextAreaElement;
   const reasonBox = (d: HTMLElement) => within(d).getByLabelText('Reason for the decision') as HTMLTextAreaElement;
 
@@ -59,6 +60,7 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     fireEvent.click(next(d));
     fireEvent.change(reasonBox(d), { target: { value: reason } });
     fireEvent.click(next(d));
+    fireEvent.click(skipNotify(d));
     await within(d).findByTestId('confirm-decision');
   }
   async function closeWizard(d: HTMLElement) {
@@ -102,10 +104,12 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     fireEvent.click(finishBtn(d, /Reject & record/));
     await within(d).findByTestId('decision-note-locked');
     expect(noteBox(d)).toHaveAttribute('readonly');
-    fireEvent.click(back(d));
+    fireEvent.click(back(d)); // Confirm -> Notify
+    fireEvent.click(back(d)); // Notify -> Reason
     expect(reasonBox(d)).toHaveAttribute('readonly');
     expect(reasonBox(d).value).toBe('Duplicate of an earlier invoice');
     fireEvent.click(next(d));
+    fireEvent.click(next(d)); // the locked Notify step holds nothing
     await within(d).findByTestId('confirm-decision');
     fireEvent.click(finishBtn(d, /Reject & record/));
     await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
@@ -159,6 +163,7 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     expect(reasonBox(again).value).toBe('Duplicate of an earlier invoice');
     expect(reasonBox(again)).toHaveAttribute('readonly');
     fireEvent.click(next(again));
+    fireEvent.click(next(again)); // the locked Notify step holds nothing
     await within(again).findByTestId('confirm-decision');
     expect(noteBox(again).value).toBe('The first note');
     expect(noteBox(again)).toHaveAttribute('readonly');
@@ -201,11 +206,13 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     // Back to the Decision step and choose Return instead.
     fireEvent.click(back(d));
     fireEvent.click(back(d));
+    fireEvent.click(back(d));
     fireEvent.click(radio(d, /^Return/));
     fireEvent.click(next(d));
     expect(reasonBox(d)).not.toHaveAttribute('readonly');
     fireEvent.change(reasonBox(d), { target: { value: 'Please correct the rates' } });
     fireEvent.click(next(d));
+    fireEvent.click(skipNotify(d));
     await within(d).findByTestId('confirm-decision');
     expect(within(d).queryByTestId('decision-note-locked')).not.toBeInTheDocument();
     expect(noteBox(d)).not.toHaveAttribute('readonly');
@@ -225,6 +232,7 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     fireEvent.change(noteBox(d), { target: { value: 'The first note' } });
     fireEvent.click(finishBtn(d, /Reject & record/));
     await within(d).findByTestId('decision-note-locked');
+    fireEvent.click(back(d));
     fireEvent.click(back(d));
     fireEvent.click(back(d));
     fireEvent.click(radio(d, /^Return/));
@@ -248,6 +256,7 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     // To Return: editable, the reviewer types something else.
     fireEvent.click(back(d));
     fireEvent.click(back(d));
+    fireEvent.click(back(d));
     fireEvent.click(radio(d, /^Return/));
     fireEvent.click(next(d));
     expect(reasonBox(d)).not.toHaveAttribute('readonly');
@@ -259,6 +268,7 @@ describe('the decision wizard: a refused note and an unsure send', () => {
     expect(reasonBox(d)).toHaveAttribute('readonly');
     expect(reasonBox(d).value).toBe('Duplicate of an earlier invoice');
     fireEvent.click(next(d));
+    fireEvent.click(next(d)); // the locked Notify step holds nothing
     await within(d).findByTestId('confirm-decision');
     expect(noteBox(d)).toHaveAttribute('readonly');
     expect(noteBox(d).value).toBe('The first note');

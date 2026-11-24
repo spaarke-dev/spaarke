@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -158,14 +159,24 @@ public class SignalClosureService
     /// policy, subject and episode, so switching an Ontology policy On again re-raises from them (D-32). A Billing-domain policy closes
     /// the same way (D-170, owner 2026-10-19) but is never re-raised.
     /// </summary>
-    internal async Task<SignalClosureOutcome> ClosePoliciesNotInForceAsync(CancellationToken ct)
+    /// <remarks>
+    /// <b>Complete or reported (D-78; #2982, DI-162).</b> The policies are read in id-cursor pages (<see cref="ReadPoliciesNotInForceAsync"/>),
+    /// so a catalogue past one Dataverse page is closed in full. A read that faults or runs past <paramref name="maxPages"/> pages is not a
+    /// silent partial success: the policies read before it ARE closed (a retry only has the rest to do), and the outcome carries one
+    /// <see cref="SignalClosureOutcome.PolicyFailures"/>, so <see cref="SignalClosureOutcome.IsComplete"/> is false and the job fails the run
+    /// (<c>policyFailures</c> in its result), as for any other policy it could not read.
+    /// </remarks>
+    /// <param name="pageSize">Policies per read; a test lowers it. Production uses <see cref="NotInForcePageSize"/>.</param>
+    /// <param name="maxPages">Pages per condition before the read is reported truncated; a test lowers it.</param>
+    internal async Task<SignalClosureOutcome> ClosePoliciesNotInForceAsync(
+        CancellationToken ct, int pageSize = NotInForcePageSize, int maxPages = SignalEvaluator.MaxPages)
     {
         // D-170: the Off/Retired CLOSE reads Billing policies too (their open Signals close PolicyRetired). Re-enabling a Billing policy
         // re-raises nothing, unlike an Ontology policy (D-32): Billing has no evaluator, so nothing ever re-raises its Signals.
-        var policies = await ReadPoliciesNotInForceAsync(includeBilling: true, ct).ConfigureAwait(false);
+        var read = await ReadPoliciesNotInForceAsync(includeBilling: true, pageSize, maxPages, ct).ConfigureAwait(false);
 
         var total = SignalClosureOutcome.None;
-        foreach (var (policyId, code) in policies)
+        foreach (var (policyId, code) in read.Policies)
         {
             ct.ThrowIfCancellationRequested();
             try
@@ -185,36 +196,143 @@ public class SignalClosureService
             }
         }
 
+        if (!read.IsComplete)
+        {
+            total = total with { PolicyFailures = total.PolicyFailures + 1 };
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
+                "The Off and Retired policies were not all read: {PoliciesRead} were read and their open Signals handled ({Closed} closed); the " +
+                "policies after them were not checked, so their open Signals stay open until a run reads them. The run is reported failed.",
+                read.Policies.Count, total.Closed);
+        }
+
         return total;
     }
 
     /// <summary>Every ONTOLOGY policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), by id, with its code. The job's
     /// stored-evidence redaction of those policies' Signals (task 145) reads this; it stays Ontology-only (D-170 widens only the close,
-    /// <see cref="ClosePoliciesNotInForceAsync"/>).</summary>
-    internal Task<IReadOnlyDictionary<Guid, string>> PoliciesNotInForceAsync(CancellationToken ct) =>
-        ReadPoliciesNotInForceAsync(includeBilling: false, ct);
+    /// <see cref="ClosePoliciesNotInForceAsync"/>). An incomplete read THROWS (#2982): a partial list would redact less than the whole with
+    /// nothing saying so; the job counts the throw as a policy failure and the next run retries.</summary>
+    /// <exception cref="InvalidOperationException">A page read failed or the page bound was reached (logged with counts).</exception>
+    internal async Task<IReadOnlyDictionary<Guid, string>> PoliciesNotInForceAsync(
+        CancellationToken ct, int pageSize = NotInForcePageSize, int maxPages = SignalEvaluator.MaxPages)
+    {
+        var read = await ReadPoliciesNotInForceAsync(includeBilling: false, pageSize, maxPages, ct).ConfigureAwait(false);
+        if (!read.IsComplete)
+        {
+            throw new InvalidOperationException($"The Off and Retired policies were not all read ({read.Policies.Count} read); the list is incomplete.");
+        }
+
+        return read.Policies;
+    }
+
+    /// <summary>Policies per "not in force" read: Dataverse's limit on the rows of one query, so N policies take ceil(N / 5,000) reads
+    /// per condition.</summary>
+    internal const int NotInForcePageSize = 5000;
+
+    /// <summary>The not-in-force policies read, and whether the read reached the end of both conditions.</summary>
+    /// <param name="Policies">Every policy read, by id, with its code (a policy both Off and Inactive appears once).</param>
+    /// <param name="IsComplete">False when a page read faulted or the page bound was reached. <paramref name="Policies"/> is then only the
+    /// part read (each condition in id order); the cause was logged at Error with the counts.</param>
+    internal sealed record NotInForceRead(IReadOnlyDictionary<Guid, string> Policies, bool IsComplete);
 
     /// <summary>The one query of "not in force" (Off = <c>sprk_enabled</c> No, Retired = <c>statecode</c> Inactive), by id with its code.
     /// <paramref name="includeBilling"/> adds Billing-domain policies (<see cref="RuleDomains.IsClosableOnRetirement"/>); false is the
     /// Ontology allowlist every other reader uses.</summary>
-    private async Task<IReadOnlyDictionary<Guid, string>> ReadPoliciesNotInForceAsync(bool includeBilling, CancellationToken ct)
+    /// <remarks>Each condition is read by the shared id-cursor reader (<see cref="ReadPolicyPagesAsync"/>, #2982); a condition that faults or
+    /// hits the bound stops THAT condition only, the other still runs, and the result says it is incomplete.</remarks>
+    private async Task<NotInForceRead> ReadPoliciesNotInForceAsync(bool includeBilling, int pageSize, int maxPages, CancellationToken ct)
     {
         var policies = new Dictionary<Guid, string>();
+        var complete = true;
         foreach (var (attribute, value) in new (string, object)[] { ("sprk_enabled", false), ("statecode", 1) })
         {
-            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode", RuleDomains.PolicyDomainColumn) };
-            query.Criteria.AddCondition(attribute, ConditionOperator.Equal, value);
-            // ebilling-r1 task 070: the same Ontology allowlist as the enabled-policies readers, kept consistent; D-170 adds Billing for the close.
-            if (includeBilling) RuleDomains.AddClosableOnRetirementAllowlist(query);
-            else RuleDomains.AddOntologyPolicyAllowlist(query);
-            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            foreach (var row in rows.Entities.Where(includeBilling ? RuleDomains.IsClosableOnRetirement : RuleDomains.IsOntologyPolicy))
+            var condition = attribute == "sprk_enabled" ? "Off" : "Inactive";
+            var read = await ReadPolicyPagesAsync(_entities, _logger, $"{condition} policies", new ColumnSet("sprk_policycode", RuleDomains.PolicyDomainColumn),
+                query =>
+                {
+                    query.Criteria.AddCondition(attribute, ConditionOperator.Equal, value);
+                    // ebilling-r1 task 070: the same Ontology allowlist as the enabled-policies readers, kept consistent; D-170 adds Billing for the close.
+                    if (includeBilling) RuleDomains.AddClosableOnRetirementAllowlist(query);
+                    else RuleDomains.AddOntologyPolicyAllowlist(query);
+                },
+                pageSize, maxPages, ct).ConfigureAwait(false);
+            complete &= read.IsComplete;
+            foreach (var row in read.Rows.Where(includeBilling ? RuleDomains.IsClosableOnRetirement : RuleDomains.IsOntologyPolicy))
             {
                 policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
             }
         }
 
-        return policies;
+        return new NotInForceRead(policies, complete);
+    }
+
+    /// <summary>The policy rows one id-cursor read returned, and whether it reached the end.</summary>
+    /// <param name="Rows">Every row read, each id once, in id order.</param>
+    /// <param name="IsComplete">False when a page read faulted, the cursor did not advance, or <c>maxPages</c> full pages had no end; the cause
+    /// was logged at Error with the counts and <paramref name="Rows"/> is only the part read.</param>
+    internal sealed record PolicyPagesRead(IReadOnlyList<Entity> Rows, bool IsComplete);
+
+    /// <summary>
+    /// <b>The one id-cursor read of <c>sprk_policy</c> (#2982)</b>, shared by the not-in-force close (<see cref="ReadPoliciesNotInForceAsync"/>) and
+    /// the job's enabled-policies read (<c>SignalReevaluationJob.ReadEnabledPoliciesAsync</c>). One <c>RetrieveMultipleAsync</c> returns at most
+    /// one Dataverse page (5,000 rows) and does not follow <c>MoreRecords</c> (<see cref="IGenericEntityService"/> does not page), so a read
+    /// taking that page as the whole list silently dropped every policy past it. Here the rows are read <paramref name="pageSize"/> at a time,
+    /// ordered by <c>sprk_policyid</c> and continued after the last id read (the paging of
+    /// <c>RuleSetService.RetireUnlinkedRecordSetsAsync</c>), until a page comes back short. A page that adds no id not already read (a store
+    /// ignoring the cursor) ends the read as a fault rather than looping. A fault, or <paramref name="maxPages"/> full pages with no end, is
+    /// logged at Error with the counts and returned as an incomplete read; the rows read before it are returned too.
+    /// </summary>
+    /// <param name="label">What is being read, for the log ("Off policies").</param>
+    /// <param name="applyFilter">Adds the caller's conditions (state, domain allowlist); the cursor, <c>TopCount</c> and order are added here.</param>
+    internal static async Task<PolicyPagesRead> ReadPolicyPagesAsync(
+        IGenericEntityService entities, ILogger logger, string label, ColumnSet columns, Action<QueryExpression> applyFilter,
+        int pageSize, int maxPages, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPages, 1);
+        const string IdColumn = "sprk_policyid";
+        var rows = new List<Entity>();
+        var seen = new HashSet<Guid>();
+        Guid? after = null;
+        for (var page = 1; ; page++)
+        {
+            var query = new QueryExpression("sprk_policy") { ColumnSet = columns, TopCount = pageSize };
+            applyFilter(query);
+            if (after is { } cursor) query.Criteria.AddCondition(IdColumn, ConditionOperator.GreaterThan, cursor);
+            query.AddOrder(IdColumn, OrderType.Ascending);
+
+            IReadOnlyList<Entity> pageRows;
+            try
+            {
+                pageRows = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
+                if (pageRows.Count > 0 && pageRows.Count(r => seen.Add(r.Id)) == 0)
+                {
+                    throw new InvalidOperationException("The page held only policies already read, so the id cursor did not advance.");
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                    "The {Label} could not be read on page {Page} ({ExceptionType}); {RowsRead} were read in all, and the {Label} after them " +
+                    "were not checked this run.",
+                    label, page, ex.GetType().Name, rows.Count, label);
+                return new PolicyPagesRead(rows, false);
+            }
+
+            rows.AddRange(pageRows);
+            if (pageRows.Count < pageSize) return new PolicyPagesRead(rows, true);
+
+            if (page >= maxPages)
+            {
+                logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "More than {MaxPages} pages of {PageSize} {Label} exist; {RowsRead} were read in all, and the {Label} after them " +
+                    "were not checked this run.",
+                    maxPages, pageSize, label, rows.Count, label);
+                return new PolicyPagesRead(rows, false);
+            }
+
+            after = pageRows[^1].Id;
+        }
     }
 
     /// <summary>

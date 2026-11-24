@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Dev BFF deploy (gated on ontology pair)</title>
+    <phase>D Registration, deploy and live E2E</phase>
+    <gate>BLOCKED until ontology's #2580/#2579 pair has deployed to dev AND the owner gives a go for the exact SHA</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task (Phase D, integration/deployment)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment through the existing bff-deploy skill and Deploy-BffApi.ps1; the judgment points are escalation triggers</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment to the shared dev BFF; runs alone</parallel-reason>
+    <deps>025, 032</deps>
+    <tags>deploy, azure, app-service, bff-api</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Once ontology's #2580/#2579 pair has deployed to dev and the owner has given a go for the exact SHA, deploy work/spaarkeai-mcp-bff-api-r1 to the dev BFF with the widget embedded, turn Mcp:Enabled on in dev only, and verify health, auth, the kill switch, the tool list and the Console.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Azure App Service deployment of the Spaarke BFF.</role>
+  <goal>The approved SHA runs on the dev BFF; /mcp/legal-operations serves the five tools to an authenticated test user; the Console worklist and wizard still work; the deploy evidence and rollback SHA are recorded.</goal>
+
+  <context>
+    <background>Ontology condition 1 (project CLAUDE.md §3): no dev BFF deploy from this branch until their pair has deployed (it waits for ebilling task 112); if this branch must deploy sooner, back the merge out first. Project CLAUDE.md §5: any deploy needs the owner's go per SHA; dev only in v1; Mcp:Enabled default false, on in dev only.</background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/decisions.md (ontology condition 1)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="pending">Conformance green and NFR measurements</dependency>
+      <dependency task="032" status="pending">Widget complete and embedded</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy only after (a) ontology confirms their #2580/#2579 pair is deployed to dev (record the source and date) and (b) the owner gives an explicit go for the exact SHA in this session; otherwise the task stays blocked (ontology condition 1).</constraint>
+    <constraint source="project">Only the dev BFF and dev tenant are touched; Mcp__Enabled=true is set in the dev App Service only; no other environment or setting changes without the owner's go.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="project">Run context-handoff after the deploy (root CLAUDE.md §5: checkpoint after a deployment or live change).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/decisions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm the gate: ontology's pair deployed to dev (source, date) and the owner's go for SHA {sha}; record both in notes/deploy-dev-041.md. If either is missing, stop here.</step>
+    <step order="2">Run /conflict-check and confirm the branch is current with master per ontology condition 3 (merge, never rebase).</step>
+    <step order="3">Build the widget, then publish the BFF; record the publish size (at or under 60 MB).</step>
+    <step order="4">Deploy the SHA to the dev BFF with the bff-deploy skill (scripts/Deploy-BffApi.ps1); record the previous SHA for rollback.</step>
+    <step order="5">Verify with Mcp__Enabled unset (false): /healthz 200, /mcp/legal-operations returns 503 ProblemDetails to an authenticated call and 401 to an anonymous call.</step>
+    <step order="6">Set Mcp__Enabled=true in the dev App Service only; verify tools/list returns the five v1 tools for a test user.</step>
+    <step order="7">Console smoke on dev: open the worklist, open the wizard on one item, confirm both work (spec success criterion 7).</step>
+    <step order="8">Run context-handoff.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="10">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology's pair has not deployed, or the owner has not given a go for this exact SHA, STOP; do not deploy (ontology condition 1, project CLAUDE.md §5).</trigger>
+    <trigger>If the owner asks to deploy before ontology's pair, STOP and remind them the merge must be backed out first; act only on their explicit decision.</trigger>
+    <trigger>If /healthz fails or the Console smoke fails after deploy, roll back to the recorded SHA and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">scripts/Deploy-BffApi.ps1 via the bff-deploy skill</tool>
+    <tool name="az">App Service settings (dev only)</tool>
+    <tool name="terminal">Run shell commands (grep, wc, git diff)</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">dev BFF at the approved SHA</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/deploy-dev-041.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/deploy-dev-041.md records ontology's confirmation that their pair is deployed (source, date), the owner's go with the exact SHA, the deployed SHA, the rollback SHA and the publish size (at or under 60 MB).</criterion>
+    <criterion testable="true">Negative: without both gate conditions recorded, no deploy happened.</criterion>
+    <criterion testable="true">On dev with Mcp__Enabled unset: /healthz returns 200; /mcp/legal-operations returns 401 anonymous and 503 ProblemDetails authenticated.</criterion>
+    <criterion testable="true">With Mcp__Enabled=true in dev only: tools/list returns exactly the five v1 tools for a test user.</criterion>
+    <criterion testable="true">The Console worklist and wizard work on dev after the deploy (smoke recorded).</criterion>
+    <criterion testable="true">No setting changed in any environment other than dev.</criterion>
+  </acceptance-criteria>
+
+  <notes>Plan risk R11. The widget is part of the BFF artifact, so this one deploy covers both deliverables (task-create Step 3.6).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

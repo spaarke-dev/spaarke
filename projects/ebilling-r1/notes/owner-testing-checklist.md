@@ -1,15 +1,15 @@
 # eBilling R1 — owner testing checklist
 
-Updated 2026-11-13. Each section says when it can be tested. Report anything odd to the `ebilling-r1` session with the record and the time.
+Updated 2026-11-21. Each section says when it can be tested. Report anything odd to the `ebilling-r1` session with the record and the time.
 
-## A. Testable on dev now (if word-add-in-r1 has deployed the pane from PRs #2789 / #2793)
+## A. Testable on dev now (pane from #2789 / #2793, plus #2913 live 2026-11-18)
 
 In Outlook, open an invoice email, then the Spaarke pane's Invoice tab.
 
-- [ ] With no firm linked to the record, the tab asks for a firm before you can submit.
+- [x] With no firm linked to the record, the Firm field is a law-firm search. Pick a firm and it is added to the record, then used for the submission. (Passed, owner, 2026-11-18. #2913 removed the old "Check again" and separate add button.)
 - [ ] The banner shows the firm's name.
 - [ ] "Open in Spaarke" opens the record.
-- [ ] Add a firm to the record in Spaarke, then click "Check again" in the pane. The pane picks it up without a reload.
+- [ ] Submit a Correction with a note. The new invoice shows the saved note (Correction Note field).
 
 ## B. After task 112 deploys 084 to dev (Procedures on a matter, project or work assignment)
 
@@ -122,9 +122,9 @@ These states are hard to cause by hand; they need a fault during a decision. If 
 - [ ] Create a rule set in the model-driven app. **Expect** the save to succeed with "Visible to Firms" = No.
 - [ ] In Rule Review, switch a rule set's visibility on and off. **Expect** it to work as before.
 
-## M. Notifications (task 132): after a dev BFF that carries it (work → master merge, your go)
+## M. Notifications (task 132): ready to test on dev (BFF 5ae2804884 live ~02:01Z 2026-11-19; firm notice Action seeded ~02:05Z)
 
-Firm emails come from the shared mailbox; the Invoice Review "notify" step (132ui) is not built yet, so Reject / Return emails only go when a reviewer-confirmed notice exists.
+Firm emails come from the shared mailbox. Reject and Return emails go only when the reviewer confirms a notice. The step that does that is built (132ui) but is not on dev until the Invoice Review page is redeployed (see M2).
 - [ ] Submit an invoice that the checks reject. The submitter (and the firm's billing contact, if they can open that matter) gets one email with the findings table in the body.
 - [ ] Approve an invoice with an adjustment. The same two people get one email; approving with no adjustment sends none.
 - [ ] A billing contact who has no access to a secure matter gets no email for that matter's invoice.
@@ -133,10 +133,40 @@ Firm emails come from the shared mailbox; the Invoice Review "notify" step (132u
 - [ ] With eBilling switched off, the portal bell shows no billing items.
 - [ ] The "notice text" field is locked (applied to dev 2026-11-17, ready to test now). As a non-admin user, the submission form shows the field masked (\*\*\*\*\*) and you can't edit it. It disappears from the form once the SpaarkeMaster release with task 132's form change is imported.
 
-## N. Billing Guidelines in the external portal (task 135): after a dev BFF and external SPA that carry it (work → master merge, your go)
+### M2. Notice to the firm on Reject / Return (task 132ui): after the Invoice Review page is redeployed to dev (your OK)
+
+On an In Review invoice, choose Decide → Reject or Return to firm, give a reason, then Next:
+- [ ] A **Notify firm** step shows the drafted subject and message, and says whether the AI wrote it or the standard wording was used. Approve never shows this step.
+- [ ] Edit the message and finish. The firm's email carries your edited text plus the findings table, which Spaarke adds.
+- [ ] Type a figure or an amount into the message (for example "$500" or "two lines"). Finishing is refused with a message under the notice, and nothing is decided. Remove it and finish again.
+- [ ] Turn "Send this notice to the firm" off, or Skip the step. The Confirm step says the firm gets no email, and none is sent. The decision is still recorded.
+- [ ] Switch between Reject and Return. Each keeps its own draft and edits.
+- [ ] "Restore draft" puts back the drafted text.
+
+## N. Billing Guidelines in the external portal (task 135): the dev BFF carries it (5ae2804884); test after spa-r4 deploys the external SPA
 
 Dev has no rule sets yet, so this needs a published Billing rule set first.
 - [ ] As a firm user, open the Billing Guidelines card. It lists the published billing rules in force for your firm(s), with rule set name, version, section and quoted clause text; never a document link.
 - [ ] A user linked to several firms sees all of them, and the firm filter narrows the list (EB-D-260).
 - [ ] A rule set with "Visible to Firms" off does not appear at all; neither does an Internal Standard Procedure's rule set.
 - [ ] With eBilling switched off, the card stays and shows "Billing guidelines aren't available." (no error styling, no Retry).
+
+## O. The firm's invoice outcome (tasks 130g and 134): after the dev BFF and external SPA carry both (deploy task 136)
+
+Both are merged into the work branch. Sign in to the external portal as a law-firm user and open one of your firm's invoices; the record shows an **Outcome** section.
+- [ ] An Approved invoice with adjustments lists each reduced, disallowed or added item with its reason or the quoted guideline, and the billed and approved totals.
+- [ ] An In Review invoice says "Under review", lists only items already decided or added, and shows no approved total.
+- [ ] A Rejected or Returned invoice lists its findings, each with its reason code, and shows no approved amount, per line or in total.
+- [ ] **Print** opens the browser print dialog with only the report on the page (no portal chrome, nothing cut off), from the record and from the submit result screen.
+- [ ] After you submit an invoice, the result screen shows the same report.
+- [ ] With eBilling switched off, the Outcome section is not shown.
+- [ ] Open one of your firm's invoices that a reviewer Rejected or Returned **with** a notice (M2). The page shows the message the reviewer sent, as plain text, without the subject and without the internal reason or note.
+- [ ] An invoice rejected or returned **without** a notice (send off or Skip), an invoice the checks rejected automatically, and an In Review or Approved invoice show no message line.
+
+## P. Legacy extraction removed (task 050b): after the next dev BFF deploy that carries it
+
+Merged into the work branch 2026-11-22 (18b02cbdcf). Nothing visible changes; this is a regression check.
+- [ ] Submit an invoice from the Create Invoice wizard: it is read and coded as before (In Review, lines filled).
+- [ ] In Invoice Review, **Confirm** an invoice document from the review queue: it still creates the invoice through the submission (as 050a).
+- [ ] The BFF starts with no warnings about `Finance:InvoiceExtractionPlaybookId` or `Finance:ExtractionDeploymentName` (both keys are gone).
+- Owner choice, no test: the old **FinanceExtraction** (PB-013) playbook rows in dev Dataverse are now unused. Leave them, or tell me to deactivate them (a live change).

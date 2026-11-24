@@ -914,7 +914,7 @@ public class DecisionActionCatalogTests
         var access = Access(Users(signal: NoCoreDoRow(), core: Fail(500, DataverseUserClientErrorCodes.ServiceError)), coreSet: "sprk_todos");
         var plans = new DecisionPlanService(EntitiesReturningPlan(SeededPlan), NullLogger<DecisionPlanService>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(access, plans, NoRuleDescriber()), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503);
     }
@@ -929,7 +929,7 @@ public class DecisionActionCatalogTests
         var access = Access(Users(signal: SignalRow(), core: Ok(new { createdon = "x" })));
         var plans = new DecisionPlanService(EntitiesReturningPlan(SeededPlan), new CapturingLogger<DecisionPlanService>());
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(access, plans, NoRuleDescriber()), CancellationToken.None);
 
         var body = result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
         body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
@@ -950,7 +950,7 @@ public class DecisionActionCatalogTests
         var plans = new DecisionPlanService(entities, NullLogger<DecisionPlanService>.Instance);
         var describer = new RuleBodyDescriber(Validator(), entities, NullLogger<RuleBodyDescriber>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, describer, CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(access, plans, describer), CancellationToken.None);
 
         var body = result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
         body.RuleDescription.Should().BeNull();
@@ -975,7 +975,7 @@ public class DecisionActionCatalogTests
         var entities = EntitiesReturningPlan(SeededPlan);
         var plans = new DecisionPlanService(entities, NullLogger<DecisionPlanService>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(access, plans, NoRuleDescriber()), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
         Mock.Get(entities).Verify(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -987,7 +987,7 @@ public class DecisionActionCatalogTests
         var access = Access(Users(signal: Fail(0, DataverseUserClientErrorCodes.UserContextRequired), core: Ok(new { createdon = "x" })));
         var plans = new DecisionPlanService(EntitiesReturningPlan(SeededPlan), NullLogger<DecisionPlanService>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(access, plans, NoRuleDescriber()), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(403);
     }
@@ -998,7 +998,7 @@ public class DecisionActionCatalogTests
         var access = Access(Users(signal: SignalRow(), core: Ok(new { createdon = "x" })));
         var plans = new DecisionPlanService(EntitiesReturningPlan("""{"actions":["send-budget-inquiry","bogus"]}"""), NullLogger<DecisionPlanService>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(access, plans, NoRuleDescriber()), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(422);
     }
@@ -1240,7 +1240,8 @@ public class DecisionActionCatalogTests
     {
         var plans = new DecisionPlanService(EntitiesReturningPlan(plan), NullLogger<DecisionPlanService>.Instance);
         var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(
-            SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None, parameterSources: sources);
+            SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(access, plans, NoRuleDescriber(), parameterSources: sources),
+            CancellationToken.None);
         return result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
     }
 
@@ -1504,7 +1505,8 @@ public class DecisionActionCatalogTests
         var plans = new DecisionPlanService(EntitiesReturningPlan(ReviseThenVariance), NullLogger<DecisionPlanService>.Instance);
 
         var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(
-            SignalId, new DefaultHttpContext(), Access(users, budgets: app), plans, NoRuleDescriber(), CancellationToken.None);
+            SignalId, DecisionCapabilityFixtures.SignedIn(), DecisionCapabilityFixtures.Capability(Access(users, budgets: app), plans, NoRuleDescriber()),
+            CancellationToken.None);
 
         result.Should().NotBeOfType<Ok<DecisionPlanResponse>>("the matter is not readable: the uniform 404");
         app.Queries.Should().BeEmpty("never an app-only read for a matter the caller could not read");

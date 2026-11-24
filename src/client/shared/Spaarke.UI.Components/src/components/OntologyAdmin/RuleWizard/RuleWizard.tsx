@@ -176,7 +176,8 @@ function refusalErrorsOf(failure: AuthoringFailure): FieldErrors {
 // ---- the catalog gate -------------------------------------------------------------------------------------------------------
 
 type CatalogLoad =
-  | { status: 'loading' }
+  /** `retrying`: this load follows a failed one, so the modal keeps the focused "Try again" button mounted (disabled) rather than unmounting it. */
+  | { status: 'loading'; retrying: boolean }
   | { status: 'error'; message: string }
   | { status: 'ready'; catalog: AuthoringCatalog };
 
@@ -187,7 +188,7 @@ type CatalogLoad =
 export const RuleWizard: React.FC<RuleWizardProps> = props => {
   const { service, mode, uiScale, onClose } = props;
   const styles = useStyles();
-  const [load, setLoad] = React.useState<CatalogLoad>({ status: 'loading' });
+  const [load, setLoad] = React.useState<CatalogLoad>({ status: 'loading', retrying: false });
   const [attempt, setAttempt] = React.useState(0);
   const mounted = React.useRef(true);
 
@@ -200,7 +201,7 @@ export const RuleWizard: React.FC<RuleWizardProps> = props => {
 
   React.useEffect(() => {
     let current = true;
-    setLoad({ status: 'loading' });
+    setLoad({ status: 'loading', retrying: attempt > 0 });
     void service.getCatalog().then(answer => {
       if (!current || !mounted.current) {
         return;
@@ -231,8 +232,15 @@ export const RuleWizard: React.FC<RuleWizardProps> = props => {
         </Button>
       }
       footer={
-        load.status === 'error' ? (
-          <Button appearance="primary" onClick={() => setAttempt(a => a + 1)} data-testid="rule-wizard-catalog-retry">
+        load.status === 'error' || load.retrying ? (
+          // While the retry loads, the button stays mounted and focusable (`disabledFocusable`, not natively disabled): unmounting a
+          // focused button drops focus to <body>, and the wizard that replaces this modal would then have no opener to return it to.
+          <Button
+            appearance="primary"
+            disabledFocusable={load.status === 'loading'}
+            onClick={() => setAttempt(a => a + 1)}
+            data-testid="rule-wizard-catalog-retry"
+          >
             Try again
           </Button>
         ) : undefined

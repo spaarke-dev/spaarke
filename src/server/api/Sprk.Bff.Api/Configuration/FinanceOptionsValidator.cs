@@ -3,49 +3,20 @@ using Microsoft.Extensions.Options;
 namespace Sprk.Bff.Api.Configuration;
 
 /// <summary>
-/// Start-up validator for the eBilling SPE container id on <see cref="FinanceOptions"/> (ebilling-r1 task 028, FR-16, D-55): the
-/// Procedure Library container must be distinct from the two containers other features already store into
-/// (<c>EmailProcessing:DefaultContainerId</c>, <c>Communication:ArchiveContainerId</c>).
+/// Start-up validator for <see cref="FinanceOptions"/>: the <c>Finance:FileStore</c> rules (<see cref="ValidateFileStore"/>,
+/// ebilling-r1 task 090).
 /// </summary>
 /// <remarks>
-/// <para>ebilling-r1 task 092 retired <c>Finance:EbillingOutputContainerId</c> (export files are Stored Files) and its checks. The
-/// Procedure Library key stays while <c>RuleSetService</c> and <c>RateCardImportService</c> read it (the 092 escalation).</para>
-/// Empty values stay allowed (the key is optional at start-up), and an empty value never counts as a collision. The comparison is ordinal (container ids are case-sensitive) on trimmed values. The other
-/// sections are read from <see cref="IConfiguration"/> rather than bound, because neither options class is validated at start
-/// (precedent: <see cref="CustomerOptionsValidator"/>).
-/// <para>ebilling-r1 task 090 adds the <c>Finance:FileStore</c> rules (<see cref="ValidateFileStore"/>).</para>
+/// ebilling-r1 task 092 retired <c>Finance:EbillingOutputContainerId</c> and task 124 retired
+/// <c>Finance:ProcedureLibraryContainerId</c> (EB-D-163): eBilling files are Stored Files in the Finance file store, so no eBilling
+/// SharePoint Embedded container is configured and this validator reads no container id. A setting left behind under either key binds
+/// to nothing and is never validated.
 /// </remarks>
 public sealed class FinanceOptionsValidator : IValidateOptions<FinanceOptions>
 {
-    private const string ProcedureLibraryKey = "Finance:ProcedureLibraryContainerId";
-    private const string EmailDefaultKey = "EmailProcessing:DefaultContainerId";
-    private const string ArchiveKey = "Communication:ArchiveContainerId";
-
-    private readonly IConfiguration _configuration;
-
-    public FinanceOptionsValidator(IConfiguration configuration)
-    {
-        _configuration = configuration;
-    }
-
     public ValidateOptionsResult Validate(string? name, FinanceOptions options)
     {
-        var procedureLibrary = options.ProcedureLibraryContainerId?.Trim();
-
         var failures = new List<string>();
-
-        if (!string.IsNullOrEmpty(procedureLibrary))
-        {
-            foreach (var otherKey in new[] { EmailDefaultKey, ArchiveKey })
-            {
-                var other = _configuration[otherKey]?.Trim();
-                if (!string.IsNullOrEmpty(other) && string.Equals(procedureLibrary, other, StringComparison.Ordinal))
-                {
-                    failures.Add($"{ProcedureLibraryKey} must not equal {otherKey} ('{procedureLibrary}'): that container already holds other documents, "
-                        + "and the eBilling container settings must name containers of their own.");
-                }
-            }
-        }
 
         ValidateFileStore(options.FileStore ?? new FinanceFileStoreOptions(), failures);
 

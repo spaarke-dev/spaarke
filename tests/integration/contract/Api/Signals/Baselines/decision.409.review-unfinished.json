@@ -1,0 +1,16 @@
+{
+  "case": "decision.409.review-unfinished",
+  "status": 409,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"An earlier decision on this item is unfinished. Close this and open the item again to finish it. Nothing was done.\",\"reasonCode\":\"ontology.decision.review_unfinished\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000043\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+    "title": "Conflict",
+    "status": 409,
+    "detail": "An earlier decision on this item is unfinished. Close this and open the item again to finish it. Nothing was done.",
+    "reasonCode": "ontology.decision.review_unfinished",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000043",
+    "actionCode": null
+  }
+}

@@ -1,5 +1,6 @@
 export { DecisionWizard } from './DecisionWizard';
 export type { DecisionWizardProps } from './DecisionWizard';
+export { CONFIRM_GUARD_MS } from './DecisionItemWizard';
 export { DecisionWizardHost } from './DecisionWizardHost';
 export type { DecisionWizardHostProps } from './DecisionWizardHost';
 export {

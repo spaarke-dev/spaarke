@@ -352,6 +352,20 @@ export interface DecisionWizardItem {
   otherOpenItems: WorklistItem[];
   /** Present when the item is already closed; absent while it is open. */
   resolution?: DecisionResolution | null;
+  /**
+   * Optional seam: the host's `evidence` holds only the first lines of what the item stores (the MCP plan tool bounds a row for its
+   * result size). Present: What was found says "Showing N of M" under the lines instead of passing them off as all of them. Absent
+   * (the Console, which holds every line): nothing is said, as before.
+   */
+  evidenceTruncation?: DecisionEvidenceTruncation;
+}
+
+/** How much of an item's evidence the host could bring. */
+export interface DecisionEvidenceTruncation {
+  /** How many lines the item stores. Absent or not above what is shown: the note says some are not shown, without a count. */
+  total?: number;
+  /** Where the rest can be read (the host opens the Console). Absent: the note has no link. */
+  openAll?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -369,9 +383,25 @@ export interface DecisionLookupRequest {
   query: string;
   /** The item's core record, for scoping (the matter's budgets). Null for a Not filed item. */
   core: { recordType: string; recordId: string } | null;
+  /**
+   * The Signal the wizard is deciding. Optional seam: a host whose search is scoped by the Work Item rather than by the core record
+   * (the MCP widget's `spaarke_search_decision_lookup` takes a signal id) reads it; the Console's search ignores it.
+   */
+  signalId?: string;
 }
 
-export type DecisionLookupSearch = (request: DecisionLookupRequest) => Promise<ILookupItem[]>;
+export type DecisionLookupSearch = ((request: DecisionLookupRequest) => Promise<ILookupItem[]>) & {
+  /**
+   * Optional seam: the fewest characters worth searching. Below it the field asks nothing and says "Type at least N letters" instead of
+   * "No results found". Absent: any text is searched, as before (the Console).
+   */
+  minChars?: number;
+  /**
+   * Optional seam: what the field says when this search REJECTS (throttled, offline), instead of "No results found". Absent: a failed
+   * search reads as no results, as before (the Console).
+   */
+  failureText?: string;
+};
 
 /**
  * What the host needs to open the platform's side-pane lookup for one Person / Lookup field (D-182). The host builds the row

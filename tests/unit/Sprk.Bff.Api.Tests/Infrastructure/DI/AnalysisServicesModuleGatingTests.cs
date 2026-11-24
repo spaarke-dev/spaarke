@@ -1,5 +1,5 @@
 // ai-architecture-redesign-r1 — Task 006 (FR-P0-05, 2026-07-05)
-// Registration-hygiene behavior tests: PlaybookLookupService + OutputOrchestratorService
+// Registration-hygiene behavior tests: PlaybookLookupService (and OutputOrchestratorService, deleted by ebilling-r1 050b)
 // moved OUT of FinanceModule into AnalysisServicesModule.AddPlaybookServices (compound
 // Analysis:Enabled && DocumentIntelligence:Enabled gate) with ADR-032 P3 Null-Object peers;
 // LinearConsumers stack moved under the same compound gate.
@@ -111,32 +111,6 @@ public class AnalysisServicesModuleGatingTests
     }
 
     // ===================================================================
-    // IOutputOrchestratorService — real unresolvable + Null peer fail-fast
-    // ===================================================================
-
-    [Theory]
-    [MemberData(nameof(CompoundOffCombinations))]
-    public async Task OutputOrchestrator_WhenCompoundGateOff_ApplyOutputMapping_FailsFastWithStable503ErrorCode(
-        bool analysisEnabled, bool documentIntelligenceEnabled)
-    {
-        using var provider = BuildCompoundOffProvider(analysisEnabled, documentIntelligenceEnabled);
-        using var scope = provider.CreateScope();
-
-        var orchestrator = scope.ServiceProvider.GetRequiredService<IOutputOrchestratorService>();
-
-        orchestrator.Should().NotBeOfType<OutputOrchestratorService>(
-            "the real OutputOrchestratorService must be unresolvable when the compound AI gate is off (FR-P0-05)");
-
-        var ex = await Assert.ThrowsAsync<FeatureDisabledException>(
-            () => orchestrator.ApplyOutputMappingAsync(
-                Guid.NewGuid(), new PlaybookExecutionContext(), CancellationToken.None));
-
-        ex.ErrorCode.Should().Be(NullOutputOrchestratorService.ErrorCode);
-        ex.ErrorCode.Should().Be("ai.output-orchestrator.disabled",
-            "errorCode must be stable across releases");
-    }
-
-    // ===================================================================
     // LinearConsumers stack — gated as one unit under the compound AI gate
     // ===================================================================
 
@@ -185,7 +159,7 @@ public class AnalysisServicesModuleGatingTests
     // ===================================================================
 
     [Fact]
-    public void FinanceModule_NoLongerRegisters_PlaybookLookup_Or_OutputOrchestrator()
+    public void FinanceModule_NoLongerRegisters_PlaybookLookup()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -194,10 +168,8 @@ public class AnalysisServicesModuleGatingTests
         using var scope = provider.CreateScope();
 
         // Resolution failure proves the FinanceModule exit — with ONLY FinanceModule loaded,
-        // neither playbook service exists. Their home is AnalysisServicesModule (compound gate).
+        // the playbook lookup service does not exist. Its home is AnalysisServicesModule (compound gate).
         scope.ServiceProvider.GetService<IPlaybookLookupService>().Should().BeNull(
             "IPlaybookLookupService moved to AnalysisServicesModule.AddPlaybookServices (FR-P0-05)");
-        scope.ServiceProvider.GetService<IOutputOrchestratorService>().Should().BeNull(
-            "IOutputOrchestratorService moved to AnalysisServicesModule.AddPlaybookServices (FR-P0-05)");
     }
 }
