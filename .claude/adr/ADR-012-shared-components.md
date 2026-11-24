@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (Amended 2026-11-24)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-11-24 (`@spaarke/compose-components` sanctioned: Compose document-editing model, TipTap quarantine; previous: 2026-11-18 Pattern D feature packages sanctioned: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`; previous: 2026-11-13 census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
+> **Last Updated**: 2026-11-24 (`@spaarke/compose-components` sanctioned: Compose document-editing model, TipTap quarantine; `@spaarke/ai-outputs` retired into `@spaarke/ai-widgets`; previous: 2026-11-18 Pattern D feature packages sanctioned: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`; previous: 2026-11-13 census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
 
 ---
 
@@ -65,13 +65,12 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 | `@spaarke/auth` | `Spaarke.Auth` | Sanctioned | The single SSO / token / authenticated-fetch implementation for every surface (ADR-028) |
 | `@spaarke/events-components` | `Spaarke.Events.Components` | Sanctioned | Events + Tasks components shared by the EventsPage code page and the SpaarkeAi Calendar widget (named in the 2026-07-12 amendment) |
 | `@spaarke/notifications` | `Spaarke.Notifications` | Sanctioned | Host-agnostic notification-spine client: SignalR delivery with poll fallback (ADR-047) |
-| `@spaarke/ai-widgets` | `Spaarke.AI.Widgets` | Sanctioned | Workspace + context widgets for the three-pane shell (ADR-030 pane event bus, ADR-031 stage lifecycle) |
+| `@spaarke/ai-widgets` | `Spaarke.AI.Widgets` | Sanctioned | Workspace + context widgets for the three-pane shell, including the internal output / source pane widgets in `src/outputs` (ADR-030 pane event bus, ADR-031 stage lifecycle) |
 | `@spaarke/sdap-client` | `Spaarke.SdapClient` | Grandfathered — under review | SDAP API client used by PCF and TS apps (18 consumers); overlap with the BFF adapters in `@spaarke/ui-components` not yet assessed |
 | `@spaarke/smart-todo-components` | `Spaarke.SmartTodo.Components` | Sanctioned | Smart To Do feature package: SmartTodo code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
 | `@spaarke/communication-components` | `Spaarke.Communication.Components` | Sanctioned | Communications feature package: 3 PCFs (deep imports), Office add-ins, ai-widgets, 4 code pages (2026-11-18 Pattern D amendment) |
 | `@spaarke/daily-briefing-components` | `Spaarke.DailyBriefing.Components` | Sanctioned | Daily Briefing feature package: DailyBriefing code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
 | `@spaarke/compose-components` | `Spaarke.Compose.Components` | Sanctioned | The Compose document-editing model (TipTap document, DOCX bridge, checkout, comments); TipTap/ProseMirror quarantine; SpaarkeAi + LegalWorkspace (2026-11-24 amendment) |
-| `@spaarke/ai-outputs` | `Spaarke.AI.Outputs` | Grandfathered — under review | AI output / source pane widgets; boundary with `@spaarke/ai-widgets` not yet assessed |
 <!-- shared-package-census:end -->
 
 **Census changes since 2026-11-10** (each one owner-approved in `projects/reuse-governance-tightening-r1/notes/package-reviews.md`):
@@ -80,6 +79,7 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 - 2026-11-13: `@spaarke/document-operations` retired. Its one hook, `useDocumentActions`, moved unchanged into `@spaarke/ui-components` (`src/hooks/useDocumentActions.ts`), exported from the main barrel only, not `pcf-safe`. Both consumers (SemanticSearch, Compose) already imported from ui-components.
 - 2026-11-18: `@spaarke/smart-todo-components`, `@spaarke/communication-components` and `@spaarke/daily-briefing-components` sanctioned as Pattern D feature packages (amendment below).
 - 2026-11-24: `@spaarke/compose-components` sanctioned (Compose amendment below).
+- 2026-11-24: `@spaarke/ai-outputs` retired. `@spaarke/ai-widgets` was its only importer; its widgets and types moved into `src/outputs` there, internal (not re-exported from the barrel). The registries key them by the `OutputWidgetType` / `SourceWidgetType` enums, and its duplicate pane-event and chat-session types were dropped for SprkChat's `IAiPaneEvent` / `IChatSession`.
 
 ---
 
