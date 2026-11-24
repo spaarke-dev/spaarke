@@ -1,0 +1,19 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.6/schema.json",
+  "version": "v1.6",
+  "name": "spaarke-legal-g8p2-org-learn",
+  "description": "Phase 0 control for G8-P2: the same agent with an MCP action on Microsoft's public Learn MCP server. Not for real work.",
+  "instructions": "You answer questions about Microsoft products by using the Microsoft Learn action. When the user asks a question about Microsoft documentation, call the Learn action's search tool once and summarise what it returns, with the links. If the action returns an error, quote the error.",
+  "conversation_starters": [
+    {
+      "title": "Learn search",
+      "text": "Search Microsoft Learn for declarative agent MCP plugins"
+    }
+  ],
+  "actions": [
+    {
+      "id": "learnMcpControl",
+      "file": "ai-plugin.json"
+    }
+  ]
+}
