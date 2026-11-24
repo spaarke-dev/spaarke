@@ -2612,6 +2612,32 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 ---
 
+### ISS-052 — The SPA "Invoice received" screen has no link to the invoice or its record
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | now |
+| **Filed** | 2026-11-24 |
+| **Source** | Owner checklist Q (2026-11-24): "the 'invoice received' should have navigation to the Invoice and to the related record (e.g., project or matter)" |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3082 |
+
+**Description**
+
+After a firm submits an invoice in the external SPA, the result screen ("Invoice received", then Accepted / Rejected / Failed) shows the status, the tracking number and the outcome report, but offers no way to open the invoice or the matter / project / work assignment it was filed against. The same is true of the resume view (`/invoices/submit?submissionId=`) and of the record modal's Submit invoice action. The firm has to leave the screen and find both by hand. The SPA already opens either by id (`useOpenRecord`; `intakeSuccess.tsx` does this for a new service request). The BFF's external status route already returns the core record (`InvoiceSubmissionView.CoreRecord`); the invoice id is read but `[JsonIgnore]`d.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/InvoiceSubmissionOutcome.tsx`, `InvoiceSubmissionWizard.tsx`, `types.ts` (`InvoiceSubmissionStatusView`)
+- `src/client/external-spa/src/pages/InvoiceSubmitPage.tsx`, `src/client/external-spa/src/components/record/actions/SubmitInvoiceAction.tsx`
+- `src/client/external-spa/src/components/detail/RecordOpener.tsx` (`useOpenRecord`), `src/client/external-spa/src/intake/intakeSuccess.tsx`
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionContracts.cs` (`InvoiceSubmissionView.InvoiceId`), `Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs` (`GetAsync`)
+
+**Suggested fix**: optional open-invoice / open-record callbacks on the shared result screen, wired in the SPA to `useOpenRecord`; the external status route returns the invoice id only for an Accepted submission whose invoice the caller may see under the existing predicate. Task iss052.
+
+**Estimated effort**: half a day. **Blockers**: none. **Related**: FR-17, FR-38 (SPA invoice detail), D-70; uac-r2 reviews the route change, spa-r4 gets a copy.
+
+---
 ### ISS-051 — Resolved UTBMS codes are never written to the Invoice Line code lookups
 
 | Field | Value |
