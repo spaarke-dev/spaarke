@@ -8,7 +8,7 @@
  */
 
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
 import type { FirmNoticeDraft } from '../services/decisionApi';
@@ -823,6 +823,20 @@ describe('Review round 1 F1-a: the banner\'s Finish repeats the wizard\'s reques
     await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
     expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
     expect(decision.reject.mock.calls[1]).toHaveLength(2);
+  });
+
+  it('ISS-041 (must-not-fire): with the notice kept in memory (on, or off) the Finish form offers no Notify step and asks for no second draft', async () => {
+    for (const tweak of [undefined, (d: HTMLElement) => fireEvent.click(sendSwitch(d))]) {
+      const { decision } = strandingPage('Reject');
+      await sendThenStrand(FINISH_REJECT, REJECT, tweak);
+      expect(decision.getFirmNoticeDraft).toHaveBeenCalledTimes(1);
+      fireEvent.click(await screen.findByTestId('finish-decision'));
+      const dialog = await finishDialog();
+      expect(within(dialog).queryByTestId('notify-step')).not.toBeInTheDocument();
+      expect(within(dialog).getByTestId('finish-decision-notice')).toBeInTheDocument();
+      expect(decision.getFirmNoticeDraft).toHaveBeenCalledTimes(1);
+      cleanup();
+    }
   });
 
   it('a Finish that comes back unsure again keeps the notice in the lock: the next Finish still carries it', async () => {
