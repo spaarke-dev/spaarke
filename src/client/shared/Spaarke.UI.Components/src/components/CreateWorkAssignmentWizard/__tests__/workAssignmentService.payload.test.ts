@@ -38,6 +38,7 @@ const EVENT_ROUTE = `${BFF_BASE}/api/v1/child-records/sprk_event`;
 const NEW_WA_ID = '33333333-3333-3333-3333-333333333333';
 const NEW_EVENT_ID = '44444444-4444-4444-4444-444444444444';
 const RT_MATTER_GUID = 'aaaaaaaa-1111-2222-3333-444444444444';
+const RT_WA_GUID = 'bbbbbbbb-1111-2222-3333-444444444444';
 const MATTER_ID_RAW = '{39CDE3E3-9D15-4B29-9A1E-1234567890AB}';
 const MATTER_ID_CLEAN = '39cde3e3-9d15-4b29-9a1e-1234567890ab';
 const MATTER_TYPE_ID = '55555555-5555-5555-5555-555555555555';
@@ -84,7 +85,18 @@ const EVENT_RELATIONSHIPS = [
   rel('sprk_assignedtoexternal', 'sprk_AssignedToExternal', 'contact'),
   rel('sprk_assignedto1', 'sprk_AssignedTo1', 'contact'),
   rel('sprk_assignedto', 'sprk_AssignedTo', 'contact'),
+  rel('sprk_regardingrecordtype', 'sprk_RegardingRecordType', 'sprk_recordtype_ref'),
 ];
+
+/** The regarding pair and display columns the follow-on event carries for its work assignment (ADR-024). */
+const EVENT_REGARDING = {
+  'sprk_RegardingWorkAssignment@odata.bind': `/sprk_workassignments(${NEW_WA_ID})`,
+  'sprk_RegardingRecordType@odata.bind': `/sprk_recordtype_refs(${RT_WA_GUID})`,
+  sprk_regardingrecordid: NEW_WA_ID,
+  sprk_regardingrecordurl: expect.stringContaining(`etn=sprk_workassignment&id=${NEW_WA_ID}`),
+  sprk_regardingrecordname: 'Review the lease',
+  sprk_regardingrecordnumber: 'WA-000007',
+};
 
 function stubNavPropFetch() {
   (global as unknown as { fetch: unknown }).fetch = jest.fn(async (url: string) => ({
@@ -101,12 +113,30 @@ function stubNavPropFetch() {
 }
 
 /** The user's data service: catalog + parent reads for the resolver; any create or BU read would be a regression. */
-function makeDataService(): IDataService {
+function makeDataService(opts?: { workAssignmentUnreadable?: boolean }): IDataService {
   return {
     createRecord: jest.fn().mockResolvedValue('xrm-created-guid'),
     retrieveRecord: jest.fn().mockResolvedValue({}),
     retrieveMultipleRecords: jest.fn(async (entityName: string, options?: string) => {
       const query = options ?? '';
+      if (entityName === 'sprk_recordtype_ref' && query.includes("'sprk_workassignment'")) {
+        // The follow-on event's parent (the dev catalog row: number sprk_workassignmentnumber, display sprk_name).
+        if (query.includes('sprk_recordtype_refid')) {
+          return { entities: [{ sprk_recordtype_refid: RT_WA_GUID, sprk_recorddisplayname: 'Work Assignment' }] };
+        }
+        if (query.includes('sprk_regardingrecordnumberfield')) {
+          return { entities: [{ sprk_regardingrecordnumberfield: 'sprk_workassignmentnumber' }] };
+        }
+        if (query.includes('sprk_recorddisplaynamefield')) {
+          return { entities: [{ sprk_recorddisplaynamefield: 'sprk_name' }] };
+        }
+        return { entities: [] };
+      }
+      if (entityName === 'sprk_workassignment') {
+        return opts?.workAssignmentUnreadable
+          ? { entities: [] }
+          : { entities: [{ sprk_workassignmentnumber: 'WA-000007', sprk_name: 'Review the lease' }] };
+      }
       if (entityName === 'sprk_recordtype_ref') {
         if (query.includes('sprk_recordtype_refid')) {
           return { entities: [{ sprk_recordtype_refid: RT_MATTER_GUID, sprk_recorddisplayname: 'Matter' }] };
@@ -353,13 +383,13 @@ describe('WorkAssignmentService — the server write path (task 026, FR-16)', ()
       sprk_description: 'Please act',
       sprk_duedate: '2026-12-02',
       sprk_finalduedate: '2026-12-09',
-      'sprk_RegardingWorkAssignment@odata.bind': `/sprk_workassignments(${NEW_WA_ID})`,
+      ...EVENT_REGARDING,
       'sprk_AssignedTo@odata.bind': `/contacts(${ASSIGNED_TO_ID})`,
     });
     expect(dataService.createRecord).not.toHaveBeenCalled();
   });
 
-  it('a minimal follow-on event sends the name, the priority and the filing key only', async () => {
+  it('a minimal follow-on event sends the name, the priority and the filing / regarding keys only', async () => {
     const fetchMock = makeFetch();
     const service = new WorkAssignmentService(makeDataService(), fetchMock, BFF_BASE, undefined);
 
@@ -369,9 +399,32 @@ describe('WorkAssignmentService — the server write path (task 026, FR-16)', ()
     expect(call.body).toEqual({
       sprk_eventname: 'Assign Work',
       sprk_priority: 100000001,
-      'sprk_RegardingWorkAssignment@odata.bind': `/sprk_workassignments(${NEW_WA_ID})`,
+      ...EVENT_REGARDING,
     });
     expect(Object.keys(call.body).filter(k => SERVER_OWNED.test(k))).toEqual([]);
+  });
+
+  // Live check 2026-11-24: the event bound only the typed lookup, so its Regarding was blank.
+  it("the follow-on event names its work assignment as the regarding record, falling back to the wizard's name when the row cannot be read", async () => {
+    const fetchMock = makeFetch();
+    const service = new WorkAssignmentService(
+      makeDataService({ workAssignmentUnreadable: true }),
+      fetchMock,
+      BFF_BASE,
+      undefined
+    );
+
+    await service.createFollowOnEvent(NEW_WA_ID, { ...EMPTY_FOLLOW_ON_EVENT_STATE }, '  Lease review  ');
+
+    const [call] = callsTo(fetchMock, EVENT_ROUTE);
+    expect(call.body['sprk_RegardingWorkAssignment@odata.bind']).toBe(`/sprk_workassignments(${NEW_WA_ID})`);
+    expect(call.body['sprk_RegardingRecordType@odata.bind']).toBe(`/sprk_recordtype_refs(${RT_WA_GUID})`);
+    expect(call.body.sprk_regardingrecordid).toBe(NEW_WA_ID);
+    expect(call.body.sprk_regardingrecordname).toBe('Lease review');
+    // The number is left out, not guessed, when the row cannot be read (the resolver's graceful blank).
+    expect(call.body).not.toHaveProperty('sprk_regardingrecordnumber');
+    // Never the look-alike work-assignment column.
+    expect(call.body).not.toHaveProperty('sprk_RelatedWorkAssignment@odata.bind');
   });
 
   it("the event route's warnings reach the caller; a refusal is the existing 'create manually' warning", async () => {

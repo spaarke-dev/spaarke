@@ -639,7 +639,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     // 3. Execute follow-on: Create Event
     if (actions.includes('create-event')) {
-      const eventResult = await service.createFollowOnEvent(waId, followOnEventStateRef.current);
+      const eventResult = await service.createFollowOnEvent(waId, followOnEventStateRef.current, form.name);
       if (!eventResult.success && eventResult.warning) {
         warnings.push(eventResult.warning);
       }
