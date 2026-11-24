@@ -334,6 +334,28 @@ public sealed class SecureRecordSetupProcedure
     public const string DecisionRecordReaderRoleMinimumRelease = "1.3.1.0";
 
     /// <summary>
+    /// S29: the privileges the PLATFORM adds to a Spaarke role, which the exact-set check tolerates and reports on the
+    /// "Spaarke Decision Record Reader" root role at any depth (they are never required, never stripped here, and any other
+    /// privilege is still drift). Source: ebilling-r1 notes/120-billing-admin-role.md ("Platform defaults on the role" —
+    /// Dataverse puts the 5 plugin-metadata reads on every role it creates; <c>AddPrivilegesRole</c> re-injects the SharePoint
+    /// four, docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md section 5.4) and the same 9 names pinned in
+    /// scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1 (<c>$PlatformDefaults</c>). The four SharePoint privileges were
+    /// observed on the managed stamp ACME after a SpaarkeMaster 1.3.2.1 import (all Global).
+    /// </summary>
+    public static readonly IReadOnlyList<string> DecisionRecordReaderPlatformAddedPrivileges =
+    [
+        "prvReadPluginAssembly",
+        "prvReadPluginType",
+        "prvReadSdkMessage",
+        "prvReadSdkMessageProcessingStep",
+        "prvReadSdkMessageProcessingStepImage",
+        "prvCreateSharePointData",
+        "prvReadSharePointData",
+        "prvWriteSharePointData",
+        "prvReadSharePointDocument",
+    ];
+
+    /// <summary>
     /// Task 267 (#2618): the business unit the ontology writer's application user lives in, ALONE — a direct child of the
     /// root, neither the customer's unit nor the Secure Record unit. H10 creates it (and refuses a customer name that
     /// resolves to it); S24 checks it by id. Its default team holds no role and is in no field-security profile, so the
@@ -1480,8 +1502,8 @@ public sealed class SecureRecordSetupProcedure
         var customerDefaultTeamRoles = await dv.ListTeamRolesAsync(t, customerDefaultTeam.Id, ct).ConfigureAwait(false);
 
         // S29 (read half, ebilling-r1 DEF-059) — the BFF's two application users hold the customer-unit copy of "Spaarke Decision
-        // Record Reader" (Read on sprk_decisionrecord at Global, nothing else). The rules of
-        // scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1: the role in the ROOT unit holds exactly that one privilege; any
+        // Record Reader" (Read on sprk_decisionrecord at Global, plus only the platform-added privileges in DecisionRecordReaderPlatformAddedPrivileges). The rules of
+        // scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1: the role in the ROOT unit holds that one privilege at Global and nothing outside the platform-added allow-list; any
         // holder that is not one of the two BFF users (a person, another application user, a team) is drift. Verified only:
         // this procedure strips a privilege from a role it creates (S6), never from one SpaarkeMaster ships, and removes no
         // holder. Every refusal is before any write.
@@ -1499,19 +1521,30 @@ public sealed class SecureRecordSetupProcedure
         {
             readerPrivilegeProblems.Add($"it does not hold {DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth}");
         }
+        var readerTolerated = readerHeld
+            .Where(h => DecisionRecordReaderPlatformAddedPrivileges.Any(p => Same(p, h.Name)))
+            .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         readerPrivilegeProblems.AddRange(readerHeld
-            .Where(h => !Same(h.Name, DecisionRecordReaderPrivilege))
+            .Where(h => !Same(h.Name, DecisionRecordReaderPrivilege)
+                        && !DecisionRecordReaderPlatformAddedPrivileges.Any(p => Same(p, h.Name)))
             .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
             .Take(NamedPrincipalLimit)
             .Select(h => $"it holds {h.Name ?? h.PrivilegeId.ToString()} at {h.Depth}, outside its one-privilege set"));
         if (readerPrivilegeProblems.Count > 0)
         {
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift,
-                $"The '{DecisionRecordReaderRoleName}' role ({readerRootRoles[0].Id}) is not exactly " +
-                $"{DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth}: {string.Join("; ", readerPrivilegeProblems)}. " +
+                $"The '{DecisionRecordReaderRoleName}' role ({readerRootRoles[0].Id}) is not " +
+                $"{DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth} plus only the platform-added privileges: {string.Join("; ", readerPrivilegeProblems)}. " +
                 "H7b changes no privilege of a role SpaarkeMaster ships: run " +
                 "scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -EnvironmentUrl <stamp> -BffApplicationIds <app-ids> -Apply " +
                 "(it strips what Dataverse added outside the declared privilege), then -Verify, then resume. Nothing was written.");
+        }
+        if (readerTolerated.Length > 0)
+        {
+            // Reported, not failed: the platform adds these to every Spaarke role; this step is verify-only on a managed role.
+            notes.Add($"'{DecisionRecordReaderRoleName}': tolerated platform-added privileges (verify-only, not stripped): " +
+                      string.Join(", ", readerTolerated.Select(h => $"{h.Name} at {h.Depth}")) + ".");
         }
         var readerHolderProblems = new List<string>();
         foreach (var copy in await dv.FindRoleCopiesAsync(t, DecisionRecordReaderRoleName, ct).ConfigureAwait(false))

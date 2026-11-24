@@ -1812,8 +1812,9 @@ public sealed class SecureRecordSetupProcedureTests
         var outcome = await RunAsync(dv);
 
         outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
-        dv.UserRoles[dv.BffAppUser].Should().Contain(dv.OntologyRoleId, "an application user may hold it and is left alone");
-        dv.UserRoles[dv.MiAppUser].Should().Contain(dv.OntologyRoleId);
+        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId, dv.DecisionReaderRoleId },
+            "an application user may hold it and is left alone (S29 adds the Decision Record Reader copy)");
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId, dv.DecisionReaderRoleId });
         dv.Writes.Should().NotContain(w => w.Contains(dv.BffAppUser.ToString(), StringComparison.Ordinal) && w.Contains(dv.OntologyRoleId.ToString(), StringComparison.Ordinal));
     }
 
@@ -2492,6 +2493,115 @@ public sealed class SecureRecordSetupProcedureTests
         refused.Diagnostic.Should().Contain("prvReadsprk_matter").And.Contain("Set-BffDecisionRecordReaderRole.ps1");
         dv.Writes.Should().BeEmpty("H7b removes no privilege from a role SpaarkeMaster ships");
         dv.RolePrivileges[dv.RootDecisionReaderRoleId].Should().HaveCount(2);
+    }
+
+    private static readonly string[] AcmeSharePointFour =
+        ["prvReadSharePointDocument", "prvReadSharePointData", "prvWriteSharePointData", "prvCreateSharePointData"];
+
+    [Fact]
+    public async Task S29_RootRoleWithTheAcmeFivePrivilegeSet_Passes_ReportsTheFourPlatformAdded_AndWritesNoStrip()
+    {
+        // The managed stamp ACME after a SpaarkeMaster 1.3.2.1 import: the declared privilege plus the SharePoint four, all Global.
+        var dv = NewEnv();
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        var note = applied.State.Notes!.Should().ContainSingle(n => n.Contains("tolerated platform-added", StringComparison.Ordinal)).Subject;
+        note.Should().Contain(DecisionReader);
+        foreach (var name in AcmeSharePointFour)
+        {
+            note.Should().Contain($"{name} at Global");
+        }
+        note.Should().NotContain(SecureRecordSetupProcedure.DecisionRecordReaderPrivilege, "the declared privilege is not 'platform-added'");
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId].Should().HaveCount(5, "S29 is verify-only: nothing is stripped");
+        dv.Writes.Should().NotContain(w => w.Contains(dv.RootDecisionReaderRoleId.ToString(), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S29_RootRoleHoldingOnlyTheDeclaredPrivilege_ReportsNoToleratedPrivileges()
+    {
+        var applied = (await RunAsync(NewEnv())).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().NotContain(n => n.Contains("tolerated platform-added", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("Basic")]
+    [InlineData("Local")]
+    [InlineData("Deep")]
+    public async Task S29_ToleratedPlatformPrivilege_IsTolerated_AtAnyDepth(string depth)
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = ("prvReadPluginAssembly", depth);
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes!.Should().ContainSingle(n => n.Contains($"prvReadPluginAssembly at {depth}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S29_ExtraPrivilegeOutsideTheAllowList_BesideTheTolerated_IsDrift_NamingOnlyTheNonAllowListed()
+    {
+        var dv = NewEnv();
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = ("prvWritesprk_DecisionRecord", "Global");
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("prvWritesprk_DecisionRecord at Global");
+        refused.Diagnostic.Should().NotContain("prvReadSharePointData at", "a tolerated privilege is not named as drift");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S29_DeclaredPrivilegeMissing_WithTheTolerated_IsDrift()
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId].Clear();
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("does not hold prvReadsprk_DecisionRecord at Global");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S29_DeclaredPrivilegeAtLocal_WithTheTolerated_IsDrift()
+    {
+        var dv = NewEnv();
+        var declared = dv.RolePrivileges[dv.RootDecisionReaderRoleId].Single();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][declared.Key] = (declared.Value.Name, "Local");
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("does not hold prvReadsprk_DecisionRecord at Global");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void S29_PlatformAddedAllowList_IsExactlyTheNineNamedInTheEbillingNotes_AndExcludesTheDeclaredPrivilege()
+    {
+        SecureRecordSetupProcedure.DecisionRecordReaderPlatformAddedPrivileges.Should().BeEquivalentTo(
+            "prvReadPluginAssembly", "prvReadPluginType", "prvReadSdkMessage", "prvReadSdkMessageProcessingStep",
+            "prvReadSdkMessageProcessingStepImage", "prvCreateSharePointData", "prvReadSharePointData",
+            "prvWriteSharePointData", "prvReadSharePointDocument");
+        SecureRecordSetupProcedure.DecisionRecordReaderPlatformAddedPrivileges.Should()
+            .NotContain(SecureRecordSetupProcedure.DecisionRecordReaderPrivilege);
     }
 
     [Theory]
