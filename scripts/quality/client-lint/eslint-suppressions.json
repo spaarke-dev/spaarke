@@ -1338,6 +1338,51 @@
       "count": 1
     }
   },
+  "src/solutions/InvoiceReview/src/components/InvoiceReviewPage.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/InvoiceReview/src/components/LineReviewPane.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/solutions/InvoiceReview/src/components/LinesGrid.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/InvoiceReview/src/components/decision/ApprovalProvider.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/InvoiceReview/src/components/decision/BlockedBanner.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/InvoiceReview/src/components/decision/DecideInvoiceAction.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/solutions/InvoiceReview/src/components/decision/steps.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/InvoiceReview/src/services/invoiceReviewApi.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/InvoiceReview/src/services/reviewModel.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
   "src/solutions/LegalWorkspace/src/App.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 2
@@ -1481,6 +1526,46 @@
       "count": 1
     }
   },
+  "src/solutions/RecordProcedures/src/components/ProcedureList.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/RecordProcedures/src/components/ProceduresPanel.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/RecordProcedures/src/components/wizards/AssignProcedureWizard.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/RecordProcedures/src/components/wizards/impact.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/RecordProcedures/src/components/wizards/plan.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/RecordProcedures/src/components/wizards/ruleForms/RuleValuesForm.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/RecordProcedures/src/components/wizards/steps.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/RecordProcedures/src/services/dryRunApi.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
   "src/solutions/Reporting/src/App.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
@@ -1523,6 +1608,16 @@
   "src/solutions/Reporting/src/styles/globalStyles.ts": {
     "no-restricted-syntax": {
       "count": 2
+    }
+  },
+  "src/solutions/RuleReview/src/components/AssignmentPanel.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/RuleReview/src/components/ParamEditor.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
     }
   },
   "src/solutions/SpaarkeAi/src/components/assistant/useMyAssistant.ts": {

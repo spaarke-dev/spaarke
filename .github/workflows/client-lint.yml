@@ -32,6 +32,11 @@ on:
       - 'src/solutions/SpaarkeAi/**'
       - 'src/solutions/LegalWorkspace/**'
       - 'src/solutions/Reporting/**'
+      - 'src/solutions/InvoiceFiles/**'
+      - 'src/solutions/InvoiceReview/**'
+      - 'src/solutions/CreateInvoiceWizard/**'
+      - 'src/solutions/RuleReview/**'
+      - 'src/solutions/RecordProcedures/**'
       - 'src/client/code-pages/SemanticSearch/**'
       - 'scripts/quality/client-lint/**'
       - '.github/workflows/client-lint.yml'
@@ -66,6 +71,11 @@ jobs:
               - 'src/solutions/SpaarkeAi/**'
               - 'src/solutions/LegalWorkspace/**'
               - 'src/solutions/Reporting/**'
+              - 'src/solutions/InvoiceFiles/**'
+              - 'src/solutions/InvoiceReview/**'
+              - 'src/solutions/CreateInvoiceWizard/**'
+              - 'src/solutions/RuleReview/**'
+              - 'src/solutions/RecordProcedures/**'
               - 'src/client/code-pages/SemanticSearch/**'
               - 'scripts/quality/client-lint/**'
               - '.github/workflows/client-lint.yml'
@@ -104,7 +114,7 @@ jobs:
         continue-on-error: true
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-npm-client-lint-${{ hashFiles('src/client/shared/*/package-lock.json', 'src/solutions/SpaarkeAi/package-lock.json', 'src/solutions/LegalWorkspace/package-lock.json', 'src/solutions/Reporting/package-lock.json', 'src/client/code-pages/SemanticSearch/package-lock.json', 'scripts/quality/client-lint/package-lock.json') }}
+          key: ${{ runner.os }}-npm-client-lint-${{ hashFiles('src/client/shared/*/package-lock.json', 'src/solutions/SpaarkeAi/package-lock.json', 'src/solutions/LegalWorkspace/package-lock.json', 'src/solutions/Reporting/package-lock.json', 'src/solutions/InvoiceFiles/package-lock.json', 'src/solutions/InvoiceReview/package-lock.json', 'src/solutions/CreateInvoiceWizard/package-lock.json', 'src/solutions/RuleReview/package-lock.json', 'src/solutions/RecordProcedures/package-lock.json', 'src/client/code-pages/SemanticSearch/package-lock.json', 'scripts/quality/client-lint/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-npm-client-lint-
 
