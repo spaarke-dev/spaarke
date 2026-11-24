@@ -185,3 +185,12 @@ Left unchanged (not `bindLookup` fragments; resolved already by exact column): `
 - work assignments A, B and C (above);
 - events `a9b1aaee-d5dd-473a-a021-cdf5f3a864b6` and `d5d8d35b-0d64-48c3-8adf-62bcc3045bf7`;
 - B's SPE container "Secure Work Assignment – FMSWP-026 live check B secure".
+
+## Event fix on master and redeploy (2026-11-24 17:46Z, owner go in this session)
+
+- **On master:** #3067 merged as 68c2a4c968.
+- **Built from:** master 68c2a4c968, in a temporary worktree (`C:\wt026b`, since removed), the same steps as the first deploy. The bundle has `mappingSourceEntity`, `sprk_regardingrecordid` and `sprk_regardingworkassignment`, and has neither `applyFieldMappings` nor the `/field-mappings/` route.
+- **Deployed:** `sprk_createworkassignmentwizard` (84bda2e0…) via `Deploy-WebResourceInline.ps1`, then published. The read-back is 1,503,103 bytes, SHA-256 `CF8B07B1…FF603702`, the same as the build.
+- **Rollback:** the 15:37Z bundle (SHA-256 `E8DE9527…4B60A1`) was saved before the deploy, in this session's scratchpad as `wr026b/rollback-sprk_createworkassignmentwizard.html`.
+- **Re-check (owner go), PASS, 2026-11-24 18:07Z:** a new work assignment with no parent ("FMSWP-026 re-check event regarding", `29554738-6151-412a-ac6d-c0593f6056dc`, WRK-001016) and its follow-on event `90587042-0df6-4852-99ab-feb2ec7bc785`, created through the BFF. The event has the `sprk_regardingworkassignment` lookup, the record type "Work Assignment", and the regarding id, name, number (WRK-001016) and url. No warning in the wizard. Read with `live026/read-event.ps1`; log `live026/waD.log`.
+- **Rows left on dev:** that work assignment and its event.

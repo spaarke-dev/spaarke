@@ -4,7 +4,7 @@
     <title>Migrate Create Report Card wizard with the fill-only regression (FR-16, FR-02)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>026 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, deploy, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
