@@ -9,16 +9,15 @@
 | Field | Value |
 |---|---|
 | **Active work** | **G8-P2 live test** (owner go 2026-11-23). This is the Practice-agent build path, so the owner said it must be RESOLVED, not just recorded. Run log: `phase0/g8/README.md` § "G8-P2 run log" |
-| **Step** | **Found:** the fresh-id Learn control through the **org catalog** WORKS (2026-11-24). So the route and the tenant are fine; the failures (1.0.0–1.0.4) were all updates to app id `802fd9cc`, which never loaded its action. Working hypothesis: catalog updates of an existing app id don't refresh its action. **Now:** owner installs `spaarke-legal-g8p2-sideload.zip` (real action, fresh id `d38f8df8-…`) through the **org catalog** for owner + test user, and asks "Show my Spaarke decisions" |
+| **Step** | **G8-P2 ✅ in Copilot Chat (2026-11-24, App Insights verified):** fresh app id `d38f8df8-…`, org catalog, decisions widget rendered, one `spaarke_show_decisions` per turn. Cause of the earlier failures: catalog updates to app id `802fd9cc` never loaded its action. **Next:** the same agent in **Word** and **Teams** (G8-P2's remaining surfaces), then removals |
 | **Design version** | design.md v0.6 + G9 (`4ed12dbee3`); latest commit `e48dc2e012` (pushed) |
 | **Uncommitted** | none |
 
 ## Next action (exact)
-1. Owner uploads `phase0/g8/spaarke-legal-g8p2-sideload.zip` through the admin center / org catalog (owner + test user, R7). New chat with `spaarke-legal-g8p2-sl` at m365.cloud.microsoft/chat: "Show my Spaarke decisions" (sign in if a card appears; Cancel any approval card). Note the time.
-2. Check App Insights for `initialize` / `tools/list` / `tools/call` from client "Sydney" in that minute.
-3. **✅:** the Practice build path works. Then G8-P2's real questions: Word and Teams surfaces, and one call per turn (R1′). Later D-A1 check: does an org-catalog **update** of an agent pick up a changed action?
-4. **❌ while the Learn control works:** the difference is our server or OAuth. Get the debug card, compare the sign-in flow, and check whether the OAuth registration accepts the new app id.
-5. Record the result in the README run log and design §8 G8-P2. Send it to COPILOT-PLATFORM-COORDINATION [0afb62] with removal confirmations (G8-a, G8-p2 `802fd9cc`, G8-p2-sl, G8-p2-org-learn, by 2026-11-30).
+1. Owner opens `spaarke-legal-g8p2-sl` in **Teams** (Copilot app / agent chat) and in **Word** (blank test document, Copilot pane, agent picker): "Show my Spaarke decisions". Cancel any approval card; never decide in the widget. Note times.
+2. Check App Insights for one `tools/call spaarke_show_decisions` per turn from client Sydney; record per surface in the README run log and design §8 G8-P2.
+3. Report to COPILOT-PLATFORM-COORDINATION [0afb62]. Removals by 2026-11-30: G8-a agent + 2 skills, G8-p2 `802fd9cc`, G8-p2-sl `d38f8df8`, G8-p2-org-learn `0421c980`.
+4. Later D-A1 check: does an org-catalog **update** of an installed agent pick up a changed action?
 
 ## G8 result (recorded in phase0/g8/README.md, commit 9c557d7e95)
 - An Agent Builder agent cannot use the tenant federated connector (A1 ❌, A2 "No connectors available" ❌, skills inside the agent ❌). Plain Chat works (`spike_whoami` ✅).

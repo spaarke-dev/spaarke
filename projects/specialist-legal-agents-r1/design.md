@@ -551,7 +551,7 @@ Phase 0 covers only what §7 leaves open. Each item names its pass condition. G1
   - **P1 dropped:** its `GraphConnectors` capability is the same knowledge setting A2 showed empty.
   - **Copilot Studio** adds an MCP *tool* to the agent: that is the agent's own tool, not the tenant connector.
   - **Conclusion:** agents are **direct MCP clients**. The tenant connector is the horizontal path for Chat, Cowork and Word (§0.5).
-- **G8-P2: owner go 2026-11-23; package built (`phase0/g8/package-p2/`, schema-valid, dynamic tool discovery), not yet uploaded.** Runbook and pass criteria: [phase0/g8/README.md](phase0/g8/README.md) § G8-P2.
+- **G8-P2: ✅ in Copilot Chat (2026-11-24, verified in App Insights).** A coded declarative agent with its own MCP action on `/mcp/legal-operations` (existing OAuth registration, org-catalog install, owner + test user) rendered the decisions widget and made **one** `spaarke_show_decisions` call per turn (R1′ ✅ in Chat). The earlier failures (1.0.0–1.0.4) were all catalog **updates** to one app id whose action never loaded; a fresh app id fixed it. Design consequence for D-A1: test action changes on a fresh app id, and verify that an org-catalog update of an installed agent picks up a changed action before customers rely on updates. Still open: Word and Teams. Run log: [phase0/g8/README.md](phase0/g8/README.md) § G8-P2 run log.
   - What it is: the same coded package, with its **own MCP action** on `/mcp/legal-operations` (plugin manifest v2.4, `RemoteMCPServer`, the existing OAuth registration A1).
   - What it shows:
     - whether a coded declarative agent runs our tools in Chat, Word and Teams;
