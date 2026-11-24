@@ -17,7 +17,7 @@ Each MCP URL (`/mcp/{area}`) is registered **once** per tenant: either as a fede
 
 A Spaarke plugin package adds `agentSkills` and, where a practice needs one, a declarative agent. It does **not** add an `agentConnectors` entry for an MCP URL already registered under R1.
 
-- **Status: NOT confirmed (owner, 2026-11-23).** Microsoft documents skills naming tools "from the same package"; it says nothing about a skill using a server registered outside its package. Agents: G8 (S-3, 2026-11-23) showed an Agent Builder agent cannot use the tenant connector, so an agent that needs our tools needs its own private action (see R1′). The packaged-agent case (G8-p) is still to run.
+- **Status (2026-11-24): skills part CONFIRMED in Cowork by T10** — a skills-only package drove the tool through the separate federated connector, so no package needs its own connector and no "core connector package" is needed (mcp-r1 option (a) stands). Chat not yet tested. Agents part still open (R1′, G8-P2). Earlier: NOT confirmed (owner, 2026-11-23). Microsoft documents skills naming tools "from the same package"; it says nothing about a skill using a server registered outside its package. Agents: G8 (S-3, 2026-11-23) showed an Agent Builder agent cannot use the tenant connector, so an agent that needs our tools needs its own private action (see R1′). The packaged-agent case (G8-p) is still to run.
 - **Pending evidence:** whether a package skill can drive the tools of a connector registered outside the package is mcp-r1's **T10** ("a skill naming a connector tool", not yet run). If T10 fails, mcp-r1's fallback (2026-11-23) is one "core" package carrying the single connector registration (the federated connector is then removed), with every other package carrying skills only; that still satisfies R1. The owner decides. This rule is re-decided then; until then, no new package connector for an already-registered URL.
 - **Known host gap:** a package connector worked in Cowork but failed in Chat before reaching the BFF (T2/T13/T14). Another reason not to rely on package connectors for Chat yet.
 
@@ -62,7 +62,7 @@ A model can call a tool twice (a duplicate registration, a retry, or a skill tha
 | Rule | State | Waits on |
 |---|---|---|
 | R1 one registration | Holds; amendment R1′ (agent-private actions allowed) proposed | S-1 sharpens the wording; R1′ needs G8-P2 and the owner |
-| R2 packages carry skills/agents, not a connector | **Open** | S-2 (= mcp-r1 T10), S-3 |
+| R2 packages carry skills/agents, not a connector | Skills part confirmed (T10 passed in Cowork 2026-11-24); agents part open | G8-P2 for agents (R1′); a Chat run of T10 |
 | R3 naming | Holds for new artifacts | accelerator OD-42 for existing skills |
 | R4–R7 process rules | Independent of structure | — |
 | R8 safe-to-repeat writes | Proposed; mcp-r1 already compliant and agrees it fits other projects | owner |
