@@ -4,7 +4,7 @@
     <title>Assign Task: an assignee whose user account is in Administrative access mode gets its own "no email" warning, not "does not have access to this record" (#3063, DI-171)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the Assign Task recipient gate (.cs) in BFF Signals and the shared DecisionWizard display (.ts); adds one warning code to the decision commit answer.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -64,4 +64,5 @@ Entry points (line numbers drift; search by name): `src/server/api/Sprk.Bff.Api/
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt207); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-24: PR #3068 squash-merged to master (20129e985c, Closes #3063) after an independent Opus review; the F4 wording, consumer note and a refusal-warning guard test were added in the review round. An Administrative-mode (accessmode 1) assignee whose task-rights answer lacks Read now gets AssignTaskRefusal.AdministrativeAccount and the commit warning assignee_email_not_sent_admin_account; the Console reads "The task was assigned, but no email was sent: the assignee's user account is set up for administration only and cannot use the app." No early refusal, the rights answer stays the decider, who is emailed is unchanged; Read-Write without Read keeps NoAccess, an unanswered rights read keeps Unverified. Console auto-deployed 20129e985c to dev; the BFF part reaches dev with the next uac-r2 dev BFF build, after which the main session re-runs the dev reproduction (owner go needed: it creates a task).</completion>
 </task>
