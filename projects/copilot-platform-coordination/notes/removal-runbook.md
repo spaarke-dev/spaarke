@@ -34,4 +34,4 @@ Note on step 5: per Microsoft's governance page, uninstalling or deleting a plug
 
 | # | Date | Done by | Evidence |
 |---|---|---|---|
-| | | | |
+| 5 | 2026-11-24 ~03:15Z | owner | mcp-r1 report (C2 deleted) |
