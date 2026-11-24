@@ -273,7 +273,7 @@ public sealed record FinanceAuthorizationCheck
 
     /// <summary>
     /// A check that the CALLER holds the Dataverse table privilege <paramref name="privilegeName"/> (any depth),
-    /// e.g. <see cref="FinanceAuthorizationFilter.CreateInvoicePrivilege"/>. <paramref name="entitySetName"/>
+    /// e.g. <c>prvCreatesprk_analysis</c>. <paramref name="entitySetName"/>
     /// names the table the privilege governs, for the deny log only.
     /// </summary>
     public static FinanceAuthorizationCheck CallerPrivilege(string privilegeName, string entitySetName, string source)
@@ -366,13 +366,6 @@ public class FinanceAuthorizationFilter : IEndpointFilter
 
     /// <summary><c>sprk_invoicesubmission</c>'s set name (ebilling-r1 task 044; the value <c>SecureChildLineage</c> uses).</summary>
     public const string InvoiceSubmissionEntitySet = "sprk_invoicesubmissions";
-
-    /// <summary>
-    /// The Create privilege on <c>sprk_invoice</c>, by its live name (spaarkedev1 <c>privileges</c>, 2026-10-01 —
-    /// the table's schema name is <c>sprk_Invoice</c>, so the privilege is NOT all lower case). A misspelt name
-    /// answers "not held" for every caller and denies every confirm, which is why it is pinned by a test.
-    /// </summary>
-    public const string CreateInvoicePrivilege = "prvCreatesprk_Invoice";
 
     /// <summary>Record-path deny reason (same code OperationAccessRule uses for the document path).</summary>
     public const string InsufficientRightsReasonCode = "sdap.access.deny.insufficient_rights";

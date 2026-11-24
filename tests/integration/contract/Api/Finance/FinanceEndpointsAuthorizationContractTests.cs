@@ -533,7 +533,6 @@ public class FinanceEndpointsAuthorizationContractTests
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
-        host.Probe.Hold(CreateInvoicePrivilege);
 
         var docRights = AccessRights.Read | AccessRights.Write | AccessRights.Append;
         var matterRights = AccessRights.Read | AccessRights.AppendTo;
@@ -565,7 +564,6 @@ public class FinanceEndpointsAuthorizationContractTests
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
-        host.Probe.Hold(CreateInvoicePrivilege);
         host.Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
         host.Access.Grant(Matters, body.MatterId, AccessRights.AppendTo);
         host.Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
@@ -593,56 +591,85 @@ public class FinanceEndpointsAuthorizationContractTests
         host.VerifyNoServiceWasInvoked();
     }
 
-    [Fact]
-    public async Task Confirm_CallerWithoutCreateOnSprkInvoice_Returns403_AndNothingIsCreated()
+    // ── ebilling-r1 050c (EB-D-264): confirm asks what the manual internal submission asks, and no Create on sprk_invoice ──
+
+    /// <summary>A confirm that reached the service answers with a submission receipt.</summary>
+    private static void ConfirmReachesTheService(FinanceAuthHost host, ConfirmBody body) =>
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(
+                It.Is<InvoiceReviewConfirmRequest>(q => q.DocumentId == body.DocumentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(Guid.NewGuid(), Guid.NewGuid(), "INV-7.1", body.DocumentId)));
+
+    [Fact(DisplayName = "050c / EB-D-264 (must fire): a caller with the submit rights but WITHOUT Create on sprk_invoice is 202, and the privilege is never asked")]
+    public async Task Confirm_CallerWithoutCreateOnSprkInvoice_ButWithTheSubmitRights_Is202_AndNoPrivilegeIsAsked()
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
         host.Probe.Release(CreateInvoicePrivilege); // every record right, but not the table privilege
+        ConfirmReachesTheService(host, body);
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        host.Probe.Calls.Should().BeEmpty("confirm no longer asks the caller's table privileges (the Create Invoice wizard does not either)");
+    }
+
+    [Fact(DisplayName = "050c / EB-D-264: a privilege probe that faults no longer decides a confirm (nothing asks it)")]
+    public async Task Confirm_PrivilegeProbeFaults_DoesNotDecideTheConfirm()
+    {
+        await using var faulting = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        faulting.GrantFullConfirm(body);
+        faulting.Probe.ThrowOnEveryCall = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable");
+        ConfirmReachesTheService(faulting, body);
+
+        (await faulting.SendAsync(Confirm(body))).StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Fact(DisplayName = "050c / EB-D-264: without AppendTo on the core record a confirm is still refused, even for a caller who holds Create on sprk_invoice")]
+    public async Task Confirm_WithoutAppendToOnTheCoreRecord_IsStillRefused_EvenForACallerHoldingCreate()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.Probe.Hold(CreateInvoicePrivilege); // holding Create does not stand in for the submit rights
+        host.Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
+        host.Access.Grant(Matters, body.MatterId, AccessRights.Read); // no AppendTo
+        host.Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
 
         var response = await host.SendAsync(Confirm(body));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_privilege");
-        host.Probe.Calls.Should().ContainSingle()
-            .Which.Should().Be(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true),
-                "the privilege is asked AS THE CALLER (their token forwarded), by its exact live name");
+        host.Access.Calls.Last().Should().Be(new AccessCall(AccessPath.Record, Matters, body.MatterId, HasToken: true));
         host.VerifyNoServiceWasInvoked();
     }
 
-    [Fact]
-    public async Task Confirm_PrivilegeCheckThrows_IsDenied()
+    [Fact(DisplayName = "050c / EB-D-263: a body that still sends invoiceDate and totalAmount is accepted (202); the contract carries neither member")]
+    public async Task Confirm_BodyWithInvoiceDateAndTotalAmount_IsAccepted_AndTheRequestCarriesNeither()
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
-        host.Probe.ThrowOnEveryCall = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable");
+        InvoiceReviewConfirmRequest? seen = null;
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<InvoiceReviewConfirmRequest, string, CancellationToken>((q, _, _) => seen = q)
+            .ReturnsAsync(InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(Guid.NewGuid(), Guid.NewGuid(), "INV-7.1", body.DocumentId)));
 
-        var response = await host.SendAsync(Confirm(body));
+        var response = await host.SendAsync(WithJson(Authenticated(HttpMethod.Post, "/api/finance/invoice-review/confirm"), new
+        {
+            documentId = body.DocumentId,
+            matterId = body.MatterId,
+            vendorOrgId = body.VendorOrgId,
+            invoiceNumber = "INV-42",
+            invoiceDate = "2026-11-01T00:00:00Z",
+            totalAmount = 1234.56m,
+        }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        await ShouldCarryReasonCode(response, "sdap.access.error.system_failure");
-        host.VerifyNoServiceWasInvoked();
-    }
-
-    [Fact]
-    public async Task Confirm_NoPrivilegeProbeRegistered_IsDenied_NeverAllowed()
-    {
-        // A host whose container has no CallerRecordAccessProbe: the Privilege-path check cannot be asked, and a
-        // check that cannot be asked must deny (fail closed) — every record right is granted, so only that guard
-        // stands between this caller and an app-only invoice create.
-        await using var host = await FinanceAuthHost.StartAsync(registerProbe: false);
-        var body = ConfirmBody.New();
-        host.GrantFullConfirm(body);
-
-        var response = await host.SendAsync(Confirm(body));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        await ShouldCarryReasonCode(response, "sdap.access.error.system_failure");
-        host.Access.Calls.Should().HaveCount(4, "every record check ran and passed; the privilege check denied");
-        host.Probe.Calls.Should().BeEmpty("the probe is not registered, so it cannot have been asked");
-        host.VerifyNoServiceWasInvoked();
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        seen.Should().NotBeNull();
+        seen!.DocumentId.Should().Be(body.DocumentId);
+        seen.InvoiceNumber.Should().Be("INV-42");
+        typeof(InvoiceReviewConfirmRequest).GetProperties().Select(p => p.Name)
+            .Should().NotContain(["InvoiceDate", "TotalAmount"], "EB-D-263: the contract carries neither; the job reads them from the document");
     }
 
     // ── ebilling-r1 050a (D-134): confirm answers with the intake's outcome, rendered as the internal submission route renders it ──
@@ -787,7 +814,7 @@ public class FinanceEndpointsAuthorizationContractTests
             new AccessCall(AccessPath.Record, Documents, body.DocumentId, HasToken: true),
             new AccessCall(AccessPath.Record, Matters, body.MatterId, HasToken: true),
             new AccessCall(AccessPath.Record, VendorOrganizations, body.VendorOrgId, HasToken: true));
-        host.Probe.Calls.Should().Equal(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true));
+        host.Probe.Calls.Should().BeEmpty("050c / EB-D-264: confirm asks no table privilege");
     }
 
     // ── ebilling-r1 task 094 fix round: the confirm route's Submit Invoice step 1 (F4, F1-b) ──
@@ -1583,7 +1610,6 @@ public class FinanceEndpointsAuthorizationContractTests
             Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
             Access.Grant(Matters, body.MatterId, AccessRights.Read | AccessRights.AppendTo);
             Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
-            Probe.Hold(CreateInvoicePrivilege);
         }
 
         /// <summary>Every service and Dataverse seam behind the eight handlers was left untouched.</summary>

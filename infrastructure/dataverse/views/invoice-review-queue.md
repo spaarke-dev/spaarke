@@ -113,11 +113,16 @@ When a document IS an invoice:
    - Creates ONE internal invoice submission for the document (no second copy of the file) and enqueues
      `InvoiceSubmissionProcessing`; the job creates `sprk_invoice`, links the document to it and re-files it under the invoice.
    - The vendor must be one of the matter's assigned law firms (403 `ebilling.submission.firm_not_linked`).
-   - Answers `202 {submissionId, jobId, trackingNumber, statusUrl}`; a retry for the same document returns the same submission, unless
-     that submission already ended Failed or Rejected (409 `ebilling.submission.submission_already_ended`, D-139).
+   - Answers `202 {submissionId, jobId, trackingNumber, statusUrl}`; a retry for the same document returns the same submission. After
+     that submission ended Rejected the retry is 409 `ebilling.submission.submission_already_ended` (D-139); after it ended Failed the
+     retry starts a new attempt (EB-D-167).
    - A document already rejected as not an invoice, or rejected while the confirm runs, is 409
      `sdap.finance.invoice_review.review_decision_changed`; the reject stands.
-   - The request's `invoiceDate` and `totalAmount` are ignored: the submission job reads them from the document.
+   - The request has no `invoiceDate` or `totalAmount` (EB-D-263): the submission job reads them from the document. A body that still
+     sends them is accepted and they are ignored, as any unknown member is.
+   - The caller needs the same rights as the manual internal submission (the Create Invoice wizard): Read and AppendTo on the matter
+     (`finance.submit_invoice`), AppendTo on the vendor organization (`finance.attach_invoice`), plus Write on the document
+     (`finance.confirm`) and Write and Append on it (`finance.link_invoice`). Confirm does not ask Create on `sprk_invoice` (EB-D-264).
    - Document removed from review queue (`sprk_invoicereviewstatus` = ConfirmedInvoice)
 
 ### 3. Reject Non-Invoice
@@ -140,6 +145,9 @@ When a document is NOT an invoice:
    - Document removed from review queue
    - **No invoice record created**
    - Document retained for audit (not deleted)
+   - A document linked to an invoice, or whose confirm submission is Received, Processing, Accepted or Rejected, is refused with 409
+     `sdap.finance.invoice_review.document_linked_to_invoice` (a Rejected submission has created an invoice, D-101). A document whose
+     confirm submission ended Failed (no invoice was created) can be rejected (EB-D-262).
 
 ## Integration with Finance Intelligence Pipeline
 

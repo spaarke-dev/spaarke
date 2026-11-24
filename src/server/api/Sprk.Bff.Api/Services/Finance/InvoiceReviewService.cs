@@ -25,8 +25,9 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// conditional on that version (an unrelated change is re-read and retried; a reject that landed in between is 409
 /// <see cref="InvoiceReviewFailure.ReviewDecisionChanged"/> and the job refuses the submission). A failure there names the submission, and a
 /// retry of the confirm returns the same submission and completes the mark.</para>
-/// <para><b>Reject</b> is conditional on the version it read and refuses a document that is linked to an invoice or that has a confirm
-/// submission, so neither decision silently overwrites the other.</para>
+/// <para><b>Reject</b> is conditional on the version it read and refuses a document that is linked to an invoice or whose confirm
+/// submission is not Failed, so neither decision silently overwrites the other. A confirm submission that ended Failed created no
+/// invoice, so a document confirmed by mistake can still be rejected (ebilling-r1 task 050c, EB-D-262).</para>
 /// Per ADR-013: Extends BFF API (not a separate service).
 /// Per ADR-015: NEVER log document content or PII. Only IDs, statuses, and timings.
 /// </remarks>
@@ -57,8 +58,8 @@ public interface IInvoiceReviewService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Result with the document ID and rejection status.</returns>
     /// <exception cref="KeyNotFoundException">The document no longer exists; nothing was written.</exception>
-    /// <exception cref="InvoiceReviewException">The document is linked to an invoice or was confirmed
-    /// (<see cref="InvoiceReviewFailure.DocumentLinkedToInvoice"/>), kept changing
+    /// <exception cref="InvoiceReviewException">The document is linked to an invoice, or its confirm submission is Received, Processing,
+    /// Accepted or Rejected (<see cref="InvoiceReviewFailure.DocumentLinkedToInvoice"/>; one that ended Failed does not refuse), kept changing
     /// (<see cref="InvoiceReviewFailure.DocumentChangedConcurrently"/>), or its confirm could not be read
     /// (<see cref="InvoiceReviewFailure.ConfirmStateUnreadable"/>); nothing was written.</exception>
     Task<InvoiceReviewRejectResult> RejectInvoiceAsync(
@@ -68,7 +69,8 @@ public interface IInvoiceReviewService
 }
 
 /// <summary>
-/// Request to confirm a document as an invoice.
+/// Request to confirm a document as an invoice. The invoice date and the total are not part of it (EB-D-263): the submission job reads
+/// them from the document. A body that still names them is accepted; unknown JSON members are ignored, and the values are not used.
 /// </summary>
 public record InvoiceReviewConfirmRequest
 {
@@ -83,12 +85,6 @@ public record InvoiceReviewConfirmRequest
 
     /// <summary>The firm's invoice number (required, D-91; never defaulted from the classifier's hint).</summary>
     public string? InvoiceNumber { get; init; }
-
-    /// <summary>Not used since 050a (D-134): the submission job reads the invoice date from the document. Accepted for compatibility.</summary>
-    public DateTime? InvoiceDate { get; init; }
-
-    /// <summary>Not used since 050a (D-134): the submission job reads the total from the document. Accepted for compatibility.</summary>
-    public decimal? TotalAmount { get; init; }
 
     /// <summary>Optional reviewer notes — written to the document's <c>sprk_invoicereviewnotes</c>.</summary>
     public string? Notes { get; init; }
@@ -150,7 +146,7 @@ public enum InvoiceReviewFailure
     DocumentChangedConcurrently,
 
     /// <summary>
-    /// Reject only: the document is linked to an invoice or has a confirm submission (it was confirmed), so it cannot be rejected as not
+    /// Reject only: the document is linked to an invoice or has a confirm submission that has not ended Failed (it was confirmed), so it cannot be rejected as not
     /// an invoice. Nothing was written; neither the invoice nor the submission is named.
     /// </summary>
     DocumentLinkedToInvoice,
@@ -519,7 +515,8 @@ public class InvoiceReviewService : IInvoiceReviewService
     /// <inheritdoc />
     /// <remarks>
     /// The status write is CONDITIONAL on the version read with the link (<c>If-Match</c>). A document linked to an invoice, or with a
-    /// confirm submission (050a: the confirm's submission exists before the job links the document), is refused (409
+    /// confirm submission that has not ended Failed (050a: the confirm's submission exists before the job links the document; 050c,
+    /// EB-D-262: a Failed one created no invoice, so it does not refuse), is refused (409
     /// <see cref="InvoiceReviewFailure.DocumentLinkedToInvoice"/>): a confirm that lands after this read marks the document, the write
     /// is 412, the re-read sees the submission, and the reject refuses instead of overwriting ConfirmedInvoice. An unrelated write is
     /// retried, up to <see cref="MaxConditionalWriteAttempts"/> in total.
@@ -545,7 +542,6 @@ public class InvoiceReviewService : IInvoiceReviewService
 
         // Mark RejectedNotInvoice; notes go to the live sprk_invoicereviewnotes column.
         var fields = BuildReviewStatusFields(ReviewStatusRejectedNotInvoice, request.Notes, DateTime.UtcNow);
-        var confirmSubmissionId = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId);
         for (var attempt = 1; ; attempt++)
         {
             var document = await _records.RetrieveRecordFieldsAsync(
@@ -566,25 +562,13 @@ public class InvoiceReviewService : IInvoiceReviewService
             }
 
             // 050a: the confirm's submission exists from the moment the confirm is received, before its job links the document.
-            InvoiceSubmissionView? confirmed;
-            try
-            {
-                confirmed = await _submissions.GetAsync(confirmSubmissionId, ct);
-            }
-            catch (SdapProblemException unreadable)
-            {
-                throw new InvoiceReviewException(
-                    InvoiceReviewFailure.ConfirmStateUnreadable,
-                    "Whether the document was already confirmed as an invoice could not be read right now. Nothing was saved; " +
-                    "retry the rejection.",
-                    inner: unreadable);
-            }
-
+            // 050c (EB-D-262): one that ended Failed created no invoice, so it does not block the reject.
+            var confirmed = await ReadBlockingConfirmAttemptAsync(request.DocumentId, ct);
             if (confirmed is not null)
             {
                 _logger.LogWarning(
-                    "Document {DocumentId} has confirm submission {SubmissionId}; refusing to reject it as not an invoice (409). " +
-                    "CorrelationId={CorrelationId}", request.DocumentId, confirmed.SubmissionId, correlationId);
+                    "Document {DocumentId} has confirm submission {SubmissionId} ({Status}); refusing to reject it as not an invoice " +
+                    "(409). CorrelationId={CorrelationId}", request.DocumentId, confirmed.SubmissionId, confirmed.Status, correlationId);
 
                 throw AlreadyConfirmed();
             }
@@ -620,6 +604,44 @@ public class InvoiceReviewService : IInvoiceReviewService
             DocumentId = request.DocumentId,
             Status = "Rejected"
         };
+    }
+
+    /// <summary>
+    /// The confirm attempt of <paramref name="documentId"/> that stops a reject, or null when none does (no confirm submission, or every
+    /// attempt ended <see cref="InvoiceSubmissionStatus.Failed"/>, which created no invoice: EB-D-262). The attempts are walked by their
+    /// derived ids as <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/> walks them (EB-D-167: a confirm after a Failed
+    /// attempt is a NEW attempt), so the LATEST one decides: an earlier Failed attempt never lets a reject past a later one that is
+    /// Received, Processing, Accepted or Rejected (D-101: a Rejected submission creates an invoice). A status that is not exactly Failed
+    /// (also an unknown one) blocks. A fault of any read is <see cref="InvoiceReviewFailure.ConfirmStateUnreadable"/> (503): fail closed.
+    /// </summary>
+    private async Task<InvoiceSubmissionView?> ReadBlockingConfirmAttemptAsync(Guid documentId, CancellationToken ct)
+    {
+        try
+        {
+            for (var generation = 1; generation <= InvoiceSubmissionService.MaxExistingDocumentGeneration; generation++)
+            {
+                var attempt = await _submissions.GetAsync(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId, generation), ct);
+                if (attempt is null)
+                {
+                    return null;
+                }
+
+                if (attempt.Status != nameof(InvoiceSubmissionStatus.Failed))
+                {
+                    return attempt;
+                }
+            }
+
+            return null;
+        }
+        catch (SdapProblemException unreadable)
+        {
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.ConfirmStateUnreadable,
+                "Whether the document was already confirmed as an invoice could not be read right now. Nothing was saved; " +
+                "retry the rejection.",
+                inner: unreadable);
+        }
     }
 
     private static InvoiceReviewException AlreadyConfirmed() =>
