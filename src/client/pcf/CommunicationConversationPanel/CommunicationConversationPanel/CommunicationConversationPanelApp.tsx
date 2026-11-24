@@ -40,8 +40,13 @@ const useStyles = makeStyles({
 });
 
 // The typed Xrm page declares no data.entity, so each reader casts to the one member it calls.
-type HostEntity = { getId?: () => unknown; getEntityName?: () => unknown };
-type HostPage = { data?: { entity?: HostEntity } };
+interface HostEntity {
+  getId?: () => unknown;
+  getEntityName?: () => unknown;
+}
+interface HostPage {
+  data?: { entity?: HostEntity };
+}
 const { getHostRecordId, getHostEntityName } = createHostContext({
   readEntityId: () => (getXrm('page')?.Page as HostPage | undefined)?.data?.entity?.getId?.(),
   readEntityName: () => (getXrm('page')?.Page as HostPage | undefined)?.data?.entity?.getEntityName?.(),
