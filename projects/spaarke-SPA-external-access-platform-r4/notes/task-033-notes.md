@@ -3,7 +3,7 @@
 Status: implemented and verified in the working tree, NOT committed (per brief). POML status, TASK-INDEX and current-task.md are not touched (the main session closes the task after review and merge).
 Rigor FULL, sonnet @ high, directional steps. Run in the main worktree by an implementer agent, no sub-agents.
 
-Framework owners' OK: pending (main session is asking the owner)
+Framework owners' OK: APPROVED by the owner on behalf of the dataset-grid owners (2026-11-24)
 
 ## Value-shape finding (step 1)
 
@@ -92,7 +92,7 @@ Known limits (K, no fix, one line each):
 
 ## Needs owner / main session
 
-1. Framework owners' OK: pending (main session is asking the owner). See the line at the top.
+1. Framework owners' OK: approved by the owner, 2026-11-24 (see the line at the top).
 2. Live check not done (no live actions): on the dev Invoices grid, sort Total amount ascending/descending, Export to CSV, compare an exported Total amount with the cell on screen, console clean, dark mode unchanged.
 
 ## Out-of-scope defects found
