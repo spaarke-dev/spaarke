@@ -467,6 +467,19 @@ These decide where each function's procedure and engine can run.
 
 **Owner decision D-A17** (§12): which vehicle for which UI. **Spike G11** (§8) runs before any spec relies on it.
 
+**Owner direction (24 Nov, later the same day): MCP Apps widgets are the default.** SPFx components must live in each customer's SharePoint App Catalog. That puts our UI code inside the customer's tenant, and every UI release behind a customer admin step. It doesn't fit our pro-code product model.
+
+**Where our widgets live** `[Code]` (mcp-r1 branch):
+- **Source:** `src/client/widgets/spaarke-decisions/` (React 18.3.1, Fluent v9, `@modelcontextprotocol/ext-apps` 2.0.4).
+- **Build:** `npm run build` makes **one self-contained HTML file** (Vite plus a bundle-size check).
+- **Packaging:** `Sprk.Bff.Api.csproj` embeds that file in the BFF assembly (`EmbeddedResource`). `publish-bff-artifact.yml` builds the widget first.
+- **Serving:** `DecisionsWidgetResource` serves it through the MCP server's `resources/read` as `ui://spaarke/decisions.html`, behind the route's auth and the A10 filter.
+- **Security:** the widget declares **no network origins** (`_meta.ui.csp` is empty) and holds **no token**. It reaches data only through `callServerTool`, as the caller.
+- **Linking:** each tool points at its widget through `_meta.ui.resourceUri`.
+- **The plugin package contains no UI**, only the connector. A UI change is a BFF deploy, and every customer gets it at once.
+
+That avoids both the per-customer upload and the version lag we saw in V1. **G11 becomes optional.**
+
 ## 4. Program structure (OD-3)
 
 This folder is the umbrella. It holds this design, the decision log, the coordination register and the Phase 0 go/no-go record. It carries no implementation tasks of its own. Each phase is a child project registered under the same Epic. A child starts only after the previous gate passes.
@@ -770,7 +783,7 @@ The paths are proposals. The human chooses the path for each tension before the 
 | D-A15 | Attorney profile round-trip: at T0/T1 the attorney edits `legal-profile.md` freely in prose (`[DEFAULT]` / `[PENDING]` markers). If T3 exports it, those edits need a way back into the Dataverse master, or the exported file must become read-only | Open. Raised by the accelerator (Q2). Decide in Phase 1 with the profile schema (Q3) | Owner, Phase 1 |
 | D-A16 | One roadmap across the accelerator's package tiers and this program's phases (Q8) | One table, with the hand-off "connector available → area agent replaces packaged agent" | **Owner** |
 | **D-A12** | **Framing: function, persona, or both (§3.9)** | Both, in layers: functions (skill + Action, with golden set and position schema) are the machinery; archetypes (persona) are configuration and the Chat front door; instances are per attorney. One agent per **practice area**, with role as a profile dimension; validate routing in G5 | **Owner.** Proposed 2026-11-23, not yet decided |
-| **D-A17** | **Agent UI vehicle (§3.13):** MCP Apps widgets, Copilot UX components (SPFx `.sppkg`), or both by surface | **Both, by surface (revised 24 Nov for plugin packaging).** Copilot UX components, shipped in the Spaarke plugin, for rich or fullscreen screens in Chat, Cowork and Teams, and for UI also wanted in SharePoint. MCP Apps widgets wherever the UI must show in **Word**, until Word support is documented. **One shared view layer** (React 18-compatible) behind thin host adapters | **Owner**, after G11 |
+| **D-A17** | **Agent UI vehicle (§3.13):** MCP Apps widgets, Copilot UX components (SPFx `.sppkg`), or both by surface | **MCP Apps widgets are the default (owner direction, 24 Nov).** SPFx components must be deployed into each customer's SharePoint App Catalog, which doesn't fit our pro-code product model. Widgets instead live in our repo (`src/client/widgets/<name>/`, React 18.3.1 + Fluent v9 + `@modelcontextprotocol/ext-apps`). Each is built into one HTML file, embedded in the BFF, and served by our MCP server as `ui://spaarke/<name>.html`. So they ship with our BFF releases, reach every customer with no customer admin step, and work in Word, Chat and Cowork. Copilot UX components only if a customer wants SharePoint-native UI, or a measured gap appears that widgets can't fill. Views stay shareable (the widget is already on React 18.3.1) | **Owner** (direction given 24 Nov; G11 now optional) |
 
 ## 13. Market position `[Synopsis]`, summary
 
