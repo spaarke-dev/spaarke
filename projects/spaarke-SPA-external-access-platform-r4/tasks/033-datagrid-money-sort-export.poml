@@ -4,7 +4,7 @@
     <title>DataGrid Money columns sort by value + Export writes formatted values (FR-20, #2446, #2447)</title>
     <phase>3 Grids, information, messages</phase>
     <gate>after 028 and 032</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared DataGrid sort and CSV export (.ts/.tsx) used by many surfaces</rigor-reason>
     <model-tier>sonnet</model-tier>
