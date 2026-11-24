@@ -90,6 +90,7 @@ async function openDocument(documentId: string): Promise<void> {
   try {
     await createXrmNavigationService().openRecord('sprk_document', documentId);
   } catch (err) {
+    // eslint-disable-next-line no-restricted-syntax -- best-effort navigation: the host owns the form and this page has no error surface for it, so the failure is only logged
     console.warn('[InvoiceFiles] The source email could not be opened:', err);
   }
 }
