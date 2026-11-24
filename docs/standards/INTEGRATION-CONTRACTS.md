@@ -175,7 +175,7 @@ Policy composition order (inner to outer): Timeout -> Retry -> Circuit Breaker.
 | Outcome | Action | Condition |
 |---------|--------|-----------|
 | **Completed** | `CompleteMessageAsync` | Handler returns `JobStatus.Completed` |
-| **Retry** | Send a copy scheduled `JobContract.RetryDelay` later (1, 2, 4, 8 min; 15 min in all) with application property `PriorDeliveryCount`, then `CompleteMessageAsync`; `AbandonMessageAsync` (immediate redelivery) only if the send fails | Handler fails (or throws) but `attempt < maxAttempts` and logical `deliveryCount < 5` (`< 3` for a throw) |
+| **Retry** | Schedule a copy (`ScheduleMessageAsync`) `JobContract.RetryDelay` later (1, 2, 4, 8 min; 15 min in all) with application property `PriorDeliveryCount`, then `CompleteMessageAsync`; if the complete fails, cancel the copy (`CancelScheduledMessageAsync`); `AbandonMessageAsync` (immediate redelivery) only if the schedule fails. A failed complete or dead-letter of a settled outcome, or a lost lock, is logged and never retried. Same rules in `CommunicationJobProcessor` (shared `JobMessageRetry`) | Handler fails (or throws) but `attempt < maxAttempts` and logical `deliveryCount < 5` (`< 3` for a throw) |
 | **Dead-letter** | `DeadLetterMessageAsync` with reason code | `JobStatus.Poisoned`, `maxAttempts` reached, or logical `deliveryCount >= 5` (`PriorDeliveryCount` + broker delivery count) |
 
 Dead-letter reason codes: `InvalidFormat`, `NoHandler`, `HandlerResolutionFailed`, `MaxRetriesExceeded`, `Poisoned`, `ProcessingError`.
@@ -189,7 +189,7 @@ Dead-letter reason codes: `InvalidFormat`, `NoHandler`, `HandlerResolutionFailed
 | **Max auto-lock renewal** | 10 minutes |
 | **Dead-letter threshold** | logical `deliveryCount >= 3` for unhandled exceptions; logical `deliveryCount >= 5` or `attempt >= maxAttempts` for handler failures |
 | **Retry back-off** | `JobContract.RetryDelay`: 1 min doubled per delivery, capped at 15 min; 15 min in all before the 5th delivery (ISS-025) |
-| **Duplicate detection** | Via `IdempotencyKey` as `MessageId` |
+| **Duplicate detection** | OFF on the BFF queues (`service-bus.bicep`; create-time only). `MessageId` = `IdempotencyKey` is still set, but the broker does not de-duplicate on it: receive-side idempotency in each handler (per-job claim + completion marker, ADR-004 A1) is the guarantee. The retry copy reuses the `MessageId`, so it depends on duplicate detection staying off |
 
 ### Queues
 
