@@ -160,6 +160,13 @@ export interface InvoiceSubmissionOutcomeProps {
    * `coreRecord` is a known kind and a GUID shows "Open {matter|project|work assignment}". Absent: no such action.
    */
   onOpenRecord?: (record: InvoiceSubmissionRecordRef) => void;
+  /**
+   * Optional (iss052 fix round 1): whether the Rejected bar names the stored reason code ("Reason: {code}"). Default true (the
+   * internal host, unchanged). A firm-facing host passes false: the bar then says "The invoice was rejected." and the code is
+   * never shown as text (EB-D-210: a firm sees a code only with its firm-safe description, which the host's report carries).
+   * Only the rendering changes; every decision that reads the code (the record-setup refusal, the result heading) is the same.
+   */
+  showReasonCode?: boolean;
 }
 
 /** The warning when it carries a sentence to show; null for a missing, null or blank one (nothing renders). */
@@ -201,6 +208,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   onStatusChange,
   onOpenInvoice,
   onOpenRecord,
+  showReasonCode = true,
 }) => {
   const styles = useStyles();
   const [view, setView] = React.useState<InvoiceSubmissionStatusView | null>(null);
@@ -347,7 +355,9 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
           <MessageBar intent="error" role="alert">
             <MessageBarBody>
               <MessageBarTitle>Rejected</MessageBarTitle>
-              {view.outcomeReasonCode ? `Reason: ${view.outcomeReasonCode}` : 'The invoice was rejected.'}
+              {showReasonCode && view.outcomeReasonCode
+                ? `Reason: ${view.outcomeReasonCode}`
+                : 'The invoice was rejected.'}
             </MessageBarBody>
           </MessageBar>
           {renderReport ? (

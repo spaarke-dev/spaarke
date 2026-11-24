@@ -168,3 +168,66 @@ describe('InvoiceSubmissionWizard — iss052 passes the links to its result scre
     expect(screen.queryByTestId('invoice-submission-links')).not.toBeInTheDocument();
   });
 });
+
+describe('InvoiceSubmissionOutcome — iss052 fix round 1: showReasonCode', () => {
+  it('default (the internal host): the Rejected bar names the code, as before', async () => {
+    renderOutcome(view({ status: 'Rejected', outcomeReasonCode: 'invoice.read.unreadable' }));
+    expect(await screen.findByText(/Reason: invoice\.read\.unreadable/)).toBeInTheDocument();
+  });
+
+  it('false (a firm-facing host): the Rejected bar says the invoice was rejected and shows no code text', async () => {
+    const getStatus = jest
+      .fn()
+      .mockResolvedValue(view({ status: 'Rejected', outcomeReasonCode: 'invoice.read.unreadable' }));
+    renderWithProviders(
+      <InvoiceSubmissionOutcome submissionId={ID} getStatus={getStatus} pollIntervalMs={10} showReasonCode={false} />
+    );
+    expect(await screen.findByText('The invoice was rejected.')).toBeInTheDocument();
+    expect(screen.queryByText(/invoice\.read\.unreadable/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Reason:/)).not.toBeInTheDocument();
+  });
+
+  it('false: the record-setup refusal still reads the code (only the rendering changes)', async () => {
+    const getStatus = jest
+      .fn()
+      .mockResolvedValue(
+        view({ status: 'Failed', outcomeReasonCode: 'record_owner_restricted_content_team_unresolved' })
+      );
+    renderWithProviders(
+      <InvoiceSubmissionOutcome submissionId={ID} getStatus={getStatus} pollIntervalMs={10} showReasonCode={false} />
+    );
+    expect(await screen.findByText(/how the record you chose is set up/)).toBeInTheDocument();
+    expect(screen.queryByText(/Submit it again\./)).not.toBeInTheDocument();
+    expect(screen.queryByText(/record_owner_/)).not.toBeInTheDocument();
+  });
+
+  it('the wizard passes it to its result screen', async () => {
+    const MATTER: InvoiceCoreRecordOption = { kind: 'matter', recordId: RECORD_ID, name: 'Acme v. Roadrunner' };
+    const utils = renderWithProviders(
+      <InvoiceSubmissionWizard
+        embedded
+        pollIntervalMs={10}
+        showReasonCode={false}
+        loadRecords={jest.fn().mockResolvedValue({ records: [MATTER] })}
+        submit={jest.fn().mockResolvedValue({ submissionId: ID, trackingNumber: 'TRK-0052' })}
+        getStatus={jest
+          .fn()
+          .mockResolvedValue(view({ status: 'Rejected', outcomeReasonCode: 'invoice.read.no_invoice' }))}
+        onClose={jest.fn()}
+      />
+    );
+    fireEvent.click(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^next$/i }));
+    const input = utils.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['%PDF-1.4'], 'invoice.pdf', { type: 'application/pdf' })] },
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: /^next$/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /^next$/i }));
+    fireEvent.change(await screen.findByLabelText(/Firm invoice number/i), { target: { value: 'INV-52' } });
+    fireEvent.click(screen.getByRole('button', { name: /^submit invoice$/i }));
+
+    expect(await screen.findByText('The invoice was rejected.')).toBeInTheDocument();
+    expect(screen.queryByText(/invoice\.read\.no_invoice/)).not.toBeInTheDocument();
+  });
+});

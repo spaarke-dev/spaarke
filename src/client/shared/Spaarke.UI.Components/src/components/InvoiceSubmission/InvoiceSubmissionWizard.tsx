@@ -218,6 +218,8 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
   onOpenInvoice?: (invoiceId: string) => void;
   /** Optional (iss052): passed to the result screen (`InvoiceSubmissionOutcome.onOpenRecord`). Absent: no "Open {record}". */
   onOpenRecord?: (record: InvoiceSubmissionRecordRef) => void;
+  /** Optional (iss052 fix round 1): passed to the result screen (`InvoiceSubmissionOutcome.showReasonCode`). Default true. */
+  showReasonCode?: boolean;
 }
 
 /**
@@ -271,6 +273,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   renderAccepted,
   onOpenInvoice,
   onOpenRecord,
+  showReasonCode,
   loadRecords,
   loadFirms: loadFirmsProp,
   submit,
@@ -512,6 +515,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
           renderAccepted={renderAccepted}
           onOpenInvoice={onOpenInvoice}
           onOpenRecord={onOpenRecord}
+          showReasonCode={showReasonCode}
         />
       ),
       actions: (
@@ -539,6 +543,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     renderAccepted,
     onOpenInvoice,
     onOpenRecord,
+    showReasonCode,
     onClose,
     doneLabel,
   ]);
