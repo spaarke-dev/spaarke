@@ -203,11 +203,6 @@
       "count": 4
     }
   },
-  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailWorkspaceWidget.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 4
-    }
-  },
   "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/FindSimilarWizardWidget.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 6
@@ -1458,11 +1453,6 @@
   "src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    }
-  },
-  "src/solutions/LegalWorkspace/src/sections/email.registration.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
     }
   },
   "src/solutions/LegalWorkspace/src/sections/todo.registration.ts": {

@@ -39,15 +39,7 @@ import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
 import { EmailWorkspace } from '@spaarke/communication-components';
 import type { EmailWorkspaceVisibleState } from '@spaarke/communication-components';
-import {
-  XrmDataverseClient,
-  createXrmDataService,
-  createXrmNavigationService,
-  createXrmEmailComposeHandlers,
-  resolveCurrentUserEmail,
-  searchUsersAndContacts,
-  getXrm,
-} from '@spaarke/ui-components';
+import { getXrm, useXrmEmailHostProps } from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { EmailTabWidgetData } from '../../types/WorkspaceTab';
@@ -147,49 +139,13 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = ({ tabId, on
     [onDataChange, tabId]
   );
 
-  // Stable across the widget's lifetime — one Xrm-backed adapter set per
-  // mount, matching `XrmDataverseClient`'s own "instantiate once" guidance
-  // (see DataGrid.tsx's defaultClientRef pattern).
-  const dataverseClient = React.useMemo(() => new XrmDataverseClient(), []);
-  const dataService = React.useMemo(() => createXrmDataService(), []);
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // The Xrm-backed adapters, compose handlers, "From:" mailbox and org URL: the same hook the LegalWorkspace
+  // section and the sprk_emailpage code page use, so the three mounts cannot drift (#2973).
+  const hostProps = useXrmEmailHostProps({ authenticatedFetch, bffBaseUrl });
   // Xrm.WebApi-compatible bridge for the associations additive-write path
   // (035) + the embedded PolymorphicPicker (035) — the same object shape a
   // PCF host passes as `context.webAPI`.
   const webApi = React.useMemo(() => getXrm()?.WebApi, []);
-
-  // Composer parity wiring (compose-wiring fixes #1/#2/#3/#5): recipient
-  // typeahead + Xrm-backed advanced-lookup handlers + Dataverse URL for
-  // attachment deep-links. Same shared factory the code-page mount uses, so both
-  // mounts stay in parity (NFR-06).
-  const handleSearchRecipients = React.useCallback(
-    (query: string) => searchUsersAndContacts(dataService, query),
-    [dataService]
-  );
-  // Pass auth + BFF URL so the factory also builds `onUploadLocalAttachment` (item 9b):
-  // new-file attachments upload to the deployment SPE container (resolved from the
-  // user's BU) and become governed `sprk_document`s.
-  const composeHandlers = React.useMemo(
-    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl ?? undefined }),
-    [authenticatedFetch, bffBaseUrl]
-  );
-  const dataverseUrl = React.useMemo(
-    () => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '',
-    []
-  );
-
-  // Signed-in user's mailbox address for the compose "From:" row (item 3). Resolved once
-  // via Xrm; the email surface defaults From to send-as this user (switchable to shared).
-  const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
-  React.useEffect(() => {
-    let cancelled = false;
-    void resolveCurrentUserEmail().then(email => {
-      if (!cancelled) setFromMailbox(email);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   if (!webApi) {
     // No Dataverse host available (e.g. a non-MDA dev shell). EmailWorkspace's
@@ -202,24 +158,10 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = ({ tabId, on
   return (
     <div className={styles.host} data-testid="email-widget-scroll-host">
       <EmailWorkspace
-        dataverseClient={dataverseClient}
-        dataService={dataService}
-        navigationService={navigationService}
+        {...hostProps}
         webApi={webApi}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
-        onSearchRecipients={handleSearchRecipients}
-        onLookupRecipients={composeHandlers.onLookupRecipients}
-        recordLookupCatalog={composeHandlers.recordLookupCatalog}
-        onLookupRecord={composeHandlers.onLookupRecord}
-        onAddRelationship={composeHandlers.onAddRelationship}
-        onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
-        onResolveShareLink={composeHandlers.onResolveShareLink}
-        onListEmailTemplates={composeHandlers.onListEmailTemplates}
-        onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
-        onDraftWithAi={composeHandlers.onDraftWithAi}
-        fromMailbox={fromMailbox}
-        dataverseUrl={dataverseUrl}
         onVisibleEmailChange={handleVisibleEmailChange}
       />
     </div>
