@@ -165,7 +165,7 @@ Left unchanged (not `bindLookup` fragments; resolved already by exact column): `
 | Mapped values at first load | **PASS**: Attorney 2 (Jessica Broyles), Paralegal 1 (Eyal Iffergan), Paralegal 2, Assigned To Internal (Test User 1) and Assigned To External all come from the matter; Assigned To = Test User 1 (the server default from Internal) | n/a: the matter has no person values (warning `copied_default_source_unset`, as expected) | **PASS**: none, and no warning |
 | User value kept (fill-only) | **PASS**: Attorney 1 = Jane Smith (the wizard's pick), not the matter's Test User 1 | n/a | n/a |
 | Primary slots | **PASS**: Attorney → `sprk_assignedattorney1`, Law Firm → `sprk_assignedlawfirm1` | n/a | n/a |
-| Owner (FR-09) | **PASS**: Spaarke Business Unit 1, the matter's owner team | **PASS**: Secure Record Owners, `sprk_issecure` = true (created into isolation) | **PASS**: Spaarke, the maker's business-unit team |
+| Owner (FR-09) | **PASS**: Spaarke Business Unit 1, the matter's owner team | **PASS**: Secure Record Owners, `sprk_issecure` = true (created into isolation) | **PASS**: Spaarke, the maker's business-unit team. The maker's account is homed in the root business unit, so a record with no parent takes the root team (the #3047 shape; UAC-r2 confirmed it and left this row as it is) |
 | Follow-on event | Created under the work assignment, owner = the work assignment's team. **DEFECT (fixed):** regarding pair blank | Created, owner Secure Record Owners. Same defect | n/a |
 | Duration (server) | 4.7 s | 24.6 s: secure provisioning (SPE container 5.5 s, about 90 sharing calls 9.3 s). This is UAC-r2's secure path; the latency verdict is UAT's (owner) | about 2 s |
 
