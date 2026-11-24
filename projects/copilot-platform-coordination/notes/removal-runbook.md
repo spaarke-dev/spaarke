@@ -28,7 +28,7 @@ Received: Registry "spaarke" (9 rows), Copilot Studio agents, Plugins page, sour
 
 Everything else is listed below. After each step, send "done" or a screenshot, and I'll move the row to "Removed".
 
-### A. Test agents: by 2026-11-30 (testing is finished)
+### A. Test agents: now (the specialist confirmed 2026-11-24 that no test needs them; latest 2026-11-30)
 
 | # | What | Where / how |
 |---|---|---|
@@ -38,7 +38,7 @@ Everything else is listed below. After each step, send "done" or a screenshot, a
 | A4 | **G8-p2-dd** `spaarke-legal-g8p2-dd` (`cb5afd1c…`) | As A1 |
 | A5 | **G8-a** `spaarke-legal-g8-ab-test` (Agent Builder), with its two skills `spaarke-mcp-operations` and `spaarke-tool-test` | Admin center › **Agents › All agents › Registry** › select › **Delete**, or Copilot › the agent › **…** › Delete. If the two skills also appear in your skills list outside the agent: **…** › **Remove** |
 
-Before you start, ask the specialist session whether any test still needs one of these (for example the open `?pkg=` question). Uninstalling them does **not** affect C1 or A1. The agents reused A1's sign-in setup, but no agent owns it.
+Any later test uses a fresh app id, rebuilt from `projects/specialist-legal-agents-r1/phase0/g8/`. Uninstalling them does **not** affect C1 or A1. The agents reused A1's sign-in setup, but no agent owns it.
 
 ### B. Now
 
