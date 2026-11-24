@@ -142,6 +142,7 @@ On an In Review invoice, choose Decide → Reject or Return to firm, give a reas
 - [ ] Turn "Send this notice to the firm" off, or Skip the step. The Confirm step says the firm gets no email, and none is sent. The decision is still recorded.
 - [ ] Switch between Reject and Return. Each keeps its own draft and edits.
 - [ ] "Restore draft" puts back the drafted text.
+- [ ] (ISS-041) A stranded Reject or Return finished after a page reload: if a "Finish decision…" banner shows on an invoice (a Reject or Return that stopped part way), reload the page and use the banner. The finish form offers the same Notify fields, and the firm's email carries the notice you confirm there. Turning sending off sends none. Hard to set up by hand; skip it if no banner appears.
 
 ## N. Billing Guidelines in the external portal (task 135): the dev BFF carries it (5ae2804884); test after spa-r4 deploys the external SPA
 

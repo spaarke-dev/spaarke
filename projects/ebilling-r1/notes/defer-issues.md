@@ -2616,7 +2616,7 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work (7da8f29320, task iss050); closes when the next master PR merges. The 1,000-line duration on dev is still not measured |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | Task iss029 Opus adversarial review (found in passing, pre-existing) |

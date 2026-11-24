@@ -4,7 +4,7 @@
     <title>ISS-050 (#3059): the line-decision lock is renewed while a long call is still writing, and a call that loses its lock stops before writing anything more</title>
     <phase>Issue fix; filed 2026-11-24 from the iss029 Opus review</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the Invoice Review line-decision write path (.cs) and the lock it shares with the approval.</rigor-reason>
     <model-tier>opus</model-tier>
