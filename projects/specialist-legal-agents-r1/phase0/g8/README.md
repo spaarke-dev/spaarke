@@ -133,6 +133,31 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 | No leak into plain Chat | Step 5: the same number of `tools/call` as the step 1 baseline |
 | Word / Teams | Steps 6 and 7: one `tools/call` each, or a clear "agent not offered here" |
 
+### G8-P2 run log (2026-11-24, owner + this session)
+
+**Why it matters:** this is the build path for every Practice agent (design §3.12, D-A1 default). If the action doesn't attach, the default Practice vehicle doesn't work, so the cause has to be found. Recording "it didn't work" is not enough.
+
+| Version | Change | Result |
+|---|---|---|
+| 1.0.0 | Dynamic tool discovery | Agent installed (Teams custom upload, owner only). In the agent: "Tools I can see: none". **No MCP traffic at the BFF** (no `initialize`, `tools/list` or 401) |
+| 1.0.1 | `spaarke_show_decisions` pinned in the package (`mcp-tools.json`) | Same: the tool is not visible even though it is pinned, and no BFF traffic. So **the action is not attaching**; this is not a discovery or sign-in step |
+| 1.0.2 | Server URL with a trailing slash (`…/mcp/legal-operations/`). The BFF serves both forms, and the OAuth Base URL still prefix-matches | To run. Tests whether the tenant ties an action to the existing **"Spaarke MCP" MCP-server object for the same URL** (admin center shows C1 as an MCP server with "Dependent plugins: Spaarke MCP") |
+
+**Ruled out (owner screenshots):**
+- OAuth registration "Spaarke Copilot Connector – dev": Base URL = the MCP URL, Restrict usage by org = my organization only, by app = **Any Teams app**.
+- Package: Developer Portal **App validation passed, no errors** (v1.0.1).
+- Admin center lists the agent as **Available**.
+
+**Not yet seen:** the developer-mode debug card. The Edge sidebar doesn't show it; use `https://m365.cloud.microsoft/chat` in a normal tab.
+
+**If 1.0.2 also fails, in order:**
+1. The agent's **Data & tools** tab in the admin center: is the action listed?
+2. The debug card's **Actions** section.
+3. Regenerate the agent with Microsoft's own tooling (Agents Toolkit / Work IQ Dev Tools, "Start with an MCP server") and diff it against ours.
+4. A Microsoft support case with the package and the no-traffic evidence.
+
+**Fallback for D-A1:** Copilot Studio with an MCP tool (G10), where the tool is the agent's own.
+
 ## App Insights check (this session)
 
 Use PowerShell. The `az` query fails with `BadArgumentError` when the KQL has `name=` aliases, so use the form below.
