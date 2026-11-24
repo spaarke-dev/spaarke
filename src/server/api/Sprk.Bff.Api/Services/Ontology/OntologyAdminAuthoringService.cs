@@ -1624,13 +1624,19 @@ public sealed partial class OntologyAdminAuthoringService
             var plan = DecisionPlanService.Resolve(draft.DecisionPlan, l);
             if (plan.IsRefused && plan.RefusalReason == DecisionPlanRefusalReason.DuplicateAction)
             {
-                errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): each code may appear once, in actions or in " +
-                    "nextSteps, never twice in one list and never in both."];
+                // DI-157/203: plain sentences, no internal refusal code in the text; the reason code travels in ReasonCode / the log.
+                errors["decisionPlan"] = ["Each action can be listed only once: not twice in one list, and not in both Actions and Next steps."];
                 check = check with { ReasonCode = check.ReasonCode ?? ReasonDuplicateAction };
+            }
+            else if (plan.IsRefused && plan.RefusalReason == DecisionPlanRefusalReason.PlanMissing)
+            {
+                // DI-157: an empty plan is the wizard's "nothing chosen yet", so the author is told what to do, not the internal code.
+                // The refusal reason is unchanged (telemetry, the plan route and the stored-plan refusal still carry it).
+                errors["decisionPlan"] = ["Choose at least one action."];
             }
             else if (plan.IsRefused)
             {
-                errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): it must list actions from the {l} lane's catalog."];
+                errors["decisionPlan"] = [$"This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the {l} lane."];
             }
         }
 

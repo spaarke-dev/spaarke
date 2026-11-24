@@ -1,8 +1,10 @@
 /**
  * worklistNarrative - the Briefing narrative over the worklist (task 062; FR-31, FR-34; W-10 as amended).
  *
- * The narrative is prose WRITTEN BY THE ASSISTANT over facts the list itself holds: how many items are to decide, how many are to do,
- * how many of those are past due. It never decides membership or order (the Signal read route owns both, D-42) and it SUMMARISES Do
+ * The narrative is prose WRITTEN BY THE ASSISTANT over facts the list itself holds: how many items are to decide and how many are to do.
+ * The two lanes are the only categories sent. Past due is a SUBSET of the Do lane, not a third lane (DI-161), so it is never a
+ * category: the one summary line is built from the counts here (`worklistSummaryLine`) and the Assistant writes the bullets. It never
+ * decides membership or order (the Signal read route owns both, D-42) and it SUMMARISES Do
  * volume rather than listing it, so the request below carries counts only: no record name, no date and no item at all. A narrative that
  * is given no name cannot name an item that is not on the list, and the server's entity-name scrubber still checks the text it gets back.
  *
@@ -47,7 +49,6 @@ export interface WorklistNarrativeText {
 
 export const DECIDE_CATEGORY = 'Items to decide';
 export const DO_CATEGORY = 'Items to do';
-export const DO_PAST_DUE_CATEGORY = 'Items to do that are past due';
 
 const count = (name: string, n: number): WorklistNarrativeCategory => ({ name, count: n, unreadCount: n });
 
@@ -56,22 +57,50 @@ const count = (name: string, n: number): WorklistNarrativeCategory => ({ name, c
  * lanes' own: the same items the count cards describe. A Do item is past due when its date-only due date is before `today`'s
  * local calendar day (the same comparison the row's due state uses).
  */
-export function buildWorklistNarrativeRequest(
-  data: WorklistData | undefined,
-  today: Date
-): WorklistNarrativeRequest | null {
+function pastDueCount(doItems: readonly { dueDate?: string | null }[], today: Date): number {
+  return doItems.filter(i => {
+    const due = parseDueDate(i.dueDate);
+    return due !== null && daysBetweenLocalMidnight(today, due) < 0;
+  }).length;
+}
+
+/**
+ * The one summary line, from the lanes' own counts (DI-161): "241 Work Items: 192 to decide and 49 to do. 49 of the 49 to do are past
+ * due." Two lanes at most, past due said of the Do items only, and the items are Work Items (never "notifications"). `null` for an empty
+ * list. Deterministic, so it cannot say a count the list does not hold; the Assistant's own summary is not shown.
+ */
+export function worklistSummaryLine(data: WorklistData | undefined, today: Date): string | null {
+  if (!data) return null;
+  const decide = data.Decide.reduce((n, g) => n + g.items.length, 0);
+  const doItems = data.Do.flatMap(g => g.items);
+  const total = decide + doItems.length;
+  if (total === 0) return null;
+  const items = `${total} Work ${total === 1 ? 'Item' : 'Items'}`;
+  const lanes = [
+    decide > 0 ? `${decide} to decide` : null,
+    doItems.length > 0 ? `${doItems.length} to do` : null,
+  ].filter(Boolean);
+  let line = `${items}: ${lanes.join(' and ')}.`;
+  const pastDue = pastDueCount(doItems, today);
+  if (pastDue > 0) {
+    line +=
+      pastDue === doItems.length
+        ? doItems.length === 1
+          ? ' It is past due.'
+          : ' All of the items to do are past due.'
+        : ` ${pastDue} of the ${doItems.length} to do ${pastDue === 1 ? 'is' : 'are'} past due.`;
+  }
+  return line;
+}
+
+export function buildWorklistNarrativeRequest(data: WorklistData | undefined): WorklistNarrativeRequest | null {
   if (!data) return null;
   const decide = data.Decide.reduce((n, g) => n + g.items.length, 0);
   const doItems = data.Do.flatMap(g => g.items);
   if (decide + doItems.length === 0) return null;
 
-  const pastDue = doItems.filter(i => {
-    const due = parseDueDate(i.dueDate);
-    return due !== null && daysBetweenLocalMidnight(today, due) < 0;
-  }).length;
-
+  // One category per lane, never more categories than lanes: past due is a subset of Do, carried by the summary line, not sent.
   const categories = [count(DECIDE_CATEGORY, decide), count(DO_CATEGORY, doItems.length)];
-  if (pastDue > 0) categories.push(count(DO_PAST_DUE_CATEGORY, pastDue));
   const total = decide + doItems.length;
   return {
     categories,

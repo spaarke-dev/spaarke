@@ -37,7 +37,7 @@ const assignTask: DecisionAction = {
     },
   ],
   effectLines: [
-    'Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded',
+    'Creates a task (an event of type Task) linked to the record, assigned to the person you choose, when the decision is recorded',
   ],
   excludes: [],
 };

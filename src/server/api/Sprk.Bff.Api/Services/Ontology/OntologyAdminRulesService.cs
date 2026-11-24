@@ -730,7 +730,8 @@ public sealed class OntologyAdminRulesService
         var resolution = DecisionPlanService.Resolve(planJson, (DecisionLane)l);
         if (resolution.Plan is not { } plan)
         {
-            return new RulePlanView([], [], [], $"The stored plan does not resolve against the action catalog ({resolution.RefusalReason}).");
+            // The refusal reason is counted and logged by DecisionPlanService; the admin reads a sentence, not the internal code.
+            return new RulePlanView([], [], [], "The stored plan can't be used with the actions this rule's lane offers. Edit the rule and choose its actions again.");
         }
 
         return new RulePlanView(
