@@ -4,7 +4,7 @@
   "name_for_human": "Spaarke MCP G8-P2",
   "namespace": "spaarkeg8p2",
   "description_for_human": "Phase 0 test action on the Spaarke MCP server.",
-  "description_for_model": "The Spaarke MCP server's read-only spaarke_show_decisions tool. Use it only when the user asks for it by name or asks to see their Spaarke decisions.",
+  "description_for_model": "Spaarke legal operations tools. Use spaarke_show_decisions when the user wants to see their Spaarke decisions, Decide lane, or work items waiting for their decision.",
   "functions": [
     {
       "name": "spaarke_show_decisions",
@@ -19,7 +19,7 @@
         "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI="
       },
       "spec": {
-        "url": "https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations/",
+        "url": "https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations",
         "mcp_tool_description": {
           "file": "mcp-tools.json"
         }
