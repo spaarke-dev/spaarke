@@ -726,7 +726,7 @@
       "count": 7
     },
     "no-restricted-syntax": {
-      "count": 3
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx": {
