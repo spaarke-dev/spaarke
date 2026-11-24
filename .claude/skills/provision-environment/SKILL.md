@@ -617,6 +617,7 @@ if ($BatchIntakeFile) {
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
   $secureRecordSetupDryRun = $intake.secureRecordSetupDryRun  # T256 — OPTIONAL: true = H7b dry run (plan only; the run stops at H7b); absent/false = apply (Step 1b-sexies)
+  $buildId        = $intake.buildId             # ISS-036 — OPTIONAL: pin the BFF CI build H9 deploys (e.g. 2026.10.16-2); absent = latest.json. H9 refuses the run when it is not latest.json's buildId — set it on an upgrade that must not change the BFF
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
@@ -1682,6 +1683,11 @@ if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
 if ($secureRecordSetupDryRun -eq $true) {
   $runRequest.nonSecretParameters.secureRecordSetupDryRun = 'true'
 }
+# ISS-036 — the BFF build pin: sent only when the intake sets it; absent = H9 deploys latest.json's build. H9 is the
+# guard: it refuses the run (before any swap) when the value is not latest.json's own buildId.
+if (-not [string]::IsNullOrWhiteSpace("$buildId")) {
+  $runRequest.nonSecretParameters.buildId = "$buildId"
+}
 $body = $runRequest | ConvertTo-Json -Depth 5
 
 $response = Invoke-RestMethod `
@@ -2508,7 +2514,7 @@ handoff, and continue.
 
 ### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
 
-Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
+Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
 
 Trigger conditions (each writes a distinct postmortem):
 - `Completed` (H13 acceptance passed; sprk_setupstatus=Ready reached) — capture what worked + manual gates encountered + recommendations

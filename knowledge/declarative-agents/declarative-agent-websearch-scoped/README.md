@@ -93,7 +93,7 @@ The following are Teams Toolkit specific project files. You can [visit a complet
 
 ## Addition information and references
 
-- [Declarative agents for Microsoft 365](https://aka.ms/teams-toolkit-declarative-agent)
+- [Declarative agents for Microsoft 365](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-declarative-agent)
 
 
 <img src="https://m365-visitor-stats.azurewebsites.net/copilot-pro-dev-samples/samples/da-BlogPostHelper" />

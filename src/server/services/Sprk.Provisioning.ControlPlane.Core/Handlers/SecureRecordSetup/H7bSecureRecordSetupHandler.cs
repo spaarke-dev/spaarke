@@ -353,12 +353,22 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[gateId ?? $"h7b-{rejectionCode}"] = new GateEntry
+        JsonElement? gateEvidence = evidence is null ? null : JsonDocument.Parse(JsonSerializer.Serialize(evidence)).RootElement.Clone();
+        if (gateId is null)
         {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-            Evidence = evidence is null ? null : JsonDocument.Parse(JsonSerializer.Serialize(evidence)).RootElement.Clone(),
-        };
+            // ISS-035: no named gate -> this is a failure marker, cleared when H7b later succeeds.
+            run.RecordFailureGate($"h7b-{rejectionCode}", HandlerIdentifier, gateEvidence);
+        }
+        else
+        {
+            // A named gate (the plan-approval gate) is a real operator gate, never auto-cleared.
+            run.GateStates[gateId] = new GateEntry
+            {
+                Status = GateState.Pending,
+                VerifierHandler = HandlerIdentifier,
+                Evidence = gateEvidence,
+            };
+        }
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

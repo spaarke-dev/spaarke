@@ -320,6 +320,101 @@ public class Issue2750_HeldWindowPastThePageBoundTests
         Moved(events).Should().BeTrue();
     }
 
+    // ── #1821, second round: the capped window's helpers, and what a capped listing must still report and order ──
+
+    [Fact]
+    public void Earliest_OfTwoCappedInstants_IsTheEarlierOne_AndAnUncappedSideDefersToTheOther()
+    {
+        var early = new DateTime(2026, 11, 20, 9, 0, 0, DateTimeKind.Utc);
+        var late = early.AddMinutes(5);
+
+        Job.Earliest(early, late).Should().Be(early, "two tables capped at different instants: the window moves to the earlier");
+        Job.Earliest(late, early).Should().Be(early);
+        Job.Earliest(early, early).Should().Be(early);
+        Job.Earliest(early, null).Should().Be(early);
+        Job.Earliest(null, late).Should().Be(late);
+        Job.Earliest(null, null).Should().BeNull("no table was capped");
+    }
+
+    [Fact]
+    public void WatermarkAfter_MovesToTheCap_OnlyWhenTheCapIsEarlierThanTheRunsOwnWatermark()
+    {
+        var uncapped = new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
+        var earlier = uncapped.UtcDateTime.AddMinutes(-3);
+
+        Job.WatermarkAfter(uncapped, null).Should().Be(uncapped);
+        Job.WatermarkAfter(uncapped, earlier).Should().Be(new DateTimeOffset(earlier, TimeSpan.Zero));
+        Job.WatermarkAfter(uncapped, uncapped.UtcDateTime).Should().Be(uncapped, "a cap at the run's own watermark moves it nowhere");
+        Job.WatermarkAfter(uncapped, uncapped.UtcDateTime.AddSeconds(1)).Should().Be(uncapped, "a later cap never moves the watermark past the run's own");
+    }
+
+    [Fact]
+    public void WatermarkAfter_ReadsALocalCapAsItsUtcInstant_AndAnUnspecifiedOneAsUtc()
+    {
+        // Dataverse answers modifiedon in UTC; a Local value is converted, an Unspecified one is read as UTC. The two differ only on a
+        // machine whose zone is not UTC (a UTC runner reads both the same).
+        var uncapped = new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
+        var cap = uncapped.UtcDateTime.AddMinutes(-3);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(cap, TimeZoneInfo.Local);
+        var unspecified = DateTime.SpecifyKind(cap, DateTimeKind.Unspecified);
+        local.Kind.Should().Be(DateTimeKind.Local);
+
+        Job.WatermarkAfter(uncapped, local).UtcDateTime.Should().Be(cap);
+        Job.WatermarkAfter(uncapped, unspecified).UtcDateTime.Should().Be(cap);
+    }
+
+    /// <summary>
+    /// A capped recent-changes listing whose rows are all Secure-team-owned already has nothing to reconcile, but it still read
+    /// only up to its cap: the early return must carry that cap, or the window moves past rows it never listed.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_ACappedRecentChangesListing_OfRowsAlreadySecure_ReportsTheCap_AndHoldsTheWindowThere()
+    {
+        var harness = new Harness(this);
+        await harness.RunAsync(recentWrites: true, ordinaryWrites: false);
+        _world.MaxRowsPerPage = 1; // the 20-page bound is 20 rows
+        for (var i = 0; i < Rows; i++)
+        {
+            var id = Guid.NewGuid();
+            _world.Add("sprk_todo", id, ("owningteam", new EntityReference("team", SecureChildShareWorld.SecureTeam)));
+            _world.Modified("sprk_todo", id, At(i));
+        }
+
+        _time.Advance(TimeSpan.FromMinutes(5));
+        var capped = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: false), Pass.RecentChanges);
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var next = Report(await harness.RunAsync(recentWrites: true, ordinaryWrites: false), Pass.RecentChanges);
+
+        capped.GetProperty("rowsChanged").GetInt32().Should().Be(0, "every listed row is already owned by the Secure team");
+        capped.GetProperty("cappedAt").GetDateTime().Should().Be(At(19), "the 20th row read is the cap");
+        next.GetProperty("since").GetDateTime().Should().Be(At(19), "the window moves only to the cap, so the rows past it are listed next");
+    }
+
+    /// <summary>
+    /// Two roots at one instant in different tables, the project's id below the matter's: past a carry of one, the key order (instant,
+    /// then TABLE, then id) leaves the project out and keeps the matter, so the matter is walked first next run and the window
+    /// resumes at the project's key. Ordering by id alone would swap them.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_OrdinaryRootsPastTheCarryAtOneInstant_AreKeptInTableOrder_NotIdOrder()
+    {
+        var harness = new Harness(this, ordinaryCarryCap: 1);
+        await SweepCompleteAsync(harness, maxRoots: "50");
+        var start = _time.GetUtcNow().UtcDateTime;
+        var walkedFirst = ReassignedMatters(1, _ => start, firstId: 0x10);
+        var matter = ReassignedMatters(1, _ => start, firstId: 0x30);
+        var project = ReassignedMatters(1, _ => start, firstId: 0x20, table: "sprk_project", lookup: "sprk_regardingproject");
+
+        _time.Advance(TimeSpan.FromMinutes(2));
+        await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "1"); // walks the first matter; one root is carried
+        _time.Advance(TimeSpan.FromMinutes(2));
+        await harness.RunAsync(recentWrites: true, ordinaryWrites: true, maxRoots: "1");
+
+        Moved(walkedFirst).Should().BeTrue();
+        Moved(matter).Should().BeTrue("the matter sorts before the project at one instant, so it is the carried root");
+        Moved(project).Should().BeFalse("the project, left out of the carry, is listed again from its key: after the matter");
+    }
+
     private static Guid OrderedId(int n) => Guid.Parse($"00000000-0000-4000-8000-{n:x12}");
 
     private async Task SweepCompleteAsync(Harness harness, string maxRoots)

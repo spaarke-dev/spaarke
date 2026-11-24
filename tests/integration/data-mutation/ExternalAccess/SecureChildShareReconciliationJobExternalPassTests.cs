@@ -853,6 +853,44 @@ public class SecureChildShareReconciliationJobExternalPassTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WhenOnlyOnePassFails_ErrorMessageNamesTheCountsAndTheFailure_AndProcessedItemsCountsTheExaminedRows()
+    {
+        FiledEvent(1, RecentlyChanged);
+        FiledEvent(2);
+        _directTeamFaults = 1;
+
+        var (run, external) = await RunExternalAsync(NewJob());
+
+        var failure = external.GetProperty("failure").GetString();
+        failure.Should().NotBeNullOrEmpty();
+        var summary = JsonDocument.Parse(run.ResultJson!).RootElement;
+        run.ErrorMessage.Should().Be(
+            $"{summary.GetProperty("notUpdated").GetInt32()} child(ren) not updated and {summary.GetProperty("held").GetInt32()} held" +
+            $"; External team: failed, {Int(external, "failures")} row(s) carried for a fault, {Int(external, "carried")} carried in all " +
+            $"({failure}); the next run retries.");
+        Int(external, "examined").Should().BeGreaterThan(0);
+        run.ProcessedItems.Should().Be(summary.GetProperty("inScope").GetInt32() + Int(external, "examined"),
+            "the secure children in scope plus the rows the External-team pass examined (no Direct pass here)");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenRowsAreCarriedForAFaultButNoPassFailed_ErrorMessageHasNoFailureSuffix()
+    {
+        FiledEvent(1, RecentlyChanged);
+        FiledEvent(2);
+        _shares.IgnoreWrites = true;
+
+        var (run, external) = await RunExternalAsync(NewJob());
+
+        external.GetProperty("failure").ValueKind.Should().Be(JsonValueKind.Null, "no listing or prerequisite failed: only writes did not read back");
+        var summary = JsonDocument.Parse(run.ResultJson!).RootElement;
+        run.ErrorMessage.Should().Be(
+            $"{summary.GetProperty("notUpdated").GetInt32()} child(ren) not updated and {summary.GetProperty("held").GetInt32()} held" +
+            $"; External team: {Status(external)}, {Int(external, "failures")} row(s) carried for a fault, {Int(external, "carried")} carried in all" +
+            "; the next run retries.");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenAListingFailsAndAPassFails_ReportsTheListingFailure()
     {
         FiledEvent(1);

@@ -557,13 +557,7 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
         // Pending (external precondition to resolve). Evidence carries the
         // probe's raw response so the operator has the diagnostic without
         // pulling logs.
-        var gateEntry = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-            Evidence = evidence,
-        };
-        run.GateStates[$"subready-{rejectionCode}"] = gateEntry;
+        run.RecordFailureGate($"subready-{rejectionCode}", HandlerIdentifier, evidence);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.review-changed",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"This review id was already used for a different decision.\",\"reasonCode\":\"ontology.decision.review_changed\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000025\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "This review id was already used for a different decision.",
+    "reasonCode": "ontology.decision.review_changed",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000025",
+    "actionCode": null
+  }
+}

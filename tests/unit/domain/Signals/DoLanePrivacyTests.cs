@@ -6,11 +6,13 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Signals;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
@@ -264,22 +266,27 @@ public sealed class DoLanePrivacyTests
         // Adversarial pass 1 F1: a closed inquiry's To Do that went overdue must not be stuck (409 already_resolved on the
         // disposition, 409 disposition_required on Mark complete).
         var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), Hint(Inquiry), inquiryState);
+        var cache = new Mock<ITenantCache>();
 
-        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
+        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan, Stamp(cache)));
 
         plan.Actions.Select(a => a.Code).Should().Equal("mark-complete", "reschedule", "reassign");
         world.Requests.Should().Contain(InquiryStateRead(Inquiry));
+        cache.Invocations.Should().ContainSingle("a returned plan starts the review (task 043 stamp)")
+            .Which.Method.Name.Should().Be(nameof(ITenantCache.SetAsync));
     }
 
     [Fact]
     public async Task WhenTheInquirysStateCannotBeRead_ThePlanIs503_NeverAGuess()
     {
         var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), Hint(Inquiry), inquiryReadFaults: true);
+        var cache = new Mock<ITenantCache>();
 
-        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan));
+        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan, Stamp(cache)));
 
         problem.Status.Should().Be(503);
         problem.Extensions["reasonCode"]!.ToString().Should().Be(DecisionPlanEndpoints.AccessUnavailableReasonCode);
+        cache.Invocations.Should().BeEmpty("no plan was shown, so no review started (spaarkeai-mcp-bff-api-r1 task 013: the stamp stays last)");
     }
 
     [Fact]
@@ -411,25 +418,65 @@ public sealed class DoLanePrivacyTests
             MatterInquiries = [Inquiry],
             InquiryListFails = fault,
         };
+        var cache = new Mock<ITenantCache>();
 
-        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan));
+        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan, Stamp(cache)));
 
         problem.Status.Should().Be(503);
         problem.Extensions["reasonCode"]!.ToString().Should().Be(DecisionPlanEndpoints.AccessUnavailableReasonCode);
+        cache.Invocations.Should().BeEmpty("no plan was shown, so no review started");
+    }
+
+    // ---- spaarkeai-mcp-bff-api-r1 task 016: the reassign lookup sits behind the same gate ---------------------------------------
+
+    [Fact]
+    public async Task TheReassignLookup_SearchesContactsForTheAssignee_AndAnswersTheColleagueExactlyAsAnUnreadableSignal()
+    {
+        var alices = AlicesTodo(SubjectId, null);
+        var colleagues = new World("sprk_todo", hasCore: true) { Subject = { [PersonColumn("sprk_todo")] = AliceContact } };
+        var unreadable = new World("sprk_todo", hasCore: true) { SignalUnreadable = true };
+
+        var mine = await Lookup(alices.As(Alice), alices.Client);
+        var notMine = await Lookup(colleagues.As(Bob), colleagues.Client);
+        var none = await Lookup(unreadable.As(Bob), unreadable.Client);
+
+        mine.Outcome.Should().Be(DecisionLookupOutcome.Ok);
+        mine.Response!.Entity.Should().Be("contact");
+        mine.Response.Candidates.Select(c => c.Id).Should().Equal(BobContact);
+        alices.Requests.Should().ContainSingle(r => r.StartsWith("contacts?", StringComparison.Ordinal), "the assignee search is the caller's read");
+
+        notMine.Should().Be(none, "the colleague learns nothing a Signal they cannot read would not tell them");
+        notMine.Outcome.Should().Be(DecisionLookupOutcome.NotAllowed);
+        Problem(DecisionResultMapper.ToHttp(notMine, Http())).Should().BeEquivalentTo(Problem(DecisionResultMapper.ToHttp(none, Http())));
+        Problem(DecisionResultMapper.ToHttp(notMine, Http())).Status.Should().Be(404);
+        colleagues.Requests.Should().NotContain(r => r.StartsWith("contacts?", StringComparison.Ordinal), "nothing is searched past the gate");
     }
 
     // =================================================================================================
     // Fixtures
     // =================================================================================================
 
+    /// <summary>The lookup search (task 016) for the To Do plan's <c>assignee</c>, with the version's plan readable.</summary>
+    private static Task<DecisionLookupResult> Lookup(SignalCoreRecordAccess access, IDataverseUserClient caller)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_policyversion", VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_policyversion", VersionId) { ["sprk_decisionplan"] = TodoPlan });
+        return new DecisionLookupSearch(access, new DecisionPlanService(entities.Object, NullLogger<DecisionPlanService>.Instance), caller,
+                NullLogger<DecisionLookupSearch>.Instance)
+            .SearchAsync(Http(), SignalId, "assignee", "Bob", CancellationToken.None);
+    }
+
     private static Task<IResult> PlanRoute(SignalCoreRecordAccess access) =>
         DecisionPlanEndpoints.GetDecisionPlanAsync(
-            SignalId, Http(), access,
-            new DecisionPlanService(new Mock<IGenericEntityService>(MockBehavior.Strict).Object, NullLogger<DecisionPlanService>.Instance),
-            new RuleBodyDescriber(
-                new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
-                    NullLogger<PolicyVersionValidator>.Instance),
-                new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance),
+            SignalId, Http(),
+            DecisionCapabilityFixtures.Capability(
+                access,
+                new DecisionPlanService(new Mock<IGenericEntityService>(MockBehavior.Strict).Object, NullLogger<DecisionPlanService>.Instance),
+                new RuleBodyDescriber(
+                    new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
+                        NullLogger<PolicyVersionValidator>.Instance),
+                    new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance)),
             CancellationToken.None);
 
     private static Task<IResult> SuppressionRoute(World world, Guid actingAs)
@@ -442,29 +489,36 @@ public sealed class DoLanePrivacyTests
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SignalSuppressionService>.Instance);
         return DecisionPlanEndpoints.GetSuppressionAsync(
-            SignalId, Http(), access, strict, world.Client, NullLogger<SignalSuppressionService>.Instance, CancellationToken.None);
+            SignalId, Http(), DecisionCapabilityFixtures.Capability(access, suppression: strict, caller: world.Client), CancellationToken.None);
     }
 
     /// <summary>The plan route with the version's plan readable (configuration, the BFF's own read).</summary>
-    private static Task<IResult> PlanRoute(SignalCoreRecordAccess access, string planJson)
+    private static Task<IResult> PlanRoute(SignalCoreRecordAccess access, string planJson, DecisionPlanReadStamp? planReadStamp = null)
     {
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync("sprk_policyversion", VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_policyversion", VersionId) { ["sprk_decisionplan"] = planJson });
         return DecisionPlanEndpoints.GetDecisionPlanAsync(
-            SignalId, Http(), access,
-            new DecisionPlanService(entities.Object, NullLogger<DecisionPlanService>.Instance),
-            new RuleBodyDescriber(
-                new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
-                    NullLogger<PolicyVersionValidator>.Instance),
-                new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance),
+            SignalId, Http(),
+            DecisionCapabilityFixtures.Capability(
+                access,
+                new DecisionPlanService(entities.Object, NullLogger<DecisionPlanService>.Instance),
+                new RuleBodyDescriber(
+                    new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
+                        NullLogger<PolicyVersionValidator>.Instance),
+                    new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance),
+                planReadStamp: planReadStamp),
             CancellationToken.None);
     }
+
+    /// <summary>The plan-read stamp (task 043) over the tenant cache at its boundary; the test reads what was written from the mock.</summary>
+    private static DecisionPlanReadStamp Stamp(Mock<ITenantCache> cache) =>
+        new(cache.Object, new FakeTimeProvider(), NullLogger<DecisionPlanReadStamp>.Instance);
 
     private static DecisionPlanResponse Plan(IResult result) =>
         result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
 
-    private static HttpContext Http() => new DefaultHttpContext { TraceIdentifier = "trace-150" };
+    private static HttpContext Http() => DecisionCapabilityFixtures.SignedIn("trace-150");
 
     private static Microsoft.AspNetCore.Mvc.ProblemDetails Problem(IResult result) =>
         result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails;
@@ -612,6 +666,12 @@ public sealed class DoLanePrivacyTests
                     })),
                     _ => Ok(new { value = rows }),
                 };
+            }
+
+            if (path.StartsWith("contacts?", StringComparison.Ordinal))
+            {
+                // spaarkeai-mcp-bff-api-r1 task 016: the reassign lookup's contact search, as the caller.
+                return Ok(new { value = new[] { new { contactid = BobContact.ToString("D"), fullname = "Bob Colleague", emailaddress1 = "bob@firm.example" } } });
             }
 
             if (path.Contains("&$filter=", StringComparison.Ordinal))

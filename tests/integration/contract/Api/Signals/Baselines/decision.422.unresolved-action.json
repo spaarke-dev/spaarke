@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.unresolved-action",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"'escalate' is not an action this decision can record.\",\"reasonCode\":\"ontology.decision.unresolved_action\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000018\",\"actionCode\":\"escalate\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "'escalate' is not an action this decision can record.",
+    "reasonCode": "ontology.decision.unresolved_action",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000018",
+    "actionCode": "escalate"
+  }
+}

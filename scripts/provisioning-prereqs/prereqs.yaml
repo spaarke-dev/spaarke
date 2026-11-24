@@ -31,9 +31,15 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 15
-last_updated: 2026-10-14
+manifest_version: 16
+last_updated: 2026-11-23
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 16 (2026-11-23, customer-provisioning-orchestration-r1 ISS-030 / #2925): PRQ-C-03 no longer fails an upgrade
+# or resume run. checkNameAvailability / checkDomainAvailability report every existing name unavailable, the stamp's own
+# resources included (ACME 2026-11-20 failed on spaarke-acme-prod-sbus, sprkacmeprodsa, sprk-acme-prod-docintel and
+# sprk-acme-prod-contentsafety). An unavailable name is now read at its expected ID in rg-spaarke-{customerId}-{env}: 200 =
+# the stamp's own resource (OWNED, pass), 404 = a real collision (fail), any other status fails - the rule H2a applies in
+# ArmResourceNameAvailabilityProbe (T186 L23).
 # manifest_version 15 (2026-10-14, customer-provisioning-orchestration-r1 T186): the first live run of every recipe against a
 # real customer (acme) found recipes that disagreed with the code they guard. Fixed to mirror it: PRQ-S-00 counts only the
 # rg-spaarke-{id}-{env} groups H1 counts (SubscriptionDedication.cs); PRQ-S-01 reads the quota id from ARM (az account show
@@ -809,24 +815,42 @@ prereqs:
         tok=$(az account get-access-token --resource https://management.azure.com/ --query accessToken -o tsv | tr -d '\r') || exit 1
         [ -n "$tok" ] || { echo "no ARM access token - az login first"; exit 1; }
         # Names mirror infrastructure/bicep/customer.bicep (serviceBusName, storageAccountName, openAi/docIntelligence/contentSafety names).
+        # The stamp's own resource group is customer.bicep's resourceGroupName (rg-spaarke-{customerId}-{env}) - the same group H2a
+        # (ArmResourceNameAvailabilityProbe) reads. Each Cognitive Services account is named exactly its customSubDomainName.
+        rg="rg-spaarke-{customerId}-{stampEnvironment}"
         sb="spaarke-{customerId}-{stampEnvironment}-sbus"
         sa=$(printf 'sprk%s%ssa' '{customerId}' '{stampEnvironment}' | tr 'A-Z' 'a-z' | cut -c1-24)
-        post() { # label url body key
+        # checkNameAvailability / checkDomainAvailability report EVERY existing name as unavailable, including the stamp's own
+        # resources, so on an upgrade run an unavailable name is read at its expected resource ID in the stamp's resource group
+        # (T186 L23, same rule as H2a): 200 = ours (pass), 404 = another tenant holds the name (collision), anything else fails.
+        owned() { # label provider-path api-version -> 0 ours (200), 1 not found (404), 2 any other status
+          h=$(curl -sS -o /dev/null -D - -H "Authorization: Bearer $tok" "https://management.azure.com/subscriptions/{stampSubscriptionId}/resourceGroups/$rg/providers/$2?api-version=$3") || { echo "UNAVAILABLE $1: ownership GET in $rg failed (curl)"; return 2; }
+          code=$(echo "$h" | sed -n 1p | tr -d '\r' | awk '{print $2}')
+          case "$code" in
+            200) return 0 ;;
+            404) return 1 ;;
+            *)   echo "UNAVAILABLE $1: ownership GET in $rg returned unexpected HTTP '$code'"; return 2 ;;
+          esac
+        }
+        post() { # label url body key provider-path api-version
           r=$(curl -sS -X POST -H "Authorization: Bearer $tok" -H "Content-Type: application/json" -d "$3" "$2") || { echo "$1: request failed"; return 1; }
           echo "$r" | grep -Eq "\"$4\": *true" && return 0
-          echo "UNAVAILABLE $1: $r"; return 1
+          owned "$1" "$5" "$6"; s=$?
+          [ "$s" = 0 ] && { echo "OWNED $1"; return 0; }
+          [ "$s" = 1 ] && echo "UNAVAILABLE $1: not in $rg, so another tenant holds the name: $r"
+          return 1
         }
         failed=0
-        post "Service Bus namespace $sb" "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" "{\"name\":\"$sb\",\"type\":\"Microsoft.ServiceBus/namespaces\"}" nameAvailable || failed=1
-        post "Storage account $sa" "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.Storage/checkNameAvailability?api-version=2023-01-01" "{\"name\":\"$sa\",\"type\":\"Microsoft.Storage/storageAccounts\"}" nameAvailable || failed=1
+        post "Service Bus namespace $sb" "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" "{\"name\":\"$sb\",\"type\":\"Microsoft.ServiceBus/namespaces\"}" nameAvailable "Microsoft.ServiceBus/namespaces/$sb" 2022-10-01-preview || failed=1
+        post "Storage account $sa" "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.Storage/checkNameAvailability?api-version=2023-01-01" "{\"name\":\"$sa\",\"type\":\"Microsoft.Storage/storageAccounts\"}" nameAvailable "Microsoft.Storage/storageAccounts/$sa" 2023-01-01 || failed=1
         for kind in openai docintel contentsafety; do
           n="sprk-{customerId}-{stampEnvironment}-$kind"
-          post "Cognitive Services subdomain $n" "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.CognitiveServices/checkDomainAvailability?api-version=2023-05-01" "{\"subdomainName\":\"$n\",\"type\":\"Microsoft.CognitiveServices/accounts\"}" isSubdomainAvailable || failed=1
+          post "Cognitive Services subdomain $n" "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.CognitiveServices/checkDomainAvailability?api-version=2023-05-01" "{\"subdomainName\":\"$n\",\"type\":\"Microsoft.CognitiveServices/accounts\"}" isSubdomainAvailable "Microsoft.CognitiveServices/accounts/$n" 2024-10-01 || failed=1
         done
         [ "$failed" = 0 ] || exit 1
         echo ok
-      expect: "`ok` - the stamp's Service Bus namespace, storage account and the three Cognitive Services subdomains (openai, docintel, contentsafety) are all available; each unavailable name is printed with Azure's reason and the recipe exits 1. A run that already deployed some of them (resume) reports them unavailable - run this before the first attempt only"
-    remediation: 'Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace).'
+      expect: "`ok` - the stamp's Service Bus namespace, storage account and the three Cognitive Services subdomains (openai, docintel, contentsafety) are each either available or already this stamp's own resource. A name Azure reports unavailable is read at its expected ID in `rg-spaarke-{customerId}-{stampEnvironment}`: HTTP 200 prints `OWNED <label>` and passes (safe on an upgrade or resume run); HTTP 404 prints `UNAVAILABLE <label>: <Azure's reason>` (another tenant holds the name) and the recipe exits 1; any other status prints it and exits 1"
+    remediation: 'Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace). A name that is unavailable and absent from the stamp''s resource group is held elsewhere (another tenant, or a soft-deleted Cognitive Services account - purge it with `az cognitiveservices account purge`).'
     related_findings: [F10]
 
   - id: PRQ-C-04

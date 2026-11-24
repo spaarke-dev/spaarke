@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.item-owner-unsupported",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"The item's decision cannot be filed under an owning team, so it cannot be recorded; nothing was done.\",\"reasonCode\":\"ontology.decision.item_owner_unsupported\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000030\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "The item's decision cannot be filed under an owning team, so it cannot be recorded; nothing was done.",
+    "reasonCode": "ontology.decision.item_owner_unsupported",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000030",
+    "actionCode": null
+  }
+}
