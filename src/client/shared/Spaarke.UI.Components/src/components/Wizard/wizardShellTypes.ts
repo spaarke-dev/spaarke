@@ -214,8 +214,11 @@ export interface IWizardShellHandle {
 export interface IWizardSuccessConfig {
   /** Icon or illustration displayed above the title (e.g., a checkmark). */
   icon: React.ReactNode;
-  /** Primary success message (e.g., "Matter created successfully"). */
-  title: string;
+  /**
+   * Primary success message (e.g., "Matter created successfully"). A string for a fixed message; a node when the heading
+   * follows something that is still changing on the success screen (the invoice result screen follows its polled status).
+   */
+  title: React.ReactNode;
   /** Body content below the title — can be a string or rich JSX. */
   body: React.ReactNode;
   /**
