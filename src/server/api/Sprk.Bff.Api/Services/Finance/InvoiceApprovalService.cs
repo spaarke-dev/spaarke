@@ -255,7 +255,8 @@ public sealed record ApprovalResult(
 /// or policy version is taken from the request.</para>
 /// <para><b>Exactly once (074 K-1 / K-4), three layers.</b> (1) Two processing locks, the invoice-decision lock shared with 104 / 105
 /// (<see cref="SubmissionOverrideService.LockKey"/>) and the line-decision lock (<see cref="InvoiceLineDecisionService.LockKeyFor"/>, the
-/// per-invoice <see cref="InvoiceLineDecisionService.LockKeyPrefix"/> key every line decision takes), so one decision runs per invoice. (2) The
+/// per-invoice <see cref="InvoiceLineDecisionService.LockKeyPrefix"/> key every line decision takes), so one decision runs per invoice. The bulk
+/// accepts renew the line-decision lock (at <see cref="LockDuration"/>) while they write and stop when it is lost (ISS-050). (2) The
 /// CLAIM: before the transition, the portion's decider, time and approved amount are written conditional on the portion's row version as read,
 /// and only when the portion names no decider or the caller's own contact (K1); a concurrent approve that read the same version gets 409
 /// <c>ebilling.approval.changed</c>, another person's unfinished claim 409 <c>ebilling.approval.claimed</c>, and nothing else is written. A
@@ -623,7 +624,7 @@ public sealed class InvoiceApprovalService
 
             try
             {
-                return await ApproveHeldAsync(invoiceId, callerSystemUserId, checkedNote.Value, callerBearerToken, ct).ConfigureAwait(false);
+                return await ApproveHeldAsync(invoiceId, callerSystemUserId, checkedNote.Value, callerBearerToken, owner, ct).ConfigureAwait(false);
             }
             finally
             {
@@ -636,7 +637,8 @@ public sealed class InvoiceApprovalService
         }
     }
 
-    private async Task<ApprovalResult> ApproveHeldAsync(Guid invoiceId, Guid caller, string? note, string? callerBearerToken, CancellationToken ct)
+    /// <param name="lockOwner">ISS-050: the owner id under which this approve holds the line-decision lock; its bulk accepts renew that lock.</param>
+    private async Task<ApprovalResult> ApproveHeldAsync(Guid invoiceId, Guid caller, string? note, string? callerBearerToken, string lockOwner, CancellationToken ct)
     {
         Entity? invoice;
         IReadOnlyList<Entity> portions;
@@ -752,16 +754,17 @@ public sealed class InvoiceApprovalService
         }
 
         // ── F2: an earlier attempt's bulk accept whose lines were written but not recorded is completed first (never skipped). ──
-        if (await CompleteEarlierBulkAcceptAsync(invoiceId, approvalId, caller, callerBearerToken, lineRows, ct).ConfigureAwait(false) is { } bulkIncomplete)
+        if (await CompleteEarlierBulkAcceptAsync(invoiceId, approvalId, caller, callerBearerToken, lockOwner, lineRows, ct).ConfigureAwait(false) is { } bulkIncomplete)
         {
             return bulkIncomplete;
         }
 
-        // ── D-72 (F-2): undecided Clean lines are accepted in bulk ("Accepted in bulk" rows, not labels). The caller holds the line lock. ──
+        // ── D-72 (F-2): undecided Clean lines are accepted in bulk ("Accepted in bulk" rows, not labels). The caller holds the line lock, which the
+        //    bulk accept renews (ISS-050) and stops on losing: Unavailable before its line write, Incomplete after it (FromLineResult). ──
         if (CleanCount(lineRows) > 0)
         {
             var lineDecisionId = AcceptCleanDecisionIdFor(approvalId);
-            var accepted = await _lines.AcceptCleanHeldAsync(invoiceId, lineDecisionId, caller, callerBearerToken, ct).ConfigureAwait(false);
+            var accepted = await _lines.AcceptCleanHeldAsync(invoiceId, lineDecisionId, caller, callerBearerToken, lockOwner, LockDuration, ct).ConfigureAwait(false);
             if (!accepted.IsApplied)
             {
                 return FromLineResult(accepted, invoiceId, "accept-clean", lineDecisionId);
@@ -1635,7 +1638,7 @@ public sealed class InvoiceApprovalService
     /// and is left alone. Null when nothing is outstanding.
     /// </summary>
     private async Task<ApprovalResult?> CompleteEarlierBulkAcceptAsync(
-        Guid invoiceId, Guid approvalId, Guid caller, string? callerBearerToken, IReadOnlyList<Entity> lineRows, CancellationToken ct)
+        Guid invoiceId, Guid approvalId, Guid caller, string? callerBearerToken, string lockOwner, IReadOnlyList<Entity> lineRows, CancellationToken ct)
     {
         var accepted = lineRows
             .Where(l => l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value == (int)InvoiceLineStatus.Accepted
@@ -1677,7 +1680,7 @@ public sealed class InvoiceApprovalService
         for (var offset = 0; offset < ids.Count; offset += InvoiceLineDecisionService.MaxLinesPerRequest)
         {
             var chunk = ids.Skip(offset).Take(InvoiceLineDecisionService.MaxLinesPerRequest).ToList();
-            var result = await _lines.CompleteBulkAcceptHeldAsync(invoiceId, lineDecisionId, chunk, caller, callerBearerToken, ct).ConfigureAwait(false);
+            var result = await _lines.CompleteBulkAcceptHeldAsync(invoiceId, lineDecisionId, chunk, caller, callerBearerToken, lockOwner, LockDuration, ct).ConfigureAwait(false);
             if (!result.IsApplied)
             {
                 return FromLineResult(result, invoiceId, "accept-clean", lineDecisionId);

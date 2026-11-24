@@ -171,6 +171,16 @@ public sealed record LineDecisionResult(
 /// request (<see cref="IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync"/>, all-or-nothing), so a lock that expired mid-request, or a writer
 /// that does not take the lock, makes the write fail (409 <c>ebilling.line.changed</c>) before anything is recorded. The Decision Record is written only
 /// AFTER the line write succeeded, so a refused or conflicting decision leaves no record.</para>
+/// <para><b>Lock renewal (ISS-050).</b> The lock lasts <see cref="LockDuration"/> (2 minutes) and a call can cover up to
+/// <see cref="MaxLinesPerRequest"/> lines, one Decision Record each, so the call renews it
+/// (<see cref="IIdempotencyService.RenewProcessingLockAsync"/>, owner-checked) at a checkpoint before every write: the line write, the totals,
+/// each correction chunk, each line's Decision Record and each line's Signal close. A checkpoint renews only once <see cref="LockRenewInterval"/>
+/// has passed since the lock was taken or last renewed, so a short call makes no renewal. A renewal that answers false or throws means the lock is
+/// LOST: the call writes nothing more and answers 503 <c>ebilling.decision.incomplete</c> naming the step it stopped before (503
+/// <c>ebilling.decision.unavailable</c> when nothing was written yet), never 409 and never unlocked; the repeat of the same decision completes it
+/// under a new lock. The approval's held paths (<see cref="AcceptCleanHeldAsync"/>, <see cref="CompleteBulkAcceptHeldAsync"/>) renew the
+/// approval's own lock the same way, at the approval's lock duration, and renew at their first checkpoint (the caller's time under it is not
+/// known here).</para>
 /// <para><b>Order and recovery.</b> Validate everything (all lines, the amount rules, the dry-run totals, the recorder's no-I/O preflight, the owner of
 /// the correction rows) before the first write, then: lines (one conditional transaction) -> totals (016) -> correction rows (deterministic-id upserts) ->
 /// Decision Records (one per line, idempotent by decision id). A failure after the lines were written answers 503 <c>ebilling.decision.incomplete</c>
@@ -219,6 +229,13 @@ public sealed class InvoiceLineDecisionService
     private const int OutcomeUnreviewed = 100000003;
     private const int CorrectionChunk = 400;
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// ISS-050: how long a call runs on its lock before the next write checkpoint renews it (a quarter of <see cref="LockDuration"/>). The lock is
+    /// lost only when one step between two checkpoints (one conditional line transaction, one totals recalculation, one correction chunk, one
+    /// line's record or close) takes longer than <see cref="LockDuration"/> minus this.
+    /// </summary>
+    internal static readonly TimeSpan LockRenewInterval = TimeSpan.FromSeconds(30);
 
     private static readonly string[] InvoiceColumns =
     [
@@ -320,6 +337,7 @@ public sealed class InvoiceLineDecisionService
 
         var key = LockKeyFor(command.InvoiceId);
         var owner = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+        var takenAt = _time.GetUtcNow(); // read before the acquire: the lock lasts at least LockDuration from here
         bool acquired;
         try
         {
@@ -340,7 +358,7 @@ public sealed class InvoiceLineDecisionService
 
         try
         {
-            return await ApplyAsync(command, acceptClean, checkCorrections: true, ct).ConfigureAwait(false);
+            return await ApplyAsync(command, acceptClean, checkCorrections: true, new LockLease(key, owner, LockDuration, takenAt), ct).ConfigureAwait(false);
         }
         finally
         {
@@ -364,11 +382,15 @@ public sealed class InvoiceLineDecisionService
     /// Task 103 (D-72, F-2): Accept all Clean as a bulk decision, run by the approval, which already HOLDS <see cref="LockKeyFor"/>. Same rules,
     /// order and recovery as <see cref="AcceptCleanAsync"/>; only the lock is the caller's.
     /// </summary>
+    /// <param name="lockOwner">ISS-050: the owner id under which the caller holds <see cref="LockKeyFor"/>; the call renews that lock (owner-checked)
+    /// for <paramref name="lockDuration"/>, the caller's own lock duration, and stops before its next write when the lock is lost.</param>
     internal Task<LineDecisionResult> AcceptCleanHeldAsync(
-        Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
+        Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, string? callerBearerToken, string lockOwner, TimeSpan lockDuration, CancellationToken ct)
     {
         var command = new LineDecisionCommand(invoiceId, decisionId, LineDecisionAction.Accept, null, [], deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: true) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: true, checkCorrections: false, ct);
+        return ShapeError(command, acceptClean: true) is { } invalid
+            ? Task.FromResult(invalid)
+            : ApplyAsync(command, acceptClean: true, checkCorrections: false, LockLease.Held(LockKeyFor(invoiceId), lockOwner, lockDuration), ct);
     }
 
     /// <summary>
@@ -376,13 +398,71 @@ public sealed class InvoiceLineDecisionService
     /// no longer chooses them). The documented repeat of an Incomplete bulk decision: the same decision id over those lines, Bulk, Accept, so
     /// the same values, the same correction row ids ("Accepted in bulk") and only the missing records. The caller holds <see cref="LockKeyFor"/>.
     /// </summary>
+    /// <param name="lockOwner">ISS-050: as on <see cref="AcceptCleanHeldAsync"/>.</param>
     internal Task<LineDecisionResult> CompleteBulkAcceptHeldAsync(
-        Guid invoiceId, Guid decisionId, IReadOnlyList<Guid> lineIds, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
+        Guid invoiceId, Guid decisionId, IReadOnlyList<Guid> lineIds, Guid deciderSystemUserId, string? callerBearerToken, string lockOwner, TimeSpan lockDuration,
+        CancellationToken ct)
     {
         var command = new LineDecisionCommand(
             invoiceId, decisionId, LineDecisionAction.Accept, null, lineIds.Select(id => new LineDecisionLine(id)).ToList(), deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, checkCorrections: false, ct);
+        return ShapeError(command, acceptClean: false) is { } invalid
+            ? Task.FromResult(invalid)
+            : ApplyAsync(command, acceptClean: false, checkCorrections: false, LockLease.Held(LockKeyFor(invoiceId), lockOwner, lockDuration), ct);
     }
+
+    /// <summary>ISS-050: the line-decision lock one call holds, and when it was last taken or renewed (by this service's clock).</summary>
+    private sealed class LockLease(string key, string owner, TimeSpan duration, DateTimeOffset renewedAt)
+    {
+        public string Key { get; } = key;
+
+        public string Owner { get; } = owner;
+
+        public TimeSpan Duration { get; } = duration;
+
+        public DateTimeOffset RenewedAt { get; set; } = renewedAt;
+
+        /// <summary>A lock the caller took at a time not known here: the first checkpoint renews it.</summary>
+        public static LockLease Held(string key, string owner, TimeSpan duration) => new(key, owner, duration, DateTimeOffset.MinValue);
+    }
+
+    /// <summary>
+    /// ISS-050: the checkpoint before a write. Renews the lock once <see cref="LockRenewInterval"/> has passed since it was taken or last renewed;
+    /// otherwise does nothing. <see langword="false"/> = the lock is LOST (the renewal answered false or threw): the caller writes nothing more.
+    /// </summary>
+    private async Task<bool> KeepLockAsync(LockLease lease, Guid invoiceId, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow();
+        if (now - lease.RenewedAt < LockRenewInterval)
+        {
+            return true;
+        }
+
+        bool renewed;
+        try
+        {
+            renewed = await _locks.RenewProcessingLockAsync(lease.Key, lease.Owner, lease.Duration, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Line decision on invoice {InvoiceId}: the processing lock could not be renewed ({ExceptionType}).", invoiceId, ex.GetType().Name);
+            renewed = false;
+        }
+
+        if (!renewed)
+        {
+            _logger.LogError("Line decision on invoice {InvoiceId}: lock-lost: the processing lock is no longer this call's; nothing more is written.", invoiceId);
+            return false;
+        }
+
+        lease.RenewedAt = now; // read before the renewal: the lock lasts at least its duration from here
+        return true;
+    }
+
+    /// <summary>ISS-050: the answer of a call that lost its lock. Nothing written yet: 503 unavailable. Lines written: 503 incomplete at <paramref name="step"/>.</summary>
+    private LineDecisionResult LockLost(LineDecisionCommand command, IReadOnlyList<Guid>? committed, string step) =>
+        committed is null
+            ? new LineDecisionResult(LineDecisionStatus.Unavailable, LineDecisionCodes.Unavailable, "The decision could not be started; nothing was changed. Try again.")
+            : Incomplete(command, committed, step, "lock-lost");
 
     /// <summary>
     /// Task 103 (D-72): every AI-sourced field of a decided Fee or Expense line (Accepted, Reduced, Disallowed) that has no correction row yet
@@ -562,7 +642,8 @@ public sealed class InvoiceLineDecisionService
 
     /// <param name="checkCorrections">Refuse while a correction is unapplied (<see cref="RefuseUnappliedAsync"/>). False on the approval's held paths: the
     /// approval's own guard has just refused on the same read (<see cref="InvoiceApprovalCodes.CorrectionsPending"/>).</param>
-    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, bool checkCorrections, CancellationToken ct)
+    /// <param name="lease">ISS-050: the lock this call holds, renewed at the checkpoint before every write (<see cref="KeepLockAsync"/>).</param>
+    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, bool checkCorrections, LockLease lease, CancellationToken ct)
     {
         Entity? invoice;
         List<Entity> lineRows;
@@ -775,6 +856,12 @@ public sealed class InvoiceLineDecisionService
             corrections = built.Rows;
         }
 
+        // ── ISS-050: every write below is preceded by a lock checkpoint; a lost lock stops the call before that write. ──
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLost(command, committed: null, "lines");
+        }
+
         // ── 1. The lines: one conditional all-or-nothing transaction. ──
         var updates = proposals.Select(p => (
             id: p.Line.Id,
@@ -798,6 +885,11 @@ public sealed class InvoiceLineDecisionService
         var committed = proposals.Select(p => p.Line.Id).ToList();
 
         // ── 2. Totals (016): the approved total follows the approved amounts (D-130). ──
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLost(command, committed, "totals");
+        }
+
         InvoiceTotalsCalculation calculation;
         try
         {
@@ -822,6 +914,11 @@ public sealed class InvoiceLineDecisionService
         {
             for (var offset = 0; offset < corrections.Count; offset += CorrectionChunk)
             {
+                if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+                {
+                    return LockLost(command, committed, "corrections");
+                }
+
                 var requests = corrections.Skip(offset).Take(CorrectionChunk)
                     .Select(row => (OrganizationRequest)new UpsertRequest { Target = row }).ToList();
                 await _entities.ExecuteTransactionAsync(requests, ct).ConfigureAwait(false);
@@ -838,16 +935,29 @@ public sealed class InvoiceLineDecisionService
         var signalsNotClosed = 0;
         for (var i = 0; i < proposals.Count; i++)
         {
+            // ISS-050: a lost lock stops the loop (unlike a failed record, after which the other lines are still attempted).
+            if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+            {
+                return LockLost(command, committed, "record");
+            }
+
             try
             {
                 var recorded = await _recorder.RecordAsync(decisions[i], ct).ConfigureAwait(false);
                 decided.Add(new DecidedLineDto(
                     proposals[i].Line.Id, proposals[i].Status.ToString(), proposals[i].Approved, proposals[i].Reason, decidedOn, recorded.AlreadyRecorded));
 
+                var lineSignals = signalSets.ByLine[proposals[i].Line.Id];
+                if (lineSignals.Signals.Count > 0 && !await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+                {
+                    // The last line's record is written and only its close is left; otherwise later lines are not recorded yet.
+                    return LockLost(command, committed, failedStep is null && i == proposals.Count - 1 ? SignalsStep : "record");
+                }
+
                 // ── 5. The line's Signals, closed as Acted by its record (a retry: AlreadyClosedByThisRecord). Every Signal and every line is
                 //    still attempted, but a close that failed is counted: nothing else closes that Signal later, so the answer is 'incomplete'. ──
                 signalsNotClosed += await HumanDecisionSignalClose.CloseSetAsync(
-                    _closeActed, signalSets.ByLine[proposals[i].Line.Id], recorded.RecordId, command.DeciderSystemUserId, _logger, ct).ConfigureAwait(false);
+                    _closeActed, lineSignals, recorded.RecordId, command.DeciderSystemUserId, _logger, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
