@@ -31,7 +31,7 @@ const { TextDecoder: NodeTextDecoder } = require('node:util');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).TextDecoder = NodeTextDecoder;
 
-import { exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from '../csvExport';
+import { asSpreadsheetText, exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from '../csvExport';
 import type { ResolvedColumn } from '../../configResolution';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,10 +139,72 @@ describe('escapeCsvField — RFC 4180 quoting', () => {
     expect(escapeCsvField({ name: 'Smith, John' })).toBe('"Smith, John"');
   });
 
-  it('JSON-stringifies arbitrary objects with no name/label', () => {
-    // The JSON itself contains quotes, so the result must be quoted + escaped.
-    const result = escapeCsvField({ foo: 'bar' });
-    expect(result).toBe('"{""foo"":""bar""}"');
+  it('writes an object with no name/label as an empty field, never JSON (D-34 #3045)', () => {
+    expect(escapeCsvField({ foo: 'bar' })).toBe('');
+    expect(escapeCsvField({ value: 1, extensionData: null })).toBe('');
+  });
+
+  it('reads an AliasedValue through its inner value, and an array as its readable items (shared rule)', () => {
+    expect(escapeCsvField({ attributeLogicalName: 'name', entityLogicalName: 'account', value: 'Acme' })).toBe('Acme');
+    expect(escapeCsvField({ attributeLogicalName: 'name', entityLogicalName: 'account', value: null })).toBe('');
+    expect(escapeCsvField(['a', { name: 'B' }, { value: 1 }])).toBe('"a, B"');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// asSpreadsheetText — text a spreadsheet would evaluate is written as text
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('asSpreadsheetText', () => {
+  it('must-fire: text starting with = + - @ tab or CR gets a leading apostrophe', () => {
+    for (const lead of ['=', '+', '-', '@', '\t', '\r']) {
+      expect(asSpreadsheetText(`${lead}SUM(A1:A2)`)).toBe(`'${lead}SUM(A1:A2)`);
+    }
+    expect(asSpreadsheetText('-1+2')).toBe("'-1+2");
+    expect(asSpreadsheetText('+1e5x')).toBe("'+1e5x");
+  });
+
+  it('must-not-fire: signed amounts, exponent numbers, a lone sign and ordinary text are unchanged', () => {
+    for (const text of [
+      '-$1,200.00',
+      '-1.200,00 €',
+      '-1 200,00 €',
+      '($1,200.00)',
+      '+5%',
+      '-12',
+      '-0.5',
+      '-1e-7',
+      '+2.5E10',
+      '-',
+      '+',
+      'Draft',
+      'a=b',
+      'Smith, Jo',
+      '',
+    ]) {
+      expect(asSpreadsheetText(text)).toBe(text);
+    }
+  });
+});
+
+describe('escapeCsvField — text a spreadsheet would evaluate', () => {
+  it('writes such text with a leading apostrophe, RFC 4180 quoted when needed', () => {
+    expect(escapeCsvField('=1+1')).toBe("'=1+1");
+    expect(escapeCsvField('@A1')).toBe("'@A1");
+    expect(escapeCsvField('=A1,B1')).toBe(`"'=A1,B1"`);
+    expect(escapeCsvField('=say "hi"')).toBe(`"'=say ""hi"""`);
+  });
+
+  it('applies to an object cell read through its name or label', () => {
+    expect(escapeCsvField({ id: '1', name: '=Acme' })).toBe("'=Acme");
+    expect(escapeCsvField({ value: 1, label: '+Open' })).toBe("'+Open");
+  });
+
+  it('must-not-fire: number and boolean values, including negative and exponent forms, are written as is', () => {
+    expect(escapeCsvField(-5)).toBe('-5');
+    expect(escapeCsvField(-1e-7)).toBe('-1e-7');
+    expect(escapeCsvField(BigInt(-9))).toBe('-9');
+    expect(escapeCsvField(true)).toBe('true');
   });
 });
 
@@ -288,9 +350,14 @@ describe('exportCsv — end-to-end', () => {
       const without = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event'));
       const declined = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event', () => undefined));
       expect(declined).toBe(without);
-      expect(without).toBe(
-        `${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,"{""value"":1200,""extensionData"":null}"\r\nBob,Closed,9`
-      );
+      expect(without).toBe(`${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,\r\nBob,Closed,9`);
+    });
+
+    it('text from the hook goes through the same guard: an evaluated lead gets the apostrophe, an amount does not', async () => {
+      const hook = (r: Record<string, unknown>, c: ResolvedColumn): string | undefined =>
+        c.name === 'status' ? '=HYPERLINK("x")' : c.renderer === 'currency' ? '-$9.00' : undefined;
+      const text = await readBlobAsText(exportCsv(records.slice(1), columns, 'View', 'sprk_event', hook));
+      expect(text).toBe(`${UTF8_BOM}Name,Status,Amount\r\nBob,"'=HYPERLINK(""x"")",-$9.00`);
     });
   });
 

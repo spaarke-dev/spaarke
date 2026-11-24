@@ -11,7 +11,7 @@
  * the container, and nothing is reported (there is nothing to report to).
  */
 import * as React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { DataGrid } from '../DataGrid';
 import type { DataGridSettings } from '../index';
@@ -201,14 +201,23 @@ const optionsTrigger = (label: string, filtered = false): HTMLElement =>
 
 /** Applies a "Contains" text filter on a column through the header menu ("Filter by" -> text -> Apply). */
 async function applyTextFilter(label: string, attribute: string, text: string): Promise<void> {
-  fireEvent.click(optionsTrigger(label));
-  fireEvent.click(await screen.findByTestId(`header-cell-content-menu-filter-${attribute}`));
-  await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, 120)); // the popover opens 50 ms after the menu closes
-  });
-  const input = await screen.findByRole('textbox');
-  fireEvent.change(input, { target: { value: text } });
-  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  // The popover opens 50 ms after the menu closes. Under a loaded parallel run it can open late, or a late re-render of
+  // the grid can close it again, so wait for its textbox and Apply together, and reopen it (at most 3 times) if needed.
+  let popover: { input: HTMLElement; apply: HTMLElement } | undefined;
+  for (let attempt = 1; !popover; attempt++) {
+    fireEvent.click(optionsTrigger(label));
+    fireEvent.click(await screen.findByTestId(`header-cell-content-menu-filter-${attribute}`));
+    try {
+      popover = await waitFor(
+        () => ({ input: screen.getByRole('textbox'), apply: screen.getByRole('button', { name: 'Apply' }) }),
+        { timeout: 2000 }
+      );
+    } catch (error) {
+      if (attempt >= 3) throw error;
+    }
+  }
+  fireEvent.change(popover.input, { target: { value: text } });
+  fireEvent.click(popover.apply);
   await flushFrames();
 }
 

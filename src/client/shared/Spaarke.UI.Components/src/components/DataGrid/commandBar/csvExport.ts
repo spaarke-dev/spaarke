@@ -27,6 +27,7 @@
  */
 
 import type { ResolvedColumn } from '../configResolution';
+import { objectCellText } from '../objectCellText';
 
 /** UTF-8 BOM (`U+FEFF`) — written as the first character so Excel detects UTF-8. */
 export const UTF8_BOM = '﻿';
@@ -40,6 +41,30 @@ const CRLF = '\r\n';
  */
 export type ExportCellText = (record: Record<string, unknown>, column: ResolvedColumn) => string | undefined;
 
+/** Leading characters with which a spreadsheet starts evaluating a cell instead of showing it. */
+const EVALUATED_LEAD = /^[=+\-@\t\r]/;
+
+/**
+ * A signed amount as text ("-$1,200.00", "-1.200,00 €", "+5%", "-12"): a sign, then only digits, separators, spaces,
+ * parentheses, percent and currency symbols. With no letters and no operators after the sign it is a number to a
+ * spreadsheet, so it keeps its text unchanged. A lone sign ("-", a common placeholder) is also left as is.
+ */
+const SIGNED_AMOUNT_TEXT = /^[+-](?:[\d\s.,'()%\p{Sc}]*\d[\d\s.,'()%\p{Sc}]*)?$/u;
+
+/** A signed number in exponent form ("-1e-7"), as `String()` writes a very small or large number. */
+const SIGNED_EXPONENT_TEXT = /^[+-](\d+\.?\d*|\.\d+)e[+-]?\d+$/i;
+
+/**
+ * The text a spreadsheet shows as written: one that would otherwise be evaluated gets a leading apostrophe, the
+ * usual spreadsheet marker for "this is text". Signed amounts and every other text are unchanged.
+ *
+ * Exported for unit testing.
+ */
+export function asSpreadsheetText(str: string): string {
+  if (!EVALUATED_LEAD.test(str) || SIGNED_AMOUNT_TEXT.test(str) || SIGNED_EXPONENT_TEXT.test(str)) return str;
+  return "'" + str;
+}
+
 /**
  * Render a single cell value into its CSV string form, applying RFC 4180 quoting.
  *
@@ -47,9 +72,10 @@ export type ExportCellText = (record: Record<string, unknown>, column: ResolvedC
  * Numbers → `String(value)` (no thousands separator, no locale formatting).
  * Booleans → `'true'` / `'false'`.
  * Dates → ISO 8601 (`toISOString()`).
- * Objects with a `name` string property → `value.name` (matches Dataverse lookup
- *   FormattedValue convention, mirroring the grid's `default` renderer behavior).
- * Other objects → `JSON.stringify(value)`.
+ * Objects → {@link objectCellText}, the same rule the grid's display uses (a `name`, else a `label`, an
+ *   AliasedValue's inner value, an array's readable items). An object with none of those is an empty field,
+ *   never JSON (D-34, #3045).
+ * Text (not a number or boolean value) goes through {@link asSpreadsheetText}, so a spreadsheet shows it as written.
  *
  * Resulting string is wrapped in double quotes IFF it contains a delimiter
  * (`,`), a quote (`"`), or a line terminator (`\r` / `\n`), per RFC 4180 §2.6.
@@ -68,25 +94,18 @@ export function escapeCsvField(value: unknown): string {
   } else if (value instanceof Date) {
     str = Number.isNaN(value.getTime()) ? '' : value.toISOString();
   } else if (typeof value === 'object') {
-    // Dataverse lookups + option-set formatted values arrive as `{ name, id, … }`
-    // or `{ value, label }`; prefer the display string where present.
-    const o = value as Record<string, unknown>;
-    if (typeof o.name === 'string') {
-      str = o.name;
-    } else if (typeof o.label === 'string') {
-      str = o.label;
-    } else {
-      try {
-        str = JSON.stringify(value);
-      } catch {
-        str = String(value);
-      }
-    }
+    // Dataverse lookups + option-set formatted values arrive as `{ name, id, … }` or `{ value, label }`; the shared
+    // rule keeps this and the grid's own display from drifting.
+    str = objectCellText(value);
   } else {
     str = String(value);
   }
 
   if (str === '') return '';
+
+  // Text (never a number value) that a spreadsheet would evaluate is written as text instead.
+  const isNumberValue = typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean';
+  if (!isNumberValue) str = asSpreadsheetText(str);
 
   // RFC 4180 §2.6: quote on delimiter, quote, CR, or LF.
   const needsQuote = /[",\r\n]/.test(str);
@@ -147,7 +166,8 @@ export function csvFilename(entityName: string, savedQueryName: string, date: Da
  *
  * @param cellText        Optional. Returns the exact text to write for a cell, or `undefined` to
  *                        keep the default formatting of `record[column.name]` for that cell. The
- *                        DataGrid uses it so a Money column exports the text the cell displays.
+ *                        DataGrid uses it so every column exports the text the cell displays (a
+ *                        Money amount, an option-set label, a lookup name).
  *                        Absent = every cell uses the default formatting (unchanged).
  *
  * @returns A `Blob` of type `text/csv;charset=utf-8` ready for download.
@@ -179,7 +199,7 @@ export function exportCsv(
       lines.push(
         columns
           .map(c => {
-            // The grid may supply the text for a cell (a Money cell exports what it displays); a column it
+            // The grid may supply the text for a cell (a cell exports what it displays); a column it
             // declines (undefined) keeps the raw-value formatting below.
             const text = cellText?.(record, c);
             return escapeCsvField(text !== undefined ? text : record[c.name]);

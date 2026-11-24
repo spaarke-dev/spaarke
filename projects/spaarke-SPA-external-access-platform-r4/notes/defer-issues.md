@@ -437,3 +437,11 @@ This under-lists, which fails closed.
 **Why it matters.** A euro or pound amount without a formatted label is shown and exported as dollars.
 
 **Fix.** Without a label, use the row's currency when known, else show the plain number. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3046 (board Type=Bug).
+
+## D-36 — Shared DataGrid: model-driven hosts may show option-set numbers (OData label annotations not read) (#3050)
+
+**What.** `formattedLabelOf` (`DataGrid.tsx` ~:728) reads labels only from `@formattedValues`. Rows from `XrmDataverseClient` carry `{column}@OData.Community.Display.V1.FormattedValue` annotations, which nothing in the DataGrid path maps, so under model-driven hosts an option set likely shows and exports its integer, and a `_x_value` lookup column may be empty. Found by the #3045 fix review (2026-11-24); medium confidence, not verified live.
+
+**Why it matters.** Model-driven grid users may see numbers instead of labels, in the cell and the export.
+
+**Fix.** Verify on a dev model-driven grid; if confirmed, read the annotation forms in `formattedLabelOf` with tests for both row shapes. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3050 (board Type=Bug).

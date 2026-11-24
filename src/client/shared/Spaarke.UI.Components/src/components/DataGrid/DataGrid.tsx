@@ -83,6 +83,8 @@ import {
 } from './fetchXmlOverlay';
 import type { MembershipResolver } from '../../services/membership';
 import { CommandBar as DataGridCommandBar, type DataGridHostCommand } from './commandBar/CommandBar';
+import type { ExportCellText } from './commandBar/csvExport';
+import { objectCellText } from './objectCellText';
 import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type ChipState } from './filterChips';
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
@@ -736,6 +738,9 @@ export function formattedLabelOf(row: Record<string, unknown>, column: string): 
 /** Renderers whose client formatting wins over a server label: dates (task 098 calendar-day rule) and percentages. */
 const CLIENT_FORMATTED_RENDERERS = new Set(['date', 'dateonly', 'datetime', 'percentage']);
 
+/** The date renderers: the export writes the date these draw (cellExportText). */
+const DATE_RENDERERS = new Set(['date', 'dateonly', 'datetime']);
+
 /**
  * Whether a server label replaces the client rendering of a cell (task 061). Not for the client-formatted renderers,
  * and not for a plain number under 'currency' (a configured currency column keeps its client formatting; a Money
@@ -753,11 +758,18 @@ function usesFormattedLabel(value: unknown, renderer: string): boolean {
  * precedence over the raw value so an option set / lookup / money value shows its label instead of JSON. The date and
  * percentage renderers ignore it (a server-formatted date carries the server's culture and zone and would undo the
  * calendar-day handling below, task 098), and so does 'currency' for a plain number (see usesFormattedLabel).
+ *
+ * An object with no label is never drawn as JSON or "[object Object]": a lookup shows its name (or label), a Money
+ * object its amount, anything else nothing (see {@link objectCellText}).
  */
 export function renderCellValue(value: unknown, renderer: string, formattedLabel?: string): string {
   if (value === null || value === undefined || value === '') return '';
   if (formattedLabel && usesFormattedLabel(value, renderer)) {
     return formattedLabel;
+  }
+  // An object (not a Date; not Money, which the currency branch reads) has no label here: show its name or nothing.
+  if (typeof value === 'object' && !(value instanceof Date) && renderer !== 'currency') {
+    return objectCellText(value);
   }
   switch (renderer) {
     case 'currency': {
@@ -768,7 +780,7 @@ export function renderCellValue(value: unknown, renderer: string, formattedLabel
           : typeof value === 'number'
             ? value
             : Number(value);
-      if (Number.isNaN(num)) return String(value);
+      if (Number.isNaN(num)) return typeof value === 'object' ? objectCellText(value) : String(value);
       return new Intl.NumberFormat(undefined, {
         style: 'currency',
         currency: 'USD',
@@ -808,14 +820,8 @@ export function renderCellValue(value: unknown, renderer: string, formattedLabel
         return String(value);
       }
     }
-    default: {
-      if (typeof value === 'object') {
-        const v = value as Record<string, unknown>;
-        if (typeof v.name === 'string') return v.name;
-        return JSON.stringify(value);
-      }
+    default:
       return String(value);
-    }
   }
 }
 
@@ -894,17 +900,34 @@ export function compareColumnValues(
 }
 
 /**
- * The CSV text for one cell when the grid owns how it is written (task 033): a Money column exports exactly what the
- * cell displays (the same {@link renderCellValue} + {@link formattedLabelOf} path), so "$1,200.00" is not exported as
- * `{"value":1200,"extensionData":null}` or a bare `1200`. Every other column returns undefined, which leaves
- * {@link exportCsv}'s own formatting untouched.
+ * The CSV text for one cell: the text the grid draws for it (task 033 Money; D-34 #3045 every column). Goes through the
+ * same {@link renderCellValue} + {@link formattedLabelOf} path as the cell, so an option set exports its label
+ * ("Draft"), a lookup its name, a Money cell "$1,200.00", and an object with no label nothing, never
+ * `{"value":1,"extensionData":null}`. The primary-name column is drawn with the 'default' renderer, so it exports as that.
+ *
+ * A date column exports the date the grid draws (owner decision 2026-11-24: dates are exported as shown, not as the
+ * raw UTC timestamp), so a Date Only value keeps its calendar day and a date-time shows the viewer's local time. An
+ * invalid date is an empty field, never "Invalid Date".
+ *
+ * Returns undefined (the export keeps `exportCsv`'s own formatting of the raw value) for a plain value in a percentage
+ * column (a spreadsheet wants the 0-1 fraction) and for a `Date` instance in a column that is not a date column. A
+ * plain string, number or boolean with no label yields the text the default formatting would write, so those are
+ * byte-identical to the old export.
  */
-export function moneyExportText(
+export function cellExportText(
   record: Record<string, unknown>,
-  column: { name: string; renderer: string }
+  column: { name: string; renderer: string; isPrimaryName?: boolean }
 ): string | undefined {
-  if (column.renderer !== 'currency') return undefined;
-  return renderCellValue(record[column.name], column.renderer, formattedLabelOf(record, column.name));
+  const value = record[column.name];
+  const renderer = column.isPrimaryName ? 'default' : column.renderer;
+  if (DATE_RENDERERS.has(renderer)) {
+    const shown = renderCellValue(value, renderer, formattedLabelOf(record, column.name));
+    return shown === 'Invalid Date' ? '' : shown;
+  }
+  if (value instanceof Date) return undefined;
+  const isObject = typeof value === 'object' && value !== null;
+  if (!isObject && CLIENT_FORMATTED_RENDERERS.has(renderer)) return undefined;
+  return renderCellValue(value, renderer, formattedLabelOf(record, column.name));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1466,6 +1489,32 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   );
   const effectiveRecordOpen = onRecordOpen ?? defaultRecordOpen;
 
+  // Export to Excel writes each cell as the grid draws it (cellExportText). A column the host draws with its own
+  // `overrides.columnRenderers` entry is exported as that entry's text: it is called with the arguments the cell
+  // render uses, and a string it returns IS the cell text. When it returns something else (a React node has no text to
+  // read), an object value (an option set, a lookup), a Money column and a date column still export the text the grid
+  // would draw, never JSON; any other value keeps the raw-value export (task 033 K2).
+  const hostColumnRenderers = resolved?.overrides.columnRenderers;
+  const exportCellText = React.useCallback<ExportCellText>(
+    (record, column) => {
+      const hostRenderer = column.isPrimaryName ? undefined : hostColumnRenderers?.[column.name];
+      if (!hostRenderer) return cellExportText(record, column);
+      let drawn: unknown;
+      try {
+        drawn = hostRenderer(record[column.name], record);
+      } catch {
+        drawn = undefined; // a renderer that throws on an export call is treated as drawing no text
+      }
+      if (typeof drawn === 'string') return drawn;
+      const value = record[column.name];
+      const isObject = typeof value === 'object' && value !== null && !(value instanceof Date);
+      return isObject || column.renderer === 'currency' || DATE_RENDERERS.has(column.renderer)
+        ? cellExportText(record, column)
+        : undefined;
+    },
+    [hostColumnRenderers]
+  );
+
   const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(() => {
     if (!resolved) return [];
     const columns = visibleColumns.map(col =>
@@ -1941,7 +1990,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             selectedIds={Array.from(selectedRowIds).map(String)}
             records={records}
             columns={visibleColumns}
-            exportCellText={moneyExportText}
+            exportCellText={exportCellText}
             currentView={contextValue.currentView}
             refresh={refresh}
             theme={theme}
