@@ -1533,12 +1533,11 @@ public sealed class DecisionRecordWriter
             // caller can tell it from proven other content (ebilling-r1 164a fix round K2). The rules are shared with the Procedure entry
             // (AlreadyRecordedOrRefuse, task 084h-1 fix round 1); the messages are billing's own. PreflightBillingRepeat applies the same rules,
             // with the same messages, to a stored record a caller read before its own writes (ebilling-r1 iss029).
-            const string otherCodeRefusal = BillingOtherCodeRefusal;
             var (existing, hash) = AlreadyRecordedOrRefuse(
                 recorded,
                 request.ActionCode,
                 () => BillingDecisionHash(request),
-                otherCodeRefusal,
+                BillingOtherCodeRefusal,
                 BillingOtherContentRefusal,
                 BillingContentUnreadableRefusal);
 
@@ -1571,7 +1570,7 @@ public sealed class DecisionRecordWriter
                 // above (another code, other content or an unreadable hash refused; the same code and hash answered), on this decision's hash.
                 var stored = await FindBillingRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
                 var (found, _) = AlreadyRecordedOrRefuse(
-                    stored, request.ActionCode, () => hash, otherCodeRefusal, BillingOtherContentRefusal, BillingContentUnreadableRefusal);
+                    stored, request.ActionCode, () => hash, BillingOtherCodeRefusal, BillingOtherContentRefusal, BillingContentUnreadableRefusal);
                 if (found.Id != Guid.Empty)
                 {
                     await ShareIfThisCallsRecordAsync(taken, found.Id).ConfigureAwait(false);

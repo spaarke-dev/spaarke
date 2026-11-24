@@ -61,3 +61,14 @@ After the change, the class has 18 tests, all passing (one route-rendering test 
 
 - **Client (095f-2f scope):** `src/solutions/InvoiceReview` has no handling for `ebilling.decision.id_reused`. The shipped client mints a new `decisionId` per submit and its Repeat resends the exact request, so it cannot reach the 409. A generic 409 shows the server's detail.
 - **No docs under `docs/`** list the line-decision route's answers (grep `ebilling.decision.incomplete` under `docs/` finds nothing). The route description and the service remarks were updated.
+
+## Quality gates (task-execute Step 9.5)
+
+- **code-review** (on the diff, standard depth): no F-class finding. One cleanup was made in a follow-up commit: the redundant local alias `otherCodeRefusal` in `WriteBillingDecisionAsync` was replaced by the hoisted `BillingOtherCodeRefusal`, so the message is byte-identical. Known limits:
+  - K4: `ArgumentNullException.ThrowIfNull` on the non-nullable parameters of `PreflightBillingRepeat`. This follows the file's idiom.
+  - K2: a colleague cannot finish another reviewer's stranded decision under its id. It is now refused with 409 instead of the old 503 that could never complete, the same as the adjustment path's "another reviewer" rule.
+- **adr-check**: no violations.
+  - Compliant: ADR-002 (the writer remains the only owner of the content comparison), ADR-008, ADR-010, ADR-015 (the log carries ids and refusal codes only), ADR-019, ADR-038 (new test in the data-mutation KEEP path; the old test was modified, not deleted).
+  - N/A: ADR-013.
+- **Re-run after the cleanup:** the affected suites (adding `RecordProcedure`) passed 2616 / 2616. BFF build: 0 warnings, 0 errors.
+- **Publish-size delta (root §10 bullet 4): not measured in this sub-agent run.** The change is code-only: no package, asset or DI change. The main session measures it at the PR against a fresh master build.
