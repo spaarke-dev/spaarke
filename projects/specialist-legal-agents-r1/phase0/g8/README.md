@@ -212,6 +212,14 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
       - the test user gets a sign-in card, then data.
     - **Partial:** the owner passes but the test user gets no sign-in card. Then dynamic discovery works, but the OAuth first-run is broken (#16973), and BR-5 keeps pinned tools until a fix.
     - **Fail:** no `tools/list` from Sydney.
+  - **V2 result, owner (2026-11-24 ~18:04Z): ✅** (owner report + App Insights)
+    - The **Data & tools** tab showed the banner "This MCP server uses other tools, which may be changed by the publisher: Spaarke MCP V2", which is the documented dynamic-discovery marker.
+    - App Insights:
+      - 18:04:31 **`tools/list` from Sydney**: the runtime discovery, absent from the pinned agents' runs;
+      - 18:04:34 **one** `tools/call spaarke_show_decisions` (ok, 50 rows, 5.6 s);
+      - 18:04:42–18:04:50, 4 × `spaarke_list_decision_page`: the widget's own calls to app-only tools, which still work under dynamic discovery.
+    - It worked on the first upload with no delay, consistent with the fresh-id runs.
+    - **Still to run:** step 4, the test user who has never signed in (sign-in card, #16973). Also the agent's answer to "Which Spaarke tools can you use?", which should name only `spaarke_show_decisions`.
   - **Measurement caveat:** BFF requests are now sampled at **25%**, so not every call is logged. The `show_decisions` call for this turn is missing. Any logged call carrying `?pkg=1.1.1` is still proof; the absence of one needs several turns.
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.
