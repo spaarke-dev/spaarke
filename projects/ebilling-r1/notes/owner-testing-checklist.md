@@ -194,3 +194,9 @@ Deployed with the owner's go: web resource `sprk_invoicereviewpage` built from m
 - [ ] The resolved UTBMS codes show on the lines (the page reads them from the coding result; ISS-051 is about other readers, not this page).
 - [ ] Dark mode: the page follows it and the PDF page stays light.
 - Optional, changes data (only if you want to try it): decide one line (Accept or Reduce with a reason), then Approve. Approve needs you to be an eligible approver on MAT-000113.
+
+## T. Resolved codes on invoice lines (ISS-051): after the next dev BFF deploy that carries iss051
+Once a dev BFF with iss051 is live, new and corrected lines carry the resolved UTBMS code in their task / activity / expense code fields. Existing lines need a one-off backfill, which is a live dev write that needs your typed OK. Run it only after that BFF is live, because today's dev BFF does not update the fields when a reviewer corrects a code. Report run on 2026-11-24: 80 lines on open (In Review) invoices, 139 fields to set; lines of Sent to AP and Superseded invoices are skipped so they keep matching what AP received.
+- [ ] Owner OK, then `-Apply` and the re-index sweep the script prints.
+- [ ] Open INV-123.1's lines in Spaarke: the Task / Activity / Expense code columns show codes.
+- [ ] After the next AP export of a coded invoice, the export file carries the resolved code, not the firm's own text.
