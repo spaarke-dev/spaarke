@@ -284,6 +284,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔄 203 | [Wording tells the truth: rule wizard display names + no raw plan codes; decision wizard state labels + Assign Task text; Worklist summary names two lanes (DI-157, DI-159, DI-161)](203-admin-and-decision-wording-truth.poml) | FULL | sonnet/high | none | 185-fixes | Owner 2026-11-23 "continue with other tasks so we can make progress"; #2945 #2950 #2952; UAT paths (105). PR to master |
 | ✅ 204 | [Nightly D-170 close pages not-in-force policies and reports a truncated read (DI-162)](204-signal-close-pages-not-in-force-policies.poml) | FULL | sonnet/high | none | 185-fixes | #2982 (ebilling ISS-044). Silent skip past 5,000 Off/Inactive policies. PR to master |
 | 🔄 205 | [A row decision closes its items in batches (DI-146)](205-decision-commit-batches-row-closes.poml) | FULL | opus/high | none | 185-fixes | #2650. 18 items took 41.7 s / 315 Dataverse calls on dev; target at most 3 calls per extra item. PR to master |
+| 🔲 206 | [Plan refusal on the admin Rules page is logged and counted; authoring names the real refusal (#3034)](206-plan-refusal-trace-and-authoring-messages.poml) | FULL | sonnet/high | 203, 204 | 185-fixes | uac-r2 pre-deploy review of 203-205. PR to master |
 
 ### Phase 5 — The worklist surface
 

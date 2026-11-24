@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="206" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A plan refused on the admin Rules page is logged and counted again; authoring names the real refusal; the policy-order comment tells the truth (#3034, uac-r2 review of 203-205)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF ontology/Signals services (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three located defects with stated fixes in #3034; small diff.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No open ontology PR touches these files.</parallel-reason>
+    <deps>203, 204</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>uac-r2 pre-deploy review of tasks 203-205 on master filed issue #3034 (read it in full: gh issue view 3034). Three items:
+(1) Should-fix. `src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminRulesService.cs` `ResolvePlan` (~730) calls the static `DecisionPlanService.Resolve`, which neither logs `OntologyWriterEvents.DecisionPlanRefused` nor counts `ontology.decisionplan.refused`; only the instance `GetAsync` path does (`Services/Signals/Actions/DecisionPlanService.cs` ~99-103). The comment at ~733 claims it is counted and logged. Task 203 removed the reason code from the admin sentence, so a refused stored plan now leaves no trace.
+(2) Nit. `OntologyAdminAuthoringService.cs` ~1639: one "lane" sentence ("This plan lists an action that can't be used in this rule's lane") covers PlanMalformed, UnknownAction and a non-next-step code in nextSteps, and sets no ReasonCode. Example: `{"actions":"assign-task"}` reports a lane problem.
+(3) Nit. `SignalReevaluationJob.cs` ~1274: enabled policies are now sorted OrdinalIgnoreCase (task 204), not in Dataverse collation; the doc comment says the order is unchanged.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, ontology admin and Signals services, OpenTelemetry metrics.</role>
+  <goal>A refused stored plan on the admin Rules page is logged (event DecisionPlanRefused, with the reason) and counted (ontology.decisionplan.refused, reason tag) exactly as the decision path does; each authoring refusal gets a plain sentence that names what is actually wrong; the job's comment says what the sort does.</goal>
+  <context>
+    <background>Reuse, don't fork: prefer a small shared helper in DecisionPlanService that both GetAsync and the admin path call to record a refusal (the static Resolve stays pure). The admin page renders often: confirm the counter is not double-counted for one page load (one row, one count) and decide whether to tag the source (e.g. surface=admin) only if the metric already has a matching tag pattern; otherwise keep the existing tags. Plain-language sentences follow task 203's style (no internal codes in what the user reads); API reason codes stay as they are; set the existing ReasonCode where the other branches set one.</background>
+  </context>
+  <constraints>
+    <constraint source="project">No change to plan validation, refusal codes, API reason codes or the admin view shape; only logging/counting, the sentence choice and a comment.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration; a private/internal helper is enough.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="ADR-038">Tests fail on origin/master: the admin path logs and counts a refused plan with its reason; each of PlanMalformed, UnknownAction and the nextSteps misplacement gets its own sentence; the lane case still gets the lane sentence.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Failing tests for (1) and (2).</step>
+    <step order="2">Fix (1) with a shared refusal-recording helper; fix (2) with one sentence per refusal; fix (3) comment.</step>
+    <step order="3">Filtered tests (OntologyAdmin, DecisionPlan, SignalReevaluation), full ArchTests, BFF build, publish-size delta.</step>
+    <step order="4">PR to master, body "Closes #3034"; notes in notes/task-206-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A refused stored plan on the admin Rules path emits DecisionPlanRefused with the reason and increments ontology.decisionplan.refused once with the reason tag; the comment is true; test fails on origin/master.</criterion>
+    <criterion testable="true">Authoring: PlanMalformed, UnknownAction and a non-next-step code in nextSteps each get a distinct plain sentence with no internal code; the lane case keeps the lane sentence; ReasonCode set consistently with the sibling branches.</criterion>
+    <criterion testable="true">SignalReevaluationJob comment describes the OrdinalIgnoreCase order; no behaviour change.</criterion>
+    <criterion testable="true">Build, filtered tests, full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a new metric, an API reason-code change or a new endpoint: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt206); PR to master.</protocol>
+  </execution>
+</task>
