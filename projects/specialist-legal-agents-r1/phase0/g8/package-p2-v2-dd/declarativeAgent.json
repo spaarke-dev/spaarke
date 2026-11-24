@@ -1,0 +1,23 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.6/schema.json",
+  "version": "v1.6",
+  "name": "spaarke-legal-g8p2-dd",
+  "description": "Phase 0 test V2. Spaarke MCP tools discovered at runtime through this agent's own action. Not for real work.",
+  "instructions": "You help the user see their Spaarke decisions. When the user asks to see their Spaarke decisions, their Decide lane, or the work items waiting for their decision, use the Spaarke MCP action and call its tool for showing decisions once. Then summarise the counts per category and the top items it returns. If the user asks which Spaarke tools you have, list the tool names exactly as you see them. This is a Phase 0 platform test: only read. Never complete, dismiss or change a decision. If the action returns an error, quote the error.",
+  "conversation_starters": [
+    {
+      "title": "My decisions",
+      "text": "Show my Spaarke decisions"
+    },
+    {
+      "title": "Which tools",
+      "text": "Which Spaarke tools can you use?"
+    }
+  ],
+  "actions": [
+    {
+      "id": "spaarkeMcpG8p2dd",
+      "file": "ai-plugin.json"
+    }
+  ]
+}

@@ -197,6 +197,21 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
     - **Discriminators, if wanted (each needs a fresh id and an R4 row):**
       - **(a)** a fresh id whose **first** upload uses the `?pkg=` URL. If it works, query strings are fine and H1 holds.
       - **(b)** a fresh id, then an update that changes **only** the description or version. If the action survives, non-action updates are safe.
+  - **V2 dynamic discovery (prepared 2026-11-24):**
+    - **Package:** `package-p2-v2-dd/` → `spaarke-legal-g8p2-dd-1.0.0.zip`. Fresh id `cb5afd1c-…`, same server and auth config as the working agent. `functions: []`, `run_for_functions: ["*"]`, no `mcp-tools.json`.
+    - The model can only see `spaarke_show_decisions`. The four other tools are widget-only, and the server refuses to start with a model-callable write tool.
+    - **Steps:**
+      - (1) Admin center: upload as a **new** agent; owner + test user only.
+      - (2) **Data & tools** tab: note whether the dynamic-discovery banner shows.
+      - (3) Owner, new chat: "Which Spaarke tools can you use?", then "Show my Spaarke decisions". Note the times.
+      - (4) **Test user** (`demo@…`, never signed in to this agent): the same two questions. Note whether a **sign-in card** appears (#16973 says it may not).
+    - **Pass:**
+      - App Insights shows `tools/list` from Sydney, then `tools/call spaarke_show_decisions`;
+      - the widget renders, and its own calls (`spaarke_list_decision_page` etc.) work;
+      - the agent names only `spaarke_show_decisions`;
+      - the test user gets a sign-in card, then data.
+    - **Partial:** the owner passes but the test user gets no sign-in card. Then dynamic discovery works, but the OAuth first-run is broken (#16973), and BR-5 keeps pinned tools until a fix.
+    - **Fail:** no `tools/list` from Sydney.
   - **Measurement caveat:** BFF requests are now sampled at **25%**, so not every call is logged. The `show_decisions` call for this turn is missing. Any logged call carrying `?pkg=1.1.1` is still proof; the absence of one needs several turns.
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.
@@ -252,6 +267,7 @@ az monitor app-insights query --apps $id --offset 3h --analytics-query "requests
 | G8-p2-sl | `spaarke-legal-g8p2-sl` (app id `d38f8df8-d248-4ab9-9c3d-4f7e6b513b19`) | Same as G8-p2 (action on `/mcp/legal-operations`, `OAuthPluginVault` = A1), namespace `spaarkeg8sl`, pinned `spaarke_show_decisions`. **Personal sideload, owner only** (not org catalog) | specialist-legal-agents-r1 | G8-P2 with a fresh app id. **Route changed 2026-11-24: org catalog, owner + test user only (R7)**, not a sideload | **PLANNED → REMOVE** (throwaway) | Owner removes it in admin center by **2026-11-30** |
 | G8-p2-sl-learn | `spaarke-legal-g8p2-sl-learn` (app id `125c3b10-1833-468f-8141-6c54b8ab2085`) | Control: same agent, action on Microsoft's public Learn MCP server, auth None. **Personal sideload, owner only** | specialist-legal-agents-r1 | Same, with no Spaarke server or OAuth involved | **DROPPED** (not needed, never uploaded) | Nothing to remove |
 | G8-p2-org-learn | `spaarke-legal-g8p2-org-learn` (app id `0421c980-686d-4953-b817-c4b4960c8d17`) | Same Learn control, namespace `learnorg`. **Org catalog, owner + test user only (R7)** | specialist-legal-agents-r1 | Route discriminator: org catalog with a fresh id | **PLANNED → REMOVE** (throwaway) | Owner removes it in admin center by **2026-11-30** |
+| G8-p2-dd (V2) | `spaarke-legal-g8p2-dd` (app id `cb5afd1c-c0ef-409a-a2a7-fe7e00ddafa5`) | Own RemoteMCPServer action on `/mcp/legal-operations`, A1 `reference_id`, **dynamic discovery** (`functions: []`, `run_for_functions: ["*"]`), namespace `spaarkeg8dd`. **Org catalog, owner + test user only (R7)** | specialist-legal-agents-r1 | Test V2: runtime tool discovery with OAuth | **PLANNED → REMOVE** (throwaway). R4 row sent 2026-11-24 | Owner removes it in admin center by **2026-11-30** |
 
 ## Result (filled in after the run)
 

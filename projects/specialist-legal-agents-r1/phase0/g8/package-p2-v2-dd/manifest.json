@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.25/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.25",
+  "version": "1.0.0",
+  "id": "cb5afd1c-c0ef-409a-a2a7-fe7e00ddafa5",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://www.example.com",
+    "privacyUrl": "https://www.example.com/privacy",
+    "termsOfUseUrl": "https://www.example.com/termsofuse"
+  },
+  "name": {
+    "short": "spaarke-legal-g8p2-dd",
+    "full": "Spaarke legal G8-P2 V2 test (dynamic tool discovery, Phase 0)"
+  },
+  "description": {
+    "short": "Phase 0 platform test. Not for real work.",
+    "full": "Phase 0 test V2 for the specialist legal agents program: does a declarative agent whose Spaarke MCP action uses dynamic tool discovery with OAuth load its tools at runtime and render the decisions widget? Read-only. Throwaway; removed when V2 is recorded."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0F6CBD",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "g8p2ddAgent",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["spaarke-bff-dev.azurewebsites.net"]
+}
