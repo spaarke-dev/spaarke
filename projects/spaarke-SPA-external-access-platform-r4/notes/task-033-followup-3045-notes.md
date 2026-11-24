@@ -122,7 +122,7 @@ Known limits after this round: dates and percentages still export the raw ISO da
 
 ## Round 3: owner decisions (2026-11-24)
 
-The owner answered the two open questions: "dates should be formatted as shown not raw utc", and fix the export text-hardening finding in this PR (the finding's detail is tracked outside the repo; it predates task 033).
+The owner answered the two open questions: "dates should be formatted as shown not raw utc", and fix the export text-hardening finding in this PR (the finding's detail was reported to the owner privately; it predates task 033).
 
 **Dates.** `cellExportText` (`DataGrid.tsx`) now returns the text `renderCellValue` draws for the `date`, `dateonly` and `datetime` renderers: a Date Only value keeps its calendar day (task 098 rule), a date-time is the viewer's local date and time, and the client format still wins over a server label, as on screen. An empty or invalid date is an empty field (never "Invalid Date"). The host-renderer branch of the grid's `exportCellText` treats a date column like Money: an element-returning host renderer still exports the date the grid would draw. Percentages keep the 0-1 fraction, and a `Date` instance in a non-date column keeps `exportCsv`'s ISO text.
 
@@ -145,3 +145,19 @@ The owner answered the two open questions: "dates should be formatted as shown n
 | `external-spa`: `npx vitest run ReviewDetail GridWidgetBody` | 2 files, 44 / 44 |
 
 Known limits now: percentages export the 0-1 fraction; an unlabelled currency cell is USD (D-35 #3046); a host renderer that returns an element for a primitive, non-date value keeps the raw value; an exported date is the viewer's locale text, so a spreadsheet in another locale may read it as text; not verified on a live dev grid.
+
+## Round 3 review (opus, one independent pass, 2026-11-24)
+
+The export text-hardening detail was reported to the owner privately, not in the repo (public repository); only the behaviour is recorded here.
+
+**F1 fixed.** `asSpreadsheetText` now also checks each part of a field after a `;`, tab or line break, and covers the full-width forms of the lead characters. Ordinary text and signed amounts are unchanged. Tests in `csvExport.test.ts` (must-fire per separator and full-width form; must-not-fire for ordinary text and amounts after a separator). Fail before: the previous guard left those inputs unchanged.
+
+**F2 fixed.** The Date Only export assertion moved to `dateOnlyColumns.tz.test.ts` (America/New_York environment), so a UTC CI runner cannot pass it trivially; it also asserts the result is not the previous day.
+
+**Known limits (K):**
+- An exported date is the viewer's locale text (owner decision "as shown"), so a spreadsheet set to another locale may read a day/month date differently (for example `10/2/2026`). Raised with the owner: keep as shown, or write Date Only values as `yyyy-mm-dd`.
+- A phone number such as `+1 (555) 123-4567` is exported with a leading apostrophe.
+- The task 032 test helper `applyTextFilter` reopens the filter popover (at most 3 times), so no test pins "the first open stays open".
+- Further hardening notes were reported to the owner privately.
+
+Checks after the fixes: grid jest 26 suites, 299 / 299; tsc exit 0; eslint 0 errors; prettier clean.

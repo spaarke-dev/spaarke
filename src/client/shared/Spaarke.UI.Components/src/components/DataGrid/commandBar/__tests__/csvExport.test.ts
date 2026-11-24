@@ -164,6 +164,27 @@ describe('asSpreadsheetText', () => {
     expect(asSpreadsheetText('+1e5x')).toBe("'+1e5x");
   });
 
+  it('must-fire: the full-width forms of = + - @ are treated the same', () => {
+    for (const lead of ['＝', '＋', '－', '＠']) {
+      expect(asSpreadsheetText(`${lead}1+1`)).toBe(`'${lead}1+1`);
+    }
+  });
+
+  it('must-fire: a part after a semicolon, tab or line break is checked as if it began a cell', () => {
+    expect(asSpreadsheetText('Acme;=1+1')).toBe("Acme;'=1+1");
+    expect(asSpreadsheetText('a;b;@x')).toBe("a;b;'@x");
+    expect(asSpreadsheetText('note\t+1+1')).toBe("note\t'+1+1");
+    expect(asSpreadsheetText('line one\r\n=1+1')).toBe("line one\r\n'=1+1");
+    expect(asSpreadsheetText('line one\n-2+3')).toBe("line one\n'-2+3");
+    expect(asSpreadsheetText('=a;=b')).toBe("'=a;'=b");
+  });
+
+  it('must-not-fire: separators followed by ordinary text or a signed amount are unchanged', () => {
+    for (const text of ['Acme; Inc', 'a;b', 'total;-$1,200.00', 'line one\r\nline two', 'x\t-5', 'a;-']) {
+      expect(asSpreadsheetText(text)).toBe(text);
+    }
+  });
+
   it('must-not-fire: signed amounts, exponent numbers, a lone sign and ordinary text are unchanged', () => {
     for (const text of [
       '-$1,200.00',
@@ -193,6 +214,9 @@ describe('escapeCsvField — text a spreadsheet would evaluate', () => {
     expect(escapeCsvField('@A1')).toBe("'@A1");
     expect(escapeCsvField('=A1,B1')).toBe(`"'=A1,B1"`);
     expect(escapeCsvField('=say "hi"')).toBe(`"'=say ""hi"""`);
+    // No comma, quote or line break: written unquoted, so the part after ";" must carry its own apostrophe.
+    expect(escapeCsvField('Acme;=1+1')).toBe("Acme;'=1+1");
+    expect(escapeCsvField('a\n=1')).toBe(`"a\n'=1"`);
   });
 
   it('applies to an object cell read through its name or label', () => {

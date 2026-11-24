@@ -261,12 +261,6 @@ describe('cellExportText — every column exports the text the cell shows (D-34,
     expect(cellExportText({ c: instant }, col('datetime'))).toBe(instant.toLocaleString());
   });
 
-  it('a Date Only value exports its calendar day, never the previous day (task 098 rule)', () => {
-    const record = { c: '2026-10-02' };
-    expect(cellExportText(record, col('dateonly'))).toBe(new Date(2026, 9, 2).toLocaleDateString());
-    expect(cellExportText(record, col('date'))).toBe(new Date(2026, 9, 2).toLocaleDateString());
-  });
-
   it('an empty or invalid date exports as an empty field, never "Invalid Date"', () => {
     for (const renderer of ['date', 'dateonly', 'datetime']) {
       expect(cellExportText({ c: null }, col(renderer))).toBe('');

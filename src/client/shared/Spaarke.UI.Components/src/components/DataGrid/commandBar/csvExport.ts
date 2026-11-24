@@ -41,8 +41,18 @@ const CRLF = '\r\n';
  */
 export type ExportCellText = (record: Record<string, unknown>, column: ResolvedColumn) => string | undefined;
 
-/** Leading characters with which a spreadsheet starts evaluating a cell instead of showing it. */
-const EVALUATED_LEAD = /^[=+\-@\t\r]/;
+/**
+ * Leading characters with which a spreadsheet starts evaluating a cell instead of showing it, including their
+ * full-width forms (U+FF1D, U+FF0B, U+FF0D, U+FF20).
+ */
+const EVALUATED_LEAD = /^[=+\-@\t\r＝＋－＠]/;
+
+/**
+ * Where a spreadsheet may start a new cell or row inside one exported field: after a semicolon (the list separator
+ * Excel uses in many regions when it opens a comma file), a tab, or a line break (a quote that is not at the start of
+ * a cell does not hold a field together). Each part after one of these is checked as if it began a cell.
+ */
+const CELL_BREAK_AFTER = /(?<=[;\t\r\n])/;
 
 /**
  * A signed amount as text ("-$1,200.00", "-1.200,00 €", "+5%", "-12"): a sign, then only digits, separators, spaces,
@@ -55,14 +65,20 @@ const SIGNED_AMOUNT_TEXT = /^[+-](?:[\d\s.,'()%\p{Sc}]*\d[\d\s.,'()%\p{Sc}]*)?$/
 const SIGNED_EXPONENT_TEXT = /^[+-](\d+\.?\d*|\.\d+)e[+-]?\d+$/i;
 
 /**
- * The text a spreadsheet shows as written: one that would otherwise be evaluated gets a leading apostrophe, the
- * usual spreadsheet marker for "this is text". Signed amounts and every other text are unchanged.
+ * The text a spreadsheet shows as written: the field, and each part of it after a semicolon, tab or line break
+ * ({@link CELL_BREAK_AFTER}), that would otherwise be evaluated gets a leading apostrophe, the usual spreadsheet marker
+ * for "this is text". Signed amounts and every other text are unchanged.
  *
  * Exported for unit testing.
  */
 export function asSpreadsheetText(str: string): string {
-  if (!EVALUATED_LEAD.test(str) || SIGNED_AMOUNT_TEXT.test(str) || SIGNED_EXPONENT_TEXT.test(str)) return str;
-  return "'" + str;
+  return str.split(CELL_BREAK_AFTER).map(asCellText).join('');
+}
+
+/** One part of a field as text: an apostrophe before an evaluated lead, unless it is a signed amount. */
+function asCellText(part: string): string {
+  if (!EVALUATED_LEAD.test(part) || SIGNED_AMOUNT_TEXT.test(part) || SIGNED_EXPONENT_TEXT.test(part)) return part;
+  return "'" + part;
 }
 
 /**
