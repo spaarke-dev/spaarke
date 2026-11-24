@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: #3051 and #3065 merged; issue batch 2 (iss050, iss047, iss041) running in agents; checklist Q re-run pending with the owner)
+> **Last Updated:** 2026-11-24 (checkpoint: issue batch 2 merged into work, master PR #3073 open; checklist Q re-run pending with the owner) running in agents; checklist Q re-run pending with the owner)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,7 +10,16 @@
 
 ## Quick recovery
 
-- **Issue batch 2 in flight (2026-11-24):** POMLs iss050 (#3059, lock renewal, Opus), iss047 (#3042, drift-check id grammar, Sonnet), iss041 (#2930, finish-decision notify after reload, client-only option a, Sonnet). Implementer agents in worktrees on branches `task/ebilling-iss050`, `-iss047`, `-iss041`, base b4746e24df (work after merging master 20129e985c). Next: adversarial review each (Opus for iss050, Sonnet for the others) → fix rounds → `--no-ff` merge into work.
+- **Master PR #3073 OPEN (2026-11-24):** issue batch 2, all merged into work and reviewed.
+  - iss050 (#3059): lock renewal; merged 7da8f29320 after an Opus review, fix rounds 1-2 and a Sonnet re-check.
+  - iss041 (#2930): finish-decision notice after a reload; merged efab4736b6 after a Sonnet review, fix round 1 and a re-check PASS.
+  - iss047 (#3042): drift-check id grammar; merged 219c0c6207 after a Sonnet review and fix round 1.
+  - Work tip: build 0 warnings; filtered InvoiceLineDecision|InvoiceApproval tests 439/0; no overlap with open PRs.
+  - Not bound and no auto-merge. Merge as a merge commit once CI passes and the owner says go. Do not push new work to work/ebilling-r1 while #3073 is open, unless it should join that PR.
+- **Index after the fixed drift check:**
+  - 0 status drifts. The 8 POMLs it exposed (084h-1, 095c-5, 130-0, 130-0b, 130e-1, 151c-1a/1b/2) were set to completed; each merge sha was verified as an ancestor.
+  - 27 unpaired entries remain: 25 index sub-rows without a POML, plus 095d-1 and 095d-2. The POMLs say not-started, but the 095d row says 1a/1b/1c and 2b-* are merged. Resolve them from evidence.
+- **Agent worktrees locked by the app (pid 39572):** agent-a31ddd127a439f9dd (iss041), agent-a73718461abbfd6a5, agent-afe7e9fefac5f933f. All are pushed. Remove them with Remove-WorktreeSafe once unlocked.
 - **Master PR #3065 MERGED** 2026-11-24 16:53Z at 6d167e0646 (owner: "Yes, auto-merge"): iss027 (#2878), iss042 (#2933), iss043 (#2978 + #2889), iss029 (#2880), all closed. Found in passing and filed: ISS-049 #3057, ISS-050 #3059. Label wording "Line date" / "Description" kept (owner, EB-D-268).
 - **Master PR #3051 MERGED** 2026-11-24 15:14Z at cf1b7027ce (owner: "Yes, merge #3051"): iss048, iss046 (#3001), the rule-type options script fix. iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
 - **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
