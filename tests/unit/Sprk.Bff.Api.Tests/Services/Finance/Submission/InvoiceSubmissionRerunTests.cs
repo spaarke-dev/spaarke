@@ -98,6 +98,7 @@ public sealed partial class InvoiceSubmissionRerunTests
         [
             InvoiceSubmissionPersister.LineResolvedTimekeeper, InvoiceSubmissionPersister.LineApprovedRate, InvoiceSubmissionPersister.LineCodingConfidence,
             InvoiceTotalsService.LineStatus, InvoiceSubmissionPersister.LineExtractionConfidence,
+            InvoiceSubmissionPersister.LineTaskCode, InvoiceSubmissionPersister.LineActivityCode, InvoiceSubmissionPersister.LineExpenseCode, // ISS-051: derived from the coding
         ]);
         ((UpdateRequest)commit[1]).Target.Attributes.Keys.Should().BeEquivalentTo([InvoiceFirmHold.InvoiceHoldColumn, InvoiceReviewDetail.Column]);
     }
@@ -651,6 +652,36 @@ public sealed partial class InvoiceSubmissionRerunTests
         changed.Processor.Coding.Request!.Lines.Select(l => l.LineKey).Should().Equal("0");
         changed.Processor.Reads.Should().Be(0);
         changed.Processor.DocumentLoads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "ISS-051: the re-run sets a line's code lookup from the row its stored coding names, clears a lookup with no code, and leaves a code stored with no row as it is")]
+    public async Task TheRerun_KeepsTheCodeLookupsInStepWithTheStoredCoding()
+    {
+        var world = await World.SeedAsync();
+        var taskRow = Guid.Parse("05100000-0000-4000-8000-00000000a110");
+        var line0 = world.Row(world.LineIds[0]);
+        var extraction = JsonNode.Parse(line0.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence))!.AsObject();
+        extraction["coding"]!["task"]![InvoiceSubmissionPersister.CodeIdMember] = taskRow.ToString("D");
+        line0[InvoiceSubmissionPersister.LineExtractionConfidence] = extraction.ToJsonString();
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        var lines = world.Applied.Single().Skip(2).Cast<UpdateRequest>().Select(u => u.Target).ToList();
+        var first = lines.Single(l => l.Id == world.LineIds[0]);
+        first[InvoiceSubmissionPersister.LineTaskCode].Should().BeEquivalentTo(new EntityReference("sprk_billingcode", taskRow));
+        first.Attributes.Should().Contain(InvoiceSubmissionPersister.LineExpenseCode, null, "no expense code, so the lookup is empty");
+        world.Row(world.LineIds[0]).GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineTaskCode)!.Id.Should().Be(taskRow);
+
+        // The stored JSON keeps the row, so a later rebuild sets the same lookup.
+        JsonNode.Parse(world.Row(world.LineIds[0]).GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence))!["coding"]!["task"]!
+            [InvoiceSubmissionPersister.CodeIdMember]!.GetValue<string>().Should().Be(taskRow.ToString("D"));
+
+        // A line whose stored code names no row (stored before ISS-051) does not touch its task lookup (a backfilled value stays).
+        foreach (var other in lines.Where(l => l.Id != world.LineIds[0]))
+        {
+            other.Attributes.ContainsKey(InvoiceSubmissionPersister.LineTaskCode).Should().BeFalse();
+        }
     }
 
     /// <summary>The code set the processor harness's coding service answers with (and intake stored).</summary>

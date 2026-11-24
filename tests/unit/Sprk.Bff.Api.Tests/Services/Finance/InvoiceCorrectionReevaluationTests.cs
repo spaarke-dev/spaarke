@@ -284,6 +284,11 @@ public sealed class InvoiceCorrectionReevaluationTests
         coding["recoded"]!.GetValue<bool>().Should().BeTrue("no AI coded the line");
         coding["task"]!["code"]!.GetValue<string>().Should().Be("L120", "the code as the set spells it");
         StatusOf(world.Line()).Should().Be((int)InvoiceLineStatus.Clean);
+
+        // ISS-051: the re-code sets the task lookup to the code's row in the resolved set, as the JSON records it.
+        var l120 = world.Codes.Single(c => c.GetAttributeValue<string>("sprk_code") == "L120").Id;
+        world.Line().GetAttributeValue<EntityReference>("sprk_taskcode")!.Id.Should().Be(l120);
+        coding["task"]!["codeId"]!.GetValue<string>().Should().Be(l120.ToString("D"));
     }
 
     [Fact]
