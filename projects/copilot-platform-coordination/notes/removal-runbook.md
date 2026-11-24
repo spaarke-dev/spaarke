@@ -11,13 +11,80 @@ Received: Registry "spaarke" (9 rows), Copilot Studio agents, Plugins page, sour
 - "Spaarke AI" has two Registry rows (last updated 2026-10-28 and 2026-10-08) but no version shown. **Still needed:** click each "Spaarke AI" row and screenshot its details pane (version, app id, installed or not).
 - NDA Review, Legal Hold Review and Legal Review are **Agent Builder** agents, not Copilot Studio agents, and are shared with **All users**.
 
+## End-of-testing removal list (written 2026-11-24)
+
+> **Owner direction 2026-11-24** (relayed by specialist-legal-agents-r1): "once we get the testing done we need to remove all plugins/agents/skills etc. that will not be part of our production package".
+> Groups A, B and F follow the removal list you approved on 2026-11-23. Group E (Spaarke AI and its bot) waits for your yes.
+
+**What stays (the production set):**
+- **C1 "Spaarke MCP"**: the federated connector.
+- **C3 "Spaarke"**: the plugin package.
+- **A1**: the Dev Portal OAuth registration.
+- **A2**: the Entra app "Spaarke Copilot Connector – dev".
+
+**Not production, but kept for now:**
+- **S1–S4**, the accelerator skills. They become the `spaarke-*` plugin after the rename; the old-name folders are removed then.
+- **D5 "Spaarke Dataverse MCP"**, until you name the project that owns it.
+
+Everything else is listed below. After each step, send "done" or a screenshot, and I'll move the row to "Removed".
+
+### A. Test agents: by 2026-11-30 (testing is finished)
+
+| # | What | Where / how |
+|---|---|---|
+| A1 | **G8-p2** `spaarke-legal-g8p2-test` (app id `802fd9cc…`) | Admin center › **Agents › Tools** › select › **Uninstall**, then **Delete**. Then check that **Agents › All agents › Registry** no longer lists it; if it does, select it › **Delete** |
+| A2 | **G8-p2-sl** `spaarke-legal-g8p2-sl` (`d38f8df8…`) | As A1 |
+| A3 | **G8-p2-org-learn** `spaarke-legal-g8p2-org-learn` (`0421c980…`) | As A1 |
+| A4 | **G8-p2-dd** `spaarke-legal-g8p2-dd` (`cb5afd1c…`) | As A1 |
+| A5 | **G8-a** `spaarke-legal-g8-ab-test` (Agent Builder), with its two skills `spaarke-mcp-operations` and `spaarke-tool-test` | Admin center › **Agents › All agents › Registry** › select › **Delete**, or Copilot › the agent › **…** › Delete. If the two skills also appear in your skills list outside the agent: **…** › **Remove** |
+
+Before you start, ask the specialist session whether any test still needs one of these (for example the open `?pkg=` question). Uninstalling them does **not** affect C1 or A1. The agents reused A1's sign-in setup, but no agent owns it.
+
+### B. Now
+
+| # | What | Where / how |
+|---|---|---|
+| B1 | **S5 `spaarke-visual-probe`** skill | Same as step 1 below |
+
+### C. On a trigger
+
+| # | What | Trigger |
+|---|---|---|
+| C1 | **P1 "Spaarke Word Probe"** plugin | Same day as the accelerator's Word tests (step 4 below) |
+| C2 | **D2–D4** NDA Review, Legal Hold Review, Legal Review (Agent Builder, shared with All users) | When their replacement practice agent ships (step 6 below) |
+
+### D. Your decision
+
+| # | What | Choice |
+|---|---|---|
+| D1 | **D6/D7** "Copilot in Power Apps" drafts | Delete or keep (step 7 below). They aren't production, so under your direction they go unless someone uses them |
+
+### E. Needs your yes: "Spaarke AI" and its bot
+
+| # | What | Where / how |
+|---|---|---|
+| E1 | **D1 "Spaarke AI", both Registry rows** (last updated 2026-10-28 and 2026-10-08) | Admin center › **Agents › All agents › Registry** › select each › **Uninstall** (if installed), then **Delete**. If it also appears under **Agents › Tools**, uninstall and delete it there too. This replaces step 3 below: there's no need to tell the rows apart if both go |
+| E2 | **A3, the bot behind D1:** Azure Bot `spaarke-bot-dev`, its bot OAuth connection, and Entra app `f257a0a9…` ("Spaarke AI Assistant") | **After E1.** Azure portal › the Bot resource › **OAuth Connection Settings** › delete the connection; then delete the Bot resource. Then Entra › **App registrations** › `f257a0a9…` › **Delete**. **Leave any Key Vault secret for this app alone:** deleting a secret follows root CLAUDE.md §9 and `.claude/constraints/provisioning.md`, as a separate step |
+
+What E removes, and what it doesn't:
+- **Code stays.** The source in `src/solutions/CopilotAgent/` remains as the MCP tool-parity checklist.
+- **Two code follow-ups, not tenant actions:** the BFF's `/api/agent/*` gateway loses its only Copilot caller, and `infrastructure/bot-service/` loses its resource.
+
+### F. Checks
+
+| # | What |
+|---|---|
+| F1 | **Agents › Tools › Registry** no longer lists "Spaarke MCP spike A/B" as MCP servers (X3) |
+| F2 | **Agents › Tools**: `spaarke-nda-mvp` is gone (X1) |
+| F3 | **C3 "Spaarke"**: its **Users** tab shows only you and the test user (R7) |
+
 ## Now
 
 | # | What | Where / how | Notes |
 |---|---|---|---|
 | 1 | **S5 `spaarke-visual-probe`** skill (confirmed present 2026-11-23) | OneDrive › `Documents/Cowork/Skills/spaarke-visual-probe` › delete the folder. Then check it is gone from the skills list (if it is still there: **…** › **Remove**) | Per-user skill folder; only your account sees it. Active Cowork conversations keep it until they end |
 | 2 | ~~D5 duplicate "Spaarke Dataverse MCP"~~ | **Cancelled 2026-11-23**: only one copy exists (Copilot Studio, Registry). Nothing to delete | Still open: which project owns it |
-| 3 | **D1 stale "Spaarke AI" registration** | After the details-pane screenshot, I'll name the row. Then admin center › **Agents › All agents › Registry** › select it › **Uninstall** (if installed) and then **Delete** | Master's manifest is still `1.1.0`. Likely keep the installed v1.1.0 and delete the uploaded-but-not-installed v1.5.0. provisioning-r1 confirmed neither row is theirs (2026-11-23). **Whether "Spaarke AI" stays at all is still your decision** |
+| 3 | **D1 stale "Spaarke AI" registration**. *Superseded by E1 if you say yes: both rows go* | After the details-pane screenshot, I'll name the row. Then admin center › **Agents › All agents › Registry** › select it › **Uninstall** (if installed) and then **Delete** | Master's manifest is still `1.1.0`. Likely keep the installed v1.1.0 and delete the uploaded-but-not-installed v1.5.0. provisioning-r1 confirmed neither row is theirs (2026-11-23). **Whether "Spaarke AI" stays at all is still your decision** |
 
 ## On a trigger
 
