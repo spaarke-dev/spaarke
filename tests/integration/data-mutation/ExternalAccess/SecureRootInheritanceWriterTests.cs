@@ -1809,7 +1809,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _writes.Should().BeEmpty("the caller's PATCH is never sent");
     }
 
-    // ── (2) RE-FILE: the playbook output orchestrator's DataverseUpdateHandler ─────────────────────────────────────────
+    // ── (2) RE-FILE: DataverseUpdateHandler ─────────────────────────────────────────
 
     private Task RefileThroughTheUpdateHandler(Guid workAssignment, Guid matter) =>
         new DataverseUpdateHandler(
@@ -2035,7 +2035,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     // ── Task 175 fix round 2 (K3): sprk_issecure is never a generic writer's to set ─────────────────────────────────────
 
     /// <summary>
-    /// K3, the output orchestrator's update handler: a payload that sets <c>sprk_issecure</c> on a work assignment (true or
+    /// K3, DataverseUpdateHandler: a payload that sets <c>sprk_issecure</c> on a work assignment (true or
     /// false) is refused <c>secure_flag_transition_only</c> and nothing is written — only Make Secure / Remove Secure (F3,
     /// with their isolation steps) and the cascade set it.
     /// </summary>

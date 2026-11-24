@@ -29,9 +29,10 @@ const EVIDENCE = [
   { kind: 'matter', ref: `sprk_matter:${MATTER}`, tier: 'Fact', text: null, withheld: true },
 ];
 
-const MODES: ReadonlyArray<readonly [string, 'fullscreen' | 'inline']> = [
-  ['the dialog', 'fullscreen'],
-  ['master-detail', 'inline'],
+// [name, dialogFails]: the dialog is the first place; master-detail is reached when the dialog fails.
+const MODES: ReadonlyArray<readonly [string, boolean]> = [
+  ['the dialog', false],
+  ['master-detail', true],
 ];
 const openLinks = () => screen.queryAllByRole('button', { name: /^open in spaarke/i });
 
@@ -44,7 +45,7 @@ describe('Open in Spaarke on an evidence line', () => {
   it.each(MODES)(
     '%s: a line that names a record opens its Console form through the host, and only that line',
     async (_n, mode) => {
-      const host = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }], { displayMode: mode });
+      const host = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }], { dialogFails: mode });
       mount(host);
       await openItem(1);
 
@@ -59,7 +60,7 @@ describe('Open in Spaarke on an evidence line', () => {
   );
 
   it('the matter in the heading stays plain text: the lane names no table for it, so none is invented', async () => {
-    const host = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }], { displayMode: 'fullscreen' });
+    const host = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }]);
     mount(host);
     await openItem(1);
     expect(within(screen.getByTestId('found-meta')).queryByRole('button')).toBeNull();
@@ -68,7 +69,7 @@ describe('Open in Spaarke on an evidence line', () => {
   });
 
   it('without a usable Console address no line is a link', async () => {
-    const host = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }], { displayMode: 'fullscreen' });
+    const host = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }]);
     mount(host, { toolResult: {} });
     await openItem(1);
     expect(openLinks()).toHaveLength(0);
@@ -81,7 +82,7 @@ describe('Showing N of M evidence lines', () => {
     '%s: a bounded row says how many lines the item stores, and links to the Console',
     async (_n, mode) => {
       const host = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE.slice(0, 2), evidenceStored: 130 }], {
-        displayMode: mode,
+        dialogFails: mode,
       });
       mount(host);
       await openItem(1);
@@ -93,14 +94,13 @@ describe('Showing N of M evidence lines', () => {
   );
 
   it('a row inside the bounds says nothing, and a bounded row with no count still says some lines are not shown', async () => {
-    const whole = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }], { displayMode: 'fullscreen' });
+    const whole = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE }]);
     const first = mount(whole);
     await openItem(1);
     expect(screen.queryByTestId('evidence-truncated')).toBeNull();
     first.unmount();
 
     const noCount = wizardHost([{ n: 1, plan: ONE_CLICK_PLAN, evidence: EVIDENCE.slice(0, 2) }], {
-      displayMode: 'fullscreen',
       plan: (signalId, item) => ({
         structuredContent: {
           plan: { ...item.plan, signalId },

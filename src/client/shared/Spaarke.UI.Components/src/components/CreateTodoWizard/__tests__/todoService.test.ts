@@ -89,7 +89,19 @@ const NAV_PROPS_RESPONSE = {
       ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
       ReferencedEntity: 'sprk_recordtype_ref',
     },
-    // Assignee — UAT 2026-06-21: migrated from systemuser to OOB contact lookup
+    // Assignee — UAT 2026-06-21: migrated from systemuser to OOB contact lookup.
+    // The two other contact lookups whose names contain 'assignedto' come first, in the same order as the live
+    // metadata on dev (2026-11-24), so a fragment match would pick the wrong column.
+    {
+      ReferencingAttribute: 'sprk_assignedtointernal',
+      ReferencingEntityNavigationPropertyName: 'sprk_AssignedToInternal',
+      ReferencedEntity: 'contact',
+    },
+    {
+      ReferencingAttribute: 'sprk_assignedtoexternal',
+      ReferencingEntityNavigationPropertyName: 'sprk_AssignedToExternal',
+      ReferencedEntity: 'contact',
+    },
     {
       ReferencingAttribute: 'sprk_assignedto',
       ReferencingEntityNavigationPropertyName: 'sprk_AssignedTo',
@@ -146,7 +158,13 @@ describe('TodoService.createTodo — through the BFF (UAC-r2 task 147 r1)', () =
     const result = await service.createTodo(FORM_VALUES, MATTER_REGARDING);
 
     expect(result.success).toBe(true);
-    expect(childWriteCalls(bff)).toEqual([['POST', '/api/v1/child-records/sprk_todo']]);
+    // Task 024 (FR-16): the regarding parent is the mapping source, named in the query string only.
+    expect(childWriteCalls(bff)).toEqual([
+      [
+        'POST',
+        '/api/v1/child-records/sprk_todo?mappingSourceEntity=sprk_matter&mappingSourceId=abcdef12-3456-7890-abcd-ef1234567890',
+      ],
+    ]);
   });
 
   it('REFUSES the create when the host wired no BFF connection — nothing is created as the user (fail closed)', async () => {
@@ -295,6 +313,9 @@ describe('TodoService.createTodo', () => {
     // Discovered nav-prop is sprk_AssignedTo; bind targets the OOB contact entity
     // (UAT 2026-06-21 migration — was /systemusers pre-migration)
     expect(payload['sprk_AssignedTo@odata.bind']).toBe('/contacts(contact-guid-123)');
+    // The internal and external assignee columns are listed first and also contain 'assignedto'; neither is bound.
+    expect(payload).not.toHaveProperty('sprk_AssignedToInternal@odata.bind');
+    expect(payload).not.toHaveProperty('sprk_AssignedToExternal@odata.bind');
   });
 
   // -----------------------------------------------------------------

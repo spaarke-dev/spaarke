@@ -1,0 +1,15 @@
+{
+  "name": "@spaarke/copilot-plugin-spaarke",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Spaarke plugin package for Microsoft 365 Copilot and Cowork: skills only (task 040, spaarkeai-mcp-bff-api-r1)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "validate": "node scripts/validate-plugin.mjs",
+    "test": "node --test scripts/validate-plugin.test.mjs && node scripts/validate-plugin.mjs",
+    "build": "node scripts/build-plugin.mjs"
+  }
+}

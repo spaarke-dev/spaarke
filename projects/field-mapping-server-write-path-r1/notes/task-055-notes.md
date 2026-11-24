@@ -60,3 +60,21 @@ Branch `task/fm-055` from `work/field-mapping-server-write-path-r1` (aa3214b7eb)
 
 - Hosts need no change: both all-mode hosts already pass `navigationService`. The record-mode PCF (CommunicationConversationPanel 1.18.4) shows no switch and mounts no new modal; it already imports `DataverseLookupField`, `FormModal` and `TabList` through the main barrel, so no new dependency reaches it. Its bundle does change (`build:prod` passes, 606 KiB, and carries the new modal code), so it is not needed for 055 to work but needs a 1.18.5 bump and `/pcf-deploy` at its next release ("compare bundles, not versions").
 - Deploy (UAC-r2 runs dev deploys): BFF, then the bundles that carry `@spaarke/ui-components` all-mode hosts (`sprk_communicationconversationpage`, `sprk_spaarkeai` for the workspace widget).
+
+## Live check on dev (AC5): PASS, 2026-11-23
+
+Owner go in this session ("Yes, run the checks"). Run 22:17–22:19Z against `spaarke-bff-dev` (BFF a48398746d, carries #2984) and `spaarkedev1`. The caller was the owner's admin account (a delegated token, `scp` = `SDAP.Access user_impersonation`; no token is recorded). Access was read with `RetrievePrincipalAccess` as an admin. Script and log: `scratchpad/live055/s2-live.ps1`, `s2.log`, `s3.log` (session scratchpad).
+
+| Check | Result |
+|---|---|
+| AC2: find-or-create twice with Test User 1 | **PASS**: both calls returned thread `d226439d-9fc1-f111-a05c-0022482913fc` |
+| Send an ordinary Direct message | 200, communication `c0dfc7b4-8be7-f111-84ea-00224829aef9` |
+| AC5: recipient stamped | **PASS**: `sprk_directrecipient` = Test User 1; `sprk_sentby` = the sender |
+| AC5: owner is the Direct team | **PASS**: owner and owning team = "Spaarke Direct Message Owners" |
+| AC5: both participants read | **PASS**: sender has full access; Test User 1 has `ReadAccess` on the message and full access on the thread |
+| AC5: a third user does not | **PASS**: `# UAC Child BU Test User`, who reads the matter used in 056, has `None` on the message and `None` on the thread |
+| AC3: Messages view (`kind=direct`) as the sender | **PASS**: one thread listed, this one, with `counterpartName` "Test User 1" |
+
+The test message stays on dev; listed with the 056 row for later cleanup. AC1 and AC4 (the picker) are covered by the RTL tests; a UI click-through is the owner's.
+
+UAC-r2 confirmed AC5 and the 056 result on 2026-11-23 by its own read-back. Test User 1's full access on the thread is by design: they started the thread on 2026-10-06, and the starter owns it. Every Message row having its own `sprk_acsthreadid` (the send path creates a new ACS chat thread per send) is a messaging-owner issue, #3024. It does not hold 055 or 056.

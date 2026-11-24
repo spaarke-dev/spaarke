@@ -52,7 +52,7 @@ export const sendInquiry: DecisionAction = {
     ...mailParameters,
     { code: 'outsideFirm', label: 'Outside firm', kind: 'Lookup', required: false, lookupEntity: 'sprk_organization' },
   ],
-  effectLines: ['Sends the message above to the recipient', 'Records the inquiry against the matter'],
+  effectLines: ['Sends the message to the recipient', 'Records the inquiry against the matter'],
   excludes: [],
 };
 
@@ -199,7 +199,7 @@ export const reassign: DecisionAction = {
     { code: 'assignee', label: 'Reassign to', kind: 'Person', required: true },
     { code: 'note', label: 'Note to them', kind: 'TextArea', required: false },
   ],
-  effectLines: ['Assigns the item to the person above'],
+  effectLines: ['Assigns the item to the person you choose'],
   excludes: ['mark-complete'],
 };
 

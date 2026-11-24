@@ -108,10 +108,13 @@ public class OfficeFilingAccessParityContractTests : IClassFixture<OfficeFilingA
         denied!.Results.Should().OnlyContain(r => r.CanFile == false,
             "Read alone does not let a caller file a document to a record");
 
-        allowed!.Results.Where(r => r.EntityType != AssociationEntityType.Account)
+        allowed!.Results.Where(r => r.EntityType is not (AssociationEntityType.Account or AssociationEntityType.Invoice))
             .Should().OnlyContain(r => r.CanFile == true, "AppendTo is exactly the right filing needs");
         allowed.Results.Single(r => r.EntityType == AssociationEntityType.Account).CanFile.Should().BeFalse(
             "the save refuses an account target whatever the caller holds (no sprk_document account lookup), so "
+            + "the picker must not offer one as fileable");
+        allowed.Results.Single(r => r.EntityType == AssociationEntityType.Invoice).CanFile.Should().BeFalse(
+            "the save refuses an invoice target whatever the caller holds (OFFICE_023, ebilling-r1 task 096), so "
             + "the picker must not offer one as fileable");
     }
 
@@ -156,9 +159,9 @@ public class OfficeFilingAccessParityContractTests : IClassFixture<OfficeFilingA
 
         _fixture.Probe.RecordsCalls.Should().Be(before + 1, "one multi-record lookup per request, not one per row");
         _fixture.Probe.LastRecordsRequest.Select(t => t.EntitySet).Should().BeEquivalentTo(
-            new[] { "sprk_matters", "sprk_projects", "sprk_invoices", "contacts" },
-            "each fileable row is asked about in its own collection; the account row is not asked about at all, "
-            + "because no rights could make the save accept it");
+            new[] { "sprk_matters", "sprk_projects", "contacts" },
+            "each fileable row is asked about in its own collection; the account and invoice rows are not asked about at all, "
+            + "because no rights could make the save accept them (OFFICE_002 / OFFICE_023)");
     }
 
     [Fact]
@@ -175,7 +178,7 @@ public class OfficeFilingAccessParityContractTests : IClassFixture<OfficeFilingA
 
         search!.Results.Single(r => r.Id == OfficeFilingAccessTestFixture.MatterId).CanFile.Should().BeFalse();
         search.Results.Single(r => r.Id == OfficeFilingAccessTestFixture.ProjectId).CanFile.Should().BeTrue();
-        search.Results.Single(r => r.Id == OfficeFilingAccessTestFixture.InvoiceId).CanFile.Should().BeTrue();
+        search.Results.Single(r => r.Id == OfficeFilingAccessTestFixture.InvoiceId).CanFile.Should().BeFalse("the save refuses an invoice target whatever the caller holds (OFFICE_023)");
     }
 
     [Fact]
@@ -288,7 +291,7 @@ public class OfficeFilingAccessParityContractTests : IClassFixture<OfficeFilingA
         }
 
         return (response.StatusCode == HttpStatusCode.Forbidden && reasonCode == "insufficient_rights")
-            || (response.StatusCode == HttpStatusCode.BadRequest && errorCode == "OFFICE_002");
+            || (response.StatusCode == HttpStatusCode.BadRequest && errorCode is "OFFICE_002" or "OFFICE_023");
     }
 }
 

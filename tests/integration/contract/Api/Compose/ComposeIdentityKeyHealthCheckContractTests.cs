@@ -23,7 +23,9 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Moq;
@@ -45,8 +47,9 @@ public sealed class ComposeIdentityKeyHealthCheckContractTests : IClassFixture<C
         private readonly KeyProbe _probe;
         private readonly Exception? _throws;
 
-        public StubbedProbe(IServiceProvider sp, KeyProbe probe, Exception? throws = null)
-            : base(sp, NullLogger<ComposeIdentityKeyHealthCheck>.Instance)
+        public StubbedProbe(
+            IServiceProvider sp, KeyProbe probe, Exception? throws = null, ILogger<ComposeIdentityKeyHealthCheck>? logger = null)
+            : base(sp, logger ?? NullLogger<ComposeIdentityKeyHealthCheck>.Instance)
         {
             _probe = probe;
             _throws = throws;
@@ -153,6 +156,85 @@ public sealed class ComposeIdentityKeyHealthCheckContractTests : IClassFixture<C
             result.Status.Should().NotBe(HealthStatus.Unhealthy,
                 $"key status '{status ?? "absent"}' must never take instances out of rotation");
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // The request the real probe sends (#3030).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void KeyStatusRequest_AsksForAttributes_BecauseEntityOnlyMetadataCarriesNoKeys()
+    {
+        // #3030: the probe used EntityFilters.Entity, which returns an EMPTY Keys collection (verified live
+        // on spaarkedev1, 2026-11-24: 0 keys with Entity; all 3 with Attributes or All). Every environment
+        // therefore logged "DEGRADED ... unreadable" at every start while the key was Active. The stubbed
+        // tests above override the fetch seam, so only a test of the request itself can catch this.
+        var request = ComposeIdentityKeyHealthCheck.BuildKeyStatusRequest();
+
+        request.LogicalName.Should().Be("sprk_document");
+        request.EntityFilters.HasFlag(EntityFilters.Attributes).Should().BeTrue(
+            "Dataverse fills EntityMetadata.Keys only when Attributes (or All) is requested");
+        request.RetrieveAsIfPublished.Should().BeTrue();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // The startup log — what an operator reads first, so it must name the right condition and remedy.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Startup_WhenTheKeyIsAbsent_LogsNotFoundWithTheImportRemedyNotTheDedupeScript()
+    {
+        // #3030: this line said "= unreadable" and sent the operator to the dedupe script, while the
+        // endpoint (CheckHealthAsync) correctly said NOT FOUND / re-import. The two surfaces must agree.
+        var logger = new CapturingLogger();
+        var sut = new StubbedProbe(
+            ProviderWithDataverse(), new ComposeIdentityKeyHealthCheck.KeyProbe(null, null), logger: logger);
+
+        await sut.StartAsync(CancellationToken.None);
+
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject.Message;
+        warning.Should().Contain("NOT FOUND").And.Contain("re-import");
+        warning.Should().NotContain("unreadable");
+        warning.Should().NotContain("Repair-ComposeIdentityKey.ps1");
+    }
+
+    [Fact]
+    public async Task Startup_WhenTheKeyIndexFailed_LogsTheStatusAndTheRepairScript()
+    {
+        var logger = new CapturingLogger();
+        var sut = new StubbedProbe(
+            ProviderWithDataverse(), new ComposeIdentityKeyHealthCheck.KeyProbe("Failed", null), logger: logger);
+
+        await sut.StartAsync(CancellationToken.None);
+
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject.Message;
+        warning.Should().Contain("= Failed").And.Contain("Repair-ComposeIdentityKey.ps1");
+    }
+
+    [Fact]
+    public async Task Startup_WhenTheKeyIsActive_LogsNoWarning()
+    {
+        var logger = new CapturingLogger();
+        var sut = new StubbedProbe(
+            ProviderWithDataverse(), new ComposeIdentityKeyHealthCheck.KeyProbe("Active", null), logger: logger);
+
+        await sut.StartAsync(CancellationToken.None);
+
+        logger.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    /// <summary>Records each log entry's level and formatted message.</summary>
+    private sealed class CapturingLogger : ILogger<ComposeIdentityKeyHealthCheck>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════

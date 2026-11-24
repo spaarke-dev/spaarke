@@ -4,7 +4,7 @@
     <title>Redirect the review-confirm route into the submission operation</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the write path of an authorized BFF route: the submission operation (the only invoice creator, ADR-002) gains an existing-document entry; the document is re-filed under the invoice with the secure-record isolation step (uac-r2 reviews); the response contract of POST /api/finance/invoice-review/confirm changes.</rigor-reason>
     <model-tier>opus</model-tier>

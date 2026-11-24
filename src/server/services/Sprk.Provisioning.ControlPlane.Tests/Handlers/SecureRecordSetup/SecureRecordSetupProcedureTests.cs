@@ -755,6 +755,19 @@ public sealed class SecureRecordSetupProcedureTests
                     dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_directrecipient")] = false;
                 },
                 SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "a private-context column exists but is not secured", dv =>
+                {
+                    dv.AddPrivateContextColumns();
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_privatecontextmatter")] = false;
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable },
+            { "another profile may update a private-context column", dv =>
+                {
+                    dv.AddPrivateContextColumns();
+                    dv.ColumnPermissions("sprk_privatecontextworkassignment").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile("Mail Admins"), "sprk_communication", 4, 0, 4));
+                },
+                SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter, FailureClass.QuarantineRequired },
             { "another profile may update sprk_communication.sprk_communicationthread", dv =>
                     dv.ColumnPermissions("sprk_communicationthread").Add(new SecureSetupFieldPermission(
                         dv.AddProfile("Mail Admins"), "sprk_communication", 4, 0, 4)),
@@ -1303,6 +1316,45 @@ public sealed class SecureRecordSetupProcedureTests
         refused.Diagnostic.Should().Contain("sprk_communication.sprk_directrecipient").And.Contain("IsSecured=False")
             .And.Contain("scripts/Set-ThreadFlagFieldSecurity.ps1").And.Contain("-SolutionUniqueName SpaarkeMaster")
             .And.Contain("only where sprk_communication.sprk_directrecipient exists").And.Contain("Nothing was written");
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_PrivateContextColumnsAbsent_Passes_WithANotePerColumnNamingTheScript()
+    {
+        // Must not fire: the three references exist only where scripts/Set-PrivateContextSchema.ps1 ran (field-mapping 056b).
+        var applied = (await RunAsync(NewEnv())).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        foreach (var column in new[] { "sprk_privatecontextmatter", "sprk_privatecontextproject", "sprk_privatecontextworkassignment" })
+        {
+            applied.State.Notes.Should().ContainSingle(n => n.Contains($"sprk_communication.{column}: not in this environment")
+                                                            && n.Contains("scripts/Set-PrivateContextSchema.ps1 not run")
+                                                            && !n.Contains("DirectMessage:"));
+        }
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_PrivateContextColumnsPresentAndLocked_Passes_WithoutTheNote()
+    {
+        var dv = NewEnv();
+        dv.AddPrivateContextColumns();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().NotContain(n => n.Contains("sprk_privatecontext", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task MessageAccessLock_APrivateContextColumnPresentButItsGrantRemoved_IsRefused()
+    {
+        // Must fire: the column exists (Set-PrivateContextSchema.ps1 ran) but the Readers profile lost its read — Dataverse
+        // would return the reference EMPTY, so a private message would read as having no context.
+        var dv = NewEnv();
+        dv.AddPrivateContextColumns();
+        dv.RemoveGrant("sprk_communication", "sprk_privatecontextproject", dv.ReaderProfileId);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("sprk_communication.sprk_privatecontextproject").And.Contain("Nothing was written");
     }
 
     // ------------------------------------------------------------ S18/S19: an environment on SpaarkeMaster 1.2.3.1

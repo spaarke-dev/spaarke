@@ -1,0 +1,30 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
+  "version": "1.0.0",
+  "id": "68427ffa-ce23-4bed-9cdf-f1d6ed16eec4",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://spaarke.com",
+    "privacyUrl": "https://spaarke.com/privacy",
+    "termsOfUseUrl": "https://spaarke.com/terms"
+  },
+  "name": {
+    "short": "Spaarke",
+    "full": "Spaarke for Microsoft 365 Copilot"
+  },
+  "description": {
+    "short": "See the Work Items waiting for your decision in Spaarke",
+    "full": "Spaarke skills for Microsoft 365 Copilot and Copilot Cowork. Ask what decisions are waiting for you in Spaarke and review them in the decisions widget. This package carries skills only: the Spaarke MCP connector is registered once for the tenant, and you sign in with your Spaarke account. Copilot sees only what that account may see."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#4F6BED",
+  "agentSkills": [
+    {
+      "folder": "skills/spaarke-decisions"
+    }
+  ]
+}

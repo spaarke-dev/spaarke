@@ -10,6 +10,7 @@ import { createMockDataService } from '../../../__mocks__/mockDataService';
 import {
   SPRK_TODO_CHANNEL_NAME,
   SPRK_TODO_CREATED,
+  broadcastTodoCreated,
   resolveCurrentUserContact,
   withTodoCreatedBroadcast,
 } from '../todoWizardHostSupport';
@@ -54,6 +55,42 @@ describe('withTodoCreatedBroadcast', () => {
     expect(inner.retrieveRecord).toHaveBeenCalledWith('sprk_todo', 'id-1');
     // Inherits (Object.create) rather than spreads, so markers on the inner service stay visible.
     expect(Object.getPrototypeOf(wrapped)).toBe(inner);
+  });
+});
+
+describe('broadcastTodoCreated (task 024: the wizard create no longer passes through the data service)', () => {
+  const RealBroadcastChannel = (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel;
+  afterEach(() => {
+    (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = RealBroadcastChannel;
+  });
+
+  it('posts sprk_todo:created with the id on the lifecycle channel and closes the channel', () => {
+    const posted: Posted[] = [];
+    let closed = 0;
+    (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = class {
+      constructor(private readonly name: string) {}
+      postMessage(message: unknown) {
+        posted.push({ name: this.name, message });
+      }
+      close() {
+        closed++;
+      }
+    };
+    broadcastTodoCreated('todo-9');
+    expect(posted).toEqual([{ name: SPRK_TODO_CHANNEL_NAME, message: { type: SPRK_TODO_CREATED, todoId: 'todo-9' } }]);
+    expect(closed).toBe(1);
+  });
+
+  it('never throws: no BroadcastChannel, or one that throws', () => {
+    (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = undefined;
+    expect(() => broadcastTodoCreated('todo-9')).not.toThrow();
+    (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = class {
+      constructor() {
+        throw new Error('blocked');
+      }
+    };
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(() => broadcastTodoCreated('todo-9')).not.toThrow();
   });
 });
 

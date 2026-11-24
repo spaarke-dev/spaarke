@@ -88,6 +88,8 @@ export interface DecisionWizardProps {
   evidenceLinks?: boolean;
   /** Optional seam: render in the page with no modal envelope (a frame too small for a dialog). Absent or false: the modal wizard. */
   embedded?: boolean;
+  /** Optional seam: the modal wizard opens maximized (restorable). Ignored when `embedded`. Absent or false: the wizard size. */
+  defaultMaximized?: boolean;
   /**
    * Optional seam: the Confirm step cannot record until it has been showing this long (`CONFIRM_GUARD_MS`), so a double click on Next
    * at the last action step cannot record a decision the user has not seen (NFR-06). Absent or 0: no guard, as before.
@@ -146,6 +148,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   collectBecause,
   evidenceLinks,
   embedded,
+  defaultMaximized,
   confirmGuardMs,
   closeOnEscape,
 }) => {
@@ -525,6 +528,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       uiScale={uiScale}
       today={today}
       embedded={embedded}
+      defaultMaximized={defaultMaximized}
       confirmGuardMs={confirmGuardMs}
     />
   );

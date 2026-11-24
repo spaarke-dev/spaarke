@@ -233,7 +233,7 @@ public sealed class OntologyAdminRulesService
         var wording = inForce is { } w
             ? new RuleWordingView(Str(w, "sprk_shortheadline"), Str(w, "sprk_messagetemplate"), Str(w, "sprk_proposedaction"))
             : new RuleWordingView(null, null, null);
-        var plan = ResolvePlan(inForce is { } p ? Str(p, "sprk_decisionplan") : null, lane);
+        var plan = ResolvePlan(inForce is { } p ? Str(p, "sprk_decisionplan") : null, lane, inForceId);
 
         var scope = new RuleScopeView(Str(policy, "sprk_tenant"), matterId, matterName, Int(policy, "sprk_priority"));
         var noise = new RuleNoiseView(
@@ -720,7 +720,9 @@ public sealed class OntologyAdminRulesService
         }
     }
 
-    private static RulePlanView ResolvePlan(string? planJson, int? lane)
+    /// <summary>The stored plan as the page shows it. A refused plan is logged and counted here (<see cref="DecisionPlanService.RecordRefusal"/>,
+    /// #3034), once per page load, because the static <c>Resolve</c> records nothing; a rule with no version in force has no plan to refuse.</summary>
+    private RulePlanView ResolvePlan(string? planJson, int? lane, Guid? policyVersionId)
     {
         if (lane is not { } l || !Enum.IsDefined(typeof(DecisionLane), l))
         {
@@ -728,9 +730,15 @@ public sealed class OntologyAdminRulesService
         }
 
         var resolution = DecisionPlanService.Resolve(planJson, (DecisionLane)l);
+        if (policyVersionId is { } versionId)
+        {
+            DecisionPlanService.RecordRefusal(_logger, versionId, resolution);
+        }
+
         if (resolution.Plan is not { } plan)
         {
-            return new RulePlanView([], [], [], $"The stored plan does not resolve against the action catalog ({resolution.RefusalReason}).");
+            // The reason is logged and counted above (RecordRefusal); the admin reads a sentence, not the internal code.
+            return new RulePlanView([], [], [], "The stored plan can't be used with the actions this rule's lane offers. Edit the rule and choose its actions again.");
         }
 
         return new RulePlanView(

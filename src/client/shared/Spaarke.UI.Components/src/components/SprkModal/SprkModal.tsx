@@ -207,6 +207,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   yieldToSidePane = false,
   uiScale = 1,
   maximizable = true,
+  defaultMaximized = false,
   nav,
   headerActions,
   footerStart,
@@ -216,7 +217,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   children,
 }) => {
   const styles = useStyles();
-  const [maximized, setMaximized] = React.useState(false);
+  const [maximized, setMaximized] = React.useState(defaultMaximized && maximizable);
   // Stable per-instance title id so the surface announces its accessible name
   // (aria-labelledby) — we render a custom header, not Fluent's DialogTitle,
   // so the auto-wiring DialogTitle provides must be supplied here explicitly.
@@ -321,8 +322,8 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   const layering = useSidePaneLayering(surfaceInert && open, surfaceRef);
 
   React.useEffect(() => {
-    if (!open) setMaximized(false);
-  }, [open]);
+    if (!open) setMaximized(defaultMaximized && maximizable);
+  }, [open, defaultMaximized, maximizable]);
 
   const effectiveSize: SprkModalSize = maximized ? 'full' : size;
   const surfaceStyle: React.CSSProperties = getSurfaceStyle(effectiveSize, uiScale);
