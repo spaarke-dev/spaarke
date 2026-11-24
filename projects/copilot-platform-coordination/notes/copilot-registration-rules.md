@@ -18,7 +18,7 @@ Each MCP URL (`/mcp/{area}`) is registered **once** per tenant: either as a fede
 - Calls were matched to prompts by order, because the owner did not record times.
 
 **Ready for the owner's decision.**
-- **Packaging note (G8-P2):** an org-catalog update of an existing app id did not load a changed action (five versions of `802fd9cc`); a fresh app id did. Until this is understood, a test agent whose action changes gets a new app id.
+- **Packaging note (V1, 2026-11-24):** catalog updates of an existing app id do work, but an update that changes the action takes it offline for a while (missing at ~25 min, back at ~40 min). Test about 45 min after upload. The five failed `802fd9cc` versions were probably tested too soon (not proven). Whether a `?pkg=` query string on the action URL is acceptable is still open. Build rules: specialist `notes/agent-package-identity-and-distribution.md`.
 
 ## R2. Packages carry skills (and agents where needed), not a second connector
 
