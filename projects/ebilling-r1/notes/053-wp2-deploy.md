@@ -88,3 +88,7 @@ Read-only checks run 2026-11-23 (~01:40-02:10Z on 11-24):
 What closes 053: checklist section Q (an Accepted and a Rejected submission from the firm portal). After that, 079 has no open dependency.
 
 Deviation: step 3's "-DiffOnly shows no difference" stays unmet for the reasons above. D-101 also changed step 10: a Rejected submission now creates its invoice, in status Rejected. The step's "no invoice" is out of date.
+
+## 2026-11-24: the Rejected check moves to task 079
+
+A read of dev (read-only) found no published rule version with the Reject consequence: 10 policy versions in total, none of them a billing rule that can reject. Rules are first published on dev in 079 step 10. So 053 step 10's Rejected half moved into 079 step 10. There, 079 publishes an InvoiceAge rule (maxAgeDays 180, Reject) and the owner submits evaluation-set B-0082 (INV-2025-34586, invoice date 2025-04-01). 053 now closes on the Accepted portal submission alone (checklist Q, sample B-0050).
