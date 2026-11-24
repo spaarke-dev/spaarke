@@ -4,7 +4,7 @@
     <title>A plan refused on the admin Rules page is logged and counted again; authoring names the real refusal; the policy-order comment tells the truth (#3034, uac-r2 review of 203-205)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF ontology/Signals services (.cs).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -57,4 +57,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt206); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-24: PR #3035 merged to master (44c4cd5b01) after an independent Opus review and a main-session re-check of the F1 fix. A refused stored plan on the admin Rules page now goes through the shared DecisionPlanService.RecordRefusal (the same helper GetAsync uses), so it logs DecisionPlanRefused with its reason and counts ontology.decisionplan.refused once per row; Resolve stays pure. Authoring gives PlanMalformed, UnknownAction and a non-next-step code in nextSteps each their own plain sentence and sets ReasonCode like the sibling branches; the lane case keeps the lane sentence. F1 (a repeated JSON key gave 503) fixed with JsonDocument so repeated keys behave like Resolve. SignalReevaluationJob comment now describes the OrdinalIgnoreCase order. Issue #3034 closed by the merge. Reaches dev with the next uac-r2 dev BFF build.</completion>
 </task>
