@@ -10,7 +10,7 @@
 
 ## Quick recovery
 
-- **In flight (2026-11-24, owner: "proceed with other open tasks in parallel" while testing Q):** four implementer agents in isolated worktrees from base f5ec8b6a20, each on `task/ebilling-<id>`: iss043 (+ISS-035; Sonnet), iss029 (Opus), iss042 (Sonnet), iss027 (Sonnet). Next for each: adversarial review (Opus for the three BFF tasks, Sonnet for iss027), fix round, `--no-ff` merge into work, then one publish-size measurement for the BFF batch. **Do not push those merges to work/ebilling-r1 while #3051 is open** (they would join that PR); push after it merges, then a new master PR. iss042 and iss043's ISS-035 part touch firm-visible output / the external route: copy spa-r4 at the PR.
+- **Issue batch (2026-11-24, owner: "proceed with other open tasks in parallel" while testing Q): all four ✅ merged into work, LOCAL ONLY.** iss027 fbba523806 (Sonnet review, no F), iss042 1b756a83d3, iss043 263aa4c674 (+ISS-035), iss029 5f75e3e930 (each Opus review + fix round 1, scoped re-check). K-limits in each task's notes. No package, project or DI change (publish-size: code-only, not measured, as earlier iss tasks). Found in passing and filed: ISS-049 #3057 (non-Finance upload routes), ISS-050 #3059 (line-decision lock under a large call). **Do not push work/ebilling-r1 while #3051 is open** (the merges would join that PR); after #3051 merges: push, then a new master PR. Copy spa-r4 at that PR (iss042 firm labels; ISS-035's repeated-field 400 on the external route has no top-level errorCode, K1) and ontology-r1 (iss029 adds `PreflightBillingRepeat` to `DecisionRecordWriter`). Owner question open: label wording "Line date" / "Description" (iss042).
 - **Master PR #3051 OPEN** (owner said "Yes open pr", 2026-11-24): iss048, iss046 (Closes #3001), the rule-type options script fix and notes. No conflicts with master at open. Not bound, no auto-merge. Merge as a merge commit once CI and the owner agree. After it merges: iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
 - **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
 - **Dev BFF 0362599b94** live since 2026-11-24 (uac-r2's deploy; carries 050c). healthz 200; confirm and reject return 401 unauthenticated. Evidence: `notes/050c-confirm-followups.md`. Owner checklist **R** (Office add-in) is ready to test.
@@ -29,7 +29,7 @@
 - **Stays off:**
   - 117's Apply stays off until 079, with the owner's OK. #2982 is fixed on master.
   - `Ebilling:StoredFileReconcileEnabled` stays false.
-- **Clean-up:** the iss048 agent worktree is removed. The agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-afe7e9fefac5f933f` is locked by the app (pid 39572). Remove it with Remove-WorktreeSafe once the lock is gone. Its branch was fully pushed.
+- **Clean-up:** the iss048 and batch agent worktrees are removed, except `agent-a73718461abbfd6a5` (iss029 fix round, branch pushed), locked by the app like the one below. The agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-afe7e9fefac5f933f` is locked by the app (pid 39572). Remove it with Remove-WorktreeSafe once the lock is gone. Its branch was fully pushed.
 - **Machine load:** rerun timed-out classes with `-- xUnit.MaxParallelThreads=4`.
 
 ## Recently done (detail in the notes and git)
