@@ -4,7 +4,7 @@
     <title>ISS-046 (#3001): Deploy-EbillingFormsViews.ps1 Section mode keeps cells it does not manage (the invoice form's Batch quick view)</title>
     <phase>Issue fix; filed 2026-11-23 from the task 194 review (finding 7, pre-existing)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>A PowerShell deploy script and its Pester tests; no BFF or client code; no live run.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -2527,7 +2527,7 @@ Task 050b deleted the legacy invoice extraction path, so nothing writes `sprk_in
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work/ebilling-r1 (task iss046, merge 234828cfb2; Sonnet review + fix round 1). #3001 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 194 adversarial review, finding 7 (found in passing; pre-existing) |
