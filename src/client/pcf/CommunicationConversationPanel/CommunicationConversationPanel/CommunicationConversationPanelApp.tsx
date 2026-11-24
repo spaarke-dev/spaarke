@@ -19,13 +19,16 @@ import { makeStyles, tokens, Spinner, MessageBar, MessageBarBody } from '@fluent
 import { authenticatedFetch } from '@spaarke/auth';
 import { readByRegarding, cleanGuid, type IRegardingReadResultDto, getXrm } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
-import { initializeAuth, resolveDataverseUrl } from './authInit';
+import { usePcfAuthBootstrap, createHostContext } from '@spaarke/communication-components/logic/pcf-host';
 import { resolveRegardingContext } from './hostContext';
 import { buildPreviewModel } from './previewModel';
 import { ConversationPreview } from './ConversationPreview';
 import { ConversationModal } from './ConversationModal';
 import { useConversationPanelOpenRequest } from './useConversationPanelOpenRequest';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
+
+/** The environment-variable readers the shared auth bootstrap resolves its settings with. */
+const PCF_ENV = { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId };
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -34,33 +37,7 @@ const useStyles = makeStyles({
   notice: { paddingInline: tokens.spacingHorizontalM, paddingBlock: tokens.spacingVerticalXS },
 });
 
-function getHostRecordId(): string | undefined {
-  // Shared cross-frame walker (task 081 / C-8).
-  // `any` view: typed XrmContext does not declare the members used below.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('page') as any;
-  try {
-    const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
-  } catch {
-    /* ignore */
-  }
-  return undefined;
-}
-
-function getHostEntityName(): string | undefined {
-  // Shared cross-frame walker (task 081 / C-8).
-  // `any` view: typed XrmContext does not declare the members used below.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('page') as any;
-  try {
-    const name = xrm?.Page?.data?.entity?.getEntityName?.();
-    if (typeof name === 'string' && name.length > 0) return name;
-  } catch {
-    /* ignore */
-  }
-  return undefined;
-}
+const { getHostRecordId, getHostEntityName } = createHostContext({ getXrm, cleanGuid });
 
 /**
  * Round-7 item 11: detects the `sprk_openconversation=1` deep-link param the
@@ -128,39 +105,16 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
     [context.userSettings]
   );
 
-  const [authReady, setAuthReady] = React.useState(false);
-  const [authError, setAuthError] = React.useState<string | null>(null);
-  const [bffBaseUrl, setBffBaseUrl] = React.useState('');
-
   // Bootstrap @spaarke/auth once (identical pattern to the sibling control).
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const clientAppId = manifestClientAppId || (await getMsalClientId(webApi));
-        const bffAppId = manifestBffAppId || (await getBffApiAppId(webApi));
-        const baseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-        if (!clientAppId || !bffAppId || !baseUrl) {
-          if (!cancelled) {
-            setAuthError(
-              'The conversation panel is not configured. Set the sprk_MsalClientId / sprk_BffApiAppId / ' +
-                'sprk_BffApiBaseUrl Dataverse environment variables (or the PCF Client App ID / BFF App ID / API URL inputs).'
-            );
-          }
-          return;
-        }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
-        if (cancelled) return;
-        setBffBaseUrl(baseUrl);
-        setAuthReady(true);
-      } catch (err) {
-        if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, webApi]);
+  const { authReady, authError, bffBaseUrl } = usePcfAuthBootstrap({
+    controlLabel: 'The conversation panel is',
+    webApi,
+    manifestClientAppId,
+    manifestBffAppId,
+    manifestApiBaseUrl,
+    env: PCF_ENV,
+    getXrm,
+  });
 
   const regardingContext = React.useMemo(
     () => resolveRegardingContext(hostEntityName, hostRecordId),

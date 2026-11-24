@@ -36,9 +36,12 @@ import {
   getXrm,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
-import { initializeAuth, resolveDataverseUrl } from './authInit';
+import { usePcfAuthBootstrap, createHostContext } from '@spaarke/communication-components/logic/pcf-host';
 import { resolveMessageTarget, resolveInternalOnlySeed, type IResolvedMessageTarget } from './hostContext';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
+
+/** The environment-variable readers the shared auth bootstrap resolves its settings with. */
+const PCF_ENV = { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId };
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types, whose FC return
 // type is incompatible with React 16's JSX element type. Cast at the boundary (same pattern as
@@ -64,33 +67,7 @@ const useStyles = makeStyles({
   },
 });
 
-function getHostRecordId(): string | undefined {
-  // Shared cross-frame walker (task 081 / C-8).
-  // `any` view: typed XrmContext does not declare the members used below.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('page') as any;
-  try {
-    const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
-  } catch {
-    /* ignore */
-  }
-  return undefined;
-}
-
-function getHostEntityName(): string | undefined {
-  // Shared cross-frame walker (task 081 / C-8).
-  // `any` view: typed XrmContext does not declare the members used below.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('page') as any;
-  try {
-    const name = xrm?.Page?.data?.entity?.getEntityName?.();
-    if (typeof name === 'string' && name.length > 0) return name;
-  } catch {
-    /* ignore */
-  }
-  return undefined;
-}
+const { getHostRecordId, getHostEntityName } = createHostContext({ getXrm, cleanGuid });
 
 function getHostThreadPrivacyState(): unknown {
   // The thread form's own `sprk_privacystate` value - read from the form that is already loaded, never from
@@ -143,9 +120,6 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
   const hostRecordId = React.useMemo(() => getHostRecordId(), []);
   const webApi = context.webAPI;
 
-  const [authReady, setAuthReady] = React.useState(false);
-  const [authError, setAuthError] = React.useState<string | null>(null);
-  const [bffBaseUrl, setBffBaseUrl] = React.useState('');
   const [status, setStatus] = React.useState<string | null>(null);
   const [isSending, setIsSending] = React.useState(false);
 
@@ -160,34 +134,15 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
   const [sourceIsInternalOnly, setSourceIsInternalOnly] = React.useState(false);
 
   // Bootstrap @spaarke/auth once (identical pattern to CommunicationActions).
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const clientAppId = manifestClientAppId || (await getMsalClientId(webApi));
-        const bffAppId = manifestBffAppId || (await getBffApiAppId(webApi));
-        const baseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-        if (!clientAppId || !bffAppId || !baseUrl) {
-          if (!cancelled) {
-            setAuthError(
-              'Message actions are not configured. Set the sprk_MsalClientId / sprk_BffApiAppId / ' +
-                'sprk_BffApiBaseUrl Dataverse environment variables (or the PCF Client App ID / BFF App ID / API URL inputs).'
-            );
-          }
-          return;
-        }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
-        if (cancelled) return;
-        setBffBaseUrl(baseUrl);
-        setAuthReady(true);
-      } catch (err) {
-        if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, webApi]);
+  const { authReady, authError, bffBaseUrl } = usePcfAuthBootstrap({
+    controlLabel: 'Message actions are',
+    webApi,
+    manifestClientAppId,
+    manifestBffAppId,
+    manifestApiBaseUrl,
+    env: PCF_ENV,
+    getXrm,
+  });
 
   // Load the sprk_communication record's channel + thread lookup when placed on that entity.
   React.useEffect(() => {
