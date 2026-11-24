@@ -1,37 +1,48 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-23 ~20:50Z (task 028 complete: P2 deployed to dev and E2E passed; P3 not started)
+> **Last Updated**: 2026-11-24 ~01:30Z (wave 8 committed: 031, 032, 034; PR next, then the owner's merge go)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | None in progress. **030 ✅ completed 2026-11-23**: 18 of 29 columns found, 11 dropped, none secured. The owner said yes to `createdon` as the open date and to all three people columns. The final list for 031 is in `notes/task-030-information-fields.md`. |
-| **Next** | Phase 3 Group C: **031** (ReadableColumns + Information section; opus/high; BFF, with UAC review per column via uac-r2; run `/conflict-check` before the BFF PR; include D-33 #3010's comment fix), **032** (DataGrid persisted widths/sort + Reset columns; builds on PR #3000's `userColumnWidths`) and **034** (Messages refresh). Run them through task-execute; Group C tasks can run in parallel. |
-| **Previous** | 028 ✅ (record: `notes/task-028-deploy-record.md`). |
-| **Live on dev** | **SPA:** master `9d08576e63`, run 45260396182, live 20:34:15Z (rollback: redeploy `2dcbe35e34`). **BFF:** `a48398746d` (uac-r2, gate passed). **Grid config:** row `286be8b4` created; `3ff4102c` has the Review detail column (rollback string in the deploy record). |
-| **Phase 2 result** | E2E round 2 (owner as writer + View-only partner): all pass. uac-r2 server readout: PASS (9 requests, all 200, no errors). Fix PR #3000 (Review detail option-set shape + DataGrid column resize) merged. |
+| **Wave 8** | Tasks 031 (`5fed198b33`), 034 (`b976ebca35`) and 032 (next commit) are committed on `work/spaarke-SPA-external-access-platform-r4`. Review is done: one adversarial pass, fix rounds 1 and 2, and the main session's scoped re-checks. The owner's four decisions (2026-11-23) are applied. POML status, TASK-INDEX and the board are NOT updated yet: close the three tasks after the merge. |
+| **Next action** | Push → one PR (031+032+034) → owner merge go → `gh pr merge N --squash` → send uac-r2 the merge SHA → close #3010 → close 031/032/034 (POML, TASK-INDEX ✅, `pwsh scripts/check-task-status-drift.ps1`, board Tasks Completed 25→28) → reset this file. |
+| **Checks run** | BFF `ExternalModuleColumnAllowListTests`: 173 passed. SPA vitest: RecordMessages/GridSettings/RecordTemplateAccess/GridWidgetBody.hostCommands/RecordTemplateSections, 317+ passed. ui-components jest (DataGrid + RecordCommandBar): 229 passed. tsc clean on both packages. external-spa `npm run build` OK. Publish-size delta (031): +57 B. |
 
-## Side work
-- ebilling-r1 task 134: R4 review done; nothing pending.
-- uac-r2: has both E2E windows and readouts; nothing pending.
+## 🔒 HARD DEPLOY ORDER (wave-8 review F1, 2026-11-23)
+Once 031 is merged, **no SPA deploy may run until uac-r2 has deployed a BFF that carries 031's ReadableColumns to dev.** Every SPA deploy builds master HEAD. Without that BFF, every matter, project and work-assignment record read answers 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED`. uac-r2 has agreed. The same rule is in task 038's `<gate>`. The current dev BFF `22c42efad6` does NOT carry 031.
 
-## Merge trap (seen 2026-11-22)
-- Merging master after a squash of our own work: a line that one task changed and a later task changed BACK looks unchanged from the merge base, so git takes master's text. For files where `origin/master` == the pre-squash branch tip, restore `HEAD^1`'s copy.
+## Owner decisions (2026-11-23)
+1. 032's DataGrid prop API is approved on behalf of the dataset-grid owners (recorded in `notes/task-032-notes.md`).
+2. "Reset columns" became **"Clear all"**. It uses the new icon-map entry `reset` (ArrowReset20Regular) and clears widths, sort AND column filters. A filtered header is announced as "filtered" as well as showing the filter icon.
+3. Information also shows matter `sprk_mattertype` and `modifiedon`, and work-assignment `sprk_mattertype`. These were already allow-listed.
+4. 034's background check (≤ 1 GET/min) is accepted. The manual Refresh the owner asked for already exists (Messages header icon and "Show new messages").
 
-## Owner questions open
-- Should a docx preview be filed as an Idea? (FR-14 owner decision 2026-11-09 = PDF + images only.)
-- Older: show "The client is reviewing this invoice." beyond the Information field?
-- Add a `useHostRowSource` row to `.claude/patterns/CAPABILITY-INDEX.md` row 31? (`.claude` edit, needs owner approval.)
+## Known limits (for the PR)
+- "Open date" is the formatted `createdon`, which is a date-time.
+- Contact lookups also return the contact GUID (a serialised EntityReference). uac-r2 says this is fine.
+- A parent record's Messages keeps polling while a child modal is open.
+- Found and fixed in scope: a `HeaderCellContent` hook-order bug (`useRef` after an early return). It has a regression test.
+
+## UAC
+All 12 columns are approved: 11 by uac-r2, and `sprk_regardingmatter` by the owner in uac-r2's session. Both uac-r2 conditions are met by existing tests (`ExternalModuleColumnAllowListTests.cs` ~:1287 drops an unlisted lookup's display value; ~:1318 refuses a contact read).
+
+## Live on dev
+- SPA: master `9d08576e63` (rollback `2dcbe35e34`).
+- BFF: `22c42efad6`, live since ~23:49Z with MCP on (rollback `a48398746d`); deployed by uac-r2.
+
+## Owner questions open (older)
+- Should a docx preview be filed as an Idea?
+- Show "The client is reviewing this invoice." beyond the Information field?
+- Add a `useHostRowSource` row to `.claude/patterns/CAPABILITY-INDEX.md` row 31? This is a `.claude` edit and needs owner approval.
 
 ## Filed
-- D-24 #2939, D-25 #2960, D-26 #2961, D-27 #2962, D-28 #2963, D-29 #2964, D-30 #2975.
+- D-24 #2939 … D-30 #2975.
 - D-31 #3008: narrow DataGrid header minimums.
-- D-32 #3009: empty band above the Documents grid header.
-- D-33 #3010: FetchService comment drift. Ride it on the next R4 BFF PR.
+- D-32 #3009: empty band above the Documents grid ("Clear all" now sits in that toolbar).
+- D-33 #3010: folded into 031; close it after the merge.
 
-## Coordination
-- uac-r2 deploys the dev BFF only; peer messages are not owner approval.
-- An SPA deploy builds master HEAD, so re-check HEAD before dispatch and tell the owner and uac-r2 what it adds.
-- Task 032 (DataGrid persisted widths + Reset columns) builds on PR #3000's `userColumnWidths` state in `DataGrid.tsx`.
+## Merge trap (seen 2026-11-22)
+When merging master after a squash of our own work, watch for a line that one task changed and a later task changed back. It looks unchanged from the merge base, so git takes master's text. For files where `origin/master` equals the pre-squash branch tip, restore `HEAD^1`'s copy.
