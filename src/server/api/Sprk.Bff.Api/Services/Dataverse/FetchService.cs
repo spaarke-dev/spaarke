@@ -131,17 +131,21 @@ internal sealed class FetchService
 
     /// <summary>
     /// Returns a dictionary view of an <see cref="Entity"/>'s attributes plus its
-    /// formatted-value cache (under the synthetic key
-    /// <c>"FormattedValues"</c>) and primary id (under the entity logical name's
+    /// formatted-value cache (under the synthetic key <c>"@formattedValues"</c>), its logical
+    /// name (under <c>"@logicalName"</c>) and primary id (under the entity logical name's
     /// <c>id</c> attribute, already in <see cref="Entity.Attributes"/>).
     /// </summary>
     /// <remarks>
-    /// The default <see cref="System.Text.Json"/> serializer can project SDK types
-    /// (<see cref="EntityReference"/>, <see cref="OptionSetValue"/>, <see cref="Money"/>,
-    /// <see cref="AliasedValue"/>) via their public properties; we don't flatten further
-    /// here so the client can recover the typed values. The client (
-    /// <c>BffDataverseClient</c>) is responsible for normalizing this shape to its
-    /// preferred type.
+    /// SDK values are NOT flattened here, and no client normalizes them either:
+    /// <c>BffDataverseClient</c> returns the JSON as it arrives. The default
+    /// <see cref="System.Text.Json"/> serializer (Web defaults) writes each SDK type through its public
+    /// properties, so on the wire an <see cref="OptionSetValue"/> or a <see cref="Money"/> is an
+    /// object, <c>{ "value": 1, "extensionData": null }</c>, never a bare number; an
+    /// <see cref="EntityReference"/> is <c>{ "id", "logicalName", "name", … }</c>; and a lookup's
+    /// display name is also under <c>@formattedValues</c> keyed by the column name. A client that
+    /// gates on a raw option-set value reads it through <c>rawWholeNumberOf</c>
+    /// (<c>src/client/external-spa/src/utils/rawWholeNumber.ts</c>), which accepts both shapes
+    /// (spaarke-SPA-external-access-platform-r4 D-33, #3010).
     /// </remarks>
     private static IReadOnlyDictionary<string, object?> ProjectEntity(Entity entity)
     {

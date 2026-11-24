@@ -420,4 +420,4 @@ This under-lists, which fails closed.
 
 **Why it matters.** The comment led task 020 to read bare numbers, which was the cause of the Review detail and closed-request Delete defects fixed in PR #3000. The next reader could repeat the mistake.
 
-**Fix.** Correct the comment and point it to `rawWholeNumberOf`. It's comment-only, so make it part of the next R4 BFF PR. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3010 (board Type=Bug).
+**Fix.** Correct the comment and point it to `rawWholeNumberOf`. It's comment-only, so make it part of the next R4 BFF PR. Status: Done (task 031, 2026-11-23: the `ProjectEntity` remarks now state the wire shape and point to `rawWholeNumberOf`; its summary's wrong key name, `FormattedValues` for `@formattedValues`, is fixed too. The issue is closed by the main session). Issue: https://github.com/spaarke-dev/spaarke/issues/3010 (board Type=Bug).
