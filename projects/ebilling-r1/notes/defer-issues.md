@@ -2612,6 +2612,32 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 ---
 
+### ISS-051 — Resolved UTBMS codes are never written to the Invoice Line code lookups
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | now |
+| **Filed** | 2026-11-24 |
+| **Source** | Owner checklist Q (invoice INV-123.1.1 on MAT-000113): read-only check of the created lines on dev |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3080 |
+
+**Description**
+
+FR-04 gives `sprk_billingevent` UTBMS task / activity / expense code lookups (`sprk_taskcode`, `sprk_activitycode`, `sprk_expensecode`) next to the as-billed text. The coding step (FR-22) resolves a code per line and stores it only in the `coding` member of `sprk_extractionconfidence`. No BFF code writes the three lookups: 0 lines on dev have one, including the 42 lines of the checklist-Q invoice, whose coding JSON says Coded (e.g. expense E118). Readers of the lookups therefore never see the resolved code. `ApExportService.CodeAsync` falls back to the firm's as-billed text, so the AP export sends what the firm typed, not the resolved code, and a line with no as-billed code exports nothing. `InvoiceIndexDocument` indexes the lookups (`LineTaskCode` and the others), so the invoice index has no codes. The Invoice Review page reads the JSON, so the page itself is not affected.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs` (~1820, as-billed text only; ~2109 coding JSON)
+- `src/server/api/Sprk.Bff.Api/Services/Finance/ApExportService.cs:1287` (`CodeAsync`)
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexDocument.cs:42-44`
+- Line-decision code corrections (`InvoiceLineDecisionService` ~1486): check whether a corrected code updates the lookup
+
+**Suggested fix**: write the lookups when the line is persisted (resolve code + code set to the `sprk_billingcode` row; an unresolvable code leaves the lookup empty and keeps the finding), and update them when a reviewer corrects a code; or make export and index read the coding JSON. Decide by checking how `sprk_billingcode` rows are keyed and which readers exist.
+
+**Estimated effort**: half a day to a day. **Blockers**: none. **Related**: FR-04, FR-22, FR-30, D-56.
+
+---
 ### ISS-050 — Line-decision lock expires after 2 minutes while a 1,000-line call can still be writing
 
 | Field | Value |

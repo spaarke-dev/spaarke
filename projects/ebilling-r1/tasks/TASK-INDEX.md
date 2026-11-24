@@ -64,7 +64,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 050b | ✅ [done] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
 | 051 | ✅ [done] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | ✅ [done; browser ui-tests deferred to 112, notes/052-createinvoicewizard-rewire.md] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
-| 053 | 🔄 [steps 2-5, 7 (unauthenticated), 9 done; BFF and SPA steps superseded by master deploys; closes on owner checklist Q] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
+| 053 | ✅ [done 2026-11-24: owner checklist Q passed (accepted INV-123.1.1 on MAT-000113); Rejected check moved to 079 step 10; ISS-051 #3080 found] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054 |
 | 054 | ✅ [done] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
 
 ### Phase 3 — Rules (WP3)
