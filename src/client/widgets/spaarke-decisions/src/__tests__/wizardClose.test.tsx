@@ -180,7 +180,7 @@ describe('the display mode is never requested (owner decision 2026-11-24)', () =
     fireEvent.click(await screen.findByRole('button', { name: 'Discard and close' }));
 
     await waitFor(() => expect(screen.queryByTestId('step-confirm')).toBeNull());
-    expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'idle');
+    await waitFor(() => expect(screen.getByTestId('wizard-place')).toHaveAttribute('data-place', 'idle'));
     expect(lineIds()).toHaveLength(3);
     await waitFor(() => expect(document.activeElement).toBe(rowOf(1)));
     expect(host.callsTo(COMPLETE_TOOL)).toHaveLength(0);
