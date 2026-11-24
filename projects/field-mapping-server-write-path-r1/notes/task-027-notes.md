@@ -48,6 +48,29 @@ FULL rigor, sonnet @ high, directional. One Sonnet implementer in an `isolation:
   - Read-back from dev: the same SHA.
   - Rollback: the previous dev bundle, deployed 2026-11-23, SHA 0B0B550C…36702005, 1,548,994 bytes. It still called `/field-mappings/`. A copy is kept outside the repo; redeploying it is the rollback.
 
+## Live check on dev (2026-11-24, 22:52Z): FAIL, nothing mapped
+
+Matter FMSWP-021-after-08 (MAT-000065, 3fa0d616-1183-4088-930e-109fdc981810), team-owned. All eight mapped columns are set on it. Wizard launched from the Matter form, so the association was locked to the Matter.
+
+| Report card | Picked | Result |
+|---|---|---|
+| FMSWP-027-picks 45edd549-3658-4e42-88ed-9bd8ee330e09 | Law Firm 1 Tennant Whitcombe PC, External Ralph Dewey, Internal Test User 1 | The three picks were kept. The five unpicked columns are EMPTY; the Matter has values for all of them. |
+| FMSWP-027-unpicked 737f7880-1b70-451b-8c56-943e6f2aba01 | nothing | All eight columns are EMPTY. |
+
+Both rows:
+- Owner is the Matter's team (Spaarke Business Unit 1).
+- Regarding matter, record type, id and name are all right.
+- No warnings were shown.
+- The browser made one call, `POST /api/v1/child-records/sprk_reportcard`, with no query string and no `/field-mappings/` request.
+
+**Cause.** The BFF trace for the second create says `step FieldMapping: NoOp no field mapping was asked for`.
+- `ChildRecordEndpoints.InferMappingSourceTables` lists the TABLES BEING CREATED whose create infers a source. It is currently `sprk_matter` and `sprk_project`. It is not a list of parent tables.
+- A create of `sprk_reportcard` that names no `mappingSource` therefore asks for no mapping.
+- Task 027 removed the client mapping and sent no `mappingSource`. That rested on a misreading of the set. Its payload test asserted the misreading ("no mappingSource"), and review missed it.
+- Every other wizard already on the server names its parent explicitly: Event, Matter, Project, To Do, and Work Assignment with its follow-on event. The Report Card wizard is the only one that does not.
+
+**Fix (in scope of 027).** `reportCardService.ts` names the regarding Matter or Project as `mappingSource`, the same way the other wizards do. The payload test asserts the query string. No BFF change. Then PR, redeploy, and re-check on dev; each needs the owner's go.
+
 ## Left (on the owner's go)
 
 1. Live check on dev under a Matter whose profile maps Law Firm 1 / External / Internal: pick one of each and confirm the picks are kept; create one leaving them unpicked and confirm they are filled from the matter; owner = the matter's team; mapped values present on first load.
