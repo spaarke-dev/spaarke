@@ -4,7 +4,7 @@
     <title>A row decision closes its items in batches: one Signal read per page, one access check per subject record, one matter read per commit, bounded-parallel closes (DI-146)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the core decision commit write path (.cs) in BFF Signals; concurrency and per-item safety outcomes.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -63,4 +63,5 @@ Entry points on origin/master (line numbers drift; search by name): `src/server/
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt205); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-24: PR #3027 merged to master (ccbcc5c7f9, Refs #2650) after an independent Opus review; the F2 fix round (a real-concurrency overlap test) was re-checked by the main session. Signals are read in pages of 100, access answers are memoised per (table, id) for one request (allowed answers only), and closes run with bounded parallelism of 4 with results kept in item order. Counted on the unit-test fake, Dataverse calls per extra item fell from 6 to 2 (3 when every item has its own subject); per-item row-version, D-120, outcome codes, ledger resume and the WhoAmI bound are unchanged. On dev BFF 996928732e (2026-11-24). Dev timing was not possible: no dev matter has a multi-item Decide row (largest 3 items) and Do-lane decisions are per item. Owner chose (2026-11-24, "Accept test counts") to complete on the counted evidence; #2650 stays open to time the next real multi-item Decide row.</completion>
 </task>
