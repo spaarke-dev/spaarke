@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="207" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Assign Task: an assignee whose user account is in Administrative access mode gets its own "no email" warning, not "does not have access to this record" (#3063, DI-171)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the Assign Task recipient gate (.cs) in BFF Signals and the shared DecisionWizard display (.ts); adds one warning code to the decision commit answer.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located change with a stated rule; the security decision itself does not change (only which warning a refusal carries).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No open ontology PR touches AssignTaskRecipientGate.cs or decisionDisplay.ts.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, react, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Issue #3063 (read it in full: gh issue view 3063) and DI-171 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. Reproduced on dev 2026-11-24 (owner go) and diagnosed read-only by uac-r2: the assignee's systemuser is an unlicensed administrator in Administrative access mode (accessmode = 1). Dataverse's impersonated RetrievePrincipalAccess for that user answers 403 (0x80040220, filtered privileges), which the probe maps to AccessRights.None, so the gate refuses with NoAccess and the assigner reads "the assignee does not have access to this record". The refusal is correct (such a user cannot use the app); the sentence is misleading.
+
+Owner decision 2026-11-24: "New warning code". uac-r2's binding guidance: keep Dataverse's task-rights answer as the decider (no early refusal on access mode, no new eligibility rule); leave InternalShareEndpoints.ClassifyEligibility unchanged.
+
+Entry points (line numbers drift; search by name): `src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs` (`AssignTaskRefusal`, `AssignTaskRecipient` warning constants and `Warning` switch, `DecideInternalAsync` at the `TaskRightsAsync` refusal "the user cannot read the task"); `src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskNotifier.cs` (the refusal switch: a new refusal must fall into NotAllowed, as NoAccess does); `src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts` (`WARNING_TEXT`); tests `tests/integration/data-mutation/Signals/AssignTaskNotifierTests.cs` and `src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/__tests__/DecisionWizard.assignTaskNotify.test.tsx`. Administrative access mode is 1 (see `Services/ExternalAccess/FlaggedUserPlacementJob.cs` `AdministrativeAccessMode`).</prompt>
+  <role>SPAARKE full-stack developer: .NET 10 BFF Signals (Assign Task notifier and gate), shared React DecisionWizard.</role>
+  <goal>When the one eligible internal user who represents the assignee contact has accessmode = 1 (Administrative) and Dataverse's task-rights answer lacks Read, the decision commit warns `assignee_email_not_sent_admin_account` (new) and the Console reads a plain sentence saying the assignee's user account is set up for administration only and cannot use the app; every other path, including who is emailed, is unchanged.</goal>
+  <context>
+    <background>The new refusal is a reason refinement, not a new check: it is chosen ONLY at the existing "the user cannot read the task" branch (rights answered, no Read) and ONLY when that user's AccessMode == 1. An Administrative user whose rights answer includes Read is still emailed exactly as today (no early refusal). An unknown rights answer stays Unverified. Every other NoAccess branch keeps NoAccess. Add an `AssignTaskRefusal` value (e.g. `AdministrativeAccount`) with its own warning constant and a log reason that names it; the notifier's NotAllowed mapping covers it via its default case (confirm, and add the case explicitly only if the switch's style needs it). Find every consumer of the existing warning codes (Grep `assignee_email_not_sent`, `AssignTaskRefusal.`, `Warning =>`) before editing: the Copilot widget (mcp-r1) may show the same codes; if it has its own text table outside this repo's shared lib, list it in the task notes for the main session to pass on, do not edit it. Sentence style follows task 203: plain, no internal codes, starts like its siblings ("The task was assigned, but no email was sent: ..."). An older client that does not know the code already reads the generic sentence (describeWarning fallback), so no version gate is needed.</background>
+  </context>
+  <constraints>
+    <constraint source="owner 2026-11-24">New warning code (not a reword). Who receives an email does not change for any input.</constraint>
+    <constraint source="uac-r2 diagnosis">No early refusal on access mode; the task-rights answer stays the decider; ClassifyEligibility and its LastPersonAccessMode unchanged; no change to CallerRecordAccessProbe or DataverseWebApiService.</constraint>
+    <constraint source="project">Security fails closed exactly as today: an unanswered rights read is Unverified for every access mode. No other refusal changes code.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, or tenant names in code, tests, notes or the PR.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration; one enum value and one constant answer the three questions in the PR (existing: NoAccess; extension: refine its reason; cost of nothing: the assigner is told the assignee lacks record access when the account cannot use the app at all).</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests. Client: the DecisionWizard tests and client-lint before push.</constraint>
+    <constraint source="ADR-038">Tests fail on origin/master: Administrative + rights without Read gives the new warning and sends nothing. Must-not-fire controls: Administrative + Read is emailed; Read-Write (accessmode 0) + rights without Read keeps NoAccessWarning; Administrative + unanswered rights keeps UnverifiedWarning. Client: describeWarning gives the new sentence; existing sentences unchanged.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read #3063, DI-171 and the entry points; Grep every consumer of the warning codes; record findings in notes/task-207-notes.md.</step>
+    <step order="2">Failing tests first (BFF gate/notifier and client describeWarning), including the three must-not-fire controls.</step>
+    <step order="3">Add the refusal, constant, Warning mapping and the branch at the task-rights refusal; add the client sentence.</step>
+    <step order="4">Filtered tests (AssignTaskNotifier, AssignTask, Signals), full ArchTests, BFF build, publish-size delta; client DecisionWizard tests, typecheck, client-lint.</step>
+    <step order="5">PR to master, body "Closes #3063"; notes in notes/task-207-notes.md (include any out-of-repo consumer of the codes for the main session).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Administrative (accessmode 1) user, rights answered without Read: commit warning is assignee_email_not_sent_admin_account, no email or bell; test fails on origin/master.</criterion>
+    <criterion testable="true">Administrative user with Read is emailed as before; accessmode 0 user without Read gives assignee_email_not_sent_no_access; Administrative user with an unanswered rights read gives assignee_email_not_sent_unverified.</criterion>
+    <criterion testable="true">describeWarning('assignee_email_not_sent_admin_account') returns the new plain sentence with no internal code; the three existing assignee sentences are unchanged.</criterion>
+    <criterion testable="true">No other refusal branch, eligibility rule, probe or notifier outcome changes; build, filtered tests, full ArchTests, client tests and client-lint pass; publish-size delta reported.</criterion>
+    <criterion testable="false">Main session re-runs the dev reproduction after the next uac-r2 dev BFF build and the Console auto-deploy: the warning reads the new sentence.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The change would alter who is emailed, need a probe or eligibility change, a schema change, or a second new code: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt207); PR to master.</protocol>
+  </execution>
+</task>

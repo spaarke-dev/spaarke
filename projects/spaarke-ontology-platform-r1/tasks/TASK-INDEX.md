@@ -285,6 +285,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ 204 | [Nightly D-170 close pages not-in-force policies and reports a truncated read (DI-162)](204-signal-close-pages-not-in-force-policies.poml) | FULL | sonnet/high | none | 185-fixes | #2982 (ebilling ISS-044). Silent skip past 5,000 Off/Inactive policies. PR to master |
 | ✅ 205 | [A row decision closes its items in batches (DI-146)](205-decision-commit-batches-row-closes.poml) | FULL | opus/high | none | 185-fixes | #2650. 18 items took 41.7 s / 315 Dataverse calls on dev; target at most 3 calls per extra item. #3027 merged ccbcc5c7f9; completed on test counts (owner), #2650 open for a dev timing |
 | ✅ 206 | [Plan refusal on the admin Rules page is logged and counted; authoring names the real refusal (#3034)](206-plan-refusal-trace-and-authoring-messages.poml) | FULL | sonnet/high | 203, 204 | 185-fixes | uac-r2 pre-deploy review of 203-205. #3035 merged 44c4cd5b01 |
+| 🔲 207 | [Assign Task: an Administrative-mode assignee gets its own "no email" warning (#3063, DI-171)](207-assign-task-admin-account-warning.poml) | FULL | sonnet/high | none | 185-fixes | Owner 2026-11-24 "New warning code"; uac-r2: rights answer stays the decider, no early refusal, ClassifyEligibility unchanged |
 
 ### Phase 5 — The worklist surface
 
