@@ -14,6 +14,7 @@
 | **Uncommitted** | none |
 
 ## Next action (exact)
+0. **Plain-Chat leak check (coordination ask, not yet run):** with the agent installed, in plain Copilot Chat (no agent selected) "Show my Spaarke decisions" must still make exactly ONE `tools/call spaarke_show_decisions` (the baseline). Owner notes the time.
 1. Owner opens `spaarke-legal-g8p2-sl` in **Teams** (Copilot app / agent chat) and in **Word** (blank test document, Copilot pane, agent picker): "Show my Spaarke decisions". Cancel any approval card; never decide in the widget. Note times.
 2. Check App Insights for one `tools/call spaarke_show_decisions` per turn from client Sydney; record per surface in the README run log and design §8 G8-P2.
 3. Report to COPILOT-PLATFORM-COORDINATION [0afb62]. Removals by 2026-11-30: G8-a agent + 2 skills, G8-p2 `802fd9cc`, G8-p2-sl `d38f8df8`, G8-p2-org-learn `0421c980`.
