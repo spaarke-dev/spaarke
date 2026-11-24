@@ -139,7 +139,7 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 
 | Version | Change | Result |
 |---|---|---|
-| 1.0.0 | Dynamic tool discovery | Agent installed (Teams custom upload, owner only). In the agent: "Tools I can see: none". **No MCP traffic at the BFF** (no `initialize`, `tools/list` or 401) |
+| 1.0.0 | Dynamic tool discovery | Agent installed through the **admin center / org catalog** (owner confirmed 2026-11-24; this row earlier said "Teams custom upload" in error), as were 1.0.1–1.0.4. In the agent: "Tools I can see: none". **No MCP traffic at the BFF** (no `initialize`, `tools/list` or 401) |
 | 1.0.1 | `spaarke_show_decisions` pinned in the package (`mcp-tools.json`) | Same: the tool is not visible even though it is pinned, and no BFF traffic. So **the action is not attaching**; this is not a discovery or sign-in step |
 | 1.0.2 | Server URL with a trailing slash (`…/mcp/legal-operations/`). The BFF serves both forms, and the OAuth Base URL still prefix-matches | ❌ same. Rules out the shared-URL theory. (Tested whether the tenant ties an action to the existing **"Spaarke MCP" MCP-server object for the same URL** (admin center shows C1 as an MCP server with "Dependent plugins: Spaarke MCP") |
 | 1.0.3 | Instructions point at the action, plain-language starters, canonical URL (Learn: no debug card is returned when the orchestrator skips the agent's skills) | ❌ The model: "the Spaarke MCP G8-P2 action is not currently exposed among my available tools". The new instructions were live. Still no debug card (the owner has an M365 Copilot Premium licence) |
@@ -150,7 +150,7 @@ Run every step in **Chat**. Also run P1 in **Word (web)** and **Teams** where th
 
 **Coordination S-3 (2026-11-24) challenges "platform limit"; points taken:**
 1. The 1.0.4 control reused app id `802fd9cc`, so it was not independent. Hence the two fresh-id Learn controls above, one per route.
-2. **Which route was 1.0.0–1.0.4 actually installed by?** The 1.0.0 row says "Teams custom upload". If that was "Upload a custom app (for me)", the sideload has already failed once. Owner to confirm.
+2. **Which route was 1.0.0–1.0.4 installed by?** Owner confirmed 2026-11-24: **admin center / org catalog**, all versions. So a personal sideload has never been tried.
 3. Tenant checks to screenshot: Agents › Settings › **Agent and plugin access** (is "your organization" allowed?); Agents › Tools › **Registry** (any MCP-server object for `learn.microsoft.com/api/mcp` or the BFF URL, and its state); the agent's **Users** scope includes the test user; the **developer-mode debug card** Actions section.
 4. D1's failure differs in kind: its function **is selected and executed** and fails at a pre-flight; G8's function is **never loaded**. Not one cause, though both are worth fixing.
 5. Strongest discriminator: a **Microsoft-generated** sample agent (ATK "Start with an MCP server" / WIQD) with a fresh id through the org catalog. Needs the owner's OK to install the tooling.

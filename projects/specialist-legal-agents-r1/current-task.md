@@ -14,7 +14,7 @@
 | **Uncommitted** | none |
 
 ## Next action (exact)
-0. Coordination S-3 (2026-11-24): "platform limit" not proven. Owner confirms which upload option 1.0.0–1.0.4 used, and screenshots the tenant checks (README § "Coordination S-3"). Third zip `spaarke-legal-g8p2-org-learn.zip` (fresh id `0421c980-…`) goes through the **org catalog**, paired with the sideloaded Learn control.
+0. Coordination S-3 (2026-11-24): "platform limit" not proven. Owner confirmed 1.0.0–1.0.4 all went through the admin center / org catalog (sideload never tried). Owner screenshots the tenant checks (README § "Coordination S-3"). Third zip `spaarke-legal-g8p2-org-learn.zip` (fresh id `0421c980-…`) goes through the **org catalog**, paired with the sideloaded Learn control.
 1. Owner sideloads both v1.1.0 zips (Upload a custom app, for me). In m365.cloud.microsoft/chat, new chat with each agent: the Learn one gets "Search Microsoft Learn for declarative agent MCP plugins", and `spaarke-legal-g8p2-sl` gets "Show my Spaarke decisions" (sign in if a card appears; Cancel any approval card).
 2. Check App Insights for `initialize` / `tools/list` / `tools/call` from client "Sydney" in that minute.
 3. **Sideload ✅:** the build path works. Record it, and log org-catalog distribution as a D-A1 deployment risk (track #16643). Then G8-P2's real questions: Word/Teams surfaces and one call per turn (R1′).
