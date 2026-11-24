@@ -32,152 +32,6 @@ every what-if Modify/Deploy/Unsupported as drift and has never run on a real sta
 versions; a what-if dry run against ACME to decide which change kinds are drift. Until then #3017 acknowledges an existing
 stamp with `upgradeOfProvisionedOn` and never sends `provisionedOn`.
 
-### ISS-037 — H12b never seeded the Worklist, Decision Records, Reconciliation and Compose workspaces
-
-| Field | Value |
-|---|---|
-| **Status** | Fixed by PR #2993 (merged `5e4cf470d6`, 2026-11-23); ACME seeded live 2026-11-23; dev L2 Worker deployed from master `ca1684dd2f` 2026-11-23 (owner OK), healthy, package carries all 16 layouts |
-| **Urgency** | before the next stamp run (every new stamp lacks the four workspaces) |
-| **Filed** | 2026-11-23 |
-| **Source** | ACME guest-test prep after run `3b6f7b65`: the Console's Manage Workspaces showed 12 system workspaces, dev 16 |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2991 |
-
-**Description**
-
-H12b (`DataverseWebApiWorkspaceLayoutSeeder`) seeds only `scripts/system-layouts.json`. Worklist, Decision Records and
-Reconciliation were seeded on dev by standalone `scripts/seed-*-workspace-layout.ps1` scripts, and Compose by hand
-(2026-06-29), so no provisioned stamp had them.
-
-**Done**
-- ACME (owner OK "Fix both"): the three scripts ran after a `-WhatIf`, and Compose was created from dev's row (sort 5, section `compose-editor`). Read-back: 16 system rows, Daily Briefing the only default.
-- PR #2993: the four layouts are added to `system-layouts.json`, plus a guard test (every standalone seed script's layout is listed with the same section; it fails on master's list).
-
-**Remaining**: none on dev. Any other L2 environment (demo, prod) picks the list up at its next Worker deploy from master; move this entry to Resolved at the next defer-issues review.
-
-### ISS-036 — intake.schema.json lacks `buildId`, so an upgrade run cannot pin the BFF build from a valid intake
-
-| Field | Value |
-|---|---|
-| **Status** | Fixed by PR #3012 (merged `b9a4d6b5a7`, 2026-11-23): schema `buildId` + parity test + skill Step 1.0/4.0 send it; no deploy needed (skill / prereq files only) |
-| **Urgency** | before the next upgrade run that must not move the BFF |
-| **Filed** | 2026-11-23 |
-| **Source** | ACME upgrade run `3b6f7b65` (2026-11-20): `buildId = 2026.10.16-2` was added to the POST outside the schema-valid intake — a recorded deviation |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2987 |
-
-**Description**
-
-`IntakeParameterCatalog.cs:200` accepts `buildId` ("BFF build to deploy (H9 optional — defaults to latest.json)"), but
-`scripts/provisioning-prereqs/intake.schema.json` does not list it. Pinning the build is the only guard on an upgrade that
-changes the solution but must not change the BFF (ACME: the BFF upgrade waits on A9 home sign-in). Without it in the schema
-every such run deviates from the skill, or deploys whatever `latest.json` names.
-
-**Suggested fix**: add `buildId` (optional string, H9's pattern) to the schema; mention it in the skill's upgrade-mode
-intake step; add a test that every catalog key has a schema property or is listed as server-only.
-
-**Estimated effort**: 1–2 h with the parity test
-**Related**: ISS-031; `notes/acme-1.3.2.0-upgrade-plan.md` step 2
-
-### ISS-035 — A completed run keeps its handlers' failure-marker gates `Pending`
-
-| Field | Value |
-|---|---|
-| **Status** | Fixed by PR #3013 (merged `b76078668c`, 2026-11-23): `RecordFailureGate` tags markers, `MarkPhaseSucceeded` clears them, H13 records its own success; dev L2 Worker deployed from master `7dc36ac0f5` 2026-11-23 (owner OK), healthy |
-| **Urgency** | before any tooling reads `gateStates` (fleet view, provisioning web UI) |
-| **Filed** | 2026-11-23 |
-| **Source** | ACME upgrade run `3b6f7b65` ended `Completed` with five `Pending` gates and H13 in `failedHandlers` |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2986 |
-
-**Description**
-
-Failure paths write `run.GateStates[$"{h}-{rejectionCode}"]` as `Pending` (H2a, H2b `H2bAiSearchIndexHandler.cs:516`,
-H4b, H9 `H9BffDeployHandler.cs:884`, H10, H12a, H12b, and H13/H6 alike); a later success never clears them. Run
-`3b6f7b65` shows `h2b-index-provisioning-failed`, `h6-import-timeout`, `h9-slot-swap-infra-fault`,
-`h9-scheduled-jobs-slot-guard-failed` and `h13-h13-extended-validation-inconclusive` (H13's codes already carry the
-`h13-` prefix the key adds). A reader cannot tell from the record whether anything is owed.
-
-**Suggested fix**: on a handler's success, set its own failure-marker gates to `Cleared` (verifier + time), keeping them as
-history; clear or rename `failedHandlers`.
-
-**Estimated effort**: 2–3 h with tests
-**Related**: ISS-034
-
-### ISS-034 — H13 keyless-proof times out against a BFF still warming up after H9's swap
-
-| Field | Value |
-|---|---|
-| **Status** | Fixed — PR #2980 merged `c4d7da8d57` 2026-11-23 (H13 repeats a no-verdict keyless proof with 30 s → 5 min waits for up to 40 min; never a failure, an earlier failed check or a 404); dev L2 Worker deployed; ACME H13 passed on resume (first attempt, 5 s). Stamp sizing (second bullet below) remains an owner decision |
-| **Urgency** | now (every H13 within ~30–45 min of a BFF deploy on S1 fails; workaround: wait for the plan CPU to settle, then resume) |
-| **Filed** | 2026-11-22 |
-| **Source** | ACME upgrade run `3b6f7b65`: H13 failed `h13-extended-validation-inconclusive` (keyless-proof: no answer within 90 s) |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2970 |
-
-**Description**
-
-H9 finished the swap at 19:22:07Z, and the new production BFF process had started at 19:20:36Z. H13 called `POST /api/platform/keyless-proof` at 19:23:02Z. ACME's App Insights shows the call took 98.5 s in all:
-- the request waited 33 s before the endpoint ran (19:23:35Z);
-- the `openai-chat` probe timed out after 36 s, over its 30 s cap, although the OpenAI call itself returned 200 in 1.5 s at 19:24:17Z;
-- the BFF answered at 19:24:40Z, logged as 499.
-
-H13 had given up at `KeylessProofTimeout` (90 s), so the run failed. The isolation census that followed took 45 s and returned Isolated. The owner chose to resume (2026-11-22).
-
-**Second attempt and corrected cause.** The resume at 19:33:53Z failed the same way: the BFF took 119 s, and `openai-chat` sent its request only 42 ms before its 30 s limit. Redis GETs took 19–20 s and the BFF logged `RedisTimeoutException` with nothing in flight. The process was not cold; the plan was saturated. `sprk-acme-prod-plan` is S1 with 1 worker, running both BFF slots. Its CPU:
-- 24–30% average 15:00–16:30Z;
-- 89–93% for 16:45–17:15Z after the first H9 deploy and swap, back to 32–40% from 17:30Z;
-- 97% at 19:15Z and 85% at 19:30Z after the second, with memory peaking at 97%.
-
-So for about 30–45 minutes after each deploy and swap, every call to the BFF is slow, while `/healthz` still answers in about 2 s. A `/healthz` warm-up check would not catch it.
-
-**Entry-points**
-
-- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs:413-457`
-- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13AcceptanceOptions.cs:50`
-- `src/server/api/Sprk.Bff.Api/Infrastructure/Diagnostics/KeylessProbeRunner.cs:29`
-
-**Suggested fix**
-
-- H13: treat a keyless-proof timeout as transient, and retry with backoff over up to about 45 minutes before reporting Inconclusive. Keep the 90 s per-call limit, so a BFF that is really stuck is still reported.
-- Stamp sizing: an S1 plan with one worker running both BFF slots saturates for about 30–45 minutes after every deploy. Decide whether stamps need a larger plan, or whether the staging slot should stop after a successful swap. This needs an owner decision; it affects the NFR-04 cost envelope.
-
-**Estimated effort**: 2–3 h with tests.
-
-### ISS-033 — H9 gives up on a slot swap after 10 min while ACME's swap takes 11, then retries into the still-running swap
-
-| Field | Value |
-|---|---|
-| **Status** | Fixed — PR #2956 merged `c39114e7c6` 2026-11-22 (30-min swap wait; slot guard waits out a swap in flight); verified on ACME (H9 passed on resume) |
-| **Urgency** | now (every BFF deploy to a stamp on S1) |
-| **Filed** | 2026-11-22 |
-| **Source** | ACME upgrade run `3b6f7b65`: H9 failed `scheduled-jobs-slot-guard-failed` (409 "prepared for swap") after `slot-swap-infra-fault` |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2949 |
-
-**Description**
-
-On 2026-11-22 H9 deployed the BFF to `sprk-acme-prod-api` staging (push deploy ended 16:48:58Z) and called the staging → production swap at 16:53:49Z. Azure applied production's settings to staging and started warmup.
-
-`ArmSlotSwapper` waits `SlotSwapTimeout` (10 min), then reports `slot-swap-infra-fault`. The run auto-retried H9 at about 17:03:51Z, while the swap was still running. H9's first step (the slot-sticky `Scheduling__RunScheduledJobs=false` write on staging) got 409 "The slot cannot be changed because its configuration settings have been prepared for swap". The run failed.
-
-The swap completed at 17:04:53Z (about 11 min; the BFF needs about 220 s to start on S1, T186 L48). Production then served H9's deployment, and both slots were healthy. So H9's work had succeeded, yet the run recorded it as failed. A resume reruns the deploy and swap, and hits the same 10-minute ceiling.
-
-Same shape as ISS-032 (H6): a fixed wait shorter than the Azure operation, then a retry that collides with the operation still in flight.
-
-**Entry-points**
-
-- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/BffDeployOptions.cs:84` (`SlotSwapTimeout` = 10 min; its doc says swaps take 30–90 s)
-- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotSwapper.cs:94-130`
-- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotStickyAppSettingWriter.cs` (the 409 on the retry)
-
-**Suggested fix**
-
-On a swap timeout, do not report a failure while Azure is still swapping. Poll the site's `slotSwapStatus.timestampUtc` (and the activity log) until the swap completes or fails, within a ceiling that covers `WEBSITES_CONTAINER_START_TIME_LIMIT` plus warmup (≥ 30 min).
-
-At the start of H9, if a swap is in flight on the site (the staging config is "prepared for swap"), wait for it instead of writing to the slot.
-
-When the swap completes with production healthy and serving the expected deployment, H9 succeeds without redeploying.
-
-**Estimated effort**: 3–5 h with tests
-**Blockers**: none
-**Related**: ISS-032; T186 L46/L48
-
 ### ISS-032 — H6 misjudges a long SpaarkeMaster upgrade: 60-minute timeout, no in-flight check, async-op status trusted over the import result
 
 | Field | Value |
@@ -218,74 +72,6 @@ Raise the default `ImportTimeout` to at least 120 min. On a timeout, record the 
 **Blockers**: none
 **Related**: ISS-031; ebilling PR #2935 (the 1.3.2.0 package defect that preceded this); `notes/acme-1.3.2.0-upgrade-plan.md`
 
-### ISS-031 — No upgrade run can start: CreateRun (REG-07) refuses a Ready registry row and nothing moves it back
-
-| Field | Value |
-|---|---|
-| **Status** | Fixed by PR #3017 (merged `7dc36ac0f5`, 2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. dev L2 API deployed from master `7dc36ac0f5` and swapped to production 2026-11-23 (owner OK), healthy |
-| **Urgency** | now (every upgrade of an existing stamp) |
-| **Filed** | 2026-11-20 |
-| **Source** | ACME upgrade to SpaarkeMaster 1.3.2.0: the first `POST /api/runs` returned 400 `registry-setup-status-not-in-progress` |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2926 |
-
-**Description**
-
-`CreateRun` accepts a run only when the customer's `sprk_dataverseenvironment` row has `sprk_setupstatus = InProgress`.
-After a stamp's first run, H13 sets it to Ready. The skill's Step 1a detects an upgrade (`sprk_provisionedon` set) and
-asks the operator to confirm. But neither the skill nor L2 sets the row back to InProgress, so every upgrade run
-fails with 400 before it starts. On 2026-11-20 the owner approved a manual PATCH (2 → 1) for ACME; run `3b6f7b65` then
-started.
-
-**Entry-points**
-
-- `src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs:686-698` (REG-07 setupStatus check)
-- `.claude/skills/provision-environment/SKILL.md` Step 1a, the upgrade branch (`$script:IsUpgradeRun = $true`), around line 739
-
-**Suggested fix**
-
-Pick one owner for the transition. Either Step 1a's upgrade branch PATCHes the row to InProgress after the operator
-confirms the upgrade (registry write, like Step 1f), or CreateRun accepts Ready when the row has `sprk_provisionedon`
-and the intake carries an upgrade acknowledgement, and moves the row itself. The second keeps the rule in one place
-on the server.
-
-**Estimated effort**: 2–4 h with tests
-**Blockers**: none
-**Related**: REG-07 (pre-dispatch punch list 2026-08-27); ISS-030; `notes/acme-1.3.2.0-upgrade-plan.md`
-
-### ISS-030 — PRQ-C-03 (global name availability) fails on every upgrade run
-
-| Field | Value |
-|---|---|
-| **Status** | Fixed by PR #3015 (merged `22c42efad6`, 2026-11-23): an unavailable name that exists in the stamp RG passes as OWNED (H2a rule); no deploy needed (skill / prereq files only) |
-| **Urgency** | next-round |
-| **Filed** | 2026-11-20 |
-| **Source** | ACME upgrade prechecks (skill Step 1e-ter), 2026-11-20 |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2925 |
-
-**Description**
-
-PRQ-C-03 calls `checkNameAvailability` / `checkDomainAvailability`, which report every existing name as taken. On an
-upgrade run the stamp's Service Bus namespace, storage account and Cognitive Services subdomains already exist in the
-customer's own resource group, so the check fails. ACME failed it for `spaarke-acme-prod-sbus`, `sprkacmeprodsa`,
-`sprk-acme-prod-docintel` and `sprk-acme-prod-contentsafety`, all four in `rg-spaarke-acme-prod`. The operator has to
-recognise and override a hard-stop check. H2a had the same defect and was fixed on 2026-10-15 (T186 L23); the
-precheck recipe was not.
-
-**Entry-points**
-
-- `scripts/provisioning-prereqs/prereqs.yaml:800-829` (PRQ-C-03 recipe; its `expect` already says "run this before the first attempt only")
-- `src/server/services/Sprk.Provisioning.ControlPlane.Core/.../ArmResourceNameAvailabilityProbe.cs` (H2a's fix to copy)
-
-**Suggested fix**
-
-When a name is unavailable, GET it at its expected ID in `rg-spaarke-{customerId}-{stampEnvironment}` on the stamp
-subscription: 200 means it is the stamp's own (pass), 404 means a real collision (fail), anything else fails with the
-error. This matches H2a.
-
-**Estimated effort**: 1–2 h
-**Blockers**: none
-**Related**: T186 L23; ISS-031
-
 ### ISS-028 — Operator scripts excuse the System Administrator field-security profile by name (#2725)
 
 | Field | Value |
@@ -294,41 +80,6 @@ error. This matches H2a.
 | Issue | https://github.com/spaarke-dev/spaarke/issues/2725 |
 | Fails without it | A profile NAMED "System Administrator" with create/update on a locked column is excused by 19 scripts' `-Verify` (list in the issue), so the script reports the lock whole while an ordinary member can write the column. |
 | Owner | unified-access-control-r2 / external-access r3 (most scripts), ebilling-r1 (four). Not ours to fix in 268. |
-
-### ISS-001 — Hand-off owed by UAC-r2: how a new environment gets `sprk_noaccessentry`
-
-| Field | Value |
-|---|---|
-| **Status** | Open — waiting on unified-access-control-r2 |
-| **Urgency** | now (blocks T256 / T218 / T186) |
-| **Filed** | 2026-10-07 |
-| **Source** | 2026-10-06 conversion review; owner 2026-10-07 asked for an issue + message to UAC-r2 |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1364 |
-
-**Description**
-
-An environment without `sprk_noaccessentry` denies every read, so a freshly provisioned environment fails closed and
-T186 cannot pass. UAC-r2 documents the table only in its own notes; nothing tells provisioning which solution carries
-it, when it must exist, what to seed, or how H13 verifies it.
-
-**Entry-points**
-
-- `projects/unified-access-control-r2/` notes `DEPLOY-CHECKLIST.md`, `batch4-integration-steps.md`; `docs/data-model/INDEX.md`
-- This project: T256 (INCOMING-145), T218 (solution package), H13 checks
-
-**Suggested fix**
-
-UAC-r2 answers the four questions in the issue (packaging, ordering, verification, upgrade); provisioning turns the
-answer into T256 handler work and T218 package content.
-
-**Update 2026-10-08 (T256).** What provisioning needs is now answered by the repository, and built:
-1. *Packaging*: the table ships in SpaarkeMaster 1.2.0.0 with every column the BFF reads (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_noaccessentry`).
-2. *Ordering*: H7b probes `sprk_noaccessentries` with the BFF reader's own `$select` (`NoAccessListReader.RowSelect`,
-   pinned by `SecureRecordOwnerRoleSetParityTests`) and refuses Resumable `secure_setup.noaccessentry_missing`; H9 waits
-   for H7b, so no BFF is deployed to an environment without it. Nothing is seeded: an empty deny list denies nothing.
-3. *Verification*: that probe, on every run.
-4. *Upgrades*: SpaarkeMaster upgrades carry it.
-Left open only for UAC-r2's confirmation on #1364 (and to hear if the schema changes — we re-export, never hand-edit).
 
 ### ISS-003 — A second environment for the same customer overwrites the first one's BFF app registration
 
@@ -684,31 +435,6 @@ caller on a stamp; none is a boot failure.
 with "unresolved placeholder" on PRQ-C-10. Fix when Model 2 returns: resolve to `notApplicable` for non-B2BGuest runs and let
 PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
 
-### ISS-024 — H14m (customer shared mailbox) needs two Exchange roles the owner has not approved yet — CLOSED 2026-10-13
-
-| Field | Value |
-|---|---|
-| **Status** | **Closed 2026-10-13.** D32 approved 2026-10-10 and applied 2026-10-13 (M1 PASS). Live checks as the app (Worker UAMI → MI-FIC → Spaarke Exchange Admin) the same day: M2, M3, M4a/b, M5, M7 PASS; M6 not run (optional). Results: `notes/t263-customer-shared-mailbox.md` §5. The full ensure route (M4 `Success` → `AlreadyCompliant`, `Test-ServicePrincipalAuthorization` for the 3 roles) is proven by T186 at H14m |
-| **Filed** | 2026-10-10 (T263; number provisional — the main session assigns ISS numbers) |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1562 (the mail-model issue; T263 implements it) |
-
-T263 built H14m: `sprk-{customerId}-mail` is created as a shared mailbox, added to `Spaarke-AppAccess-{customerId}`,
-authorization-tested, and recorded as the stamp's verified `sprk_communicationaccount` row. H13 re-checks all of it.
-`Spaarke Exchange Admin` holds only `Spaarke App RBAC Admin` plus `View-Only Recipients`, so it cannot run `New-Mailbox`
-or `Add-DistributionGroupMember`. Widening it is an owner decision (D25; `provisioning.md`).
-
-The sidecar detects the missing cmdlets before any write, so every run fails Resumable at H14m with
-`h14m-mailbox-ensure-failed` ("PRQ-E-16 … not applied") and creates nothing.
-
-**Needs**:
-1. The owner approves D32: the two custom roles plus one scope in `notes/t263-customer-shared-mailbox.md` §5, with
-   the exact cmdlets and parameters.
-2. An Organization Management admin applies them (deployment guide §4.2.1 step 5).
-3. Run live checks M1–M7, notably M5: whether `Get-Recipient -Filter "Members -eq '<DN>'"` works. If it does not, use
-   the one-line fallback in the note.
-
-Until then, merge T263 only together with the approval, or accept that T186 stops at H14m.
-
 ### ISS-025 — H7b does not check the `contact.sprk_externalinvitedon` (and, with UAC 185, `sprk_externalinvitecodehash`) field locks on stamps
 
 | Field | Value |
@@ -793,6 +519,245 @@ URLs to BFF hosts and defaults to the deleted `spe-api-dev-67e2xz`. The non-ship
 | Resolved | 2026-11-16. Task 270 (PR #2862 → `4256166205`): H7b procedure 10 verifies the invoice-family lock (S27) and the message-access lock (S28); remedies name only routes that work on a stamp. uac-r2 #2865 → `57431c8e6a`: SpaarkeMaster 1.3.2.0 carries the #2799 lock (pinned by `InvoiceFamilyFieldLockSourceGuardTests`); S27's remedy names 1.3.2.0. #2859 closed. Not yet published or imported anywhere (uac-r2, owner go); no L2 Worker with procedure 10 before 1.3.2.0 is published. |
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
+
+### ISS-037 — H12b never seeded the Worklist, Decision Records, Reconciliation and Compose workspaces
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed by PR #2993 (merged `5e4cf470d6`, 2026-11-23); ACME seeded live 2026-11-23; dev L2 Worker deployed from master `ca1684dd2f` 2026-11-23 (owner OK), healthy, package carries all 16 layouts |
+| **Urgency** | before the next stamp run (every new stamp lacks the four workspaces) |
+| **Filed** | 2026-11-23 |
+| **Source** | ACME guest-test prep after run `3b6f7b65`: the Console's Manage Workspaces showed 12 system workspaces, dev 16 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2991 |
+
+**Description**
+
+H12b (`DataverseWebApiWorkspaceLayoutSeeder`) seeds only `scripts/system-layouts.json`. Worklist, Decision Records and
+Reconciliation were seeded on dev by standalone `scripts/seed-*-workspace-layout.ps1` scripts, and Compose by hand
+(2026-06-29), so no provisioned stamp had them.
+
+**Done**
+- ACME (owner OK "Fix both"): the three scripts ran after a `-WhatIf`, and Compose was created from dev's row (sort 5, section `compose-editor`). Read-back: 16 system rows, Daily Briefing the only default.
+- PR #2993: the four layouts are added to `system-layouts.json`, plus a guard test (every standalone seed script's layout is listed with the same section; it fails on master's list).
+
+**Remaining**: none on dev. Any other L2 environment (demo, prod) picks the list up at its next Worker deploy from master; move this entry to Resolved at the next defer-issues review.
+
+### ISS-036 — intake.schema.json lacks `buildId`, so an upgrade run cannot pin the BFF build from a valid intake
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed by PR #3012 (merged `b9a4d6b5a7`, 2026-11-23): schema `buildId` + parity test + skill Step 1.0/4.0 send it; no deploy needed (skill / prereq files only) |
+| **Urgency** | before the next upgrade run that must not move the BFF |
+| **Filed** | 2026-11-23 |
+| **Source** | ACME upgrade run `3b6f7b65` (2026-11-20): `buildId = 2026.10.16-2` was added to the POST outside the schema-valid intake — a recorded deviation |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2987 |
+
+**Description**
+
+`IntakeParameterCatalog.cs:200` accepts `buildId` ("BFF build to deploy (H9 optional — defaults to latest.json)"), but
+`scripts/provisioning-prereqs/intake.schema.json` does not list it. Pinning the build is the only guard on an upgrade that
+changes the solution but must not change the BFF (ACME: the BFF upgrade waits on A9 home sign-in). Without it in the schema
+every such run deviates from the skill, or deploys whatever `latest.json` names.
+
+**Suggested fix**: add `buildId` (optional string, H9's pattern) to the schema; mention it in the skill's upgrade-mode
+intake step; add a test that every catalog key has a schema property or is listed as server-only.
+
+**Estimated effort**: 1–2 h with the parity test
+**Related**: ISS-031; `notes/acme-1.3.2.0-upgrade-plan.md` step 2
+
+### ISS-035 — A completed run keeps its handlers' failure-marker gates `Pending`
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed by PR #3013 (merged `b76078668c`, 2026-11-23): `RecordFailureGate` tags markers, `MarkPhaseSucceeded` clears them, H13 records its own success; dev L2 Worker deployed from master `7dc36ac0f5` 2026-11-23 (owner OK), healthy |
+| **Urgency** | before any tooling reads `gateStates` (fleet view, provisioning web UI) |
+| **Filed** | 2026-11-23 |
+| **Source** | ACME upgrade run `3b6f7b65` ended `Completed` with five `Pending` gates and H13 in `failedHandlers` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2986 |
+
+**Description**
+
+Failure paths write `run.GateStates[$"{h}-{rejectionCode}"]` as `Pending` (H2a, H2b `H2bAiSearchIndexHandler.cs:516`,
+H4b, H9 `H9BffDeployHandler.cs:884`, H10, H12a, H12b, and H13/H6 alike); a later success never clears them. Run
+`3b6f7b65` shows `h2b-index-provisioning-failed`, `h6-import-timeout`, `h9-slot-swap-infra-fault`,
+`h9-scheduled-jobs-slot-guard-failed` and `h13-h13-extended-validation-inconclusive` (H13's codes already carry the
+`h13-` prefix the key adds). A reader cannot tell from the record whether anything is owed.
+
+**Suggested fix**: on a handler's success, set its own failure-marker gates to `Cleared` (verifier + time), keeping them as
+history; clear or rename `failedHandlers`.
+
+**Estimated effort**: 2–3 h with tests
+**Related**: ISS-034
+
+### ISS-034 — H13 keyless-proof times out against a BFF still warming up after H9's swap
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed — PR #2980 merged `c4d7da8d57` 2026-11-23 (H13 repeats a no-verdict keyless proof with 30 s → 5 min waits for up to 40 min; never a failure, an earlier failed check or a 404); dev L2 Worker deployed; ACME H13 passed on resume (first attempt, 5 s). Stamp sizing (second bullet below) remains an owner decision |
+| **Urgency** | now (every H13 within ~30–45 min of a BFF deploy on S1 fails; workaround: wait for the plan CPU to settle, then resume) |
+| **Filed** | 2026-11-22 |
+| **Source** | ACME upgrade run `3b6f7b65`: H13 failed `h13-extended-validation-inconclusive` (keyless-proof: no answer within 90 s) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2970 |
+
+**Description**
+
+H9 finished the swap at 19:22:07Z, and the new production BFF process had started at 19:20:36Z. H13 called `POST /api/platform/keyless-proof` at 19:23:02Z. ACME's App Insights shows the call took 98.5 s in all:
+- the request waited 33 s before the endpoint ran (19:23:35Z);
+- the `openai-chat` probe timed out after 36 s, over its 30 s cap, although the OpenAI call itself returned 200 in 1.5 s at 19:24:17Z;
+- the BFF answered at 19:24:40Z, logged as 499.
+
+H13 had given up at `KeylessProofTimeout` (90 s), so the run failed. The isolation census that followed took 45 s and returned Isolated. The owner chose to resume (2026-11-22).
+
+**Second attempt and corrected cause.** The resume at 19:33:53Z failed the same way: the BFF took 119 s, and `openai-chat` sent its request only 42 ms before its 30 s limit. Redis GETs took 19–20 s and the BFF logged `RedisTimeoutException` with nothing in flight. The process was not cold; the plan was saturated. `sprk-acme-prod-plan` is S1 with 1 worker, running both BFF slots. Its CPU:
+- 24–30% average 15:00–16:30Z;
+- 89–93% for 16:45–17:15Z after the first H9 deploy and swap, back to 32–40% from 17:30Z;
+- 97% at 19:15Z and 85% at 19:30Z after the second, with memory peaking at 97%.
+
+So for about 30–45 minutes after each deploy and swap, every call to the BFF is slow, while `/healthz` still answers in about 2 s. A `/healthz` warm-up check would not catch it.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs:413-457`
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13AcceptanceOptions.cs:50`
+- `src/server/api/Sprk.Bff.Api/Infrastructure/Diagnostics/KeylessProbeRunner.cs:29`
+
+**Suggested fix**
+
+- H13: treat a keyless-proof timeout as transient, and retry with backoff over up to about 45 minutes before reporting Inconclusive. Keep the 90 s per-call limit, so a BFF that is really stuck is still reported.
+- Stamp sizing: an S1 plan with one worker running both BFF slots saturates for about 30–45 minutes after every deploy. Decide whether stamps need a larger plan, or whether the staging slot should stop after a successful swap. This needs an owner decision; it affects the NFR-04 cost envelope.
+
+**Estimated effort**: 2–3 h with tests.
+
+### ISS-033 — H9 gives up on a slot swap after 10 min while ACME's swap takes 11, then retries into the still-running swap
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed — PR #2956 merged `c39114e7c6` 2026-11-22 (30-min swap wait; slot guard waits out a swap in flight); verified on ACME (H9 passed on resume) |
+| **Urgency** | now (every BFF deploy to a stamp on S1) |
+| **Filed** | 2026-11-22 |
+| **Source** | ACME upgrade run `3b6f7b65`: H9 failed `scheduled-jobs-slot-guard-failed` (409 "prepared for swap") after `slot-swap-infra-fault` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2949 |
+
+**Description**
+
+On 2026-11-22 H9 deployed the BFF to `sprk-acme-prod-api` staging (push deploy ended 16:48:58Z) and called the staging → production swap at 16:53:49Z. Azure applied production's settings to staging and started warmup.
+
+`ArmSlotSwapper` waits `SlotSwapTimeout` (10 min), then reports `slot-swap-infra-fault`. The run auto-retried H9 at about 17:03:51Z, while the swap was still running. H9's first step (the slot-sticky `Scheduling__RunScheduledJobs=false` write on staging) got 409 "The slot cannot be changed because its configuration settings have been prepared for swap". The run failed.
+
+The swap completed at 17:04:53Z (about 11 min; the BFF needs about 220 s to start on S1, T186 L48). Production then served H9's deployment, and both slots were healthy. So H9's work had succeeded, yet the run recorded it as failed. A resume reruns the deploy and swap, and hits the same 10-minute ceiling.
+
+Same shape as ISS-032 (H6): a fixed wait shorter than the Azure operation, then a retry that collides with the operation still in flight.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/BffDeployOptions.cs:84` (`SlotSwapTimeout` = 10 min; its doc says swaps take 30–90 s)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotSwapper.cs:94-130`
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotStickyAppSettingWriter.cs` (the 409 on the retry)
+
+**Suggested fix**
+
+On a swap timeout, do not report a failure while Azure is still swapping. Poll the site's `slotSwapStatus.timestampUtc` (and the activity log) until the swap completes or fails, within a ceiling that covers `WEBSITES_CONTAINER_START_TIME_LIMIT` plus warmup (≥ 30 min).
+
+At the start of H9, if a swap is in flight on the site (the staging config is "prepared for swap"), wait for it instead of writing to the slot.
+
+When the swap completes with production healthy and serving the expected deployment, H9 succeeds without redeploying.
+
+**Estimated effort**: 3–5 h with tests
+**Blockers**: none
+**Related**: ISS-032; T186 L46/L48
+
+### ISS-031 — No upgrade run can start: CreateRun (REG-07) refuses a Ready registry row and nothing moves it back
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed by PR #3017 (merged `7dc36ac0f5`, 2026-11-23): admitted with intake `upgradeOfProvisionedOn` = the row's `sprk_provisionedon`, row left as it is (no InProgress move); skill sends it. Review found sending `provisionedOn` would break H0 → ISS-038. dev L2 API deployed from master `7dc36ac0f5` and swapped to production 2026-11-23 (owner OK), healthy |
+| **Urgency** | now (every upgrade of an existing stamp) |
+| **Filed** | 2026-11-20 |
+| **Source** | ACME upgrade to SpaarkeMaster 1.3.2.0: the first `POST /api/runs` returned 400 `registry-setup-status-not-in-progress` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2926 |
+
+**Description**
+
+`CreateRun` accepts a run only when the customer's `sprk_dataverseenvironment` row has `sprk_setupstatus = InProgress`.
+After a stamp's first run, H13 sets it to Ready. The skill's Step 1a detects an upgrade (`sprk_provisionedon` set) and
+asks the operator to confirm. But neither the skill nor L2 sets the row back to InProgress, so every upgrade run
+fails with 400 before it starts. On 2026-11-20 the owner approved a manual PATCH (2 → 1) for ACME; run `3b6f7b65` then
+started.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs:686-698` (REG-07 setupStatus check)
+- `.claude/skills/provision-environment/SKILL.md` Step 1a, the upgrade branch (`$script:IsUpgradeRun = $true`), around line 739
+
+**Suggested fix**
+
+Pick one owner for the transition. Either Step 1a's upgrade branch PATCHes the row to InProgress after the operator
+confirms the upgrade (registry write, like Step 1f), or CreateRun accepts Ready when the row has `sprk_provisionedon`
+and the intake carries an upgrade acknowledgement, and moves the row itself. The second keeps the rule in one place
+on the server.
+
+**Estimated effort**: 2–4 h with tests
+**Blockers**: none
+**Related**: REG-07 (pre-dispatch punch list 2026-08-27); ISS-030; `notes/acme-1.3.2.0-upgrade-plan.md`
+
+### ISS-030 — PRQ-C-03 (global name availability) fails on every upgrade run
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed by PR #3015 (merged `22c42efad6`, 2026-11-23): an unavailable name that exists in the stamp RG passes as OWNED (H2a rule); no deploy needed (skill / prereq files only) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-20 |
+| **Source** | ACME upgrade prechecks (skill Step 1e-ter), 2026-11-20 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2925 |
+
+**Description**
+
+PRQ-C-03 calls `checkNameAvailability` / `checkDomainAvailability`, which report every existing name as taken. On an
+upgrade run the stamp's Service Bus namespace, storage account and Cognitive Services subdomains already exist in the
+customer's own resource group, so the check fails. ACME failed it for `spaarke-acme-prod-sbus`, `sprkacmeprodsa`,
+`sprk-acme-prod-docintel` and `sprk-acme-prod-contentsafety`, all four in `rg-spaarke-acme-prod`. The operator has to
+recognise and override a hard-stop check. H2a had the same defect and was fixed on 2026-10-15 (T186 L23); the
+precheck recipe was not.
+
+**Entry-points**
+
+- `scripts/provisioning-prereqs/prereqs.yaml:800-829` (PRQ-C-03 recipe; its `expect` already says "run this before the first attempt only")
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/.../ArmResourceNameAvailabilityProbe.cs` (H2a's fix to copy)
+
+**Suggested fix**
+
+When a name is unavailable, GET it at its expected ID in `rg-spaarke-{customerId}-{stampEnvironment}` on the stamp
+subscription: 200 means it is the stamp's own (pass), 404 means a real collision (fail), anything else fails with the
+error. This matches H2a.
+
+**Estimated effort**: 1–2 h
+**Blockers**: none
+**Related**: T186 L23; ISS-031
+
+### ISS-024 — H14m (customer shared mailbox) needs two Exchange roles the owner has not approved yet — CLOSED 2026-10-13
+
+| Field | Value |
+|---|---|
+| **Status** | **Closed 2026-10-13.** D32 approved 2026-10-10 and applied 2026-10-13 (M1 PASS). Live checks as the app (Worker UAMI → MI-FIC → Spaarke Exchange Admin) the same day: M2, M3, M4a/b, M5, M7 PASS; M6 not run (optional). Results: `notes/t263-customer-shared-mailbox.md` §5. The full ensure route (M4 `Success` → `AlreadyCompliant`, `Test-ServicePrincipalAuthorization` for the 3 roles) is proven by T186 at H14m |
+| **Filed** | 2026-10-10 (T263; number provisional — the main session assigns ISS numbers) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1562 (the mail-model issue; T263 implements it) |
+
+T263 built H14m: `sprk-{customerId}-mail` is created as a shared mailbox, added to `Spaarke-AppAccess-{customerId}`,
+authorization-tested, and recorded as the stamp's verified `sprk_communicationaccount` row. H13 re-checks all of it.
+`Spaarke Exchange Admin` holds only `Spaarke App RBAC Admin` plus `View-Only Recipients`, so it cannot run `New-Mailbox`
+or `Add-DistributionGroupMember`. Widening it is an owner decision (D25; `provisioning.md`).
+
+The sidecar detects the missing cmdlets before any write, so every run fails Resumable at H14m with
+`h14m-mailbox-ensure-failed` ("PRQ-E-16 … not applied") and creates nothing.
+
+**Needs**:
+1. The owner approves D32: the two custom roles plus one scope in `notes/t263-customer-shared-mailbox.md` §5, with
+   the exact cmdlets and parameters.
+2. An Organization Management admin applies them (deployment guide §4.2.1 step 5).
+3. Run live checks M1–M7, notably M5: whether `Get-Recipient -Filter "Members -eq '<DN>'"` works. If it does not, use
+   the one-line fallback in the note.
+
+Until then, merge T263 only together with the approval, or accept that T186 stops at H14m.
 
 ### ISS-020 — H7b leaves a new stamp unable to read standing grants (and did not check the task-154 role split)
 
@@ -1156,3 +1121,38 @@ in to Azure as the app, with all its roles, before review.
 **Suggested fix**
 
 Delete the credential; drop `pull_request` from the OIDC guide's setup loop (guide row already corrected).
+
+### ISS-001 — Hand-off owed by UAC-r2: how a new environment gets `sprk_noaccessentry`
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved — answered and built by T256 (2026-10-08, update below); #1364 closed by unified-access-control-r2 |
+| **Urgency** | now (blocks T256 / T218 / T186) |
+| **Filed** | 2026-10-07 |
+| **Source** | 2026-10-06 conversion review; owner 2026-10-07 asked for an issue + message to UAC-r2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1364 |
+
+**Description**
+
+An environment without `sprk_noaccessentry` denies every read, so a freshly provisioned environment fails closed and
+T186 cannot pass. UAC-r2 documents the table only in its own notes; nothing tells provisioning which solution carries
+it, when it must exist, what to seed, or how H13 verifies it.
+
+**Entry-points**
+
+- `projects/unified-access-control-r2/` notes `DEPLOY-CHECKLIST.md`, `batch4-integration-steps.md`; `docs/data-model/INDEX.md`
+- This project: T256 (INCOMING-145), T218 (solution package), H13 checks
+
+**Suggested fix**
+
+UAC-r2 answers the four questions in the issue (packaging, ordering, verification, upgrade); provisioning turns the
+answer into T256 handler work and T218 package content.
+
+**Update 2026-10-08 (T256).** What provisioning needs is now answered by the repository, and built:
+1. *Packaging*: the table ships in SpaarkeMaster 1.2.0.0 with every column the BFF reads (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_noaccessentry`).
+2. *Ordering*: H7b probes `sprk_noaccessentries` with the BFF reader's own `$select` (`NoAccessListReader.RowSelect`,
+   pinned by `SecureRecordOwnerRoleSetParityTests`) and refuses Resumable `secure_setup.noaccessentry_missing`; H9 waits
+   for H7b, so no BFF is deployed to an environment without it. Nothing is seeded: an empty deny list denies nothing.
+3. *Verification*: that probe, on every run.
+4. *Upgrades*: SpaarkeMaster upgrades carry it.
+Left open only for UAC-r2's confirmation on #1364 (and to hear if the schema changes — we re-export, never hand-edit).
