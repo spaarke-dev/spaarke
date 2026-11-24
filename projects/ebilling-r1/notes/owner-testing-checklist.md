@@ -177,3 +177,7 @@ This closes task 053. After it, task 079 has no open dependency. The dev BFF and
 - [ ] In Spaarke, that invoice is **In Review** on the matter. Its lines are filled in with codes, and it has an approval portion.
 - [ ] Submit a second sample that breaks a published **Reject** rule on that matter. The portal shows **Rejected** with a reason. In Spaarke the invoice exists, in status Rejected (D-101: every submission that is read creates its invoice).
 - [ ] The portal's submission screens look right in dark mode too.
+
+## R. Office add-in no longer files to an invoice (task 096): live on dev since 2026-11-24 (BFF 996928732e)
+- [ ] In the Outlook add-in, open Save and search for an invoice. It appears in the search results, but it cannot be chosen as the place to save the email.
+- [ ] Saving an email to a matter or a project still works, and so does quick-create of a matter or a project.
