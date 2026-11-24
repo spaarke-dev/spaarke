@@ -9,17 +9,16 @@
 | Field | Value |
 |---|---|
 | **Active work** | **G8-P2 live test** (owner go 2026-11-23). This is the Practice-agent build path, so the owner said it must be RESOLVED, not just recorded. Run log: `phase0/g8/README.md` § "G8-P2 run log" |
-| **Step** | v1.0.0–1.0.3 ❌ and the Learn control v1.0.4 (auth None) ❌: the action is listed in admin center but never reaches the model, with no BFF traffic. **Probable cause (GitHub ATK #16643, kuldeepkeshwar):** MCP agents work when **personally sideloaded** but not when **published to the org catalog**. The owner said this is ours to solve, not a support case. **Now: v1.1.0 sideload test**, two fresh-ID packages: `spaarke-legal-g8p2-sideload.zip` (real) and `spaarke-legal-g8p2-sideload-learn.zip` (control). Owner uploads both via Teams › Apps › Manage your apps › Upload an app › **Upload a custom app** (for me). R4 rows sent to coordination 2026-11-24 |
+| **Step** | **Found:** the fresh-id Learn control through the **org catalog** WORKS (2026-11-24). So the route and the tenant are fine; the failures (1.0.0–1.0.4) were all updates to app id `802fd9cc`, which never loaded its action. Working hypothesis: catalog updates of an existing app id don't refresh its action. **Now:** owner installs `spaarke-legal-g8p2-sideload.zip` (real action, fresh id `d38f8df8-…`) through the **org catalog** for owner + test user, and asks "Show my Spaarke decisions" |
 | **Design version** | design.md v0.6 + G9 (`4ed12dbee3`); latest commit `e48dc2e012` (pushed) |
 | **Uncommitted** | none |
 
 ## Next action (exact)
-0. Coordination S-3 (2026-11-24): "platform limit" not proven. Owner confirmed 1.0.0–1.0.4 all went through the admin center / org catalog (sideload never tried). Owner screenshots the tenant checks (README § "Coordination S-3"). Third zip `spaarke-legal-g8p2-org-learn.zip` (fresh id `0421c980-…`) goes through the **org catalog**, paired with the sideloaded Learn control.
-1. Owner sideloads both v1.1.0 zips (Upload a custom app, for me). In m365.cloud.microsoft/chat, new chat with each agent: the Learn one gets "Search Microsoft Learn for declarative agent MCP plugins", and `spaarke-legal-g8p2-sl` gets "Show my Spaarke decisions" (sign in if a card appears; Cancel any approval card).
+1. Owner uploads `phase0/g8/spaarke-legal-g8p2-sideload.zip` through the admin center / org catalog (owner + test user, R7). New chat with `spaarke-legal-g8p2-sl` at m365.cloud.microsoft/chat: "Show my Spaarke decisions" (sign in if a card appears; Cancel any approval card). Note the time.
 2. Check App Insights for `initialize` / `tools/list` / `tools/call` from client "Sydney" in that minute.
-3. **Sideload ✅:** the build path works. Record it, and log org-catalog distribution as a D-A1 deployment risk (track #16643). Then G8-P2's real questions: Word/Teams surfaces and one call per turn (R1′).
-4. **Sideload ❌:** if the upload option is missing, custom app upload is off for the owner (Teams app setup policy). Otherwise, generate an agent with Microsoft's own tooling (ATK / WIQD; installing needs the owner's OK) and diff it against ours.
-5. Record the result in the README run log and design §8 G8-P2. Send it to COPILOT-PLATFORM-COORDINATION [0afb62] with removal confirmations (G8-a, G8-p2, both -sl, by 2026-11-30).
+3. **✅:** the Practice build path works. Then G8-P2's real questions: Word and Teams surfaces, and one call per turn (R1′). Later D-A1 check: does an org-catalog **update** of an agent pick up a changed action?
+4. **❌ while the Learn control works:** the difference is our server or OAuth. Get the debug card, compare the sign-in flow, and check whether the OAuth registration accepts the new app id.
+5. Record the result in the README run log and design §8 G8-P2. Send it to COPILOT-PLATFORM-COORDINATION [0afb62] with removal confirmations (G8-a, G8-p2 `802fd9cc`, G8-p2-sl, G8-p2-org-learn, by 2026-11-30).
 
 ## G8 result (recorded in phase0/g8/README.md, commit 9c557d7e95)
 - An Agent Builder agent cannot use the tenant federated connector (A1 ❌, A2 "No connectors available" ❌, skills inside the agent ❌). Plain Chat works (`spike_whoami` ✅).
