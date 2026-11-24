@@ -4,7 +4,7 @@
     <title>User-facing wording tells the truth: rule wizard display names and no raw plan codes, decision wizard state labels and Assign Task text, Worklist summary names two lanes (DI-157, DI-159, DI-161)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF Signals (.cs) and shared UI (.ts/.tsx); text the user reads on UAT paths.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -61,4 +61,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree; PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-24: PR #3016 merged to master (56c8acc0e9, with the main-session TS6133 fix f000be035f). Dev check 2026-11-24 on dev BFF 996928732e (uac-r2, owner go) and the auto-deployed Console, all PASS, nothing saved or recorded: rule wizard Condition step lists tables by display name with logical values (Matter = sprk_matter); Actions step Next with nothing chosen shows "Choose at least one action." and no (plan_missing); decision wizard "How this was determined" reads "No budget exists for the matter where the budget is active." with the formal line unchanged; Assign Task "What it does" says "assigned to the person you choose"; Worklist summary "242 Work Items: 193 to decide and 49 to do. All of the items to do are past due." with two lane bullets and no past-due category. Found in the check, outside 203's scope: column lists and the plain describer line still use column logical names (DI-169 #3040).</completion>
 </task>

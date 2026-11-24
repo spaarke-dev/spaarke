@@ -1,5 +1,10 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-24 ~03:20Z — check: task 203 wording on dev (dev BFF `996928732e`, deployed by uac-r2 on owner go)
+
+- Main session, Claude in Chrome, read-only (wizards opened and cancelled; nothing saved or recorded). All task 203 strings PASS: table display names in the rule wizard; "Choose at least one action."; "where the budget is active"; Assign Task "the person you choose"; Worklist summary names two lanes only. Gap outside scope filed: DI-169 #3040 (column logical names).
+- 206 (#3035) is not in this build. 205 measurement on dev waits for an owner go (an 18-item row decision closes real items).
+
 ## 2026-11-24 02:58Z — live change: POL-MATTER-NOBUDGET switched Off on dev (spaarkedev1)
 
 - **Owner go:** "Switch it off" (2026-11-24, chat), answering how to clear the Worklist (192 items, 186 of them this rule: one per test matter with no budget); owner added "and then we can switch it back on if we want to run this particular rule".
