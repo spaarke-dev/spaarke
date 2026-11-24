@@ -68,3 +68,13 @@ uac-r2 had already said (earlier that day) that `b64d988625` will be in its next
   - SprkChat types (`a83f5b629d`);
   - `mountWizardPage` (`3471c31b7e`).
 - Rollback: redeploy `9d08576e63`.
+- Owner go 2026-11-24, "Yes, deploy fa96792811". Master then moved to `3067fb3bdc` (#3078, docs only, nothing in `src/`). uac-r2 was told before dispatch and had no objection. The owner then said "Yes, deploy 3067fb3bdc".
+
+## Step 5: SPA deploy
+
+- Run 45506591396 (`deploy-external-spa.yml`, dev, ref master, head `3067fb3bdc`): success, 23:03:30Z–23:04:59Z 2026-11-24.
+- **Served build check:**
+  - `/` answers 200;
+  - `/assets/app.js` is 1,621,612 bytes; SHA-256 starts `AF3FAFFCD434C31C`;
+  - it contains "Show new messages" (034), `sprk_assignedparalegal1` (031), `threadId` (035), "Clear all" (032) and "No version history" (024, still present).
+- Live now: SPA `3067fb3bdc`, BFF `20129e985c`. Rollback: SPA `9d08576e63`.
