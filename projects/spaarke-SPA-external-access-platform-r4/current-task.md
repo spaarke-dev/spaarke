@@ -7,7 +7,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Active** | None in progress. Next is **038** (P3 dev deploy + E2E). |
+| **Active** | **Task 038** (P3 dev deploy + E2E), STANDARD rigor, prescriptive steps, in progress since 2026-11-24 ~15:40Z. Steps 0-2 done: merges recorded in `notes/task-038-deploy-record.md`; formal BFF request sent to uac-r2 (needs `b64d988625`; 031 already live in `0362599b94`; 036 cancelled). **At step 3:** waiting for uac-r2's after-notice + 30-minute GATE PASS, then step 4 (owner go for the SPA SHA = master HEAD at that time, rollback `9d08576e63`). |
 | **Status** | **PR #3055 merged** 2026-11-24 15:15:44Z, squash `8dd44cf528` (#3045 export: cells export shown text, dates as shown, export text hardening). #3045 closed; D-34 Done. Notes: `notes/task-033-followup-3045-notes.md`. Owner 2026-11-24: Date Only exports stay as shown (viewer's locale), not `yyyy-mm-dd`. Open owner question: whether to track the residual hardening gaps privately (chat only, never in the repo). |
 | **Next action** | Plan **038** (P3 dev deploy + E2E) on the owner's per-SHA go; SPA deploy builds master HEAD (now includes `8dd44cf528`). uac-r2 told the #3048 merge `b64d988625` for a later BFF candidate (threads). |
 | **Last merged** | PR #3048 at 06:14:00Z, merge `b64d988625`: tasks 033 (Money sort + export) and 035 (message threads, `threadId`). POMLs completed, TASK-INDEX ✅, drift check clean, board Tasks Completed = 30. |
