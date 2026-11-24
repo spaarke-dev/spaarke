@@ -1,6 +1,6 @@
 # Jobs Architecture
 
-> **Last Updated**: April 5, 2026
+> **Last Updated**: 2026-11-24 (ebilling-r1 ISS-025: retry with back-off)
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: New
@@ -56,8 +56,8 @@ The system was designed to replace in-process background queues with a durable, 
 3. **Receive**: ServiceBusJobProcessor (or CommunicationJobProcessor) receives the message with PeekLock, creates a DI scope, deserializes `JobContract`
 4. **Route**: Processor resolves all `IJobHandler` registrations and finds the handler where `handler.JobType == job.JobType`
 5. **Process**: Handler calls `IdempotencyService.IsEventProcessedAsync()` and `TryAcquireProcessingLockAsync()` before executing business logic
-6. **Outcome**: Handler returns `JobOutcome` — Completed (complete message), Failed (abandon for redelivery), or Poisoned (dead-letter)
-7. **Dead-letter**: Messages are dead-lettered when: poisoned by handler, `job.IsAtMaxAttempts`, `DeliveryCount >= 5`, or 3 unhandled exceptions
+6. **Outcome**: Handler returns `JobOutcome` — Completed (complete message), Failed (retry later: ServiceBusJobProcessor sends a copy scheduled `JobContract.RetryDelay` later — 1, 2, 4, 8 minutes after logical deliveries 1-4, 15 minutes in all — carrying the `PriorDeliveryCount` application property, then completes the original; if the send fails it abandons for immediate redelivery), or Poisoned (dead-letter)
+7. **Dead-letter**: Messages are dead-lettered when: poisoned by handler, `job.IsAtMaxAttempts`, logical `DeliveryCount >= 5` (`JobContract.IsFinalDelivery`), or 3 unhandled exceptions. The logical count is `PriorDeliveryCount` + the broker's own delivery count, so it survives the retry copies; `JobContract.DeliveryCount` is that logical count for every handler. CommunicationJobProcessor (`sdap-communication`) still abandons for immediate redelivery and counts broker deliveries only
 
 ### Job Chaining Pattern
 
