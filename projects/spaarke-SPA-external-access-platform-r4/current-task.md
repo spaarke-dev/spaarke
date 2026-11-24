@@ -1,37 +1,31 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-24 ~03:25Z (wave 8 merged and closed: 031, 032, 034)
+> **Last Updated**: 2026-11-24 ~07:40Z (wave 9 merged and closed: 033, 035; #3045 follow-up committed)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Active (wave 9, owner "Yes, start them" 2026-11-24)** | **033** (FULL, sonnet @ high): Money sort + formatted CSV export in the shared DataGrid, run by an implementer agent in this worktree. **035** (FULL, sonnet): STOPPED at step 1, its escalation. The external message DTO has NO thread key (re-verified 2026-11-24: `ExternalMessageDtos.cs` and `messages-client.ts` have none). The owner must choose (A) add the thread key (`_sprk_communicationthread_value`) to the external DTO, with uac-r2 review, or (B) defer FR-22. No 035 code before the answer. 033 also needs the owner's OK on behalf of the dataset-grid owners (recorded in `notes/task-033-notes.md`). |
-| **033 status** | COMMITTED `1f7bb5d006` (not yet in a PR). Review done (opus, one pass); fix round 2 applied (F2 unused eslint-disables, K1 overflow → Infinity). Jest 261 pass, tsc/eslint/client-lint clean. Pre-existing defects filed: D-34 #3045 (option-set/lookup CSV as JSON; the POML escalation, asked of the owner), D-35 #3046 (unlabelled currency = USD). Waiting on the owner's OK on behalf of the grid owners (`notes/task-033-notes.md` line 6). |
-| **035 status** | Owner chose A (2026-11-24). COMMITTED `8c08c7bcd1` (+ notes `bf488b6a40`): `threadId` on the external message DTO, SPA conversations. uac-r2 APPROVED the design (`f23828d3cb`) and the final diff. Opus review: no leak, no F1; publish delta +2,659 B; conflict-check clean. |
-| **PR** | **#3048** (033 + 035), open, CI starting. Merge needs the owner's go. |
-| **Next action** | Owner answers: (1) 033 grid-owner OK (in the PR as pending); (2) #3045 fix now or later. Then the merge go → close 033/035 (POML, TASK-INDEX, drift check, board +2, current-task). Then 038 stays gated on a dev BFF ≥ `bd40b57b03` (and ≥ the #3048 merge for threads). |
-| **Previously** | Wave 8 is closed. |
-| **Last merged** | PR #3033 at 03:17:25Z, merge `bd40b57b03`. It carries tasks 031 (Information fields + 12 ReadableColumns), 032 (grid settings per browser + "Clear all") and 034 (Messages refresh + new-message check). POMLs are completed, TASK-INDEX is ✅, the drift check is clean, and the board shows Tasks Completed = 28. #3010 is closed. |
-| **Next in phase 3** | 033 + 035 are in PR #3048 (owner approved 033's grid change 2026-11-24). Then **038** (P3 dev deploy + E2E), on the owner's per-SHA go. 036 is cancelled. |
-| **uac-r2** | Dev BFF `0362599b94` (contains `bd40b57b03`) LIVE since ~05:21:45Z 2026-11-24 on the owner's go; uac-r2's live notice lifted the SPA hold. It does NOT carry 035 (`threadId`): threads need a later BFF candidate after #3048 merges (the SPA degrades to an ungrouped list without it). uac-r2 did not test external routes with a CIAM token; 038's E2E checks the Information columns. |
+| **Active** | **#3045 follow-up (D-34)**, the shared DataGrid export: every cell exports the text it shows; host-rendered columns export the renderer's text; dates export as shown (owner 2026-11-24); export text hardening (owner 2026-11-24: "fix the excel formula risk"; detail tracked outside the repo, never in public text). Committed `6dc5eba5ed` on top of merge `e288c59dc0`. Notes: `notes/task-033-followup-3045-notes.md` (round 3 is current). |
+| **Status** | Local checks green: grid jest 295/295 (two parallel runs), tsc, eslint 0 errors, prettier, client-lint ok, external-spa tsc + 44/44. One independent opus review of round 3 is running. Not pushed, no PR yet. |
+| **Next action** | Apply review findings (F-class only), push, open the #3045 PR (public text: "export text hardening", no mechanism), ask the owner for the merge go. After merge: close #3045 (D-34 → Done). Then tell uac-r2 the #3048 merge `b64d988625` for a later BFF candidate (threads), and plan **038** (P3 dev deploy + E2E) on the owner's per-SHA go. |
+| **Last merged** | PR #3048 at 06:14:00Z, merge `b64d988625`: tasks 033 (Money sort + export) and 035 (message threads, `threadId`). POMLs completed, TASK-INDEX ✅, drift check clean, board Tasks Completed = 30. |
+| **Next in phase 3** | **038** (P3 dev deploy + E2E). 036 is cancelled. |
+| **uac-r2** | Dev BFF `0362599b94` LIVE since ~05:21:45Z 2026-11-24; it does NOT carry 035's `threadId` (the SPA then shows ungrouped messages). Threads need a later BFF candidate that includes `b64d988625`, through uac-r2 with the owner's per-SHA go. |
+| **ebilling-r1 FYI** | Master PR #3051 changes the shared invoice submission result screen (title/icon follow the polled status); one external-spa test assertion changes. It reaches the portal with the next SPA build from master after it merges. No action needed. |
 
-## Deploy order (031 condition MET 2026-11-24)
-The hold is lifted: dev BFF `0362599b94` carries 031's ReadableColumns. Every SPA deploy still builds master HEAD and needs the owner's go for the exact SHA, with rollback `9d08576e63`. For 035's threads to show, the BFF must also carry the #3048 merge.
+## Deploy order
+Every SPA deploy builds master HEAD and needs the owner's go for the exact SHA, with rollback `9d08576e63`. For 035's threads to show, the BFF must also carry `b64d988625`.
 
 ## Live on dev
-- SPA: master `9d08576e63` (rollback `2dcbe35e34`). It works with today's BFF.
+- SPA: master `9d08576e63` (rollback `2dcbe35e34`).
 - BFF: `0362599b94`, live ~05:21:45Z 2026-11-24 (uac-r2; previous `996928732e`).
 
-## Wave 8 outcome (for 038's E2E)
-- Information shows the new columns:
-  - matter: Open date (`createdon`), Matter type, Practice area, Assigned attorney, Assigned paralegal, Description, Last modified;
-  - project: Practice area, Assigned attorney, Assigned paralegal, Description;
-  - work assignment: Matter, Matter type, Assigned to, Description.
-- Grids remember widths and sort per browser (`sprk.ext.gridSettings.v1.{configId}`). "Clear all" (reset icon) clears widths, sort and column filters. A filtered header is announced as "filtered".
-- Messages: a header Refresh icon, a background check at most once a minute, and "Show new messages".
-- Known limits: "Open date" is a date-time; contact lookups carry the contact id (UAC OK); a parent's Messages keeps polling under a child modal.
+## For 038's E2E
+- Wave 8: Information columns (matter: Open date, Matter type, Practice area, Assigned attorney/paralegal, Description, Last modified; project: Practice area, Assigned attorney/paralegal, Description; WA: Matter, Matter type, Assigned to, Description). Grid widths/sort per browser, "Clear all". Messages Refresh + "Show new messages".
+- Wave 9: currency columns sort by amount; Export to Excel writes displayed text (labels, names, amounts, dates as shown); messages grouped into conversations (needs the threads BFF).
+- Known limits: "Open date" is a date-time; a parent's Messages keeps polling under a child modal; amounts in different currencies sort by raw amount; an unlabelled currency cell shows USD (D-35 #3046).
 
 ## Owner questions open (older)
 - Should a docx preview be filed as an Idea?
@@ -39,10 +33,8 @@ The hold is lifted: dev BFF `0362599b94` carries 031's ReadableColumns. Every SP
 - Add a `useHostRowSource` row to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval)?
 
 ## Filed
-- D-24 #2939 … D-30 #2975.
-- D-31 #3008: narrow DataGrid header minimums.
-- D-32 #3009: empty band above the Documents grid ("Clear all" now sits in that toolbar).
-- D-33 #3010: closed (fixed in #3033).
+- D-24 #2939 … D-30 #2975; D-31 #3008; D-32 #3009; D-33 #3010 closed.
+- D-34 #3045 (fix in progress, above); D-35 #3046 (unlabelled currency = USD); D-36 #3050 (MDA grids don't read OData label annotations; not verified live).
 
 ## Merge trap (seen 2026-11-22)
-When merging master after a squash of our own work, watch for a line that one task changed and a later task changed back. It looks unchanged from the merge base, so git takes master's text. For files where `origin/master` equals the pre-squash branch tip, restore `HEAD^1`'s copy. On 2026-11-24 the check came back clean (no trap).
+When merging master after a squash of our own work, watch for a line that one task changed and a later task changed back. It looks unchanged from the merge base, so git takes master's text. For files where `origin/master` equals the pre-squash branch tip, restore `HEAD^1`'s copy. 2026-11-24 merge `e288c59dc0`: every touched file was identical on both sides (clean).
