@@ -11,12 +11,9 @@
  *   - Presentational list: the promoted (task 021) `<AttachmentList />`.
  *   - Preview: the shared `<RichFilePreviewDialog />` (`@spaarke/ui-components`).
  *
- * Mirrors the wiring in the production `CommunicationAttachmentsApp.tsx`
- * (`src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx`)
- * — the PCF's React-16 host for the exact same service + list + dialog — adapted
- * to this package's host-agnostic `IEmailAttachmentsDataService` /
- * `IEmailAttachmentsNavigationService` props (ADR-012) instead of
- * `context.webAPI` / a raw `Xrm` frame-walk.
+ * The preview / open logic is the shared `useAttachmentPreview` hook (#2967), the same one the
+ * CommunicationAttachments PCF uses; this view supplies the host-agnostic `IEmailAttachmentsDataService` /
+ * `IEmailAttachmentsNavigationService` props (ADR-012) instead of `context.webAPI` / a raw `Xrm` frame-walk.
  *
  * React-version note (ADR-022/NFR-05): `React.FC` + standard hooks only — no
  * React-18/19-only runtime API and no `as React.ComponentType` cast. Fluent v9
