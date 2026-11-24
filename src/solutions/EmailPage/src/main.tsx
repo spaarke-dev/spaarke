@@ -35,12 +35,8 @@ import {
   setupCodePageThemeListener,
   AppErrorBoundary,
   AppInsightsService,
-  createXrmDataService,
-  createXrmNavigationService,
-  createXrmEmailComposeHandlers,
-  resolveCurrentUserEmail,
-  searchUsersAndContacts,
-  XrmDataverseClient,
+  useXrmEmailHostProps,
+  type XrmEmailHostProps,
   getXrm,
   ensureNavigatorSidePane,
 } from '@spaarke/ui-components';
@@ -151,11 +147,8 @@ EmailPageAuthError.displayName = 'EmailPageAuthError';
 interface EmailComposeStandaloneProps {
   compose: ComposeLaunch;
   bffBaseUrl: string;
-  dataService: ReturnType<typeof createXrmDataService>;
-  navigationService: ReturnType<typeof createXrmNavigationService>;
-  composeHandlers: ReturnType<typeof createXrmEmailComposeHandlers>;
-  fromMailbox?: string;
-  dataverseUrl: string;
+  /** The shared Xrm-backed host wiring (adapters, compose handlers, From, org URL) — see `useXrmEmailHostProps`. */
+  hostProps: XrmEmailHostProps;
 }
 
 /**
@@ -168,11 +161,7 @@ interface EmailComposeStandaloneProps {
 const EmailComposeStandalone: React.FC<EmailComposeStandaloneProps> = ({
   compose,
   bffBaseUrl,
-  dataService,
-  navigationService,
-  composeHandlers,
-  fromMailbox,
-  dataverseUrl,
+  hostProps,
 }) => {
   const closedRef = React.useRef(false);
   const closeWindow = React.useCallback(() => {
@@ -192,30 +181,12 @@ const EmailComposeStandalone: React.FC<EmailComposeStandaloneProps> = ({
     }
   }, []);
 
-  const handleSearchRecipients = React.useCallback(
-    (query: string) => searchUsersAndContacts(dataService, query),
-    [dataService]
-  );
-
   const { actions, composerDialog, openComposer } = useEmailComposeActions({
     // Dedicated compose window (target=2 modal) — the composer IS the window.
     composerFullBleed: true,
     authenticatedFetch,
     bffBaseUrl,
-    dataService,
-    navigationService,
-    onSearchRecipients: handleSearchRecipients,
-    onLookupRecipients: composeHandlers.onLookupRecipients,
-    recordLookupCatalog: composeHandlers.recordLookupCatalog,
-    onLookupRecord: composeHandlers.onLookupRecord,
-    onAddRelationship: composeHandlers.onAddRelationship,
-    onUploadLocalAttachment: composeHandlers.onUploadLocalAttachment,
-    onResolveShareLink: composeHandlers.onResolveShareLink,
-    onListEmailTemplates: composeHandlers.onListEmailTemplates,
-    onRenderEmailTemplate: composeHandlers.onRenderEmailTemplate,
-    onDraftWithAi: composeHandlers.onDraftWithAi,
-    fromMailbox,
-    dataverseUrl,
+    ...hostProps,
     onClose: closeWindow,
   });
 
@@ -281,49 +252,13 @@ function Root() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt]);
 
-  // Host-specific (Xrm-backed) adapters `EmailWorkspace` expects as props
-  // (ADR-012 — the shared component stays Xrm-agnostic; this mount resolves
-  // the concrete implementations).
-  const dataverseClient = React.useMemo(() => new XrmDataverseClient(), []);
-  const dataService = React.useMemo(() => createXrmDataService(), []);
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // Host-specific (Xrm-backed) adapters `EmailWorkspace` expects as props (ADR-012 — the shared component stays
+  // Xrm-agnostic). The Xrm-backed adapters, compose handlers (recipient lookup, record lookup, add-relationship, upload,
+  // templates, AI draft, share links), the "From:" mailbox and the org URL: the same hook the SpaarkeAi widget and
+  // the LegalWorkspace section use, so the mounts stay in parity (NFR-06, #2973). Its compose handlers are rebuilt
+  // once `bffBaseUrl` resolves.
+  const hostProps = useXrmEmailHostProps({ authenticatedFetch, bffBaseUrl });
   const webApi = React.useMemo(() => buildXrmWebApi(), []);
-
-  // Composer parity wiring (compose-wiring fixes #1/#2/#3/#5): recipient
-  // typeahead + the Xrm-backed advanced-lookup handlers (people picker, record
-  // lookup, add-relationship) + the Dataverse URL used for attachment
-  // deep-links. Same handlers the CommunicationActions PCF builds — lifted into
-  // the shared `createXrmEmailComposeHandlers` factory so both mounts stay in
-  // parity (NFR-06).
-  const handleSearchRecipients = React.useCallback(
-    (query: string) => searchUsersAndContacts(dataService, query),
-    [dataService]
-  );
-  // Pass auth + BFF URL so the factory also builds `onUploadLocalAttachment` (item 9b):
-  // new-file attachments upload to the deployment SPE container (resolved from the
-  // user's BU) and become governed `sprk_document`s. Re-memoized when bffBaseUrl resolves.
-  const composeHandlers = React.useMemo(
-    () =>
-      createXrmEmailComposeHandlers({
-        authenticatedFetch,
-        bffBaseUrl: bffBaseUrl ?? undefined,
-      }),
-    [authenticatedFetch, bffBaseUrl]
-  );
-  const dataverseUrl = React.useMemo(() => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
-
-  // Signed-in user's mailbox for the compose "From:" row (item 3) — the email surface
-  // defaults From to send-as this user (switchable to the Spaarke shared mailbox).
-  const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
-  React.useEffect(() => {
-    let cancelled = false;
-    void resolveCurrentUserEmail().then(email => {
-      if (!cancelled) setFromMailbox(email);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Resolve the incoming record + view mode ONCE from the launch context (URL
   // `data`/`id` param → embedded host form). Drives `initialSelectedId` (pre-select)
@@ -350,34 +285,16 @@ function Root() {
       <EmailComposeStandalone
         compose={launch.compose}
         bffBaseUrl={bffBaseUrl}
-        dataService={dataService}
-        navigationService={navigationService}
-        composeHandlers={composeHandlers}
-        fromMailbox={fromMailbox}
-        dataverseUrl={dataverseUrl}
+        hostProps={hostProps}
       />
     );
   } else {
     body = (
       <EmailWorkspace
-        dataverseClient={dataverseClient}
-        dataService={dataService}
-        navigationService={navigationService}
+        {...hostProps}
         webApi={webApi}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
-        onSearchRecipients={handleSearchRecipients}
-        onLookupRecipients={composeHandlers.onLookupRecipients}
-        recordLookupCatalog={composeHandlers.recordLookupCatalog}
-        onLookupRecord={composeHandlers.onLookupRecord}
-        onAddRelationship={composeHandlers.onAddRelationship}
-        onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
-        onResolveShareLink={composeHandlers.onResolveShareLink}
-        onListEmailTemplates={composeHandlers.onListEmailTemplates}
-        onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
-        onDraftWithAi={composeHandlers.onDraftWithAi}
-        fromMailbox={fromMailbox}
-        dataverseUrl={dataverseUrl}
         initialSelectedId={launch.initialSelectedId}
         hideList={launch.hideList}
       />

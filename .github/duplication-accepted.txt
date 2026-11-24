@@ -52,4 +52,3 @@ src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAt
 
 # --- Tracked: Smart To Do and Email host copies (#2972, #2973) ---
 src/solutions/LegalWorkspace/src/services/DataverseService.ts | src/solutions/SmartTodo/src/services/DataverseService.ts | #2972 | SmartTodo page keeps a drifted copy of the workspace data service; shared to-do service planned.
-src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailWorkspaceWidget.tsx | src/solutions/EmailPage/src/main.tsx | #2973 | Both hosts hand-build EmailWorkspace compose wiring; one host-props hook planned.
