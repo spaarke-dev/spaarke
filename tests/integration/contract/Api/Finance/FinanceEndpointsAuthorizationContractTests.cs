@@ -1227,6 +1227,28 @@ public class FinanceEndpointsAuthorizationContractTests
         json.Should().NotContainKey("invoiceId");
     }
 
+    [Fact(DisplayName = "050c fix round 1 (F1): reject of a Failed attempt whose undo is unfinished is a retryable 503 with the confirm route's errorCode")]
+    public async Task Reject_EarlierAttemptBeingRemoved_Is503_WithTheConfirmRoutesErrorCode()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceReviewException(InvoiceReviewFailure.EarlierAttemptBeingRemoved, "still being removed; nothing was saved"));
+
+        var request = Authenticated(HttpMethod.Post, "/api/finance/invoice-review/reject");
+        request.Content = JsonContent.Create(new { documentId });
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved);
+        json["reasonCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved);
+        json.Should().NotContainKey("invoiceId");
+    }
+
     // =========================================================================================
     // Helpers
     // =========================================================================================
@@ -1518,19 +1540,17 @@ public class FinanceEndpointsAuthorizationContractTests
             return entities;
         }
 
-        /// <param name="registerProbe">False builds a host whose container has NO <see cref="CallerRecordAccessProbe"/>
-        /// — the configuration fault the Privilege path must deny on.</param>
         /// <param name="ebillingEnabled">The eBilling flag (050a: the confirm route is gated by it).</param>
         /// <param name="realProblemMiddleware">095 contract fix (2026-10-29): true runs the BFF's REAL pipeline
         /// (<c>UseSpaarkeMiddleware</c>, its global exception handler included), so a test sees an exception as the wire renders it.</param>
-        public static async Task<FinanceAuthHost> StartAsync(bool registerProbe = true, bool ebillingEnabled = true, bool realProblemMiddleware = false)
+        public static async Task<FinanceAuthHost> StartAsync(bool ebillingEnabled = true, bool realProblemMiddleware = false)
         {
             var host = new FinanceAuthHost();
-            await host.InitializeAsync(registerProbe, ebillingEnabled, realProblemMiddleware);
+            await host.InitializeAsync(ebillingEnabled, realProblemMiddleware);
             return host;
         }
 
-        private async Task InitializeAsync(bool registerProbe, bool ebillingEnabled, bool realProblemMiddleware = false)
+        private async Task InitializeAsync(bool ebillingEnabled, bool realProblemMiddleware = false)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -1555,11 +1575,8 @@ public class FinanceEndpointsAuthorizationContractTests
             // Task 188 round 4b: what the app-only identity reads for THE external document narrowing. The caller is the
             // one StepZero states above (StatedCaller): step 0 and the narrowing ask the same two resolvers.
             builder.Services.AddNarrowingWorld(() => World);
-            if (registerProbe)
-            {
-                Probe.RecordRights = Access.RightsOf; // task 094 F4: step 1's own Read checks see the caller's same rights
-                builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
-            }
+            Probe.RecordRights = Access.RightsOf; // task 094 F4: step 1's own Read checks see the caller's same rights
+            builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
 
             builder.Services.AddSingleton(Review.Object);
             builder.Services.AddSingleton(Entities.Object);

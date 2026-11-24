@@ -166,6 +166,13 @@ public enum InvoiceReviewFailure
     /// Nothing was saved; transient (503), retry.
     /// </summary>
     ReviewStateUnreadable,
+
+    /// <summary>
+    /// Reject only (050c fix round 1, F1): the document's latest confirm attempt ended Failed but the commit gate's undo has not finished
+    /// (<see cref="SubmissionCommitGate.UndoUnfinished"/>), so an invoice it created may still exist. Nothing was written; retryable (503),
+    /// answered with the same code the confirm route answers for this state (<see cref="InvoiceSubmissionErrors.EarlierAttemptBeingRemoved"/>).
+    /// </summary>
+    EarlierAttemptBeingRemoved,
 }
 
 /// <summary>
@@ -197,6 +204,7 @@ public sealed class InvoiceReviewException : Exception
         InvoiceReviewFailure.DocumentLinkedToInvoice => "sdap.finance.invoice_review.document_linked_to_invoice",
         InvoiceReviewFailure.ReviewDecisionChanged => "sdap.finance.invoice_review.review_decision_changed",
         InvoiceReviewFailure.ReviewStateUnreadable => "sdap.finance.invoice_review.review_state_unreadable",
+        InvoiceReviewFailure.EarlierAttemptBeingRemoved => InvoiceSubmissionErrors.EarlierAttemptBeingRemoved,
         _ => "sdap.finance.invoice_review.confirm_state_unreadable",
     };
 }
@@ -618,18 +626,36 @@ public class InvoiceReviewService : IInvoiceReviewService
     {
         try
         {
+            InvoiceSubmissionView? latestFailed = null;
             for (var generation = 1; generation <= InvoiceSubmissionService.MaxExistingDocumentGeneration; generation++)
             {
                 var attempt = await _submissions.GetAsync(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId, generation), ct);
                 if (attempt is null)
                 {
-                    return null;
+                    break;
                 }
 
                 if (attempt.Status != nameof(InvoiceSubmissionStatus.Failed))
                 {
                     return attempt;
                 }
+
+                latestFailed = attempt;
+            }
+
+            // 050c fix round 1 (F1): a Failed attempt created no invoice only once its undo has finished. While the commit gate's undo is
+            // unfinished (SubmissionCommitGate.UndoUnfinished: reason source_check_failed / file_unservable, sprk_invoice still set) the
+            // invoice and its rows still exist, and since task 094 nothing links the document to them, so the link check cannot see it.
+            // Refuse, as the confirm route does for the same state (503, retryable); nothing is written.
+            if (latestFailed is not null
+                && SubmissionCommitGate.UndoUnfinished(InvoiceSubmissionStatus.Failed, latestFailed.OutcomeReasonCode, latestFailed.InvoiceId))
+            {
+                _logger.LogWarning(
+                    "Document {DocumentId} has confirm submission {SubmissionId} that ended Failed with its undo unfinished; refusing to " +
+                    "reject it (503)", documentId, latestFailed.SubmissionId);
+
+                throw new InvoiceReviewException(
+                    InvoiceReviewFailure.EarlierAttemptBeingRemoved, InvoiceSubmissionService.EarlierAttemptBeingRemovedDetail);
             }
 
             return null;

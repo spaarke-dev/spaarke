@@ -67,13 +67,15 @@ public static class FinanceEndpoints
             .WithDescription(
                 "Marks a classified document as not an invoice. " +
                 "Updates the document status to RejectedNotInvoice. No invoice record is created. A document linked to an invoice, " +
-                "or whose confirm submission has not ended Failed, is refused with 409.")
+                "or whose confirm submission has not ended Failed, is refused with 409. A Failed confirm submission whose undo has not " +
+                "finished (an invoice it created is still being removed) is refused with 503 earlier_attempt_being_removed; retry shortly.")
             .Produces<InvoiceReviewRejectResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // GET /api/finance/invoices/search — Semantic invoice search
         group.MapGet("/invoices/search", SearchInvoices)
@@ -422,6 +424,7 @@ public static class FinanceEndpoints
             InvoiceReviewFailure.ReviewDecisionChanged => (StatusCodes.Status409Conflict, "Review Decision Changed"),
             InvoiceReviewFailure.ConfirmStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             InvoiceReviewFailure.ReviewStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
+            InvoiceReviewFailure.EarlierAttemptBeingRemoved => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };
 
@@ -434,6 +437,12 @@ public static class FinanceEndpoints
         if (ex.SubmissionId is { } submissionId)
         {
             extensions["submissionId"] = submissionId;
+        }
+
+        if (ex.Failure == InvoiceReviewFailure.EarlierAttemptBeingRemoved)
+        {
+            // The confirm route answers this state with a top-level errorCode (InvoiceSubmissionHttp.Refused); reject answers the same.
+            extensions["errorCode"] = InvoiceSubmissionErrors.EarlierAttemptBeingRemoved;
         }
 
         return Results.Problem(title: title, detail: ex.Message, statusCode: status, extensions: extensions);
