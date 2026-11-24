@@ -2392,7 +2392,7 @@ Every firm-visibility reader trusts `sprk_ruleset.sprk_visibletofirms`, so only 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work (efab4736b6, task iss041); closes when the next master PR merges |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-20 |
 | **Source** | Adversarial review of task 132ui (finding 2) |
@@ -2551,7 +2551,7 @@ In Section mode the forms script rebuilds `section_ebilling` from its `Cols` lis
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work (219c0c6207, task iss047); closes when the next master PR merges |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | Index tidy-up (2026-11-24): running `scripts/check-task-status-drift.ps1` on this project |

@@ -4,7 +4,7 @@
     <title>ISS-041 (#2930): finishing a stranded reject or return after a page reload can still send the firm notice</title>
     <phase>Issue fix; filed 2026-11-20 from the 132ui review</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies Invoice Review code page .tsx on the reject/return decision path.</rigor-reason>
     <model-tier>sonnet</model-tier>
