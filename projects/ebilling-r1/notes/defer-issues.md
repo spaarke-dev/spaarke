@@ -2642,7 +2642,7 @@ After a firm submits an invoice in the external SPA, the result screen ("Invoice
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work/ebilling-r1 at be99e31311 (task iss051: every writer of a resolved code also sets the lookup; backfill scripts/ebilling/Backfill-EbillingLineCodeLookups.ps1 report run 2026-11-24: 80 open-invoice lines, 139 slots; -Apply and the re-index sweep wait for the owner's OK); closes with the master PR |
 | **Urgency** | now |
 | **Filed** | 2026-11-24 |
 | **Source** | Owner checklist Q (invoice INV-123.1.1 on MAT-000113): read-only check of the created lines on dev |

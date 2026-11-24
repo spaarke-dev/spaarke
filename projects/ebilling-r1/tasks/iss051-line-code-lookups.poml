@@ -4,7 +4,7 @@
     <title>ISS-051 (#3080): the resolved UTBMS codes reach the Invoice Line code lookups, so the AP export and the invoice index carry the resolved code</title>
     <phase>Issue fix; filed 2026-11-24 from owner checklist Q</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the invoice submission write path and/or the AP export (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
