@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: 050c in master PR #3038 with auto-merge; ISS-046 agent running; 053 waits for owner check Q)
+> **Last Updated:** 2026-11-24 (checkpoint: #3038 merged; ISS-046 done; 079 read-only prep done; 053 waits for owner check Q)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,16 +10,16 @@
 
 ## Quick recovery
 
-- **Master PR #3038** (050c + notes): auto-merge is ON (owner go 2026-11-24; merge commit; pinned to head 21511fe21c). uac-r2 and ontology-r1 have both APPROVED. ontology-r1's question about the latest attempt is answered in a PR comment.
-  - **Do NOT push work/ebilling-r1 until #3038 merges.** About 6 local commits are waiting (notes, index, iss046 POML, EB-D-267, ISS-047). Push them after the merge.
-  - After the merge, tell uac-r2 that 050c is in master, for its next dev BFF build (the owner's SHA go is given in uac-r2's session).
+- **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c. work/ebilling-r1 pushed (tip 8cefa96054). uac-r2 told that 050c is in master for its next dev BFF build (the owner's SHA go is given in uac-r2's session).
 - **Dev BFF 996928732e** has been live since 2026-11-24 ~03:01Z. It carries #3029 (096, 194, 164). 096 is recorded as live, and owner checklist **R** (Office add-in) is ready to test.
 - **053:** every read-only check passes, and its BFF and SPA steps are superseded by the master deploys. It closes on owner checklist **Q**: one Accepted firm-portal submission with sample B-0050. The Rejected check moved into **079 step 10**, because dev has no published Reject rule: publish an InvoiceAge rule (maxAgeDays 180, Reject), then the owner submits B-0082 (dated 2025-04-01). Both PDFs were sent to the owner; the copies are in the session scratchpad `samples\`, and the originals in `notes/evaluation-set/local/synthetic/` (gitignored).
 - **079 prep (read-only, 2026-11-24), step 2:**
   - These scripts report nothing to create: Procedure schema, Stored File schema, AddedFee/Discount options, rejection-reason schema.
-  - **Deploy-EbillingRuleTypeOptions.ps1 -WhatIf exits 2 with an ESCALATION:** it expects 14 options and finds AddedFee (100000015) and Discount (100000016). Those two were added on purpose by Deploy-EbillingAddedFeeDiscountOptions.ps1. The script's expected set is stale; fix its expectation (in 079 or a small fix), and do NOT run anything live from it.
-  - Steps 3 and 4 have not run yet.
-- **ISS-046 (#3001):** an implementer agent is running on branch `task/ebilling-iss046`, from 21511fe21c (POML `tasks/iss046-forms-script-keep-quickview.poml`, STANDARD). Next: review it (a scoped review is enough: script + Pester), then merge it into work.
+  - Deploy-EbillingRuleTypeOptions.ps1 fixed (d566d01136): it tolerates AddedFee/Discount; -WhatIf exits 0.
+  - Step 3: settings, the three containers and the container-scope role are already on dev; live step (b) has nothing to set.
+  - Step 4: both -Verify PASS. Evidence: `notes/079-wp3-deploy.md`.
+  - Owner said "not yet" to checklist Q on 2026-11-24.
+- **ISS-046 (#3001) ✅** merged into work 234828cfb2 (Sonnet review, fix round 1, Pester 27/0). #3001 closes when the change reaches master.
 - **ISS-047 (#3042) filed:** the drift-check script misreads `iss028`/`iss040` as 028/040 and does not parse hyphen-suffixed ids. The real drifts were reconciled by hand (084d, 093, 113 completed; 053 and 161 set to 🔄). Two phantom drifts remain (028, 040).
 - **Decisions:** EB-D-267 (owner): no typed (no-PDF) invoice create is needed.
 - **Blocked chain:** 053 (owner Q) → 079 → 112, 189 and 160. 121 waits for uac-r2 191. 136 and 153 are deploy close-outs after 079/112.
