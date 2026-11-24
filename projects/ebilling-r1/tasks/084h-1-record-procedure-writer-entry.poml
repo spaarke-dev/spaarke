@@ -4,7 +4,7 @@
     <title>Decision Record writer entry for per-record Procedure changes (WriteRecordProcedureDecisionAsync), its catalog set and writer tests W1-W8</title>
     <phase>3 Rules (WP3) — Procedures on the record (EB-D-238), wave W3-E2</phase>
     <gate>Design notes/084h-procedure-change-decision-records-design.md revised after ontology-r1 review round 1 (section 16) and PASS on re-check; ontology-r1 reviews the writer and catalog diff (section 6.5 path B) before merge</gate>
-    <status>built-awaiting-review</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a public entry to the ontology-owned Decision Record writer and a catalog set (C# code, root section 6.5 path B, D-100 shape); moves the billing lookup query body into a shared helper.</rigor-reason>
     <model-tier>opus</model-tier>

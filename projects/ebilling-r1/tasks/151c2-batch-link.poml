@@ -4,7 +4,7 @@
     <title>Batch link on the AP email: a plain sprk_billingexport reference on sprk_communication</title>
     <phase>6 Export and index (WP6) - wave W6-2 (split from 151c, EB-D-182)</phase>
     <gate>startable after 151c-1a</gate>
-    <status>done</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a Dataverse relationship whose cascade is an access requirement (agreed with unified-access-control-r2), touches the shared communication send path and adds an ArchTest guard over the family, lineage and ownership registries.</rigor-reason>
     <model-tier>sonnet</model-tier>

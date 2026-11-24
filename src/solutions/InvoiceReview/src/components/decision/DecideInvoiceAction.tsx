@@ -26,7 +26,7 @@ import {
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
-import { decisionFailureMessage, isOutcomeUnknown } from '../../services/decisionApi';
+import { decisionFailureMessage, isOutcomeUnknown, type FirmNoticeKind } from '../../services/decisionApi';
 import {
   decisionAccess,
   finishDecisionIntro,
@@ -37,9 +37,23 @@ import {
   type InvoiceOutcome,
 } from '../../services/decisionModel';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage, noteToSend } from '../../services/noteModel';
-import { isNoticeRefusal, noticeEntryOfLock, noticeToSend } from '../../services/noticeModel';
+import {
+  EMPTY_NOTICES,
+  isNoticeRefusal,
+  noticeBlocker,
+  noticeEntryOfLock,
+  noticeKindOf,
+  noticeLockOf,
+  noticeToSend,
+  settleNoticeEntries,
+  type NoticeEntries,
+  type NoticeEntry,
+} from '../../services/noticeModel';
 import { NoteField } from '../NoteField';
 import { InvoiceDecisionWizard } from './InvoiceDecisionWizard';
+import { NotifyStep } from './NotifyStep';
+import { useNoticeDrafts } from './useNoticeDrafts';
+import { EMPTY_FORM, WizardContext, type WizardCtx } from './wizardContext';
 import { useApprovalSync } from './AwaitingApprovers';
 import { useApproval } from './ApprovalProvider';
 import type { WizardNoticeLock } from './decisionLocks';
@@ -129,6 +143,12 @@ export interface IncompleteDecisionBannerProps {
  * a 503 is shown in the form with its code, and the banner keeps its Finish button while the server still reports the decision. The form
  * is not tied to the banner: when a re-read shows the hint gone, an open form stays open with its error.
  *
+ * ISS-041 (#2930): the notice to the firm (task 132ui) lives only in the page's memory (`locks`). When this form finishes a reject or return and no
+ * notice is kept there (the page was reloaded, or the first attempt came from another tab), the repeat would decide the invoice and the server
+ * would send the firm no email, so the form offers the wizard's own Notify step (`NotifyStep`, with the same draft call, limits and screening).
+ * Its switch sends no notice. The repeat then carries the confirmed notice exactly as the wizard's first call would. With a kept notice, and for
+ * an approve, the form is as before.
+ *
  * Review round 1 F4: when the record exists and only its follow-up steps did not finish (`failedStep` `link`), nothing is asked. The server
  * finishes from the stored record and ignores the request's reason and note, but a reject or return still needs a non-empty reason, so the
  * form sends the reason the record holds (`recordedReason`, from the review's invoice-level Decision Record), read-only, and no note. When the
@@ -142,7 +162,12 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
 
   // The form, kept after it closes with `open={false}` (never unmounted while open, #2658). `seq` keys each opening; `outcome` and
   // `recorded` are what the hint said when it opened, so a re-read under an open form does not change what it sends.
-  const [dialog, setDialog] = React.useState<{ open: boolean; seq: number; outcome: InvoiceOutcome; recorded: boolean } | null>(null);
+  // `offerNotice` (ISS-041): a reject or return with no notice kept in this page's memory (the page was reloaded, or another tab sent the first
+  // attempt) offers the wizard's Notify step here, because the repeat decides the invoice and the server sends the firm email only when the
+  // repeat itself carries the notice. Fixed when the form opens, so the form does not change size under the reviewer.
+  const [dialog, setDialog] = React.useState<{ open: boolean; seq: number; outcome: InvoiceOutcome; recorded: boolean; offerNotice: boolean } | null>(
+    null
+  );
   const closeDialog = () => setDialog(prev => (prev ? { ...prev, open: false } : prev));
   const [reason, setReason] = React.useState('');
   const [note, setNote] = React.useState('');
@@ -150,6 +175,21 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
   // Review round 1 F1-a: the firm notice of the request this page sent and that came back unsure (reject or return), as that request carried it.
   const [noticeLock, setNoticeLock] = React.useState<WizardNoticeLock | undefined>(undefined);
   const [noticeError, setNoticeError] = React.useState<string | null>(null);
+  // ISS-041: the notice the reviewer composes in this form (the Notify step's own entries, one per kind), when none is kept.
+  const [notices, setNotices] = React.useState<NoticeEntries>(EMPTY_NOTICES);
+  const patchNotice = React.useCallback((kind: FirmNoticeKind, patch: Partial<NoticeEntry>, edited = false) => {
+    setNotices(n => ({ ...n, [kind]: { ...n[kind], ...patch } }));
+    // A reviewer's edit drops the server's refusal of the old text.
+    if (edited) setNoticeError(null);
+  }, []);
+  const noticeWriter = React.useMemo(
+    () => ({
+      patch: (kind: FirmNoticeKind, patch: Partial<NoticeEntry>) => patchNotice(kind, patch),
+      settle: (kind: FirmNoticeKind, patch: Partial<NoticeEntry>) => setNotices(n => settleNoticeEntries(n, kind, patch)),
+    }),
+    [patchNotice]
+  );
+  const { loadNotice, reset: resetNoticeDrafts } = useNoticeDrafts(api, invoiceId, noticeWriter);
   const [locked, setLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -168,9 +208,14 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
     // A decision this page sent and that came back unsure (the wizard's or this form's) is repeated as it was sent, locked.
     const kept = locks.get('wizard');
     const same = kept && kept.outcome === stranded ? kept : undefined;
+    // Fix round 1 F2: a recorded reject or return whose reason the page cannot read cannot be finished from here (Finish is off and the form says
+    // to reload), so no notice is offered and no draft is asked for.
+    let reasonUnreadable = false;
     if (recordedStage) {
       // The record exists: its reason (or, failing that, the one this page sent), read-only; no note, which the server would drop.
-      setReason(stranded === 'approve' ? '' : (recordedReason(review, stranded) ?? same?.reason ?? ''));
+      const recordedText = stranded === 'approve' ? '' : (recordedReason(review, stranded) ?? same?.reason ?? '');
+      reasonUnreadable = stranded !== 'approve' && recordedText.trim() === '';
+      setReason(recordedText);
       setNote('');
       setLocked(true);
     } else {
@@ -180,18 +225,62 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
     }
     setNoteError(null);
     setNoticeError(null);
-    setNoticeLock(stranded === 'approve' ? undefined : same?.notice);
+    const keptNotice = stranded === 'approve' ? undefined : same?.notice;
+    setNoticeLock(keptNotice);
+    // A fresh form asks for a fresh draft (never one that was drafted for an earlier opening).
+    setNotices(EMPTY_NOTICES);
+    resetNoticeDrafts();
     setError(null);
-    setDialog(prev => (prev?.open ? prev : { open: true, seq: (prev?.seq ?? 0) + 1, outcome: stranded, recorded: recordedStage }));
+    setDialog(prev =>
+      prev?.open
+        ? prev
+        : {
+            open: true,
+            seq: (prev?.seq ?? 0) + 1,
+            outcome: stranded,
+            recorded: recordedStage,
+            offerNotice: stranded !== 'approve' && !keptNotice && !reasonUnreadable,
+          }
+    );
   };
 
   const outcome = dialog?.outcome ?? null;
   const recorded = dialog?.recorded ?? false;
   const needsReason = outcome === 'reject' || outcome === 'return';
   const reasonMissing = needsReason && reason.trim() === '';
-  const incomplete = reasonMissing || noteProblem(note) !== null;
-  // What the repeat carries for the firm: the kept notice with sending on (the wizard's own rule), else none.
-  const sentNotice = noticeLock && needsReason ? noticeToSend(noticeEntryOfLock(noticeLock), { skipped: false, locked: true }) : null;
+  // ISS-041: the Notify step is offered while no notice is kept (an unsure send from this form keeps what it sent, and the form then shows it).
+  const noticeKind = needsReason ? noticeKindOf(outcome ?? undefined) : undefined;
+  const noticeEntry = noticeKind ? notices[noticeKind] : undefined;
+  const offered = !!dialog?.offerNotice && !noticeLock && !!noticeEntry;
+  // Held while the draft loads, and for a blank or over-limit notice with sending on; a failed draft, or sending off, holds nothing.
+  const noticeHeld = offered && !!noticeEntry && noticeBlocker(noticeEntry) !== null;
+  const incomplete = reasonMissing || noteProblem(note) !== null || noticeHeld;
+  // What the repeat carries for the firm: the kept notice with sending on (the wizard's own rule), else the notice composed here, else none.
+  const sentNotice = !needsReason
+    ? null
+    : noticeLock
+      ? noticeToSend(noticeEntryOfLock(noticeLock), { skipped: false, locked: true })
+      : offered
+        ? noticeToSend(noticeEntry, { skipped: false, locked: false })
+        : null;
+  // What the Notify step reads (it is the wizard's step, so it reads the wizard's context): only these members are used there.
+  const notifyCtx: WizardCtx | null =
+    offered && state && outcome
+      ? {
+          form: { ...EMPTY_FORM, outcome, reason, note, notices, noticeError, locked: false },
+          set: () => undefined,
+          readOnly: false,
+          review,
+          approval: state,
+          api,
+          invoiceId,
+          reload,
+          onOutcome: () => undefined,
+          loadNotice,
+          patchNotice,
+          locks,
+        }
+      : null;
 
   const submit = async () => {
     if (!dialog?.open || !outcome || sending.current || incomplete) return;
@@ -226,8 +315,20 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
       setNoteError(noteRefusalMessage(r.failure));
       return;
     }
-    // The server refused the notice itself (400, before it decided anything): shown in the form; nothing else changes.
+    // The server refused the notice itself (400, before it decided anything): shown in the form; nothing was decided.
     if (isNoticeRefusal(r.failure)) {
+      // Fix round 1 F1 (as the wizard's review round 2): the route answers this before the service is called, so it proves this request decided
+      // nothing. A notice kept from an unsure send is therefore not a request to repeat any more: drop the lock (page level and form), so the
+      // Notify step is offered again with the text as sent (editable, or turn it off) and the reason and note, as typed, can be edited. In the
+      // recorded stage the reason is the record's and stays read-only.
+      if (noticeLock && needsReason) {
+        locks.clear('wizard');
+        setNoticeLock(undefined);
+        if (!recorded) setLocked(false);
+        // A notice kept from before (not composed in this form) seeds the Notify entry, so its text is what the reviewer edits.
+        if (noticeKind && !dialog.offerNotice) patchNotice(noticeKind, noticeEntryOfLock(noticeLock));
+        setDialog(prev => (prev ? { ...prev, offerNotice: true } : prev));
+      }
       sending.current = false;
       setBusy(false);
       setNoticeError(decisionFailureMessage(r.failure));
@@ -237,8 +338,11 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
     const unknown = isOutcomeUnknown(r.failure);
     if (unknown) {
       setLocked(true);
-      // The notice stays in the lock, so an unsure send here does not erase it.
-      locks.set('wizard', { outcome, reason: needsReason ? reason.trim() : '', note, ...(noticeLock && needsReason ? { notice: noticeLock } : {}) });
+      // The notice stays in the lock, so an unsure send here does not erase it. One composed in this form (ISS-041) is what this request carried
+      // (or no notice, when sending was off): the repeat is the same request, and the form then shows it read-only like a kept one.
+      const keptNotice = !needsReason ? undefined : noticeLock ?? (offered && noticeEntry ? noticeLockOf(noticeEntry, sentNotice) : undefined);
+      if (keptNotice && !noticeLock) setNoticeLock(keptNotice);
+      locks.set('wizard', { outcome, reason: needsReason ? reason.trim() : '', note, ...(keptNotice ? { notice: keptNotice } : {}) });
     }
     // An unsure outcome or a 409 means the page may be out of date: re-read the approval and the review, as the wizard does.
     if (unknown || r.failure.status === 409) {
@@ -272,7 +376,7 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
         <FormModal
           key={dialog.seq}
           open={dialog.open}
-          size="sm"
+          size={dialog.offerNotice ? 'md' : 'sm'}
           title="Finish decision"
           submitLabel="Finish"
           submitDisabled={incomplete}
@@ -283,7 +387,7 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
           onSubmit={() => void submit()}
         >
           <div className={s.form}>
-            <Text data-testid="finish-decision-intro">{finishDecisionIntro(outcome, locked, recorded)}</Text>
+            <Text data-testid="finish-decision-intro">{finishDecisionIntro(outcome, locked, recorded, offered)}</Text>
             {needsReason && recorded && reasonMissing && (
               <MessageBar intent="warning" layout="multiline" data-testid="finish-decision-no-reason">
                 <MessageBarBody>
@@ -305,14 +409,21 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
                 />
               </Field>
             )}
-            {needsReason && (
+            {/* ISS-041: no notice is kept, so the same Notify step the wizard offers (its own draft call and limits; Send is on once a draft loads,
+                and the switch sends none). The step shows the server's refusal under its fields. */}
+            {notifyCtx && (
+              <WizardContext.Provider value={notifyCtx}>
+                <NotifyStep />
+              </WizardContext.Provider>
+            )}
+            {needsReason && !offered && !(recorded && reasonMissing) && (
               <Text className={s.muted} data-testid="finish-decision-notice">
                 {sentNotice
                   ? `The firm will be emailed this notice, with the findings table: “${sentNotice.subject}”.`
                   : 'No email is sent to the firm. The decision is still recorded.'}
               </Text>
             )}
-            {noticeError && (
+            {noticeError && !offered && (
               <MessageBar intent="error" layout="multiline" data-testid="finish-decision-notice-refused">
                 <MessageBarBody>{noticeError}</MessageBarBody>
               </MessageBar>

@@ -107,6 +107,13 @@ public sealed partial class InvoiceLineDecisionServiceTests
         public Exception? CorrectionFault;
         public Exception? TotalsFault;
         public Action<string>? BeforeLineWrite;
+
+        /// <summary>ISS-050: called after each write, by kind ("lines", "totals", "corrections", "close"), so a test can move <see cref="Clock"/>.</summary>
+        public Action<string>? OnWrite;
+
+        /// <summary>ISS-050: the service's lock and clock when a test sets them (default: <see cref="Locks"/> and the system clock).</summary>
+        public IIdempotencyService? LockService;
+        public TimeProvider? Clock;
         public RecordOwnerResolution Owner = RecordOwnerResolution.Owned(Guid.Parse("01000000-0000-4000-8000-0000000000d0"));
         private long _nextVersion = 10;
 
@@ -213,6 +220,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
                         }
                     }
 
+                    OnWrite?.Invoke("lines");
                     return Task.CompletedTask;
                 });
 
@@ -229,6 +237,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
                         Corrections[upsert.Target.Id] = Copy(upsert.Target);
                     }
 
+                    OnWrite?.Invoke("corrections");
                     return Task.CompletedTask;
                 });
 
@@ -245,6 +254,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
                 {
                     TotalsWrites.Add(fields);
                     Invoice["sprk_approvedtotal"] = new Money((decimal)fields["sprk_approvedtotal"]!);
+                    OnWrite?.Invoke("totals");
                 })
                 .Returns(Task.CompletedTask);
             Records.Setup(r => r.UpdateExistingRecordFieldsAsync("sprk_billingevent", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
@@ -271,7 +281,8 @@ public sealed partial class InvoiceLineDecisionServiceTests
         {
             var recorder = new BillingDecisionRecorder(H.Writer, Identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
-            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, Probe.Object, CloseAsync, Log, jobs: Queue.Submitter);
+            return new InvoiceLineDecisionService(
+                Entities.Object, totals, recorder, LockService ?? Locks, Ownership.Object, Probe.Object, CloseAsync, Log, time: Clock, jobs: Queue.Submitter);
         }
 
         /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the
@@ -300,6 +311,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
 
                 ClosedBy[signalId] = recordId;
                 row["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+                OnWrite?.Invoke("close");
                 return Task.FromResult(SignalAutomatedCloseOutcome.Closed);
             }
         }
@@ -856,7 +868,8 @@ public sealed partial class InvoiceLineDecisionServiceTests
         w.AddLine(100m, InvoiceLineStatus.Accepted, extraction: Extraction);
         w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
 
-        var result = await w.Service().WriteUnreviewedAsync(w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, CancellationToken.None);
+        var result = await w.Service().WriteUnreviewedAsync(
+            w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, "approval-owner", TimeSpan.FromMinutes(5), CancellationToken.None);
 
         result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
         w.Corrections.Should().BeEmpty();

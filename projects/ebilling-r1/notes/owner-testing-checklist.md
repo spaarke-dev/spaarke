@@ -142,6 +142,7 @@ On an In Review invoice, choose Decide → Reject or Return to firm, give a reas
 - [ ] Turn "Send this notice to the firm" off, or Skip the step. The Confirm step says the firm gets no email, and none is sent. The decision is still recorded.
 - [ ] Switch between Reject and Return. Each keeps its own draft and edits.
 - [ ] "Restore draft" puts back the drafted text.
+- [ ] (ISS-041) A stranded Reject or Return finished after a page reload: if a "Finish decision…" banner shows on an invoice (a Reject or Return that stopped part way), reload the page and use the banner. The finish form offers the same Notify fields, and the firm's email carries the notice you confirm there. Turning sending off sends none. Hard to set up by hand; skip it if no banner appears.
 
 ## N. Billing Guidelines in the external portal (task 135): the dev BFF carries it (5ae2804884); test after spa-r4 deploys the external SPA
 
@@ -174,6 +175,7 @@ Merged into the work branch 2026-11-22 (18b02cbdcf). Nothing visible changes; th
 ## Q. A firm submits through the external portal (task 053): ready to test on dev now
 This closes task 053. After it, task 079 has no open dependency. The dev BFF and the external portal both run master (the portal was deployed 2026-11-23).
 - 2026-11-24, first run: **Failed** on matter MAT-000113. The cause is that matter's dev setup, not the invoice: MAT-000113 and MAT-000065 cannot take invoices on dev. Re-run on another of the firm's matters, e.g. PAT-792345. In the form, type the invoice number as `2026024892` (the portal stores exactly what is typed in Invoice number and PO number) and leave PO number blank.
+- 2026-11-24 ~16:10Z: the dev setup that blocked MAT-000113 was fixed (owner-approved, done by uac-r2), so MAT-000113 can take invoices again; PAT-792345 is still fine. Use a matter, project or work assignment that already exists; one newly created with no parent may still hit the same block (#3047).
 - [ ] Sign in to the external portal as a firm user who has access to a matter. Submit the sample `Accepted-sample-B-0050-INV-2026024892.pdf` (sent in the session; evaluation-set B-0050, invoice 2026024892) on that matter. The portal shows **Processing**, then **Accepted**, with a tracking number such as `INV-123.1`.
 - [ ] In Spaarke, that invoice is **In Review** on the matter. Its lines are filled in with codes, and it has an approval portion.
 - Moved to task 079 (2026-11-24): the **Rejected** check. Dev has no published Reject rule yet; 079 step 10 publishes the first rules. Once it does, you submit `Rejected-sample-B-0082-INV-2025-34586-dated-2025-04-01.pdf` (sent in the session), which breaks a 180-day invoice-age rule, and the portal should show **Rejected**.

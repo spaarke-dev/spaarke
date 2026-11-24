@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss050" project="ebilling-r1">
+  <metadata>
+    <title>ISS-050 (#3059): the line-decision lock is renewed while a long call is still writing, and a call that loses its lock stops before writing anything more</title>
+    <phase>Issue fix; filed 2026-11-24 from the iss029 Opus review</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the Invoice Review line-decision write path (.cs) and the lock it shares with the approval.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Concurrency on a write path: line fields, totals, corrections and Decision Records must not disagree when two callers race.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>iss029</deps>
+    <tags>bff-api, api, dataverse, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-050. A line-decision call takes the invoice's processing lock for a fixed 2 minutes (InvoiceLineDecisionService.LockDuration) and never renews it. One call can cover up to 1,000 lines (MaxLinesPerRequest, Accept all Clean), and the record step writes one Decision Record per line. If the call outlives the lock, a second reviewer can take the lock and write a line the first call updated but has not yet recorded; the first call then records "accept" on a line that now shows Reduced.
+IIdempotencyService already has RenewProcessingLockAsync(eventId, ownerId, lockDuration, ct) (Services/Jobs/IIdempotencyService.cs ~58-75): it answers true only when the lock was read back as this owner's and extended. Use it; do not add a lock API.
+Entry points: src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs (MaxLinesPerRequest ~205, LockDuration ~221, acquire ~321-356, the record loop, the class remarks ~168-175 on serialisation). The approval path (task 103, AcceptCleanUnderHeldLockAsync and its siblings ~364-395) runs the same steps while the CALLER holds the lock: find where the approval takes it (grep LockKeyFor) and give it the same renewal. Find how other long holders renew (grep RenewProcessingLockAsync) and copy that pattern.</prompt>
+
+  <constraints>
+    <constraint>Renew the lock during the call at a bounded interval (before each record chunk or every N lines, so that no stretch between renewals can approach LockDuration). Keep LockDuration and MaxLinesPerRequest as they are unless you show in the notes why one must change.</constraint>
+    <constraint>A renewal that answers false or throws means the lock is lost: stop before the next write of any kind (line, total, correction, Signal, Decision Record) and answer the route's existing "incomplete, repeat to complete" outcome (503 ebilling.decision.incomplete with its failedStep) so a same-content repeat finishes the work under a new lock. Never continue unlocked; never answer 409 for a lost lock. The approval path does the same through its own existing incomplete answer.</constraint>
+    <constraint>The iss029 pre-check (DecisionRecordWriter.PreflightBillingRepeat, 409 ebilling.decision.id_reused) and every existing answer stay unchanged. Release stays owner-checked (ReleaseProcessingLockAsync with ownerId).</constraint>
+    <constraint>No new endpoint, service, DI registration, package, Dataverse column or lock API. Update the class remarks and any doc that states the lock never renews (grep LockDuration and "processing lock" under docs/ and projects/ebilling-r1/notes/).</constraint>
+    <constraint>Tests, failing before and passing after, in the existing InvoiceLineDecisionService test class(es) (find them with grep): (1) a call long enough to need renewal renews (the fake sees RenewProcessingLockAsync with this owner) and completes; (2) renewal answers false part way: no write after that point (assert the fakes), 503 incomplete; (3) renewal throws: same as (2); (4) a short call still completes as before; (5) the approval's Accept all Clean under a held lock renews the same way and stops the same way. Run only the affected classes: dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~InvoiceLineDecision|FullyQualifiedName~InvoiceApproval" -- xUnit.MaxParallelThreads=4 (adjust the filter to the real class names). Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests.</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings. Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss050-line-decision-lock-renewal.md (what changed, renewal interval and why, K-limits; the 1,000-line duration on dev is still not measured: say so).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A call that outlives one lock duration renews the lock and completes.</criterion>
+    <criterion testable="true">A call whose renewal fails writes nothing more and answers the existing incomplete outcome; a same-content repeat finishes it.</criterion>
+    <criterion testable="true">The approval path renews and stops the same way.</criterion>
+    <criterion testable="true">Short calls, the iss029 id_reused answer and all other existing answers are unchanged.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

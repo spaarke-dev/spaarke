@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: #3051 merged; master PR #3065 open with the issue batch; checklist Q re-run pending with the owner)
+> **Last Updated:** 2026-11-24 (checkpoint: issue batch 2 merged into work, master PR #3073 open; checklist Q re-run pending with the owner) running in agents; checklist Q re-run pending with the owner)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,11 +10,21 @@
 
 ## Quick recovery
 
-- **Master PR #3065 OPEN (2026-11-24):** issue batch iss027 (#2878), iss042 (#2933), iss043 (#2978 + ISS-035 #2889), iss029 (#2880) + notes. Work merged master cf1b7027ce first (167de5cdb7): BFF build 0 warnings, filtered Sprk.Bff.Api.Tests 3,507/0; no file overlap with 33 open PRs. Not bound, no auto-merge; merge as a merge commit once CI and the owner agree. spa-r4 copied (firm labels; K1 errorCode) and ontology-r1 asked to review `DecisionRecordWriter.PreflightBillingRepeat`. K-limits in each task's notes. Found in passing and filed: ISS-049 #3057, ISS-050 #3059. Owner question open: label wording "Line date" / "Description" (iss042). **Do not push new work to work/ebilling-r1 while #3065 is open** unless it should join that PR.
+- **Master PR #3073 OPEN (2026-11-24):** issue batch 2, all merged into work and reviewed.
+  - iss050 (#3059): lock renewal; merged 7da8f29320 after an Opus review, fix rounds 1-2 and a Sonnet re-check.
+  - iss041 (#2930): finish-decision notice after a reload; merged efab4736b6 after a Sonnet review, fix round 1 and a re-check PASS.
+  - iss047 (#3042): drift-check id grammar; merged 219c0c6207 after a Sonnet review and fix round 1.
+  - Work tip: build 0 warnings; filtered InvoiceLineDecision|InvoiceApproval tests 439/0; no overlap with open PRs.
+  - Not bound and no auto-merge. Merge as a merge commit once CI passes and the owner says go. Do not push new work to work/ebilling-r1 while #3073 is open, unless it should join that PR.
+- **Index after the fixed drift check:**
+  - 0 status drifts. The 8 POMLs it exposed (084h-1, 095c-5, 130-0, 130-0b, 130e-1, 151c-1a/1b/2) were set to completed; each merge sha was verified as an ancestor.
+  - 27 unpaired entries remain: 25 index sub-rows without a POML, plus 095d-1 and 095d-2. The POMLs say not-started, but the 095d row says 1a/1b/1c and 2b-* are merged. Resolve them from evidence.
+- **Agent worktrees locked by the app (pid 39572):** agent-a31ddd127a439f9dd (iss041), agent-a73718461abbfd6a5, agent-afe7e9fefac5f933f. All are pushed. Remove them with Remove-WorktreeSafe once unlocked.
+- **Master PR #3065 MERGED** 2026-11-24 16:53Z at 6d167e0646 (owner: "Yes, auto-merge"): iss027 (#2878), iss042 (#2933), iss043 (#2978 + #2889), iss029 (#2880), all closed. Found in passing and filed: ISS-049 #3057, ISS-050 #3059. Label wording "Line date" / "Description" kept (owner, EB-D-268).
 - **Master PR #3051 MERGED** 2026-11-24 15:14Z at cf1b7027ce (owner: "Yes, merge #3051"): iss048, iss046 (#3001), the rule-type options script fix. iss048 reaches the portal only with the next external SPA build from master (checklist Q's last item).
 - **Master PR #3038** (050c + notes) MERGED 2026-11-24 04:16Z at a1ab27702c.
 - **Dev BFF 0362599b94** live since 2026-11-24 (uac-r2's deploy; carries 050c). healthz 200; confirm and reject return 401 unauthenticated. Evidence: `notes/050c-confirm-followups.md`. Owner checklist **R** (Office add-in) is ready to test.
-- **Checklist Q first run (2026-11-24) Failed** on MAT-000113: the matter is root-BU owned on dev, so the submission was refused `record_owner_restricted_content_team_unresolved`. Not an eBilling defect; uac-r2 confirmed and filed the gap as #3047 (149 root-owned dev records; re-homing is an owner decision uac-r2 raises). Private detail stays with uac-r2. **Re-run:** PAT-792345, invoice number `2026024892`, PO blank (other BU1 matters are listed in checklist Q). Avoid MAT-000113 and MAT-000065.
+- **Checklist Q first run (2026-11-24) Failed** on MAT-000113: the matter is root-BU owned on dev, so the submission was refused `record_owner_restricted_content_team_unresolved`. Not an eBilling defect; uac-r2 confirmed and filed the gap as #3047 (149 root-owned dev records; re-homing is an owner decision uac-r2 raises). Private detail stays with uac-r2. **Re-run:** PAT-792345, invoice number `2026024892`, PO blank (other BU1 matters are listed in checklist Q). Update 2026-11-24 ~16:10Z (uac-r2): the owner approved re-homing the root-owned dev records and it is done, so MAT-000113 can be used again; a parentless record created by the root-homed admin still lands in the root until #3047 is fixed. Resubmitting the dead-lettered MAT-000113 invoice is a live action that needs the owner's go here.
 - **iss048 ✅** merged into work f4f5b06f52 (result screen title and icon follow the outcome; record-setup Failed text). Sonnet review: no F-class, K1-K8 in `notes/iss048-submission-result-screen.md`.
 - **053:** every read-only check passes, and its BFF and SPA steps are superseded by the master deploys. It closes on owner checklist **Q**: one Accepted firm-portal submission with sample B-0050. The Rejected check moved into **079 step 10**, because dev has no published Reject rule: publish an InvoiceAge rule (maxAgeDays 180, Reject), then the owner submits B-0082 (dated 2025-04-01). Both PDFs were sent to the owner; the copies are in the session scratchpad `samples\`, and the originals in `notes/evaluation-set/local/synthetic/` (gitignored).
 - **079 prep (read-only, 2026-11-24), step 2:**
