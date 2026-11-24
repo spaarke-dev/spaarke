@@ -9,14 +9,21 @@
 | Field | Value |
 |---|---|
 | **Active work** | **G8-P2 live test** (owner go 2026-11-23). This is the Practice-agent build path, so the owner said it must be RESOLVED, not just recorded. Run log: `phase0/g8/README.md` § "G8-P2 run log" |
-| **Step** | **G8-P2 ✅ in Chat, Word, plain Chat (no leak); Teams = Chat** (2026-11-24, App Insights verified). **V1 in progress:** owner uploaded `spaarke-legal-g8p2-sl` **1.1.1** (same id `d38f8df8`, action URL `…/mcp/legal-operations?pkg=1.1.1`) as an update ~16:2xZ. As of 16:35Z no Sydney call since the upload. **Next:** owner asks the agent in a new chat; read `requests.url` for `?pkg=1.1.1`. Also new: design §3.13 Copilot UX components (SPFx), G11, T-8, D-A17 |
+| **Step** | **G8-P2 ✅** (Chat, Word, plain Chat no leak, Teams = Chat). **V1 ⚠️:** an action-changing update takes the action offline for a while (1.1.2 back after ~40 min); BR-3 revised. **V2 ✅** (`cb5afd1c`, dynamic discovery + OAuth, owner + `demo@`); BR-5 now proposes dynamic discovery as the default; the first sign-in card is not proven. Design §3.13: MCP Apps widgets are the default UI (owner, D-A17); SPFx is the exception. **Next:** removals by 30 Nov; open: V1a (`?pkg=`), V3, V5, first sign-in |
 | **Design version** | design.md v0.6 + G9 (`4ed12dbee3`); latest commit `e48dc2e012` (pushed) |
 | **Uncommitted** | none |
 
 ## Next action (exact)
-1. **V1 result:** after the owner's new-chat question to `spaarke-legal-g8p2-sl`, query `requests | where url has 'mcp' | summarize count(), max(timestamp) by url, resultCode` (no KQL aliases). `?pkg=1.1.1` = updates carry action changes (BR-3 holds); plain URL = old action still bound; no call = update broke the action. Note: the tenant connector also calls the plain URL, so match by time and by Sydney `tools/call` traces. Record in the README V1 section, note §5, BR-3, design §8; tell COPILOT-PLATFORM-COORDINATION [0afb62].
-2. Removals by 2026-11-30: G8-a agent + 2 skills, G8-p2 `802fd9cc`, G8-p2-sl `d38f8df8`, G8-p2-org-learn `0421c980`.
-3. V2 (dynamic discovery + OAuth on a fresh id), then G11 (Copilot UX component spike; needs the owner's OK to install the SPFx toolchain). Build rules BR-1–BR-7: the note and the `declarative-agent` skill Step 5.5.
+1. Tell COPILOT-PLATFORM-COORDINATION [0afb62] the V2 result (the R4 row and V1 were sent ~17:45Z).
+2. Removals by 2026-11-30 (owner, admin center): G8-a agent + 2 skills, G8-p2 `802fd9cc`, G8-p2-sl `d38f8df8`, G8-p2-org-learn `0421c980`, G8-p2-dd `cb5afd1c`.
+3. Open tests:
+   - V1a: `?pkg=` on a fresh id; wait an hour before judging.
+   - First sign-in card, with a user who has never used the Spaarke connector.
+   - V3: Model 1, second tenant.
+   - V5: the old Spaarke AI agent.
+   - G11 is optional (MCP Apps widgets are the default).
+   Build rules BR-1–BR-7: the note and the `declarative-agent` skill Step 5.5.
+4. App Insights: BFF requests are sampled at about 25–33% now, and caller identity isn't logged. Use several turns per check.
 
 ## G8 result (recorded in phase0/g8/README.md, commit 9c557d7e95)
 - An Agent Builder agent cannot use the tenant federated connector (A1 ❌, A2 "No connectors available" ❌, skills inside the agent ❌). Plain Chat works (`spike_whoami` ✅).
