@@ -32,6 +32,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import {
   applyResolverFields,
   discoverNavProps,
+  findNavProp,
   toNavPropMap,
   cleanGuid,
   _resetNavPropCacheForTests,
@@ -185,12 +186,13 @@ export class TodoService {
       // @odata.bind key predicate is valid (Dataverse 400 "query syntax" otherwise).
       const assignedToGuid = cleanGuid(formValues.assignedToId);
       try {
+        // Bind by the column's FULL logical name: `sprk_todo` also has `sprk_assignedtointernal` and
+        // `sprk_assignedtoexternal`, which contain the fragment 'assignedto' and are listed first. A fragment
+        // match bound the Assignee to `sprk_assignedtointernal`, so the To Do left the assignee's Smart To Do list.
         const navProps = await discoverNavProps('sprk_todo');
-        const assignedNav = navProps.find(
-          n => n.referencedEntity === 'contact' && n.columnName.toLowerCase().includes('assignedto')
-        );
+        const assignedNav = findNavProp(navProps, 'contact', 'sprk_assignedto');
         if (assignedNav) {
-          entity[`${assignedNav.navPropName}@odata.bind`] = `/contacts(${assignedToGuid})`;
+          entity[`${assignedNav}@odata.bind`] = `/contacts(${assignedToGuid})`;
         } else {
           // Fallback: use the lookup attribute name directly
           // UAT 2026-06-22 round 13: PascalCase nav-prop name required

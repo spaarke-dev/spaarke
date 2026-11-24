@@ -13,9 +13,10 @@
 | **Dev** | BFF a48398746d (carries #2984). Web resources `sprk_communicationconversationpage.html` and `sprk_spaarkeai` from master 738648c7fb. `RecordRepair:Pass:GoLive` unset everywhere. |
 | **Active task** | **024** To Do wizard migration (FR-16), FULL rigor, sonnet @ high, STEP MODE directional. Gate met: 023 live check PASS 2026-11-23 (dark-mode look left for the owner). |
 | **024 approach** | Copy the 023 Event wizard migration: `CreateEventWizard/eventService.ts` + `__tests__/eventService.fieldMapping.test.ts`, notes `notes/task-023-notes.md`. Implementation delegated to one Sonnet implementer in a worktree on `task/fm-024` (branched from 98b2084536); this session reviews, runs gates, merges `--no-ff`. |
-| **024 current step** | Code merged into the work branch at 869c6cf494 (task/fm-024 fca6adcf22). Review + gates PASS (jest 16/119, tsc 0, client-lint ok, ADR clean). Agent worktree to remove later: `C:code_filesspaarke.claudeworktreesgent-a451c05c09d18c1b9` (Remove-WorktreeSafe.ps1). |
+| **024 current step** | Code merged into the work branch at 869c6cf494 (task/fm-024 fca6adcf22). Review + gates PASS (jest 16/119, tsc 0, client-lint ok, ADR clean). Agent worktree to remove later: `C:\code_files\spaarke\.claude\worktrees\agent-a451c05c09d18c1b9` (Remove-WorktreeSafe.ps1). |
 | **Files modified (024)** | All committed (merge 869c6cf494). |
-| **Next action** | Owner decision: open the master PR for the work branch (carries 024 + docs). Then `code-page-deploy` of `sprk_createtodowizard` on dev (owner go), then the AC5 live check in the owner Chrome (new tab group): create a To Do under a matter with a mapping profile, check mapped fields on first load, user value kept, owner = owning team, SmartTodo launch, widget refetch. Then mark 024 done and start 025. |
+| **Deployed** | #3031 merged (57a68b06c5). `sprk_createtodowizard` on dev from 57a68b06c5, 2026-11-24 01:35Z, SHA-256 C29DA862…B300C, in SpaarkeMaster (`notes/task-024-notes.md` "Deploy to dev"). |
+| **Next action** | AC5 live check done 2026-11-24 (PASS except the Assignee bind; notes "Live check on dev (AC5)"). Assignee fix committed on the work branch (todoService binds `sprk_assignedto` exactly; DI-039/#3039 for the Event wizard). Next: owner go for a master PR with the fix, then redeploy `sprk_createtodowizard` and re-check that a picked Assignee lands in `sprk_assignedto`; then mark 024 done and start 025. |
 
 ## Done 2026-11-23 (for context)
 
