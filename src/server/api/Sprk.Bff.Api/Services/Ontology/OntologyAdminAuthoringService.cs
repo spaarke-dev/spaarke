@@ -293,6 +293,14 @@ public sealed partial class OntologyAdminAuthoringService
                 .Order(StringComparer.Ordinal)
                 .ToList();
 
+        // Task 210 (DI-169): the display name of every allow-listed column of the table, from the describer's one table of them (a guard
+        // test pins it to the solution source and to the allow-list), so the wizard shows "Created On" and still writes "createdon".
+        static IReadOnlyDictionary<string, string> FieldLabelsOf(string entity) =>
+            PolicyVersionValidator.AuthorableColumns
+                .Where(c => c.Entity == entity && RuleBodyDescriber.ColumnDisplayNames.ContainsKey(c))
+                .OrderBy(c => c.Column, StringComparer.Ordinal)
+                .ToDictionary(c => c.Column, c => RuleBodyDescriber.ColumnDisplayNames[c], StringComparer.Ordinal);
+
         var subjects = PredicateCompiler.EvaluatorGlobalReadableEntities
             .Where(SubjectTypeBySubject.ContainsKey)
             .Order(StringComparer.Ordinal)
@@ -307,9 +315,11 @@ public sealed partial class OntologyAdminAuthoringService
                 PredicateCompiler.VerifiedJoins
                     .Where(kv => kv.Key.Subject == subject && PredicateCompiler.EvaluatorGlobalReadableEntities.Contains(kv.Key.Related))
                     .OrderBy(kv => kv.Key.Related, StringComparer.Ordinal)
-                    .Select(kv => new OntologyCatalogJoin(kv.Key.Related, kv.Value, DateOnlyOf(kv.Key.Related), AuthorableOf(kv.Key.Related)))
+                    .Select(kv => new OntologyCatalogJoin(
+                        kv.Key.Related, kv.Value, DateOnlyOf(kv.Key.Related), AuthorableOf(kv.Key.Related), FieldLabelsOf(kv.Key.Related)))
                     .ToList(),
-                AuthorableOf(subject)))
+                AuthorableOf(subject),
+                FieldLabelsOf(subject)))
             .ToList();
 
         return new OntologyAuthoringCatalog(
