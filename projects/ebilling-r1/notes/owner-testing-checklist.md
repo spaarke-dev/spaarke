@@ -200,3 +200,9 @@ Once a dev BFF with iss051 is live, new and corrected lines carry the resolved U
 - [ ] Owner OK, then `-Apply` and the re-index sweep the script prints.
 - [ ] Open INV-123.1's lines in Spaarke: the Task / Activity / Expense code columns show codes.
 - [ ] After the next AP export of a coded invoice, the export file carries the resolved code, not the firm's own text.
+
+## U. Links on the portal's "Invoice received" screen (ISS-052): after the next dev BFF and external portal deploys from master
+- [ ] Submit an invoice in the portal. When it is Accepted, the result screen shows **Open invoice** and **Open matter** (or project / work assignment). Each opens that record.
+- [ ] Open the resume link (`/invoices/submit?submissionId=…`) of the same submission: the same two links show.
+- [ ] From a matter's record view, use **Submit invoice**; on the result, **Open invoice** opens the invoice over the matter, and closing it returns you to the matter with focus on the Submit invoice button. **Open matter** just closes back to the matter.
+- [ ] A Rejected submission shows no **Open invoice**, and its red bar says "The invoice was rejected." with no code like `invoice.read.unreadable` (the report below still lists rule findings with their descriptions).

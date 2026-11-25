@@ -4,7 +4,7 @@
     <title>ISS-052 (#3082): the SPA "Invoice received" screen links to the invoice and to the matter / project / work assignment it was filed against</title>
     <phase>Issue fix; owner request from checklist Q, 2026-11-24</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits an external-access BFF route's response (firm visibility, D-70) and .tsx in the shared library and the external SPA.</rigor-reason>
     <model-tier>opus</model-tier>

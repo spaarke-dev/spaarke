@@ -2616,7 +2616,7 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work/ebilling-r1 at 45e2db2bb8 (task iss052: Open invoice / Open record on the result screen, resume view and record modal; the external status route returns the invoice id only for an Accepted invoice the caller may see; uac-r2 PASS. Fixed in passing: the firm-facing Rejected bar no longer shows the raw reason code); closes with the master PR |
 | **Urgency** | now |
 | **Filed** | 2026-11-24 |
 | **Source** | Owner checklist Q (2026-11-24): "the 'invoice received' should have navigation to the Invoice and to the related record (e.g., project or matter)" |
