@@ -60,3 +60,21 @@
 2. Memoise the pre-write access answers within the preflight pass only (all four creates ask about the same matter). Every check after a write re-asks. uac-r2 reviews.
 3. Profile `RecordCreationService` (the 113 SDK calls) with a call-counting fake, and remove repeated reads. This is the biggest block.
 4. The email send off the request: owner decision (see above).
+
+## Implementer stop (Opus, 2026-11-25 ~23:00Z); branch `perf/decision-commit-latency` (from master, no changes yet)
+
+- **No existing harness counts the real SDK calls.**
+  - `DecisionCommitServiceTests` uses fake executors.
+  - `SecureChildOwnershipAiToolTests.DecisionCommit.cs` runs the real path but fakes every service that makes SDK calls.
+  - A profile needs a new world: the real ownership resolver, `CoreAncestorRestamper`, `SecureChildShareSynchronizer`, `SecureRootFilingGate` and `AssignedAccessMaterializer`, all over one scripted, counting `IDataverseService`, plus `IDataverseRecordShareService` and `IAccessibleRecordSetService`. Calls are counted per interface method and table.
+- **Fix 2 (access memo) design gap.**
+  - The creates are written app-only (`IFieldMappingDataverseService`), not through the caller's client. A memo on the caller's client would not see those writes, so it could answer from before a write.
+  - A safe memo needs a commit-scoped write signal raised by the app writer, the restamper, sharing and the materializer. That is cross-cutting work in uac-r2's area.
+  - The rule "re-ask after a write" also leaves only these repeats: duplicate questions across the four preflights, step 1's execute-pass recheck, and repeats within one create's two passes. The 8 `sprk_recordtype_refs` reads would drop to about 4, not 1; those reads are an access answer, not metadata.
+- **Fix 1 (metadata memo) carrier.** Today's memo instances are locals in `RecordCreationService.DecideAsync`. For one commit, `HttpContext.Items` would carry it (as `CallerWhoAmIMemo` does). Off-request callers (chat tool, jobs) need another carrier or no memo. Dropping "cleared on any write" for metadata changes that class's documented contract.
+- **Split, one PR at the end:**
+  - A: profile harness, equivalence tests and the notes table. This gates the rest.
+  - B: request-scoped metadata memo.
+  - C: access memo, designed with uac-r2 first; two auth review passes.
+  - D: repeats inside create, scoped from A's numbers.
+  - E: verify and deliver.
