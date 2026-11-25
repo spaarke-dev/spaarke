@@ -6,6 +6,8 @@
 > **Status**: Verified
 > **Project**: ai-m365-copilot-integration (R1)
 
+> **Legacy (2026-11-25):** this document describes the OpenAPI-based "Spaarke AI" declarative agent and the `/api/agent/*` gateway. They still run, but they are no longer the model. How Spaarke reaches Copilot is now set by [SPAARKE-AI-SURFACES-AND-PACKAGING.md](SPAARKE-AI-SURFACES-AND-PACKAGING.md): one MCP server, area connectors, and agents only for practice areas. The agent's 28 functions move to MCP tools in `spaarkeai-mcp-bff-api-r2`, after which the tenant registration is retired. Keep this file until then.
+
 > **Verification note (2026-04-05)**: All 14 agent gateway files confirmed in `src/server/api/Sprk.Bff.Api/Api/Agent/`. `src/solutions/CopilotAgent/` exists. Feature is in R1 production.
 
 ## System Architecture
