@@ -1,7 +1,7 @@
 # Spaarke MCP r2: Ask tool parity and retiring the Spaarke AI agent (`spaarkeai-mcp-bff-api-r2`)
 
 > **Portfolio**: [Project #3150](https://github.com/spaarke-dev/spaarke/issues/3150) · Epic: [#421](https://github.com/spaarke-dev/spaarke/issues/421) · [Portfolio board view](https://github.com/users/spaarke-dev/projects/2)
-> **Status:** Ready for execution (2026-11-25). Spec done; 35 tasks planned; Phase 0 next. Phases 1–3 wait for r1 PR #3161 and r1 task 042.
+> **Status:** Ready for execution (2026-11-25). Spec done; 35 tasks planned; Phase 0 next. Phase 0 code complete; Phase 1 r1 gate released 2026-11-25 (notes/decisions.md D-r1-gate).
 > **Branch:** `work/spaarkeai-mcp-bff-api-r2` · **Worktree:** `C:/code_files/spaarke-wt-spaarkeai-mcp-bff-api-r2`
 > **Builds on:** `spaarkeai-mcp-bff-api-r1` (the MCP server in the BFF).
 

@@ -3,7 +3,7 @@
   <metadata>
     <title>Tool: spaarke_list_playbooks (caller's + public, de-duplicated)</title>
     <phase>1 Read tools</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF surface (MCP tool)</rigor-reason>
@@ -37,7 +37,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback). Call the same IPlaybookService methods the two REST handlers call, with the same paging limits.</constraint>
     <constraint source="project">[McpArea("legal-operations")], readOnlyHint true, destructiveHint false, idempotentHint true, a title, description ≤ 1,024 characters that says "JPS playbooks (AI analysis recipes)", not bare "playbook" (D-209). Ledger row in RouteAuthorizationGuardTests.Mcp.Playbooks.cs.</constraint>
     <constraint source="ADR-015">Slim rows only; no playbook definition JSON or prompts in model-visible text. Logs: tool name, latency, row count, outcome, correlation id. Result &lt; 64 KiB at the list maximum.</constraint>

@@ -121,7 +121,7 @@
 | Phase | Tasks | Gate |
 |---|---|---|
 | 0 — removal, prerequisites, seams | 001–012, 019 | None for code; 019 waits for owner E1 and per-SHA go |
-| 1 — read tools | 020–026, 029 | r1 PR #3161 and r1 task 042 merged to master and master merged here |
+| 1 — read tools | 020–026, 029 | r1 gate released 2026-11-25 (D-r1-gate); master merged here |
 | 2 — long-running, AI, widgets, task writes | 030–036, 039 | Phase 1 tools + Phase 0 prerequisites per task |
 | 3 — email, eval, E2E | 040–043, 049 | Phase 2 |
 | Wrap-up | 090 | All tasks done or cancelled |
@@ -158,7 +158,7 @@ r1 gate → 020 → 024 → 030 → 032 → 039 → 040 → 049 → 042 / 043 �
 
 ### Phase 1: Read tools (020–026, 029)
 
-**Objectives:** the shared tool plumbing and the read tools. **External gate:** r1 PR #3161 + r1 task 042 merged.
+**Objectives:** the shared tool plumbing and the read tools. **External gate:** released 2026-11-25 (D-r1-gate); merge master first.
 
 | Task | Deliverable |
 |---|---|
@@ -206,7 +206,7 @@ Final code-review/adr-check, `/test-diet`, repo-cleanup, final docs (MCP archite
 
 ### External Dependencies
 
-- `spaarkeai-mcp-bff-api-r1`: PR #3161 and task 042 must merge before Phase 1 (shared `Api/Mcp/`, `McpToolCatalog`, `McpModule`, ledger, Decisions widget). spec.md names PR #3146 — that PR merged; #3161 is the open one.
+- `spaarkeai-mcp-bff-api-r1`: all r1 code is on master; gate released 2026-11-25 by D-r1-gate (shared `Api/Mcp/`, `McpToolCatalog`, `McpModule`, ledger, Decisions widget). spec.md names PR #3146 — that PR merged; #3161 is the open one.
 - Owner: runbook E1 before 019; per-SHA go for every dev deploy; dev Dataverse schema changes (005, 012); restart of dev App Service (039).
 - Reviews: unified-access-control-r2 (every caller path: 001, 006, 007, 008, 009, 022–036, 040); ebilling-r1 (008, 033); ontology-r1 (capability and authorization extractions: 006, 007, 008, 031).
 - Microsoft 365 Copilot Chat / Cowork hosts; `@modelcontextprotocol/ext-apps` 2.0.4; `ModelContextProtocol.AspNetCore` as pinned by r1.

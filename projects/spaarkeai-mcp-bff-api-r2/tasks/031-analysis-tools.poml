@@ -3,7 +3,7 @@
   <metadata>
     <title>Analysis tools: spaarke_start_analysis, spaarke_get_analysis</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Model-callable write that must reuse AnalysisAuthorizationFilter's create check through a shared method (an extraction no Phase 0 task covers); tags include auth</rigor-reason>
@@ -42,7 +42,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback; never pass or log the token). The create check moves into one public method the filter and the tool both call; the tool adds no check of its own (spec MUST NOT copy authorization).</constraint>
     <constraint source="ADR-008">The frozen-bytes baseline for POST /api/ai/analysis/create (201, 400, 403, 404) is written and green before the extraction and passes unchanged after it; the filter stays registered the same way.</constraint>
     <constraint source="ADR-002">The record is created only through RecordCreationService.CreateAsync (one server-side owner); no direct Dataverse create; the tool never executes the analysis (no AnalysisOrchestrationService call).</constraint>

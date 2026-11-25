@@ -3,7 +3,7 @@
   <metadata>
     <title>Tool: spaarke_get_matter_summary (cached, else start a run)</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF surface that may start an AI run; second user of the long-running pattern</rigor-reason>
@@ -41,7 +41,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="ADR-028">Read the matter column as the caller (IDataverseUserClient, user OBO) so Dataverse enforces read access; unreadable and missing matters return the same not-found. No app-only read.</constraint>
     <constraint source="project">No new store, table, cache or background worker (FR-10, ADR-052): freshness = column timestamp vs the registry TTL; the start path is 030's run start (with the matter as subject), so the persister writes the column on completion. If 030's path cannot target the matter-summary Binding, STOP and escalate.</constraint>
     <constraint source="project">readOnlyHint false (it can start a run), destructiveHint false, idempotentHint true; a second call while a run for the same matter is in flight returns that run's id, not a new run. Description says "AI summary of one matter"; not finance, not health.</constraint>

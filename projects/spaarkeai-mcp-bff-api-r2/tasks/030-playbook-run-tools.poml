@@ -3,7 +3,7 @@
   <metadata>
     <title>Playbook run tools: spaarke_run_playbook, spaarke_get_playbook_run</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Model-callable write (run start) behind the shared playbook authorization; reads durable run records with an owner check; tags include auth</rigor-reason>
@@ -44,7 +44,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback; never pass or log the token). Authorization is exactly 007's shared method; the tool adds no check of its own and maps its typed refusal to McpToolResults with the same reasonCode REST returns.</constraint>
     <constraint source="project">spaarke_run_playbook: readOnlyHint false, destructiveHint false, idempotentHint true; required idempotencyKey argument; a retry with the same key and caller returns the original runId without starting a second run (key scope and storage follow CompleteDecisionTool's pattern; no new store if r1's mechanism fits). Answers within 5 s: it returns after the run is accepted, never waits for completion (FR-14).</constraint>
     <constraint source="project">spaarke_get_playbook_run: readOnlyHint true, idempotentHint true; reads through the same service methods as GET runs/{runId} (in-memory, then 005's durable record); a run whose StartedByOid is not the caller returns the same not-found as a missing run.</constraint>

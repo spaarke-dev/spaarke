@@ -3,7 +3,7 @@
   <metadata>
     <title>Shared widget MCP transport; move the Decisions widget onto it</title>
     <phase>1 Read tools</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New shared client abstraction used by four widgets; moves a live widget (Decisions) onto it</rigor-reason>
@@ -41,7 +41,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="ADR-012">Placement: a shared source folder under src/client/widgets/shared/, not a new package and not @spaarke/ui-components. If adr-check flags ADR-012 (unsanctioned shared surface), STOP and raise the ADR conflict (root CLAUDE.md §6.5) instead of choosing another location.</constraint>
     <constraint source="project">No behaviour change in spaarke-decisions: every test under src/client/widgets/spaarke-decisions/src/__tests__/ passes unchanged; the same tool names, arguments and error handling; the bundle size from scripts/check-bundle-size.mjs does not grow by more than 5 KB.</constraint>
     <constraint source="project">The transport's callTool result shape is structurally assignable to task 011's McpToolCaller (a compile-time assertion in the test); it performs no fetch of its own and no MSAL, and _meta.ui.csp stays empty (all data through the host's tools/call).</constraint>

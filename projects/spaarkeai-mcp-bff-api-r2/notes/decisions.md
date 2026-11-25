@@ -39,3 +39,14 @@ Full detail: `notes/001-task-notes.md`.
 ## 2026-11-25 — Owner decisions (spec interview and pipeline)
 
 See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8.
+
+## D-r1-gate — Phase 1 no longer waits for r1 task 042 (2026-11-25)
+- **Owner's words (relayed by mcp-r1, verbatim):** "I can't judge. You have to coordinate and determine with mcp-r2 the correct approach and path". The release is a joint mcp-r1/mcp-r2 determination under that delegation, not an explicit owner release.
+- **Why:** the gate protected r2 from r1 still changing the shared MCP files. All r1 code is on master: #3146, #3152, #3161 and #3127, verified merged with `gh pr view`. 042's remaining work is the owner's live testing, a dev deploy, a 50-call measurement and notes, none of which touches code.
+- **Terms agreed with mcp-r1:**
+  1. Ownership of `Api/Mcp/**`, `McpModule`, `McpToolCatalog`, `RouteAuthorizationGuardTests.Mcp.cs`, the conformance host and the spaarke-decisions transport and build files moves to r2. If 042 finds a defect in one of them, it is filed and discussed before anyone edits.
+  2. r1 keeps the ISS-010 (#3184) files and the Decision wizard heading files (listed in the project CLAUDE.md). r2 messages mcp-r1 before editing them; r1 won't change `RecordCreationService.CreateAsync`'s signature without telling r2.
+  3. Task 021 doesn't wait for the heading change. Whichever lands second adapts, and each side tells the other before opening and before merging.
+  4. Deploys stay separate, each with the owner's per-SHA go via uac-r2.
+  5. 042 closes on its own timeline.
+- **Rejected:** waiting for 042 to close. It protects nothing and could take days.

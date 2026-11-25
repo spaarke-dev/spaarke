@@ -3,7 +3,7 @@
   <metadata>
     <title>Task write tools: spaarke_create_task, spaarke_complete_task (idempotent)</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Model-callable writes to sprk_event through task 006's capability; idempotency; tags include tenant-isolation</rigor-reason>
@@ -41,7 +41,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback). Validation and authorization are IEventsCapability's; the tools add none (spec MUST NOT copy authorization); refusals map to McpToolResults with the REST reasonCode.</constraint>
     <constraint source="project">create: readOnlyHint false, destructiveHint false, idempotentHint true, required idempotencyKey; a retry with the same key and caller returns the first event id and writes nothing. complete: readOnlyHint false, destructiveHint false, idempotentHint true; completing a completed task returns success without a second write. No host consent prompt is relied on (NFR-06). Ledger rows in RouteAuthorizationGuardTests.Mcp.Tasks.cs.</constraint>
     <constraint source="ADR-002">No plugin; writes go only through IEventsCapability (one server-side owner per invariant).</constraint>

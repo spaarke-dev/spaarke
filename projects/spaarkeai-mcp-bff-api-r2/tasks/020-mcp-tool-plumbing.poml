@@ -3,7 +3,7 @@
   <metadata>
     <title>Shared tool plumbing: general McpToolResults, start/status helper, per-area MCP ledger files</title>
     <phase>1 Read tools</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared MCP host code and the ArchTest ledger (tests/**); every later tool depends on it</rigor-reason>
@@ -43,7 +43,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase). Re-read every r1 file before editing; if r1 has already generalised McpToolResults or split the ledger, adopt r1's shape and record it.</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first. Re-read every r1 file before editing; if r1 has already generalised McpToolResults or split the ledger, adopt r1's shape and record it.</constraint>
     <constraint source="ADR-019">Decision-tool error results stay byte-identical (content text and structuredContent { reasonCode, message, status, correlationId?, partial? }); existing ShowDecisionsToolTests, PlanAndLookupToolTests and McpHostContractTests pass unchanged. Errors stay isError tool results, never transport errors.</constraint>
     <constraint source="project">McpLongRunning's start result is structuredContent { runId, status, consoleLink } plus a one-line text summary; the status result is { runId, status (queued|running|completed|failed), progress?, result? }; the consoleLink is built from an existing deep-link helper (HandoffUrlBuilder, relocated by 001 to Services/Ai/Handoff/, or Services/Todo/IDeepLinkBuilder), not a hand-built URL; no polling loop or background work in the helper (ADR-052).</constraint>
     <constraint source="project">The ledger split is mechanical: the guard's assertion set is unchanged, the concatenated array equals r1's rows, and a test proves a tool class missing from every partial still fails the guard (must-fire) while all r1 tools pass (must-not-fire). uac-r2 reviews the diff.</constraint>
@@ -78,7 +78,7 @@
   </knowledge>
 
   <steps mode="prescriptive">
-    <step order="1">Confirm the r1 gate (gh pr view 3161 --json state; r1 TASK-INDEX 042 done); merge origin/master into this branch; build.</step>
+    <step order="1">Merge origin/master into this branch (r1 gate released 2026-11-25); build.</step>
     <step order="2">Generalise McpToolResults; run the r1 MCP contract and auth suites unchanged.</step>
     <step order="3">Add McpLongRunning and McpLongRunningTests (start shape, status shapes, link built by the helper).</step>
     <step order="4">Split the ledger into per-area partial files; add the must-fire/must-not-fire guard proof; run Spaarke.ArchTests.</step>

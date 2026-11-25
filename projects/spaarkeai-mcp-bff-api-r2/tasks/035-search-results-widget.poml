@@ -3,7 +3,7 @@
   <metadata>
     <title>Search results widget (ui://spaarke/search-results.html)</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New widget resource, embed and CI changes, React widget over a shared component</rigor-reason>
@@ -45,7 +45,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="project">Widget: SearchResultsWidget used as-is through props (no edit to Spaarke.AI.Widgets); transport from src/client/widgets/shared/mcp/; _meta.ui.csp empty; no fetch, MSAL or Xrm; open-in-Spaarke links go through the host's openLink; Fluent v9 semantic tokens; host light/dark; keyboard operable. Bundle &lt; 1 MB target, 3 MB hard ceiling.</constraint>
     <constraint source="project">022's tools change only by adding _meta.ui.resourceUri; their model-visible text and structuredContent stay as 022 left them (022's contract tests pass unchanged). Mcp:Enabled=false removes the resource (ADR-032).</constraint>
     <constraint source="ADR-012">If SearchResultsWidget needs a prop change to work outside the Console, STOP and escalate instead of editing the shared component.</constraint>

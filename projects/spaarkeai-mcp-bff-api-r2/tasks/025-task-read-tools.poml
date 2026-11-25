@@ -3,7 +3,7 @@
   <metadata>
     <title>Task read tools: spaarke_list_tasks, spaarke_get_task</title>
     <phase>1 Read tools</phase>
-    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF surface over events read with the BFF identity plus a BFF-applied filter (FR-15 caller scope)</rigor-reason>
@@ -41,7 +41,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
     <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback). The tools call IEventsCapability only, never IEventDataverseService directly, and add no filter of their own (spec MUST NOT copy authorization).</constraint>
     <constraint source="project">[McpArea("legal-operations")], readOnlyHint true, destructiveHint false, idempotentHint true, a title, description ≤ 1,024 characters ("to-dos and tasks (Spaarke events)"; not calendar meetings). Ledger rows in RouteAuthorizationGuardTests.Mcp.Tasks.cs.</constraint>
     <constraint source="ADR-015">Slim rows: id, subject, due date, status, priority, regarding record name, open link; no description body in model-visible text. 200 tasks &lt; 64 KiB. Logs: tool name, latency, row count, outcome, correlation id.</constraint>
