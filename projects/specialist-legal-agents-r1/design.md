@@ -182,7 +182,7 @@ A Service Bus job (ADR-004) turns signals into suggestions; nothing changes sile
 
 ### 3.6 Autonomous runs
 
-> **Scope change (owner, 2026-11-25):** the event-started run below is delivered by the proposed shared request pipeline `spaarke-intake-pipeline-r1` (draft: `notes/spaarke-intake-pipeline-r1-design-draft.md`), not by this program. This program supplies the specialist (persona, profile, practice content) that its NDA harness calls.
+> **Scope change (owner, 2026-11-25):** the event-started run below is delivered by the shared request pipeline `spaarke-intake-pipeline-r1` (#3128; design on `work/spaarke-intake-pipeline-r1`), not by this program. This program supplies the specialist (persona, profile, practice content) that its NDA harness calls.
 
 
 An event (for example an incoming email classified as an NDA) starts the same specialist headlessly through the backend:
@@ -492,7 +492,7 @@ This folder is the umbrella. It holds this design, the decision log, the coordin
 | 0 | **This umbrella** (OD-3 amended 2026-11-24; no child) | Spikes and inventory follow-ups in §8 only | **G1 go/no-go** decides the runtime shape (D-A7) |
 | 1 | `specialist-legal-agents-nda-r1` | Role Profile schema, layer compiler with ratchet, Agent Instance, NDA archetype end to end (Chat + Cowork), run ledger binding | NDA golden set passes for two owner profiles; ratchet tests pass |
 | 2 | `specialist-legal-agents-tuning-r1` | Profile diff review, golden-set gate, versioning and rollback, then correction harvesting and the Coach | Diff-gate eval; no silent change path |
-| 3 | `specialist-legal-agents-governance-r1` | Agent 365 plugin governance, background identity (after T-2), per-archetype budgets (ADR-016), dashboards. **Autonomous NDA intake moved out (owner, 2026-11-25)** to the proposed `spaarke-intake-pipeline-r1` (draft: `notes/spaarke-intake-pipeline-r1-design-draft.md`); this program supplies the NDA specialist and profiles to its NDA harness | Owner and counsel sign-off on autonomy |
+| 3 | `specialist-legal-agents-governance-r1` | Agent 365 plugin governance, background identity (after T-2), per-archetype budgets (ADR-016), dashboards. **Autonomous NDA intake moved out (owner, 2026-11-25)** to `spaarke-intake-pipeline-r1` (#3128; design on `work/spaarke-intake-pipeline-r1`); this program supplies the NDA specialist and profiles to its NDA harness | Owner and counsel sign-off on autonomy |
 | 4 | `specialist-legal-agents-archetypes-r1` | Second archetype (biotech patent associate + supervision protocol), CRE partner, L2 firm-policy editor, template distribution | — |
 
 Slugs are proposals, to be confirmed when each child is created. Phase 0's design is §7–§8 of this document.
