@@ -209,7 +209,13 @@ public class InvoiceSubmissionService
     }
 
     /// <summary>The configured file limit in bytes (<see cref="EbillingOptions.MaxSubmissionFileSizeMb"/>).</summary>
-    public long MaxFileBytes => (long)_ebilling.CurrentValue.MaxSubmissionFileSizeMb * 1024 * 1024;
+    public long MaxFileBytes => MaxFileBytesOf(_ebilling.CurrentValue);
+
+    /// <summary>
+    /// The per-file limit in bytes of <paramref name="options"/>: the one calculation the upload routes (<see cref="MaxFileBytes"/>), the
+    /// processing job's document copy and the from-email part reader (DEF-052) share.
+    /// </summary>
+    internal static long MaxFileBytesOf(EbillingOptions options) => (long)options.MaxSubmissionFileSizeMb * 1024 * 1024;
 
     /// <summary>
     /// ebilling-r1 task 191: whether the invoice reader is set up in this environment. The reader's own test

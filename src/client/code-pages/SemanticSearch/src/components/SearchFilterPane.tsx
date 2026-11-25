@@ -42,8 +42,11 @@ import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular } from '@fluent
 import type { SearchDomain, SearchFilters, FilterOption, SavedSearch, HybridMode } from '../types';
 import { SearchIndexSelector } from './SearchIndexSelector';
 import { InfoPopover } from './InfoPopover';
-import { FilterDropdown } from './FilterDropdown';
-import { DateRangeFilter } from './DateRangeFilter';
+import {
+  FilterDropdown,
+  DateRangeFilter,
+  type DateRangeFilterValue,
+} from '@spaarke/ui-components/components/SearchFilters';
 import { SavedSearchSelector } from './SavedSearchSelector';
 import type { AiSearchIndexRow } from '../services/aiSearchIndexService';
 
@@ -285,8 +288,9 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   );
 
   const handleDateRangeChange = useCallback(
-    (dateRange: { from: string | null; to: string | null }) => {
-      onFiltersChange({ ...filters, dateRange });
+    (dateRange: DateRangeFilterValue | null) => {
+      // The shared filter emits null when cleared; this page keeps an always-present range.
+      onFiltersChange({ ...filters, dateRange: dateRange ?? { from: null, to: null } });
     },
     [filters, onFiltersChange]
   );

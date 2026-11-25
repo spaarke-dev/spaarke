@@ -445,3 +445,56 @@ This under-lists, which fails closed.
 **Why it matters.** Model-driven grid users may see numbers instead of labels, in the cell and the export.
 
 **Fix.** Verify on a dev model-driven grid; if confirmed, read the annotation forms in `formattedLabelOf` with tests for both row shapes. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3050 (board Type=Bug).
+
+## D-37 — Shared DataGrid: Export to Excel ignores the on-screen sort (#3129)
+
+**What.** Found in the task 038 E2E (2026-11-25). The export writes rows in the order they were loaded, not the order the user sorted them on screen. On dev, Invoices sorted by Total Amount (Local) exported 10 rows in served order. The grid passes its loaded `records` to the command bar (`DataGrid.tsx` ~:1999). The export (`commandBar/CommandBar.tsx` `records`, ~:163 and ~:447, then `csvExport.ts` `exportCsv`) never sees the sort, which lives in DataGrid's `userSort` and Fluent's `sortState`.
+
+**Why it matters.** A user sorts by amount, exports, and gets a file in another order, so the export no longer matches what they saw.
+
+**Fix.** Pass the records sorted with the same `compare` the column uses (the active sort column and direction) to the command bar, or let the export take a sorted list. Add a test: the menu sort followed by export gives the sorted order. Needs the dataset-grid owners' OK (the shared export API). Effort: about half a day. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3129 (board Type=Bug).
+
+## D-38 — External SPA: three low-priority browser checks not run in task 038 (#3149)
+
+**What.** Three task 038 ui-test checks were not run on dev (2026-11-25). Each needs an owner-side change: (1) FR-19 with browser storage blocked (a Chrome site-data block for the portal; `services/gridSettingsStore.ts`, `widgets/useGridSettings.ts`); (2) FR-22, a thread message with a remote image does not load it (needs an internal email with a remote image filed to a portal thread; `components/detail/RecordMessages.tsx`); (3) the high-contrast theme (Windows contrast mode). The behaviour is covered by unit tests; only the live browser check is missing. The owner rated them low priority and closed 038 with them filed ("we can close these three issues (and these are really low priority)").
+
+**Why it matters.** A real-browser regression would not show in the unit tests: a grid that fails to load for a user who blocks site data, or a remote image loading in a portal thread.
+
+**Fix.** Run the three at the next SPA E2E or the R4 closing task, with the owner's OK for the storage block, the test email and contrast mode; file a Bug for any failure. Effort: about an hour. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3149 (board Type=Idea).
+
+## D-39 — External SPA: one entitlement code gates five record tabs against one Workforce-role table (#3153)
+
+**What.** Since task 040, `assigned-work` opens the five record tabs for CIAM partners and granted workforce contacts.
+
+The Workforce-role ceiling (`WorkforceRoleCeilingGate.cs` `ModuleTables` ~:273-278) maps the code to `sprk_workassignment` only. For a workforce contact this has two effects:
+- A role that reads work assignments but not, for example, invoices still shows the Invoices tab. Its list fetch is refused by the ceiling, and the grid shows its empty state ("No records to display"). The shared DataGrid never renders a row-fetch error, because `useLazyLoad`'s `error` is not read (`DataGrid.tsx` ~:2138).
+- A role without work-assignment Read hides all five tabs, even for a project-only grant.
+
+Security holds: every fetch is ceiling-checked per table and Tier-2-scoped. The case arises only for a misconfigured role; the prerequisite role reads all five tables. uac-r2 reviewed it (2026-11-25) and chose to accept it as a known limit for R4, with per-tab codes as the later fix.
+
+**Why it matters.** A workforce contact on a misconfigured role sees a tab that is silently empty, or loses tabs it could use.
+
+**Fix.**
+- Give each tab its own code, mapped to its own table, under the same grant rule.
+- Optionally, show a row-fetch 403 in the shared grid as "no access" (needs the dataset-grid owners' OK).
+- `WorkforceRoleCeilingGate` is uac-r2's file (task 186).
+
+Effort: about a day plus a UAC review. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3153 (board Type=Idea).
+
+## D-40 — External SPA: a licensed user linked to a WorkforceHome contact gets none of the contact's record grants (K3) (#3154)
+
+**What.** This is known limit K3 from R3 task 090, revisited in task 040 and kept. A licensed user whose systemuser is linked to a WorkforceHome contact's home identity resolves as the systemuser. The contact's grants (and since task 040 its record tabs) don't apply to that person on the external SPA.
+
+The fix would change principal precedence, which is escalation trigger 3 for task 040 (auth plane). uac-r2 agreed (2026-11-25) and asked for a cross-reference to the stored-link rule in ADR-028 A9.
+
+**Why it matters.** Such a person sees fewer records than the contact's grants give. The grants go unused. This fails closed.
+
+**Fix.** The auth plane needs to decide whether a linked licensed user gets the union of both sets of grants or stays on the licensed model. That needs an auth review and an ADR-028 check. Effort: unknown. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3154 (board Type=Idea).
+
+## D-41 — External SPA: decide whether a workforce contact may submit invoices (#3159)
+
+**What.** Since task 040, a workforce contact with record grants sees the Invoices tab. `/me` lists firms for any contact with organization memberships, on either plane, and ebilling never decided whether a workforce contact may submit. The submit routes also apply the Workforce-role ceiling, which `firms` does not reflect, so the command could be offered and then refused. Owner decision 2026-11-25: hide Submit invoice on the workforce plane for now (the Invoices grid command and the record view's action; `callerMaySubmitInvoices` in `src/client/external-spa/src/components/record/recordAccess.ts`).
+
+**Why it matters.** If workforce contacts should submit, they can't from the SPA until this is decided. If they shouldn't, the server should say so (for example `/me` sends no firms on the workforce plane) and the client rule becomes a backstop.
+
+**Fix.** ebilling-r1 decides, with uac-r2 for the ceiling: either (a) workforce contacts don't submit, and `ExternalUserContextEndpoint` sends no firms on the workforce plane; or (b) they do, and the offer also checks the ceiling's Create on the submission table and AppendTo on documents, after which the SPA's plane rule is removed. Effort: under a day either way, plus reviews. Status: Open (urgency: next-round). Issue: https://github.com/spaarke-dev/spaarke/issues/3159 (board Type=Idea).

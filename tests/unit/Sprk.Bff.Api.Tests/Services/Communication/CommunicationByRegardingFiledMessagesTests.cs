@@ -230,8 +230,9 @@ public class CommunicationByRegardingFiledMessagesTests
     [Fact]
     public async Task AnchoredThreadsFillTheBudget_TheSkippedFiledRead_IsLogged()
     {
-        // Review F2: 200 anchored threads (MaxThreads) leave no budget, so the filed-message read is skipped. The result has no
-        // truncation flag, so the cut must reach the log (the same Warning event as every other bound here).
+        // Review F2: 200 anchored threads (MaxThreads) leave no budget, so no filed thread can be added. A visible filed message
+        // on a readable thread elsewhere is left out: the flag is set and the cut reaches the log (the same Warning event as
+        // every other bound here).
         for (var i = 0; i < 200; i++)
             _world.Thread($"Anchored {i}", Open, anchor: ("sprk_regardingmatter", MatterId));
         var elsewhere = _world.Thread("Budget inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
@@ -241,6 +242,7 @@ public class CommunicationByRegardingFiledMessagesTests
         var result = await Sut(logger: logger.Object).ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
 
         result.Threads.Should().NotContain(t => t.ThreadId == elsewhere, "the budget is spent on the anchored threads");
+        result.Truncated.Should().BeTrue("task 221: a filed message the caller can see was left out for the budget");
         logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
@@ -264,6 +266,332 @@ public class CommunicationByRegardingFiledMessagesTests
         result.Threads.Should().ContainSingle().Which.Messages.Select(m => m.MessageId).Should().Equal(message);
         _world.MessageQueries.Should().Contain(q => q.Contains($"_{field}_value eq {MatterId}"));
     }
+
+    // ── task 221 (#2671, DI-148): the truncation flag, newest first, and a scan spent only on candidates ──────────
+
+    [Fact]
+    public async Task FiledMessagesBeyondTheScan_SetTheFlag_AndTheNewestThreadIsKept()
+    {
+        // 501 visible filed messages (scan cap 500). The newest thread holds only the newest message.
+        var older = _world.Thread("Older", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        for (var i = 0; i < 500; i++)
+            _world.Message(older, regarding: [("sprk_regardingmatter", MatterId)]);
+        var newest = _world.Thread("Newest", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        var newestMessage = _world.Message(newest, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Truncated.Should().BeTrue("a visible filed message is beyond the scan");
+        result.Threads.Should().Contain(t => t.ThreadId == newest, "the scan reads the newest filed messages first")
+            .Which.Messages.Select(m => m.MessageId).Should().Equal(newestMessage);
+        var olderShown = result.Threads.Single(t => t.ThreadId == older).Messages;
+        olderShown.Should().HaveCount(499);
+        olderShown.Select(m => m.CreatedOn).Should().BeInAscendingOrder("messages within a thread stay oldest first");
+    }
+
+    [Fact]
+    public async Task FiledMessagesExactlyAtTheScan_DoNotSetTheFlag()
+    {
+        // Must-not-fire boundary: 500 filed messages, nothing beyond.
+        var thread = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        for (var i = 0; i < 500; i++)
+            _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Truncated.Should().BeFalse();
+        result.MessageCount.Should().Be(500);
+    }
+
+    [Fact]
+    public async Task RecordWithinEveryBound_DoesNotSetTheFlag()
+    {
+        var anchored = _world.Thread("Matter thread", Open, anchor: ("sprk_regardingmatter", MatterId));
+        _world.Message(anchored, regarding: [("sprk_regardingmatter", MatterId)]);
+        var elsewhere = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        _world.Message(elsewhere, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Threads.Should().HaveCount(2);
+        result.Truncated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MoreFiledThreadsThanTheBudget_KeepsTheNewest_AndSetsTheFlag()
+    {
+        // 195 anchored threads leave a budget of 5 (MaxThreads 200); 8 filed threads elsewhere, oldest first.
+        for (var i = 0; i < 195; i++)
+            _world.Thread($"Anchored {i}", Open, anchor: ("sprk_regardingmatter", MatterId));
+        var filedThreads = new List<Guid>();
+        for (var i = 0; i < 8; i++)
+        {
+            var thread = _world.Thread($"Filed {i}", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+            _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)]);
+            filedThreads.Add(thread);
+        }
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Threads.Should().HaveCount(200);
+        result.Threads.Skip(195).Select(t => t.ThreadId).Should().BeEquivalentTo(filedThreads.Skip(3),
+            "the five newest filed threads are kept");
+        result.Threads.Skip(195).Select(t => t.ThreadId).Should().Equal(filedThreads.Skip(3),
+            "the kept threads still show oldest first after the anchored ones");
+        result.Truncated.Should().BeTrue("three filed threads the caller can read were left out");
+    }
+
+    [Fact]
+    public async Task ManyAnchoredMessagesAlsoFiledToTheRecord_DoNotUseUpTheFiledScan()
+    {
+        // 1,200 messages on the anchored thread also carry the record's own lookup; the one message the union exists to add
+        // sits in the middle of them by time. Without the exclusion, neither scan order reaches it within 500 rows.
+        var anchored = _world.Thread("Matter thread", Open, anchor: ("sprk_regardingmatter", MatterId));
+        for (var i = 0; i < 600; i++)
+            _world.Message(anchored, regarding: [("sprk_regardingmatter", MatterId)]);
+        var elsewhere = _world.Thread("Budget inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        var inquiry = _world.Message(elsewhere, regarding: [("sprk_regardingmatter", MatterId)]);
+        for (var i = 0; i < 600; i++)
+            _world.Message(anchored, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Threads.Should().Contain(t => t.ThreadId == elsewhere, "the filed scan is not spent on anchored threads")
+            .Which.Messages.Select(m => m.MessageId).Should().Equal(inquiry);
+        _world.MessageQueries.Should().Contain(q =>
+            q.Contains($"_sprk_regardingmatter_value eq {MatterId}")
+            && q.Contains($"_sprk_communicationthread_value ne {anchored}")
+            && q.Contains("_sprk_communicationthread_value ne null"));
+    }
+
+    [Fact]
+    public async Task AnchoredMessagesBeyondTheScan_SetTheFlag()
+    {
+        var anchored = _world.Thread("Matter thread", Open, anchor: ("sprk_regardingmatter", MatterId));
+        for (var i = 0; i < 501; i++)
+            _world.Message(anchored, regarding: [("sprk_regardingservicerequest", ServiceRequestId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Truncated.Should().BeTrue();
+        result.MessageCount.Should().Be(500);
+    }
+
+    [Fact]
+    public async Task MoreAnchoredThreadsThanTheBound_SetTheFlag()
+    {
+        for (var i = 0; i < 201; i++)
+            _world.Thread($"Anchored {i}", Open, anchor: ("sprk_regardingmatter", MatterId));
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Threads.Should().HaveCount(200);
+        result.Truncated.Should().BeTrue();
+    }
+
+    // ── task 221 must-not-fire: the flag never depends on what the caller cannot see, and carries no count ───────
+
+    [Fact]
+    public async Task HiddenMessagesFillingTheScan_NeverShow_AndDoNotSetTheFlag()
+    {
+        // A flagged-external caller: 500 internal-only filed messages (newest) and one readable message beyond them.
+        var thread = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        var readable = _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)]);
+        var hidden = new List<Guid>();
+        for (var i = 0; i < 500; i++)
+            hidden.Add(_world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)], internalOnly: true));
+
+        var result = await Sut(external: true).ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        var shown = result.Threads.SelectMany(t => t.Messages).Select(m => m.MessageId).ToList();
+        shown.Should().NotIntersectWith(hidden, "an internal-only message never reaches an external caller");
+        result.Truncated.Should().BeFalse(
+            "hidden rows filled the scan: raising the flag would tell the caller they exist (known limit: the cut readable message is not signalled)");
+        shown.Should().NotContain(readable, "it is beyond the scan");
+    }
+
+    [Fact]
+    public async Task HiddenMessagesFillingTheScan_InternalCaller_SetTheFlag()
+    {
+        // Control for the test above: the same rows, an internal caller who can read every one of them.
+        var thread = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)]);
+        for (var i = 0; i < 500; i++)
+            _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)], internalOnly: true);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Truncated.Should().BeTrue();
+        result.MessageCount.Should().Be(500);
+    }
+
+    [Fact]
+    public async Task TheOnlyMessageBeyondTheScan_IsHidden_DoesNotSetTheFlag()
+    {
+        // External caller: 500 readable filed messages, and the one row beyond the scan is internal-only.
+        var thread = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)], internalOnly: true);
+        for (var i = 0; i < 500; i++)
+            _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var external = await Sut(external: true).ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+        external.MessageCount.Should().Be(500);
+        external.Truncated.Should().BeFalse("the only row beyond the scan is one the caller cannot read");
+
+        var internalCaller = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+        internalCaller.Truncated.Should().BeTrue("control: an internal caller can read the row beyond the scan");
+    }
+
+    [Fact]
+    public async Task HiddenAnchoredMessagesFillingTheScan_DoNotSetTheFlag()
+    {
+        // External caller on an Open anchored thread: 500 internal-only messages (oldest), then one readable message.
+        var thread = _world.Thread("Matter thread", Open, anchor: ("sprk_regardingmatter", MatterId));
+        for (var i = 0; i < 500; i++)
+            _world.Message(thread, regarding: [("sprk_regardingservicerequest", ServiceRequestId)], internalOnly: true);
+        _world.Message(thread, regarding: [("sprk_regardingservicerequest", ServiceRequestId)]);
+
+        var result = await Sut(external: true).ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.MessageCount.Should().Be(0);
+        result.Truncated.Should().BeFalse("the scan was filled by rows the caller cannot read");
+    }
+
+    [Fact]
+    public async Task FiledMessagesOnAThreadTheCallerCannotRead_DoNotSetTheFlag()
+    {
+        // 501 readable filed messages, all on a thread whose row the caller cannot read: nothing shows, and no flag.
+        var hiddenThread = _world.Thread("Board only", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId), readable: false);
+        for (var i = 0; i < 501; i++)
+            _world.Message(hiddenThread, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.Threads.Should().BeEmpty();
+        result.Truncated.Should().BeFalse("the cut messages sit on a thread the caller cannot read");
+        Serialized(result).Should().NotContain("Board only");
+    }
+
+    [Fact]
+    public async Task TheResponse_CarriesOnlyABooleanFlag_NoCount()
+    {
+        var thread = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        for (var i = 0; i < 501; i++)
+            _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        doc.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
+            "entityType", "recordId", "threads", "threadCount", "messageCount", "truncated");
+        doc.RootElement.GetProperty("truncated").ValueKind.Should().Be(JsonValueKind.True);
+        doc.RootElement.GetProperty("messageCount").GetInt32().Should().Be(500, "the count covers only what is shown");
+    }
+
+    // ── task 221 fix round 1: the probe counts only on a thread the caller can read, and a spent budget is exact ──
+
+    [Fact]
+    public async Task TheRowBeyondTheScan_OnAThreadTheCallerCannotRead_DoesNotSetTheFlag()
+    {
+        // Internal caller: the one row beyond the scan is a visible message, but its thread row is one the caller cannot read.
+        var unreadableThread = _world.Thread("Board only", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId), readable: false);
+        _world.Message(unreadableThread, regarding: [("sprk_regardingmatter", MatterId)]);
+        var readableThread = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        for (var i = 0; i < 500; i++)
+            _world.Message(readableThread, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.MessageCount.Should().Be(500);
+        result.Threads.Should().NotContain(t => t.ThreadId == unreadableThread);
+        result.Truncated.Should().BeFalse("the only content beyond the scan sits on a thread the caller cannot read");
+        Serialized(result).Should().NotContain("Board only");
+    }
+
+    [Theory]
+    [InlineData(true, Private, false)]
+    [InlineData(true, Open, true)]
+    [InlineData(false, Private, true)]
+    public async Task TheRowBeyondTheScan_SetsTheFlag_OnlyWhenTheOpenThreadGatePassesIt(bool external, int privacy, bool expected)
+    {
+        // The row beyond the scan is a normal message on another thread; for an external caller the D7 gate hides it unless that
+        // thread is Open. An internal caller is not gated.
+        var beyond = _world.Thread("Older thread", privacy, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        _world.Message(beyond, regarding: [("sprk_regardingmatter", MatterId)]);
+        var thread = _world.Thread("Inquiry", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId));
+        for (var i = 0; i < 500; i++)
+            _world.Message(thread, regarding: [("sprk_regardingmatter", MatterId)]);
+
+        var result = await Sut(external: external).ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.MessageCount.Should().Be(500);
+        result.Threads.Should().NotContain(t => t.ThreadId == beyond, "it is beyond the scan");
+        result.Truncated.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task AnchoredThreadsFillTheBudget_NothingFiledElsewhere_DoesNotSetTheFlag()
+    {
+        for (var i = 0; i < 200; i++)
+            _world.Thread($"Anchored {i}", Open, anchor: ("sprk_regardingmatter", MatterId));
+        var logger = new Mock<ILogger<CommunicationThreadReadService>>();
+
+        var result = await Sut(logger: logger.Object).ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.ThreadCount.Should().Be(200);
+        result.Truncated.Should().BeFalse("no filed message was left out for the budget");
+        VerifyBoundedWarning(logger, Times.Never());
+    }
+
+    [Theory]
+    [InlineData("message the caller cannot read")]
+    [InlineData("thread the caller cannot read")]
+    [InlineData("internal-only message, external caller")]
+    public async Task AnchoredThreadsFillTheBudget_OnlyHiddenContentFiledElsewhere_DoesNotSetTheFlag(string hiddenBy)
+    {
+        for (var i = 0; i < 200; i++)
+            _world.Thread($"Anchored {i}", Open, anchor: ("sprk_regardingmatter", MatterId));
+        var elsewhere = _world.Thread(
+            "Board only", Open, anchor: ("sprk_regardingservicerequest", ServiceRequestId),
+            readable: hiddenBy != "thread the caller cannot read");
+        _world.Message(
+            elsewhere, regarding: [("sprk_regardingmatter", MatterId)],
+            internalOnly: hiddenBy == "internal-only message, external caller",
+            readable: hiddenBy != "message the caller cannot read");
+        var logger = new Mock<ILogger<CommunicationThreadReadService>>();
+
+        var result = await Sut(external: hiddenBy == "internal-only message, external caller", logger: logger.Object)
+            .ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        result.ThreadCount.Should().Be(200);
+        result.Truncated.Should().BeFalse("the only content left out for the budget is content the caller cannot see");
+        Serialized(result).Should().NotContain("Board only");
+        VerifyBoundedWarning(logger, Times.Never());
+    }
+
+    [Fact]
+    public async Task AnchoredThreadsFillTheBudget_TheBudgetSpentCheck_IsOneRowOfTheSameCandidateRead()
+    {
+        for (var i = 0; i < 200; i++)
+            _world.Thread($"Anchored {i}", Open, anchor: ("sprk_regardingmatter", MatterId));
+
+        await Sut().ReadByRegardingAsync("sprk_matter", MatterId, Caller(), CancellationToken.None);
+
+        var filedRead = _world.MessageQueries.Single(q => q.Contains("_sprk_regardingmatter_value eq", StringComparison.Ordinal));
+        filedRead.Should().Contain("_sprk_communicationthread_value ne null")
+            .And.Contain("$orderby=createdon desc").And.Contain("$top=1");
+        Regex.Matches(filedRead, @"_sprk_communicationthread_value ne [0-9a-fA-F-]{36}").Count
+            .Should().Be(200, "every anchored thread is left out of the candidates, as in the full filed read");
+    }
+
+    private static void VerifyBoundedWarning(Mock<ILogger<CommunicationThreadReadService>> logger, Times times) =>
+        logger.Verify(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("the filed-message read was bounded")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            times);
 
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -374,7 +702,10 @@ public class CommunicationByRegardingFiledMessagesTests
             hit = hit.Where(r => !_unreadable.Contains(Guid.Parse(r[Key(entitySetName)].GetString()!)));
             if (filter.Contains("statecode eq 0", StringComparison.Ordinal))
                 hit = hit.Where(r => r["statecode"].GetInt32() == 0);
-            hit = hit.OrderBy(r => r["createdon"].GetString(), StringComparer.Ordinal);
+            // Task 221: honour the read's order (newest first when it asks for createdon desc).
+            hit = Regex.IsMatch(odata, @"\$orderby=createdon desc")
+                ? hit.OrderByDescending(r => r["createdon"].GetString(), StringComparer.Ordinal)
+                : hit.OrderBy(r => r["createdon"].GetString(), StringComparer.Ordinal);
             var top = Regex.Match(odata, @"\$top=(\d+)");
             if (top.Success)
                 hit = hit.Take(int.Parse(top.Groups[1].Value));
@@ -400,9 +731,19 @@ public class CommunicationByRegardingFiledMessagesTests
         private IEnumerable<Dictionary<string, JsonElement>> Messages(string filter)
         {
             var threadIds = Ids(filter, "_sprk_communicationthread_value");
-            return threadIds.Count > 0
+            var rows = threadIds.Count > 0
                 ? _messages.Where(r => r.TryGetValue("_sprk_communicationthread_value", out var t) && threadIds.Contains(t.GetString()!))
                 : _messages.Where(r => MatchesLookup(r, filter));
+
+            // Task 221: `_sprk_communicationthread_value ne null` and `ne {id}` exclusions, as Dataverse applies them.
+            if (filter.Contains("_sprk_communicationthread_value ne null", StringComparison.Ordinal))
+                rows = rows.Where(r => r.ContainsKey("_sprk_communicationthread_value"));
+            var excluded = Regex.Matches(filter, @"_sprk_communicationthread_value ne ([0-9a-fA-F-]{36})")
+                .Select(m => m.Groups[1].Value)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (excluded.Count > 0)
+                rows = rows.Where(r => !r.TryGetValue("_sprk_communicationthread_value", out var t) || !excluded.Contains(t.GetString()!));
+            return rows;
         }
 
         /// <summary>The one <c>_{lookup}_value eq {id}</c> condition a by-record query carries.</summary>

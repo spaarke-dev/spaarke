@@ -37,6 +37,7 @@
  */
 import type { InvoiceCoreRecordKind } from '@spaarke/ui-components/components/InvoiceSubmission';
 import type { InvoiceFirmRecordsResponse } from '../../api/web-api-client';
+import type { BackendPlane } from '../../auth/backend-selection';
 import type { ExternalUserContextResponse } from '../../auth/bff-client';
 import { canCreate as levelCanCreate, mapAccessLevelString } from '../../hooks/useAccessLevel';
 import { AccessLevel } from '../../types';
@@ -330,6 +331,23 @@ export function callerFirmIdsOf(callerContext: ExternalUserContextResponse | nul
   return Array.isArray(firms) ? firms.map(f => f.firmId) : [];
 }
 
+/**
+ * Whether "Submit invoice" may be offered at all (the Invoices grid command and the record view's action): `/me` `firms` is a
+ * non-empty array AND the caller did not sign in on the workforce plane (SPA-r4 task 040, owner 2026-11-25). A workforce
+ * contact with record grants sees the Invoices tab, and `/me` can list firms for it, but the submit routes also apply the
+ * Workforce-role ceiling, which `firms` does not reflect; whether a workforce contact may submit at all is ebilling's
+ * question. Until it is answered the command is hidden on that plane, so the UI never offers a submit the server may
+ * refuse. `plane` is the active backend's (`activePlaneOrNull`); `null` (no backend active, so no `/me` was read in the
+ * app) leaves the firms rule alone. A display rule only: the server re-checks every submission.
+ */
+export function callerMaySubmitInvoices(
+  callerContext: ExternalUserContextResponse | null,
+  plane: BackendPlane | null
+): boolean {
+  if (plane === 'workforce') return false;
+  return callerFirmIdsOf(callerContext).length > 0;
+}
+
 const FIRM_RECORD_LIST_OF_KIND: Readonly<Record<InvoiceCoreRecordKind, 'matters' | 'projects' | 'workAssignments'>> = {
   matter: 'matters',
   project: 'projects',
@@ -337,19 +355,20 @@ const FIRM_RECORD_LIST_OF_KIND: Readonly<Record<InvoiceCoreRecordKind, 'matters'
 };
 
 /**
- * Whether the record view offers "Submit invoice" on this record. `/me` `firms` must be a non-empty array AND the
- * firm-records answer of at least one of those firms must list this record's id under its kind. A failed, unanswered or
+ * Whether the record view offers "Submit invoice" on this record. `callerMaySubmitInvoices` must hold (firms, and not the
+ * workforce plane) AND the firm-records answer of at least one of those firms must list this record's id under its kind. A failed, unanswered or
  * non-listing answer is a no (hidden), for every firm. The server re-checks Read, Create and the firm link on submit; this
  * is the display rule only.
  */
 export function submitInvoiceRightOf(input: {
   callerContext: ExternalUserContextResponse | null;
+  plane: BackendPlane | null;
   kind: InvoiceCoreRecordKind | undefined;
   recordId: string;
   reads: Readonly<Record<string, FirmRecordsRead>>;
 }): boolean {
-  const { callerContext, kind, recordId, reads } = input;
-  if (!kind) return false;
+  const { callerContext, plane, kind, recordId, reads } = input;
+  if (!kind || !callerMaySubmitInvoices(callerContext, plane)) return false;
   const wanted = recordId.toLowerCase();
   return callerFirmIdsOf(callerContext).some(firmId => {
     const read = reads[firmId];

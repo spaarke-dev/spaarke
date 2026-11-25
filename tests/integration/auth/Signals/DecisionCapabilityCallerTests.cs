@@ -56,6 +56,25 @@ public sealed class DecisionCapabilityCallerTests
 
     [Theory]
     [MemberData(nameof(NoCaller))]
+    public async Task GetWorkItemAsync_WithNoSignedInCaller_ReturnsUserContextRequired_AndMakesNoDataverseCall(string caller)
+    {
+        var users = new Mock<IDataverseUserClient>(MockBehavior.Strict);
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var signalRead = new SignalReadService(
+            users.Object, entities.Object, new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            Unused<SignalSuppressionService>(), Unused<DecisionRecordWriter>(), new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
+            new Mock<ICallerSystemUserResolver>(MockBehavior.Strict).Object, new Mock<ISystemUserIdentityResolver>(MockBehavior.Strict).Object,
+            TimeProvider.System, NullLogger<SignalReadService>.Instance);
+
+        var result = await Capability(signalRead: signalRead, caller: users.Object).GetWorkItemAsync(Request(caller)?.User, SignalId, CancellationToken.None);
+
+        AssertUserContextRequired(DecisionResultMapper.ToToolError(result), DecisionResultMapper.ToHttp(result, SignedIn()));
+        users.VerifyNoOtherCalls();
+        entities.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [MemberData(nameof(NoCaller))]
     public async Task GetPlanAsync_WithNoSignedInCaller_ReturnsUserContextRequired_MakesNoDataverseCall_AndWritesNoStamp(string caller)
     {
         var (access, plans, users, entities) = DecideSignalOnAMatter();

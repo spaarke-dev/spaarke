@@ -71,8 +71,11 @@ internal sealed class FiveToolCapability : IDecisionCapability
 
     public string? EvidenceRefsJson { get; }
 
-    /// <summary>Lane reads plus page reads: each is one worklist read as the caller (the cost the widget's opening pays).</summary>
+    /// <summary>Whole-lane reads plus page reads: each reads the caller's whole worklist (the cost the widget's opening pays).</summary>
     public int WorklistReads => _lane.LaneReads + _lane.PageReads;
+
+    /// <summary>Single Work Item reads: the caller's lanes read narrowed to one Signal.</summary>
+    public int RowReads => _lane.RowReads;
 
     /// <summary><paramref name="count"/> evidence lines as <c>SignalWriter</c> writes them (kind, ref, tier, confidence), plus the read-time detail (text, source).</summary>
     public static string EvidenceLines(int count) => JsonSerializer.Serialize(
@@ -86,9 +89,15 @@ internal sealed class FiveToolCapability : IDecisionCapability
             source = "sprk_invoiceline",
         }));
 
-    public async Task<SignalReadResult> ListDecideAsync(ClaimsPrincipal? user, CancellationToken ct, WorklistSet set = WorklistSet.Lanes)
+    public async Task<SignalReadResult> ListDecideAsync(ClaimsPrincipal? user, CancellationToken ct, WorklistSet set = WorklistSet.Lanes) =>
+        WithTargetEvidence(await _lane.ListDecideAsync(user, ct, set));
+
+    /// <summary>The plan tool's row read: the lane double's one-row read, the target row carrying the seeded evidence.</summary>
+    public async Task<SignalReadResult> GetWorkItemAsync(ClaimsPrincipal? user, Guid signalId, CancellationToken ct) =>
+        WithTargetEvidence(await _lane.GetWorkItemAsync(user, signalId, ct));
+
+    private SignalReadResult WithTargetEvidence(SignalReadResult read)
     {
-        var read = await _lane.ListDecideAsync(user, ct, set);
         if (EvidenceRefsJson is null || read.Response is null)
         {
             return read;

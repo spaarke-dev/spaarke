@@ -17,7 +17,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <see cref="CallerPrincipal"/> on <c>HttpContext.Items</c>. Principal-agnostic at the route level; the
 /// resolver applies the A8 default-by-principal-kind rule (server-resolved kind: workforce →
 /// <c>legal-front-door</c> + <c>policy-library</c>; CIAM → <c>assigned-work</c>, plus <c>legal-front-door</c>
-/// when <c>ExternalAccess:PartnerServiceRequestsEnabled</c> is on); <c>sprk_approlemodulemap</c> rows are extras.
+/// when <c>ExternalAccess:PartnerServiceRequestsEnabled</c> is on); <c>sprk_approlemodulemap</c> rows are extras. A
+/// workforce contact that can read at least one record also gets <c>assigned-work</c>, the record tabs (R4 task 040,
+/// FR-24); the ceiling below still drops it when the Workforce role cannot read the work-assignment table.
 ///
 /// ADR-001: Minimal API. ADR-008: group filter (no global middleware). ADR-009: the resolver caches the
 /// App-Role→module DATA, never an authorization decision. NFR-06: entitlement is UX-honest data, never

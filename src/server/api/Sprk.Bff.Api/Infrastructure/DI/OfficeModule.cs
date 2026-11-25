@@ -89,6 +89,14 @@ public static class OfficeModule
         // asymmetry for the unconditional save route.
         services.AddScoped<ReconciledEmailFiling>();
 
+        // spaarkeai-word-add-in-r1 task 138 (#2209): what a re-save of an email already saved to the same record adds — the
+        // attachments of its stored .eml (the worker's converter, noise filter and selection rule) not yet saved as its
+        // children. Read-only. Concrete (ADR-010), SCOPED because SpeFileStore, IEmailToEmlConverter and
+        // AttachmentFilterService are; every dependency is registered unconditionally (DocumentsModule, EmailServicesModule,
+        // the composite IDataverseService) — no §10 F.1 asymmetry for the unconditional save route. §11 answers:
+        // projects/spaarkeai-word-add-in-r1/notes/138-email-resave-add-attachments.md §5.
+        services.AddScoped<EmailAttachmentAddPlanner>();
+
         // ============================================================================
         // Office Add-in Orchestrator Service
         // ============================================================================

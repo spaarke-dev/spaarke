@@ -158,6 +158,20 @@ function New-PublishParameterXmlFromPlan {
         -SiteMaps $Plan.SiteMaps -Dashboards $Plan.Dashboards -AppModules $Plan.AppModules -ApplicationRibbon:([bool]$Plan.ApplicationRibbon)
 }
 
+function Test-PublishPlanEmpty {
+<# Pure: $true when the plan has nothing a PublishXml request could carry (the case New-PublishParameterXmlFromPlan refuses). Used by -PlanOnly (DEF-063). #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Plan)
+    $count = 0
+    foreach ($k in 'Entities', 'WebResources', 'OptionSets', 'SiteMaps', 'Dashboards', 'AppModules') {
+        $count += @(@($Plan.$k) | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") }).Count
+    }
+    if ($Plan.ApplicationRibbon) { $count++ }
+    # App settings are published through the request too (they ride on the last chunk), so a plan holding only app settings is NOT empty.
+    $count += @(@($Plan.AppSettings) | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") }).Count
+    return ($count -eq 0)
+}
+
 function ConvertTo-ExtraList {
 <#
 .SYNOPSIS  Splits comma-separated values, trims, drops empties and VALIDATES them (task 130 round 6, F4/K5). Web resources must be
@@ -683,6 +697,10 @@ function Publish-SolutionComponents {
         [switch]$SkipCollateralCheck,
         [switch]$AllowWorkflows,
         [switch]$AllowPendingCollateral,
+        # DEF-063: a solution with nothing publishable (for example only a security role) imports successfully. With this switch an empty
+        # plan skips the publish request and the returned plan carries NothingToPublish = $true; without it the throw below stays.
+        # The ParameterXml builders throw on an empty set regardless, so an empty publish can never widen into a publish-all.
+        [switch]$AllowNothingToPublish,
         [int]$ChunkSize = 25
     )
     # Validate first: nothing unvalidated may reach a REST call or the resume command.
@@ -696,8 +714,12 @@ function Publish-SolutionComponents {
     $allWebs = @(@($plan.WebResources) + $ExtraWebResources | Where-Object { $_ } | Select-Object -Unique)
     $chunks = @(Split-PublishPlan -Entities $allEntities -WebResources $allWebs -OptionSets $plan.OptionSets -SiteMaps $plan.SiteMaps `
         -Dashboards $plan.Dashboards -AppModules $plan.AppModules -AppSettings $plan.AppSettings -ApplicationRibbon:([bool]$plan.ApplicationRibbon) -ChunkSize $ChunkSize)
-    if ($chunks.Count -eq 0) { throw 'Nothing to publish: refusing to build an empty ParameterXml (an empty publish must never widen into a publish-all).' }
-    Write-Host "Scoped publish of ${SolutionUniqueName}: $($allEntities.Count) entities, $($allWebs.Count) web resources, $(@($plan.OptionSets).Count) option sets, $(@($plan.SiteMaps).Count) site maps, $(@($plan.Dashboards).Count) dashboards, $(@($plan.AppModules).Count) app modules, $(@($plan.AppSettings).Count) app settings, application ribbon: $([bool]$plan.ApplicationRibbon), in $($chunks.Count) request(s)."
+    # "Nothing to publish" means no chunk item AND no app setting. App settings ride on the last chunk, so a plan holding only app
+    # settings has 0 chunks but IS something to publish: it keeps the old loud throw even with -AllowNothingToPublish.
+    $nothingToPublish = ($chunks.Count -eq 0 -and @($plan.AppSettings | Where-Object { $_ }).Count -eq 0)
+    if ($chunks.Count -eq 0 -and -not ($nothingToPublish -and $AllowNothingToPublish)) { throw 'Nothing to publish: refusing to build an empty ParameterXml (an empty publish must never widen into a publish-all).' }
+    if ($nothingToPublish) { Write-Host "Nothing to publish for ${SolutionUniqueName}: none of its components needs a publish request, so no publish request is sent." }
+    else { Write-Host "Scoped publish of ${SolutionUniqueName}: $($allEntities.Count) entities, $($allWebs.Count) web resources, $(@($plan.OptionSets).Count) option sets, $(@($plan.SiteMaps).Count) site maps, $(@($plan.Dashboards).Count) dashboards, $(@($plan.AppModules).Count) app modules, $(@($plan.AppSettings).Count) app settings, application ribbon: $([bool]$plan.ApplicationRibbon), in $($chunks.Count) request(s)." }
     $envUrl = $Context.Api -replace '/api/data/v[0-9.]+$', ''
     # Components published in THIS run that are not in the solution (a caller's -Extra* lists) are lost by a plain -PublishOnly resume,
     # so the resume command carries them. FORMAT: one single-quoted, comma-separated string ('g1,g2'). Bash and PowerShell both deliver it
@@ -713,7 +735,7 @@ function Publish-SolutionComponents {
     # The pending-collateral rule applies to the resume too: it carries the opt-in flag ONLY if this run had it. $resumeBase is the command without the flag.
     $resumeBase = $resume
     if ($AllowPendingCollateral) { $resume += ' -AllowPendingCollateral' }
-    if (-not $SkipCollateralCheck) {
+    if (-not $SkipCollateralCheck -and -not $nothingToPublish) {
         $rows = @(Get-SolutionComponentRows -Context $Context -SolutionUniqueName $SolutionUniqueName)
         $own = @($rows | Where-Object { $_ } | ForEach-Object { $_.objectid })
         $inApps = @($rows | Where-Object { $_ -and [int]$_.componenttype -eq 80 } | ForEach-Object { "$($_.objectid)" })
@@ -741,6 +763,7 @@ function Publish-SolutionComponents {
         $inactive = @(Test-WorkflowsActivated -Context $Context -WorkflowIds $plan.Workflows)
         if ($inactive.Count -gt 0) { throw "Workflow(s) not activated after the import (statecode must be 1): $($inactive -join ', '). Import with --activate-plugins and re-check; resume the publish with: $resume" }
     }
+    $plan | Add-Member -NotePropertyName NothingToPublish -NotePropertyValue $nothingToPublish -Force
     return $plan
 }
 
@@ -786,5 +809,5 @@ function Invoke-ScopedSolutionImport {
     & $PacExe solution import --environment $EnvironmentUrl --path $ZipPath @ImportArgs
     if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
     return Publish-SolutionComponents -Context $Context -SolutionUniqueName $SolutionUniqueName `
-        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -SkipCollateralCheck -AllowWorkflows:$AllowWorkflows -AllowPendingCollateral:$AllowPendingCollateral
+        -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -SkipCollateralCheck -AllowWorkflows:$AllowWorkflows -AllowPendingCollateral:$AllowPendingCollateral -AllowNothingToPublish
 }

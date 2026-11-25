@@ -198,6 +198,13 @@ public static class SubmissionReasonCodes
     public const string FileMalicious = "ebilling.submission.file_malicious";
 
     /// <summary>
+    /// ebilling-r1 DEF-052: the Submit Invoice source document's file is over the per-file limit (<see cref="InvoiceSubmissionService.MaxFileBytes"/>).
+    /// The upload route answers 413 with the same string (<see cref="InvoiceSubmissionErrors.TooLarge"/>), so the UI's existing message for it
+    /// shows. The job stops before it stages the copy; permanent (a retry reads the same file); no invoice.
+    /// </summary>
+    public const string FileTooLarge = InvoiceSubmissionErrors.TooLarge;
+
+    /// <summary>
     /// ebilling-r1 task 092 (review F1): the uploaded invoice PDF's malware scan gave no verdict in time. Each delivery of the job waits up to
     /// <c>InvoiceSubmissionProcessingJobHandler.ScanWaitBudget</c> (3 min 50 s) for it; while deliveries remain it is transient, and on the final
     /// delivery the submission is Failed with this code (about 19 minutes in all). No invoice; the PDF was never read.

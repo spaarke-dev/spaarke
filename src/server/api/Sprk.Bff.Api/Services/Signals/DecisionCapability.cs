@@ -98,6 +98,17 @@ public sealed partial class DecisionCapability : IDecisionCapability
     }
 
     /// <inheritdoc />
+    public async Task<SignalReadResult> GetWorkItemAsync(ClaimsPrincipal? user, Guid signalId, CancellationToken ct)
+    {
+        if (!HasSignedInCaller(user))
+        {
+            return UserContextRequiredReadResult;
+        }
+
+        return await _signalRead.ReadAsync(WorklistSet.Lanes, user, ct, extras: null, onlySignalId: signalId);
+    }
+
+    /// <inheritdoc />
     public async Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct)
     {
         if (!HasSignedInCaller(user))
@@ -127,7 +138,7 @@ public sealed partial class DecisionCapability : IDecisionCapability
         // of at most 200 distinct ids, so one request for a page that names up to 200; none when no item names a communication). The page arrives flagged; only an item judged not privileged is cleared.
         var flagged = await _privilege.FlaggedAsync(_caller, items.ToDictionary(i => i.SignalId, i => extras[i.SignalId].Privilege), ct);
         items = [.. items.Select(i => i with { PrivilegeFlagged = flagged.Contains(i.SignalId) })];
-        return DecidePageResult.Ok(items, cores, next);
+        return DecidePageResult.Ok(items, cores, next, response);
     }
 
     /// <inheritdoc />
@@ -139,6 +150,34 @@ public sealed partial class DecisionCapability : IDecisionCapability
         }
 
         var decision = await _signalAccess.AuthorizeAsync(signalId, ct);
+        return await PlanForAsync(http, signalId, decision, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<(DecisionPlanReadResult Plan, SuppressionReadResult? Suppression)> GetPlanAndSuppressionAsync(
+        HttpContext? http, Guid signalId, CancellationToken ct)
+    {
+        if (http is null || !HasSignedInCaller(http.User))
+        {
+            return (DecisionPlanReadResult.UserContextRequired, null);
+        }
+
+        // NFR-01 (2026-11-25): ONE access decision for both reads. GetPlanAsync and GetSuppressionAsync each ask SignalCoreRecordAccess the
+        // same question for the same Signal and caller; asked twice within one request it costs a second set of caller reads (~0.5 s) and
+        // can only give the same answer. The plan goes first and decides everything as GetPlanAsync does: a refusal reads no suppression.
+        var decision = await _signalAccess.AuthorizeAsync(signalId, ct);
+        var plan = await PlanForAsync(http, signalId, decision, ct);
+        if (plan.Outcome != DecisionPlanReadOutcome.Ok)
+        {
+            return (plan, null);
+        }
+
+        return (plan, await SuppressionForAsync(signalId, decision, ct));
+    }
+
+    /// <summary>The plan read after the access check: <see cref="GetPlanAsync"/>'s body from the decision on, unchanged.</summary>
+    private async Task<DecisionPlanReadResult> PlanForAsync(HttpContext http, Guid signalId, SignalAccessDecision decision, CancellationToken ct)
+    {
         if (decision.Outcome != SignalAccessOutcome.Allowed || decision.Lane is not { } lane || decision.PolicyVersionId is not { } versionId)
         {
             return DecisionPlanReadResult.NotAllowed(decision.Outcome);
@@ -212,6 +251,12 @@ public sealed partial class DecisionCapability : IDecisionCapability
         }
 
         var decision = await _signalAccess.AuthorizeAsync(signalId, ct);
+        return await SuppressionForAsync(signalId, decision, ct);
+    }
+
+    /// <summary>The suppression read after the access check: <see cref="GetSuppressionAsync"/>'s body from the decision on, unchanged.</summary>
+    private async Task<SuppressionReadResult> SuppressionForAsync(Guid signalId, SignalAccessDecision decision, CancellationToken ct)
+    {
         if (decision.Outcome != SignalAccessOutcome.Allowed)
         {
             return SuppressionReadResult.NotAllowed(decision.Outcome);
