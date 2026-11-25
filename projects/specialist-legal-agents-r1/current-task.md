@@ -33,7 +33,7 @@
 
 ## Open owner decisions
 - **Gate A0 CLEAR (2026-11-24):** D-A11 split by layer, D-A16 one roadmap, Q7 shared catalogue (accelerator refreshes first); Q2 resolved from the ontology model: the positions master is a **Playbook** (D-209), not "Policy versions". Still to do: tell accelerator r1 about D-A11/Q7/D-A16.
-- **Phase 0 runs HERE** (OD-3 amended 2026-11-24, no child project). **Open owner question first:** is more NDA capability needed at all, given Microsoft review-contract + Word Run Review, the accelerator nda-review skill and the BFF NDA-REVIEW Action? This may reshape G1 and Phase 1 (OD-2). Do NOT start the Phase 0 spec until that is answered.
+- **Phase 0 runs HERE** (OD-3 amended 2026-11-24, no child project). **NDA current state reviewed 2026-11-24:** `notes/nda-current-state-2026-11-24.md`. There are three NDA review routes already: platform agreement-review, Word plus our playbook, and Cowork nda-review. There is no NDA drafting. Submit-and-return flow: the pieces exist, but nothing connects them. Two NDA standards (KNW-011 v0.1 vs accelerator v1.2) need to become one. Owner questions in §7 of that note (one standard; the submit-and-return flow as Phase 1; drafting). Do NOT start the Phase 0 spec until they are answered.
 - **Still open, not A0 blockers:** D-A12 framing; D-A13 Microsoft-first; D-A1 front door (G8-P2 now done); D-A7 (at G1); D-A5 pricing; BR-5 (dynamic discovery as default); the R1 change (with coordination).
 
 ## Standing directives
