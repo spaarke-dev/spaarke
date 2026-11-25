@@ -65,8 +65,28 @@ Contract baselines: `tests/integration/contract/Api/Signals/Baselines/plan.200.*
 ## Self-review (Step 9.5)
 
 - Code review, own diff. One F2 found and fixed before commit: folding the old column-keyed `ColumnLabels` into the (entity, column) display-name table would have turned e.g. "due date" back into `sprk_duedate` for a body written outside the BFF on a table where the column is not allow-listed. The original `ColumnLabels` entries are kept and take precedence; display names fill the rest.
-- K4: when Redis is unreachable at runtime, `MetadataService` falls back to a Dataverse read on every call, so a description of a body that tests a choice value would read metadata per request in that degraded state. Deployed BFFs fail fast at startup without Redis (ADR-009); this is `MetadataService`'s existing behaviour for all its callers.
+- K4: when Redis is unreachable at runtime, `MetadataService` falls back to a Dataverse read on every call, so a description of a body that tests a choice value would read metadata per request in that degraded state. Startup fail-fast (ADR-009) only proves Redis was reachable when the BFF started, not that it stays reachable; a later Redis outage puts every `MetadataService` caller on per-call Dataverse reads, and this is its existing behaviour for all of them, not something task 210 adds.
 - K4: lower-casing a display name can read oddly for an acronym; no authorable column has one today ("to do due date" is the oddest).
 - ADR check: ADR-009 (no new cache; `MetadataService`'s system key is already allow-listed), ADR-010 (no new registration; one constructor parameter), ADR-021 (no new styling), ADR-038 (tests in KEEP paths `tests/unit/domain`, `tests/integration/auth`), ADR-028 (metadata read app-only through the existing service; reference data, not matter data). Clean.
 
-rework: none task 210
+## Fix round 1 (PR #3092 review)
+
+- **F4-1 (fixed).** A not-null test said "it has a opened date". `RuleBodyDescriber.Article(label)` now picks "an" before a
+  vowel-initial label (`it has {Article(label)} {label}`); no authorable label starts with a silent letter or a "you" sound, so the
+  first letter decides. Test `ANotNullTest_TakesTheArticleItsLabelNeeds` (vowel: `sprk_openeddate` → "it has an opened date",
+  `sprk_approveddate` → "an approved date"; consonant: `sprk_duedate` → "a due date", `createdon` → "a created on"): 2 failed / 2
+  passed with the old wording, 4 passed after.
+- **F4-2 (comment and notes only).** The `RuleBodyDescriber` remark no longer says "never one per request" without a qualifier: one
+  Dataverse read per table org-wide per cache lifetime *while the shared cache is reachable*; if Redis is unavailable,
+  `MetadataService` reads Dataverse on each call, its existing behaviour for every caller. The K4 Redis-outage reason above is
+  corrected: startup fail-fast covers startup, not a later Redis outage.
+- **Known limits recorded, no change:**
+  - K3: one Redis GET per table per description when a rule tests a choice value.
+  - K4: the wizard lists "Status Reason" while the sentence says "status" (the reviewed `ColumnLabels` phrase wins).
+  - K4: option labels are the app identity's localized label; `RetrieveAsIfPublished` can show an unpublished edit; labels can be up
+    to 6 h stale (the metadata cache TTL).
+  - K4: columns outside the allow-list keep their logical names.
+- **Verification:** BFF build 0 warnings / 0 errors; filtered BFF tests
+  (`RuleBodyDescriber|OntologyAdminAuthoring|Signals`) 5672 passed, 0 failed, 6 skipped.
+
+rework: fix-round-1 task 210

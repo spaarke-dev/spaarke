@@ -88,6 +88,25 @@ public class RuleBodyDescriberLabelTests
         string.Join(" ", result.Description.Clauses.Select(c => c.Formal)).Should().Contain(column, "the formal line keeps the logical name");
     }
 
+    [Theory]
+    [InlineData("sprk_matter", "sprk_openeddate", "it has an opened date")] // vowel-initial label
+    [InlineData("sprk_event", "sprk_approveddate", "it has an approved date")]
+    [InlineData("sprk_event", "sprk_duedate", "it has a due date")] // consonant-initial label
+    [InlineData("sprk_matter", "createdon", "it has a created on")]
+    public async Task ANotNullTest_TakesTheArticleItsLabelNeeds(string entity, string column, string expected)
+    {
+        var describer = Describer(scopes: null);
+        var body = """{"type":"Existence","subject":"@E","when":{"@C":{"notNull":true}},"all":[]}"""
+            .Replace("@E", entity, StringComparison.Ordinal).Replace("@C", column, StringComparison.Ordinal);
+
+        var result = await describer.DescribeAsync(body, CancellationToken.None);
+
+        result.IsRefused.Should().BeFalse(result.Refusal);
+        var line = result.Description!.Clauses.Should().ContainSingle().Subject;
+        line.Text.Should().Contain(expected);
+        line.Formal.Should().Contain($"{column} is not null", "the formal line keeps the logical name");
+    }
+
     [Fact]
     public async Task ACreatedOnTest_ReadsCreatedOn_AndTheFormalLineKeepsCreatedon()
     {

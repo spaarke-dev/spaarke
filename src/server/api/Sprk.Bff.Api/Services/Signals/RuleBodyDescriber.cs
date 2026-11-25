@@ -44,7 +44,8 @@ public sealed record RuleDescriptionResult(RuleDescription? Description, string?
 /// 100000003), not invented. <c>statecode</c>'s two states are the same on every table and are said as "active" / "inactive"
 /// (DI-159). Any other choice value tested for equality (<c>statuscode</c>, a choice column such as <c>sprk_reviewoutcome</c>) is said by
 /// its option label (task 210, DI-165), read from the BFF's shared entity-metadata cache (<see cref="MetadataService"/>: one Dataverse
-/// read per table org-wide per cache lifetime, never one per request). That read is made only when the body tests such a value, and a
+/// read per table org-wide per cache lifetime while the shared cache is reachable; if Redis is unavailable, MetadataService reads
+/// Dataverse on each call, its existing behaviour for every caller). That read is made only when the body tests such a value, and a
 /// failure shows the number instead: the description is never refused for it. The formal form always carries the exact value.</para>
 /// <para><b>Column names.</b> A column is said by its Dataverse display name in lower case ("created on"), from the static
 /// <see cref="ColumnDisplayNames"/> (the authorable columns are a closed, reviewed list, so the names need no metadata read).</para>
@@ -471,7 +472,7 @@ public sealed class RuleBodyDescriber
                     // Task 061 (D-54): a null test names no value. "it has no response recorded" / "it has a response recorded";
                     // the formal form is the test itself.
                     var isNull = ops[0].Name == PredicateCompiler.NullTestMember;
-                    words.Add(isNull ? $"it has no {label}" : $"it has a {label}");
+                    words.Add(isNull ? $"it has no {label}" : $"it has {Article(label)} {label}");
                     formal.Add($"{field.Name} is {(isNull ? "null" : "not null")}");
                     continue;
                 }
@@ -620,6 +621,11 @@ public sealed class RuleBodyDescriber
 
     private static string Label(IReadOnlyDictionary<string, string> labels, string logicalName) =>
         labels.TryGetValue(logicalName, out var label) ? label : logicalName;
+
+    /// <summary>The indefinite article for a lower-case column label: "an opened date", "a due date" (task 210 fix round 1). No
+    /// authorable label starts with a silent letter or a "you" sound, so the first letter decides.</summary>
+    internal static string Article(string label) =>
+        label.Length > 0 && "aeiouAEIOU".Contains(label[0]) ? "an" : "a";
 
     /// <summary>How a sentence names a column (task 210, DI-169): its <see cref="ColumnLabels"/> wording, else its display name in lower
     /// case ("created on"), else its logical name (a column outside <see cref="ColumnDisplayNames"/>; never guessed).</summary>
