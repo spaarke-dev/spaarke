@@ -11,9 +11,9 @@
  * which `WizardShell` shows in its error bar with the wizard still open; nothing is re-read because nothing changed. The lists are re-read
  * (`onChanged`) after a write succeeded, and also when a plan of two calls got only as far as its first (the record's override changed).
  *
- * While a save runs the frame blocks the header ‹ › and the close (the shared shell only disables its own footer buttons), so a result or a
- * partial-save message can never land under another row, and the user is never left unaware of a half-done switch. After a partial save the
- * wizard holds the row it was opened on, which is out of date: Finish stays off until the panel hands back the re-read row.
+ * While a save runs the shared `WizardShell` holds the header ‹ › and the close (ISS-016), so a result or a partial-save message can never land
+ * under another row, and the user is never left unaware of a half-done switch. After a partial save the wizard holds the row it was opened on,
+ * which is out of date: Finish stays off until the panel hands back the re-read row.
  *
  * Task 084c adds an optional fifth step, "New values", between "On this record" and Impact: the rule wizard asks for it (`valuesStep.active`)
  * while "Change for this record" is chosen, and the shell inserts and removes it as a dynamic step.
@@ -252,8 +252,6 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   const [stale, setStale] = React.useState(false);
   const staleRef = React.useRef(false);
   staleRef.current = stale;
-  // True from the first call of a save to its answer: nothing may move the wizard to another row or close it meanwhile.
-  const saving = React.useRef(false);
 
   // The wizard moved to another row: forget the previous row's answers, and abandon the reads still in flight for it.
   const [seenKey, setSeenKey] = React.useState(resetKey);
@@ -278,13 +276,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     // The note the server would refuse is never sent (Confirm holds Finish off for it; this is the backstop).
     const noteText = noteProblemRef.current;
     if (noteText) throw new Error(noteText);
-    saving.current = true;
-    let run: PlanRun;
-    try {
-      run = await executePlan(p.api, p.core, p.recordId, p.plan, noteToSend(noteRef.current));
-    } finally {
-      saving.current = false;
-    }
+    const run: PlanRun = await executePlan(p.api, p.core, p.recordId, p.plan, noteToSend(noteRef.current));
     if (!run.ok) {
       const failure = run.failure as WriteFailure;
       p.onRefused?.(failure);
@@ -415,11 +407,8 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     },
   ];
 
-  // The shell disables only its own footer buttons while a save runs; the header ‹ › and × are guarded here.
-  const guardedNav = nav ? { ...nav, onBeforeNavigate: () => !saving.current } : undefined;
-  const guardedClose = React.useCallback(() => {
-    if (!saving.current) live.current.onClose();
-  }, []);
+  // The shell holds the header ‹ › and × while a save runs (ISS-016); the close always reads the latest handler.
+  const close = React.useCallback(() => live.current.onClose(), []);
 
   // Read-only: Back · Next through the two steps, and Close on the last; no Cancel, no Finish. The shell takes its steps at open and at a
   // reset, so a change of mode is a reset (its own key).
@@ -453,9 +442,9 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       open
       title={title}
       steps={steps}
-      nav={guardedNav}
+      nav={nav}
       resetKey={readOnly ? `${resetKey}:read-only` : resetKey}
-      onClose={guardedClose}
+      onClose={close}
       onFinish={onFinish}
       finishLabel={props.finishLabel}
       finishingLabel="Saving…"
