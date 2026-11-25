@@ -43,11 +43,12 @@ public interface IDecisionCapability
     Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct);
 
     /// <summary>
-    /// One Work Item's full row as the caller's <see cref="WorklistSet.Lanes"/> read has it (<c>spaarke_get_decision_plan</c>): the lanes
-    /// response narrowed to <paramref name="signalId"/>, which holds that one row when the caller's lanes show the Signal and no row
-    /// otherwise (hidden and unknown are the same answer). Failures are the lane read's outcomes. <see cref="DecisionCapability"/> reads
-    /// only that Signal (<see cref="SignalReadService.ReadAsync"/> with <c>onlySignalId</c>, ontology task 222 B, NFR-01); this default,
-    /// which test doubles inherit, reads the whole lane through <see cref="ListDecideAsync"/>, which holds the same row.
+    /// One Work Item's full row as the caller's <see cref="WorklistSet.Lanes"/> read has it (<c>spaarke_get_decision_plan</c>): a lanes
+    /// response that contains that row when the caller's lanes show the Signal and does not contain it otherwise (hidden and unknown are
+    /// the same answer); callers find the row by its id. Failures are the lane read's outcomes. <see cref="DecisionCapability"/> reads
+    /// only that Signal (<see cref="SignalReadService.ReadAsync"/> with <c>onlySignalId</c>, ontology task 222 B, NFR-01), so its response
+    /// holds that one row or none; this default, which test doubles inherit, returns the whole lane from <see cref="ListDecideAsync"/>,
+    /// which contains the same row among the others.
     /// </summary>
     /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="ListDecideAsync"/>, the whole caller lane read.
     /// Extension: this narrows the same read, as the caller, through the read's own <c>onlySignalId</c> parameter; no rule, route or
