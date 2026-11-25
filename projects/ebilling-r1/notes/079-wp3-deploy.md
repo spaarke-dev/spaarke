@@ -28,7 +28,7 @@ Read-only steps, ~01:20-02:00Z. No live write yet.
 
 **Owner OK (typed in the ebilling-r1 session, 2026-11-25 ~02:00Z):** "Let's take the approach with the least impact", in answer to plan A (by script; no SpaarkeMaster import into dev). It covers live step (c) (forms), step 6 (Action and Binding), step 8 (the Rule Review page) and the D-114 sitemap entry. uac-r2 got the before notice (no objection; it confirmed `sprk_billingfirm` is read only by `RecordProcedureReadService` to choose procedures and `sprk_billingresponsible` by nothing in the BFF, so neither changes access) and the after notice with the read-backs below.
 
-**Deviation from D-114 (owner's least-impact choice):** the "Rule Review" sitemap entry goes in by script, not by import, and the command on the sprk_ruleset main form is not built in 079 (ribbon XML plus a script function; the sitemap entry reaches every rule set through the page's own list). Filed as a follow-up.
+**Deviation from D-114 (owner's least-impact choice):** the "Rule Review" sitemap entry goes in by script, not by import, and the command on the sprk_ruleset main form is not built in 079 (ribbon XML plus a script function; the sitemap entry reaches every rule set through the page's own list). Filed as DEF-069 (#3112).
 
 | Write | Command | Result (read back) |
 |---|---|---|

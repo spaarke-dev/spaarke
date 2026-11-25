@@ -1954,6 +1954,39 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 ---
 
+### DEF-069 — Rule set main form: no command that opens the Rule Review page for that rule set (D-114, second half)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-25 |
+| **Source** | Task 079 (owner chose the least-impact path, 2026-11-25; notes/079-wp3-deploy.md) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3112 |
+
+**Description**
+
+D-114 asked for two ways into the Rule Review page (`sprk_rulereviewpage`, task 077): a "Rule Review" entry in the Spaarke Administration sitemap and a command on the `sprk_ruleset` main form that opens the page for that rule set. Task 079 delivered the sitemap entry by script (2026-11-25) and did not build the form command, which needs ribbon XML on `sprk_ruleset` (its `RibbonDiff.xml` is empty today) plus a script function that calls `Xrm.Navigation.navigateTo` with the rule set id, and the page has to open that rule set directly when given an id (today `App.tsx` starts on the list; `openId` is set only by a click).
+
+Failure without it: an administrator working on a rule set record has no way into its review from the record; they must go to Spaarke Administration > Rule Review and find the same rule set in the list again. No wrong data, no access effect.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_RuleSet/RibbonDiff.xml` (empty)
+- `src/solutions/RuleReview/src/App.tsx:51` (`openId` state; no URL parameter read)
+- `.claude/skills/ribbon-edit/SKILL.md` (export/import of a temporary solution holding the entity's ribbon)
+- Precedent for a code page opened with a record id: `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`, `docs/standards/MODAL-DECISION-CRITERIA.md`
+
+**Suggested fix** (if known)
+
+Read a `ruleSetId` from the page's `data` parameter and open that rule set; add a form command (display rule: form, existing record) through the ribbon-edit procedure, imported with `scripts/Import-SolutionScoped.ps1` as a temporary solution holding only `sprk_ruleset`; sync the ribbon into SpaarkeMaster source.
+
+**Estimated effort**: 0.5-1 day
+**Blockers**: none
+**Related**: D-114, task 077, task 079
+
+---
+
 ### DEF-068 — Client resolver: `PolymorphicResolverService.ts` warns where it could refuse; consider refusing
 
 | Field | Value |
