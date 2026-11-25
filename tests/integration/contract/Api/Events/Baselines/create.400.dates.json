@@ -1,0 +1,14 @@
+{
+  "case": "create.400.dates",
+  "status": 400,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"ScheduledEnd\":[\"Scheduled end date must be on or after scheduled start date.\"]}}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+    "title": "One or more validation errors occurred.",
+    "status": 400,
+    "errors": {
+      "ScheduledEnd": ["Scheduled end date must be on or after scheduled start date."]
+    }
+  }
+}
