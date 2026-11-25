@@ -9,13 +9,12 @@ export type { FilterDropdownProps, FilterDropdownOption } from './FilterDropdown
 export { DateRangeFilter, calculatePresetRange, detectActivePreset, DATE_RANGE_PRESET_IDS } from './DateRangeFilter';
 export {
   SEARCH_FILE_TYPE_OPTIONS,
-  getDataverseOrgUrl,
   fetchOptionsetOptions,
   fetchLookupOptions,
   loadSearchFilterOptions,
   clearSearchFilterOptionsCache,
 } from './searchFilterOptions';
-export type { SearchFilterOptions } from './searchFilterOptions';
+export type { SearchFilterOptions, SearchFilterOptionList } from './searchFilterOptions';
 export { useSearchFilterOptions } from './useSearchFilterOptions';
 export type { UseSearchFilterOptionsResult } from './useSearchFilterOptions';
 export type { DateRangeFilterProps, DateRangeFilterValue, DateRangePresetId } from './DateRangeFilter';

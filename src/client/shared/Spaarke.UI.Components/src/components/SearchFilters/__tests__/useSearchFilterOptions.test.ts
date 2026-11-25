@@ -8,39 +8,37 @@ import type { SearchFilterOptions } from '../searchFilterOptions';
 
 const mockLoad = jest.fn<Promise<SearchFilterOptions>, []>();
 const mockClearCache = jest.fn<void, []>();
+const FILE_TYPES = [{ value: 'pdf', label: 'PDF' }];
 
 jest.mock('../searchFilterOptions', () => ({
   loadSearchFilterOptions: () => mockLoad(),
   clearSearchFilterOptionsCache: () => mockClearCache(),
+  SEARCH_FILE_TYPE_OPTIONS: [{ value: 'pdf', label: 'PDF' }],
 }));
 
 import { useSearchFilterOptions } from '../useSearchFilterOptions';
 
 const loaded: SearchFilterOptions = {
   documentTypes: [{ value: '1', label: 'Contract' }],
-  fileTypes: [{ value: 'pdf', label: 'PDF' }],
+  fileTypes: FILE_TYPES,
   matterTypes: [{ value: 'mt-1', label: 'Litigation' }],
+  failed: [],
 };
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockLoad.mockResolvedValue(loaded);
-  jest.spyOn(console, 'error').mockImplementation(() => undefined);
 });
 
-afterEach(() => {
-  jest.restoreAllMocks();
-});
-
-it('is loading with empty lists until the options arrive', () => {
+it('is loading with empty Dataverse lists until they arrive; file types are there from the start', () => {
   mockLoad.mockReturnValue(new Promise(() => undefined));
   const { result } = renderHook(() => useSearchFilterOptions());
 
   expect(result.current.isLoading).toBe(true);
   expect(result.current.error).toBeNull();
   expect(result.current.documentTypes).toEqual([]);
-  expect(result.current.fileTypes).toEqual([]);
   expect(result.current.matterTypes).toEqual([]);
+  expect(result.current.fileTypes).toEqual(FILE_TYPES);
 });
 
 it('exposes the loaded lists', async () => {
@@ -48,29 +46,29 @@ it('exposes the loaded lists', async () => {
 
   await waitFor(() => expect(result.current.isLoading).toBe(false));
   expect(result.current.documentTypes).toEqual(loaded.documentTypes);
-  expect(result.current.fileTypes).toEqual(loaded.fileTypes);
   expect(result.current.matterTypes).toEqual(loaded.matterTypes);
+  expect(result.current.error).toBeNull();
 });
 
-it('reports a failed load', async () => {
-  mockLoad.mockRejectedValue(new Error('down'));
+it('reports a list that failed to load, and keeps the one that loaded', async () => {
+  mockLoad.mockResolvedValue({ ...loaded, documentTypes: [], failed: ['documentTypes'] });
   const { result } = renderHook(() => useSearchFilterOptions());
 
   await waitFor(() => expect(result.current.isLoading).toBe(false));
   expect(result.current.error).toBe('Failed to load filter options');
+  expect(result.current.matterTypes).toEqual(loaded.matterTypes);
 });
 
 it('refresh() clears the cache, loads again and clears a previous error', async () => {
-  mockLoad.mockRejectedValueOnce(new Error('down'));
+  mockLoad.mockResolvedValueOnce({ ...loaded, failed: ['matterTypes'] });
   const { result } = renderHook(() => useSearchFilterOptions());
   await waitFor(() => expect(result.current.error).not.toBeNull());
 
   act(() => result.current.refresh());
 
   expect(mockClearCache).toHaveBeenCalledTimes(1);
-  await waitFor(() => expect(result.current.documentTypes).toEqual(loaded.documentTypes));
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
   expect(result.current.error).toBeNull();
-  expect(result.current.isLoading).toBe(false);
   expect(mockLoad).toHaveBeenCalledTimes(2);
 });
 

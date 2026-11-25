@@ -67,7 +67,44 @@ describe('DateRangeFilter', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Date range preset' }));
     fireEvent.click(screen.getByRole('option', { name: 'This year' }));
 
-    expect(onChange).toHaveBeenLastCalledWith({ from: '2026-01-01', to: '2026-03-10' });
+    expect(onChange).toHaveBeenLastCalledWith({ from: '2026-01-01', to: '2026-03-10' }, 'thisYear');
+  });
+
+  // #3131: on 8 January "This year" and "Last 7 days" are the same range. The picked id is what
+  // the host stores (and re-resolves later), so it must not be inferred from the dates.
+  it('emits the picked preset id and labels by the host preset when two presets coincide', () => {
+    jest.useFakeTimers({
+      now: new Date(2026, 0, 8, 9, 0, 0),
+      doNotFake: [
+        'setTimeout',
+        'clearTimeout',
+        'setInterval',
+        'clearInterval',
+        'setImmediate',
+        'clearImmediate',
+        'queueMicrotask',
+        'nextTick',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+        'requestIdleCallback',
+        'cancelIdleCallback',
+        'performance',
+        'hrtime',
+      ],
+    });
+    const jan = { from: '2026-01-01', to: '2026-01-08' };
+    const { onChange, unmount } = renderFilter(null);
+    fireEvent.click(screen.getByRole('combobox', { name: 'Date range preset' }));
+    fireEvent.click(screen.getByRole('option', { name: 'This year' }));
+    expect(onChange).toHaveBeenLastCalledWith(jan, 'thisYear');
+    unmount();
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <DateRangeFilter value={jan} preset="thisYear" onChange={jest.fn()} />
+      </FluentProvider>
+    );
+    expect(screen.getByRole('combobox', { name: 'Date range preset' })).toHaveTextContent('This year');
   });
 
   it('shows the From/To inputs with no range set, so a custom range can be typed', () => {
@@ -75,7 +112,7 @@ describe('DateRangeFilter', () => {
 
     fireEvent.change(screen.getByLabelText('From date'), { target: { value: '2026-02-01' } });
 
-    expect(onChange).toHaveBeenLastCalledWith({ from: '2026-02-01', to: null });
+    expect(onChange).toHaveBeenLastCalledWith({ from: '2026-02-01', to: null }, 'custom');
   });
 
   it('labels a range that matches no preset "Custom"', () => {
@@ -89,20 +126,20 @@ describe('DateRangeFilter', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Date range preset' }));
     fireEvent.click(screen.getByRole('option', { name: 'Off' }));
 
-    expect(onChange).toHaveBeenLastCalledWith(null);
+    expect(onChange).toHaveBeenLastCalledWith(null, 'off');
   });
 
   it('the Clear button clears the filter with null, and is absent with no range', () => {
     const { onChange } = renderFilter({ from: '2001-02-01', to: null });
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-    expect(onChange).toHaveBeenLastCalledWith(null);
+    expect(onChange).toHaveBeenLastCalledWith(null, 'off');
     expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
   });
 
   it('emptying both inputs emits null', () => {
     const { onChange } = renderFilter({ from: '2001-02-01', to: null });
     fireEvent.change(screen.getByLabelText('From date'), { target: { value: '' } });
-    expect(onChange).toHaveBeenLastCalledWith(null);
+    expect(onChange).toHaveBeenLastCalledWith(null, 'off');
   });
 
   it('refuses a reversed range with a message', () => {

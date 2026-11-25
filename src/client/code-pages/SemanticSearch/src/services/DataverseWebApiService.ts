@@ -5,9 +5,9 @@
  * (`SearchFilters/searchFilterOptions`) in #3131, shared with the Spaarke Console.
  */
 
-import { getDataverseOrgUrl } from '@spaarke/ui-components/components/SearchFilters';
+import { getClientUrl } from '@spaarke/ui-components/utils/xrmContext';
 
 /** The Dataverse org URL from Xrm, or this page's origin outside a Dataverse host. */
 export function getOrgUrl(): string {
-  return getDataverseOrgUrl();
+  return getClientUrl() ?? window.location.origin;
 }

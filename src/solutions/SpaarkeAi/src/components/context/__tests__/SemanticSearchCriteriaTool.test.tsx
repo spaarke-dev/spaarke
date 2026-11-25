@@ -13,6 +13,8 @@ import { parseUrlParams } from '../../../../../../client/code-pages/SemanticSear
 
 const mockNavigateTo = jest.fn();
 const mockDispatch = jest.fn();
+const mockRefresh = jest.fn();
+let mockOptionsError: string | null = null;
 
 jest.mock('@spaarke/ui-components', () => {
   const actual = jest.requireActual('@spaarke/ui-components');
@@ -27,8 +29,8 @@ jest.mock('@spaarke/ui-components', () => {
       fileTypes: [{ value: 'pdf', label: 'PDF' }],
       matterTypes: [{ value: 'mt-1', label: 'Litigation' }],
       isLoading: false,
-      error: null,
-      refresh: () => undefined,
+      error: mockOptionsError,
+      refresh: mockRefresh,
     }),
   };
 });
@@ -62,20 +64,30 @@ function criteria(patch: Partial<PersistedCriteria>): PersistedCriteria {
   };
 }
 
-/** The page's view of a `data` string (navigateTo wraps it in `?data=`). */
-function pageSees(data: string) {
-  return parseUrlParams(`?data=${encodeURIComponent(data)}`);
+/**
+ * The page's view of the `data` handed to navigateTo: Dataverse puts it in the URL as
+ * `?data=<encoded>`, and the page decodes the envelope once more before parsing it.
+ */
+function pageSees(navigateData: string) {
+  return parseUrlParams(`?data=${encodeURIComponent(navigateData)}`);
+}
+
+/** The page's view of a `buildSearchDataParams` string, as the tool launches it (encoded once). */
+function pageSeesParams(params: string) {
+  return pageSees(encodeURIComponent(params));
 }
 
 beforeEach(() => {
   mockNavigateTo.mockReset().mockReturnValue(Promise.resolve());
   mockDispatch.mockReset();
+  mockRefresh.mockReset();
+  mockOptionsError = null;
   window.localStorage.clear();
 });
 
 describe('buildSearchDataParams — the page reads every criterion', () => {
   it('documents: all three filter lists and the dates reach the page parser', () => {
-    const sees = pageSees(
+    const sees = pageSeesParams(
       buildSearchDataParams(
         criteria({
           documentTypes: ['100000001', '100000002'],
@@ -107,7 +119,7 @@ describe('buildSearchDataParams — the page reads every criterion', () => {
         dateRange: { from: '2026-11-01', to: null },
       })
     );
-    const sees = pageSees(data);
+    const sees = pageSeesParams(data);
 
     expect(sees.documentTypes).toBeUndefined();
     expect(sees.fileTypes).toBeUndefined();
@@ -234,5 +246,100 @@ describe('SemanticSearchCriteriaTool — Search', () => {
     expect(widgetData.matterTypes).toEqual(['Litigation']);
     expect(widgetData.dateFrom).toBe('2026-11-01');
     expect(widgetData.dateTo).toBeNull();
+  });
+
+  it('a query with "&" and "+" reaches the page whole', () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(criteria({ query: 'M&A + indemnity' })));
+    renderTool();
+
+    fireEvent.click(screen.getByTestId('semantic-search-criteria-submit'));
+
+    expect(pageSees(mockNavigateTo.mock.calls[0][0].data as string).query).toBe('M&A + indemnity');
+  });
+
+  it('says when the filter options could not be loaded, and Retry reloads them', () => {
+    mockOptionsError = 'Failed to load filter options';
+    renderTool();
+
+    expect(screen.getByTestId('semantic-search-criteria-options-error').textContent).toContain(
+      "Couldn't load the filter options"
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a stored custom date that is not a real date', () => {
+    expect(
+      normalizeCriteria({ datePreset: 'custom', dateRange: { from: '2026-13-45', to: '2026-02-30' } }, NOW).dateRange
+    ).toBeNull();
+  });
+
+  describe('date range', () => {
+    // Fake only Date: Fluent's dropdown needs real timers.
+    const fakeDateOnly = (now: Date) =>
+      jest.useFakeTimers({
+        now,
+        doNotFake: [
+          'setTimeout',
+          'clearTimeout',
+          'setInterval',
+          'clearInterval',
+          'setImmediate',
+          'clearImmediate',
+          'queueMicrotask',
+          'nextTick',
+          'requestAnimationFrame',
+          'cancelAnimationFrame',
+          'requestIdleCallback',
+          'cancelIdleCallback',
+          'performance',
+          'hrtime',
+        ],
+      });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('picking a preset stores the preset id and searches with its range', () => {
+      fakeDateOnly(NOW);
+      renderTool();
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Date range preset' }));
+      fireEvent.click(screen.getByRole('option', { name: 'Last 7 days' }));
+      fireEvent.click(screen.getByTestId('semantic-search-criteria-submit'));
+
+      const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) as string) as PersistedCriteria;
+      expect(stored.datePreset).toBe('last7');
+      const sees = pageSees(mockNavigateTo.mock.calls[0][0].data as string);
+      expect(sees.dateFrom).toBe('2026-11-17');
+      expect(sees.dateTo).toBe('2026-11-24');
+    });
+
+    // On 8 January "This year" and "Last 7 days" are the same range; the picked one is stored.
+    it('stores the preset picked, not one inferred from the dates', () => {
+      fakeDateOnly(new Date(2026, 0, 8, 9, 0, 0));
+      renderTool();
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Date range preset' }));
+      fireEvent.click(screen.getByRole('option', { name: 'This year' }));
+
+      const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) as string) as PersistedCriteria;
+      expect(stored.datePreset).toBe('thisYear');
+    });
+
+    it('re-resolves the preset when Search is pressed on a later day', () => {
+      fakeDateOnly(NOW);
+      renderTool();
+      fireEvent.click(screen.getByRole('combobox', { name: 'Date range preset' }));
+      fireEvent.click(screen.getByRole('option', { name: 'Last 7 days' }));
+
+      jest.setSystemTime(new Date(2026, 10, 26, 8, 0, 0));
+      fireEvent.click(screen.getByTestId('semantic-search-criteria-submit'));
+
+      const sees = pageSees(mockNavigateTo.mock.calls[0][0].data as string);
+      expect(sees.dateFrom).toBe('2026-11-19');
+      expect(sees.dateTo).toBe('2026-11-26');
+    });
   });
 });

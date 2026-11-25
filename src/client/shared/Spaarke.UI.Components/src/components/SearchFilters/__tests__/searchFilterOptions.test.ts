@@ -76,6 +76,7 @@ it('loads all three lists, file types from the fixed list', async () => {
   expect(options.documentTypes).toEqual([{ value: '1', label: 'Brief' }]);
   expect(options.matterTypes).toEqual([{ value: 'mt-1', label: 'Litigation' }]);
   expect(options.fileTypes).toEqual(SEARCH_FILE_TYPE_OPTIONS);
+  expect(options.failed).toEqual([]);
 });
 
 it('caches a list until the cache is cleared', async () => {
@@ -90,13 +91,32 @@ it('caches a list until the cache is cleared', async () => {
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
-it('returns an empty list (not a throw) for a missing column, a failed read or a network error', async () => {
+it('a missing column or table (404) is an empty list; a failed read throws and is not cached', async () => {
   fetchMock.mockResolvedValueOnce(jsonResponse({}, 404));
   expect(await fetchOptionsetOptions('sprk_document', 'sprk_missing')).toEqual([]);
 
   fetchMock.mockResolvedValueOnce(jsonResponse({}, 500));
-  expect(await fetchLookupOptions('sprk_mattertype_refs', 'sprk_mattertypename')).toEqual([]);
+  await expect(fetchLookupOptions('sprk_mattertype_refs', 'sprk_mattertypename')).rejects.toThrow('500');
 
   fetchMock.mockRejectedValueOnce(new Error('offline'));
-  expect(await fetchOptionsetOptions('sprk_document', 'sprk_documenttype')).toEqual([]);
+  await expect(fetchOptionsetOptions('sprk_document', 'sprk_documenttype')).rejects.toThrow('offline');
+
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({ value: [{ sprk_mattertype_refid: 'mt-1', sprk_mattertypename: 'X' }] })
+  );
+  expect(await fetchLookupOptions('sprk_mattertype_refs', 'sprk_mattertypename')).toHaveLength(1);
+});
+
+it('names the list that failed and still loads the other', async () => {
+  fetchMock.mockImplementation(async (url: string) =>
+    url.includes('EntityDefinitions')
+      ? jsonResponse({}, 403)
+      : jsonResponse({ value: [{ sprk_mattertype_refid: 'mt-1', sprk_mattertypename: 'Litigation' }] })
+  );
+
+  const options = await loadSearchFilterOptions();
+
+  expect(options.failed).toEqual(['documentTypes']);
+  expect(options.documentTypes).toEqual([]);
+  expect(options.matterTypes).toEqual([{ value: 'mt-1', label: 'Litigation' }]);
 });

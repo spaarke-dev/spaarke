@@ -36,8 +36,18 @@ export interface DateRangeFilterProps {
   label?: string;
   /** Current range; `null` or both ends null = no filter */
   value: DateRangeFilterValue | null;
-  /** Called with the new range, or `null` when the filter is cleared */
-  onChange: (value: DateRangeFilterValue | null) => void;
+  /**
+   * Called with the new range, or `null` when the filter is cleared. `preset` says how it was set:
+   * the preset picked, `'off'` for a clear, `'custom'` for typed dates. Hosts that store a preset
+   * (to re-resolve it later) keep this id: inferring it from the dates is ambiguous when two
+   * presets give the same range (early January, "This year" equals "Last 7 days").
+   */
+  onChange: (value: DateRangeFilterValue | null, preset: DateRangePresetId | 'custom') => void;
+  /**
+   * The preset the host stored for `value`, shown as the dropdown label while `value` still is that
+   * preset's range. Without it the label is inferred from the dates.
+   */
+  preset?: DateRangePresetId | 'custom';
   /** Whether the inputs are disabled */
   disabled?: boolean;
 }
@@ -159,6 +169,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   label = 'Date Range',
   value,
   onChange,
+  preset,
   disabled = false,
 }) => {
   const styles = useStyles();
@@ -169,6 +180,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   const [fromDate, setFromDate] = React.useState<string>(value?.from ?? '');
   const [toDate, setToDate] = React.useState<string>(value?.to ?? '');
   const [validationError, setValidationError] = React.useState<string | null>(null);
+  // The preset picked here, for the label when two presets give the same range.
+  const [pickedPreset, setPickedPreset] = React.useState<DateRangePresetId | null>(null);
 
   // Follow the host's value (a preset, a clear, a saved search).
   React.useEffect(() => {
@@ -176,20 +189,29 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     setToDate(value?.to ?? '');
   }, [value?.from, value?.to]);
 
-  const activePreset = React.useMemo(() => detectActivePreset(value), [value]);
+  const activePreset = React.useMemo(() => {
+    const known = preset ?? pickedPreset;
+    if (known === 'custom' && value && (value.from || value.to)) return 'custom';
+    if (known && known !== 'custom' && known !== 'off') {
+      const range = calculatePresetRange(known);
+      if (range.from === value?.from && range.to === value?.to) return known;
+    }
+    return detectActivePreset(value);
+  }, [value, preset, pickedPreset]);
 
   const updateRange = React.useCallback(
     (from: string, to: string) => {
       setValidationError(null);
+      setPickedPreset(null);
       if (!from && !to) {
-        onChange(null);
+        onChange(null, 'off');
         return;
       }
       if (from && to && from > to) {
         setValidationError('From date must be before To date');
         return;
       }
-      onChange({ from: from || null, to: to || null });
+      onChange({ from: from || null, to: to || null }, 'custom');
     },
     [onChange]
   );
@@ -216,22 +238,24 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     setFromDate('');
     setToDate('');
     setValidationError(null);
-    onChange(null);
+    setPickedPreset(null);
+    onChange(null, 'off');
   }, [onChange]);
 
   const handlePresetSelect = React.useCallback(
     (_ev: unknown, data: { optionValue?: string }) => {
-      const preset = DATE_PRESETS.find(p => p.value === data.optionValue);
-      if (!preset) return;
-      if (preset.value === 'off') {
+      const picked = DATE_PRESETS.find(p => p.value === data.optionValue);
+      if (!picked) return;
+      if (picked.value === 'off') {
         clear();
         return;
       }
-      const range = calculatePresetRange(preset.value);
+      const range = calculatePresetRange(picked.value);
       setFromDate(range.from ?? '');
       setToDate(range.to ?? '');
       setValidationError(null);
-      onChange(range);
+      setPickedPreset(picked.value);
+      onChange(range, picked.value);
     },
     [onChange, clear]
   );

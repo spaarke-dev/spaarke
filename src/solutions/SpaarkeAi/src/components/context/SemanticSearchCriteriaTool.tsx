@@ -113,7 +113,6 @@ import {
   DateRangeFilter,
   useSearchFilterOptions,
   calculatePresetRange,
-  detectActivePreset,
   DATE_RANGE_PRESET_IDS,
 } from '@spaarke/ui-components';
 import type { DateRangeFilterValue, DateRangePresetId, FilterDropdownOption } from '@spaarke/ui-components';
@@ -211,8 +210,14 @@ function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((v) => typeof v === 'string') ? (value as string[]) : undefined;
 }
 
+/** A stored `YYYY-MM-DD` that is a real calendar date (`2026-13-45` is not), else null. */
 function dateOrNull(value: unknown): string | null {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? value : null;
 }
 
 /**
@@ -342,7 +347,10 @@ function launchSemanticSearch(criteria: PersistedCriteria): void {
     );
     return;
   }
-  const data = buildSearchDataParams(criteria);
+  // The page decodes the `data` envelope once more after URLSearchParams (parseUrlParams), so it
+  // is passed encoded, as the SemanticSearchControl PCF does: raw, a query with `&` or `+`
+  // ("M&A indemnity") was cut at the `&` (#3131 review).
+  const data = encodeURIComponent(buildSearchDataParams(criteria));
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (nav.navigateTo as any)(
@@ -479,9 +487,12 @@ const useStyles = makeStyles({
     width: '100%',
   },
 
-  dropdown: {
-    width: '100%',
-    minWidth: 'auto',
+  optionsError: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: tokens.fontSizeBase200,
   },
   textarea: {
     width: '100%',
@@ -590,11 +601,12 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
     [updateCriteria],
   );
 
-  // Store which preset the range is (detected today, when it was picked) so a reload re-resolves
-  // it; a typed range is 'custom' and is kept as typed.
+  // Store the preset the user picked (DateRangeFilter reports it; inferring it from the dates is
+  // ambiguous when two presets coincide) so a reload or a later Search re-resolves it; typed
+  // dates are 'custom' and kept as typed.
   const handleDateRangeChange = React.useCallback(
-    (value: DateRangeFilterValue | null) => {
-      updateCriteria({ dateRange: value, datePreset: detectActivePreset(value) });
+    (value: DateRangeFilterValue | null, preset: DateRangePresetId | 'custom') => {
+      updateCriteria({ dateRange: value, datePreset: value ? preset : 'off' });
     },
     [updateCriteria],
   );
@@ -668,15 +680,24 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
   );
 
   const handleSearchClick = React.useCallback(() => {
+    // Re-resolve a preset against today: the pane can stay open past midnight, and "Last 7 days"
+    // picked yesterday must not send yesterday's range.
+    const current = normalizeCriteria(criteria);
+    if (
+      current.dateRange?.from !== criteria.dateRange?.from ||
+      current.dateRange?.to !== criteria.dateRange?.to
+    ) {
+      updateCriteria({ dateRange: current.dateRange });
+    }
     if (addToWorkspace) {
-      dispatchSearchCriteriaWidget(criteria);
+      dispatchSearchCriteriaWidget(current);
       // Reset the opt-in for the next search-click so the user must
       // re-affirm. This matches the "MUST be optional" task-spec invariant
       // and prevents accidental tab pile-up.
       setAddToWorkspace(false);
     }
-    launchSemanticSearch(criteria);
-  }, [addToWorkspace, criteria, dispatchSearchCriteriaWidget]);
+    launchSemanticSearch(current);
+  }, [addToWorkspace, criteria, dispatchSearchCriteriaWidget, updateCriteria]);
 
   // Per-domain filter visibility: the page's SearchFilterPane rule.
   const applies = domainFilters(criteria.domain);
@@ -772,8 +793,23 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
 
       {/* Date Range (all domains; shared DateRangeFilter) ------------------ */}
       <div data-testid="semantic-search-criteria-date-range">
-        <DateRangeFilter value={criteria.dateRange} onChange={handleDateRangeChange} />
+        <DateRangeFilter
+          value={criteria.dateRange}
+          preset={criteria.datePreset}
+          onChange={handleDateRangeChange}
+        />
       </div>
+
+      {/* The Dataverse option lists could not be read: say so (an empty "All" would look like
+          "no filter available") and offer a retry. */}
+      {filterOptions.error && (
+        <div className={styles.optionsError} role="alert" data-testid="semantic-search-criteria-options-error">
+          <span>Couldn't load the filter options.</span>
+          <Button appearance="transparent" size="small" onClick={filterOptions.refresh}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* R4 task 043 (W-5) — "Also add to Workspace" opt-in checkbox.
           Renders above the Search button. Unchecked by default (the task spec
