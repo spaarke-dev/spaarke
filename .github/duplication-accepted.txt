@@ -34,3 +34,72 @@ src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage
 src/solutions/ApExport/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
 src/solutions/ApExport/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
 src/solutions/ApExport/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
+
+# ===== #2974: older clusters recorded (2026-11-24). Jest scaffolding (__mocks__, jest.setup, jest.config) is excluded in .jscpd.json instead. =====
+
+# --- Tracked: e-billing Vite config, more pairs (#2965) ---
+src/solutions/ApExport/vite.config.ts | src/solutions/RuleReview/vite.config.ts | #2965 | E-billing Vite config; one shared config planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/vite.wizard.shared.ts | #2965 | E-billing Vite config; one shared config planned.
+
+# --- Tracked: code-page scaffolding, more pairs (#3052) ---
+src/solutions/ApExport/vite.config.ts | src/solutions/CalendarSidePane/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/ApExport/src/main.tsx | src/solutions/CommunicationReconciliation/src/main.tsx | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/CommunicationReconciliation/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/DailyBriefing/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/Notepad/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/ApExport/vite.config.ts | src/solutions/Reporting/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CommunicationReconciliation/vite.config.ts | src/solutions/EmailPage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/DocumentUploadWizard/vite.config.ts | src/solutions/PlaybookLibrary/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_communicationspage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_invoicespage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_kpiassessmentspage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/LegalWorkspace/src/config/publicConfig.ts | src/solutions/SpaarkeAi/src/config/publicConfig.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/LegalWorkspace/src/App.tsx | src/solutions/SpeAdminApp/src/App.tsx | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/Reporting/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/sprk_invoicespage/src/main.tsx | src/solutions/sprk_kpiassessmentspage/src/main.tsx | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+
+# --- Tracked: PCF and code-page document twins (#3093) ---
+src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentNode.tsx | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/components/DocumentNode.tsx | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+src/client/code-pages/DocumentRelationshipViewer/src/hooks/useForceLayout.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/hooks/useForceLayout.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+src/client/code-pages/DocumentRelationshipViewer/src/hooks/useVisualizationApi.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/hooks/useVisualizationApi.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/services/VisualizationApiService.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+src/client/code-pages/DocumentRelationshipViewer/src/types/api.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/types/api.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+src/client/code-pages/DocumentRelationshipViewer/src/types/graph.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/types/graph.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+src/client/code-pages/SemanticSearch/src/components/DateRangeFilter.tsx | src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/DateRangeFilter.tsx | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+src/client/code-pages/SemanticSearch/src/components/FilterDropdown.tsx | src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilterDropdown.tsx | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
+
+# --- Tracked: twin schema validators (#3094) ---
+src/client/code-pages/PlaybookBuilder/src/services/schemaValidation.ts | src/client/pcf/ScopeConfigEditor/ScopeConfigEditor/utils/openAiSchemaValidator.ts | #3094 | Twin OpenAI schema validators; one to be hoisted into ui-components.
+
+# --- Tracked: PCF host boilerplate (#3095) ---
+src/client/pcf/MatterHeader/control/MatterHeaderHost.tsx | src/client/pcf/RecordHeader/control/RecordHeaderHost.tsx | #3095 | Copied PCF host boilerplate; ThemeService wrappers to go, host shell to be shared.
+src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/index.ts | src/client/pcf/SemanticSearchControl/SemanticSearchControl/index.ts | #3095 | Copied PCF host boilerplate; ThemeService wrappers to go, host shell to be shared.
+src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/services/ThemeService.ts | src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/ThemeService.ts | #3095 | Copied PCF host boilerplate; ThemeService wrappers to go, host shell to be shared.
+
+# --- Tracked: Communication PCF residue after #2967 (#3096) ---
+src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/CommunicationConversationPanelApp.tsx | src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/hostContext.ts | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/hostContext.ts | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/CommunicationTimelineRegardingApp.tsx | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+src/client/pcf/CommunicationTimeline/CommunicationTimeline/CommunicationTimelineApp.tsx | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/CommunicationTimelineRegardingApp.tsx | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+
+# --- Tracked: lazy MSAL wrapper around BFF writes (#3097) ---
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/client/pcf/RegardingResolver/RegardingResolver/handlers/bffWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/solutions/EventDetailSidePane/src/services/childRecordWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/solutions/Notepad/src/services/memoWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+
+# --- Tracked: Reconciliation host wiring (#3099) ---
+src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/ReconciliationWorkspaceWidget.tsx | src/solutions/CommunicationReconciliation/src/main.tsx | #3099 | Reconciliation widget and page build the same host wiring; one host-props hook planned.
+
+# --- Tracked: re-declared result and Web API types (#3100) ---
+src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts | src/solutions/LegalWorkspace/src/types/xrm.ts | #3100 | Re-declared result and Web API types; one shared copy planned.
+src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts | src/solutions/LegalWorkspace/src/types/result.ts | #3100 | Re-declared result and Web API types; one shared copy planned.
+
+# --- Tracked: navigator page-context derivation (#3101) ---
+src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts | src/solutions/NavigatorPane/src/services/bookmarkService.ts | #3101 | Re-implemented page-context derivation; to be shared from navigatorCaptureService.
+
+# --- Tracked: Office add-in copies (#3102) ---
+src/client/office-addins/outlook/taskpane/index.tsx | src/client/office-addins/word/taskpane/index.tsx | #3102 | Office add-in copies; icon to come by exact-path alias, taskpane mount to be shared.
+src/client/office-addins/shared/taskpane/components/icons/MicrosoftToDoIcon.tsx | src/client/shared/Spaarke.UI.Components/src/icons/MicrosoftToDoIcon.tsx | #3102 | Office add-in copies; icon to come by exact-path alias, taskpane mount to be shared.
+
+# --- Deliberate: two SecureRecordOwnerRoleSet readers (#3103, closed as a record) ---
+src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerRoleSet.cs | src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordOwnerRoleSet.cs | #3103 | Two readers by design (control plane has no BFF reference); SecureRecordOwnerRoleSetParityTests keeps them in step.
