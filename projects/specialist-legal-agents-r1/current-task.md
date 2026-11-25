@@ -8,7 +8,7 @@
 
 ## OPEN NOW (checkpoint 2026-11-25 evening, read first)
 - **Design v0.8:** D-A18 (2)–(8) accepted; T1 specialty = `sprk_technologyarea` (DEV-only table, needs columns + solution export); taxonomy tables are keys for L2, not storage (§3.14).
-- **Open with the owner:** D-A18 (1) after the persona clarification. `sprk_aipersona` is LIVE (chat default system prompt via `ResolvePersonaForChatAsync`); recommendation: keep it, profile template row points at it.
+- **D-A18 all decided (owner 2026-11-25):** (1) new `sprk_agentprofile` pair; keep the LIVE `sprk_aipersona` (chat default prompt), template row points at it.
 - **DEV facts (2026-11-25):** `sprk_playbookrun`/`noderun` 0 rows (BFF keeps runs in memory); `sprk_precedent` 0 rows; `sprk_technologyarea` 0 rows, 2 columns.
 - **mcp-r2** (separate worktree) design v0.2 holds the MCP-side answers (incl. Dataverse MCP position §4.7).
 - **Owner tenant action pending:** remove Spaarke AI (coordination runbook E1/E2).
