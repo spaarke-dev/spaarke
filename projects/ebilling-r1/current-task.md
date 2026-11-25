@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-25 ~14:10Z (checkpoint: #3084 and #3130 merged; task 189 done; ISS-054 filed)
+> **Last Updated:** 2026-11-25 ~16:45Z (checkpoint: issue batch 4 merged into work; dev BFF a1b7db1def live)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,7 +10,13 @@
 
 ## Quick recovery
 
-- **NOW (2026-11-25 ~14:10Z):** no task is running. Work is e495ea68ee (master merged in after #3130).
+- **NOW (2026-11-25 ~16:45Z): issue batch 4 merged into work (2fc3074cf7, pushed); no agent running.** Next: master PR for batch 4, after the word add-in session agrees the from-email 413 (see below).
+  - **Batch 4 on work:** ISS-053 #3106 (ArchTest `JobQueueDuplicateDetectionOffGuardTests` 8/0; jobs.md "Enforced by"), ISS-014 #2730 (Invoice Review re-reads the approval state while firmNeeded; jest 667/0), DEF-063 #2642 (scoped import with nothing to publish exits 0; app-settings-only still throws after review F2; Pester 96/0), DEF-052 #2553 (job copy + from-email marked files enforce the per-file limit; review F1 fixed: 413 at step 1 before the .eml save; filtered 2,539/0 + merged-tip 584/0; build 0/0). Closed as already fixed: #1904 (ISS-001, task 015), #2455 (dead `CoreOf` removed, 18d9ce62a8). Batch-4 agent worktrees removed.
+  - **DEF-052 needs word-add-in-r1's OK before master** (095-from-email contract is binding; additive 413 `ebilling.submission.too_large`, add-in has no message for it). NOT sent: the app flagged that a local session now claims the `word-add-in-r1` name, which earlier was a session on another machine; owner to confirm which is genuine.
+  - **Dev BFF a1b7db1def LIVE 15:58:53Z** (uac-r2, owner go; has #3084 + #3130; rollback ef0c566d2c). Checklist W all three checks ready; T backfill `-Apply` needs the owner's typed OK (+ uac-r2 notices); U waits for spa-r4's SPA deploy.
+  - **Stamp-side follow-up:** the read-only live check that sdap-jobs/sdap-communication keep duplicate detection off belongs to customer-provisioning-orchestration-r1 (recipe in the ISS-053 agent report: `az servicebus queue show ... --query requiresDuplicateDetection`, expect false); not yet sent to provisioning-r1.
+  - **Lesson:** a non-isolated reviewer agent checked out a branch in this worktree; briefs now forbid checkout here (memory feedback_reviewer-agent-checkout).
+- **Earlier (2026-11-25 ~14:10Z):** no task is running. Work is e495ea68ee (master merged in after #3130).
   - **#3084 MERGED** 08:16Z at 2ac250cae4 (079 content, SpaarkeMaster 1.3.3.0 with ISS-042, batch 3); spa-r4 told. The "Server tests (office scope) (rest)" cancel is the known 20-minute cap (#2767/#1474).
   - **#3130 MERGED** 13:50Z at 6e04bc024e (Invoice Review points 2-4; uac-r2 reviewed, no findings; publish +5,738 B). **Page live on dev 14:19:37Z** (uac-r2, from 6e04bc024e; sha256 fc4b9ec2…231095, read back identical); checklist W ready. The BFF part (UTBMS descriptions) needs the owner to name the exact BFF SHA in uac-r2's session. Checklist section **W** added. Point 1 (next/previous invoice) = DEF-070 #3124.
   - **Task 189 ✅** (docs; merged 9dc1180223 + follow-up 72adc42b85). The three escalated points were resolved with uac-r2: Stored File hard-deny is the design (model 5.2 amended); sprk_area/sprk_proceduretype are documented as field-secured; the Procedure tables' missing registry marker fails closed and is filed as **ISS-054 #3143** (option c; uac-r2 cross-ref D-3143). Revisit with task 121.
