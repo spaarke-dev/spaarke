@@ -4,7 +4,7 @@
     <title>Dataverse MCP: research re-check and deployment-guide admin paragraph</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Research note and one documentation paragraph; no code</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,7 +87,7 @@
     <criterion testable="true">Negative: no other section of the deployment guide is changed.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-18. The researcher agent may update its own .claude/agent-memory/researcher files; that is its own boundary, not this task's edit.</notes>
+  <notes>Completed 2026-11-25. Re-check note written; guide section 12.9 added; no contradiction with design 4.7. Out-of-scope follow-up: knowledge/dataverse-mcp/NOTES.md and dataverse-mcp-usage skill use removed tool names. rework: none task 004. Spec FR-18. The researcher agent may update its own .claude/agent-memory/researcher files; that is its own boundary, not this task's edit.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
