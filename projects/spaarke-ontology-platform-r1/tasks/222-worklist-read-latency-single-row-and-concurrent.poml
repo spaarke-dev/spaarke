@@ -66,6 +66,6 @@ Entry point: `src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs`
     <trigger>A speed-up needs a change to which identity performs a read, a change to any visibility rule or response, a schema change, unbounded concurrency, or the clients are not safe for concurrent use: STOP and report.</trigger>
   </escalation>
   <execution>
-    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt222); PR to master; do not merge.</protocol>
+    <protocol>Built by mcp-r1 in their own PR to master (their owner's direction, relayed 2026-11-25); the ontology main session reviews it against this POML (independent Opus adversarial review) and approves before merge. If mcp-r1 hands it back, run through task-execute in C:\wt222.</protocol>
   </execution>
 </task>
