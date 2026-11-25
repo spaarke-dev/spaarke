@@ -48,8 +48,11 @@ export interface IAuthService {
    * re-acquiring a token for the retry attempt — mirrors `@spaarke/auth`'s
    * `authenticatedFetch`, which calls `provider.clearCache()` on a 401 before
    * its own retry.
+   *
+   * @param refusedToken The token the server just answered 401 for (#1571 fix round 3). The strategy records it as
+   *   refused only when it is still the token it last issued; with no argument nothing is recorded.
    */
-  clearCache(): void;
+  clearCache(refusedToken?: string): void;
   /**
    * #1571 review F2: subscribe to "sign-in required" — raised when the provider could not acquire a token silently,
    * or when a request was still refused (401) after its single retry. The pane shows its sign-in prompt: nothing else
@@ -203,11 +206,12 @@ class AuthService implements IAuthService {
     return this.provider?.isAuthenticated() ?? false;
   }
 
-  clearCache(): void {
+  clearCache(refusedToken?: string): void {
     this.provider?.clearCache();
     // #1571 review F1: this runs before a 401 retry, and MSAL's cached token is the one the server just refused, so
-    // the re-acquire asks Entra for a new one (still silently).
-    this.strategy?.requestFreshToken();
+    // the re-acquire asks for a new one (still silently). The token the request sent is passed on, so a late 401 for
+    // an older token never marks a newer, good one as refused (fix round 3).
+    this.strategy?.requestFreshToken(refusedToken);
   }
 }
 

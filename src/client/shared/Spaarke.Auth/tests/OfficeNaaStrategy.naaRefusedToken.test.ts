@@ -4,7 +4,7 @@
  * map it), so the Office host answers a forced silent request with its cached copy of the token the server refused.
  * The doubles here do the same: the NAA silent call returns ONE token whatever `forceRefresh` says.
  *
- *   - After a 401 (`requestFreshToken()`), the automatic retry (silent only, no gesture) does not use the refused
+ *   - After a 401 (`requestFreshToken(sentToken)`), the automatic retry (silent only, no gesture) does not use the refused
  *     token and never calls `acquireTokenPopup`: it returns no token, and the host shows its sign-in prompt.
  *   - A Sign in click then goes on to `acquireTokenPopup` (the broker's interactive call) instead of "succeeding" with
  *     the refused token.
@@ -131,7 +131,7 @@ describe('OfficeNaaStrategy — the NAA host hands back the refused token (#1571
     const first = await s.acquire();
     expect(first.accessToken).toBe(hostToken);
 
-    s.requestFreshToken();
+    s.requestFreshToken(hostToken);
     const retry = await s.acquire();
 
     expect(retry.accessToken).toBe('');
@@ -141,7 +141,7 @@ describe('OfficeNaaStrategy — the NAA host hands back the refused token (#1571
   it('Sign in after a 401 reaches acquireTokenPopup and its new token is what the next acquire answers with', async () => {
     const s = strategy();
     await s.acquire();
-    s.requestFreshToken();
+    s.requestFreshToken(hostToken);
     await s.acquire(); // the automatic retry: no token
 
     const brokered = freshJwt();
@@ -161,7 +161,7 @@ describe('OfficeNaaStrategy — the NAA host hands back the refused token (#1571
   it('a different silent token after a 401 is used, and clears the record', async () => {
     const s = strategy();
     await s.acquire();
-    s.requestFreshToken();
+    s.requestFreshToken(hostToken);
     const renewed = freshJwt();
     hostToken = renewed;
 
@@ -172,7 +172,7 @@ describe('OfficeNaaStrategy — the NAA host hands back the refused token (#1571
   it('clearCache() clears the record: the host token is usable again', async () => {
     const s = strategy();
     await s.acquire();
-    s.requestFreshToken();
+    s.requestFreshToken(hostToken);
     s.clearCache();
 
     expect((await s.acquire()).accessToken).toBe(hostToken);
@@ -181,9 +181,73 @@ describe('OfficeNaaStrategy — the NAA host hands back the refused token (#1571
   it('logout() clears the record: the host token is usable again', async () => {
     const s = strategy();
     await s.acquire();
-    s.requestFreshToken();
+    s.requestFreshToken(hostToken);
     await s.logout();
 
     expect((await s.acquire()).accessToken).toBe(hostToken);
+  });
+});
+
+describe('OfficeNaaStrategy — the refused-token record never blocks a good token (#1571 fix round 3)', () => {
+  let saved: Pick<Console, 'warn' | 'info' | 'error'>;
+  let hostToken: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    naaInstance = makeInstance();
+    installNaaHost();
+    naaInstance.getAllAccounts.mockReturnValue([account(T2, 'user@spaarke')]);
+    hostToken = freshJwt();
+    // As under NAA: one token, whatever forceRefresh says.
+    naaInstance.acquireTokenSilent.mockImplementation(async () => ({ accessToken: hostToken, expiresOn: null }));
+    saved = { warn: console.warn, info: console.info, error: console.error };
+    console.warn = jest.fn();
+    console.info = jest.fn();
+    console.error = jest.fn();
+  });
+
+  afterEach(() => {
+    Object.assign(console, saved);
+    delete (globalThis as unknown as { Office?: unknown }).Office;
+    sessionStorage.clear();
+  });
+
+  it('a late 401 for the old token, after a different token was accepted, does not refuse the good token', async () => {
+    // Two requests sent token A and both got a 401. The first retry got B; the second 401 arrives after that.
+    const s = strategy();
+    const a = (await s.acquire()).accessToken;
+    s.requestFreshToken(a);
+    const b = freshJwt();
+    hostToken = b;
+    expect((await s.acquire()).accessToken).toBe(b);
+
+    s.requestFreshToken(a);
+
+    expect((await s.acquire()).accessToken).toBe(b);
+  });
+
+  it('requestFreshToken() with no token records nothing', async () => {
+    const s = strategy();
+    await s.acquire();
+
+    s.requestFreshToken();
+
+    expect((await s.acquire()).accessToken).toBe(hostToken);
+  });
+
+  it('a Sign in click the broker answers with the refused token clears the record: later silent acquires get it', async () => {
+    const s = strategy();
+    const a = (await s.acquire()).accessToken;
+    s.requestFreshToken(a);
+    expect((await s.acquire()).accessToken).toBe(''); // the automatic retry: no token
+    naaInstance.acquireTokenPopup.mockResolvedValue({
+      accessToken: a,
+      expiresOn: null,
+      account: account(T2, 'user@spaarke'),
+    });
+
+    expect((await s.acquireInteractive()).accessToken).toBe(a);
+    expect((await s.acquire()).accessToken).toBe(a); // the hand-off
+    expect((await s.acquire()).accessToken).toBe(a); // a later silent acquire, e.g. the proactive refresh
   });
 });

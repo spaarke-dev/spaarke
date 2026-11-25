@@ -153,7 +153,8 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
       // Auth v2 (D-AUTH-7): on 401, close current stream, re-fetch fresh token,
       // and reopen. Capped at `maxAuthRetries` to avoid infinite loops if the
       // user's account is genuinely revoked.
-      if (response.status === 401 && authRetries < maxAuthRetries && abortController) {
+      // An empty token means nothing can be had silently: no further retry (#1571 fix round 3).
+      if (response.status === 401 && authRetries < maxAuthRetries && abortController && accessToken) {
         authRetries += 1;
         // Drain the body to release the underlying connection before reconnecting.
         // (Failing to consume the body of a 401 can leak the socket on some hosts.)
@@ -161,8 +162,8 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
           /* best-effort drain */
         });
         // #1571 review F1: the refused token is what the auth service's caches hold, so the re-acquire asks Entra
-        // for a new one (still silently).
-        authService.clearCache();
+        // for a new one (still silently). The token this request sent is the one recorded as refused (fix round 3).
+        authService.clearCache(accessToken);
         // Re-enter connect — `getAccessToken()` at the top will fetch a new token.
         return connect();
       }

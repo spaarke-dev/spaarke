@@ -238,8 +238,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * The token the server refused, recorded by `requestFreshToken()`. A silent result equal to it counts as a failed
    * silent step (#1571 fix round 2): under NAA, msal-browser 3.30.0 drops `forceRefresh` (the NAA silent path reads only
    * `claims` and `cacheLookupPolicy`, and `NestedAppAuthAdapter.toNaaTokenRequest` does not map it), so the host answers
-   * with its cached copy of the refused token. Cleared when a different token is accepted, on sign-out and on
-   * `clearCache()` (which also runs on a logout broadcast).
+   * with its cached copy of the refused token. Cleared when a different token is accepted, when a Sign in click
+   * returns a token (even the same one), on sign-out and on `clearCache()` (which also runs on a logout broadcast).
    */
   private _refusedToken: string | null = null;
 
@@ -292,19 +292,26 @@ export class OfficeNaaStrategy implements AuthStrategy {
     this._forceNextRefresh = false;
     const token = await this._acquire(true, true);
     this._handoff = token.accessToken ? token : null;
+    // The user's click is the answer, even when the broker hands back the token that was refused (a transient 401,
+    // or the broker reissuing it): keeping it recorded would refuse every later silent acquire for its lifetime. If
+    // the server refuses it again, the next 401 records it again (fix round 3).
+    if (token.accessToken) this._refusedToken = null;
     return token;
   }
 
   /**
-   * Call it before retrying a request the server answered 401 (#1571 review F1). The token this strategy last returned
-   * is recorded as refused, and the next `acquire()` asks for a new one, still silently. A silent answer equal to the
-   * refused token is not used: a silent-only acquire then returns no token (the host shows its sign-in prompt; nothing
-   * opens without a click), and only `acquireInteractive()` goes on to the interactive step.
+   * Call it before retrying a request the server answered 401 (#1571 review F1), with the token that request sent. The
+   * next `acquire()` asks for a new token, still silently. The sent token is recorded as refused only while it is
+   * still the token this strategy last issued: a late 401 for an older token (two requests refused at once, or a
+   * proactive refresh mid-flight) never marks the newer, good token as refused (fix round 3). With no argument nothing
+   * is recorded. A silent answer equal to the refused token is not used: a silent-only acquire then returns no token
+   * (the host shows its sign-in prompt; nothing opens without a click), and only `acquireInteractive()` goes on to the
+   * interactive step.
    */
-  requestFreshToken(): void {
+  requestFreshToken(refusedToken?: string): void {
     this._handoff = null;
     this._forceNextRefresh = true;
-    if (this._lastIssued) this._refusedToken = this._lastIssued;
+    if (refusedToken && refusedToken === this._lastIssued) this._refusedToken = refusedToken;
   }
 
   private async _acquire(interactive: boolean, forceRefresh: boolean): Promise<TokenResult> {

@@ -265,8 +265,8 @@ describe('App — Create To Do retries once on 401 (#1571)', () => {
       result = await view.onCreateTodo(TODO_INPUT);
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(authorizationOf(fetchMock.mock.calls[1]!)).not.toBe('Bearer token');
+    // The refused token is not resent; with no token silently the retry is not sent at all (fix round 3).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result?.ok).toBe(false);
     expect(await screen.findByText(SIGN_IN_EXPIRED)).toBeTruthy();
     expect(signIn).not.toHaveBeenCalled();

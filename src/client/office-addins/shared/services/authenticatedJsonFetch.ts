@@ -61,10 +61,17 @@ export async function authenticatedJsonFetch(
   }
 
   // #1571 review F1: the token just refused is the one the auth service would hand back from its caches, so the
-  // re-acquire asks Entra for a new one (silently) whatever the caller's retry config does.
-  authService.clearCache();
+  // re-acquire asks for a new one (silently) whatever the caller's retry config does. The token this request sent is
+  // passed on, so a late 401 for an older token never marks a newer, good one as refused (fix round 3).
+  authService.clearCache(token);
   retry.onBeforeRetry?.();
   const freshToken = await retry.getRetryToken();
+  if (!freshToken) {
+    // No token silently (fix round 3): the retry would be refused too, so it is not sent. The caller gets the
+    // original 401, and the pane its sign-in prompt.
+    authService.notifySignInRequired?.();
+    return response;
+  }
   const retried = await fetch(url, withAuth(freshToken));
   if (retried.status === 401) {
     // #1571 review F2: the session cannot be renewed silently. One signal for every caller (Save, Find, Invoice,

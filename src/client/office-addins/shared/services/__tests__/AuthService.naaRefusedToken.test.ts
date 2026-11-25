@@ -136,8 +136,9 @@ describe('AuthService under NAA — the host hands back the refused token (#1571
     });
     unsubscribe();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(authorizationOf(fetchMock.mock.calls[1]!)).not.toBe(`Bearer ${refused}`);
+    // The refused token is not resent; with no token silently the retry is not sent at all (fix round 3).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(authorizationOf(fetchMock.mock.calls[0]!)).toBe(`Bearer ${refused}`);
     expect(mockNaa.acquireTokenPopup).not.toHaveBeenCalled();
     expect(signInRequired).toHaveBeenCalled();
   });
