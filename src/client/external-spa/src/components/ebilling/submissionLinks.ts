@@ -13,24 +13,18 @@
  *     (`useOpenRecord`), as `intakeSuccess.tsx` opens a new request.
  *   - `SubmitInvoiceAction` (inside a record modal) opens them as that modal's children: see that file.
  *
- * Type-only imports: the record action registry imports this module, and a runtime import of the opener (which imports the record
- * modal) would make them import each other at load time.
+ * No runtime import of the opener: the record action registry imports this module, and the opener imports the record modal, so
+ * they would import each other at load time. The one runtime import, `recordAccess`, imports only types and the access-level hook.
  */
-import type {
-  InvoiceCoreRecordKind,
-  InvoiceSubmissionRecordRef,
-} from '@spaarke/ui-components/components/InvoiceSubmission';
+import type { InvoiceSubmissionRecordRef } from '@spaarke/ui-components/components/InvoiceSubmission';
 import type { RecordTarget } from '../detail/record-targets';
+import { ENTITY_OF_INVOICE_KIND } from '../record/recordAccess';
 
 /** The invoice's record-view entity. */
 export const INVOICE_ENTITY = 'sprk_invoice';
 
-/** The record-view entity of each core record kind. */
-export const ENTITY_OF_INVOICE_KIND: Readonly<Record<InvoiceCoreRecordKind, string>> = {
-  matter: 'sprk_matter',
-  project: 'sprk_project',
-  workassignment: 'sprk_workassignment',
-};
+/** The record-view entity of each core record kind: derived from the record types that offer "Submit invoice". */
+export { ENTITY_OF_INVOICE_KIND };
 
 /** The record view's target for an invoice id. */
 export function invoiceTarget(invoiceId: string): RecordTarget {
