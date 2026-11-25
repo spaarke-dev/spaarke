@@ -2,7 +2,12 @@
   "table": "sprk_triagecategory",
   "entitySet": "sprk_triagecategories",
   "primaryKey": "sprk_triagecategoryid",
-  "columns": ["sprk_classifierguidance", "sprk_enabled", "sprk_name", "sprk_priorityweight"],
+  "columns": [
+    "sprk_classifierguidance",
+    "sprk_enabled",
+    "sprk_name",
+    "sprk_priorityweight"
+  ],
   "rows": [
     {
       "sprk_triagecategoryid": "5ac90050-598b-f111-8077-7ced8ddc4cc6",
