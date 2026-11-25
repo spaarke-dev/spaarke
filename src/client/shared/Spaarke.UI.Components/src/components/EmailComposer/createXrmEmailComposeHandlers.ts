@@ -272,13 +272,8 @@ export function createXrmEmailComposeHandlers(options?: {
           // parentless, alongside the Analysis wizard's standalone-document flow — the only other
           // caller of `uploadFilesWithoutRecord` at HEAD.
           //
-          // The client no longer resolves or names that container. The value is the same one it used
-          // to compute here; the difference is that the client is no longer the authority for it.
-          const userId: string | undefined = xrm.Utility?.getGlobalContext?.()?.userSettings?.userId;
-          if (!userId) throw new Error('Could not resolve the current user for upload.');
-          // Still needed for the SEARCH-INDEX routing fields below; the container half of this
-          // result is no longer read by anything on this path.
-          const bu = await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
+          // The client no longer resolves or names that container, nor the search index: the BFF stamps the index
+          // when it creates the document (field-mapping-server-write-path-r1, FR-40).
 
           const svc = new EntityCreationService(xrm.WebApi, authenticatedFetch, bffBaseUrl);
           const uploaded: IUploadedFile = {
@@ -305,10 +300,6 @@ export function createXrmEmailComposeHandlers(options?: {
             sprk_filename: meta.name,
             sprk_filesize: meta.size,
           };
-          if (bu.searchIndexName) payload.sprk_searchindexname = bu.searchIndexName;
-          if (bu.searchIndexId) {
-            payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${bu.searchIndexId})`;
-          }
           const documentId = await svc.createEntityRecord('sprk_document', payload);
           try {
             await svc.attachUploadedFile(documentId, meta);

@@ -123,6 +123,12 @@ export interface SendCommunicationOptions {
    * defaults an internal topic when creating a new ACS thread).
    */
   subject?: string;
+  /**
+   * Client-only, never sent. An email may go with an empty subject because the server fills it: an email filed under one
+   * analysis gets an empty subject and body from the analysis mapping (field-mapping-server-write-path-r1 task 028,
+   * FR-17), and the server refuses one that nothing filled. Default `false`: an email needs a subject here.
+   */
+  serverFillsEmptySubject?: boolean;
   /** Body content (required). HTML by default. */
   body: string;
   /** Body content format. Default `'html'`. */
@@ -431,7 +437,7 @@ export async function sendCommunication(
     if (!opts.to || opts.to.length === 0) {
       throw new Error('sendCommunication: at least one recipient is required.');
     }
-    if (!opts.subject || !opts.subject.trim()) {
+    if ((!opts.subject || !opts.subject.trim()) && opts.serverFillsEmptySubject !== true) {
       throw new Error('sendCommunication: subject is required.');
     }
   }

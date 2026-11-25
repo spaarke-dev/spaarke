@@ -35,7 +35,7 @@ import {
 } from '@fluentui/react-components';
 import { Edit16Regular, ErrorCircle16Filled, Info16Regular, PersonWarning16Regular, Warning16Filled } from '@fluentui/react-icons';
 import { AiFieldTag, EvidenceLine, StatusBadge, StatusBar, type ConsoleStatusOverride } from '@spaarke/ui-components';
-import type { Correction, DecisionAction, ReviewFinding, ReviewLine } from '../services/invoiceReviewApi';
+import type { Correction, DecisionAction, ReviewCode, ReviewFinding, ReviewLine } from '../services/invoiceReviewApi';
 import {
   FIRM_FIRST_WORDS,
   LINE_STATUS,
@@ -366,15 +366,38 @@ export function correctableFields(line: ReviewLine): string[] {
   return [];
 }
 
+/** A code with its UTBMS description ("L190 · Pleadings"); the bare code when the description is not known. */
+export function codeWithDescription(code: string | null | undefined, description: string | null | undefined): string | null {
+  if (!code) return null;
+  return description ? `${code} · ${description}` : code;
+}
+
+export interface CorrectableCode {
+  field: string;
+  label: string;
+  value: string | null;
+  /** The code with its description, for display. `value` stays the bare code (the correction compares and sends it). */
+  display: string | null;
+  /** The firm's code with its description when it differs from the AI's; null otherwise. */
+  firmDisplay: string | null;
+}
+
+function codeRow(field: string, label: string, c: ReviewCode): CorrectableCode {
+  return {
+    field,
+    label,
+    value: c.code,
+    display: codeWithDescription(c.code, c.description),
+    firmDisplay: c.mismatch ? codeWithDescription(c.firmCode, c.firmDescription) : null,
+  };
+}
+
 /** The coded fields 101 corrects (the code must be in the line's code set; the server refuses one that is not). */
-export function correctableCodes(line: ReviewLine): Array<{ field: string; label: string; value: string | null }> {
+export function correctableCodes(line: ReviewLine): CorrectableCode[] {
   if (line.type === 'Fee') {
-    return [
-      { field: 'TaskCode', label: 'Task code', value: line.codes.task.code },
-      { field: 'ActivityCode', label: 'Activity code', value: line.codes.activity.code },
-    ];
+    return [codeRow('TaskCode', 'Task code', line.codes.task), codeRow('ActivityCode', 'Activity code', line.codes.activity)];
   }
-  if (line.type === 'Expense') return [{ field: 'ExpenseCode', label: 'Expense code', value: line.codes.expense.code }];
+  if (line.type === 'Expense') return [codeRow('ExpenseCode', 'Expense code', line.codes.expense)];
   return [];
 }
 
@@ -458,8 +481,13 @@ function WhatWasRead({
           <Caption1 className={s.fieldLabel}>{code.label}</Caption1>
           <div className={s.fieldBody}>
             <span>
-              <EvidenceLine tier="Interpretation" text={code.value} subject={code.label} source="Coded by AI" /> {code.value && <AiFieldTag />}
+              <EvidenceLine tier="Interpretation" text={code.display} subject={code.label} source="Coded by AI" /> {code.value && <AiFieldTag />}
             </span>
+            {code.firmDisplay && (
+              <Caption1 className={s.muted} data-testid={`firm-${code.field}`}>
+                Firm billed: {code.firmDisplay}
+              </Caption1>
+            )}
           </div>
           {canCorrect && (
             <Tooltip content={`Correct ${code.label}`} relationship="label">

@@ -16,12 +16,14 @@
  *   1. The four steps render in order.
  *   2. Add file(s) is REQUIRED — Next is disabled with no document (negative).
  *   3. Finish creates a valid `sprk_analysis` and loads the file to a workspace tab.
- *   4. Associate-to (step 1) is Field-Mapping-driven (`applyFieldMappings` parent→analysis).
- *   5. Send Email next-step is Field-Mapping-driven (mapped subject/body win).
- *   6. ADR-021: renders under both light and dark Fluent themes.
+ *   4. Associate-to (step 1): the create names the chosen parent as the BFF `mappingSource`; the payload holds only
+ *      what the user entered (field-mapping-server-write-path-r1 task 028, FR-16). No client mapping request.
+ *   5. Send Email next-step: the request carries the user-typed subject/body as they are (task 028, FR-17).
+ *   6. The server's create warnings reach the success panel.
+ *   7. ADR-021: renders under both light and dark Fluent themes.
  *
- * `applyFieldMappings` is mocked at the module boundary (BFF call); everything else
- * (CreateRecordWizard, AssociateToStep, WizardFollowOns) is the REAL shared-lib impl.
+ * Everything (CreateRecordWizard, AssociateToStep, WizardFollowOns, the BFF create adapter) is the REAL shared-lib impl;
+ * only the BFF itself is faked, at the `authenticatedFetch` boundary.
  */
 
 import '@testing-library/jest-dom';
@@ -38,16 +40,6 @@ class ResizeObserverStub {
 (global as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver = ResizeObserverStub;
 
 import type { IDataService, INavigationService, LookupResult } from '@spaarke/ui-components';
-
-const mockApplyFieldMappings = jest.fn().mockResolvedValue({ profileFound: false, fieldsMapped: [], warnings: [] });
-
-jest.mock('@spaarke/ui-components', () => {
-  const actual = jest.requireActual('@spaarke/ui-components');
-  return {
-    ...actual,
-    applyFieldMappings: (...args: unknown[]) => mockApplyFieldMappings(...args),
-  };
-});
 
 import CreateAnalysisWizardWidget from '../CreateAnalysisWizardWidget';
 import type { CreateAnalysisWizardData } from '../CreateAnalysisWizardWidget';
@@ -88,8 +80,17 @@ function buildNavigationService(lookupResult: LookupResult[] = []): INavigationS
  */
 /** The tables created through the fake BFF route, in order (reset per test). */
 const childRecordPosts: string[] = [];
+/** The full URL of each create (query string included), in order (reset per test). */
+const childRecordUrls: string[] = [];
+/** Every URL the widget asked the fake BFF for, in order (reset per test). */
+const requestedUrls: string[] = [];
+/** The `warnings` the fake BFF answers each create with (reset per test). */
+let childRecordWarnings: string[] | undefined;
 beforeEach(() => {
   childRecordPosts.length = 0;
+  childRecordUrls.length = 0;
+  requestedUrls.length = 0;
+  childRecordWarnings = undefined;
 });
 
 function routeChildRecords(
@@ -98,11 +99,18 @@ function routeChildRecords(
 ): CreateAnalysisWizardData['authenticatedFetch'] {
   return (async (input: RequestInfo, init?: RequestInit) => {
     const url = String(input);
-    const create = /\/api\/v1\/child-records\/([a-z_]+)$/.exec(url);
+    requestedUrls.push(url);
+    const create = /\/api\/v1\/child-records\/([a-z_]+)(\?.*)?$/.exec(url);
     if (create && init?.method === 'POST') {
       childRecordPosts.push(create[1]);
+      childRecordUrls.push(url);
       const id = await dataService.createRecord(create[1], JSON.parse(String(init.body)));
-      return { ok: true, status: 201, json: async () => ({ id }), text: async () => '' } as unknown as Response;
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ id, ...(childRecordWarnings ? { warnings: childRecordWarnings } : {}) }),
+        text: async () => '',
+      } as unknown as Response;
     }
     return inner(input as string, init);
   }) as CreateAnalysisWizardData['authenticatedFetch'];
@@ -159,8 +167,6 @@ function clickPrimary(label: 'Next' | 'Finish') {
 
 describe('CreateAnalysisWizardWidget', () => {
   beforeEach(() => {
-    mockApplyFieldMappings.mockClear();
-    mockApplyFieldMappings.mockResolvedValue({ profileFound: false, fieldsMapped: [], warnings: [] });
     (useDispatchPaneEvent as jest.Mock).mockReturnValue(jest.fn());
   });
 
@@ -299,125 +305,232 @@ describe('CreateAnalysisWizardWidget', () => {
     expect(bindValues).toContain('/sprk_agreementtypes(nda-type-id)');
   });
 
-  it('is Field-Mapping-driven for associate-to: applyFieldMappings runs parent -> sprk_analysis when a regarding record is picked in step 1', async () => {
-    const dataService = buildDataService();
-    // Two openLookup calls: first the step-1 AssociateToStep (matter), then the
-    // step-2 existing-document picker (document).
-    const navigationService: INavigationService = {
-      openRecord: jest.fn().mockResolvedValue(undefined),
-      openDialog: jest.fn().mockResolvedValue({ confirmed: true }),
-      closeDialog: jest.fn(),
-      openLookup: jest
+  // -------------------------------------------------------------------------
+  // field-mapping-server-write-path-r1 task 028 (FR-16, FR-17): the client maps nothing.
+  // -------------------------------------------------------------------------
+  describe('task 028: server-side field mapping (FR-16, FR-17)', () => {
+    /** Every key a create may carry: what the user entered or picked, the document bind, the wizard's own run status, and the regarding keys. */
+    const USER_AND_ROUTE_KEYS = [
+      'sprk_name',
+      'sprk_description',
+      'sprk_worktype',
+      'sprk_analysisstatus',
+      'sprk_documentid@odata.bind',
+    ];
+
+    function mattersAndDocumentNav(): INavigationService {
+      return {
+        openRecord: jest.fn().mockResolvedValue(undefined),
+        openDialog: jest.fn().mockResolvedValue({ confirmed: true }),
+        closeDialog: jest.fn(),
+        openLookup: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: 'matter-id', name: 'Smith v. Jones', entityType: 'sprk_matter' }])
+          .mockResolvedValueOnce([{ id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' }]),
+      };
+    }
+
+    /** Step 1: pick the regarding matter; step 2: the document; step 3: name + description; step 4: Finish. */
+    async function driveAssociatedToFinish(extraOnDetailsStep?: () => void) {
+      const selectRecordButton = screen.getByTestId('associate-to-step-select-record-button');
+      await act(async () => {
+        fireEvent.click(selectRecordButton);
+        await Promise.resolve();
+      });
+      await screen.findByText('Smith v. Jones');
+      clickPrimary('Next');
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+      fireEvent.change(screen.getByLabelText('Analysis description'), { target: { value: 'Reviewing the MSA.' } });
+      extraOnDetailsStep?.();
+      clickPrimary('Next');
+    }
+
+    async function finish() {
+      await act(async () => {
+        clickPrimary('Finish');
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+      });
+    }
+
+    it('with an association: creates through the BFF route naming the parent as the mapping source; the payload holds only what the user entered', async () => {
+      const dataService = buildDataService();
+      renderWidget(buildData({ dataService, navigationService: mattersAndDocumentNav(), workTypeValue: 100000001 }));
+
+      await driveAssociatedToFinish();
+      await finish();
+
+      await waitFor(() => expect(dataService.createRecord).toHaveBeenCalled());
+      // The parent is named as the mapping source on the create's own URL.
+      expect(childRecordUrls).toEqual([
+        'https://bff.example.com/api/v1/child-records/sprk_analysis?mappingSourceEntity=sprk_matter&mappingSourceId=matter-id',
+      ]);
+      // No mapped, default or owner value: the user's values, the document bind, the wizard's run status, the regarding keys.
+      const [, payload] = (dataService.createRecord as jest.Mock).mock.calls[0] as [string, Record<string, unknown>];
+      expect(payload).toMatchObject({
+        sprk_name: 'MSA Review',
+        sprk_description: 'Reviewing the MSA.',
+        sprk_worktype: 100000001,
+        sprk_analysisstatus: 1,
+        'sprk_documentid@odata.bind': '/sprk_documents(existing-doc-id)',
+      });
+      const extraKeys = Object.keys(payload).filter(k => !USER_AND_ROUTE_KEYS.includes(k));
+      expect(extraKeys.every(k => /regard/i.test(k))).toBe(true);
+      expect(Object.keys(payload).some(k => /owner|^sprk_searchindex|AI_Search_Index|subject/i.test(k))).toBe(false);
+      // The client makes no mapping request of its own.
+      expect(requestedUrls.filter(u => u.includes('/field-mappings'))).toEqual([]);
+    });
+
+    it('without an association: creates on the plain route and names no mapping source', async () => {
+      const dataService = buildDataService();
+      renderWidget(buildData({ dataService }));
+
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'Standalone' } });
+      clickPrimary('Next');
+      await finish();
+
+      await waitFor(() => expect(dataService.createRecord).toHaveBeenCalled());
+      expect(childRecordUrls).toEqual(['https://bff.example.com/api/v1/child-records/sprk_analysis']);
+      const [, payload] = (dataService.createRecord as jest.Mock).mock.calls[0] as [string, Record<string, unknown>];
+      expect(Object.keys(payload).sort()).toEqual([...USER_AND_ROUTE_KEYS].sort());
+      expect(requestedUrls.filter(u => u.includes('/field-mappings'))).toEqual([]);
+    });
+
+    it('shows the warnings the server sends with the create on the success panel', async () => {
+      childRecordWarnings = ['The related record is not available to you, so no fields were copied from it.'];
+      renderWidget(buildData({ navigationService: mattersAndDocumentNav() }));
+
+      await driveAssociatedToFinish();
+      await finish();
+
+      expect(
+        await screen.findByText('The related record is not available to you, so no fields were copied from it.')
+      ).toBeInTheDocument();
+      expect(await screen.findByText('Analysis created with warnings')).toBeInTheDocument();
+    });
+
+    it('Send Email next-step: the request carries the user-typed subject and body as they are, with the analysis as its association', async () => {
+      const dataService = buildDataService();
+      const authenticatedFetch = jest
         .fn()
-        .mockResolvedValueOnce([{ id: 'matter-id', name: 'Smith v. Jones', entityType: 'sprk_matter' }])
-        .mockResolvedValueOnce([{ id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' }]),
-    };
-    const data = buildData({ dataService, navigationService });
+        .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
+      const searchUsers = jest
+        .fn()
+        .mockResolvedValue([{ id: 'user-1', name: 'Jordan Lee', email: 'jordan.lee@firm.example' }]);
+      const data = buildData({ dataService, authenticatedFetch, searchUsers });
 
-    renderWidget(data);
+      renderWidget(data);
 
-    // Step 1: pick the regarding record via AssociateToStep's "Select Record" button.
-    const selectRecordButton = screen.getByTestId('associate-to-step-select-record-button');
-    await act(async () => {
-      fireEvent.click(selectRecordButton);
-      await Promise.resolve();
-    });
-    await screen.findByText('Smith v. Jones');
-    clickPrimary('Next');
+      // Step 1: skip Associate To. Step 2: existing document. Step 3: name.
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+      clickPrimary('Next');
 
-    // Step 2: select existing document.
-    await selectExistingDocument();
-    clickPrimary('Next');
+      // Step 4: select the Send Email follow-on card, then advance into its step.
+      fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
+      clickPrimary('Next');
 
-    // Step 3: name.
-    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
-    clickPrimary('Next');
+      // Send Email step (task 182: the shared EmailComposer, compose-only): pick a "To" user via the recipient search.
+      const toInput = await screen.findByRole('textbox', { name: 'To' });
+      fireEvent.change(toInput, { target: { value: 'jo' } });
+      fireEvent.click(await screen.findByText(/Jordan Lee/));
 
-    // Step 4: finish.
-    await act(async () => {
-      clickPrimary('Finish');
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Subject' }), { target: { value: 'User-typed subject' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Switch to plain text' }));
+      fireEvent.change(await screen.findByRole('textbox', { name: 'Message body' }), {
+        target: { value: 'User-typed body' },
+      });
 
-    await waitFor(() => expect(dataService.createRecord).toHaveBeenCalled());
-    expect(mockApplyFieldMappings).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceEntity: 'sprk_matter', sourceId: 'matter-id', targetEntity: 'sprk_analysis' })
-    );
-  });
+      await finish();
 
-  it('is Field-Mapping-driven for the Send Email next-step: applyFieldMappings runs sprk_analysis -> sprk_communication and mapped subject/body win over user input', async () => {
-    mockApplyFieldMappings.mockImplementation(
-      async (args: { targetEntity: string; payload: Record<string, unknown> }) => {
-        if (args.targetEntity === 'sprk_communication') {
-          args.payload['subject'] = 'Mapped subject from profile';
-          args.payload['description'] = 'Mapped body from profile';
-          return { profileFound: true, fieldsMapped: ['subject', 'description'], warnings: [] };
-        }
-        return { profileFound: false, fieldsMapped: [], warnings: [] };
-      }
-    );
-
-    const dataService = buildDataService();
-    const authenticatedFetch = jest
-      .fn()
-      .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
-    const searchUsers = jest
-      .fn()
-      .mockResolvedValue([{ id: 'user-1', name: 'Jordan Lee', email: 'jordan.lee@firm.example' }]);
-    const data = buildData({ dataService, authenticatedFetch, searchUsers });
-
-    renderWidget(data);
-
-    // Step 1: skip Associate To.
-    skipAssociateTo();
-    // Step 2: existing document.
-    await selectExistingDocument();
-    clickPrimary('Next');
-
-    // Step 3: name.
-    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
-    clickPrimary('Next');
-
-    // Step 4: select the Send Email follow-on card, then advance into its step.
-    fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
-    clickPrimary('Next');
-
-    // Send Email step (task 182: the shared EmailComposer, compose-only): pick a "To" user via the recipient search.
-    const toInput = await screen.findByRole('textbox', { name: 'To' });
-    fireEvent.change(toInput, { target: { value: 'jo' } });
-    fireEvent.click(await screen.findByText(/Jordan Lee/));
-
-    fireEvent.change(screen.getByRole('textbox', { name: 'Subject' }), { target: { value: 'User-typed subject' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to plain text' }));
-    fireEvent.change(await screen.findByRole('textbox', { name: 'Message body' }), {
-      target: { value: 'User-typed body' },
+      await waitFor(() => expect(dataService.createRecord).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(authenticatedFetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/communications/send'),
+          expect.objectContaining({ method: 'POST' })
+        )
+      );
+      const sendCall = authenticatedFetch.mock.calls.find(([url]: [string]) =>
+        url.includes('/api/communications/send')
+      );
+      const sentBody = JSON.parse(sendCall[1].body as string);
+      // Exactly what was typed; the send path fills an EMPTY one server-side and never replaces a typed one.
+      expect(sentBody.subject).toBe('User-typed subject');
+      expect(sentBody.body).toBe('User-typed body');
+      expect(sentBody.bodyFormat).toBe('PlainText');
+      // Task 182: sent through the composer's request path - To from the composer, filed under the analysis.
+      expect(sentBody.to).toEqual(['jordan.lee@firm.example']);
+      expect(sentBody.associations).toEqual([expect.objectContaining({ entityType: 'sprk_analysis' })]);
+      // The client computes no mapped text: no mapping request at all.
+      const allUrls = [...requestedUrls, ...authenticatedFetch.mock.calls.map(([url]: [string]) => String(url))];
+      expect(allUrls.filter(u => u.includes('/field-mappings'))).toEqual([]);
     });
 
-    await act(async () => {
-      clickPrimary('Finish');
-      await Promise.resolve();
-      await Promise.resolve();
+    it('Send Email next-step: an empty subject and body do not block Finish and are sent empty, for the server to fill (owner 2026-11-25)', async () => {
+      const dataService = buildDataService();
+      const authenticatedFetch = jest
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
+      const searchUsers = jest
+        .fn()
+        .mockResolvedValue([{ id: 'user-1', name: 'Jordan Lee', email: 'jordan.lee@firm.example' }]);
+      renderWidget(buildData({ dataService, authenticatedFetch, searchUsers }));
+
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+      clickPrimary('Next');
+      fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
+      clickPrimary('Next');
+
+      // A recipient only: no subject, no body.
+      const toInput = await screen.findByRole('textbox', { name: 'To' });
+      fireEvent.change(toInput, { target: { value: 'jo' } });
+      fireEvent.click(await screen.findByText(/Jordan Lee/));
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled());
+      await finish();
+
+      await waitFor(() =>
+        expect(authenticatedFetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/communications/send'),
+          expect.objectContaining({ method: 'POST' })
+        )
+      );
+      const sendCall = authenticatedFetch.mock.calls.find(([url]: [string]) =>
+        url.includes('/api/communications/send')
+      );
+      const sentBody = JSON.parse(sendCall[1].body as string);
+      expect(String(sentBody.subject ?? '').trim()).toBe('');
+      expect(sentBody.associations).toEqual([expect.objectContaining({ entityType: 'sprk_analysis' })]);
     });
 
-    await waitFor(() => expect(dataService.createRecord).toHaveBeenCalled());
-    expect(mockApplyFieldMappings).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceEntity: 'sprk_analysis', targetEntity: 'sprk_communication' })
-    );
+    it('Send Email next-step: with no recipient, Finish stays disabled (negative)', async () => {
+      const dataService = buildDataService();
+      const authenticatedFetch = jest
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
+      renderWidget(buildData({ dataService, authenticatedFetch }));
 
-    await waitFor(() =>
-      expect(authenticatedFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/communications/send'),
-        expect.objectContaining({ method: 'POST' })
-      )
-    );
-    const sendCall = authenticatedFetch.mock.calls.find(([url]: [string]) => url.includes('/api/communications/send'));
-    const sentBody = JSON.parse(sendCall[1].body as string);
-    expect(sentBody.subject).toBe('Mapped subject from profile');
-    expect(sentBody.body).toBe('Mapped body from profile');
-    // Task 182: sent through the composer's request path — To from the composer, filed under the analysis.
-    expect(sentBody.to).toEqual(['jordan.lee@firm.example']);
-    expect(sentBody.associations).toEqual([expect.objectContaining({ entityType: 'sprk_analysis' })]);
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+      clickPrimary('Next');
+      fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
+      clickPrimary('Next');
+
+      await screen.findByRole('textbox', { name: 'To' });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Subject' }), { target: { value: 'A subject' } });
+      expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
+    });
   });
 
   it('Create To Do follow-on: Assigned To opens the Dataverse side pane over active contacts (ontology 180, D-219)', async () => {

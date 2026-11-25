@@ -8,7 +8,7 @@ import * as React from 'react';
 import { Button, Caption1, Link, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { ErrorCircle16Filled, Info16Regular, Warning16Filled } from '@fluentui/react-icons';
 import type { ReviewLine } from '../services/invoiceReviewApi';
-import { findingText, groupByRule, planSuggestion, type RuleGroup, type SuggestionPlan } from '../services/reviewModel';
+import { findingText, groupByRule, groupChecks, planSuggestion, type CheckGroup, type RuleGroup, type SuggestionPlan } from '../services/reviewModel';
 
 const useStyles = makeStyles({
   root: { flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS, padding: tokens.spacingHorizontalM },
@@ -42,7 +42,20 @@ export interface RuleGroupsProps {
 export function RuleGroups({ lines, canWrite, busy, onSelectLine, onApply }: RuleGroupsProps) {
   const s = useStyles();
   const groups = React.useMemo(() => groupByRule(lines), [lines]);
-  if (groups.length === 0) return <div className={s.empty}>No rule findings on these lines.</div>;
+  const checks = React.useMemo(() => groupChecks(lines), [lines]);
+  if (groups.length === 0 && checks.length === 0) return <div className={s.empty}>No rule findings or other checks on these lines.</div>;
+  const lineLinks = (ls: ReviewLine[]) => (
+    <div className={s.lines}>
+      {ls
+        .slice()
+        .sort((a, b) => a.sequence - b.sequence)
+        .map(l => (
+          <Link key={l.id} onClick={() => onSelectLine(l.id)} aria-label={`Open line ${l.sequence}`}>
+            Line {l.sequence}
+          </Link>
+        ))}
+    </div>
+  );
   return (
     <div className={s.root} aria-label="Findings by rule">
       {groups.map(g => {
@@ -50,7 +63,7 @@ export function RuleGroups({ lines, canWrite, busy, onSelectLine, onApply }: Rul
         const Icon = g.severity === 'Critical' ? ErrorCircle16Filled : g.severity === 'Warning' ? Warning16Filled : Info16Regular;
         const tone = g.severity === 'Critical' ? s.critical : g.severity === 'Warning' ? s.warn : s.info;
         return (
-          <section key={g.key} className={s.group} data-testid={`rule-group-${g.key}`} aria-label={`${g.label}, ${g.lines.length} lines`}>
+          <section key={g.key} className={s.group} data-testid={`rule-group-${g.key}`} aria-label={`${g.label}, ${g.lines.length} ${g.lines.length === 1 ? 'line' : 'lines'}`}>
             <div className={s.head}>
               <Icon className={tone} />
               <Text weight="semibold" className={s.title}>
@@ -63,16 +76,28 @@ export function RuleGroups({ lines, canWrite, busy, onSelectLine, onApply }: Rul
               )}
             </div>
             <Caption1 className={s.muted}>{findingText(g.sample)}</Caption1>
-            <div className={s.lines}>
-              {g.lines
-                .slice()
-                .sort((a, b) => a.sequence - b.sequence)
-                .map(l => (
-                  <Link key={l.id} onClick={() => onSelectLine(l.id)} aria-label={`Open line ${l.sequence}`}>
-                    Line {l.sequence}
-                  </Link>
-                ))}
+            {lineLinks(g.lines)}
+          </section>
+        );
+      })}
+      {checks.length > 0 && (
+        <Caption1 className={s.muted} role="heading" aria-level={3} data-testid="other-checks-heading">
+          Other checks (not billing rules)
+        </Caption1>
+      )}
+      {checks.map((c: CheckGroup) => {
+        const Icon = c.severity === 'Warning' ? Warning16Filled : Info16Regular;
+        const tone = c.severity === 'Warning' ? s.warn : s.info;
+        return (
+          <section key={c.key} className={s.group} data-testid={`check-group-${c.key}`} aria-label={`${c.label}, ${c.lines.length} ${c.lines.length === 1 ? 'line' : 'lines'}`}>
+            <div className={s.head}>
+              <Icon className={tone} />
+              <Text weight="semibold" className={s.title}>
+                {c.label} · {c.lines.length} {c.lines.length === 1 ? 'line' : 'lines'}
+              </Text>
             </div>
+            <Caption1 className={s.muted}>{c.text}</Caption1>
+            {lineLinks(c.lines)}
           </section>
         );
       })}
