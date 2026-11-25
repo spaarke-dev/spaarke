@@ -4,7 +4,7 @@
     <title>Rule wizard and "How this was determined" name columns by display name and choice values by label (#3040 DI-169, #3020 DI-165)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF Signals/Ontology services (.cs) and the shared RuleWizard UI (.tsx); may add a cached metadata read.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -66,4 +66,5 @@ Entry points (search by name; origin/master e70ff38894): `src/server/api/Sprk.Bf
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt210); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3092 squash-merged to master (b005279c4d, Closes #3040 and #3020) after an independent Opus adversarial review (no F1-F3) and one fix round (F4: "an opened date"; the metadata comment names the Redis-outage behaviour). Columns are named by a static display-name map over the 50 authorable columns, guarded against the allow-list and SpaarkeMaster Entity.xml (mutation-proven); the authoring catalog carries an additive fieldLabels field the RuleWizard shows. Choice/status values in the plain line read by label from the existing MetadataService (app identity, Redis 6 h, org-wide), only when a rule tests a choice value, falling back to the number on any failure; formal line, stored bodies and tokens unchanged. Known limits: one Redis GET per table per description for choice tests; "Status" vs "Status Reason" wording; app-identity labels up to 6 h stale. Dev check after the next uac-r2 dev BFF build and the Console auto-deploy.</completion>
 </task>

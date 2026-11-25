@@ -4,7 +4,7 @@
     <title>Nightly D-170 close reads only the not-in-force policies that still have open Signals (#3014, DI-164)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the nightly Signal close (.cs) in BFF Signals; changes which query selects Signals to close.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -61,4 +61,5 @@ Task 204 (PR #3011) made `SignalClosureService.ReadPoliciesNotInForceAsync` page
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt209); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3087 squash-merged to master (e9393ace47, Closes #3014) after an independent Opus adversarial review and one fix round (F3: a test now guards the join's link filter; mutations dropping the link filter, the allowlist, the Off/Retired filter, or widening to Docketing all fail it; K3 one open-status definition; K4 cut-short log counts handled policies). The nightly close reads Open/Acknowledged Signals joined to Off/Inactive closable policies in one paged query (5,000 per page, 200 pages max, truncation fails the run), then runs the unchanged per-policy close for policies both reads name. Signal reads for 500 Off policies with 3 having open Signals: 500 → 4. Known limits: K2 the join's cost on real Dataverse (main session times it in the nightly run after deploy); a policy switched back On between the reads is not closed that run. DI-172 #3091 filed for the same shape in the evidence redaction sweep. Reaches dev with the next uac-r2 dev BFF build.</completion>
 </task>
