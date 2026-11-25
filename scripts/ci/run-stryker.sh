@@ -75,8 +75,17 @@ types="$(
 )"
 type_re="($(echo "$types" | paste -sd'|'))"
 
+# Contract tests (tests/integration/contract/**) are left out of the referencing classes. Most
+# boot the whole API host per class, and an access filter is named by many of them: on
+# 2026-11-24 (#1821) EntityAccessFilter selected 42 classes, 28 of them contract classes from
+# 13 files, the initial test run took 42 min instead of ~12 and the night hit the 190-min cap
+# with 135 mutants untested; without them the same night selects 14 classes. The dedicated suites (SEEDS, tests/integration/auth/**) still
+# run. Cost: a mutant only a contract test would kill is reported as surviving, which raises
+# an alert rather than hiding one.
+contract_dir="tests/integration/contract/"
 classes="$(
   { grep -rlwE "$type_re" tests --include='*.cs' || true; } | sort -u | while IFS= read -r tf; do
+    case "$tf" in "$contract_dir"*) continue ;; esac
     tns="$(grep -m1 -oE '^namespace[[:space:]]+[A-Za-z0-9_.]+' "$tf" | awk '{print $2}')"
     case "$tns" in
       Sprk.Bff.Api.Tests|Sprk.Bff.Api.Tests.*) ;;
@@ -91,7 +100,8 @@ while IFS= read -r c; do
   [ -n "$c" ] || continue
   include+="${include:+|}FullyQualifiedName~${c}"
 done <<<"$classes"
-echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count}"
+contract_files="$({ grep -rlwE "$type_re" "$contract_dir" --include='*.cs' 2>/dev/null || true; } | grep -c . || true)"
+echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count} contract-files-left-out=${contract_files}"
 # A selection this large usually means a type name is a common word; the initial test run
 # alone then nears the job cap (#1821: 249 classes, cancelled). Say so where it is visible.
 if [ "$class_count" -gt 150 ]; then
