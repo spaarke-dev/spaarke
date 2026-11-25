@@ -101,6 +101,10 @@ public class FeatureRolePrivilegeGuardTests
     private const string OrganizationTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_OrganizationType_Ref.xml:3-18,38-53";
     private const string DocumentTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_documenttype_ref.xml:3-18";
 
+    /// <summary>The model-driven form lookups on the contact-type reference table, from a contact and from a contact-organization row
+    /// (no BFF route asks them; Dataverse asks AppendTo on the referenced row when the form sets the lookup).</summary>
+    private const string ContactTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_ContactType_Ref.xml:3-18,38-53";
+
     /// <summary>The quick create's source Read (one of EntityAccessFilter's tables; contact is the assignee row's).</summary>
     private const string QuickCreateSource = Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:246-260; " + Bff + "Api/Filters/EntityAccessFilter.cs:115-155";
 
@@ -225,6 +229,8 @@ public class FeatureRolePrivilegeGuardTests
         // tables. Core User holds AppendTo on them, before Basic User loses it.
         .. For("Organization type on an organization (model-driven form)", [Core], "Basic", OrganizationTypeBind, "prvAppendTosprk_OrganizationType_Ref"),
         .. For("Document type on a practice area matrix row (model-driven form)", [Core], "Basic", DocumentTypeBind, "prvAppendTosprk_documenttype_ref"),
+        // ISS-043 (owner 2026-11-25): the same for the contact type; sprk_contacttype_ref is organization-owned (OrgOwned in its Entity.xml), so Basic is the least depth that serves it.
+        .. For("Contact type on a contact (model-driven form)", [Core], "Basic", ContactTypeBind, "prvAppendTosprk_ContactType_Ref"),
 
         // Events, typed route: POST /api/v1/events (Create privilege in the route filter; the rest in the service as the caller).
         .. For("Event (typed route)", [Core], "Basic", Bff + "Api/Events/EventEndpoints.cs:66,131", "prvCreatesprk_Event"),
@@ -2203,10 +2209,11 @@ public class FeatureRolePrivilegeGuardTests
 
     /// <summary>Change gaps that no expectations file carries yet, each with the newest expectations version it was raised against; the same
     /// rule as <see cref="PendingNextReleaseRemovalGaps"/> for the config's <c>changes</c>: the published files are not edited, so the next
-    /// release's expectations file must carry each entry in its role's present list; then the gap leaves this list. None now: ISS-042
-    /// (event types readable at Global, raised against 1.3.2.0) is carried by 1.3.3.0 and left the list.</summary>
+    /// release's expectations file must carry each entry in its role's present list; then the gap leaves this list. ISS-043 (Core User's
+    /// AppendTo on the contact type table, raised against 1.3.3.0). ISS-042 (event types readable at Global, raised against 1.3.2.0) is
+    /// carried by 1.3.3.0 and left the list.</summary>
     internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseChangeGaps =
-        new Dictionary<string, Version>(StringComparer.Ordinal);
+        new Dictionary<string, Version>(StringComparer.Ordinal) { ["ISS-043"] = new Version(1, 3, 3, 0) };
 
     /// <summary>One expectations file: its version and its roles.</summary>
     internal sealed record ExpectationsRelease(Version Version, IReadOnlyDictionary<string, RoleExpectation> Roles);
