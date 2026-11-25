@@ -103,3 +103,10 @@ src/client/office-addins/shared/taskpane/components/icons/MicrosoftToDoIcon.tsx 
 
 # --- Deliberate: two SecureRecordOwnerRoleSet readers (#3103, closed as a record) ---
 src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerRoleSet.cs | src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordOwnerRoleSet.cs | #3103 | Two readers by design (control plane has no BFF reference); SecureRecordOwnerRoleSetParityTests keeps them in step.
+
+# --- Tracked: SmartTodo leftovers after #3060 (#3122, #3097, #3052) ---
+src/solutions/LegalWorkspace/src/services/xrmProvider.ts | src/solutions/SmartTodo/src/services/xrmProvider.ts | #3122 | Copied Xrm access shim; to move into a shared package.
+src/solutions/LegalWorkspace/src/types/entities.ts | src/solutions/SmartTodo/src/types/entities.ts | #3122 | Copied entity types; to move into a shared package.
+src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/TodoAISummaryDialog.tsx | src/solutions/LegalWorkspace/src/components/ActivityFeed/AISummaryDialog.tsx | #3122 | Two AI summary dialogs share copied presentation; one shared frame planned.
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/solutions/SmartTodo/src/services/childRecordWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+src/solutions/Notepad/vite.config.ts | src/solutions/SmartTodo/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
