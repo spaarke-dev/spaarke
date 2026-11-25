@@ -15,4 +15,9 @@
 | 7 NFR-01 | Not yet usable | App Insights since 00:40Z (~33% sampled) shows 1 `spaarke_list_decision_page` call at 04:24:34Z (1,942 ms, 10 rows). No plan, lookup or complete calls are possible with a billing-only lane. |
 | 8 Runbook re-run | Not run | |
 
+**Seed root cause (read-only Dataverse check, ~04:50Z 2026-11-25).**
+- All of dev holds only 10 open Decide Signals, all `BILL-SYSTEM-SUBMISSION`. The test user already sees every one, so giving them access to more matters (the owner's choice) cannot add anything.
+- 183 open `POL-MATTER-NOBUDGET` Decide Signals were resolved "Policy Retired" by `mi-ontology-writer-dev` between about 02:00 and 02:31Z 2026-11-25. The policy row is still Active.
+- Asked ontology-r1 (a) why, and (b) the supported way to bring back non-billing Decide items.
+
 Open: (1) non-billing seed for the test user; (2) whether the run was signed in as the non-admin test user (the model's reply greets the user by first name).
