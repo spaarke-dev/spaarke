@@ -4,7 +4,7 @@
     <title>Playbook run authorization into one shared method</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>after 001 (same filter file)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and auth; refactors PlaybookAuthorizationFilter (.cs) with frozen REST responses</rigor-reason>
     <model-tier>opus</model-tier>
@@ -111,7 +111,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-05 prerequisite. Two adversarial-verifier passes (auth).</notes>
+  <notes>Spec FR-05 prerequisite. Two adversarial-verifier passes (auth). Completed 2026-11-25: Run-mode checks moved into DecideRunAsync; public PlaybookAuthorizationFilter.AuthorizePlaybookRunAsync returns PlaybookRunAuthorization (outcome, reasonCode, run user); REST unchanged (contract tests unmodified, 19 new parity tests); publish +0.002 MB; no CVE. Decisions, reason-code map and the no-row (ADR-028 A10) mapping: notes/007-decisions.md. Reviews pending: unified-access-control-r2, spaarke-ontology-platform-r1. Verifier passes: main session. rework: none task 007</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
