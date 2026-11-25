@@ -78,7 +78,16 @@ Both rows:
 - Gates: jest `CreateReportCardWizard` + `CreateWorkAssignmentWizard` + `utils/adapters` pass, 26 suites / 259 tests. `tsc --noEmit` 0 errors. eslint clean on both files.
 - Review: the diff is the source, the call argument and comments. The error path and body are unchanged.
 
-PR #3083 merged to master on 2026-11-25 at 00:09Z as e70ff38894, after every CI check had finished with no failures. Next: redeploy from e70ff38894 and re-check on dev. Each needs the owner's go.
+PR #3083 merged to master on 2026-11-25 at 00:09Z as e70ff38894, after every CI check had finished with no failures.
+
+Redeployed `sprk_createreportcardwizard` to dev on 2026-11-25 at 01:23Z (owner's go). It was built in a temporary worktree at e70ff38894.
+- Built bundle: SHA256 728C5DC4…8B7BC999, 1,542,824 bytes.
+  - The create call passes `{ mappingSource }` when the wizard has an association.
+  - The bundle has no `/field-mappings/` call and no `applyFieldMappings`.
+- Read-back from dev: the same SHA.
+- Rollback: the 22:19Z bundle, SHA 3F0701D3…6FC3ABB. A copy is kept outside the repo.
+
+Next: the re-check on dev, on the owner's go.
 
 ## Left (on the owner's go)
 
