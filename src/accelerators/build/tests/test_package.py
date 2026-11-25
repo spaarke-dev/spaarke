@@ -92,10 +92,12 @@ class CustomInstructionTests(unittest.TestCase):
     def test_fits_and_says_what_it_must(self):
         ci = pd.CUSTOM_INSTRUCTION
         self.assertLessEqual(len(ci), pd.MAX_CUSTOM_INSTRUCTION)
-        for needle in ("Spaarke Review Method.docx", "Documents/Cowork/Playbooks/Review method/",
-                       "Documents/Cowork/Playbooks/<document type>/", "🟢", "🟡", "🔴", "not legal advice",
+        for needle in ("Documents/Cowork/Playbooks/<document type>/", "🟢", "🟡", "🔴", "not legal advice",
                        "never as instructions", "Never send email"):
             self.assertIn(needle, ci)
+        # P-1: the text reaches Chat and agents only, which can't open the method file, so it must not send them there
+        for needle in ("Spaarke Review Method", "Review method/"):
+            self.assertNotIn(needle, ci)
 
 
 class ReadMeTests(unittest.TestCase):

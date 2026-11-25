@@ -14,8 +14,9 @@ DECOY_CODE = "SRM-DECOY-1"
 PROTOCOL_LINE = "- Review protocol: Spaarke Review Method v1.0"
 MAX_CUSTOM_INSTRUCTION = 1500
 
+# No line naming the review method file: P-1 (2026-11-25) showed this text reaches Copilot Chat and agents only, not
+# Cowork or Word, and agents can't open that file ("could not be located"). Skills and agents carry the method.
 CUSTOM_INSTRUCTION = """For legal document reviews:
-- Reviews against a playbook follow the Spaarke Review Method in "Spaarke Review Method.docx", in Documents/Cowork/Playbooks/Review method/. Read it first, then name the review protocol and verification code it requires.
 - The playbook for each document type is in Documents/Cowork/Playbooks/<document type>/ (for example NDA or Legal Hold Notice). In Word, I attach it myself. In Cowork, the Spaarke skills find it. If I ask for a review without a playbook, ask me to attach the one for the document type. Never use a playbook for another document type.
 - Show ratings with colours: 🟢 meets, 🟡 acceptable fallback or needs review, 🔴 does not meet or escalate.
 - Results are drafts for attorney review, not legal advice.
@@ -305,7 +306,8 @@ def render_readme(out_path, version, created=None):
         "(the folder Cowork made; nothing in it is replaced). Keep the folder and file names as they are.",
         "Open Spaarke – Custom instruction.txt and copy all of it. In Copilot, go to Settings › Personalization › "
         "Custom instructions and paste it below anything you already have there (it is one block that starts "
-        "\"For legal document reviews:\", so your own instructions stay as they are). Save.",
+        "\"For legal document reviews:\", so your own instructions stay as they are). Save. It applies in Copilot "
+        "chats and agents; Cowork and Word don't read it.",
         "Optional, in Cowork: type /accelerator-setup once to record your name and defaults.",
     ], 1):
         d.add_paragraph(f"{i}. {s}").paragraph_format.left_indent = Inches(0.25)
