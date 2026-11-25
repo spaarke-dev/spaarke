@@ -4,7 +4,7 @@
     <title>EmailComposer MCP host (sibling of the Xrm host)</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds .ts code to @spaarke/ui-components (shared library consumed by the Console); tags include react and frontend</rigor-reason>
     <model-tier>sonnet</model-tier>

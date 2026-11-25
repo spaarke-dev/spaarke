@@ -56,6 +56,19 @@ export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
 export { useXrmEmailHostProps } from './useXrmEmailHostProps';
 export type { XrmEmailHostProps, UseXrmEmailHostPropsOptions } from './useXrmEmailHostProps';
 
+// MCP-backed host (spaarkeai-mcp-bff-api-r2 task 011): the sibling of the Xrm host for a Copilot widget. The engine is
+// unchanged; the host injects a tool-call transport (McpToolCaller) instead of Xrm.
+export type { McpToolCaller, McpToolCallResult } from './mcpToolCaller';
+export { createMcpEmailComposeHandlers, newIdempotencyKey } from './createMcpEmailComposeHandlers';
+export type {
+  McpEmailComposeHandlers,
+  McpEmailRegardingMatter,
+  McpMatterDocument,
+  CreateMcpEmailComposeHandlersOptions,
+} from './createMcpEmailComposeHandlers';
+export { useMcpEmailHostProps } from './useMcpEmailHostProps';
+export type { McpEmailHostProps, UseMcpEmailHostPropsOptions } from './useMcpEmailHostProps';
+
 // Pattern B launcher — opens the standalone Email code page (`sprk_emailpage`)
 // as a centered modal dialog for a specific `sprk_communication` record.
 // Callers (e.g. a Messages "open email" icon) invoke this instead of
