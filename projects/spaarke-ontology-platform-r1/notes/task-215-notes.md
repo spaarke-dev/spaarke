@@ -81,7 +81,7 @@ below).
 
 ## Tests
 
-- New: `tests/integration/data-mutation/Signals/AssignTaskRecipientGateRepresentationTableTests.cs`, 24 rows. For each
+- New: `tests/integration/data-mutation/Signals/AssignTaskRecipientGateRepresentationTableTests.cs`, 24 rows (26 after fix round 1, below). For each
   representation outcome it checks the verdict, the warning, the user emailed, how many times Restricted was read, and that the
   external path was never entered. It uses the real gate decision, the real `ContactUserRepresentation`, the real binder oid
   decision and the real eligibility rule. Rows: none, one active, one disabled, one not a person, several, several with one
@@ -128,4 +128,28 @@ below).
   which is not a copy of this rule.
 - Not run here: the adversarial reviewers (the main session runs two, plus uac-r2's review).
 
-rework: none task 215
+## Fix round 1 (both independent reviews: no gate defect; one test finding plus two rows)
+
+- **F2, the "external path never entered" check was blind.** The default contact was plane External with no oid. That makes
+  `ContactBindingDecision.ReadBinding` answer Unreadable and `IsOnboardedWithEmail` false. So a row misrouted to
+  `DecideExternalAsync` was refused no_access at the onboarding check, before either seam that set the sentinel. The header
+  and default-row comments said otherwise.
+  - Fix: the default contact is now onboarded: active, a bound portal oid `PortalOid`, an email.
+  - `PortalOid` is carried by no candidate (`UsersByOid` holds only `BoundOid`), so no row's representation changes. The
+    oid-only rows still set their own `BoundOid` contact.
+  - The external seams now answer definitely: one CIAM composition, `ContactRights` = None, so the path refuses no_access
+    before the events-list rule. The sentinel is set on composing.
+  - The table gains an `externalPath` column. It is true only for "none": an onboarded contact that no internal user
+    represents, which is master's external path. Its outcome is no_access (no grant), the same as master's gate gives.
+  - Comments corrected.
+- **K2 rows added:** "one-support-user" (access mode 3) gives no_access (NotAPerson). "one-disabled-unknown" (`isdisabled`
+  null) gives no_access: `ClassifyEligibility` counts an unknown flag as Disabled.
+- Table now 26 rows. Master's gate file swapped in: 26 / 26 pass. Branch: 26 / 26.
+- **Mutation proof:** at `AssignTaskRecipientGate.cs:212`, `Users.Count == 0` was changed to
+  `Users.All(u => u.Eligibility != Eligible)`, so a contact whose users are all ineligible falls to the external path. The new
+  table fails 4 rows: one-disabled, one-not-a-person, one-support-user, one-disabled-unknown. Each fails only on
+  "Expected w.ExternalPathEntered to be False ... but found True"; the warning is no_access either way. The previous version of
+  the table passed 24 / 24 under the same mutant, which confirms it was blind. Both files were restored byte for byte.
+- No `src` change in this round.
+
+rework: fix-round-1 task 215
