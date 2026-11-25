@@ -509,3 +509,18 @@ Everything below is in the widget unless it says "shared". Every shared change i
   - Tests: Worklist, DecisionWizard and `node scripts/quality/client-lint/client-lint.mjs check`.
   - The PR lists the hosts needing their own deploys (LegalWorkspace, external SPA, Copilot widget).
 - **mcp-r2:** no collision. r2 task 021 (Phase 1) changes the widget's transport files and build configs only, and requires every spaarke-decisions test to pass unchanged. So tell r2 before the heading branch opens and when it merges; r2 holds 021 until then.
+
+## 2026-11-25 — r2's Phase 1 gate: delegated to mcp-r1 and mcp-r2 (owner)
+Owner: "I can't judge. You have to coordinate and determine with mcp-r2 the correct approach and path."
+**PROPOSED to mcp-r2: release the gate now, not after 042 closes.** All r1 code is on master. The rest of 042 is owner live testing plus notes.
+
+Terms:
+1. Ownership of `Api/Mcp/**`, `McpModule`, `McpToolCatalog`, the MCP ledger, the conformance host, and the widget's transport and build files moves to r2. r1 files an MCP defect found in 042 and agrees the fix with r2 before anyone edits.
+2. r1 keeps two pieces of work:
+   - ISS-010's BFF files: DecisionCommitService, DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier and the job handler. No `RecordCreationService.CreateAsync` signature change without telling r2, whose task 031 calls it.
+   - The heading change: FoundStep and IssueLine, plus only the widget test lines that wait on the old text.
+3. r2's 021 is not held for the heading change. Whichever lands first, the other adapts.
+4. Deploys stay separate, each with the owner's per-SHA go.
+5. 042 closes on its own timeline.
+
+Status: awaiting r2's confirmation.
