@@ -783,6 +783,9 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     /// "Link my account" step instead of the profile form. It grants nothing, chooses no link target and authorizes nothing;
     /// the link route still proves the Spaarke-tenant guest server-side. No email, Unknown, NotLicensed or a failed read →
     /// <c>false</c> (the form shows, and the registration POST answers as before). The log carries only the outcome.
+    /// Unlike the POST, the hint does not run the binder's column-readability probes first: in a mis-provisioned
+    /// environment a licensed user reaches the link step (whose route makes its own checks) rather than the POST's
+    /// "registration environment" refusal. Deliberate; the hint never grants.
     /// </summary>
     private async Task<bool> IsLicensedUserEmailAsync(ClaimsPrincipal home, CancellationToken ct)
     {

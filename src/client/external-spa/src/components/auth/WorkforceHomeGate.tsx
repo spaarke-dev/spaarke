@@ -13,8 +13,9 @@
  *      has no licensed user (`no_systemuser`) -> `RegistrationPage`: the profile form, or, when the refusal's `licensedUser`
  *      hint says the token email is a licensed user's (R4 FR-25, #2192), its "Link my account" step. Any other refusal -> an
  *      administrator must resolve it. In Teams the silent token comes through NAA (`setGuestLinkHost('teams')`).
- *   3. A second `registration_required` always shows the form (never a loop). The form registers through the BFF (or, for
- *      a licensed user whose silent link failed, links through the popup), then /me is read again.
+ *   3. A second `registration_required` always shows `RegistrationPage` (the form, or its link step when the hint is
+ *      true) and never re-runs the silent link, so nothing loops without a click. The form registers through the BFF (or,
+ *      for a licensed user whose silent link failed, the link step links through the popup), then /me is read again.
  *
  * 401 -> the sign-in state; any other 403 -> the denied state; 5xx or a network fault -> a generic error with a retry.
  * `onReady(true)` tells the shell the workspace is showing (the notification bell waits for it, so it never reads the BFF
