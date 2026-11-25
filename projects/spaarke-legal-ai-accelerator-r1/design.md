@@ -932,11 +932,11 @@ It is used by the Cowork edit plan and summary, the JPS Action `output` section,
 | | Cowork | Word | Spaarke platform |
 |---|---|---|---|
 | Format | Markdown + Python | `.docx` | JPS JSON in `sprk_analysisaction`; Knowledge records |
-| Engines | Python (in sandbox) | Microsoft's own | C# executors/tools in the BFF |
+| Engines | Python (in sandbox) | Microsoft's own | The same Python engines in a Container Apps Job for the NDA redline (intake-pipeline-r1); C# executors/tools in the BFF elsewhere |
 | Customer overlay | Files in OneDrive/SharePoint | Attached `.docx` | CUST- scopes (Save As / Extend) |
 | Retrieval | `references/` loaded on demand | n/a | Inline Knowledge or RAG index |
 
-The mechanics will exist twice: Python in Cowork and C# in the BFF. Both are tested against **the same golden fixtures and the same review-result schema**. From T2, Cowork can call the BFF's implementation through the connector instead of its own Python (§10).
+**Owner decision 2026-11-25 (intake-pipeline-r1 Q3): one engine, not two, for the NDA redline.** Server-side, the platform runs our Python engines unchanged (`segment_clauses`, `ooxml_redline`, `summary_table`, `check_outputs`) in a Container Apps Job, with an image built from `src/accelerators/core/engines/` on master (PR #3163). There are no C# twins in the BFF. Intake's Phase 0 spike checks the hosted output against our golden fixtures, so **any change to the engines' JSON in/out CLI contract must be flagged to intake-pipeline-r1** before it merges. Keep the engines Python 3.11-compatible, standard library + lxml only. From T2, Cowork can call the hosted engine through the connector instead of its own Python (§10). Mechanics outside this path, if ever built in C#, are tested against **the same golden fixtures and the same review-result schema**.
 
 ### 6.4 Release and drift rules
 

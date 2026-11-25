@@ -440,7 +440,7 @@ Storage and format may differ. **Meaning may not.**
 | **Version stamp** | Every output names the accelerator version and legal playbook version that produced it |
 | **One customer master** | A customer's legal playbook has exactly one master copy. At T0/T1 that is the Markdown file in SharePoint or OneDrive, and the Word `.docx` is rendered from it. At T3 it is Spaarke's Policy version, exported for Cowork and Word. Never two masters. |
 
-**Engines exist twice.** Deterministic mechanics run as Python in the Cowork sandbox and as C# in the BFF. Both are tested against the same golden fixtures and the same schema. From T2, Cowork can call the BFF's implementation through the connector.
+**One engine for the NDA redline** (owner decision 2026-11-25, superseding "engines exist twice"). The platform runs the same Python engines that Cowork runs, in a Container Apps Job (intake-pipeline-r1), with no C# twins in the BFF. Both are tested against the same golden fixtures and the same schema. From T2, Cowork can call the hosted engine through the connector. Design §6.3.
 
 The detailed rules, including release, drift and the build gate, are in [design.md §6](design.md).
 
