@@ -151,12 +151,13 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             case EmlMarkedPartReadOutcome.Read when read.RowVersion is not null:
                 break;
             case EmlMarkedPartReadOutcome.TooLarge:
-                // DEF-052: a marked file over the per-file limit is refused as an over-limit upload is (413, the upload's code and sentence),
-                // before step A, so nothing is filed or tracked. Permanent: a retry reads the same part.
+                // DEF-052 backstop: the route refuses an over-limit marked file in step 1 (FromEmailMarkRules.Check), before the .eml is saved,
+                // so this is reached only when the saved .eml's part differs from what step 1 saw. Same answer (413, the same code and
+                // sentence), before step A. Permanent: a retry reads the same part.
                 _logger.LogWarning("From-email submission {SubmissionId}: a marked part of .eml {EmlDocumentId} is over the per-file size limit; refused (413)",
                     submissionId, input.SourceEmlDocumentId);
-                var tooLarge = _submissions.TooLarge();
-                return Refused(tooLarge.StatusCode, tooLarge.ErrorCode!, tooLarge.Detail!, filed: false);
+                return Refused(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+                    FromEmailMarkRules.TooLargeDetail(_submissions.MaxFileBytes), filed: false);
             case EmlMarkedPartReadOutcome.Transient:
                 return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
                     "The saved email could not be read right now. Nothing was submitted; try again shortly.", filed: false);

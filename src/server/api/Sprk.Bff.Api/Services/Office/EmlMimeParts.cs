@@ -18,9 +18,10 @@ internal static class EmlMimeParts
 
     /// <summary>
     /// As <see cref="Read"/>, with each part's decoded bytes (for the submission job's staging). DEF-052: when <paramref name="maxPartBytes"/>
-    /// is given, a part whose decoded size is over it is not held: its decode stops there and it comes back with <c>Oversize</c> true, empty
-    /// content and an empty <see cref="EmlPart.Sha256"/> (the default, no limit, is exactly the read the save has always made), so a large
-    /// part cannot fill memory. A part of exactly <paramref name="maxPartBytes"/> bytes is read.
+    /// is given, a part whose decoded size is over it is not decoded to the end: its decode stops there and it comes back with <c>Oversize</c>
+    /// true, empty content and an empty <see cref="EmlPart.Sha256"/> (the default, no limit, is exactly the read the save has always made).
+    /// This only avoids the decoded copy: <see cref="MimeMessage.Load(Stream, CancellationToken)"/> still holds the parsed <c>.eml</c>. A part
+    /// of exactly <paramref name="maxPartBytes"/> bytes is read.
     /// </summary>
     public static IReadOnlyList<(EmlPart Part, byte[] Content, bool Oversize)> ReadWithContent(
         Stream eml, CancellationToken ct = default, long? maxPartBytes = null)

@@ -23,8 +23,9 @@ namespace Sprk.Bff.Api.Tests.Integration.Regression.Ebilling;
 /// two copy paths: the processing job's copy of a Submit Invoice source document (it buffered the whole file, about twice its size) and the
 /// from-email route's marked <c>.eml</c> parts. Fixed: the job passes the limit (over it: permanent Failed
 /// <see cref="SubmissionReasonCodes.FileTooLarge"/>, no retry, nothing staged; refused before the download when the row records the size), and
-/// the part reader decodes each part under the limit and the from-email route answers 413 <see cref="InvoiceSubmissionErrors.TooLarge"/> as an
-/// over-limit upload is answered, before anything is filed.
+/// the from-email route refuses a marked file over it in step 1 (<see cref="FromEmailMarkRules.Check"/>), 413
+/// <see cref="InvoiceSubmissionErrors.TooLarge"/>, before the <c>.eml</c> (which carries every marked part) is saved, so nothing is stored.
+/// The part reader decodes each part under the limit as a backstop.
 /// </summary>
 /// <remarks>
 /// The limit under test is 1 MB (the job rig's <c>MaxFileSizeMb</c> and the intake harness's option), so a file just over it is a real
@@ -144,7 +145,7 @@ public sealed class Issue2553_SubmissionFileSizeLimitTests
     private EmlMarkedPartReader Reader() => new(_emlRows.Object, _world.Spe.Object, NullLogger<EmlMarkedPartReader>.Instance);
 
     [Fact]
-    public async Task EmlPartReader_AMarkedPartOverTheLimit_IsTooLarge_AndItsBytesAreNeverHeld()
+    public async Task EmlPartReader_AMarkedPartOverTheLimit_IsTooLarge_AndNoPartIsReturned()
     {
         var big = Filler(OneMb + 1, "PK big timesheet");
         StoreEml(W.Invoice, W.Attachment("Timesheet.xlsx", big, "application/vnd.ms-excel"));
@@ -249,7 +250,7 @@ public sealed class Issue2553_SubmissionFileSizeLimitTests
     }
 
     [Fact]
-    public async Task FromEmailRoute_AMarkedPartOverTheLimit_Is413TooLarge_AsAnUploadIs_BeforeStepA_NothingWritten()
+    public async Task FromEmailOperation_Backstop_AMarkedPartOverTheLimit_Is413TooLarge_BeforeStepA_NothingWritten()
     {
         var big = Filler(OneMb + 1, "PK big timesheet");
         StoreEml(W.Invoice, W.Attachment("Timesheet.xlsx", big, "application/vnd.ms-excel"));
@@ -259,9 +260,9 @@ public sealed class Issue2553_SubmissionFileSizeLimitTests
         var result = await operation.SubmitAsync(input, CancellationToken.None);
 
         result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
-        var upload = H.Build().TooLarge();
-        (result.Status, result.ErrorCode, result.Detail).Should().Be((StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge, upload.Detail),
-            "the route answers an over-limit marked part exactly as it answers an over-limit upload");
+        (result.Status, result.ErrorCode, result.Detail).Should().Be(
+            (StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge, FromEmailMarkRules.TooLargeDetail(OneMb)),
+            "the backstop answers as the route's step 1 does");
         operation.StepACalls.Should().Be(0, "a refused submission never leaves a filing behind");
         H.Writes.Should().Be(0);
         H.Stages.Should().BeEmpty();
@@ -269,7 +270,7 @@ public sealed class Issue2553_SubmissionFileSizeLimitTests
     }
 
     [Fact]
-    public async Task FromEmailRoute_AMarkedPartExactlyAtTheLimit_IsReceived()
+    public async Task FromEmailOperation_AMarkedPartExactlyAtTheLimit_IsReceived()
     {
         var atLimit = Filler(OneMb, "PK exactly 1 MB");
         StoreEml(W.Invoice, W.Attachment("Timesheet.xlsx", atLimit, "application/vnd.ms-excel"));
@@ -278,5 +279,68 @@ public sealed class Issue2553_SubmissionFileSizeLimitTests
         var result = await OperationOver().SubmitAsync(input, CancellationToken.None);
 
         result.Outcome.Should().Be(FromEmailSubmitOutcome.Received);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // The from-email SERVICE (the route's step 1): refused before the .eml is saved
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static Task<FromEmailSubmissionOutcome> Submit(W world, FromEmailSubmissionInput input) =>
+        world.Build().SubmitAsync(input, "office-user", W.Http(), CancellationToken.None);
+
+    private static FromEmailSubmissionInput InputWith(Sprk.Bff.Api.Models.Office.AttachmentReference timesheet, string timesheetMark = "Supporting") =>
+        W.Input(
+            [W.Mark(W.Invoice, "Invoice"), W.Mark(timesheet, timesheetMark)],
+            email: W.Email(W.Invoice, timesheet));
+
+    [Theory]
+    [InlineData("Supporting")]
+    [InlineData("Invoice")]
+    public async Task FromEmailService_AMarkedFileOverTheLimit_Is413_AndNothingIsSaved(string mark)
+    {
+        var world = new W();
+        var big = W.Attachment(mark == "Invoice" ? "Invoice big.pdf" : "Timesheet.xlsx", Filler(OneMb + 1, "%PDF-1.7 big"), "application/pdf");
+        var input = mark == "Invoice"
+            ? W.Input([W.Mark(big, "Invoice"), W.Mark(W.Timesheet, "Supporting")], email: W.Email(big, W.Timesheet))
+            : InputWith(big);
+
+        var outcome = await Submit(world, input);
+
+        outcome.Receipt.Should().BeNull();
+        (outcome.Status, outcome.ErrorCode, outcome.Detail).Should().Be(
+            (StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge, FromEmailMarkRules.TooLargeDetail(OneMb)));
+        outcome.Extensions.Should().Contain("fileName", big.FileName).And.Contain("mark", mark);
+        world.Save.Requests.Should().BeEmpty("the .eml (every marked part, its sprk_document row, its Communication row) is never saved");
+        world.Operation.Submits.Should().BeEmpty();
+        world.Operation.Requeues.Should().BeEmpty();
+        world.Files.Should().BeEmpty("no file was written to SPE");
+        H.Writes.Should().Be(0);
+        H.Stages.Should().BeEmpty();
+        H.Allocations.Should().BeEmpty();
+        world.Entities.Invocations.Select(i => i.Method.Name).Should().NotContain(n => n.Contains("Create") || n.Contains("Update") || n.Contains("Delete"));
+    }
+
+    [Fact]
+    public async Task FromEmailService_AMarkedFileExactlyAtTheLimit_Proceeds_AndIsSaved()
+    {
+        var world = new W();
+        var atLimit = W.Attachment("Timesheet.xlsx", Filler(OneMb, "PK exactly 1 MB"), "application/vnd.ms-excel");
+
+        var outcome = await Submit(world, InputWith(atLimit));
+
+        outcome.Receipt.Should().NotBeNull();
+        world.Save.Requests.Should().ContainSingle("the .eml is saved once");
+        world.Operation.Submits.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task FromEmailService_AnOverLimitFileMarkedDontSave_IsNotRefused()
+    {
+        var world = new W();
+        var big = W.Attachment("Signature.zip", Filler(OneMb + 1, "PK dont save"), "application/zip");
+
+        var outcome = await Submit(world, InputWith(big, "DontSave"));
+
+        outcome.Status.Should().NotBe(StatusCodes.Status413PayloadTooLarge, "only a file marked to be saved is copied");
     }
 }

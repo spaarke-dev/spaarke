@@ -70,8 +70,9 @@ internal sealed class EmlMarkedPartReader
     /// <summary>
     /// Reads the <paramref name="marks"/> of submission <paramref name="submissionId"/> out of <c>.eml</c> <paramref name="emlDocumentId"/>.
     /// DEF-052: <paramref name="maxPartBytes"/> (<c>null</c>, the default, is no limit) is the per-file limit each part is decoded under (a
-    /// part over it is never held); a marked part over it, at its mark's ordinal and name, is <see cref="EmlMarkedPartReadOutcome.TooLarge"/>.
-    /// An unmarked part over it is skipped.
+    /// part over it is not decoded to the end; the parsed <c>.eml</c> is still held); a marked part over it, at its mark's ordinal and name, is
+    /// <see cref="EmlMarkedPartReadOutcome.TooLarge"/>. An unmarked part over it is skipped. The route refuses an over-limit marked file earlier
+    /// (<see cref="FromEmailMarkRules.Check"/>, before the <c>.eml</c> is saved); this is the backstop.
     /// </summary>
     public async Task<EmlMarkedPartRead> ReadAsync(
         Guid submissionId, Guid emlDocumentId, IReadOnlyList<FromEmailMarkedPart> marks, CancellationToken ct, long? maxPartBytes = null)
@@ -133,7 +134,7 @@ internal sealed class EmlMarkedPartReader
             var found = mark.Ordinal >= 0 && mark.Ordinal < parts.Count ? parts[mark.Ordinal] : default;
             if (found.Oversize && string.Equals(found.Part.FileName, mark.FileName, StringComparison.Ordinal))
             {
-                // Its bytes were never held, so its hash is unknown; the name is what ties it to the mark.
+                // Its decode stopped at the limit, so its hash is unknown; the name is what ties it to the mark.
                 _logger.LogWarning("Submission {SubmissionId}: part {Ordinal} of .eml {DocumentId} is over the per-file size limit",
                     submissionId, mark.Ordinal, emlDocumentId);
                 return EmlMarkedPartRead.Of(EmlMarkedPartReadOutcome.TooLarge);
