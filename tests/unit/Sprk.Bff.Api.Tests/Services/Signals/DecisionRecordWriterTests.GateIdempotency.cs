@@ -121,7 +121,9 @@ public sealed partial class DecisionRecordWriterTests
         query.Criteria.Conditions.Should().Contain(c =>
             c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal && c.Values.Single().Equals(WriterUser),
             "adversarial pass 2 F1: and only a record the writer itself created");
-        query.Criteria.Conditions.Should().HaveCount(4);
+        query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "createdonbehalfby" && c.Operator == ConditionOperator.Null,
+            "task 223 (DI-144): and not on its behalf by another identity (WriterCreatedRecord)");
+        query.Criteria.Conditions.Should().HaveCount(5);
     }
 
     [Fact]

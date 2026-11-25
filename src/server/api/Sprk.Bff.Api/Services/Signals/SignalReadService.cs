@@ -1532,8 +1532,8 @@ public sealed class SignalReadService
                     new XElement("filter", new XAttribute("type", "and"),
                         new XElement("condition", new XAttribute("attribute", "sprk_decisionrecordid"), new XAttribute("operator", "in"),
                             chunk.Select(id => new XElement("value", id.ToString("D")))),
-                        new XElement("condition", new XAttribute("attribute", DecisionRecordWriter.CreatedByColumn), new XAttribute("operator", "eq"),
-                            new XAttribute("value", writerUserId.ToString("D"))))));
+                        // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
+                        WriterCreatedRecord.FetchXmlFilter(writerUserId))));
 
             var response = await _user.GetAsync(
                 $"{DecisionRecordEntitySet}?fetchXml={Uri.EscapeDataString(fetch.ToString(SaveOptions.DisableFormatting))}", ct).ConfigureAwait(false);
