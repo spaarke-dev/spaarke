@@ -4,7 +4,6 @@ export * from './ColumnRendererTypes';
 // ChartDefinitionTypes + DrillInteractionTypes removed (VHVU-042): the canonical
 // VisualType / IChartDefinition / IChartData / IAggregatedDataPoint / DrillInteraction
 // now live in @spaarke/visuals. These were a stale, unused fork (0 consumers).
-export * from './FieldMappingTypes';
 export * from './EventTypeConfig';
 export * from './WebApiLike';
 export * from './FetchXmlTypes';
@@ -27,9 +26,6 @@ export { ColumnRendererService } from '../services/ColumnRendererService';
 // UniversalDatasetGrid PCF, consumed only by the also-deleted CommandRegistry. CommandExecutor,
 // which the audit believed live, was consumed only by useKeyboardShortcuts + CommandToolbar and is
 // deleted too (#1113). Zero other consumers found across src/.)
-// (FieldMappingService class removed in task 010 — the engine is now the
-// `applyFieldMappings` function exported from the services barrel. Field-mapping
-// TYPES are exported above via `export * from './FieldMappingTypes'`.)
 export {
   EventTypeService,
   eventTypeService,
