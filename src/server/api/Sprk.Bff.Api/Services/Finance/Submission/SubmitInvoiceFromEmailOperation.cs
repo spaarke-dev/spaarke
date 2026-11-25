@@ -145,11 +145,18 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         // ── 3. The marked parts, out of the saved .eml: read-only, so before step A (review round 5, pass-2 F1-2 / uac-r2 K2-b: a refused
         //       submission never leaves a filing behind). A part that is gone or differs from its mark is permanent (a retry reads the same
         //       .eml), so it is a 422, never a 503 the client would retry. ──
-        var read = await _reader.ReadAsync(submissionId, input.SourceEmlDocumentId, input.MarkedParts, ct);
+        var read = await _reader.ReadAsync(submissionId, input.SourceEmlDocumentId, input.MarkedParts, ct, _submissions.MaxFileBytes);
         switch (read.Outcome)
         {
             case EmlMarkedPartReadOutcome.Read when read.RowVersion is not null:
                 break;
+            case EmlMarkedPartReadOutcome.TooLarge:
+                // DEF-052: a marked file over the per-file limit is refused as an over-limit upload is (413, the upload's code and sentence),
+                // before step A, so nothing is filed or tracked. Permanent: a retry reads the same part.
+                _logger.LogWarning("From-email submission {SubmissionId}: a marked part of .eml {EmlDocumentId} is over the per-file size limit; refused (413)",
+                    submissionId, input.SourceEmlDocumentId);
+                var tooLarge = _submissions.TooLarge();
+                return Refused(tooLarge.StatusCode, tooLarge.ErrorCode!, tooLarge.Detail!, filed: false);
             case EmlMarkedPartReadOutcome.Transient:
                 return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
                     "The saved email could not be read right now. Nothing was submitted; try again shortly.", filed: false);

@@ -452,7 +452,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on `task/ebilling-def052` (2026-11-25; pending merge). Job: over-limit source document is Failed `ebilling.submission.too_large` (permanent, refused before download when `sprk_filesize` is over). From-email: a marked part over the limit is 413 `too_large` before step A. Regression: `tests/integration/regression/Ebilling/Issue2553_SubmissionFileSizeLimitTests.cs` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-03 |
 | **Source** | 118b adversarial review (finding 2, parity) |
