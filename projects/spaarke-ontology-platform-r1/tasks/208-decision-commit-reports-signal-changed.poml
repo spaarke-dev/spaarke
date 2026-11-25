@@ -4,7 +4,7 @@
     <title>Decision commit reports signal_changed when an item changes twice while it is being closed (#3028, DI-167)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the decision commit write path (.cs) in BFF Signals; changes which declared outcome one race reports.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -59,4 +59,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt208); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3085 squash-merged to master (ef0c566d2c, Closes #3028) after a main-session review. CloseSignalAsync: a version mismatch on the last attempt now breaks to the declared signal_changed warning, which is logged but not metered as decision_commit_signal_close_failed; one retry kept, a mismatch then success still closes, any other exception still gives signal_close_failed with its count, cancellation unchanged. Task 205 pinning test retargeted; new test + two must-not-fire controls fail/pass as required; publish delta -247 bytes, 0 files. In uac-r2 dev BFF candidate cut at ef0c566d2c (deploy needs owner go in their session).</completion>
 </task>
