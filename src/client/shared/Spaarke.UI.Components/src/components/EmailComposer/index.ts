@@ -56,14 +56,16 @@ export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
 export { useXrmEmailHostProps } from './useXrmEmailHostProps';
 export type { XrmEmailHostProps, UseXrmEmailHostPropsOptions } from './useXrmEmailHostProps';
 
-// MCP-backed host (spaarkeai-mcp-bff-api-r2 task 011): the sibling of the Xrm host for a Copilot widget. The engine is
-// unchanged; the host injects a tool-call transport (McpToolCaller) instead of Xrm.
+// MCP-backed host (spaarkeai-mcp-bff-api-r2 task 011): the sibling of the Xrm host for a Copilot widget. The host injects
+// a tool-call transport (McpToolCaller) instead of Xrm. The engine gained three optional props it sets (showBcc,
+// showInternalOnly, associationsRemovable), all defaulting to the existing behaviour.
 export type { McpToolCaller, McpToolCallResult } from './mcpToolCaller';
-export { createMcpEmailComposeHandlers, newIdempotencyKey } from './createMcpEmailComposeHandlers';
+export { createMcpEmailComposeHandlers, newIdempotencyKey, McpHostRefusal } from './createMcpEmailComposeHandlers';
 export type {
   McpEmailComposeHandlers,
   McpEmailRegardingMatter,
   McpMatterDocument,
+  McpDocumentListOutcome,
   CreateMcpEmailComposeHandlersOptions,
 } from './createMcpEmailComposeHandlers';
 export { useMcpEmailHostProps } from './useMcpEmailHostProps';
