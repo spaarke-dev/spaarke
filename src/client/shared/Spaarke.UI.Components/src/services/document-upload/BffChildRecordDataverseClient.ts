@@ -8,22 +8,46 @@
  * `POST /api/v1/child-records/sprk_document`: the BFF checks the caller's rights and creates the row owned by the team the
  * ownership rule names, recording the caller as its creator person. An unfiled document still saves (owned by the
  * caller's business-unit team, owner round 5). Every other call passes through unchanged.
+ *
+ * Field mapping is the server's (field-mapping-server-write-path-r1, FR-02, FR-16): the payload carries only what the user
+ * entered and the filing parent's bind. The route infers a mapping source only for the tables in its
+ * `InferMappingSourceTables` (a matter, a project), and `sprk_document` is not one, so a create that names none maps
+ * nothing. The pipeline therefore NAMES the parent the documents are filed under as the `mappingSource`
+ * (`?mappingSourceEntity=&mappingSourceId=`), as the Event, To Do, Report Card, Work Assignment and Analysis wizards do.
+ * It adds nothing to the body.
  */
 
 import type { DataverseRecordRef, IDataverseClient } from './types';
-import { createChildRecordViaBff, isBffChildCreateTable } from '../../utils/adapters/bffChildWriteAdapter';
+import {
+  createChildRecordViaBff,
+  isBffChildCreateTable,
+  type IBffMappingSource,
+} from '../../utils/adapters/bffChildWriteAdapter';
 import type { AuthenticatedFetch } from '../../utils/adapters/bffDataServiceAdapter';
 
-/** Decorates `inner` so its child-record creates go through the BFF; `bffBaseUrl` may be `''` (relative `/api`). */
+/**
+ * Decorates `inner` so its child-record creates go through the BFF; `bffBaseUrl` may be `''` (relative `/api`).
+ * `mappingSource` is the record a created row copies its mapped fields from (the parent the documents are filed under);
+ * omit it for an unfiled upload, which maps nothing.
+ */
 export function withBffChildCreates(
   inner: IDataverseClient,
   authenticatedFetch: AuthenticatedFetch,
-  bffBaseUrl: string
+  bffBaseUrl: string,
+  mappingSource?: IBffMappingSource
 ): IDataverseClient {
   return {
     createRecord: async (entityLogicalName: string, data: Record<string, unknown>): Promise<DataverseRecordRef> =>
       isBffChildCreateTable(entityLogicalName)
-        ? { id: await createChildRecordViaBff(authenticatedFetch, bffBaseUrl, entityLogicalName, data) }
+        ? {
+            id: await createChildRecordViaBff(
+              authenticatedFetch,
+              bffBaseUrl,
+              entityLogicalName,
+              data,
+              mappingSource ? { mappingSource } : undefined
+            ),
+          }
         : inner.createRecord(entityLogicalName, data),
     updateRecord: (entityLogicalName: string, id: string, data: Record<string, unknown>) =>
       inner.updateRecord(entityLogicalName, id, data),
