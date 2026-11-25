@@ -29,7 +29,7 @@ Other modes (OwnerOnly, OwnerOrSharedOrPublic, UniformById, TablePrivilege, Publ
 ## No-caller and no-row outcomes (ADR-028 A10; open point from 008)
 
 - **No caller** — null `HttpContext`, no authenticated identity, no `RequestServices`, or an `oid` that is missing or not a GUID → `UserContextRequired`, before any Dataverse call. Proven by tests (strict mocks + recording access source see no call).
-- **A caller with no `systemuser` row** — the method cannot tell this from "no rights" in the first two Dataverse checks, because those are answered by Dataverse as the caller (OBO): a private playbook ends in `PlaybookUnavailable`, a public one in `RecordAccessDenied` (a failed OBO/rights query is a deny). If every rights check passes and only WhoAmI fails, the answer is `RunUserUnresolved`. All three carry the REST codes (FR-05 parity). `RunUserUnresolved` is a separate outcome on purpose: if the owner resolves task 008's open ADR-028 A10 conflict with path C (map no-row to `UserContextRequired` on `/mcp`), task 030 can map `RunUserUnresolved` to `UserContextRequired` without changing this method or REST. No new ADR conflict is raised by 007: the REST bytes are unchanged and the method returns REST's codes; the A10 mapping is task 030's, and follows the owner's decision on 008's conflict.
+- **A caller with no `systemuser` row** — the method cannot tell this from "no rights" in the first two Dataverse checks, because those are answered by Dataverse as the caller (OBO): a private playbook ends in `PlaybookUnavailable`, a public one in `RecordAccessDenied` (a failed OBO/rights query is a deny). If every rights check passes and only WhoAmI fails, the answer is `RunUserUnresolved`. All three carry the REST codes (FR-05 parity). `RunUserUnresolved` only separates a WhoAmI failure after every check passed; it is NOT the no-row outcome (verifier pass 1, F2 — corrected). To meet ADR-028 A10 on `/mcp` (if the owner picks path C on 008), task 030 must resolve the caller's systemuser (e.g. `ResolveCallerSystemUserIdAsync`) BEFORE calling `AuthorizePlaybookRunAsync` and refuse a no-row caller with `UserContextRequired`; the method cannot do this itself without changing REST's 404/403. No new ADR conflict is raised by 007: the REST bytes are unchanged and the method returns REST's codes; the A10 mapping is task 030's, and follows the owner's decision on 008's conflict.
 - **No bearer token on an authenticated principal** — not `UserContextRequired`: as on REST, the checks run and refuse (public playbook → `RecordAccessDenied`; private → `PlaybookUnavailable`), with no app-only query. Kept for parity (changing it would change the REST 403 to a 401).
 
 ## Deviations from the POML (code wins, root CLAUDE.md §2)
@@ -71,3 +71,11 @@ Other modes (OwnerOnly, OwnerOrSharedOrPublic, UniformById, TablePrivilege, Publ
 - K4: the identity test (`Identities.Any(IsAuthenticated)`) repeats `DecisionCapability.HasSignedInCaller` rather than referencing it, as in task 008, to avoid a Filters → Signals dependency.
 
 rework: none task 007
+
+## Verifier pass 1 (2026-11-25, opus; correctness + REST parity)
+- No F1/F3/F4. Order, Dataverse questions and 404/403 uniformity unchanged on every branch; no fail-open path; `RunUserId` comes only from WhoAmI on the caller's token. 85/85 focused tests.
+- F2 fixed (main session): the `RunUserUnresolved` doc comment and §A10 note claimed it covers "no systemuser"; it does not (a no-row caller is answered "no rights" first). Both now say task 030 must resolve the caller's systemuser before calling the method to meet A10.
+- K2: A10 no-row mapping deferred to task 030 + owner decision on 008 (fails closed today).
+- K4: parity helper compares only `IAccessDataSource` calls (both paths run the same `DecideRunAsync`, so it proves the mapping; order parity rests on unchanged contract tests + side-by-side reading).
+- K4: no cap on `documentIds` size in the shared method (REST had none); task 030's tool sets its own.
+- PR-time items: publish delta vs fresh master; uac-r2 + ontology-r1 reviews.

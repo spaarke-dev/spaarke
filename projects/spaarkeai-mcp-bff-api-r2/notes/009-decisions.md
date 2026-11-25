@@ -66,3 +66,11 @@ Proof holds: `request.Query` reaches only `searchText` and the embedding input; 
 - K4: add proof rows for the explicit-index, no-user fallback and `PreferKeywordRanking` paths.
 - K4 / obligation for task 022: `search.in` delimiter unescaped — the tool must reuse `RecordEntityType.IsValid` (or move the allow-list into the service). K2: record-type casing mismatch fails closed.
 - POML AC1 wording: vector-only sends `"*"`, not null (no query text either way).
+
+## Verifier pass 2 (2026-11-25, after fix round 69c73f57d1)
+- Result: no F-class findings. RecordSearch unit 123/123, ArchTests TenantIsolation|RecordSearch 55/55.
+- Seeding of the fix-round tests (reviewer, by reading the pre-fix code): every new test fails on revert — not-allowed index (old cache read came first, key had no index), the five distinct-request rows (old keys identical), explicit-index search, bounds rows (old handler returned 200), the 500 test (old `detail` = `ex.Message`).
+- K2 fixed in main session: `RecordSearchEndpoints.MaxRecordAuthorizationChecks = RecordSearchOptions.MaxLimit` (was literal 50; would silently truncate pages if MaxLimit rose).
+- K4 fixed: bounds contract test now asserts the result type instead of a null-conditional that could skip.
+- K3 accepted: cache hit on the explicit-index path pays one in-memory allow-list check (that is the fix).
+- Carry-over to task 022: escape the `search.in` delimiter (K4 from pass 1).

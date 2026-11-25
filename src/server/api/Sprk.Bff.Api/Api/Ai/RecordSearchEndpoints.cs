@@ -249,7 +249,7 @@ public static class RecordSearchEndpoints
     /// budget under 50 would silently truncate a legitimate full page. Repeats across requests are
     /// absorbed by <c>CachedAccessDataSource</c>'s entity-set-qualified 60 s key.
     /// </remarks>
-    private const int MaxRecordAuthorizationChecks = 50;
+    private const int MaxRecordAuthorizationChecks = RecordSearchOptions.MaxLimit;
 
     /// <summary>
     /// Authorizes every returned row against its own record and drops what the caller cannot read.

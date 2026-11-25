@@ -82,7 +82,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Confirm the r1 gate and 005, 007, 020, 024; read the run endpoints, 007's method and 005's store.</step>
+    <step order="1">Confirm the r1 gate and 005, 007, 020, 024; read the run endpoints, 007's method and 005's store. A10: 007's RunUserUnresolved is NOT the no-systemuser outcome (notes/007-decisions.md); if the owner's 008 decision requires UserContextRequired for a no-row caller, resolve the caller's systemuser before calling AuthorizePlaybookRunAsync.</step>
     <step order="2">Write RunPlaybookTool with idempotency and McpLongRunning.Started; write GetPlaybookRunTool with McpLongRunning.Status.</step>
     <step order="3">Add ledger rows; write the contract and auth tests; run MCP suites, run tests from 005/007, ArchTests and conformance.</step>
     <step order="4">Measure the publish-size delta.</step>

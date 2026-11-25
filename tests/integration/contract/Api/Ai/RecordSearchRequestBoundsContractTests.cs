@@ -76,7 +76,7 @@ public sealed class RecordSearchRequestBoundsContractTests
 
         var result = await InvokeAsync(search, Request(query: new string('q', queryLength), limit: limit, offset: offset));
 
-        (result as IStatusCodeHttpResult)?.StatusCode.Should().Be(200);
+        result.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(200);
         search.Calls.Should().Be(1);
     }
 

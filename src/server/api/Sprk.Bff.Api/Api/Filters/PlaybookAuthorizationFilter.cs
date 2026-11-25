@@ -152,7 +152,11 @@ public enum PlaybookRunAuthorizationOutcome
 
     /// <summary>
     /// Every check passed, but the caller's Dataverse <c>systemuserid</c> (the run's user) could not be resolved (REST: the same
-    /// uniform 403 as <see cref="RecordAccessDenied"/>). Kept apart so a non-HTTP host can map "no systemuser" on its own terms.
+    /// uniform 403 as <see cref="RecordAccessDenied"/>). This is NOT the "caller has no systemuser row" outcome: such a caller
+    /// is answered "no rights" by the earlier checks and ends in <see cref="PlaybookUnavailable"/> or
+    /// <see cref="RecordAccessDenied"/>. It only separates a WhoAmI failure after every check passed. A host that must refuse
+    /// a no-row caller with <c>UserContextRequired</c> (ADR-028 A10) resolves the caller's systemuser itself before calling
+    /// <see cref="PlaybookAuthorizationFilter.AuthorizePlaybookRunAsync"/>; this method cannot, without changing REST's 404/403.
     /// </summary>
     RunUserUnresolved = 5,
 
