@@ -380,7 +380,7 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
             foreach ($id in $ownIds) {
                 $status = '200'
                 foreach ($k in $OwnershipStatus.Keys) { if ($id -like "*$k*") { $status = $OwnershipStatus[$k] } }
-                $rules += , @($id, '0', "HTTP/2 $status\r\n\r\n")
+                $rules += , @($id, '0', "HTTP/2 $status\r\ncontent-type: application/json\r\n\r\n{}")
             }
             Set-Rules $Dir curl $rules
         }
@@ -406,6 +406,11 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
             Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir | Out-Null
             $calls = Get-Content (Join-Path $script:Dir 'calls.log') -Raw
             foreach ($id in $ownIds) { $calls | Should Match ([regex]::Escape("subscriptions/44444444-4444-4444-4444-444444444444/$id")) }
+        }
+        It 'passes curl no /dev/null path (ISS-044: under MSYS_NO_PATHCONV the native curl.exe cannot open it and exits 23)' {
+            Set-C03Rules $script:Dir $false
+            Invoke-Recipe 'PRQ-C-03' $script:Common $script:Dir | Out-Null
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Not Match '/dev/null'
         }
         It 'exits 1 naming the Service Bus namespace when it is unavailable and absent from the stamp resource group (404)' {
             Set-C03Rules $script:Dir $false @{ 'namespaces/spaarke-acme-prod-sbus' = '404' }
@@ -812,6 +817,8 @@ Describe 'validate.ps1 (the recipe lints)' {
       cli: |
         az ad sp list --display-name "{env}" | Select-String "$undefinedVar"
         echo x | grep -iF y
+        curl -sS -o /dev/null https://example.invalid
+        az account show > /dev/null 2>/dev/null &>/dev/null < /dev/null
       expect: n/a
     remediation: none
 
@@ -828,6 +835,9 @@ Describe 'validate.ps1 (the recipe lints)' {
             $out | Should Match "PRQ-X-99: recipe runs under bash -c but uses the PowerShell cmdlet 'Select-String'"
             # T262: lint e was inert (its code sat on one comment line joined by literal \n) until 2026-10-09.
             $out | Should Match "PRQ-X-99: recipe uses 'grep' with both -i and -F"
+            # ISS-044: fires for the curl argument (one message per recipe). The must-not-fire control is 'passes on the committed
+            # manifest' above: PRQ-E-15 / PRQ-C-13 use /dev/null only in bash redirects.
+            ([regex]::Matches($out, 'PRQ-X-99: recipe passes /dev/null as a command argument')).Count | Should Be 1
         }
         finally { Remove-Item $bad -ErrorAction SilentlyContinue }
     }
