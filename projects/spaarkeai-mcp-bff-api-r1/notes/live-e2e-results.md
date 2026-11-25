@@ -38,4 +38,11 @@
 - Read-only count afterwards: **154 open Decide items**, 144 `POL-MATTER-NOBUDGET` (144 matters, all business-unit-owned, so no secure-child items) and 10 billing.
 - The 39 refusals were asked of ontology-r1. Until they are explained, there may be no privileged Decide item.
 
+**ontology-r1 interim answer on the 39 refusals:**
+- A run reports Failed whenever any write is refused; that part is by design. The refusals themselves are not expected: the 2026-11-24 nightly had 0.
+- Ontology is investigating a possible defect: the 04:42Z swap to `ef0c566d2c`, or the Off→On re-raise path.
+- The run's log lines are also missing from App Insights for 04:51–04:56Z.
+- No secure-child item was re-raised, so **no privileged Decide item exists today**. FR-04 stays untested live until one exists.
+- Ontology asked that the run not be repeated.
+
 Open: (1) non-billing seed for the test user; (2) whether the run was signed in as the non-admin test user (the model's reply greets the user by first name).
