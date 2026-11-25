@@ -8,7 +8,7 @@
  *   2. Dataverse token provider — for OData record operations (via ODataDataverseClient)
  *
  * ⚠️ **No longer covers SPE file upload** (changed 2026-09-03). Upload moved to
- * `@spaarke/sdap-client`, which authenticates through `authenticatedFetch` (ADR-028) rather than an
+ * the shared `SdapApiClient` (`@spaarke/sdap-client` then; `@spaarke/ui-components` since 2026-11-24), which authenticates through `authenticatedFetch` (ADR-028) rather than an
  * `ITokenProvider`. Both ultimately call the same `SpaarkeAuthProvider`, so this is a change of
  * plumbing, not of identity — but do not re-derive "SdapApiClient takes a token provider" from this
  * file. See `uploadOrchestrator.ts`.

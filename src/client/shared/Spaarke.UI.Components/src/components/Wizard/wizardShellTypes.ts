@@ -214,8 +214,11 @@ export interface IWizardShellHandle {
 export interface IWizardSuccessConfig {
   /** Icon or illustration displayed above the title (e.g., a checkmark). */
   icon: React.ReactNode;
-  /** Primary success message (e.g., "Matter created successfully"). */
-  title: string;
+  /**
+   * Primary success message (e.g., "Matter created successfully"). A string for a fixed message; a node when the heading
+   * follows something that is still changing on the success screen (the invoice result screen follows its polled status).
+   */
+  title: React.ReactNode;
   /** Body content below the title — can be a string or rich JSX. */
   body: React.ReactNode;
   /**
@@ -315,6 +318,11 @@ export interface IWizardShellProps {
    * @since ontology task 056
    */
   dismiss?: SprkModalDismiss;
+  /**
+   * Modal mode only, forwarded to `SprkModal`: the dialog opens maximized (the user can still restore it to {@link size}). Embedded
+   * mode ignores it. Default `false`.
+   */
+  defaultMaximized?: boolean;
   /**
    * The `--sprk-ui-scale` factor (modal mode only), forwarded to `SprkModal`. Pass the same value the
    * host passes to `scaleTheme`. Default 1.

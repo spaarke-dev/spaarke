@@ -111,7 +111,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task Locked_ARunWithNoPerson_KeepsItsSingleApplicationWrite_NothingAsked(GenericPath path)
     {
         var outcome = await RunLocked(path, RenameOnly, playbookActsAs: null);

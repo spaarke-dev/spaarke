@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050c" project="ebilling-r1">
+  <metadata>
+    <title>050a follow-ups (owner 2026-11-23): Reject after a Failed confirm submission; drop InvoiceDate/TotalAmount from the confirm request; confirm stops asking Create on sprk_invoice</title>
+    <phase>050 follow-up; added 2026-11-23 from the owner's answers to 050a section 9 (EB-D-262, EB-D-263, EB-D-264)</phase>
+    <gate>startable (owner answers typed in the ebilling-r1 session 2026-11-23)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code on an authorization filter (the confirm route's checks) and a write-path refusal; tags bff-api, auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three small, fully specified changes with exact files and existing tests to extend.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>050a</deps>
+    <tags>bff-api, auth, finance, testing</tags>
+  </metadata>
+
+  <prompt>Implement the owner's three answers to 050a section 9 (projects/ebilling-r1/notes/050a-confirm-redirect.md; decisions EB-D-262..264 in notes/decisions-log.md).
+1. EB-D-262: POST /api/finance/invoice-review/reject accepts a document whose confirm submission has ended Failed (no invoice was created). It still refuses with 409 DocumentLinkedToInvoice when the document is linked to an invoice, or when its confirm submission is in any other state: Received, Processing, Accepted, or Rejected (D-101: a Rejected submission creates an invoice, so the document is linked).
+2. EB-D-263: InvoiceReviewConfirmRequest drops InvoiceDate and TotalAmount (they are ignored today; the job reads them from the PDF). A body that still sends them must not fail: unknown JSON members are ignored, as for any request. Update the operator doc infrastructure/dataverse/views/invoice-review-queue.md. No client in src calls the confirm route (050a notes section 5); re-check with a grep that excludes node_modules.
+3. EB-D-264: the confirm route's authorization (FinanceEndpoints.ResolveConfirmTargets, about :132-182) drops the FinanceAuthorizationCheck.CallerPrivilege(CreateInvoicePrivilege, ...) check, so confirm asks the same as the manual internal submission (the Create Invoice wizard, InvoiceSubmissionEndpoints.ResolveSubmitTargets): "finance.submit_invoice" (Read + AppendTo) on the core record and "finance.attach_invoice" on the firm, plus its existing Write on the document ("finance.confirm") and "finance.link_invoice". Users keep manual invoice creation when 096b D3 later removes Create on sprk_invoice from user roles.</prompt>
+
+  <constraints>
+    <constraint>Only these three changes. Do not change the confirm's submission flow, the re-file, D-139 (re-confirm after Failed or Rejected stays 409 submission_already_ended), the reject route's own check (Write on the document) or the eBilling gate.</constraint>
+    <constraint>Reject after Failed: read the confirm submission's status with the existing read used for the 409 today (InvoiceReviewService around :522), fail closed: a read fault stays 503 as today; a status that is not exactly Failed stays 409. Check the document's invoice link as today first. Reject writes only the document's review status, as before.</constraint>
+    <constraint>If FinanceAuthorizationFilter.CreateInvoicePrivilege has no other caller after the change, delete it (and its tests' references); otherwise leave it. Update ArchTests route census / RouteAuthorizationGuard declarations that list the confirm route's checks, if any do.</constraint>
+    <constraint>Tests fail before and pass after: reject after Failed is 200 and writes the review status; reject while Received/Processing/Accepted/Rejected is 409 (theory); a confirm by a caller without Create on sprk_invoice but with the submit rights is accepted (202); a confirm without AppendTo on the core record is still refused; a confirm body carrying invoiceDate/totalAmount is accepted and they are not used. Extend tests/integration/contract/Api/Finance/FinanceEndpointsAuthorizationContractTests.cs and tests/integration/data-mutation/FinanceInvoiceReview/InvoiceReviewWritePathTests.cs.</constraint>
+    <constraint>Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests; filter them. Measure the BFF publish-size delta against a fresh master build and run the CVE check (root CLAUDE.md section 10). No live Dataverse call, no deploy.</constraint>
+    <constraint>Write notes to projects/ebilling-r1/notes/050c-confirm-followups.md (what changed, tests, fail-before evidence, publish size). Commit on the task branch with the trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Never use --no-verify or git stash. Never run python.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Reject of a document whose confirm submission is Failed returns 200 and sets the document's review status; every other submission state returns 409 DocumentLinkedToInvoice; a status read fault returns 503 and writes nothing.</criterion>
+    <criterion testable="true">InvoiceReviewConfirmRequest has no InvoiceDate or TotalAmount member; a body that sends them is accepted.</criterion>
+    <criterion testable="true">ResolveConfirmTargets no longer asks the Create-on-sprk_invoice privilege; a caller with Write on the document, Read+AppendTo on the matter and AppendTo on the firm, but no Create on sprk_invoice, gets 202; removing any of those rights still refuses.</criterion>
+    <criterion testable="true">The filtered unit tests (Finance|InvoiceReview|InvoiceSubmission) and the filtered ArchTests (RouteAuthorization|Finance|Ownership) pass; the BFF builds with 0 errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

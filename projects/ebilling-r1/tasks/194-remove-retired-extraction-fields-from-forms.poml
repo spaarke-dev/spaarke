@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="194" project="ebilling-r1">
+  <metadata>
+    <title>Take the retired extraction fields (sprk_extractionstatus, sprk_extractedjson) off the invoice main and quick-create forms; drop PB-013 from the seed and verify script (ISS-045, #2997)</title>
+    <phase>050b follow-up (ontology-r1 review of #2992, item 3); added 2026-11-23</phase>
+    <gate>Owner's go typed in the ebilling-r1 session 2026-11-23 ("yes proceed with these"); the dev form step also needs uac-r2 notices before and after.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits SpaarkeMaster form source and a deploy script that writes live forms on dev.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical removal with exact references (193's form edit, the forms script's section mode).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits src/dataverse/solutions/SpaarkeMaster/** (serial only).</parallel-reason>
+    <deps>050b</deps>
+    <tags>dataverse, solution, forms, deletion, scripts</tags>
+  </metadata>
+
+  <prompt>050b deleted the legacy invoice extraction path. Nothing writes sprk_invoice.sprk_extractionstatus or sprk_extractedjson any more, yet the invoice main form (eBilling section) and quick-create form still show them, so users see an "Extraction Status" that never changes. The PB-013 playbook seed and Verify-Finance-Playbook.ps1 still describe the deleted playbook. Remove the controls and the seed entry. The COLUMNS stay (deleting them is a separate, destructive owner decision).</prompt>
+
+  <constraints>
+    <constraint>Only the two controls and their cells/rows on the two forms, plus PB-013. Do not delete the columns or the sprk_extractionstatus option set. No other form change.</constraint>
+    <constraint>The main form's eBilling section is written by scripts/ebilling/Deploy-EbillingFormsViews.ps1 (Form='Section', Cols list at about :178); removing 'sprk_extractionstatus' from that list is how the dev main form loses it. Keep its source XML in step (SpaarkeMaster main form and its _managed copy).</constraint>
+    <constraint>The quick-create form is not managed by any script. Edit its SpaarkeMaster source (and _managed copy). The dev quick-create change needs a guarded path: either extend an existing script with -WhatIf (default) / -Apply / -Verify, or reuse 193's form-edit approach (scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1, D-83 shared lib scripts/lib/Publish-SolutionComponents.ps1). Every Dataverse Web API call sends Consistency: Strong (route through EbillingSchema.psm1).</constraint>
+    <constraint>No live write by the implementer. The main session runs -Apply after review, with uac-r2 notices.</constraint>
+    <constraint>Pester runs on each test file's declared version (5.7.1 or 3.4.0); never plain Invoke-Pester.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for sprk_extractionstatus and sprk_extractedjson in the two invoice FormXml files (and _managed) and in Deploy-EbillingFormsViews.ps1 finds nothing; the columns' Entity.xml attributes and the option set are untouched.</criterion>
+    <criterion testable="true">PB-013 is gone from scripts/seed-data/playbooks.json and Verify-Finance-Playbook.ps1 no longer checks it (or the script is retired with a pointer, if PB-013 was its only subject).</criterion>
+    <criterion testable="true">The dev path for the quick-create form has a read-only default, -Apply and -Verify; -Verify fails while a control is on the form and passes once both are gone; Pester covers -WhatIf writes nothing and -Verify both ways.</criterion>
+    <criterion testable="true">After -Apply on dev (main session): both forms show neither field; -Verify passes; recorded in notes/194.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

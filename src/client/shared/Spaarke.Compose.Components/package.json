@@ -51,8 +51,7 @@
     "@tiptap/extension-task-list": "^2.10.3",
     "@tiptap/extension-task-item": "^2.10.3",
     "@tiptap/extension-character-count": "^2.10.3",
-    "@tiptap/extension-text-align": "^2.10.3",
-    "mammoth": "^1.8.0"
+    "@tiptap/extension-text-align": "^2.10.3"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",

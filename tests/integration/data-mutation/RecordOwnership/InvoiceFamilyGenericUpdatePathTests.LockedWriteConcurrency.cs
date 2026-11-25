@@ -12,7 +12,7 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
-/// #2799 review 1 (F4), C3: the output orchestrator's Optimistic update (<see cref="DataverseUpdateHandler"/>) adds the row's
+/// #2799 review 1 (F4), C3: DataverseUpdateHandler's Optimistic update (<see cref="DataverseUpdateHandler"/>) adds the row's
 /// <c>versionnumber</c> to its fields, and the locked-column split put it with the person's columns. Must not fire: a write whose
 /// person part is that version alone sends NO person write — one application write of the locked columns, conditional on the
 /// version; a write with other columns sends the person's write carrying the version, then the application's. Must fire: a

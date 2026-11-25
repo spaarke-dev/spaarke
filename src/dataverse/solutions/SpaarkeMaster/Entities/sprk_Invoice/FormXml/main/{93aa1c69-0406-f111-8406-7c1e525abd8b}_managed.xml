@@ -176,12 +176,6 @@
                       </cell>
                     </row>
                     <row>
-                      <cell id="{1F8668B7-C67F-8088-D1B1-9690F68E3ACE}">
-                        <labels>
-                          <label description="" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_extractionstatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_extractionstatus" />
-                      </cell>
                       <cell id="{FCBA7CB6-8CD7-9E38-E510-99898E0BE6EC}">
                         <labels>
                           <label description="" languagecode="1033" />

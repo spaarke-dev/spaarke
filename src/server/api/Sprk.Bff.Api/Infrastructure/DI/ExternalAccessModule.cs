@@ -516,6 +516,12 @@ public static class ExternalAccessModule
                 "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 61711823.
                 "sprk_projecttype_ref",
+                // spaarke-SPA-external-access-platform-r4 task 031 (FR-18; columns verified live in task 030, owner 2026-11-23): NOT
+                // grid-derived: Information section. The description (Memo), the practice area (lookup to the reference table
+                // sprk_practicearea_ref, which has no module), and the assigned attorney and paralegal (lookups to contact, which has
+                // no module: the internal person's name comes only as the lookup's @formattedValues entry, owner 2026-11-08/11-23).
+                // UAC review: APPROVED by uac-r2 2026-11-23 (R4 notes/task-031-notes.md).
+                "sprk_projectdescription", "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1",
             },
         });
 
@@ -637,6 +643,13 @@ public static class ExternalAccessModule
                 "sprk_responseduedate", "statuscode", "sprk_regardingproject",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 42f4102c.
                 "sprk_mattertype", "modifiedon",
+                // spaarke-SPA-external-access-platform-r4 task 031 (FR-18; columns verified live in task 030, owner 2026-11-23): NOT
+                // grid-derived: Information section. The description (Memo), the assignee (lookup to contact, which has no module:
+                // the internal person's name comes only as the lookup's @formattedValues entry), and the regarding matter (lookup
+                // to sprk_matter: its id and name only, never a matter read; like sprk_regardingproject above, the name shows
+                // whether or not the caller holds a grant on that matter - the disclosure question put to UAC).
+                // UAC review: sprk_description, sprk_assignedto APPROVED by uac-r2 2026-11-23; sprk_regardingmatter held by uac-r2, ACCEPTED by the owner 2026-11-23 (uac-r2 notes/decisions.md).
+                "sprk_description", "sprk_assignedto", "sprk_regardingmatter",
             },
         });
 
@@ -660,6 +673,13 @@ public static class ExternalAccessModule
                 "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 583a2a33.
                 "sprk_mattertype", "modifiedon",
+                // spaarke-SPA-external-access-platform-r4 task 031 (FR-18; columns verified live in task 030, owner 2026-11-23): NOT
+                // grid-derived: Information section. The description (Memo), the practice area (lookup to the reference table
+                // sprk_practicearea_ref, which has no module), the assigned attorney and paralegal (lookups to contact, which has no
+                // module: the internal person's name comes only as the lookup's @formattedValues entry, owner 2026-11-08/11-23), and
+                // createdon, shown as the matter's open date (sprk_opendate does not exist; owner 2026-11-23).
+                // UAC review: APPROVED by uac-r2 2026-11-23 (R4 notes/task-031-notes.md).
+                "sprk_matterdescription", "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1", "createdon",
             },
         });
 

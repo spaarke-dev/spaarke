@@ -24,7 +24,7 @@ export { dataGridCellStyle, dataGridHeaderCellStyle } from './cellStyles';
 
 // ─── Core DataGrid (task 003) ───
 export { DataGrid, default as DataGridDefault } from './DataGrid';
-export type { DataGridProps, DataGridHostContext } from './DataGrid';
+export type { DataGridProps, DataGridHostContext, DataGridSettings, DataGridSortSetting } from './DataGrid';
 
 // ─── DataGridPageShell — canonical Custom Page mount (task 035 hardening) ───
 // Thin wrapper around DataGrid that handles FluentProvider + theme listener +
@@ -130,6 +130,7 @@ export {
 export type { DefaultHandler, DefaultHandlerContext, DefaultActionMeta } from './commandBar/defaults';
 
 export { exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from './commandBar/csvExport';
+export type { ExportCellText } from './commandBar/csvExport';
 
 export {
   registerCommandHandler,

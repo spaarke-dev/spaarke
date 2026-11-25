@@ -3335,6 +3335,28 @@ public partial class SignalReevaluationJobTests
                             return copy;
                         }));
                     break;
+                // Task 209 (#3014): the nightly close's read of the open Signals whose policy is not in force: sprk_signal inner-joined to
+                // sprk_policy on the lookup, answered as Dataverse answers it. The root conditions (the status) hold on the Signal and the
+                // link criteria (D-170's state conditions, the domain allowlist) on its policy row, nested filters included; a Signal whose
+                // policy row is gone (deleted) has nothing to join. Paged by id. Any other link shape or operator throws, so a query this
+                // does not model fails the test instead of answering wrongly.
+                case "sprk_signal" when query.LinkEntities.SingleOrDefault(l => l.LinkToEntityName == "sprk_policy") is { } policyLink:
+                    if (policyLink.LinkFromAttributeName != "sprk_policy" || policyLink.LinkToAttributeName != "sprk_policyid"
+                        || policyLink.JoinOperator != JoinOperator.Inner || policyLink.LinkEntities.Count > 0)
+                        throw new NotSupportedException("Only an inner join of sprk_signal.sprk_policy to sprk_policy.sprk_policyid is modelled.");
+                    OpenSignalPolicyJoinReads++;
+                    result = Paged(query, Org.Rows.Values.Where(r =>
+                            Holds(r, query.Criteria)
+                            && r.GetAttributeValue<EntityReference>("sprk_policy") is { } linked
+                            && _policies.SingleOrDefault(p => p.Id == linked.Id) is { } policyRow
+                            && Holds(policyRow, policyLink.LinkCriteria))
+                        .Select(row =>
+                        {
+                            var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
+                            foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
+                            return copy;
+                        }));
+                    break;
                 case "sprk_signal" when Value("sprk_policy") is Guid policyId:
                     var openStatuses = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalstatus").Values.Cast<int>().ToHashSet();
                     foreach (var row in Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policyId
@@ -3477,6 +3499,28 @@ public partial class SignalReevaluationJobTests
             (entity.Element("filter")?.Elements("condition") ?? Enumerable.Empty<XElement>())
             .Where(c => c.Attribute("entityname") is null && (string?)c.Attribute("attribute") == subject + "id" && (string?)c.Attribute("operator") == "eq")
             .All(c => Guid.Parse((string)c.Attribute("value")!) == row.Id);
+
+        /// <summary>Task 209: the joined read's open-Signal reads answered (<see cref="Holds"/>).</summary>
+        public int OpenSignalPolicyJoinReads { get; private set; }
+
+        /// <summary>Task 209: a <see cref="FilterExpression"/> (conditions and nested filters, And or Or) evaluated on one row, as Dataverse does,
+        /// for the operators the joined read uses: <c>eq</c>, <c>in</c>, <c>null</c>, <c>not-null</c>. Any other operator throws.</summary>
+        private static bool Holds(Entity row, FilterExpression filter)
+        {
+            var results = filter.Conditions.Select(c =>
+            {
+                var present = row.Attributes.TryGetValue(c.AttributeName, out var value) && value is not null;
+                return c.Operator switch
+                {
+                    ConditionOperator.Equal => Matches(row, c.AttributeName, c.Values[0]),
+                    ConditionOperator.In => c.Values.Any(v => Matches(row, c.AttributeName, v)),
+                    ConditionOperator.Null => !present,
+                    ConditionOperator.NotNull => present,
+                    _ => throw new NotSupportedException($"Operator {c.Operator} on {c.AttributeName} is not modelled by the joined read."),
+                };
+            }).Concat(filter.Filters.Select(f => Holds(row, f))).ToList();
+            return filter.FilterOperator == LogicalOperator.Or ? results.Any(r => r) : results.All(r => r);
+        }
 
         private static bool Matches(Entity row, string attribute, object expected) => row.Attributes.TryGetValue(attribute, out var actual) && actual switch
         {

@@ -337,7 +337,7 @@ export class MatterService {
         }
 
         // -- Step 2b: Trigger RAG indexing for uploaded files --
-        // Uses the canonical sync-OBO path via `@spaarke/sdap-client.SdapApiClient.indexFile()`.
+        // Uses the canonical sync-OBO path via `SdapApiClient.indexFile()` (`services/sdap`).
         // Non-fatal — failures are surfaced as warnings; the matter + documents are already saved.
         const indexingWarnings = await this._entityService.indexUploadedFiles(
           uploadResult.uploadedFiles,

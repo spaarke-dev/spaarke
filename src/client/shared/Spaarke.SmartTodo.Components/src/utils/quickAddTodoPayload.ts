@@ -2,8 +2,8 @@
  * quickAddTodoPayload — the `sprk_todo` create payload of the three-field quick-add (title, due date, assigned to).
  *
  * Used by `SmartTodoWidget`'s quick-add (spaarke-ontology-platform-r1 task 106). Package-internal: it is not exported
- * from the barrel. (The SmartTodo Code Page's `QUICK_ADD_TODO_EVENT` listener builds the same shape inline, but no
- * surface dispatches that event any more — see `components/Header/Header.tsx`.)
+ * from the barrel. (The SmartTodo Code Page's orphaned `QUICK_ADD_TODO_EVENT` listener, which built the same shape
+ * inline, was removed with the page's `SmartToDo` fork in #2907.)
  *
  * Why it is a function: `sprk_todo.sprk_duedate` is a Dataverse **Date Only** column (task 106). The Web API accepts
  * only `"YYYY-MM-DD"` for it and refuses a timestamp with HTTP 400. The widget sent `toISOString()` of 23:59 LOCAL on

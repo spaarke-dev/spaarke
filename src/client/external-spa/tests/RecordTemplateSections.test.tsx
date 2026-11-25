@@ -1001,6 +1001,170 @@ describe('option-set labels', () => {
 });
 
 // ---------------------------------------------------------------------------
+// R4 task 031 (FR-18) — the Information fields task 030 verified live and the owner approved
+// ---------------------------------------------------------------------------
+
+describe('Information fields (R4 task 031, FR-18)', () => {
+  // A lookup as the module fetch serialises it (FetchService.ProjectEntity, System.Text.Json Web defaults): an object with the
+  // id. `name` is null here on purpose, so the only source of the name is `@formattedValues` (the server's display value).
+  const lookup = (id: string, logicalName: string) => ({
+    id,
+    logicalName,
+    name: null,
+    keyAttributes: [],
+    rowVersion: null,
+  });
+  const CONTACT_A = '11111111-2222-4333-8444-555555555551';
+  const CONTACT_B = '11111111-2222-4333-8444-555555555552';
+  const PRACTICE = '11111111-2222-4333-8444-555555555553';
+  const MATTER = '11111111-2222-4333-8444-555555555554';
+  const MATTER_TYPE = '11111111-2222-4333-8444-555555555555';
+
+  const INFO_CASES = [
+    {
+      entity: 'sprk_matter',
+      raw: {
+        createdon: '2026-01-15T09:30:00Z',
+        sprk_practicearea: lookup(PRACTICE, 'sprk_practicearea_ref'),
+        sprk_assignedattorney1: lookup(CONTACT_A, 'contact'),
+        sprk_assignedparalegal1: lookup(CONTACT_B, 'contact'),
+        sprk_matterdescription: 'Defend the claim.\nPhase one: discovery.',
+        // Owner 2026-11-23: the already-allowed matter type and last-modified date are shown too.
+        sprk_mattertype: lookup(MATTER_TYPE, 'sprk_mattertype_ref'),
+        modifiedon: '2026-03-02T10:00:00Z',
+      },
+      formatted: {
+        createdon: '1/15/2026',
+        sprk_mattertype: 'Litigation',
+        sprk_practicearea: 'Employment',
+        sprk_assignedattorney1: 'Avery Attorney',
+        sprk_assignedparalegal1: 'Parker Paralegal',
+        modifiedon: '3/2/2026',
+      },
+      shown: [
+        ['createdon', 'Open date', '1/15/2026'],
+        ['sprk_mattertype', 'Matter type', 'Litigation'],
+        ['sprk_practicearea', 'Practice area', 'Employment'],
+        ['sprk_assignedattorney1', 'Assigned attorney', 'Avery Attorney'],
+        ['sprk_assignedparalegal1', 'Assigned paralegal', 'Parker Paralegal'],
+        ['sprk_matterdescription', 'Description', 'Defend the claim.\nPhase one: discovery.'],
+        ['modifiedon', 'Last modified', '3/2/2026'],
+      ],
+    },
+    {
+      entity: 'sprk_project',
+      raw: {
+        sprk_practicearea: lookup(PRACTICE, 'sprk_practicearea_ref'),
+        sprk_assignedattorney1: lookup(CONTACT_A, 'contact'),
+        sprk_assignedparalegal1: lookup(CONTACT_B, 'contact'),
+        sprk_projectdescription: 'Due diligence for the acquisition.',
+      },
+      formatted: {
+        sprk_practicearea: 'Corporate',
+        sprk_assignedattorney1: 'Avery Attorney',
+        sprk_assignedparalegal1: 'Parker Paralegal',
+      },
+      shown: [
+        ['sprk_practicearea', 'Practice area', 'Corporate'],
+        ['sprk_assignedattorney1', 'Assigned attorney', 'Avery Attorney'],
+        ['sprk_assignedparalegal1', 'Assigned paralegal', 'Parker Paralegal'],
+        ['sprk_projectdescription', 'Description', 'Due diligence for the acquisition.'],
+      ],
+    },
+    {
+      entity: 'sprk_workassignment',
+      raw: {
+        sprk_regardingmatter: lookup(MATTER, 'sprk_matter'),
+        sprk_assignedto: lookup(CONTACT_A, 'contact'),
+        sprk_description: 'Review the supplier contracts.',
+        sprk_mattertype: lookup(MATTER_TYPE, 'sprk_mattertype_ref'),
+      },
+      formatted: {
+        sprk_regardingmatter: 'Acme v. Contoso',
+        sprk_assignedto: 'Avery Attorney',
+        sprk_mattertype: 'Litigation',
+      },
+      shown: [
+        ['sprk_regardingmatter', 'Matter', 'Acme v. Contoso'],
+        ['sprk_mattertype', 'Matter type', 'Litigation'],
+        ['sprk_assignedto', 'Assigned to', 'Avery Attorney'],
+        ['sprk_description', 'Description', 'Review the supplier contracts.'],
+      ],
+    },
+  ] as const;
+
+  /** The detail read's FetchXML, as the SPA sent it. */
+  const detailFetchXmlOf = (entity: string): string | undefined =>
+    bffApiCall.mock.calls
+      .filter(call => String(call[0]).endsWith('/api/dataverse/fetch'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string; fetchXml: string })
+      .find(
+        b => b.entityName === entity && b.fetchXml.includes(`attribute="${caseOf(entity).idAttribute}" operator="eq"`)
+      )?.fetchXml;
+
+  it.each(INFO_CASES)('$entity: reads each new column and shows it, lookups by their formatted name', async ic => {
+    const c = caseOf(ic.entity);
+    installDetailRead(ic.entity, id => ({
+      ...detailRow(c, id),
+      ...ic.raw,
+      '@formattedValues': ic.formatted,
+    }));
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+    const fields = await within(dialog).findByTestId('record-detail-fields');
+
+    // The read asks for every new column (the BFF allow-list admits them: ExternalModuleColumnAllowListTests section 8).
+    const fetchXml = detailFetchXmlOf(ic.entity);
+    for (const [attribute] of ic.shown) expect(fetchXml).toContain(`<attribute name="${attribute}"/>`);
+
+    for (const [attribute, label, text] of ic.shown) {
+      const value = within(dialog).getByTestId(`record-detail-field-${attribute}`);
+      expect(value.textContent).toBe(text);
+      // The row's label is the <dt> right before its value.
+      expect(value.previousElementSibling?.textContent).toBe(label);
+    }
+    // A lookup never shows its id.
+    for (const id of [CONTACT_A, CONTACT_B, PRACTICE, MATTER]) expect(fields.textContent).not.toContain(id);
+  });
+
+  it.each(INFO_CASES)(
+    '$entity: a lookup with no formatted name and no name shows the em dash, never its GUID',
+    async ic => {
+      const c = caseOf(ic.entity);
+      // The new columns come back raw only: lookups carry an id and a null name, and there is no display value at all.
+      installDetailRead(ic.entity, id => ({ ...detailRow(c, id), ...ic.raw }));
+      renderWidget(c.Body);
+      fireEvent.click(gridRow(c, 1));
+      const dialog = await screen.findByRole('dialog');
+      const fields = await within(dialog).findByTestId('record-detail-fields');
+
+      for (const [attribute] of ic.shown) {
+        const raw = (ic.raw as Record<string, unknown>)[attribute];
+        if (raw && typeof raw === 'object') {
+          expect(within(dialog).getByTestId(`record-detail-field-${attribute}`).textContent).toBe('—');
+        }
+      }
+      for (const id of [CONTACT_A, CONTACT_B, PRACTICE, MATTER]) expect(fields.textContent).not.toContain(id);
+    }
+  );
+
+  it.each(INFO_CASES)('$entity: a record with none of the new columns set shows the em dash for each', async ic => {
+    const c = caseOf(ic.entity);
+    // Dataverse leaves a null column out of the row entirely.
+    installDetailRead(ic.entity, id => detailRow(c, id));
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByTestId('record-detail-fields');
+
+    for (const [attribute] of ic.shown) {
+      expect(within(dialog).getByTestId(`record-detail-field-${attribute}`).textContent).toBe('—');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Negative cases
 // ---------------------------------------------------------------------------
 

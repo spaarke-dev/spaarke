@@ -38,7 +38,7 @@
  *
  * See also:
  *   - `projects/smart-todo-r4/notes/d-widget-parity-audit-2026-06-18.md` §6
- *   - `src/solutions/SmartTodo/src/components/SmartToDo.tsx` — Code Page consumer
+ *   - `../components/SmartToDo/SmartToDo.tsx` — the board (LegalWorkspace and the SmartTodo Code Page)
  *   - `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx`
  *     — widget consumer (rendering only, no mutations)
  */
@@ -72,10 +72,8 @@ const CHOICE_TO_COLUMN: Record<number, TodoColumn> = {
 };
 
 // ---------------------------------------------------------------------------
-// Pure scoring helpers — local copies kept inside the peer package to keep
-// the hook self-contained (no cross-package dependency on the Code Page's
-// `todoScoreUtils.ts`). The math + weights match the Code Page hook bit-for-bit
-// — verified against `src/solutions/SmartTodo/src/utils/todoScoreUtils.ts`.
+// Pure scoring helpers — kept inside the peer package so the hook is
+// self-contained (no dependency on a Code Page).
 //
 // `parseDueDate` ITSELF is no longer a local copy (spaarke-ontology-platform-r1
 // task 080 / C-10, 2026-10-03): this file's own `new Date(isoString)` parse
@@ -161,9 +159,8 @@ function resolveColumn(todo: IKanbanTodoLike, todayThreshold: number, tomorrowTh
  * verified: this function (and `resolveColumn`/`assignColumnByDate` above)
  * bucket purely on `sprk_duedate` + pin state. There is NO statuscode or
  * statecode special-casing anywhere in this file, so a Completed
- * (statuscode=2) item that the caller's query now includes (see
- * `buildTodoItemsQuery`'s `includeCompleted` param in
- * `src/solutions/SmartTodo/src/services/queryHelpers.ts`) flows through and
+ * (statuscode=2) item that a caller's query includes (none does today — see
+ * `buildActiveTodosQuery` in `../services/todoQueries.ts`) flows through and
  * lands in its normal Today/Tomorrow/Future bucket exactly like an Open/
  * In-Progress item — there is no 4th "Completed" column, satisfying the
  * spec's "kanban renders Completed without layout breakage" acceptance

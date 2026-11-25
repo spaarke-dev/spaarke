@@ -1,35 +1,40 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-23 ~15:40Z (task 028 in progress: live steps A–C done; E2E round 1 found defects; fix round started)
+> **Last Updated**: 2026-11-24 ~07:40Z (wave 9 merged and closed: 033, 035; #3045 follow-up committed)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **028** 🔄 P2 deploy + E2E (STANDARD, prescriptive; the fix round is code, so quality gates apply). Record: `notes/task-028-deploy-record.md` (has uncommitted edits: E2E round 1 + Review detail diagnosis). |
-| **Live (all with owner go + rollback)** | A: grid row `286be8b4` created 12:44Z (rollback: delete row). B: SPA master `2dcbe35e34` live 13:04:40Z, run 45180011706 (rollback: redeploy `2963d1565b`). C: `3ff4102c` Review detail column PATCHed 14:58:28Z, versionnumber 32877194 (rollback: `scratchpad/patch-3ff4102c.ps1 -Rollback`; the raw original is also in the deploy record). Dev BFF `9df4e5c819` (uac-r2, gate passed 13:01Z). |
-| **Owner go (2026-11-23)** | "Yes, fix both": the Review detail defect and the column resize defect, then redeploy the SPA. Merge and redeploy each still need the owner's go. |
-| **Fix 1: Review detail (F1)** | ROOT CAUSE CONFIRMED. The module fetch (`FetchService.ProjectEntity`) serialises SDK values as objects: `statuscode` → `{"value":1,"extensionData":null}`, Money → `{"value":77.25,...}` (measured by serialising `OptionSetValue` with Web defaults). `reviewDetail.ts` `wholeNumberOf` accepts only a number or a digit string, so all four render points are always blank. Same class: `api/delete-own.ts:116` `isServiceRequestClosed` uses `Number(record.statuscode)`, which is NaN on the object, so a closed SR is still offered Delete (server 409). FIX: one helper that accepts number / digit string / `{value:n}` (and `{Value:n}`); use it in both places. Tests use the REAL object shape at all four render points and in `isServiceRequestClosed`. The task 020 tests used a bare `1`, which is why they missed it. Grep for other `Number(record.<optionset>)` / raw option reads. |
-| **Fix 2: column resize (F1)** | The record Documents grid (DataGrid with rowSource, 023a) shows the resize cursor, but dragging doesn't resize; the header text gets selected instead. Cause unknown; needs a browser repro. The SPA has no mock mode in package.json (`dev` = vite). Option: a jsdom-free repro with Vite `dev` in the in-app browser, or a Storybook/harness. Suspects: Fluent `columnSizingOptions` being re-applied (`DataGrid.tsx` ~1440-1510 memo; `key` remount on 50px width bucket ~1741); HeaderCellContent swallowing the pointer. Ask the owner whether the home Invoices grid resizes too (pre-existing vs new). |
-| **Also (cosmetic, same PR if cheap)** | At 1000px the Type and Date columns shrink to "Ty…"/"D…" (minWidth = max(80, 0.5×width)); an empty rounded strip above the Documents grid header. |
-| **E2E round 1 (owner, writer)** | ✅ PDF preview, upload/download/delete, invoice file download, empty states. .docx = no preview by design (owner asked about a docx viewer: none reusable; the external plane can't use SharePoint's viewer; offer to file an Idea). ❌ resize. ❌ Review detail. Pending: owner checks the home Invoices grid column + resize there; the View-only pass after the redeploy. |
-| **Next Action** | Implement Fix 1 (helper + tests) → reproduce Fix 2 → fix → tests → one adversarial review → PR (owner merge go) → SPA redeploy (owner go; tell uac-r2) → owner E2E incl. View-only → tell uac-r2 the E2E end time → close 028 (deploy record, notes, TASK-INDEX, drift check, portfolio sync). |
+| **Active** | **#3045 follow-up (D-34)**, the shared DataGrid export: every cell exports the text it shows; host-rendered columns export the renderer's text; dates export as shown (owner 2026-11-24); export text hardening (owner 2026-11-24: "fix the excel formula risk"; detail tracked outside the repo, never in public text). Committed `6dc5eba5ed` on top of merge `e288c59dc0`. Notes: `notes/task-033-followup-3045-notes.md` (round 3 is current). |
+| **Status** | **PR #3055** open (fix `6dc5eba5ed` + review fixes `b4968491ac`). Local: grid jest 299/299, tsc, eslint 0 errors, prettier, client-lint ok, external-spa tsc + 44/44. Opus review done: F1 (guard after separators) and F2 (Date Only test in the New York env) fixed; Ks in the notes. Residual hardening detail reported to the owner in chat only. Open owner question: Date Only export as shown vs `yyyy-mm-dd` (locale misread risk). |
+| **Next action** | Owner's merge go for #3055 (and the Date Only answer). After merge: D-34 → Done in `notes/defer-issues.md` (#3045 auto-closes via "Fixes"). Then tell uac-r2 the #3048 merge `b64d988625` for a later BFF candidate (threads), and plan **038** (P3 dev deploy + E2E) on the owner's per-SHA go. |
+| **Last merged** | PR #3048 at 06:14:00Z, merge `b64d988625`: tasks 033 (Money sort + export) and 035 (message threads, `threadId`). POMLs completed, TASK-INDEX ✅, drift check clean, board Tasks Completed = 30. |
+| **Next in phase 3** | **038** (P3 dev deploy + E2E). 036 is cancelled. |
+| **uac-r2** | Dev BFF `0362599b94` LIVE since ~05:21:45Z 2026-11-24; it does NOT carry 035's `threadId` (the SPA then shows ungrouped messages). Threads need a later BFF candidate that includes `b64d988625`, through uac-r2 with the owner's per-SHA go. |
+| **ebilling-r1 FYI** | Master PR #3051 changes the shared invoice submission result screen (title/icon follow the polled status); one external-spa test assertion changes. It reaches the portal with the next SPA build from master after it merges. No action needed. |
 
-## Side work
-- ebilling-r1 task 134 (Outcome report): R4 review sent (F1 no-access card, F4 modal report); its fix `2304de2bb5` reviewed: OK, residual K2 agreed. Nothing pending from R4.
-- uac-r2: told about the E2E window from 14:59Z; it reads external 4xx/5xx/403 by route. Send it the E2E end time.
+## Deploy order
+Every SPA deploy builds master HEAD and needs the owner's go for the exact SHA, with rollback `9d08576e63`. For 035's threads to show, the BFF must also carry `b64d988625`.
 
-## Merge trap (seen 2026-11-22)
-- Merging master after a squash of our own work: a line that 023c changed and 024 changed BACK looks unchanged from the merge base, so git takes master's text. For files where `origin/master` == the pre-squash branch tip, restore `HEAD^1`'s copy.
+## Live on dev
+- SPA: master `9d08576e63` (rollback `2dcbe35e34`).
+- BFF: `0362599b94`, live ~05:21:45Z 2026-11-24 (uac-r2; previous `996928732e`).
 
-## Owner questions open
-- A docx preview as an Idea? (FR-14 owner decision 2026-11-09 = PDF + images only.)
-- Older: show "The client is reviewing this invoice." beyond the Information field?
-- `useHostRowSource` row in `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval).
+## For 038's E2E
+- Wave 8: Information columns (matter: Open date, Matter type, Practice area, Assigned attorney/paralegal, Description, Last modified; project: Practice area, Assigned attorney/paralegal, Description; WA: Matter, Matter type, Assigned to, Description). Grid widths/sort per browser, "Clear all". Messages Refresh + "Show new messages".
+- Wave 9: currency columns sort by amount; Export to Excel writes displayed text (labels, names, amounts, dates as shown); messages grouped into conversations (needs the threads BFF).
+- Known limits: "Open date" is a date-time; a parent's Messages keeps polling under a child modal; amounts in different currencies sort by raw amount; an unlabelled currency cell shows USD (D-35 #3046).
+
+## Owner questions open (older)
+- Should a docx preview be filed as an Idea?
+- Show "The client is reviewing this invoice." beyond the Information field?
+- Add a `useHostRowSource` row to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval)?
 
 ## Filed
-- D-24 #2939, D-25 #2960, D-26 #2961, D-27 #2962, D-28 #2963 (config row not in Deploy-Release/provisioning), D-29 #2964, D-30 #2975.
+- D-24 #2939 … D-30 #2975; D-31 #3008; D-32 #3009; D-33 #3010 closed.
+- D-34 #3045 (fix in progress, above); D-35 #3046 (unlabelled currency = USD); D-36 #3050 (MDA grids don't read OData label annotations; not verified live).
 
-## Coordination
-- uac-r2 deploys the dev BFF only; peer messages are not owner approval. An SPA deploy builds master HEAD, so re-check HEAD before dispatch.
+## Merge trap (seen 2026-11-22)
+When merging master after a squash of our own work, watch for a line that one task changed and a later task changed back. It looks unchanged from the merge base, so git takes master's text. For files where `origin/master` equals the pre-squash branch tip, restore `HEAD^1`'s copy. 2026-11-24 merge `e288c59dc0`: every touched file was identical on both sides (clean).

@@ -21,7 +21,7 @@
  */
 
 import * as React from 'react';
-import { Button, Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Text, Textarea } from '@fluentui/react-components';
+import { Button, Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Text } from '@fluentui/react-components';
 import { StatusBadge } from '@spaarke/ui-components';
 import type { CoreRoute, ProceduresQuery, RuleItem, RuleMark } from '../../services/recordProceduresApi';
 import type { OverridesApi, WriteFailure } from '../../services/overridesApi';
@@ -29,7 +29,6 @@ import type { DryRunApi } from '../../services/dryRunApi';
 import type { FirmOption } from '../../services/firmChoices';
 import { levelLabel, recordWords, ruleBadges, versionLabel, type AllowedSteps } from '../../services/model';
 import {
-  MAX_REASON_CHARS,
   allowedBlocker,
   currentRuleChoice,
   noAllowedCall,
@@ -61,7 +60,7 @@ import {
   type FormValues,
   type ServerFieldErrors,
 } from './ruleForms';
-import { ChoiceGroup, KeyValues, useWizardStyles, type ChoiceOption } from './steps';
+import { ChoiceGroup, KeyValues, ReasonField, useWizardStyles, type ChoiceOption } from './steps';
 import { WizardFrame, type OnChanged, type WizardNav } from './WizardFrame';
 import { stampWords } from './words';
 
@@ -296,9 +295,7 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
   );
 
   const reasonField = (
-    <Field label="Reason" required hint={`At most ${MAX_REASON_CHARS} characters.`}>
-      <Textarea value={form.reason} onChange={(_, d) => set({ reason: d.value })} resize="vertical" maxLength={MAX_REASON_CHARS} />
-    </Field>
+    <ReasonField value={form.reason} onChange={reason => set({ reason })} />
   );
 
   const options: Array<ChoiceOption<RuleChoice>> = [];

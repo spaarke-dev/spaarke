@@ -11,7 +11,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// <summary>
 /// H1 (ebilling-r1 + unified-access-control-r2 agreed 2026-11-13): the generic update paths' invoice-family guard covers every
 /// family table — the approval, the external identifier, the correction and the submission as well as the invoice and the line.
-/// On the playbook update, the output orchestrator and the field-mapping push a write of such a row is decided on its stored
+/// On the playbook update, the update handler and the field-mapping push a write of such a row is decided on its stored
 /// row overlaid with the patch (one core record), a row that does not exist is refused and never created, and a write the
 /// rule admits is written as before.
 /// </summary>
@@ -46,7 +46,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     /// <summary>
     /// A submission's core lookups and its <c>sprk_invoice</c> are access columns for the playbook identity on the two app-only
-    /// handlers (the playbook update and the output orchestrator), which refuse a write of them before the guard.
+    /// handlers (the playbook update and the update handler), which refuse a write of them before the guard.
     /// </summary>
     private static bool CoreLookupIsAnAccessColumnOn(GenericPath path, string table) =>
         table == "sprk_invoicesubmission" && path != GenericPath.FieldMappingPush;
@@ -93,7 +93,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public static TheoryData<GenericPath, string> EveryHandlerAndWidenedTable()
     {
         var data = new TheoryData<GenericPath, string>();
-        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.OutputOrchestrator })
+        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.UpdateHandler })
             foreach (var table in WidenedTables)
                 data.Add(path, table);
         return data;
@@ -194,7 +194,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnExternalIdentifierUnderAMatter_GivenAnInvoiceOfThatMatter_IsWritten_ItsMatterStillDecides(GenericPath path)
     {

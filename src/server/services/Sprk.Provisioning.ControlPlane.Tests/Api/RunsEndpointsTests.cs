@@ -2021,6 +2021,192 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         factory.Repository.CreatedRuns.Should().BeEmpty();
     }
 
+    // -------------------------------------------------------------------------
+    // ISS-031 — a run against an existing stamp (sprk_provisionedon set) is admitted only with intake
+    // upgradeOfProvisionedOn equal to the row's. The row is left as it is (no Ready → InProgress move), and the key does
+    // not switch any handler to upgrade mode (that is `provisionedOn`, ISS-038).
+    // -------------------------------------------------------------------------
+
+    private static readonly DateTimeOffset AcmeProvisionedOn = new(2026, 11, 23, 14, 1, 48, TimeSpan.Zero);
+
+    private static StubRegistryClient ProvisionedStamp(string setupStatus, DateTimeOffset? provisionedOn = null) => new()
+    {
+        Snapshot = new Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot(
+            EnvironmentId: "env-1",
+            CustomerId: TestCustomerId,
+            TenantId: "11111111-1111-1111-1111-111111111111",
+            SetupStatus: setupStatus,
+            CurrentRunId: null,
+            ProvisionedOn: provisionedOn ?? AcmeProvisionedOn),
+    };
+
+    private static HttpRequestMessage UpgradeRequest(string? upgradeOfProvisionedOn)
+    {
+        var parameters = new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" };
+        if (upgradeOfProvisionedOn is not null) parameters["upgradeOfProvisionedOn"] = upgradeOfProvisionedOn;
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1",
+                profile = "spaarke-hosted-model2",
+                nonSecretParameters = WithOperatorIntake(parameters),
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+        return request;
+    }
+
+    [Fact]
+    public async Task PostRuns_Iss031_ReadyStamp_Acknowledged_Returns202_RowUntouched_NoUpgradeMode()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var stub = ProvisionedStamp("Ready");
+        factory.ReplaceRegistryClient(stub);
+
+        var response = await factory.CreateClient().SendAsync(UpgradeRequest("2026-11-23T14:01:48Z"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        stub.StatusUpdates.Should().BeEmpty("the row stays Ready: H13 sets Ready at the end, nothing would move it back");
+        var run = factory.Repository.CreatedRuns.Should().ContainSingle().Subject;
+        run.Parameters.NonSecret.Should().NotContainKey("provisionedOn",
+            "the acknowledgement must not switch H0/H2a/H4/H4b to upgrade mode (ISS-038)");
+    }
+
+    [Fact]
+    public async Task PostRuns_Iss031_ReadyStamp_WithoutAcknowledgement_Returns400_NamingTheValue_GuardReleased()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var stub = ProvisionedStamp("Ready");
+        factory.ReplaceRegistryClient(stub);
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(UpgradeRequest(upgradeOfProvisionedOn: null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemErrorCode(body).Should().Be("registry-upgrade-not-acknowledged");
+        ReadProblemDetail(body).Should().Contain("upgradeOfProvisionedOn']='2026-11-23T14:01:48Z'",
+            "the refusal names the exact value to send");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+
+        // The refusal released the guard: the acknowledged retry is admitted at once (no 409 already-in-flight).
+        var retry = await client.SendAsync(UpgradeRequest("2026-11-23T14:01:48Z"));
+        retry.StatusCode.Should().Be(HttpStatusCode.Accepted, await retry.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task PostRuns_Iss031_ProvisionedOnAlone_IsNotTheAcknowledgement()
+    {
+        // `provisionedOn` is the handlers' upgrade-mode key; sending it does not acknowledge the existing stamp.
+        using var factory = new L2WebApplicationFactory();
+        factory.ReplaceRegistryClient(ProvisionedStamp("Ready"));
+        var parameters = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            ["provisionedOn"] = "2026-11-23T14:01:48Z",
+        };
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1",
+                profile = "spaarke-hosted-model2",
+                nonSecretParameters = WithOperatorIntake(parameters),
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        ReadProblemErrorCode(await response.Content.ReadAsStringAsync()).Should().Be("registry-upgrade-not-acknowledged");
+    }
+
+    [Fact]
+    public async Task PostRuns_Iss031_InProgressStamp_WithoutAcknowledgement_Returns400()
+    {
+        // ACME 2026-11-20: the row was reset by hand to InProgress; an existing stamp now always needs the acknowledgement.
+        using var factory = new L2WebApplicationFactory();
+        factory.ReplaceRegistryClient(ProvisionedStamp("InProgress"));
+
+        var response = await factory.CreateClient().SendAsync(UpgradeRequest(upgradeOfProvisionedOn: null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        ReadProblemErrorCode(await response.Content.ReadAsStringAsync()).Should().Be("registry-upgrade-not-acknowledged");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_Iss031_InProgressStamp_Acknowledged_InAnotherSpelling_Returns202()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var stub = ProvisionedStamp("InProgress");
+        factory.ReplaceRegistryClient(stub);
+
+        var response = await factory.CreateClient().SendAsync(UpgradeRequest("2026-11-23T14:01:48.000Z"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        stub.StatusUpdates.Should().BeEmpty();
+        factory.Repository.CreatedRuns.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task PostRuns_Iss031_AcknowledgementMismatch_Returns400_NothingWritten()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.ReplaceRegistryClient(ProvisionedStamp("Ready"));
+
+        var response = await factory.CreateClient().SendAsync(UpgradeRequest("2026-10-20T09:00:00Z"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        ReadProblemErrorCode(await response.Content.ReadAsStringAsync()).Should().Be("registry-upgrade-provisioned-on-mismatch");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_Iss031_NeverProvisionedRow_RefusesTheAcknowledgement()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var stub = new StubRegistryClient
+        {
+            Snapshot = new Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot(
+                EnvironmentId: "env-1",
+                CustomerId: TestCustomerId,
+                TenantId: "11111111-1111-1111-1111-111111111111",
+                SetupStatus: "InProgress",
+                CurrentRunId: null,
+                ProvisionedOn: null),
+        };
+        factory.ReplaceRegistryClient(stub);
+
+        var response = await factory.CreateClient().SendAsync(UpgradeRequest("2026-11-23T14:01:48Z"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemErrorCode(body).Should().Be("registry-upgrade-provisioned-on-mismatch");
+        ReadProblemDetail(body).Should().Contain("never been provisioned");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_Reg07_LookupTimeout_IsAnInfraFault_Proceeds_To_202()
+    {
+        // ISS-031 review: an HttpClient timeout is a TaskCanceledException with the caller's token NOT cancelled. It used
+        // to escape the infra-fault catch as a 500 that kept the guard, blocking the customer with a run never written.
+        using var factory = new L2WebApplicationFactory();
+        factory.ReplaceRegistryClient(new StubRegistryClient { ThrowOnLookup = new TaskCanceledException("HttpClient.Timeout") });
+
+        var response = await factory.CreateClient().SendAsync(UpgradeRequest(upgradeOfProvisionedOn: null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        factory.Repository.CreatedRuns.Should().ContainSingle();
+    }
+
     [Fact]
     public async Task PostRuns_Reg07_LookupInfraFault_Proceeds_To_202()
     {
@@ -2429,9 +2615,16 @@ internal sealed class StubRegistryClient : Sprk.Provisioning.ControlPlane.Regist
         string tenantId, CancellationToken cancellationToken)
         => Task.FromResult<Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot?>(null);
 
+    // ISS-031: CreateRun never writes the row's status; recorded so a test can prove it.
+    public List<Sprk.Provisioning.ControlPlane.Registry.RegistrySetupStatusUpdate> StatusUpdates { get; } = new();
+
     public Task<Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome> UpdateSetupStatusAsync(
         Sprk.Provisioning.ControlPlane.Registry.RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
-        => Task.FromResult<Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome>(new Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome.Success());
+    {
+        StatusUpdates.Add(update);
+        return Task.FromResult<Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome>(
+            new Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome.Success());
+    }
 }
 
 // -----------------------------------------------------------------------------

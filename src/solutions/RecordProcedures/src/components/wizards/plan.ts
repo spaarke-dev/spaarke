@@ -81,6 +81,10 @@ export const reasonValid = (reason: string | undefined): boolean => {
   return n > 0 && n <= MAX_REASON_CHARS;
 };
 
+/** ISS-027: why a reason is over the limit (said under the Reason box; `reasonValid` is false, so Next stays off), or null. A blank reason is waited for, not reported. */
+export const reasonProblem = (reason: string | undefined): string | null =>
+  (reason ?? '').trim().length > MAX_REASON_CHARS ? `The reason may be at most ${MAX_REASON_CHARS} characters.` : null;
+
 export interface ProcedureInput {
   versionId?: string;
   reason?: string;

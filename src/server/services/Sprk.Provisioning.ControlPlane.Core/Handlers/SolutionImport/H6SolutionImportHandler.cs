@@ -332,7 +332,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (8) Invoke the importer. Long-running (up to 60 min per POML) —
+        // (8) Invoke the importer. Long-running (up to ImportTimeout, 120 min by default) —
         //     reconciler owns keeping the ambient Service Bus lock alive per
         //     FR-22 / R20. Infrastructure exceptions classified Resumable
         //     (except OperationCanceledException which propagates for shutdown).

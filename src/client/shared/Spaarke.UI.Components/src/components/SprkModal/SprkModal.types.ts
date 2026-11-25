@@ -85,6 +85,12 @@ export interface SprkModalProps {
   uiScale?: number;
   /** Whether the maximize/restore control is shown (default true). */
   maximizable?: boolean;
+  /**
+   * Opens the modal MAXIMIZED (the `full` size), with the restore control still shown so the user can return to {@link size}. It
+   * applies on every open: closing and reopening starts maximized again. Ignored when {@link maximizable} is `false` (the modal stays
+   * at `size`). Default `false`.
+   */
+  defaultMaximized?: boolean;
   /** Optional browse navigation ("N of M") in the header-left. */
   nav?: SprkModalNav;
   /** Optional header-right actions (rendered before the window controls). */

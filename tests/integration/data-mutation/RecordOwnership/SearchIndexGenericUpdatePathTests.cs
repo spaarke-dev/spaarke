@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 039 (FR-38, #2399; part E) — the generic server update paths that do not go through
-/// <c>OwnedChildWrite</c>: the output orchestrator (<see cref="DataverseUpdateHandler"/>), the playbook update
+/// <c>OwnedChildWrite</c>: the update handler (<see cref="DataverseUpdateHandler"/>), the playbook update
 /// (<see cref="UpdateRecordActionCore"/>, also the action seam's) and the field-mapping push
 /// (<c>ApplyMappingsToChildRecordsAsync</c>). On a search-indexed table both index columns are the server's: a write that names
 /// either has it dropped (logged as <c>client_search_index_dropped</c>, applied "unchanged"), the rest of the write is made, and
@@ -50,7 +50,7 @@ public sealed class SearchIndexGenericUpdatePathTests
 
     private static IEnumerable<string> Drops(IEnumerable<string> messages) => messages.Where(m => m.Contains("client_search_index_dropped"));
 
-    // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
+    // ── DataverseUpdateHandler (its orchestrator caller was deleted in ebilling-r1 050b) ────────────────────────────────────────────────────────────
 
     private DataverseUpdateHandler Handler(CapturingLog<DataverseUpdateHandler> log) =>
         new(_writes.Object, new Mock<IGenericEntityService>().Object, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),

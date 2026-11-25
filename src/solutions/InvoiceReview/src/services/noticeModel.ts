@@ -122,6 +122,11 @@ export function noticeEntryOfLock(lock: { send: boolean; subject: string; prose:
   return { ...EMPTY_NOTICE, status: 'ready', subject, subjectSuffix: subjectSuffixOf(subject), prose: lock?.prose ?? '', send: lock?.send ?? false };
 }
 
+/** An answer lands only on an entry still waiting for it (`loading`); any other entry is left as it is (the same object comes back when nothing changes). */
+export function settleNoticeEntries(entries: NoticeEntries, kind: FirmNoticeKind, patch: Partial<NoticeEntry>): NoticeEntries {
+  return entries[kind].status === 'loading' ? { ...entries, [kind]: { ...entries[kind], ...patch } } : entries;
+}
+
 /** True when the server refused the notice itself (400 `ebilling.notice_refused`): nothing was decided, and the notice is shown the reason. */
 export function isNoticeRefusal(f: ApiFailure): boolean {
   return f.status === 400 && f.errorCode === CODE_NOTICE_REFUSED;

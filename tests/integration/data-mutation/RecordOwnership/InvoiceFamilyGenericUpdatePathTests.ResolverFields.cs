@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): on the three app-only update
-/// paths — the playbook update, the output orchestrator and the field-mapping push — a write that sets or changes an
+/// paths — the playbook update, the update handler and the field-mapping push — a write that sets or changes an
 /// invoice-family row's own core lookup carries, in the same write, the resolver fields of the record the row will name, read
 /// app-only: the type, the id and the URL always, the name and the number when the record has them. A derive that cannot be
 /// done is answered as each path answers the invoice-family guard (its code only); a write that moves no core lookup reads
@@ -79,7 +79,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnInvoiceMovedToAnotherMatter_IsRefusedCoreRecordFixed_AndNothingIsDerived(GenericPath path)
     {
@@ -95,7 +95,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AnApprovalMovedFromItsMatterToAProject_IsWrittenWithTheProjectsResolverFields(GenericPath path)
     {
         // A core-table switch (the push cannot clear the matter, so it is not run on it).
@@ -111,8 +111,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "no name")]
     [InlineData(GenericPath.PlaybookUpdate, "no number")]
-    [InlineData(GenericPath.OutputOrchestrator, "no name")]
-    [InlineData(GenericPath.OutputOrchestrator, "no number")]
+    [InlineData(GenericPath.UpdateHandler, "no name")]
+    [InlineData(GenericPath.UpdateHandler, "no number")]
     [InlineData(GenericPath.FieldMappingPush, "no name")]
     [InlineData(GenericPath.FieldMappingPush, "no number")]
     public async Task AnApprovalMovedToAMatterWithABlankNameOrNumber_IsWritten_WithTheTypeIdAndUrl_AndTheBlankOneCleared(GenericPath path, string gap)
@@ -179,7 +179,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AMatterGoneByTheDerive_OnAWriteRunAsAPerson_IsReadFailed_AsTheGuardAnswersThere(GenericPath path)
     {
         _recordAnswer = (_, _, _) => null;
@@ -211,7 +211,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task ARunAsAPersonWhoMayNotReadTheNewMatter_WritesItsTypeIdAndUrl_AndClearsItsNameAndNumber(GenericPath path)
     {
         _callerMayNotRead = true;
@@ -225,7 +225,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task ARunAsAPersonWhoMayReadTheNewMatter_WritesTheNameAndNumberThePersonReads(GenericPath path)
     {
         _personAnswer = (table, id, columns) => new Entity(table, id) { [columns[0]] = "As the person sees it", [columns[1]] = "P-1" };
@@ -242,9 +242,9 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public static TheoryData<GenericPath, string> ReNamingRuns() => new()
     {
         { GenericPath.PlaybookUpdate, "no person" },
-        { GenericPath.OutputOrchestrator, "no person" },
+        { GenericPath.UpdateHandler, "no person" },
         { GenericPath.PlaybookUpdate, "a person" },
-        { GenericPath.OutputOrchestrator, "a person" },
+        { GenericPath.UpdateHandler, "a person" },
         { GenericPath.FieldMappingPush, "a caller who may not read it" },
         { GenericPath.FieldMappingPush, "a caller who may read it" },
     };
@@ -272,7 +272,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task ARowGivenASecondCoreRecordAfterTheGuard_IsRefusedByTheDerive_AndNothingIsWritten(GenericPath path)
     {
@@ -300,7 +300,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnInvoiceWhoseCoreRecordChangesAfterTheGuard_IsRefusedCoreRecordFixedByTheDerive_AndNothingIsWritten(GenericPath path)
     {
@@ -358,7 +358,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnApprovalMovedToAnotherMatter_IsWrittenWithThatMattersResolverFields(GenericPath path)
     {
@@ -376,7 +376,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var app = FamilyRowUnderAMatter("sprk_externalidentifier",
             (InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn, new EntityReference("sprk_invoice", Invoice)));
 
-        var outcome = await RunAsync(GenericPath.OutputOrchestrator, "sprk_externalidentifier", FamilyRow,
+        var outcome = await RunAsync(GenericPath.UpdateHandler, "sprk_externalidentifier", FamilyRow,
             Lookups(("sprk_regardingmatter", null)), NoPlain, app.Object);
 
         outcome.Code.Should().BeNull(outcome.Message);
@@ -442,7 +442,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnInvoiceRenamedOnly_ReadsNothingForTheDerive_AndWritesNoneOfTheResolverFields(GenericPath path)
     {

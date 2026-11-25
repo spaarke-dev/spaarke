@@ -190,16 +190,6 @@ export interface IContact {
   sprk_email?: string;
 }
 
-/** Dataverse sprk_userpreference entity for storing user-specific settings. */
-export interface IUserPreference {
-  sprk_userpreferenceid: string;
-  sprk_preferencetype: number;   // Choice field discriminator
-  sprk_preferencevalue: string;  // JSON text
-  _sprk_user_value?: string;     // Lookup to systemuser
-  createdon: string;
-  modifiedon: string;
-}
-
 /** Generic lookup item for Dataverse reference table searches. */
 export interface ILookupItem {
   id: string;

@@ -621,10 +621,21 @@ public sealed class SignalSuppressionService
     internal async Task<IReadOnlyList<SuppressionPartition>> PartitionsOfSignalsAsync(IReadOnlyList<Guid> signalIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(signalIds);
+        // Ontology task 205 (DI-146): the Signals are read in pages (sprk_signalid IN), not one Retrieve per item; a Signal the read
+        // does not return is unknown, and throws as before.
+        var read = new Dictionary<Guid, Entity>();
+        foreach (var chunk in signalIds.Distinct().Chunk(InChunk))
+        {
+            var query = new QueryExpression("sprk_signal") { ColumnSet = new ColumnSet(["sprk_dedupekey", "ownerid", .. SignalLineageColumns]) };
+            query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            foreach (var row in (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities)
+                read[row.Id] = row;
+        }
+
         var items = new List<PartitionItem>(signalIds.Count);
         foreach (var id in signalIds)
         {
-            var signal = await _entities.RetrieveAsync("sprk_signal", id, ["sprk_dedupekey", "ownerid", .. SignalLineageColumns], ct).ConfigureAwait(false)
+            var signal = read.GetValueOrDefault(id)
                 ?? throw new InvalidOperationException($"Signal {id} could not be read, so its secure family is unknown.");
             items.Add(ItemOf(signal));
         }

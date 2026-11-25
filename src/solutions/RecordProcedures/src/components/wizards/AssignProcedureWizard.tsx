@@ -19,7 +19,7 @@
  */
 
 import * as React from 'react';
-import { Button, Caption1, Dropdown, Field, Input, MessageBar, MessageBarActions, MessageBarBody, MessageBarTitle, Option, Radio, RadioGroup, Spinner, Text, Textarea } from '@fluentui/react-components';
+import { Button, Caption1, Dropdown, Field, Input, MessageBar, MessageBarActions, MessageBarBody, MessageBarTitle, Option, Radio, RadioGroup, Spinner, Text } from '@fluentui/react-components';
 import { StatusBadge, type StatusBadgeTone } from '@spaarke/ui-components';
 import {
   MAX_NAME_SEARCH_CHARS,
@@ -39,8 +39,8 @@ import { failureText, type OverridesApi, type WriteFailure } from '../../service
 import { CODE_ABANDONED, CODE_TIMED_OUT } from '../../services/readRace';
 import type { DryRunApi } from '../../services/dryRunApi';
 import { recordWords, shortDate, versionLabel } from '../../services/model';
-import { MAX_REASON_CHARS, planAssign, type AssignChoice } from './plan';
-import { ChoiceGroup, useWizardStyles, type ChoiceOption } from './steps';
+import { planAssign, type AssignChoice } from './plan';
+import { ChoiceGroup, ReasonField, useWizardStyles, type ChoiceOption } from './steps';
 import { WizardFrame, type OnChanged } from './WizardFrame';
 import { isPinnable, versionOption, versionWindow } from './words';
 
@@ -413,9 +413,7 @@ export const AssignProcedureWizard: React.FC<AssignProcedureWizardProps> = ({ co
               </Dropdown>
             )}
           </Field>
-          <Field label="Reason" required hint={`At most ${MAX_REASON_CHARS} characters.`}>
-            <Textarea value={form.reason} onChange={(_, d) => set({ reason: d.value })} resize="vertical" maxLength={MAX_REASON_CHARS} />
-          </Field>
+          <ReasonField value={form.reason} onChange={reason => set({ reason })} />
         </>
       ),
     },

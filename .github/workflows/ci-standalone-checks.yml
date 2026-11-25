@@ -32,7 +32,8 @@ name: CI Standalone Checks
 #                                                                 (sdap-ci's Prettier check is NOT carried over:
 #                                                                 it ran after `prettier --write`, so it could
 #                                                                 never fail. Tier 2 `lint` runs the real check.)
-#   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1.
+#   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1 and
+#                                                                 summarize-mutation-report.py (unittest).
 #   ontology-script-tests   (new)                                  Pester controls for Apply-DoLanePolicies.ps1 (the
 #                                                                 policy lint and apply order),
 #                                                                 Invoke-OntologyStampBackfill.ps1 and the
@@ -280,14 +281,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx tsc
 
-      - name: Install Spaarke.SdapClient deps
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.SdapClient
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npx tsc
-
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -378,28 +371,12 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx tsc
 
-      - name: Install Spaarke.SdapClient deps
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.SdapClient
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npx tsc
-
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Build Spaarke.UI.Components
         working-directory: src/client/shared/Spaarke.UI.Components
-        run: npx tsc
-
-      - name: Install Spaarke.AI.Outputs deps
-        working-directory: src/client/shared/Spaarke.AI.Outputs
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Outputs
-        working-directory: src/client/shared/Spaarke.AI.Outputs
         run: npx tsc
 
       # MUST come after Spaarke.UI.Components: it type-checks against that package's dist.
@@ -458,10 +435,11 @@ jobs:
 
   # --------------------------------------------------------------------------
   # verdict-script-tests: the Pester must-fire controls for scripts/ci/master-ci-verdict.ps1
-  # (the decision logic behind the router-master and tier2 alerts). Fake gh, no network.
+  # (the decision logic behind the router-master and tier2 alerts), and the unittest controls for
+  # scripts/ci/summarize-mutation-report.py (the mutation-nightly verdict). Fake gh, no network.
   # --------------------------------------------------------------------------
   verdict-script-tests:
-    name: Master verdict script tests (Pester)
+    name: CI verdict script tests (Pester + unittest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -479,6 +457,11 @@ jobs:
           Import-Module Pester -MinimumVersion 5.5.0
           $r = Invoke-Pester -Path tests/scripts/Master-Ci-Verdict.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
+
+      # The mutation-nightly verdict (scripts/ci/summarize-mutation-report.py): only mutants on changed lines count,
+      # an unreadable diff fails closed (#1821). Temp git repos, no network.
+      - name: Mutation summary controls (unittest)
+        run: python3 -m unittest discover -s scripts/ci/tests -v
 
   # --------------------------------------------------------------------------
   # ontology-script-tests: the Pester controls for scripts/Apply-DoLanePolicies.ps1 (policy lint, the

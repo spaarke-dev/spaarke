@@ -36,6 +36,7 @@
 import { registerContextWidget } from './ContextWidgetRegistry';
 import { safeRegister } from '@spaarke/ui-components';
 import type { ContextWidgetComponent } from '../types/widget-types';
+import { SourceWidgetType } from '../outputs/types/widget-types';
 
 // ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
 // Isolate each registration so a synchronous throw from one call (factory-
@@ -193,8 +194,8 @@ safeRegisterContext('pinned-memory-list', {
 // ===========================================================================
 // R1 source widgets (server-driven `context_update` targets — AIPU2-081)
 //
-// Widget type strings MUST match the SourceWidgetType enum values from
-// @spaarke/ai-outputs; the server sends these strings in `context_update`
+// Registered under the SourceWidgetType enum values (src/outputs/types);
+// the server sends these same strings in `context_update`
 // events and ContextPaneController resolves the matching component.
 //
 // Citation highlighting behaviour per widget:
@@ -207,42 +208,42 @@ safeRegisterContext('pinned-memory-list', {
 //   - CodeViewer      → no-op (future: may map via selectionRef line range).
 // ===========================================================================
 
-safeRegisterContext('DocumentViewer', {
+safeRegisterContext(SourceWidgetType.DocumentViewer, {
   factory: () =>
     import('../widgets/context/DocumentViewerContextWidget') as Promise<{
       default: ContextWidgetComponent;
     }>,
 });
 
-safeRegisterContext('WebSource', {
+safeRegisterContext(SourceWidgetType.WebSource, {
   factory: () =>
     import('../widgets/context/WebSourceContextWidget') as Promise<{
       default: ContextWidgetComponent;
     }>,
 });
 
-safeRegisterContext('LegalLibrary', {
+safeRegisterContext(SourceWidgetType.LegalLibrary, {
   factory: () =>
     import('../widgets/context/LegalLibraryContextWidget') as Promise<{
       default: ContextWidgetComponent;
     }>,
 });
 
-safeRegisterContext('Citation', {
+safeRegisterContext(SourceWidgetType.Citation, {
   factory: () =>
     import('../widgets/context/CitationContextWidget') as Promise<{
       default: ContextWidgetComponent;
     }>,
 });
 
-safeRegisterContext('ImageViewer', {
+safeRegisterContext(SourceWidgetType.ImageViewer, {
   factory: () =>
     import('../widgets/context/ImageViewerContextWidget') as Promise<{
       default: ContextWidgetComponent;
     }>,
 });
 
-safeRegisterContext('CodeViewer', {
+safeRegisterContext(SourceWidgetType.CodeViewer, {
   factory: () =>
     import('../widgets/context/CodeViewerContextWidget') as Promise<{
       default: ContextWidgetComponent;

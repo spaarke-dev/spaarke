@@ -5,8 +5,8 @@
  * 3-level cascade (localStorage > URL flags > navbar DOM), and listens
  * for theme changes to stay in sync with the Spaarke theme system.
  *
- * Renders SmartTodoApp which provides the two-panel Kanban + Detail layout
- * wrapped in TodoProvider for shared state management.
+ * Renders SmartTodoApp: the Header and the shared Smart To Do Kanban board
+ * (`@spaarke/smart-todo-components`, fed by `hooks/useSmartTodoBridge`).
  */
 
 import * as React from "react";

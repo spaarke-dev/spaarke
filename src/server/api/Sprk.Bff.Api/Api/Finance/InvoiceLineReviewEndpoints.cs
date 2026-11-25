@@ -28,7 +28,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Status codes.</b> 200 applied; 400 invalid (<c>errorCode</c> says which rule); 401; 403; 404 uniform (invoice or line absent or
 /// unreadable); 409 (not In Review, line Pending or not decidable, totals refused, another decision in progress, a line changed,
 /// <c>ebilling.line.corrections_pending</c> while a correction of a chosen line, or for Accept all Clean of the invoice, was saved but did not finish:
-/// the detail names each by field and line, to be repeated first); 503
+/// the detail names each by field and line, to be repeated first; <c>ebilling.decision.id_reused</c> when the decision id is already recorded on a
+/// chosen line with another decision: another action, reason, amount, note or reviewer, checked before anything is written (ISS-029)); 503
 /// <c>ebilling.disabled</c> or a transient failure; 503 <c>ebilling.decision.incomplete</c> when the lines were written but a later step did not
 /// finish (the body names the committed lines to repeat the decision with). Its <c>failedStep</c> is <c>totals</c>, <c>corrections</c>,
 /// <c>record</c>, or <c>signals</c> (2026-10-29: a Signal close failed, so a Signal is still Open; the decision stands and the repeat
@@ -70,8 +71,10 @@ public static class InvoiceLineReviewEndpoints
                 "required; approved 0). Only while the invoice is In Review; a Pending line cannot be decided. Recomputes the invoice totals and " +
                 "records the decision. Repeating the request with the same decisionId records nothing twice. An optional note (at most 2000 " +
                 "characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters, checked before any read) is saved on this line's own " +
-                "Decision Record and nowhere else. A repeat with the same decisionId must carry the same note: another note (or none) is refused by " +
-                "the record as a different decision, answered 503 ebilling.decision.incomplete (failedStep record); once the line's record exists, the first note stays on it. Use a new decisionId for a new note.")
+                "Decision Record and nowhere else. A repeat with the same decisionId must be the same decision: once the line's record exists, another " +
+                "action, reason, amount, note (or none) or reviewer is refused 409 ebilling.decision.id_reused before anything is written, and the first " +
+                "decision and note stay. Use a new decisionId for a new decision. A 503 on the lookup of the recorded decision writes nothing and is safe " +
+                "to repeat; other 503 codes (for example ebilling.decision.incomplete) say which step to repeat or that the step needs a fix first.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -90,7 +93,9 @@ public static class InvoiceLineReviewEndpoints
                 "The selected lines get the same action and reason; a Reduce carries its own approvedAmount per line (apply a suggestion to n " +
                 "lines). All or nothing: one invalid line writes nothing. An Accept writes the 'Accepted in bulk' correction rows (never a label). " +
                 "An optional note (the single-line route's rules) is saved on every selected line's own Decision Record, one record per line, and " +
-                "nowhere else; a repeat with the same decisionId must carry the same note (see the single-line route).")
+                "nowhere else. A repeat with the same decisionId must be the same decision as every chosen line already recorded under that decisionId: " +
+                "if one of those lines was recorded with another action, reason, amount, note or reviewer, the whole call is refused 409 " +
+                "ebilling.decision.id_reused and no line is written (see the single-line route). Lines not in the call are not checked.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -298,7 +303,7 @@ public static class InvoiceLineReviewEndpoints
         LineDecisionStatus.InvalidRequest => Refused(StatusCodes.Status400BadRequest, result.Code, result.Detail),
         LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         LineDecisionStatus.NotInReview or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.TotalsRefused
-            or LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.FirmRequired => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
+            or LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.FirmRequired or LineDecisionStatus.IdReused => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
         LineDecisionStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
         LineDecisionStatus.Forbidden => Refused(StatusCodes.Status403Forbidden, result.Code, result.Detail),
         LineDecisionStatus.Incomplete => Results.Problem(

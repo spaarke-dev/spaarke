@@ -264,7 +264,7 @@ public sealed class FirmNoticeComposerTests
             [
                 new FirmOutcomeItem(
                     FirmOutcomeDecision.RejectionFinding, null, null, null, null, ["The hourly rate is above the approved rate"], [],
-                    LineNumber: 7, ValuesRead: [new FirmOutcomeValueRead("Billed rate", "450.00")], ReasonCode: "approved_rate.above_approved"),
+                    LineNumber: 7, ValuesRead: [new FirmOutcomeValueRead("Rate", "450.00")], ReasonCode: "approved_rate.above_approved"),
                 new FirmOutcomeItem(FirmOutcomeDecision.RejectionFinding, null, null, null, null, ["The invoice repeats an earlier invoice"], []),
             ],
             false, NotShownCount: 3);
@@ -274,7 +274,7 @@ public sealed class FirmNoticeComposerTests
 
         result.Status.Should().Be(FirmNoticeStatus.Composed);
         var html = result.Draft!.Html;
-        html.Should().Contain("Line 7").And.Contain("Billed rate: 450.00").And.Contain("The hourly rate is above the approved rate");
+        html.Should().Contain("Line 7").And.Contain("Rate: 450.00").And.Contain("The hourly rate is above the approved rate");
         html.Should().Contain("The invoice repeats an earlier invoice");
         html.Should().Contain("3 more findings are not shown here.");
         html.Should().NotContain("approved_rate.above_approved", "the reason code is the projection's, not the firm's wording");

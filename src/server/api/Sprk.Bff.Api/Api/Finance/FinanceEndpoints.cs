@@ -66,13 +66,16 @@ public static class FinanceEndpoints
             .WithSummary("Reject a document as not an invoice")
             .WithDescription(
                 "Marks a classified document as not an invoice. " +
-                "Updates the document status to RejectedNotInvoice. No invoice record is created.")
+                "Updates the document status to RejectedNotInvoice. No invoice record is created. A document linked to an invoice, " +
+                "or whose confirm submission has not ended Failed, is refused with 409. A Failed confirm submission whose undo has not " +
+                "finished (an invoice it created is still being removed) is refused with 503 earlier_attempt_being_removed; retry shortly.")
             .Produces<InvoiceReviewRejectResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // GET /api/finance/invoices/search — Semantic invoice search
         group.MapGet("/invoices/search", SearchInvoices)
@@ -117,16 +120,17 @@ public static class FinanceEndpoints
 
     /// <summary>
     /// Confirm — owner decision G5 (2026-10-01): every right is checked AS THE CALLER, then the APP creates the
-    /// invoice, owned by the matter's team. The checks, each on the id the handler consumes:
+    /// invoice, owned by the matter's team. Since ebilling-r1 task 050c (EB-D-264) confirm asks exactly what the manual internal
+    /// submission (the Create Invoice wizard, <c>InvoiceSubmissionEndpoints.ResolveSubmitTargets</c>) asks, plus its own document
+    /// rights: it does NOT ask the caller's Create privilege on <c>sprk_invoice</c>, so both keep working when the role change (096b D3)
+    /// removes that privilege from users. The checks, each on the id the handler consumes:
     /// <list type="bullet">
     ///   <item>Write on the body DocumentId through the document path (its review status is updated);</item>
     ///   <item>Write+Append on that document (<c>finance.link_invoice</c>) — the live schema puts the link on the
     ///   DOCUMENT (<c>sprk_document.sprk_invoice</c>), and the record that holds a lookup needs Append;</item>
     ///   <item>Read and AppendTo on the matter (<c>finance.submit_invoice</c>, 050a review #8: the same operation the internal
     ///   submission route checks on its core record, since confirm now submits through that intake) and AppendTo on the vendor
-    ///   organization (<c>finance.attach_invoice</c>) — the submission's and the new invoice's lookups point at them;</item>
-    ///   <item>the caller's Create privilege on <c>sprk_invoice</c> — the invoice is created app-only, so without
-    ///   this a user who could never create an invoice would get one by confirming.</item>
+    ///   organization (<c>finance.attach_invoice</c>) — the submission's and the new invoice's lookups point at them.</item>
     /// </list>
     /// </summary>
     internal static FinanceAuthorizationTargets ResolveConfirmTargets(EndpointFilterInvocationContext context)
@@ -175,11 +179,7 @@ public static class FinanceEndpoints
                 RecordId = request.VendorOrgId,
                 Operation = "finance.attach_invoice",
                 Source = "body.vendorOrgId",
-            },
-            FinanceAuthorizationCheck.CallerPrivilege(
-                FinanceAuthorizationFilter.CreateInvoicePrivilege,
-                FinanceAuthorizationFilter.InvoiceEntitySet,
-                source: "privilege.createInvoice"));
+            });
     }
 
     /// <summary>Reject: Write on the body DocumentId (its review status is updated) via the document path.</summary>
@@ -424,6 +424,7 @@ public static class FinanceEndpoints
             InvoiceReviewFailure.ReviewDecisionChanged => (StatusCodes.Status409Conflict, "Review Decision Changed"),
             InvoiceReviewFailure.ConfirmStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             InvoiceReviewFailure.ReviewStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
+            InvoiceReviewFailure.EarlierAttemptBeingRemoved => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };
 
@@ -436,6 +437,12 @@ public static class FinanceEndpoints
         if (ex.SubmissionId is { } submissionId)
         {
             extensions["submissionId"] = submissionId;
+        }
+
+        if (ex.Failure == InvoiceReviewFailure.EarlierAttemptBeingRemoved)
+        {
+            // The confirm route answers this state with a top-level errorCode (InvoiceSubmissionHttp.Refused); reject answers the same.
+            extensions["errorCode"] = InvoiceSubmissionErrors.EarlierAttemptBeingRemoved;
         }
 
         return Results.Problem(title: title, detail: ex.Message, statusCode: status, extensions: extensions);

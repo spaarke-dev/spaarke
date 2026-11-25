@@ -15,8 +15,10 @@
     "./logic/attachments": "./src/logic/attachments/index.ts",
     "./logic/invoice": "./src/logic/invoice/index.ts",
     "./logic/actions": "./src/logic/actions/index.ts",
+    "./logic/pcf-host": "./src/logic/pcf-host/index.ts",
     "./components": "./src/components/index.ts",
     "./components/AttachmentList": "./src/components/AttachmentList/index.ts",
+    "./components/AttachmentPreview": "./src/components/AttachmentPreview/index.ts",
     "./components/SubmitInvoice": "./src/components/SubmitInvoice/index.ts",
     "./invoice-attachment-marking": "./src/components/InvoiceAttachmentMarking/index.ts"
   },

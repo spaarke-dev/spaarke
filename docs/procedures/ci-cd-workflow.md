@@ -706,7 +706,7 @@ The checks from `sdap-ci.yml` that have no Router or nightly equivalent, run in 
 - `compose-client-gate` — the `@spaarke/compose-components` jest save-contract suite (builds its shared-lib `dist/` first).
 - `client-typecheck` — `tsc` builds of six shared client libraries in dependency order, then `Spaarke.AI.Widgets` `tsc --noEmit`.
 - `pcf-eslint` — `eslint .` in `src/client/pcf` (Tier 2 `lint` runs it only on SpaarkeAi/BFF changes and `client-lint.yml` does not cover PCF).
-- `verdict-script-tests` — Pester must-fire controls for `scripts/ci/master-ci-verdict.ps1` (fake `gh`, no network).
+- `verdict-script-tests` — Pester must-fire controls for `scripts/ci/master-ci-verdict.ps1` (fake `gh`, no network), and unittest controls for `scripts/ci/summarize-mutation-report.py` (the mutation-nightly verdict counts only mutants on changed lines).
 - `ontology-script-tests` — Pester controls for `scripts/Apply-DoLanePolicies.ps1` (policy lint, apply order, drift) `scripts/Invoke-OntologyStampBackfill.ps1` and the worklist-configuration phase (2b) of `scripts/Deploy-Release.ps1`; no Dataverse.
 - `trivy-fs` — the legacy per-change repository scan: Trivy `fs`, SARIF to the Security tab under the legacy category (`.github/workflows/sdap-ci.yml:security-scan`, so existing code-scanning alerts continue as one series). Reports only; it never fails on findings (the backlog is known), and raises `ci-standalone/trivy-fs` only if the scan itself errors. The upload step warns instead of failing on fork and Dependabot PRs, which cannot write `security-events`.
 
@@ -739,7 +739,7 @@ Seven workflows run on a `schedule:` trigger (`mutation-nightly.yml` was re-enab
 | Workflow | Schedule | What it reports | Blocking |
 |---|---|---|---|
 | `issues-dashboard.yml` | Every 6 hours (also on issue open/close/label events) | Regenerates the pinned `📊 Issues & Quality Dashboard` issue: open quality alerts, last result of each nightly, new / stale issues, totals | No — edits one issue body in place, never comments |
-| `mutation-nightly.yml` | Daily 05:00 UTC (+ dispatch) | Stryker.NET mutation run over the allowlisted security/contract BFF files that changed in the last 24h (since-mode: changed lines only) | No — quality alert `mutation-nightly` + `mutation-report` artifact |
+| `mutation-nightly.yml` | Daily 05:00 UTC (+ dispatch) | Stryker.NET mutation run over the allowlisted security/contract BFF files that changed in the last 24h (Stryker since-mode also re-tests code a changed test covers; the alert counts only mutants on changed lines, #1821) | No — quality alert `mutation-nightly` + `mutation-report` artifact |
 | `nightly-health.yml` | Daily, 06:00 UTC; Mondays 07:00 UTC (duplication sweep only) | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity; weekly jscpd duplication sweep | No — one quality alert per check + rolling tracking issue |
 | `client-tests.yml` | Nightly, 07:00 UTC | test baseline (jest, vitest, node:test) across the client packages (pass/fail/install-failed/deps-build-failed table) | No — quality alert `client-tests` + job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |

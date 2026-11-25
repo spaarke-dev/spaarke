@@ -43,6 +43,8 @@ export interface DecisionWizardHostProps {
   evidenceLinks?: boolean;
   /** Optional seam: render the wizard in place, with no modal envelope, for a frame too small for a dialog. Absent or false: SprkModal. */
   embedded?: boolean;
+  /** Optional seam: the modal wizard opens maximized (restorable). Ignored when `embedded`. Absent or false: the wizard size. */
+  defaultMaximized?: boolean;
   /** Optional seam: the Confirm step cannot record until it has been showing this long (`CONFIRM_GUARD_MS`). Absent or 0: no guard. */
   confirmGuardMs?: number;
   /** Optional seam: Escape closes the wizard (through the discard check). Absent or false: it never does. */
@@ -69,6 +71,7 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
   collectBecause,
   evidenceLinks,
   embedded,
+  defaultMaximized,
   confirmGuardMs,
   closeOnEscape,
 }) => {
@@ -134,6 +137,7 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
       collectBecause={collectBecause}
       evidenceLinks={evidenceLinks}
       embedded={embedded}
+      defaultMaximized={defaultMaximized}
       confirmGuardMs={confirmGuardMs}
       closeOnEscape={closeOnEscape}
     />

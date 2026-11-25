@@ -682,7 +682,7 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
    * `SmartTodo/DataverseService.createTodo` (task 020).
    *
    * @see src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts (TODO_REGARDING_CATALOG canonical entry: sprk_regardingevent → sprk_events)
-   * @see src/solutions/SmartTodo/src/services/DataverseService.ts createTodo (canonical record body shape)
+   * @see src/client/shared/Spaarke.SmartTodo.Components/src/services/TodoDataverseService.ts createTodo (canonical record body shape)
    * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
    */
   const handleAddTodo = React.useCallback(async () => {

@@ -22,9 +22,6 @@ public static class OfficeQuickCreateWorld
     /// <summary>OfficeQuickCreateFieldsContractTests <c>CallerId</c>.</summary>
     public static readonly Guid FieldsCaller = Guid.Parse("7d0e8a41-3b5c-4f2e-9a10-5c2b7e4f1100");
 
-    /// <summary>Issue1079_InvoiceQuickCreateNameTests <c>CallerSystemUserId</c>.</summary>
-    public static readonly Guid Issue1079Caller = Guid.Parse("7d0e8a41-3b5c-4f2e-9a10-5c2b7e4f1079");
-
     // ── Business units and their default team ──
     /// <summary>OfficeQuickCreateContractTests / OfficeQuickCreateProjectContractTests <c>BusinessUnitId</c>.</summary>
     public static readonly Guid ContractBusinessUnit = Guid.Parse("cb15f587-baa0-f111-aaac-000d3a99d1d7");
@@ -556,7 +553,6 @@ public sealed partial class OfficeCallerDataverseDouble : IDataverseUserClient
         User(OfficeQuickCreateWorld.ContractCaller, OfficeQuickCreateWorld.ContractBusinessUnit);
         User(OfficeQuickCreateWorld.FieldsCaller, OfficeQuickCreateWorld.FieldsBusinessUnit);
         User(OfficeQuickCreateWorld.FieldSecurityCaller, businessUnit: null);
-        User(OfficeQuickCreateWorld.Issue1079Caller, businessUnit: null);
         WithRow("businessunit", OfficeQuickCreateWorld.ContractBusinessUnit,
             new() { ["businessunitid"] = OfficeQuickCreateWorld.ContractBusinessUnit });
         WithRow("businessunit", OfficeQuickCreateWorld.FieldsBusinessUnit,

@@ -25,10 +25,10 @@ import type { WorklistData, WorklistService } from '..';
 import {
   DECIDE_CATEGORY,
   DO_CATEGORY,
-  DO_PAST_DUE_CATEGORY,
   acceptNarrative,
   buildWorklistNarrativeRequest,
   clearNarrativeCache,
+  worklistSummaryLine,
 } from '../worklistNarrative';
 import type { WorklistNarrativeRequest, WorklistNarrativeText } from '../worklistNarrative';
 import { ROUTE_BODIES, fakeService } from '../__fixtures__/worklistRouteFixtures';
@@ -74,9 +74,9 @@ const orderOf = () => ({ decide: lineIds(lane('Decide')), do: lineIds(lane('Do')
 beforeEach(() => clearNarrativeCache());
 
 describe('buildWorklistNarrativeRequest', () => {
-  it("carries the lanes' counts and the past-due count, and nothing else", () => {
+  it("carries the lanes' counts, one category per lane, and nothing else", () => {
     const data = lanes();
-    const request = buildWorklistNarrativeRequest(data, TODAY);
+    const request = buildWorklistNarrativeRequest(data);
     expect(request).not.toBeNull();
 
     const decide = data.Decide.reduce((n, g) => n + g.items.length, 0);
@@ -84,17 +84,21 @@ describe('buildWorklistNarrativeRequest', () => {
     const pastDue = doItems.filter(i => i.dueDate && i.dueDate < '2026-10-09').length;
     expect(pastDue).toBeGreaterThan(0);
 
+    // DI-161: past due is a subset of Do, so it is never a third category (the Assistant wrote "3 categories" and a reader could add
+    // 192 + 49 + 49). Never more categories than lanes, in the request and in the facts the model may assert.
     expect(request!.categories).toEqual([
       { name: DECIDE_CATEGORY, count: decide, unreadCount: decide },
       { name: DO_CATEGORY, count: doItems.length, unreadCount: doItems.length },
-      { name: DO_PAST_DUE_CATEGORY, count: pastDue, unreadCount: pastDue },
     ]);
+    expect(request!.categories.length).toBeLessThanOrEqual(2);
+    expect(request!.tldrFacts.categoryCounts).toEqual(request!.categories);
+    expect(JSON.stringify(request)).not.toMatch(/past due/i);
     expect(request!.totalNotificationCount).toBe(decide + doItems.length);
   });
 
   it('names no item: no priority item, no channel, no date and no record name, so the narrative cannot name one absent from the list', () => {
     const data = lanes();
-    const request = buildWorklistNarrativeRequest(data, TODAY)!;
+    const request = buildWorklistNarrativeRequest(data)!;
 
     expect(request.priorityItems).toEqual([]);
     expect(request.channels).toEqual([]);
@@ -112,15 +116,65 @@ describe('buildWorklistNarrativeRequest', () => {
   });
 
   it('is null for no list and for an empty list (nothing to say, so no call)', () => {
-    expect(buildWorklistNarrativeRequest(undefined, TODAY)).toBeNull();
-    expect(buildWorklistNarrativeRequest({ set: 'lanes', Decide: [], Do: [] }, TODAY)).toBeNull();
+    expect(buildWorklistNarrativeRequest(undefined)).toBeNull();
+    expect(buildWorklistNarrativeRequest({ set: 'lanes', Decide: [], Do: [] })).toBeNull();
   });
 
-  it('leaves out the past-due category when nothing is past due', () => {
+  it('has the same two categories when nothing is past due', () => {
     const data = lanes();
     for (const g of data.Do) for (const i of g.items) i.dueDate = '2026-10-30';
-    const names = buildWorklistNarrativeRequest(data, TODAY)!.categories.map(c => c.name);
+    const names = buildWorklistNarrativeRequest(data)!.categories.map(c => c.name);
     expect(names).toEqual([DECIDE_CATEGORY, DO_CATEGORY]);
+  });
+});
+
+describe('worklistSummaryLine (DI-161)', () => {
+  const withDue = (dueDate: string) => {
+    const data = lanes();
+    for (const g of data.Do) for (const i of g.items) i.dueDate = dueDate;
+    return data;
+  };
+  const counts = (data: WorklistData) => ({
+    decide: data.Decide.reduce((n, g) => n + g.items.length, 0),
+    doCount: data.Do.flatMap(g => g.items).length,
+  });
+
+  it('names the two lanes and the Work Items, says past due of the Do items only, and never says notifications or categories', () => {
+    const data = lanes();
+    const { decide, doCount } = counts(data);
+    const line = worklistSummaryLine(data, TODAY)!;
+    const pastDue = data.Do.flatMap(g => g.items).filter(i => i.dueDate && i.dueDate < '2026-10-09').length;
+
+    expect(decide).toBeGreaterThan(0);
+    expect(pastDue).toBeGreaterThan(0);
+    expect(pastDue).toBeLessThan(doCount);
+    expect(line).toBe(
+      `${decide + doCount} Work Items: ${decide} to decide and ${doCount} to do. ${pastDue} of the ${doCount} to do are past due.`
+    );
+    expect(line).not.toMatch(/notification|categor/i);
+  });
+
+  it('says all of them when every Do item is past due, and nothing about past due when none is', () => {
+    expect(worklistSummaryLine(withDue('2026-10-01'), TODAY)).toMatch(/to do\. All of the items to do are past due\.$/);
+    expect(worklistSummaryLine(withDue('2026-10-30'), TODAY)).not.toMatch(/past due/);
+  });
+
+  it('says "It is past due." for a single Do item that is past due, and nothing about past due when that one is not', () => {
+    const data = lanes();
+    const group = data.Do[0];
+    const one = (dueDate: string): WorklistData => ({
+      set: 'lanes',
+      Decide: [],
+      Do: [{ ...group, items: [{ ...group.items[0], dueDate }] }],
+    });
+
+    expect(worklistSummaryLine(one('2026-10-01'), TODAY)).toBe('1 Work Item: 1 to do. It is past due.');
+    expect(worklistSummaryLine(one('2026-10-30'), TODAY)).toBe('1 Work Item: 1 to do.');
+  });
+
+  it('is null for no list and for an empty list', () => {
+    expect(worklistSummaryLine(undefined, TODAY)).toBeNull();
+    expect(worklistSummaryLine({ set: 'lanes', Decide: [], Do: [] }, TODAY)).toBeNull();
   });
 });
 
@@ -169,7 +223,7 @@ describe('acceptNarrative', () => {
 });
 
 describe('createWorklistService.narrate', () => {
-  const request = buildWorklistNarrativeRequest(lanes(), TODAY)!;
+  const request = buildWorklistNarrativeRequest(lanes())!;
   const service = (fetch: jest.Mock) => createWorklistService({ fetch, baseUrl: 'https://bff.test/' });
 
   it('POSTs the counts to the narrate route and returns the accepted text', async () => {
@@ -219,12 +273,16 @@ describe('WorklistWidget narrative', () => {
     renderWidget(service);
 
     const narrative = await screen.findByTestId('worklist-narrative');
-    expect(within(narrative).getByTestId('worklist-narrative-summary')).toHaveTextContent(TEXT.summary);
+    // DI-161: the summary is the deterministic line over the counts, not the Assistant's sentence; the bullets are the Assistant's.
+    const summary = within(narrative).getByTestId('worklist-narrative-summary');
+    expect(summary).toHaveTextContent(worklistSummaryLine(lanes(), TODAY)!);
+    expect(summary).not.toHaveTextContent(TEXT.summary);
+    expect(summary).not.toHaveTextContent(/notification|categor/i);
     expect(narrative).toHaveTextContent('4 of the items to do are past due.');
     expect(narrative).toHaveTextContent('Written by the Assistant');
     expect(service.narrate).toHaveBeenCalledTimes(1);
     const sent = service.narrate.mock.calls[0][0];
-    expect(sent.categories.map(c => c.name)).toEqual([DECIDE_CATEGORY, DO_CATEGORY, DO_PAST_DUE_CATEGORY]);
+    expect(sent.categories.map(c => c.name)).toEqual([DECIDE_CATEGORY, DO_CATEGORY]);
   });
 
   it('hides it under ANY filter and does not call the model for a filter; clearing the filter brings it back', async () => {

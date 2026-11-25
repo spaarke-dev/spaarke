@@ -86,6 +86,7 @@ import {
   type DefaultHandlerContext,
 } from './defaults';
 import { getCommandHandler } from './registry';
+import type { ExportCellText } from './csvExport';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -162,6 +163,11 @@ export interface CommandBarProps {
   records: ReadonlyArray<Record<string, unknown>>;
   /** Visible columns — used by `export-excel`. */
   columns: ReadonlyArray<ResolvedColumn>;
+  /**
+   * Optional: the text `export-excel` writes for a cell, or `undefined` to keep the default formatting of the raw
+   * value. The grid passes one so a Money cell exports what it displays. Pass a stable function. Absent = unchanged.
+   */
+  exportCellText?: ExportCellText;
   /** Display name of the active savedquery / configjson title. */
   currentView: string;
   /** Trigger a hard refresh of the grid. */
@@ -403,6 +409,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
     selectedIds,
     records,
     columns,
+    exportCellText,
     currentView,
     refresh,
     parentContext,
@@ -439,11 +446,12 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
       selectedIds,
       records,
       columns,
+      exportCellText,
       currentView,
       refresh,
       parentContext,
     }),
-    [entityName, selectedIds, records, columns, currentView, refresh, parentContext]
+    [entityName, selectedIds, records, columns, exportCellText, currentView, refresh, parentContext]
   );
 
   // ── Resolve a handler for a given item ──────────────────────────────────

@@ -473,6 +473,12 @@ public sealed class StoredFileEndpointsTests
         public ConcurrentQueue<string> Timeline { get; } = new();
         public CapturingProvider Logs { get; private set; } = null!;
 
+        /// <summary>ISS-043 fix round 1 (F1): what the host logged, with level and exception.</summary>
+        public MalformedMultipartBodies.LogCapture Warnings { get; } = new();
+
+        /// <summary>ISS-043 fix round 1 (K2): replaces the request body and token before the route runs (<see cref="MalformedMultipartBodies.Apply"/>).</summary>
+        public Action<Microsoft.AspNetCore.Http.HttpContext>? OnRequest { get; set; }
+
         public IReadOnlyList<(EventId EventId, string Message)> AuditEvents =>
             Logs.Entries.Where(e => e.EventId.Id == StoredFileAudit.Downloaded.Id).ToList();
 
@@ -488,6 +494,7 @@ public sealed class StoredFileEndpointsTests
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(host.Logs);
+            builder.Logging.AddProvider(host.Warnings);
             builder.Services
                 .AddAuthentication(o =>
                 {
@@ -513,6 +520,11 @@ public sealed class StoredFileEndpointsTests
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
+            host._app.Use(async (context, next) =>
+            {
+                host.OnRequest?.Invoke(context);
+                await next(context);
+            });
             host._app.UseRouting();
             host._app.UseAuthentication();
             host._app.UseAuthorization();

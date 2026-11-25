@@ -176,9 +176,9 @@ import { COMPOSE_INDENT } from './composeIndentExtension';
 import { COMPOSE_NUMBER_ATOM } from './composeNumberAtomExtension';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
-// registration (`register-workspace-widgets.ts` transitively pulls in
-// `@spaarke/ai-outputs` subpaths that LegalWorkspace standalone Rollup cannot
-// resolve). Same rationale as ComposeWorkspace.tsx above.
+// registration (`register-workspace-widgets.ts`; it once pulled in
+// `@spaarke/ai-outputs` subpaths that LegalWorkspace standalone Rollup could not
+// resolve, folded into ai-widgets 2026-11-24). Same rationale as ComposeWorkspace.tsx.
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 
 // Task 013 (spaarkeai-compose-fidelity-r4.5, F-2 "one reader"): `docxToTipTapHtml` (the client

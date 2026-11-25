@@ -19,7 +19,7 @@
  *     ships pure ESM `export` syntax that ts-jest's CommonJS transform can't
  *     consume when loaded from `node_modules` — jest ignores node_modules
  *     for transforms by default). Mapping to source means the barrel's own
- *     transitive deps (`d3-force`, `marked`, `@spaarke/sdap-client`) must
+ *     transitive deps (`d3-force`, `marked`) must
  *     ALSO be stubbed — mirrors `@spaarke/ai-widgets/jest.config.ts`
  *     verbatim (same barrel, same problem, already solved there).
  *   - React/ReactDOM are pinned to THIS package's own `node_modules` copy so
@@ -72,7 +72,6 @@ module.exports = {
     // same problem, already solved there).
     '^d3-force$': '<rootDir>/src/__mocks__/d3-force.ts',
     '^marked$': '<rootDir>/src/__mocks__/marked.ts',
-    '^@spaarke/sdap-client$': '<rootDir>/src/__mocks__/sdap-client.ts',
     // ESM dist, reached through the ui-components barrel (see note above).
     '^@spaarke/auth$': '<rootDir>/../Spaarke.Auth/src/index.ts',
     // Dedupe React so a component mounted from @spaarke/ui-components SOURCE

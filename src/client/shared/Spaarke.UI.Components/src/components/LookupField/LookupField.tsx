@@ -283,6 +283,16 @@ const useStyles = makeStyles({
   resultItemHighlighted: {
     backgroundColor: tokens.colorNeutralBackground1Hover,
   },
+  /** An option with a secondary line: the name and the line stacked (task 211). Used only when `secondaryText` is set. */
+  resultItemText: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+  },
+  resultItemSecondary: {
+    color: tokens.colorNeutralForeground3,
+    overflowWrap: 'anywhere',
+  },
 
   selectedChip: {
     display: 'inline-flex',
@@ -723,7 +733,17 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
                   }
                 }}
               >
-                <Text size={200}>{item.name}</Text>
+                {item.secondaryText ? (
+                  // Task 211 (#3062): the second line tells same-name options apart (a person's email).
+                  <div className={styles.resultItemText}>
+                    <Text size={200}>{item.name}</Text>
+                    <Text size={100} className={styles.resultItemSecondary}>
+                      {item.secondaryText}
+                    </Text>
+                  </div>
+                ) : (
+                  <Text size={200}>{item.name}</Text>
+                )}
               </div>
             ))}
           </div>

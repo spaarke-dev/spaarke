@@ -33,8 +33,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         /// <summary>The playbook update action: <see cref="UpdateRecordActionCore"/>.</summary>
         PlaybookUpdate,
 
-        /// <summary>The output orchestrator: <see cref="DataverseUpdateHandler"/>.</summary>
-        OutputOrchestrator,
+        /// <summary>The update handler: <see cref="DataverseUpdateHandler"/> (its orchestrator caller was deleted in ebilling-r1 050b).</summary>
+        UpdateHandler,
 
         /// <summary>The field-mapping push: <c>ApplyMappingsToChildRecordsAsync</c>.</summary>
         FieldMappingPush,
@@ -62,7 +62,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     {
         switch (path)
         {
-            case GenericPath.OutputOrchestrator:
+            case GenericPath.UpdateHandler:
                 {
                     var fields = new Dictionary<string, object?>(plain);
                     foreach (var (column, record) in lookups)
@@ -257,8 +257,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoice")]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_billingevent")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoice")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_billingevent")]
+    [InlineData(GenericPath.UpdateHandler, "sprk_invoice")]
+    [InlineData(GenericPath.UpdateHandler, "sprk_billingevent")]
     [InlineData(GenericPath.FieldMappingPush, "sprk_invoice")]
     [InlineData(GenericPath.FieldMappingPush, "sprk_billingevent")]
     public async Task AnUpsertWhoseStoredRowCannotBeRead_IsRefusedReadFailed_AndNothingIsWritten(GenericPath path, string table)
@@ -276,7 +276,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnExistingInvoice_FollowsTheExistingRules_ARenameIsWritten_AndASecondCoreRecordIsRefusedCoreRecordFixed(GenericPath path)
     {
@@ -295,7 +295,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <summary>Task 045g rule 1: an update that would leave an invoice under no core record changes its core record.</summary>
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task AnInvoiceWhoseCoreLookupIsCleared_IsRefusedCoreRecordFixed_AndNothingIsWritten(GenericPath path)
     {
         var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", null)), NoPlain, InvoiceUnderAMatter().Object);
@@ -388,8 +388,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, false)]
     [InlineData(GenericPath.PlaybookUpdate, true)]
-    [InlineData(GenericPath.OutputOrchestrator, false)]
-    [InlineData(GenericPath.OutputOrchestrator, true)]
+    [InlineData(GenericPath.UpdateHandler, false)]
+    [InlineData(GenericPath.UpdateHandler, true)]
     [InlineData(GenericPath.FieldMappingPush, false)]
     [InlineData(GenericPath.FieldMappingPush, true)]
     public async Task AnInvoiceMovedToAnotherMatter_IsRefusedCoreRecordFixed_WithTheHint_WhereverItsLinesAre(GenericPath path, bool linesFollow)
@@ -409,7 +409,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task D96_ALineMovedToAnotherMatter_WhileStillAttachedToItsInvoice_IsRefusedLineMismatch_WithTheHint(GenericPath path)
     {
@@ -425,8 +425,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, false)]
     [InlineData(GenericPath.PlaybookUpdate, true)]
-    [InlineData(GenericPath.OutputOrchestrator, false)]
-    [InlineData(GenericPath.OutputOrchestrator, true)]
+    [InlineData(GenericPath.UpdateHandler, false)]
+    [InlineData(GenericPath.UpdateHandler, true)]
     public async Task ALineWhoseInvoiceIsCleared_IsRefusedLineInvoiceCleared_AndNothingIsWritten(GenericPath path, bool movedToo)
     {
         // Task 045g rule 3: a line keeps an invoice once it has one, whether or not the same write moves it.
@@ -443,7 +443,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory(DisplayName = "164a-1 (must not fire): a line's update naming its own invoice on the same matter is written; only the line's generic CREATE is refused")]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task D96_ALineReattachedToItsInvoice_OnTheSameMatter_IsWritten_TheCreateOnlyRefusalDoesNotFire(GenericPath path)
     {
         // ebilling-r1 task 164a-1 (uac-r2 Q6): the line's generic create is refused (GenericCreateRefused), its update is not.
@@ -463,7 +463,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Fact]
     public async Task TheCoreRecordFixedRefusalOnTheThrowingPaths_PinsTheExactMessage()
     {
-        var outcome = await RunAsync(GenericPath.OutputOrchestrator, "sprk_invoice", Invoice,
+        var outcome = await RunAsync(GenericPath.UpdateHandler, "sprk_invoice", Invoice,
             Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, WorldWithLines(Matter).Object);
 
         outcome.Message.Should().Be(
@@ -474,7 +474,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Fact]
     public async Task TheMismatchRefusalOnTheThrowingPaths_PinsTheExactMessage()
     {
-        var outcome = await RunAsync(GenericPath.OutputOrchestrator, "sprk_billingevent", Line,
+        var outcome = await RunAsync(GenericPath.UpdateHandler, "sprk_billingevent", Line,
             Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, WorldWithLines().Object);
 
         outcome.Message.Should().Be(

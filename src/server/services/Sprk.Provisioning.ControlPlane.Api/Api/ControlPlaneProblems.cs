@@ -43,6 +43,9 @@ internal static class ControlPlaneErrorCodes
     // --- POST /api/runs: registry + concurrency ---------------------------------------
     public const string RegistryCustomerMismatch = "registry-customer-mismatch";
     public const string RegistrySetupStatusNotInProgress = "registry-setup-status-not-in-progress";
+    // ISS-031: a run against an existing stamp (sprk_provisionedon set) needs intake upgradeOfProvisionedOn equal to the row's.
+    public const string RegistryUpgradeNotAcknowledged = "registry-upgrade-not-acknowledged";
+    public const string RegistryUpgradeProvisionedOnMismatch = "registry-upgrade-provisioned-on-mismatch";
     public const string CustomerRunInFlight = "customer-run-in-flight";
     public const string RunGuardUnavailable = "run-guard-unavailable";
     public const string RunIdCollision = "run-id-collision";

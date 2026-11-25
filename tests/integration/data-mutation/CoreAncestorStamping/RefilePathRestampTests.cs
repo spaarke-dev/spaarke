@@ -80,7 +80,7 @@ public class RefilePathRestampTests
         world.Patches.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "Task 156 path: the playbook output orchestrator's DataverseUpdateHandler re-stamps the children of the record it re-filed")]
+    [Fact(DisplayName = "Task 156 path: DataverseUpdateHandler re-stamps the children of the record it re-filed")]
     public async Task DataverseUpdateHandler_RestampsTheCommunicationsChildren()
     {
         var world = CommunicationWorld();
@@ -238,7 +238,7 @@ public class RefilePathRestampTests
             It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact(DisplayName = "Task 129: the playbook output orchestrator's DataverseUpdateHandler re-filing a communication reconciles its thread once")]
+    [Fact(DisplayName = "Task 129: DataverseUpdateHandler re-filing a communication reconciles its thread once")]
     public async Task DataverseUpdateHandler_ReFilingACommunication_ReconcilesItsThreadOnce_AndAPlainWriteNever()
     {
         var world = CommunicationWorld();
