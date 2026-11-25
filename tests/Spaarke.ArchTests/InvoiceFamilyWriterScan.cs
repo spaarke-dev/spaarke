@@ -84,9 +84,12 @@ internal static class InvoiceFamilyWriterScan
         IReadOnlyCollection<string> EnforcingCalls,
         IReadOnlyCollection<string> Tables,
         IReadOnlyCollection<string> Columns,
-        IReadOnlyList<WriteUnit> UnguardedWrites)
+        IReadOnlyList<WriteUnit> UnguardedWrites,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> DecidingCalls)
     {
         internal bool IsCandidate => UnguardedWrites.Count > 0;
+
+        internal IReadOnlyCollection<string> DecidingMethods => DecidingCalls.Keys.Order(StringComparer.Ordinal).ToList();
 
         internal string Describe() =>
             $"{Type} (tables: {string.Join(",", Tables)}; columns: {string.Join(",", Columns)}; unguarded writes: "
@@ -117,18 +120,44 @@ internal static class InvoiceFamilyWriterScan
     private static bool IsEnforcingCall(MethodBase target) =>
         target.DeclaringType is { } declaring && IlCallScan.Outermost(declaring) == Guard && Enforcing.Contains(target.Name);
 
-    /// <summary>The source method a body belongs to, by name; a lambda's body (no source method) is one group per type.</summary>
-    private static string SourceKey(Type caller, MethodBase body)
+    /// <summary>The group of a body none of the rules below can attribute to a method (see <see cref="SourceKey"/>).</summary>
+    internal const string Unattributed = "(closures)";
+
+    /// <summary>
+    /// The source-level method a body belongs to, by name: the method itself; an async / iterator state machine's source method; a local
+    /// function or lambda (<c>&lt;M&gt;g__...</c>, <c>&lt;M&gt;b__...</c>, also when nested in another lambda) to the method <c>M</c> that
+    /// holds it; the state machine of an async lambda to the same <c>M</c> through its type name. Anything else (a body whose names carry no
+    /// method) is <see cref="Unattributed"/>.
+    /// </summary>
+    internal static string SourceKey(Type caller, MethodBase body)
     {
         var name = IlCallScan.SourceMethod(caller, body)?.Name;
-        if (name is null)
+        if (name is not null && CapturedMethod(name) is { } fromSource)
         {
-            return "(closures)";
+            return fromSource;
         }
 
-        var local = Regex.Match(name, "^<(.+?)>g__");
-        return local.Success ? local.Groups[1].Value : name;
+        if (name is not null && !name.StartsWith('<'))
+        {
+            return name;
+        }
+
+        return CapturedMethod(body.Name) ?? CapturedMethod(caller.Name) ?? Unattributed;
     }
+
+    /// <summary>The method a compiler-generated name encodes: <c>&lt;M&gt;b__0_1</c>, <c>&lt;&lt;M&gt;b__0&gt;d</c>, <c>&lt;M&gt;g__L|0_0</c>.</summary>
+    private static string? CapturedMethod(string name)
+    {
+        var match = Regex.Match(name, "^<+(?<method>[^<>]+)>");
+        return match.Success ? match.Groups["method"].Value : null;
+    }
+
+    /// <summary>
+    /// Every call-like reference in <paramref name="type"/> (nested types included) as (the source method, the referenced method), with
+    /// the source method attributed as in <see cref="SourceKey"/>.
+    /// </summary>
+    internal static IEnumerable<(string Method, MethodBase Target)> ReferencesBySource(Type type) =>
+        IlCallScan.MethodReferences(IlCallScan.WithNested(type)).Select(r => (SourceKey(r.Caller, r.CallerMethod), r.Target));
 
     /// <summary>
     /// The family table (or entity-set plural) a string names: the name itself, or the name that opens a Web API path
@@ -168,7 +197,7 @@ internal static class InvoiceFamilyWriterScan
             var columnHits = new SortedSet<string>(StringComparer.Ordinal);
             var enforcingCalls = new SortedSet<string>(StringComparer.Ordinal);
             var writes = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
-            var guardedKeys = new HashSet<string>(StringComparer.Ordinal);
+            var guardedKeys = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
 
             foreach (var type in group)
             {
@@ -205,7 +234,8 @@ internal static class InvoiceFamilyWriterScan
                                 if (IsEnforcingCall(target))
                                 {
                                     enforcingCalls.Add(target.Name);
-                                    guardedKeys.Add(key);
+                                    if (!guardedKeys.TryGetValue(key, out var members)) { guardedKeys[key] = members = new SortedSet<string>(StringComparer.Ordinal); }
+                                    members.Add(target.Name);
                                 }
 
                                 if (IsDataverseWrite(target))
@@ -230,14 +260,14 @@ internal static class InvoiceFamilyWriterScan
                 // A write in a method that calls an enforcing member is decided. A lambda's body cannot be tied to the method it sits in, so
                 // it is decided when ANY body of the type calls one.
                 unguarded.AddRange(writes
-                    .Where(w => !guardedKeys.Contains(w.Key) && !(w.Key == "(closures)" && enforcingCalls.Count > 0))
+                    .Where(w => !guardedKeys.ContainsKey(w.Key) && !(w.Key == "(closures)" && enforcingCalls.Count > 0))
                     .OrderBy(w => w.Key, StringComparer.Ordinal)
                     .Select(w => new WriteUnit(w.Key, w.Value.ToList())));
             }
 
             if (enforcingCalls.Count > 0 || unguarded.Count > 0)
             {
-                result[group.Key] = new TypeFindings(group.Key, enforcingCalls.ToList(), tableHits.ToList(), columnHits.ToList(), unguarded);
+                result[group.Key] = new TypeFindings(group.Key, enforcingCalls.ToList(), tableHits.ToList(), columnHits.ToList(), unguarded, guardedKeys.ToDictionary(g => g.Key, g => (IReadOnlyCollection<string>)g.Value.ToList(), StringComparer.Ordinal));
             }
         }
 
