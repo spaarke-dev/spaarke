@@ -14,6 +14,16 @@
 // ONE GENERIC SEEDER for every table in ReferenceDataSet (L56 — the AI content —
 // is intended to reuse it).
 //
+// STARTER TAXONOMY (data-setup plan D4, owner decisions A and B): after the Tier 1
+// tables, the seeder seeds the pack the run selected (referenceDataPack: legal-standard
+// by default, none = nothing) — matter / subtype / practice-area / project / document /
+// contact / organization types. Those rows are the CUSTOMER'S, so the rule differs from
+// Tier 1: a source row counts as present when the environment holds a row with its id,
+// its code or its name (trimmed, case-insensitive, active or inactive) and is then left
+// alone — no write, no report unless its columns differ (diagnostic only). An absent row
+// is created with the pack's id (stable across stamps; on the two tables with no alternate
+// key a repeated POST is refused instead of duplicating a row). Nothing is ever updated.
+//
 // SEMANTICS (data-setup-plan.md §2 Tier 1, owner decision A: report only):
 //   - Row absent  -> POST with the source primary key in the body. A create can
 //     never update: if a row with that id appears between the read and the POST,
@@ -63,6 +73,7 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
     private readonly Func<string, TokenCredential> _credentialFactory;
     private readonly ILogger<DataverseWebApiReferenceDataSeeder> _logger;
     private readonly Func<IReadOnlyList<ReferenceTable>> _tables;
+    private readonly Func<string, IReadOnlyList<ReferenceTable>> _packTables;
 
     /// <inheritdoc/>
     public string ScopeName => AppConfigSeedScopes.ReferenceData;
@@ -78,13 +89,17 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
     {
     }
 
-    /// <summary>Test seam constructor — injects a <paramref name="credentialFactory"/> and the tables to seed.</summary>
+    /// <summary>
+    /// Test seam constructor — injects a <paramref name="credentialFactory"/>, the Tier 1 tables to seed and, optionally, the
+    /// starter-taxonomy pack lookup (pack name → tables; defaults to the embedded packs).
+    /// </summary>
     internal DataverseWebApiReferenceDataSeeder(
         HttpClient httpClient,
         IOptions<AppConfigSeedOptions> options,
         ILogger<DataverseWebApiReferenceDataSeeder> logger,
         Func<string, TokenCredential> credentialFactory,
-        Func<IReadOnlyList<ReferenceTable>> tables)
+        Func<IReadOnlyList<ReferenceTable>> tables,
+        Func<string, IReadOnlyList<ReferenceTable>>? packTables = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(options);
@@ -96,6 +111,7 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
         _logger = logger;
         _credentialFactory = credentialFactory;
         _tables = tables;
+        _packTables = packTables ?? ReferenceDataSet.Pack;
         _httpClient.Timeout = _options.DataverseRequestTimeout;
     }
 
@@ -115,9 +131,11 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
         }
 
         IReadOnlyList<ReferenceTable> tables;
+        IReadOnlyList<ReferenceTable> packTables;
         try
         {
             tables = _tables();
+            packTables = _packTables(input.ReferenceDataPack);
         }
         catch (InvalidOperationException ex)
         {
@@ -213,6 +231,35 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
             }
         }
 
+        // Starter taxonomy (data-setup plan D4): create-if-missing by natural key, never an update. Its own counters, so the
+        // Tier 1 counts and wording above stay what ISS-039 shipped.
+        var pack = new PackOutcome(input.ReferenceDataPack);
+        try
+        {
+            foreach (var table in packTables)
+            {
+                await SeedPackTableAsync(envUri, token.Token, table, pack, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return AppConfigSeederResult.Failed(
+                $"reference-data seed FAILED in starter taxonomy pack '{pack.Name}': {ex.GetType().Name}: {ex.Message} " +
+                $"({pack.Created.Count} pack row(s) created before the failure this invocation; {created.Count} Tier 1 row(s).) " +
+                "Existing rows are never written. A re-run reads each table again: rows already created are matched and skipped.");
+        }
+
+        if (pack.Differs.Count > 0)
+        {
+            _logger.LogInformation(
+                "H12b reference-data pack rows that differ from the pack (report only, NOT overwritten): customer={CustomerId} pack={Pack} count={Count}",
+                input.CustomerId, pack.Name, pack.Differs.Count);
+        }
+
         var listed = drift.Take(MaxDriftListed).ToList();
         var driftText = drift.Count == 0
             ? "no drift"
@@ -223,12 +270,105 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
             : $", {collisions.Count} row(s) COLLIDED on a natural key already held by another id and were not created (report only): " +
               string.Join("; ", collisions.Take(MaxDriftListed)) +
               (collisions.Count > MaxDriftListed ? $"; and {collisions.Count - MaxDriftListed} more" : string.Empty);
-        var evidence = JsonDocument.Parse(JsonSerializer.Serialize(new { created, unchanged, drift, collisions })).RootElement.Clone();
+        var packText = pack.Tables == 0
+            ? $"starter taxonomy pack '{pack.Name}': nothing seeded"
+            : $"starter taxonomy pack '{pack.Name}': {pack.Rows} row(s) across {pack.Tables} table(s), {pack.Created.Count} created, " +
+              $"{pack.Present} already present" +
+              (pack.Differs.Count == 0
+                  ? string.Empty
+                  : $", {pack.Differs.Count} present row(s) DIFFER from the pack and were left unchanged (report only): " +
+                    string.Join("; ", pack.Differs.Take(MaxDriftListed)) +
+                    (pack.Differs.Count > MaxDriftListed ? $"; and {pack.Differs.Count - MaxDriftListed} more" : string.Empty));
+        var evidence = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            created,
+            unchanged,
+            drift,
+            collisions,
+            pack = new { name = pack.Name, tables = pack.Tables, rows = pack.Rows, created = pack.Created, present = pack.Present, differs = pack.Differs },
+        })).RootElement.Clone();
         return AppConfigSeederResult.Ok(
             $"reference-data seed OK — {rowCount} source row(s) across {tables.Count} table(s): " +
-            $"{created.Count} created, {unchanged} unchanged, {driftText}{collisionText}.",
+            $"{created.Count} created, {unchanged} unchanged, {driftText}{collisionText}; {packText}.",
             evidence);
     }
+
+    /// <summary>Counters for one starter-taxonomy pack across its tables.</summary>
+    private sealed class PackOutcome(string name)
+    {
+        public string Name { get; } = name;
+        public int Tables { get; set; }
+        public int Rows { get; set; }
+        public int Present { get; set; }
+        public List<string> Created { get; } = [];
+        public List<string> Differs { get; } = [];
+    }
+
+    /// <summary>
+    /// Seeds one starter-taxonomy table. A source row is PRESENT when the environment holds a row with its id, or with its code,
+    /// or with its name (trimmed, case-insensitive; active or inactive) — nothing is written and nothing is reported unless the
+    /// present row's columns differ, which goes in the diagnostic only. An absent row is created with the pack's id. There is no
+    /// update path: the customer owns these rows once they exist.
+    /// </summary>
+    private async Task SeedPackTableAsync(
+        Uri envUri, string bearerToken, ReferenceTable table, PackOutcome pack, CancellationToken cancellationToken)
+    {
+        var existing = await ReadExistingAsync(envUri, bearerToken, table, cancellationToken).ConfigureAwait(false);
+        var byCode = IndexByColumn(table.NaturalKey, existing);
+        var byName = IndexByColumn(table.NameColumn, existing);
+        pack.Tables++;
+
+        foreach (var row in table.Rows)
+        {
+            pack.Rows++;
+            JsonElement current = default;
+            var found = existing.TryGetValue(row.Id, out current)
+                        || (ValueKey(table.NaturalKey, row.Values) is { } code && byCode.TryGetValue(code, out current))
+                        || (ValueKey(table.NameColumn, row.Values) is { } name && byName.TryGetValue(name, out current));
+            if (found)
+            {
+                pack.Present++;
+                var differing = DifferingColumns(table, row, current);
+                if (differing.Count > 0)
+                {
+                    pack.Differs.Add($"{table.Table} '{PackLabel(table, row)}' differs in {string.Join(", ", differing)}");
+                }
+
+                continue;
+            }
+
+            await CreateAsync(envUri, bearerToken, table, row, cancellationToken).ConfigureAwait(false);
+            pack.Created.Add($"{table.Table}/{row.Id} '{PackLabel(table, row)}'");
+        }
+    }
+
+    private static string PackLabel(ReferenceTable table, ReferenceRow row)
+        => table.NameColumn is { } column && row.Values.TryGetValue(column, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()!
+            : row.DisplayName;
+
+    /// <summary>Existing rows indexed by a column's normalised value (first wins on a duplicate); empty when the column is null.</summary>
+    private static Dictionary<string, JsonElement> IndexByColumn(string? column, Dictionary<Guid, JsonElement> existing)
+    {
+        var index = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (column is null)
+        {
+            return index;
+        }
+
+        foreach (var row in existing.Values)
+        {
+            if (row.TryGetProperty(column, out var value) && Normalise(value) is { } key)
+            {
+                index.TryAdd(key, row);
+            }
+        }
+
+        return index;
+    }
+
+    private static string? ValueKey(string? column, IReadOnlyDictionary<string, JsonElement> values)
+        => column is not null && values.TryGetValue(column, out var value) ? Normalise(value) : null;
 
     private async Task<Dictionary<Guid, JsonElement>> ReadExistingAsync(
         Uri envUri, string bearerToken, ReferenceTable table, CancellationToken cancellationToken)
@@ -237,7 +377,7 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
         // table.Columns for every shipped table; it is unioned in explicitly so a collision check never reads a column it did not select.
         var select = string.Join(
             ",",
-            new[] { table.PrimaryKey }.Concat(table.Columns).Append(table.NaturalKey ?? table.PrimaryKey).Append("statecode")
+            new[] { table.PrimaryKey }.Concat(table.Columns).Append(table.NaturalKey ?? table.PrimaryKey).Append(table.NameColumn ?? table.PrimaryKey).Append("statecode")
                 .Distinct(StringComparer.Ordinal));
         Uri? next = new Uri(envUri, $"/api/data/v9.2/{table.EntitySet}?$select={select}");
         var existing = new Dictionary<Guid, JsonElement>();

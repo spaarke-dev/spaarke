@@ -118,6 +118,12 @@
       "enum": ["managed", "unmanaged"],
       "description": "OPTIONAL (T218b). Dataverse package type H6 imports — managed by default; unmanaged ONLY on explicit instruction (ADR-027 §3, amended 2026-10-07, owner D8). Omit it for managed. H6 refuses to switch an environment's type and refuses a downgrade; H13 records the type on the registry row. Same rule as POST /api/runs (intake-invalid-solution-package-type)."
     },
+    "referenceDataPack": {
+      "type": "string",
+      "enum": ["legal-standard", "none"],
+      "default": "legal-standard",
+      "description": "OPTIONAL (data-setup plan D4, owner decision B). The starter taxonomy pack H12b seeds into the customer's reference tables: matter types and subtypes, practice areas, project types, document types, contact types and organization types. legal-standard (the default) seeds the standard legal pack, none seeds nothing — for a customer who brings its own taxonomy by data migration. A row that already exists (matched by id, code or name, active or inactive) is never changed, so the pack never overwrites a customer's edits; a pack row the customer DELETED is created again on the next run — deactivate a row to retire it, and pass none on a run against a stamp whose taxonomy is the customer's. Same rule as POST /api/runs (intake-invalid-reference-data-pack). Sent as nonSecretParameters.referenceDataPack."
+    },
     "buildId": {
       "type": "string",
       "pattern": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9]+$",

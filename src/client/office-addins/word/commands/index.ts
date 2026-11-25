@@ -30,6 +30,7 @@ import {
   describeQuickSaveFailure,
   describeUnsavableIdentity,
   buildQuickSaveRecordLink,
+  ensureQuickSaveSignedIn,
   type QuickSaveStage,
   type QuickSaveTarget,
 } from '@shared/taskpane/services/quickSaveHelpers';
@@ -199,6 +200,8 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
   let stage: QuickSaveStage = 'connect';
   try {
     const adapter = await ensureBootstrapped();
+    // #1571 review F1: the ribbon click is a user gesture — with no silent token, sign in once before saving.
+    await ensureQuickSaveSignedIn(authService);
 
     stage = 'read';
     const title = await adapter.getSubject();

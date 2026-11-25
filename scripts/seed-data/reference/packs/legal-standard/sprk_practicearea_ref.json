@@ -1,0 +1,81 @@
+{
+  "table": "sprk_practicearea_ref",
+  "entitySet": "sprk_practicearea_refs",
+  "primaryKey": "sprk_practicearea_refid",
+  "match": "naturalKey",
+  "naturalKey": "sprk_practiceareacode",
+  "nameColumn": "sprk_practiceareaname",
+  "columns": ["sprk_practiceareacode", "sprk_practiceareaname"],
+  "rows": [
+    {
+      "sprk_practicearea_refid": "b41377db-690e-f111-8342-7c1e520aa4df",
+      "sprk_practiceareacode": "APPL",
+      "sprk_practiceareaname": "Appellate"
+    },
+    {
+      "sprk_practicearea_refid": "ad1b61ed-690e-f111-8342-7c1e520aa4df",
+      "sprk_practiceareacode": "IPPAT",
+      "sprk_practiceareaname": "Intellectual Property Patents"
+    },
+    {
+      "sprk_practicearea_refid": "1aa910f8-690e-f111-8342-7c1e520aa4df",
+      "sprk_practiceareacode": "IPTM",
+      "sprk_practiceareaname": "Intellectual Property Trademarks"
+    },
+    {
+      "sprk_practicearea_refid": "02169213-6a0e-f111-8342-7c1e520aa4df",
+      "sprk_practiceareacode": "MA",
+      "sprk_practiceareaname": "Mergers & Acquisitions"
+    },
+    {
+      "sprk_practicearea_refid": "b371e9c1-690e-f111-8342-7ced8d1dc988",
+      "sprk_practiceareacode": "BNKF",
+      "sprk_practiceareaname": "Banking & Finance"
+    },
+    {
+      "sprk_practicearea_refid": "f6523f00-6a0e-f111-8342-7ced8d1dc988",
+      "sprk_practiceareacode": "CTRNS",
+      "sprk_practiceareaname": "Commercial Transactions"
+    },
+    {
+      "sprk_practicearea_refid": "9d25d536-a844-4c41-8aa8-8b3c51d7a9df",
+      "sprk_practiceareacode": "LITDISP",
+      "sprk_practiceareaname": "Litigation & Disputes"
+    },
+    {
+      "sprk_practicearea_refid": "fe9e929b-a204-4031-89e9-daf162d50b89",
+      "sprk_practiceareacode": "EMPLAB",
+      "sprk_practiceareaname": "Employment & Labor"
+    },
+    {
+      "sprk_practicearea_refid": "324c268f-7d9b-4c98-a60d-a072fe013ba9",
+      "sprk_practiceareacode": "REALEST",
+      "sprk_practiceareaname": "Real Estate"
+    },
+    {
+      "sprk_practicearea_refid": "b9be6dec-97bf-4f34-b160-1d1fc8bfcf95",
+      "sprk_practiceareacode": "REGULAT",
+      "sprk_practiceareaname": "Regulatory"
+    },
+    {
+      "sprk_practicearea_refid": "c63c1440-692f-4fe1-b305-d800ed8785a5",
+      "sprk_practiceareacode": "PRIVCYB",
+      "sprk_practiceareaname": "Privacy & Cybersecurity"
+    },
+    {
+      "sprk_practicearea_refid": "5142ddad-fbbe-41f9-a3a5-f824f1f1c028",
+      "sprk_practiceareacode": "TAX",
+      "sprk_practiceareaname": "Tax"
+    },
+    {
+      "sprk_practicearea_refid": "30b56566-7396-4651-ade8-6001bd38b39c",
+      "sprk_practiceareacode": "ANTITRST",
+      "sprk_practiceareaname": "Antitrust & Competition"
+    },
+    {
+      "sprk_practicearea_refid": "4af78076-9b58-46d8-8252-e9b59fb07b71",
+      "sprk_practiceareacode": "CORPGOV",
+      "sprk_practiceareaname": "Corporate Governance"
+    }
+  ]
+}
