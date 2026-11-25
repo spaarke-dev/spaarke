@@ -1,6 +1,9 @@
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Email;
+using Sprk.Bff.Api.Workers.Office;
 
 namespace Sprk.Bff.Api.Services.Office;
 
@@ -24,7 +27,23 @@ public class EmailAttachmentAddPlanner
     private readonly SpeFileStore _speFileStore;
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilter;
+    private readonly ITenantCache _cache;
+    private readonly IConfiguration _configuration;
+    private readonly TimeProvider _time;
     private readonly ILogger<EmailAttachmentAddPlanner> _logger;
+
+    /// <summary>
+    /// The phase a save that queued an attachments-only finalization records on its job (see
+    /// <see cref="IsFinalizationPendingAsync"/>, which tells such a job from a first save's).
+    /// </summary>
+    internal const string AttachmentsQueuedPhase = "AttachmentsQueued";
+
+    /// <summary>
+    /// The message key of the attachments-only finalization a re-save queues for job <paramref name="jobId"/>: its own, so the
+    /// first save's "already processed" mark does not skip it. The worker sets its processed mark under this key.
+    /// </summary>
+    internal static string AddJobMessageKey(string idempotencyKey, Guid jobId) =>
+        $"{idempotencyKey}|attachments-add|{jobId:N}";
 
     public EmailAttachmentAddPlanner(
         IDocumentDataverseService documents,
@@ -32,8 +51,14 @@ public class EmailAttachmentAddPlanner
         SpeFileStore speFileStore,
         IEmailToEmlConverter emlConverter,
         AttachmentFilterService attachmentFilter,
+        ITenantCache cache,
+        IConfiguration configuration,
+        TimeProvider time,
         ILogger<EmailAttachmentAddPlanner> logger)
     {
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _time = time ?? throw new ArgumentNullException(nameof(time));
         _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
@@ -50,19 +75,28 @@ public class EmailAttachmentAddPlanner
     /// <param name="ItemId">Its SPE item.</param>
     /// <param name="EmlFileName">Its stored file name (the children's "attachment from" name).</param>
     /// <param name="EmlFileSize">Its size.</param>
-    /// <param name="AttachmentNames">The attachments to add, by file name; never empty.</param>
+    /// <param name="AttachmentNames">The attachments to add, by file name; empty when the plan only reports
+    /// <see cref="NotStored"/>.</param>
     public sealed record Plan(
         Guid EmlDocumentId,
         string DriveId,
         string ItemId,
         string EmlFileName,
         long EmlFileSize,
-        IReadOnlyList<string> AttachmentNames);
+        IReadOnlyList<string> AttachmentNames)
+    {
+        /// <summary>
+        /// The names the selection asked for that the stored <c>.eml</c> does not hold (the first save left them out: unreadable
+        /// or too big then). They cannot be added: the app creates children only from the stored <c>.eml</c>, never from the
+        /// request's own bytes. Reported, so the user is told instead of seeing "Saved".
+        /// </summary>
+        public IReadOnlyList<string> NotStored { get; init; } = Array.Empty<string>();
+    }
 
     /// <summary>
     /// The plan for a re-save of an email whose earlier save created <paramref name="emlDocumentId"/> on
-    /// <paramref name="emlItemId"/>, or <see langword="null"/> when there is nothing to add: the selection names no attachment
-    /// that is not already saved, or the <c>.eml</c> no longer exists or no longer points at that item.
+    /// <paramref name="emlItemId"/>, or <see langword="null"/> when there is nothing to add or report: the selection names no
+    /// attachment that is not already saved, or the <c>.eml</c> no longer exists or no longer points at that item.
     /// </summary>
     /// <param name="selection"><c>null</c> = every attachment; a list = those names. The caller never passes <c>[]</c>
     /// (none): there is no add operation for it.</param>
@@ -139,13 +173,24 @@ public class EmailAttachmentAddPlanner
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            _logger.LogInformation(
-                "Email re-save: {Missing} of {Wanted} selected attachment(s) are not yet saved under .eml document {DocumentId}",
-                missing.Count, chosen.Wanted.Count, emlDocumentId);
+            // The names the selection asked for that the stored .eml does not hold at all (not "filtered out" or "empty": those
+            // ARE in the .eml). Nothing is created for them from the request's bytes; the answer names them.
+            var stored = new HashSet<string>(chosen.All.Select(a => a.FileName), StringComparer.OrdinalIgnoreCase);
+            var notStored = selection is null
+                ? new List<string>()
+                : selection.Where(name => !stored.Contains(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-            return missing.Count == 0
+            _logger.LogInformation(
+                "Email re-save: {Missing} of {Wanted} selected attachment(s) are not yet saved under .eml document {DocumentId}; "
+                + "{NotStored} selected name(s) are not in the stored .eml",
+                missing.Count, chosen.Wanted.Count, emlDocumentId, notStored.Count);
+
+            return missing.Count == 0 && notStored.Count == 0
                 ? null
-                : new Plan(emlDocumentId, eml.GraphDriveId, emlItemId, eml.FileName ?? eml.Name, eml.FileSize ?? 0, missing);
+                : new Plan(emlDocumentId, eml.GraphDriveId, emlItemId, eml.FileName ?? eml.Name, eml.FileSize ?? 0, missing)
+                {
+                    NotStored = notStored,
+                };
         }
         finally
         {
@@ -154,6 +199,50 @@ public class EmailAttachmentAddPlanner
                 attachment.Content?.Dispose();
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the finalization of the job a re-save matched has NOT finished yet: its worker has not set the processed mark
+    /// AND the job is younger than <see cref="OfficeJobStatusService.MaxSaveDuration"/> (the age past which a save that never
+    /// completed reads as abandoned). While it has not finished the attachments are still being created, so a re-save would
+    /// count them as missing and add them again: it adds nothing yet. Once the mark is set, or the job is older than that
+    /// age, planning proceeds (the children are re-read and the add job's own message key keeps a second add from repeating
+    /// the first).
+    /// </summary>
+    /// <remarks>
+    /// The mark is the worker's own (<see cref="UploadFinalizationWorker.ProcessedMarkResource"/>), set under the message key
+    /// its job was queued with: the save's idempotency key for a first save, <see cref="AddJobMessageKey"/> for a job that
+    /// queued an attachments-only finalization (<see cref="AttachmentsQueuedPhase"/>). A read that faults throws: the caller
+    /// answers the save as a duplicate.
+    /// </remarks>
+    public async Task<bool> IsFinalizationPendingAsync(
+        JobStatusResponse job,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var messageKey = string.Equals(job.CurrentPhase, AttachmentsQueuedPhase, StringComparison.Ordinal)
+            ? AddJobMessageKey(idempotencyKey, job.JobId)
+            : idempotencyKey;
+
+        var mark = await _cache.GetAsync<string>(
+            UploadFinalizationWorker.TenantIdForCache(_configuration),
+            resource: UploadFinalizationWorker.ProcessedMarkResource,
+            id: messageKey,
+            version: UploadFinalizationWorker.ProcessedMarkVersion,
+            ct: cancellationToken);
+        if (!string.IsNullOrEmpty(mark))
+        {
+            return false;
+        }
+
+        var young = _time.GetUtcNow() - job.CreatedAt < OfficeJobStatusService.MaxSaveDuration;
+        if (young)
+        {
+            _logger.LogInformation(
+                "Email re-save: the matched job {JobId} has not finished creating its documents; nothing is added yet", job.JobId);
+        }
+
+        return young;
     }
 
     /// <summary>

@@ -68,6 +68,16 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private const string IndexingQueueName = "office-indexing";
     private const int MaxConcurrentCalls = 5;
     private static readonly TimeSpan IdempotencyKeyTtl = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// The cache resource of the "processed" mark a finished finalization sets under its message key. Shared with
+    /// <see cref="EmailAttachmentAddPlanner"/>, which reads the mark to tell a finalization that has not finished from one
+    /// that has (task 138): one definition, so the writer and the reader cannot drift apart.
+    /// </summary>
+    internal const string ProcessedMarkResource = "office-upload-processed";
+
+    /// <summary>The schema version of the <see cref="ProcessedMarkResource"/> mark.</summary>
+    internal const int ProcessedMarkVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -626,9 +636,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var tenantId = GetTenantIdForCache();
         var cached = await _cache.GetAsync<string>(
             tenantId,
-            resource: "office-upload-processed",
+            resource: ProcessedMarkResource,
             id: idempotencyKey,
-            version: 1,
+            version: ProcessedMarkVersion,
             ct: cancellationToken);
         return !string.IsNullOrEmpty(cached);
     }
@@ -641,9 +651,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var tenantId = GetTenantIdForCache();
         await _cache.SetAsync<string>(
             tenantId,
-            resource: "office-upload-processed",
+            resource: ProcessedMarkResource,
             id: idempotencyKey,
-            version: 1,
+            version: ProcessedMarkVersion,
             value: documentId.ToString(),
             ttl: IdempotencyKeyTtl,
             ct: cancellationToken);
@@ -655,9 +665,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// is the BFF's own AAD tenant (TENANT_ID or AzureAd:TenantId).
     /// Falls back to "bff" if neither is configured (defensive — should not happen in deployed envs).
     /// </summary>
-    private string GetTenantIdForCache()
+    private string GetTenantIdForCache() => TenantIdForCache(_configuration);
+
+    /// <summary>The cache tenant id, for the readers of the <see cref="ProcessedMarkResource"/> mark.</summary>
+    internal static string TenantIdForCache(IConfiguration configuration)
     {
-        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"];
+        var tenantId = configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"];
         return string.IsNullOrWhiteSpace(tenantId) ? "bff" : tenantId;
     }
 

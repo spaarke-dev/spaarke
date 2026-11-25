@@ -45,7 +45,7 @@ import type { DocumentIdentityState, ResolvedRelatedRecord } from '../services/d
 import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
-import { describeAttachmentsAdded } from '../services/attachmentsAddedNotice';
+import { describeAttachmentsAdded, describeAttachmentsNotStored } from '../services/attachmentsAddedNotice';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
   clearReferenceListCache,
@@ -391,6 +391,11 @@ export interface SavedDocumentState {
    * confirmation then reads "Added N attachments to the saved email". Absent otherwise.
    */
   attachmentsAdded?: number;
+  /**
+   * Task 138 (#2209): the attachments the save was asked to add that the saved email does not hold (not saved with it the
+   * first time): their names. A warning beside the confirmation says they could not be added. Absent otherwise.
+   */
+  attachmentsNotStored?: string[];
 }
 
 /**
@@ -711,7 +716,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     () => ({
       apiBaseUrl,
       getAccessToken,
-      onComplete: (docId, docUrl, emailFilingProblem, attachmentsAdded) => {
+      onComplete: (docId, docUrl, emailFilingProblem, attachmentsAdded, attachmentsNotStored) => {
         const pending = pendingSaveRef.current;
         updateSavedState(prev => ({
           savedDocument: {
@@ -722,6 +727,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             lastSave: pending?.mode ?? 'create',
             ...(emailFilingProblem ? { emailFilingProblem } : {}),
             ...(attachmentsAdded ? { attachmentsAdded } : {}),
+            ...(attachmentsNotStored?.length ? { attachmentsNotStored } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
           // task 094: a fresh save always clears the re-enable trigger — this save IS the content as
@@ -1820,6 +1826,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       </MessageBar>
     ) : null;
 
+  // Task 138 (#2209): the save asked to add attachments the saved email does not hold (the first save left them out), and
+  // nothing was created for them. A non-blocking warning beside the confirmation; the same single announcement channel as
+  // the email-filing notice (Fluent's MessageBar announces itself).
+  const renderAttachmentsNotStoredNotice = (names: string[] | undefined) =>
+    names && names.length > 0 ? (
+      <MessageBar intent="warning" layout="multiline">
+        <MessageBarBody>{describeAttachmentsNotStored(names)}</MessageBarBody>
+      </MessageBar>
+    ) : null;
+
   // Task 117 (O3/W1): what Copy Link copies — the document's Spaarke record link, built exactly like View Document's
   // (`buildOpenRecordUrl`, ORG_URL + SPAARKE_APP_NAME). `null` when ORG_URL is unset: Copy Link is then HIDDEN, never
   // a fallback to the stored file's URL.
@@ -2399,6 +2415,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       <>
         {renderSavedBar(savedBarOf(saved))}
         {renderEmailFilingNotice(saved.emailFilingProblem)}
+        {renderAttachmentsNotStoredNotice(saved.attachmentsNotStored)}
         {renderDocumentHeader(canSaveNewVersion ? 'locked' : 'readonly', lockedName)}
         <div className={styles.section}>
           <DocumentProfileSection

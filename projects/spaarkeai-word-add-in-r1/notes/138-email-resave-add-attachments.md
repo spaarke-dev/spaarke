@@ -116,6 +116,10 @@ the existing document — **version saves only**, so it does not run for an emai
   answer (the children are never put in another drive than their parent).
 - **Owner.** Resolved by the save's own `ResolveOwnerAsync` over `OfficeDocumentPersistence.DocumentOwnershipOf` on the
   same association (target, communication, caller); always a team, never the user (fm G3). The add adds no owner logic.
+  **New children follow the record's CURRENT owner**, not the `.eml`'s owner of the first save: ownership is
+  record-first, so an add after the record changed hands (or became secure, which also changes the container, see above)
+  creates its children under the owner a fresh save would give them today. This is intended, the same as a fresh save,
+  and field-mapping-r1 accepted it.
 
 ### 2.4b fm-r1 conditions (2026-11-25)
 
@@ -129,8 +133,10 @@ the existing document — **version saves only**, so it does not run for an emai
 ### 2.5 Pane
 
 `SaveResponse` gains `attachmentsAdded` (omitted when null; additive). The pane keeps it for the save in flight, as task
-131 keeps `emailFiling`, and when the job completes the saved bar's title reads "Added N attachments to the saved email"
-(N = 1 → "attachment"). Every other answer, including "already saved", is unchanged.
+131 keeps `emailFiling`. The save marks its job Completed when the finalization is QUEUED, before the worker has made any
+document, so the pane never says "Added": when the job completes the saved bar's title reads "Adding N attachment(s) to the
+saved email. If they don't appear on the record in a few minutes, save the email again." (see §6, item H1). Every other
+answer, including "already saved", is unchanged. (Round 1c adds `attachmentsNotStored`, §6 item G.)
 
 ## 3. Acceptance mapping
 
@@ -146,11 +152,21 @@ the existing document — **version saves only**, so it does not run for an emai
 ## 4. Known limits (not defects of this design)
 
 - **Quick Save copy.** Quick Save sends every non-inline attachment and its own body key. Its add answer shows its normal
-  "Saved to Spaarke and filed to …" sentence, not the "Added N" text (the POML scopes the text to the pane).
-- **Duplicate attachment names.** Two attachments with the same file name in one email map to one child name and one SPE
-  path. Today the second is refused by the alternate key; that is unchanged.
-- **`IdempotencyFilter` replay.** Repeating the exact same add request within 24 h replays the 202 (and its "Added N"),
+  "Saved to Spaarke and filed to …" sentence, not the pane's "Adding N" text (the POML scopes the text to the pane).
+- **Duplicate attachment names (corrected 2026-11-25).** Two attachments with the same file name in one email map to one
+  child name and one SPE path (`{parent}_{name}`, uploaded with Replace). This note first said the second is refused by the
+  alternate key; that was wrong. The second upload REPLACES the first's bytes in the same drive item, so the two
+  attachments share one document that holds the later one's content. This is pre-existing, lives in the worker's upload
+  path (`ProcessSingleAttachmentAsync`), is not changed by this task, and is filed as #3135.
+- **`IdempotencyFilter` replay.** Repeating the exact same add request within 24 h replays the 202 (and its "Adding N"),
   as every repeated save replays its first answer today.
+- **Container changed.** A record whose documents now belong in another container than the `.eml`'s keeps the duplicate
+  answer (nothing is added there).
+- **Rolling deploy.** A message queued by this build and read by an older worker (which does not know
+  `AttachmentsOnly`) is not an add; the window is the deploy's.
+- **A 0-byte attachment cannot reach a stored `.eml` through the endpoint.** `OfficeEmailEnricher.BuildEmlFromMetadata` skips
+  an attachment with no content, so item D's "can be created" rule (§6) guards the planner/worker contract and an `.eml`
+  stored by another path; it is not a path the endpoint produces today.
 
 ## 5. Placement and §11
 
@@ -161,3 +177,54 @@ the existing document — **version saves only**, so it does not run for an emai
   missed attachment to an email already saved to a record; the second save silently adds nothing.
 - One new scoped registration (`EmailAttachmentAddPlanner`), dependencies all registered unconditionally; no new
   endpoint, no new package, no new background service.
+
+## 6. Fix round 1 (A–H) as built
+
+Rounds 1a, 1b and 1c on branch `fix/word-addin-138`, after review (uac-r2, field-mapping-r1 and the review pass).
+fm-coordinated files (`OfficeService`, `UploadFinalizationWorker`) keep fm's four conditions (§2.4b): children are created
+only by `ProcessSingleAttachmentAsync`, whose create call is unchanged.
+
+- **A. The `.eml` must still be filed to the request's record** (`EmailAttachmentAddPlanner.IsFiledTo`). The match to the
+  earlier save is made by an idempotency key, which the client may send and which says nothing about WHERE the email is
+  filed. The planner reads the `.eml`'s current filing (`DocumentLinkFields`, both the `sprk_*` and `sprk_related*`
+  families) and plans an add only when the links of the request's own record TYPE are present and every one of them is the
+  request's record; otherwise the duplicate answer, nothing queued. **Deviation from the brief, accepted by uac-r2:** the
+  comparison is scoped to the request's record type. An `.eml` that is also filed to a record of another type (a matter and
+  a project, say) is still "filed to" the matter the request targets; the brief's wording compared the whole filing.
+- **B. Rights before any app read.** `GetEmailAttachmentAddCandidate` (cheap gates, no read) runs first, then
+  `AuthorizeEmailAttachmentAddAsync`, then planning. A denied caller gets 403 `OFFICE_009` whenever the request could add
+  (an Email save, a selection that is null or non-empty, not from-email), whatever is stored: no row read, no download, no
+  child listing. A decision that faults refuses (fail closed). The older "duplicate answer for a caller who lost access"
+  behaviour is unchanged.
+- **C. The refusal's text reaches the user.** `MapSaveErrorToProblem` renders this save's `OFFICE_009` with the error's own
+  message as the problem detail; the fixed sentence stays for a refusal that carries none.
+- **D. A shared "can this be created" rule** (`CanBeCreated`: the attachment has content). An attachment the worker would
+  skip as "no content" is never counted missing.
+- **E. One selection path** (`EmailAttachmentAddPlanner.SelectAttachments`: converter, noise filter, selection, "can be
+  created"). The planner and the worker both call it; the worker also applies `ExcludeAlreadySaved` before creating.
+- **F. No download when nothing can be missing.** The planner reads the `.eml`'s children first and downloads the `.eml` only
+  when the selection is null or names a file with no child yet.
+- **G. A ticked attachment the stored `.eml` does not hold** (the first save left it out: unreadable or too big then). The
+  answer lists those names in `attachmentsNotStored` (omitted when empty), on the add answer and on the duplicate one. The
+  pane says so in plain words ("These attachments could not be added because they were not saved with the email: B. Save
+  the email again as a new copy to include them."). Nothing is created for them from the request's bytes: the app creates
+  children only from the stored `.eml`.
+- **H1. Honest wording.** The save marks the job Completed when the finalization is queued, before the worker runs, so the
+  pane never says "Added". It says "Adding N attachment(s) to the saved email. If they don't appear on the record in a few
+  minutes, save the email again." A failed add leaves its names without children (and no processed mark), so the next
+  re-save plans the same names again. `OfficeJobStatusService`, `ToEffectiveView`, the `sprk_result` semantics and the
+  5-minute rule are unchanged.
+- **H2. No add while the matched job is still finalizing.** `EmailAttachmentAddPlanner.IsFinalizationPendingAsync`: the
+  matched job is unfinished when the worker's processed mark (`UploadFinalizationWorker.ProcessedMarkResource`, the existing
+  `ITenantCache` mark, read under the message key the job was queued with: the save's key for a first save, the add job's own
+  key for an `AttachmentsQueued` job) is absent AND the job is younger than `OfficeJobStatusService.MaxSaveDuration` (the
+  existing abandoned age, reused). While unfinished the answer is the plain duplicate one. Once the mark is set, or the job
+  is older, planning proceeds; the children re-read and the add job's own message key keep a repeat from duplicating work.
+  Without it, a re-save made while the first worker runs sees no children and counts every attachment missing.
+- **I. Fail-closed branches tested:** a faulting access decision, a changed container and an unreadable stored file each end
+  in a refusal or the duplicate answer with nothing queued.
+
+## 7. Open with the owner
+
+The service-level rights check on the existing `.eml` (`AuthorizeEmailAttachmentAddAsync`) exists, and how it is resolved
+under ADR-008 is pending the owner's decision. This note records no path.

@@ -1,6 +1,7 @@
 /**
- * Task 138 (#2209): a re-save that adds attachments to an email already saved to the record says so — "Added N
- * attachments to the saved email" — in place of "Saved to Spaarke". Any other answer keeps "Saved to Spaarke".
+ * Task 138 (#2209): a re-save that adds attachments to an email already saved to the record says so — "Adding N
+ * attachments to the saved email. If they don't appear ... save the email again." — in place of "Saved to Spaarke". It
+ * never says "Added": the documents are made by a background job after the answer. Any other answer keeps "Saved to Spaarke".
  *
  * Real SaveFlow + real useSaveFlow; only fetch, SSE and the Profile / Related-to sections are doubled (the harness of
  * SaveFlow.emailFilingNotice.test.tsx), driven as the Outlook pane — the only host that saves emails.
@@ -26,6 +27,10 @@ Object.defineProperty(global.crypto, 'subtle', {
   value: { digest: jest.fn(async () => new Uint8Array(32).buffer) },
 });
 
+const ADDING_2 =
+  "Adding 2 attachments to the saved email. If they don't appear on the record in a few minutes, save the email again.";
+const ADDING_1 =
+  "Adding 1 attachment to the saved email. If it doesn't appear on the record in a few minutes, save the email again.";
 const EML_ID = 'aaaa1111-0000-4000-8000-000000000138';
 const MATTER = {
   id: 'bbbb2222-0000-4000-8000-000000000138',
@@ -92,7 +97,8 @@ describe('SaveFlow — attachments added to the saved email (task 138)', () => {
 
     renderAndSave();
 
-    expect(await screen.findByText('Added 2 attachments to the saved email')).toBeInTheDocument();
+    expect(await screen.findByText(ADDING_2)).toBeInTheDocument();
+    expect(screen.queryByText(/^Added /)).not.toBeInTheDocument();
     expect(screen.queryByText('Saved to Spaarke')).not.toBeInTheDocument();
   });
 
@@ -101,7 +107,7 @@ describe('SaveFlow — attachments added to the saved email (task 138)', () => {
 
     renderAndSave();
 
-    expect(await screen.findByText('Added 1 attachment to the saved email')).toBeInTheDocument();
+    expect(await screen.findByText(ADDING_1)).toBeInTheDocument();
   });
 
   it.each([[undefined], [[]]])('attachmentsAdded %p: the confirmation is unchanged', async value => {

@@ -129,6 +129,7 @@ public class OfficeEmailReSaveFailClosedTests
         world.DocumentReads.Count.Should().Be(readsBefore, "the .eml row is not read for a caller who may not add to it");
         world.DownloadCalls.Should().Be(downloadsBefore, "the .eml's bytes are not downloaded for a caller who may not add to it");
         world.FinalizationPayloads.Should().ContainSingle();
+        world.Jobs.Should().ContainSingle("no add job row is written for a refused caller");
     }
 
     [Fact]
@@ -145,6 +146,7 @@ public class OfficeEmailReSaveFailClosedTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         world.FinalizationPayloads.Should().ContainSingle();
+        world.Jobs.Should().ContainSingle("no add job row is written for a refused caller");
     }
 
     [Fact]

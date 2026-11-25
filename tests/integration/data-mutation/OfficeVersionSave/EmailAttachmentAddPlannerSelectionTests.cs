@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -6,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Office;
@@ -168,6 +170,9 @@ public class EmailAttachmentAddPlannerSelectionTests
                 spe.Object,
                 converter.Object,
                 new AttachmentFilterService(Options.Create(new EmailProcessingOptions()), NullLogger<AttachmentFilterService>.Instance),
+                Mock.Of<ITenantCache>(),
+                new ConfigurationBuilder().Build(),
+                TimeProvider.System,
                 NullLogger<EmailAttachmentAddPlanner>.Instance);
         }
 

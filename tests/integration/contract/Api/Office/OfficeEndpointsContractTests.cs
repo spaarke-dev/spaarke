@@ -2106,8 +2106,36 @@ public sealed class OfficeVersionSaveWorld
         }
     }
 
-    internal void RecordFinalization(string messageJson)
+    /// <summary>
+    /// Task 138 (H2): whether the finalization workers this world does not run are taken to FINISH as soon as their message is
+    /// queued, i.e. their "processed" mark is set (the default: every test that is not about a worker still running sees the
+    /// workers done, as it did before the re-save waited on the mark). A test of "the first save's worker has not finished"
+    /// sets it false and sets the marks itself (<see cref="OfficeVersionSaveTestWebAppFactory.MarkFinalizationProcessedAsync"/>).
+    /// </summary>
+    public bool WorkersFinishInstantly { get; set; } = true;
+
+    /// <summary>
+    /// Task 138 (H2): makes the saved job look <paramref name="age"/> old to the code that reads it back. The effective view
+    /// takes its age from the save's own view (<c>sprk_result</c>, <c>createdAt</c>), not from the row's <c>createdon</c>, so
+    /// it is the view that is rewritten.
+    /// </summary>
+    public void AgeJob(Guid jobId, TimeSpan age)
     {
+        lock (_gate)
+        {
+            var row = JobRows[jobId];
+            var view = System.Text.Json.Nodes.JsonNode.Parse((string)row["Result"]!)!.AsObject();
+            view["createdAt"] = DateTimeOffset.UtcNow.Subtract(age).ToString("O");
+            row["Result"] = view.ToJsonString();
+        }
+    }
+
+    /// <summary>Task 138: the message key (<c>IdempotencyKey</c>) of every finalization message queued, in order.</summary>
+    public List<string> FinalizationMessageKeys { get; } = new();
+
+    internal string? RecordFinalization(string messageJson)
+    {
+        string? messageKey = null;
         using var document = JsonDocument.Parse(messageJson);
         foreach (var property in document.RootElement.EnumerateObject())
         {
@@ -2118,7 +2146,18 @@ public sealed class OfficeVersionSaveWorld
                     FinalizationPayloads.Add(property.Value.Clone());
                 }
             }
+            else if (string.Equals(property.Name, "IdempotencyKey", StringComparison.OrdinalIgnoreCase)
+                     && property.Value.ValueKind == JsonValueKind.String)
+            {
+                messageKey = property.Value.GetString();
+                lock (_gate)
+                {
+                    FinalizationMessageKeys.Add(messageKey!);
+                }
+            }
         }
+
+        return messageKey;
     }
 
     internal static byte[] ReadAll(Stream content)
@@ -2172,6 +2211,23 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
     {
         base.ConfigureClient(client);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-caller-token");
+    }
+
+    /// <summary>
+    /// Task 138: sets the "processed" mark the upload-finalization worker sets when it has finished a message, under that
+    /// message's key — through the same cache resource, version and tenant id the worker uses, so the re-save's read sees it.
+    /// </summary>
+    public async Task MarkFinalizationProcessedAsync(string messageKey)
+    {
+        var cache = Services.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
+        var configuration = Services.GetRequiredService<IConfiguration>();
+        await cache.SetAsync<string>(
+            Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker.TenantIdForCache(configuration),
+            Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker.ProcessedMarkResource,
+            messageKey,
+            Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker.ProcessedMarkVersion,
+            Guid.NewGuid().ToString(),
+            TimeSpan.FromDays(7));
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -2326,7 +2382,12 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             var sender = new Mock<ServiceBusSender>();
             sender
                 .Setup(s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
-                .Callback((ServiceBusMessage message, CancellationToken _) => world.RecordFinalization(message.Body.ToString()))
+                .Callback((ServiceBusMessage message, CancellationToken _) =>
+                {
+                    var messageKey = world.RecordFinalization(message.Body.ToString());
+                    if (world.WorkersFinishInstantly && messageKey is not null)
+                        MarkFinalizationProcessedAsync(messageKey).GetAwaiter().GetResult();
+                })
                 .Returns(Task.CompletedTask);
             var serviceBus = new Mock<ServiceBusClient>();
             serviceBus.Setup(c => c.CreateSender(It.IsAny<string>())).Returns(sender.Object);

@@ -519,6 +519,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             // duplicate answer below, exactly as before. The save then runs the ordinary email path (capture, filing,
             // communication, owner) and, in place of the upload and the create, queues an attachments-only finalization.
             EmailAttachmentAddPlanner.Plan? attachmentAdd = null;
+            IReadOnlyList<string>? attachmentsNotStored = null;
             if (existingJob is not null)
             {
                 // The request COULD add (an Email save naming attachments, found against a Completed job that made its own
@@ -536,7 +537,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         return denied;
                     }
 
-                    attachmentAdd = await PlanEmailAttachmentAddAsync(request, candidate, cancellationToken);
+                    var plan = await PlanEmailAttachmentAddAsync(request, candidate, existingJob, idempotencyKey, cancellationToken);
+
+                    // Names the selection asked for that the stored .eml does not hold are reported on either answer (an add or
+                    // the duplicate one); a plan with no name to add is only that report.
+                    attachmentsNotStored = plan is { NotStored.Count: > 0 } ? plan.NotStored : null;
+                    attachmentAdd = plan is { AttachmentNames.Count: > 0 } ? plan : null;
                 }
 
                 if (attachmentAdd is not null)
@@ -577,7 +583,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     Duplicate = true,
                     JobId = existingJob.JobId,
                     StatusUrl = $"/api/office/jobs/{existingJob.JobId}",
-                    StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream"
+                    StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream",
+                    AttachmentsNotStored = attachmentsNotStored
                 };
             }
 
@@ -937,7 +944,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     // save's "already processed" mark does not skip it and a redelivery of this message is still skipped.
                     await _jobQueue.QueueUploadFinalizationAsync(
                         jobId,
-                        $"{idempotencyKey}|attachments-add|{jobId:N}",
+                        EmailAttachmentAddPlanner.AddJobMessageKey(idempotencyKey, jobId),
                         correlationId,
                         userId,
                         request with
@@ -962,7 +969,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     {
                         Status = JobStatus.Completed,
                         Progress = 100,
-                        CurrentPhase = "AttachmentsQueued",
+                        CurrentPhase = EmailAttachmentAddPlanner.AttachmentsQueuedPhase,
                         CompletedAt = DateTimeOffset.UtcNow,
                         Result = DocumentResult(attachmentAdd.EmlDocumentId, attachmentAdd.ItemId, attachmentAdd.DriveId, webUrl: null)
                     };
@@ -976,7 +983,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         StatusUrl = $"/api/office/jobs/{jobId}",
                         StreamUrl = $"/api/office/jobs/{jobId}/stream",
                         EmailFiling = emailFiling,
-                        AttachmentsAdded = attachmentAdd.AttachmentNames
+                        AttachmentsAdded = attachmentAdd.AttachmentNames,
+                        AttachmentsNotStored = attachmentsNotStored
                     };
                 }
 
@@ -1756,10 +1764,20 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     private async Task<EmailAttachmentAddPlanner.Plan?> PlanEmailAttachmentAddAsync(
         SaveRequest request,
         EmailAttachmentAddCandidate candidate,
+        JobStatusResponse existingJob,
+        string idempotencyKey,
         CancellationToken cancellationToken)
     {
         try
         {
+            // While the matched job has not finished creating its documents they are not all there to be counted: no add yet,
+            // the duplicate answer (the pane tells the user to save again if they do not appear). This runs after the
+            // caller's rights, so a refused caller learns nothing from what the app holds.
+            if (await _attachmentAddPlanner.IsFinalizationPendingAsync(existingJob, idempotencyKey, cancellationToken))
+            {
+                return null;
+            }
+
             return await _attachmentAddPlanner.PlanAsync(
                 candidate.Id,
                 candidate.SpeFileId,

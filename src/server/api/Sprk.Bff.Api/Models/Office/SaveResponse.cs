@@ -72,6 +72,16 @@ public record SaveResponse
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? AttachmentsAdded { get; init; }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 138 (#2209): the attachments a re-save of an already saved email named that its stored
+    /// <c>.eml</c> does not hold (the first save left them out), by file name. They are NOT added: the app creates attachment
+    /// documents only from the stored <c>.eml</c>, never from the request's bytes. Present on the add answer and on the
+    /// "already saved" (<see cref="Duplicate"/>) one; omitted (<c>null</c>) when empty. Additive: clients that do not know the
+    /// field ignore it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? AttachmentsNotStored { get; init; }
 }
 
 /// <summary>
