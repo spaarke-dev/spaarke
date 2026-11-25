@@ -20,9 +20,15 @@ import { DocumentFlowchart24Regular, Filter20Regular } from '@fluentui/react-ico
 import { IInputs } from './generated/ManifestTypes';
 import { getEffectiveDarkMode, resolveThemeWithUserPreference } from '@spaarke/ui-components/dist/utils/themeStorage';
 import { DocumentGraph } from './components/DocumentGraph';
-import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
-import type { DocumentNode } from './types/graph';
-import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from './types/api';
+import {
+  useVisualizationApi,
+  formatVisualizationError,
+  RELATIONSHIP_TYPES,
+} from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
+import type {
+  DocumentGraphNode as DocumentNode,
+  RelationshipTypeKey,
+} from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
 import {
   getApiBaseUrl,
   getMsalClientId,
@@ -32,7 +38,7 @@ import {
 import { initializeAuth } from './authInit';
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = '1.0.38';
+const CONTROL_VERSION = '1.0.39';
 
 /**
  * Props for the DocumentRelationshipViewer component

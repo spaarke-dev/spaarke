@@ -11,6 +11,9 @@
  *   - {@link describeSendFailure} — `{ title, message, reference? }` for the dialog. The message is
  *     built from `status`/`code` plus the server's ProblemDetails `detail` (ADR-019) when that detail
  *     is a real sentence. `reference` is the correlation id, shown as "Reference: …" for support.
+ *   - {@link toSendRequestError} — the same, for what the `sendCommunication()` call itself threw: anything its fetch
+ *     threw without a response is `NETWORK` (task 220). {@link mayHaveBeenSent} — whether a failure may still have
+ *     delivered the email (the composer then deletes nothing the attempt carried).
  */
 import { SendCommunicationError } from '../../services/communicationApi';
 import { isApiError, isAuthFailure, problemOf } from '../../utils/thrownFetchError';
@@ -45,8 +48,18 @@ const DRAFT_KEPT = 'Your draft is still here — nothing was lost.';
 const UNCONFIRMED_SEND_MESSAGE =
   /^sendCommunication: response (did not include communicationId|body was not valid JSON)/;
 
-// Browser wording for a fetch that never got a response: Chromium, Firefox, Safari, React Native/polyfills.
-const NETWORK_MESSAGE = /failed to fetch|networkerror|load failed|network request failed|network error/i;
+// Browser wording for a fetch that never got a response: Chromium, Firefox, Safari, React Native/polyfills, and the
+// WebKit (NSURLError) sentences Safari surfaces as the TypeError's message when offline or when the connection drops.
+const NETWORK_MESSAGE =
+  /failed to fetch|networkerror|load failed|network request failed|network error|internet connection appears to be offline|network connection was lost|could not connect to the server/i;
+
+/** A `TypeError` by name: one thrown by another frame's `fetch` fails `instanceof TypeError` here. */
+function isTypeErrorByName(err: unknown): boolean {
+  return (
+    err instanceof TypeError ||
+    (typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'TypeError')
+  );
+}
 
 // Generic status titles and framework boilerplate that say nothing the status does not already say.
 const GENERIC_DETAILS = new Set(
@@ -93,14 +106,48 @@ export function toSendCommunicationError(err: unknown): SendCommunicationError {
   if (isAuthFailure(err)) return new SendCommunicationError(401, 'HTTP_401', SIGN_IN_EXPIRED);
 
   const name = typeof err === 'object' && err !== null ? (err as { name?: unknown }).name : undefined;
-  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const message = messageOf(err);
   if (UNCONFIRMED_SEND_MESSAGE.test(message)) {
     return new SendCommunicationError(0, SEND_FAILURE_UNCONFIRMED_CODE, message);
   }
-  if ((err instanceof TypeError && NETWORK_MESSAGE.test(message)) || name === 'TimeoutError') {
+  if ((isTypeErrorByName(err) && NETWORK_MESSAGE.test(message)) || name === 'TimeoutError') {
     return new SendCommunicationError(0, SEND_FAILURE_NETWORK_CODE, message || 'Network request failed');
   }
   return new SendCommunicationError(0, SEND_FAILURE_CLIENT_CODE, message || 'Unknown error');
+}
+
+function messageOf(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  const message = typeof err === 'object' && err !== null ? (err as { message?: unknown }).message : undefined;
+  return typeof message === 'string' ? message : '';
+}
+
+/**
+ * Normalize what the `sendCommunication()` CALL itself threw (task 220, #2946). `sendCommunication` converts every HTTP
+ * outcome into a `SendCommunicationError` and throws its own plain `Error`s only for an argument guard (before the
+ * request) or a 2xx body without an id ("sendCommunication: …"); it rethrows anything the injected fetch threw
+ * unchanged. So what reaches the caller from that call and is neither of those came out of a fetch that never got a
+ * response (a `TypeError` with any browser's wording, from any frame, or a host fetch's own error): `NETWORK`. Use it
+ * only around that one call, so a programming error elsewhere in the send path still reads as `CLIENT_ERROR`.
+ */
+export function toSendRequestError(err: unknown): SendCommunicationError {
+  if (err instanceof SendCommunicationError || isApiError(err) || isAuthFailure(err)) {
+    return toSendCommunicationError(err);
+  }
+  const message = messageOf(err);
+  if (/^sendCommunication: /.test(message)) return toSendCommunicationError(err);
+  return new SendCommunicationError(0, SEND_FAILURE_NETWORK_CODE, message || 'Network request failed');
+}
+
+/**
+ * Whether a failed send may still have delivered the email, so nothing it carried may be deleted: no response
+ * (`NETWORK` — a connection that drops after the send looks the same), a 2xx without an id (`SENT_UNCONFIRMED`), or a
+ * 5xx (the BFF turns any failure after the Graph send into a 500). Every 4xx is refused before the send, and
+ * `CLIENT_ERROR` never left the client.
+ */
+export function mayHaveBeenSent(err: SendCommunicationError): boolean {
+  return err.code === SEND_FAILURE_NETWORK_CODE || err.code === SEND_FAILURE_UNCONFIRMED_CODE || err.status >= 500;
 }
 
 /**
@@ -146,10 +193,11 @@ export function describeSendFailure(err: unknown): ISendFailureDescription {
     );
   } else if (e.status === 0 && e.code === SEND_FAILURE_NETWORK_CODE) {
     // No response at all: usually the request never left, but a connection dropped after the send looks the
-    // same — so never claim it definitely did not go out.
+    // same — so never claim it definitely did not go out (resending would duplicate it). Say what failed: the
+    // connection (#2946), never "something went wrong on this page".
     title = 'Email may not have been sent';
     message = join(
-      "Couldn't get a response from the Spaarke server. Check your network connection.",
+      'The connection to the Spaarke server failed before it answered. Check your network connection.',
       "If you're not sure whether it went out, check your Sent Items before sending again.",
       DRAFT_KEPT
     );

@@ -409,10 +409,12 @@ describe('SearchFlowIntegration', () => {
       });
 
       const body = JSON.parse(mockFetch.mock.calls[0][1]?.body as string);
+      // #3093: local days are sent as UTC instants — local midnight .. local 23:59:59.999 — so the
+      // whole of the `to` day is included (a bare date was read as midnight, excluding it).
       expect(body.filters.dateRange).toEqual({
         field: 'createdAt',
-        from: '2025-01-01',
-        to: '2025-12-31',
+        from: new Date(2025, 0, 1).toISOString(),
+        to: new Date(2025, 11, 31, 23, 59, 59, 999).toISOString(),
       });
     });
 

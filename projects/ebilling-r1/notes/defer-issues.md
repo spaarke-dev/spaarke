@@ -260,7 +260,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-def063 32a5f8a388: -AllowNothingToPublish on the import paths; exit 0 'Nothing to publish; import complete'; app-settings-only plans still throw; Pester 96/0). Closes when the next master PR merges. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 DEF-059 dev apply (a role-only solution import) |
@@ -452,7 +452,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on `task/ebilling-def052` (2026-11-25; pending merge). Job: over-limit source document is Failed `ebilling.submission.too_large` (permanent, refused before download when `sprk_filesize` is over). From-email: a marked file over the limit is 413 `too_large` at step 1 (`FromEmailMarkRules.Check`), before the `.eml`, its `sprk_document` row or its Communication row is written (the reader check stays as a backstop). Regression: `tests/integration/regression/Ebilling/Issue2553_SubmissionFileSizeLimitTests.cs` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-03 |
 | **Source** | 118b adversarial review (finding 2, parity) |
@@ -770,7 +770,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-iss014 aa80d83b99: approval re-read every pollIntervalMs while firmNeeded, one review re-read when it clears; jest 667/0). Closes when the next master PR merges; reaches dev with the next Invoice Review page deploy. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 095d0 review (Codex P2 fix `546296be5c` covers only the re-read case) |
@@ -791,7 +791,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (fixed by task 015, e0df773395: the resolver reads sprk_totalamount and statuscode; closed 2026-11-25) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-15 |
 | **Source** | `/project-pipeline` task authoring (POML 015 discovery) |
@@ -2676,11 +2676,39 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 ---
 
-### ISS-053 — Nothing checks that duplicate detection stays off on the BFF job queues (ISS-025's retry copy relies on it)
+### ISS-054 — External-visibility registry: no marker for never-external reference tables outside the lineage (sprk_procedure, sprk_procedureversion)
 
 | Field | Value |
 |---|---|
 | **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-25 |
+| **Source** | Task 189 (docs) model-vs-code check; option (c) agreed with uac-r2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3143 |
+
+**Description**
+
+`sprk_procedure` and `sprk_procedureversion` sit outside the secure-child lineage, and the external-visibility registry declares no marker for them. Today this fails closed: `SecureChildLineage.ExternalMarkerOf` returns null, `ExternalVisibility` decides the row Undecided (`UnknownTable`), and every consumer treats Undecided as hidden. They cannot be added as `ExternalMarker.Never`, because there "Never" means communication content: the 191b duplicate-list ArchTest flags nine BFF types that name the Procedure tables, three unit tests pin the set, and `ExternalCallerCommunicationGuard.RefusedContentTables` is the same set. The concrete gap: the registry is meant to be the one map of never-external tables, and these two rely on the unknown-table default instead, so a consumer that reads the markers directly would not see them as never-external.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs` (`OutsideLineage`, `ExternalMarkerOf`, `NeverExternalTables`)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalVisibility.cs` (`DecideAsync`)
+- `tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs`; `tests/unit/domain/Access/SecureChildLineageTests.cs`
+
+**Suggested fix**: a separate "outside the lineage, never external, not communication content" marker, kept out of `RefusedContentTables` and the duplicate-list guard; declare both tables with it and test `ExternalMarkerOf` for both. Revisit with or after task 121.
+
+**Estimated effort**: half a day, including the registry decision (uac-r2 reviews).
+**Blockers**: the registry semantics decision (uac-r2).
+**Related**: task 189, task 121. Not a security exposure (fails closed).
+
+---
+
+### ISS-053 — Nothing checks that duplicate detection stays off on the BFF job queues (ISS-025's retry copy relies on it)
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-iss053 8b9d8c0aa6: ArchTest JobQueueDuplicateDetectionOffGuardTests, 8/0; jobs.md names it). Closes when the next master PR merges. Stamp-side live check suggested to customer-provisioning-orchestration-r1. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 |
 | **Source** | uac-r2 review of master PR #3084 (ISS-025), 2026-11-25 |

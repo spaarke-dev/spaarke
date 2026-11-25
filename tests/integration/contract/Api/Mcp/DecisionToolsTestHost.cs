@@ -243,10 +243,13 @@ internal sealed class DecideLaneDouble : IDecisionCapability
     {
         Interlocked.Increment(ref _laneReads);
         Users.Enqueue(user);
-        return Task.FromResult(LaneFailure ?? new SignalReadResult(
-            SignalReadOutcome.Ok,
-            new WorklistResponse("lanes", [new WorklistLaneGroups("Decide", Groups.ToList()), new WorklistLaneGroups("Do", DoLane)])));
+        return Task.FromResult(LaneFailure ?? new SignalReadResult(SignalReadOutcome.Ok, LanesResponse()));
     }
+
+    /// <summary>The whole lanes response, as <see cref="ListDecideAsync"/> answers it and as the page carries it (the capability cuts the
+    /// page from the same read).</summary>
+    private WorklistResponse LanesResponse() =>
+        new("lanes", [new WorklistLaneGroups("Decide", Groups.ToList()), new WorklistLaneGroups("Do", DoLane)]);
 
     public Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct)
     {
@@ -255,6 +258,12 @@ internal sealed class DecideLaneDouble : IDecisionCapability
         if (PageFailure is not null)
         {
             return Task.FromResult(PageFailure);
+        }
+
+        // The real capability reads the lane for the page, so a failed lanes read fails the page with that read's answer.
+        if (LaneFailure is not null)
+        {
+            return Task.FromResult(DecidePageResult.ReadFailed(LaneFailure));
         }
 
         DecideCursor? after = null;
@@ -270,7 +279,7 @@ internal sealed class DecideLaneDouble : IDecisionCapability
 
         var (items, cores, next) = DecideLanePaging.Page(Groups, Extras, after);
         var judged = items.Select(i => i with { PrivilegeFlagged = Privileged.Contains(i.SignalId) }).ToList();
-        return Task.FromResult(DecidePageResult.Ok(judged, cores, next));
+        return Task.FromResult(DecidePageResult.Ok(judged, cores, next, LanesResponse()));
     }
 
     public Task<DecisionPlanReadResult> GetPlanAsync(Microsoft.AspNetCore.Http.HttpContext? http, Guid signalId, CancellationToken ct) =>

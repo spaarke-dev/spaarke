@@ -73,14 +73,16 @@ public partial class RouteAuthorizationGuardTests
         // spaarkeai-mcp-bff-api-r1 task 023 (one contiguous block; tasks 022 and 024 add their own entries beside it).
         new McpTool("GetDecisionPlanTool", "", "IDecisionCapability",
             "FR-06, app-only and read-only: the Signal's decision plan, suppression and full row as the caller through IDecisionCapability "
-            + "(the REST plan route's capability call, which also writes the plan-read stamp). Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
+            + "(GetPlanAndSuppressionAsync: the REST plan and suppression routes' answers with one Signal access check, NFR-01; it also writes "
+            + "the plan-read stamp). Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
         new McpTool("SearchDecisionLookupTool", "", "IDecisionLookupSearch",
             "FR-07, app-only and read-only: the wizard's person, budget and firm search as the caller through IDecisionLookupSearch (the REST "
             + "lookup route's service); the plan names the table and scope. Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
         // ── task 022 ──
         new McpTool("ShowDecisionsTool", "", "IDecisionCapability",
-            "spaarke_show_decisions (FR-03/FR-04, model-visible, read-only): the caller's Decide lane through ListDecideAsync and "
-            + "ListDecidePageAsync with IHttpContextAccessor.HttpContext's User; privileged rows reduced to a count before the model sees them."),
+            "spaarke_show_decisions (FR-03/FR-04, model-visible, read-only): the caller's Decide lane through ListDecidePageAsync (one "
+            + "read; the counts come from the lanes response the page carries, NFR-01) with IHttpContextAccessor.HttpContext's User; "
+            + "privileged rows reduced to a count before the model sees them."),
         new McpTool("ListDecisionPageTool", "", "IDecisionCapability",
             "spaarke_list_decision_page (FR-05, app-only, read-only): one page of the caller's Decide lane through ListDecidePageAsync "
             + "with IHttpContextAccessor.HttpContext's User; the cursor is the only input."),

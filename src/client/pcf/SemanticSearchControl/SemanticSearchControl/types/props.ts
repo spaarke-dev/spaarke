@@ -4,7 +4,7 @@
  * @see spec.md for component architecture
  */
 
-import { SearchFilters, SearchResult, SearchScope, DateRange } from './search';
+import { SearchFilters, SearchResult, SearchScope } from './search';
 import { IInputs } from '../generated/ManifestTypes';
 
 /**
@@ -52,28 +52,6 @@ export interface IFilterPanelProps {
 export interface FilterOption {
   key: string;
   label: string;
-}
-
-/**
- * Props for FilterDropdown component
- */
-export interface IFilterDropdownProps {
-  label: string;
-  options: FilterOption[];
-  selectedKeys: string[];
-  onSelectionChange: (keys: string[]) => void;
-  disabled: boolean;
-  multiSelect?: boolean;
-}
-
-/**
- * Props for DateRangeFilter component
- */
-export interface IDateRangeFilterProps {
-  label: string;
-  value: DateRange | null;
-  onChange: (range: DateRange | null) => void;
-  disabled: boolean;
 }
 
 /**

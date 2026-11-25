@@ -99,6 +99,7 @@ public class JobSubmissionService
             // receive-side idempotency in each handler is the guarantee. The processors' retry copy reuses this
             // MessageId (ISS-025), which depends on duplicate detection staying off — with it on, the broker would
             // silently drop the copy inside the detection window.
+            // Enforced by: JobQueueDuplicateDetectionOffGuardTests (tests/Spaarke.ArchTests; scans the bicep queue resources).
             // Falls back to JobId for jobs without an idempotency key.
             // Service Bus MessageId has a 128-character limit; hash if needed.
             var sbMessageId = !string.IsNullOrWhiteSpace(job.IdempotencyKey)

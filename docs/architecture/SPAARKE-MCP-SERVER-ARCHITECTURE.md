@@ -7,7 +7,7 @@
 
 ## Overview
 
-Spaarke exposes one MCP server, and it lives inside the BFF (`Sprk.Bff.Api`). Microsoft 365 Copilot Chat and Cowork call it through a Copilot connector ("Spaarke MCP"). v1 serves one product area, **legal-operations**, at `POST /mcp/legal-operations`. It lets a user see the Work Items waiting for their decision (the Decide lane) and review and complete them in a widget that renders inside the host. A later area (billing review, Patents) is a new `/mcp/{area}` route on the same host, never a second MCP server or service (ADR-013 placement).
+Spaarke exposes one MCP server, and it lives inside the BFF (`Sprk.Bff.Api`). Microsoft 365 Copilot Chat and Cowork call it through a Copilot connector ("Spaarke MCP"). v1 serves one product area, **legal-operations**, at `POST /mcp/legal-operations`. It lets a user see the Work Items waiting for their decision (the Decide lane) and review and complete them in a widget that renders inside the host. A later area (billing review, Patents) is a new `/mcp/{area}` route on the same host, never a second MCP server or service (ADR-013 placement). Agents never get their own connector or server: a practice-area agent reaches its area's route through its own MCP action. Which surface gets which packaging is set in [SPAARKE-AI-SURFACES-AND-PACKAGING.md](SPAARKE-AI-SURFACES-AND-PACKAGING.md).
 
 The key design decision is that a tool is a thin adapter. Every tool runs **as the signed-in caller** (on-behalf-of, the same as the Console) and calls the service the REST route already calls. It adds no second validation, billing refusal or write path. The route is **stateless**, which is what keeps `IHttpContextAccessor.HttpContext` populated for each tool call and so keeps the caller's identity intact.
 

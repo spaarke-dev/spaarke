@@ -301,6 +301,8 @@ export const CreateRecordForm: React.FC<CreateRecordFormProps> = ({
         onSearch={searchContacts}
         minSearchLength={2}
         placeholder="Search contacts"
+        // #1571 review F3: a failed search (refused, a server fault) is never shown as "No results found".
+        searchErrorText="Could not search contacts. Try again."
       />
       {/* Clearing it on a Matter/Project means "the server's default" — the user themself — so say so, honestly. */}
       {!isMatter && !isProject ? null : defaultAssignee && !assignee ? (
