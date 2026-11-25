@@ -15,7 +15,8 @@
 - **WP-2b (Word for the web):** probe listed (plugin + both skills), but no WPI/WPS code in (a) or (b); every prompt with "Spaarke" is routed to the Spaarke connector / Spaarke MCP (MCP prompts declined). The test is **confounded by our name**. Follow-up offered: rename the probe trigger phrases (`build/build_word_probe.py`) and re-upload (new inventory row).
 - **Probe plugin P1 is still uploaded (Only you)**, for the owner's Word desktop WP-1/WP-2. copilot-platform-coordination recorded it (`45022ea1c6`) and expects a message when it's removed (planned the same day) or a new date. The owner removes it in Cowork › Customize › Plugins.
 - **Side finding:** the owner's saved custom instruction (names `Spaarke Review Method.docx`) leaks into both agents ("could not be located").
-- **Still the owner's:** WP-1, WP-2 (Word desktop), WP-3, contract steps, P-1 placement check, remove `/spaarke-visual-probe` from the Cowork skills list.
+- **P-1 done:** the Copilot custom instruction reaches Copilot Chat and agents, not Cowork or Word for the web. Owner decision pending: drop the "read Spaarke Review Method.docx" line from `package_docs.CUSTOM_INSTRUCTION`.
+- **Still the owner's:** WP-1, WP-2 (Word desktop; pick the skill chip and leave "Spaarke" out of the prompt), WP-3, contract steps, remove `/spaarke-visual-probe` from the Cowork skills list, then remove the probe plugin and tell me.
 
 ## Quick Recovery (READ THIS FIRST)
 

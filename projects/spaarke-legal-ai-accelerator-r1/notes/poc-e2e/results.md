@@ -606,6 +606,7 @@ copilot-platform-coordination before the probe upload (recorded there, commit `4
 | A-2 Legal hold | Attach draft A, same two prompts | **13 rows**: 5 Meets, 1 fallback, 1 Needs review, 6 Escalate (C-3 had the same split, with Does not meet for the one Needs review); placeholders, no invented dates; ends with the `/legal-hold-review` line. "Apply" → points to the skill; **no file changed**. **Pass** |
 | A-2 side finding | both agents | Both headers say *"Spaarke Review Method.docx could not be located"*. Source: the owner's saved custom instruction (P-1 text) tells every review to read that file, and agents follow it but cannot reach OneDrive outside their knowledge. Harmless here (they fell back to their own instructions), but the custom instruction and the agents conflict |
 | A-3 | Marker "Test marker A3: three years is preferred." added under 16. Term and survival in the NDA `(agent knowledge).docx` (OneDrive version 2.0, 20:10Z) | At **+16 min** (20:26Z), asked to quote topic 16 verbatim: the agent quoted the marker line in place and flagged it as inconsistent with the 2-year instruction. **Pass: knowledge edits reach the agent within about 15 minutes**, so the +1 h check was dropped. Marker removed by restoring version 1.0 (now version 3.0, original length 40,229 bytes) |
+| P-1 | Copilot Settings › Personalization › Customize Copilot: added *Start every answer with "P1-CHECK".* after the saved Spaarke instruction; "hello" in four places; then removed (back to the original 874 characters, checked after reload) | **Copilot app Chat: yes.** **Agent chat (Spaarke NDA Review): yes.** **Cowork: no** (Cowork uses its own Preferences, which C-1 told the user to fill). **Word for the web, Chat only: no.** So one paste does not cover both: the Copilot custom instruction reaches Chat and agents, not Cowork or Word |
 | WP-0 | Cowork, probe uploaded (Only you) | "Run the Spaarke Word probe." → `Spaarke Word probe · instructions loaded · WPI-1112-A`; "Run the Spaarke script probe." → `WPS-1112-A 528452740 python 3.12 Linux`. **Pass** (probe works) |
 | WP-2b script (a) | Word for the web, Brightwater (view mode), typed | Plugin and both skills listed under + › Choose plugins (as "Shared skill"). Answer: no `WPS` code; Word went to the **Spaarke connector** ("only operation … Decide lane") and said it can't run scripts in Chat mode. **Skill not loaded** |
 | WP-2b script (b) | skill chip `spaarke-word-probe-script` + same text | No `WPS` code; same connector routing; Word then said "Spaarke Word Probe is now on". **Skill not loaded** |
@@ -623,7 +624,11 @@ copilot-platform-coordination before the probe upload (recorded there, commit `4
    any prompt containing "Spaarke" is routed to them, even with the skill chip. The Word desktop runs (WP-1, WP-2,
    owner) and any re-run should use a probe phrase without "Spaarke" (follow-up: rename the probe trigger), or a user
    without the Spaarke connectors.
-4. **The custom instruction leaks into agents** (A-2 side finding).
+4. **The custom instruction leaks into agents** (A-2 side finding, confirmed by P-1), and it does **not** reach
+   Cowork or Word for the web. Its only effect today is on Copilot Chat and agents, where its "read Spaarke Review
+   Method.docx" line can't work (agents can't reach the file). Candidate change for the owner: drop that line from the
+   package's custom-instruction text (`package_docs.CUSTOM_INSTRUCTION`), since the skills and agents now carry the
+   method themselves; keep the colour, draft-status and no-email lines. Word desktop not checked.
 5. **Fixed after this round:** both Cowork skills now say the review and plan go in the chat reply before the card
    (C-3 defect; commit `72fdc9ab98` on PR #3163, mirrored here); `copilot-app-components.md` now says where outputs
    really land (C-2).
