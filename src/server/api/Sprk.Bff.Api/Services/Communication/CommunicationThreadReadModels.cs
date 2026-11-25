@@ -140,12 +140,19 @@ public sealed record UnreadCountResult(
 /// caller may see the thread) and every message by the IMPERSONATED message query + the shared
 /// <c>CommunicationAccessFilter</c> — private/internal-only content the caller may not see is never present (NFR-03).
 /// </summary>
+/// <param name="Truncated">
+/// Ontology task 221 (#2671): <c>true</c> when a bound of the read (threads, the message scans, the added-thread budget) left
+/// out content the caller could see, so the list is incomplete; <c>false</c> otherwise (additive, defaults to <c>false</c>).
+/// A plain boolean: it says only that the list is incomplete, never how much is missing, and it is raised only from rows the
+/// caller may read (rows hidden by Dataverse security or by the shared access filter never raise it).
+/// </param>
 public sealed record RegardingReadResult(
     string EntityType,
     Guid RecordId,
     IReadOnlyList<ThreadReadResult> Threads,
     int ThreadCount,
-    int MessageCount);
+    int MessageCount,
+    bool Truncated = false);
 
 /// <summary>
 /// The app-only by-regarding read for the external plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04):
