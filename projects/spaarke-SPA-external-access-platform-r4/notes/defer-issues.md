@@ -490,3 +490,11 @@ The fix would change principal precedence, which is escalation trigger 3 for tas
 **Why it matters.** Such a person sees fewer records than the contact's grants give. The grants go unused. This fails closed.
 
 **Fix.** The auth plane needs to decide whether a linked licensed user gets the union of both sets of grants or stays on the licensed model. That needs an auth review and an ADR-028 check. Effort: unknown. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3154 (board Type=Idea).
+
+## D-41 — External SPA: decide whether a workforce contact may submit invoices (#3159)
+
+**What.** Since task 040, a workforce contact with record grants sees the Invoices tab. `/me` lists firms for any contact with organization memberships, on either plane, and ebilling never decided whether a workforce contact may submit. The submit routes also apply the Workforce-role ceiling, which `firms` does not reflect, so the command could be offered and then refused. Owner decision 2026-11-25: hide Submit invoice on the workforce plane for now (the Invoices grid command and the record view's action; `callerMaySubmitInvoices` in `src/client/external-spa/src/components/record/recordAccess.ts`).
+
+**Why it matters.** If workforce contacts should submit, they can't from the SPA until this is decided. If they shouldn't, the server should say so (for example `/me` sends no firms on the workforce plane) and the client rule becomes a backstop.
+
+**Fix.** ebilling-r1 decides, with uac-r2 for the ceiling: either (a) workforce contacts don't submit, and `ExternalUserContextEndpoint` sends no firms on the workforce plane; or (b) they do, and the offer also checks the ceiling's Create on the submission table and AppendTo on documents, after which the SPA's plane rule is removed. Effort: under a day either way, plus reviews. Status: Open (urgency: next-round). Issue: https://github.com/spaarke-dev/spaarke/issues/3159 (board Type=Idea).

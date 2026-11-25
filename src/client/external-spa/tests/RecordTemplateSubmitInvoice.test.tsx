@@ -52,6 +52,7 @@ vi.mock('../src/api/web-api-client', async () => {
 
 import { InvoiceSubmissionError } from '@spaarke/ui-components/components/InvoiceSubmission';
 import { ApiError } from '../src/types';
+import { activateBackend, clearActiveBackend } from '../src/auth/backend-selection';
 import { RECORD_DETAIL_ENTITIES } from '../src/components/detail/RecordDetailFields';
 import { RECORD_TEMPLATES, recordActionIdsOf } from '../src/components/record/recordTemplates';
 import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
@@ -351,6 +352,33 @@ describe('Submit invoice: hidden (not rendered, never disabled)', () => {
       expect(toolbarOf(dialog)).not.toContain('submitInvoice');
       expect(invoicesHeaderOf(dialog)).toEqual([]);
       expect(firmRecordReads()).toEqual([]);
+    },
+    SLOW
+  );
+
+  it.each(OFFERING)(
+    '$label: the workforce plane hides it even when the firm lists the record, and reads no firm records (SPA-r4 task 040)',
+    async ({ entity, id, list }) => {
+      // One-variable twin of the "offered" case: only the signed-in plane differs.
+      activateBackend('workforce', {
+        customerKey: 'contoso',
+        displayName: 'Contoso',
+        bffBaseUrl: 'https://contoso-bff.test',
+        bffAppId: 'aaaaaaaa-0000-0000-0000-00000000000a',
+      });
+      try {
+        install({ me: meOf({ firms: [FIRM_A] }), firmRecords: { [FIRM_A.firmId]: listing(list, id) } });
+        const dialog = await openRecord({ entity, ids: [id] });
+        await waitFor(() => expect(h.getExternalUserContext).toHaveBeenCalled(), SLOW);
+        await settle();
+
+        expect(submitButton(dialog)).toBeNull();
+        expect(toolbarOf(dialog)).not.toContain('submitInvoice');
+        expect(invoicesHeaderOf(dialog)).toEqual([]);
+        expect(firmRecordReads()).toEqual([]);
+      } finally {
+        clearActiveBackend();
+      }
     },
     SLOW
   );

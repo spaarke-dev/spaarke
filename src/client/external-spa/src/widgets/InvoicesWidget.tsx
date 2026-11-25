@@ -9,8 +9,10 @@
  * shared grid's generic `hostCommands` slot), not a separate button above it. It is passed only when the server's own
  * answer says the caller can submit: `firms` on GET /api/v1/external/me is sent only when eBilling is on, and lists the
  * caller's own firms: none for a licensed systemuser (refused on the external submission routes; it submits from the
- * internal workspace), while a contact on either plane, a workforce contact with record tabs included (SPA-r4 task 040),
- * gets the firms its organization memberships confer. Absent, null or empty: no command. The gate is a convenience only; the server refuses a
+ * internal workspace), while a contact on either plane gets the firms its organization memberships confer. Absent, null
+ * or empty: no command. On the workforce plane there is no command either, whatever `firms` says (SPA-r4 task 040: a
+ * workforce contact with record grants sees this tab, but whether it may submit is ebilling's open question;
+ * `callerMaySubmitInvoices` in `record/recordAccess.ts`). The gate is a convenience only; the server refuses a
  * submission with no firm (EB-D-223). That is one cheap /me read on mount, never a list read. Navigation comes from the
  * `onNavigate` prop the router-owning host hands the body (App.tsx -> WorkspaceHomePage), so this file imports no
  * router API (the arch guard refuses router-named imports outside App.tsx); without the prop (a test, a surface with no
@@ -18,6 +20,8 @@
  */
 import * as React from 'react';
 import { AddRegular } from '@fluentui/react-icons';
+import { activePlaneOrNull } from '../auth/backend-selection';
+import { callerMaySubmitInvoices } from '../components/record/recordAccess';
 import { REVIEW_DETAIL_COLUMN, reviewDetailCellText } from '../components/record/reviewDetail';
 import { useCallerContext } from '../hooks/useCallerContext';
 import { INVOICE_SUBMIT_PATH } from '../pages/invoiceSubmitLink';
@@ -49,8 +53,8 @@ export const InvoicesWidgetBody: WidgetBodyComponent = props => {
   // the submission page itself still works from a direct link and the server decides).
   const me = useCallerContext(onNavigate !== undefined);
   // `firms` is set only when eBilling is on (FR-45) and the caller has none to submit for if empty (a systemuser gets []
-  // and is refused on these routes; a deactivated contact gets []).
-  const canSubmit = onNavigate !== undefined && me?.firms != null && me.firms.length > 0;
+  // and is refused on these routes; a deactivated contact gets []). Never on the workforce plane (task 040).
+  const canSubmit = onNavigate !== undefined && callerMaySubmitInvoices(me, activePlaneOrNull());
 
   const hostCommands = React.useMemo<GridHostCommands>(
     () =>

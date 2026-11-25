@@ -1,6 +1,6 @@
 # Task 040: record tabs for workforce contacts with grants (FR-24, #2508)
 
-Status: implemented and verified; UAC review recorded (no objection). FULL rigor, opus @ high, directional steps.
+Status: implemented and verified; UAC review recorded (no objection); pass-2 F1 fixed per the owner's decision. FULL rigor, opus @ high, directional steps.
 
 ## Behaviour
 
@@ -43,8 +43,19 @@ So a workforce contact sees only its granted records, and escalation trigger 1 d
 | K3 revisit | A licensed user linked to a WorkforceHome contact gets none of the contact's grants or tabs | K | uac-r2 agreed; filed D-40 #3154 |
 | code-review | Tabs opened before a grant revocation stay until `/me` is read again | K3 | Known limit, UX only; lists stay server-scoped |
 | adversarial 1, code-review | Notes and gate evidence missing | F4 | This file |
-| adversarial 2 | **The Invoices tab's "Submit invoice" command can answer 403 for a workforce contact.** The command (and the record view's Submit invoice) is offered when `/me` `firms` is non-empty. `ExternalUserContextEndpoint.cs:143` gives firms to every contact and refuses only a systemuser, and `firms` ignores the Workforce-role ceiling. The submit routes, however, enforce the ceiling (`WorkforceRoleCeilingGate.cs:214-217, 264-266`). So a granted workforce contact on a role without Create on the submission table, or without AppendTo on documents, is offered a command that is then refused. Before this task the Invoices tab was CIAM-only. ebilling never decided whether a workforce contact may submit (its code only refuses systemusers; its comment assumed workforce callers had no firms). | F1 | **Owner decision pending** (see below) |
+| adversarial 2 | **The Invoices tab's "Submit invoice" command can answer 403 for a workforce contact.** The command (and the record view's Submit invoice) is offered when `/me` `firms` is non-empty. `ExternalUserContextEndpoint.cs:143` gives firms to every contact and refuses only a systemuser, and `firms` ignores the Workforce-role ceiling. The submit routes, however, enforce the ceiling (`WorkforceRoleCeilingGate.cs:214-217, 264-266`). So a granted workforce contact on a role without Create on the submission table, or without AppendTo on documents, is offered a command that is then refused. Before this task the Invoices tab was CIAM-only. ebilling never decided whether a workforce contact may submit (its code only refuses systemusers; its comment assumed workforce callers had no firms). | F1 | **Owner chose (2026-11-25): hide it for now.** On the workforce plane neither the grid command nor the record view's action is offered (see "Submit invoice" below). The open question went to ebilling as D-41 #3159 |
 | adversarial 2 | Everything else is clean: no way to get `assigned-work` without the rule, no list outside Tier-2, no route gated on the code, CIAM unchanged; mutation check passed (removing each guard fails a test) | — | — |
+
+## Submit invoice on the workforce plane (pass-2 F1, owner decision 2026-11-25)
+
+The owner chose to hide it for now rather than fix the button's check.
+- `callerMaySubmitInvoices(callerContext, plane)` in `components/record/recordAccess.ts` is the single rule. It holds when `/me` `firms` is non-empty AND the plane is not `workforce`.
+- The plane is the active backend's (`activePlaneOrNull()`, a new non-throwing read in `auth/backend-selection.ts`). Every bootstrap path activates a backend before any request, so a successful `/me` implies a known plane; `null` leaves the firms rule as it was.
+- Both offers use it: `InvoicesWidget` (`canSubmit`) and `SubmitInvoiceAction` (through `submitInvoiceRightOf`). On the workforce plane the action also makes no firm-records read.
+- CIAM partners are unchanged. A licensed systemuser was already hidden (its `firms` is `[]`).
+- The submission page itself still opens from a direct address; the server decides there. The UI offers no link to it on the workforce plane.
+- The open question (should a workforce contact submit at all?) is D-41 #3159 for ebilling-r1, with uac-r2 for the ceiling.
+- Regression tests, each a one-variable twin of an "offered" case: `InvoiceSubmitPage.test.tsx` (the grid hands no command on the workforce plane even when `/me` lists firms) and `RecordTemplateSubmitInvoice.test.tsx` (matter, project and WA: hidden and no firm-records read). Mutation check: removing the plane line fails all four.
 
 ## UAC review (unified-access-control-r2)
 
@@ -81,6 +92,7 @@ Requested 2026-11-25 against `f6575abf70`. It covers:
   - Full suite 2,123/2,124. The one failure was a 60 s timeout in `RecordTemplateSubmitInvoice.test.tsx` under machine load; re-run alone it passed 52/52.
   - In pass 1's run, `ProjectPage.perRecordWrite.test.tsx` also timed out; re-run alone it passed 2/2.
   - Neither file imports the registry.
+  - After the F1 fix: `InvoiceSubmitPage.test.tsx` 73/73 alone (2 wait timeouts in a combined run under load), `RecordTemplateSubmitInvoice.test.tsx` 55/55, `WorkforceContactTabs.test.tsx` 9/9; `tsc --noEmit` and eslint clean.
 
 ## Test scope
 
