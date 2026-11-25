@@ -4,7 +4,7 @@
     <title>Every BFF-created record lands in the root business unit because nothing sets an owner — establish the ownership-assignment pattern across all record entities</title>
     <phase>5 Remediation — data model</phase>
     <gate>startable. BLOCKS the real closure of 063, 064 and 066.</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what every app-only Dataverse create writes, and requires a data backfill. Tags include bff-api + dataverse + security. Modifies `.cs`.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -360,4 +360,6 @@
     no vulnerable packages; office-addins tsc 68 (baseline), errorMessages jest 14/14, eslint clean. Five seeded
     negative controls went red. Step 9.5 review: 22 findings, triaged in notes/080-record-ownership.md section 6.11.
   </status-note>
+
+  <!-- 2026-11-24: owner dev check passed ("yes it works"): the last open item, the live check as Test User 1 (AC 6/7), is done. ISS-007..010 (#1034-#1037) stay filed. -->
 </task>
