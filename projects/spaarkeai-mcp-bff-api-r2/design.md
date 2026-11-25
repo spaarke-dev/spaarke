@@ -1,6 +1,6 @@
 # Spaarke MCP r2: Ask tool parity and retiring the Spaarke AI agent (`spaarkeai-mcp-bff-api-r2`)
 
-> **Status:** Design draft v0.2, 2026-11-25. Owner answered §9 Q1–Q4; Q5, Q7 and Q8 have recommendations awaiting the owner. No spec or tasks yet. Next: the owner resolves Q5, Q7 and Q8, then `/design-to-spec`.
+> **Status:** Design v0.3, 2026-11-25. All §9 questions decided by the owner. No spec or tasks yet. Next: `/design-to-spec` (Q7: spec now).
 > **Priority:** high (owner, 2026-11-25).
 > **Builds on:** `spaarkeai-mcp-bff-api-r1`, the MCP server in the BFF (`/mcp/legal-operations`, 5 decision tools, the Decide widget). r1 is in its live-E2E and wrap-up tasks.
 > **Model doc:** `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (PR #3147). This project implements its Ask row for general Spaarke data.
@@ -99,7 +99,7 @@ The r2 tools could all go on `/mcp/legal-operations`, giving about 22 tools on o
    This closes #2575, and #1523 (`AgentTokenService`) is decided with it. The 28-function checklist is preserved in `notes/legacy-agent-inventory-2026-11-25.md`, so the code is no longer needed as a reference. If `specialist-legal-agents-r1` later builds a Spaarke runtime agent (its G9), it needs a new Agents SDK front door anyway: the April handler was never a live Bot endpoint.
 3. Users get the MCP tools as each phase ships; there is no parallel period.
 
-### 4.6 Widgets: reuse the Console's components
+### 4.6 Widgets: reuse the Console's components (decided, Q5)
 
 The pattern is already built and live. The Decisions widget (`src/client/widgets/spaarke-decisions/`) renders the Console's own `WorklistLanePanel` from `@spaarke/ui-components`, and gets its data from app-only MCP tools instead of BFF calls (`createWorklistService` with an MCP transport). The same widget's Decision wizard already sends an inquiry email from inside Copilot.
 
@@ -108,9 +108,9 @@ A Console or workspace component can run as a widget when:
 - **It fits one self-contained HTML file** under the 3 MB bundle check.
 - **It is a single component, not the whole Console.** Each widget is one `ui://` resource served by `McpModule`.
 
-The spec inventories which workspace widgets already have a seam (Q5).
+**Decided (owner, 2026-11-25):** reuse Console components, one per widget, starting with briefing, search results and email compose. The spec inventories which workspace widgets already have a seam.
 
-### 4.7 Dataverse MCP: position (proposed, Q8)
+### 4.7 Dataverse MCP: position (decided, Q8)
 
 Microsoft offers its own Dataverse MCP server (`https://<org>.crm.dynamics.com/api/mcp`):
 - generic tools (`list_tables`, `read_query`, `create_record`, `update_record`, delete);
@@ -123,7 +123,7 @@ It is not a replacement for the Spaarke MCP server:
 - **It competes for tool choice.** If a tenant connects both, Copilot may pick a generic `create_record` over a governed Spaarke tool. This is the same double-answer risk that led to removing the Spaarke AI agent now (§4.5).
 - **Cost.** Calls from outside Copilot Studio are metered unless the tenant's licence covers them.
 
-**Proposed:**
+**Decided (owner, 2026-11-25):**
 - Spaarke's end-user surfaces use only the Spaarke MCP server.
 - Built-in Dataverse MCP stays a developer and admin tool (schema checks, verification), as it is used today.
 - The customer deployment guide tells admins not to allow the Dataverse MCP client for end users in environments that run Spaarke, or to allow it read-only for named analysts.
@@ -145,7 +145,7 @@ BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the exis
 
 | With | What |
 |---|---|
-| `spaarkeai-mcp-bff-api-r1` | Proposed (Q7): Phase 0 runs in parallel now, because it touches none of r1's files (legacy agent code, gateway, bot infrastructure, spikes). The tool phases add to `McpModule`, the tool catalog and the route-guard ledger, which r1 is still changing (PR #3146, task 042). They start after r1's open PRs merge |
+| `spaarkeai-mcp-bff-api-r1` | **Decided 2026-11-25 (Q7):** Phase 0 runs in parallel now, because it touches none of r1's files (legacy agent code, gateway, bot infrastructure, spikes). The tool phases add to `McpModule`, the tool catalog and the route-guard ledger, which r1 is still changing (PR #3146, task 042). They start after r1's open PRs merge |
 | unified-access-control-r2 | Auth review of every tool's caller path; dev deploys run through its session (owner per-SHA go) |
 | ebilling-r1 | `getMatterFinanceSummary` authorization; invoice decisions stay out (EB-D-194) |
 | `specialist-legal-agents-r1` | Practice-area routes (`/mcp/patents`, …) and the profile tool are theirs. r2 keeps the host conventions they will use |
@@ -175,7 +175,7 @@ BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the exis
 2. ~~**Route split**~~ **Decided 2026-11-25: one connector** (§4.4).
 3. ~~**Long-running pattern**~~ **Decided 2026-11-25: 30 seconds is the limit**; longer work uses start and check status (§4.2 A).
 4. ~~**Email**~~ **Owner direction 2026-11-25: include it** unless it turns out large. It is a compose widget plus an app-only send tool, the pattern the Decision wizard already uses for inquiry emails (§4.6). The spec sizes it.
-5. **Widgets:** reuse Console components as widgets (§4.6)? Recommended: yes, one component per widget, starting with briefing, search results and email compose. The spec inventories which components already have a data seam.
+5. ~~**Widgets**~~ **Decided 2026-11-25:** reuse Console components, one per widget; briefing, search results and email compose first (§4.6).
 6. ~~**Agent removal order**~~ **Decided 2026-11-25: remove now** (§4.5).
-7. **Timing:** spec now; Phase 0 in parallel with r1; tool phases after r1's open PRs merge (recommended, §6)?
-8. **Dataverse MCP:** accept the position in §4.7?
+7. ~~**Timing**~~ **Decided 2026-11-25:** spec now; Phase 0 in parallel with r1; tool phases after r1's open PRs merge (§6).
+8. ~~**Dataverse MCP**~~ **Decided 2026-11-25:** the §4.7 position.
