@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Durable playbook run status in sprk_playbookrun / sprk_playbooknoderun</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>code startable; the dev Dataverse schema step needs the owner's explicit go</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api and dataverse; modifies PlaybookOrchestrationService (.cs) on the live run path and adds Dataverse columns</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Persistence on a live execution path with a fail-safe rule (a write failure never fails the run), a REST contract that must stay byte-identical, and a schema change; high-risk in plan R4</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns PlaybookOrchestrationService.cs and a new run-record store; does not edit IPlaybookOrchestrationService.cs (001 edits its :724 comment), PlaybookRunEndpoints.cs or Api/Agent/**</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, dataverse, fields, ai, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make playbook run status durable: PlaybookOrchestrationService writes sprk_playbookrun on start, state changes and completion and sprk_playbooknoderun per node, and GetRunStatusAsync / GetRunDetailAsync read Dataverse when the run is not in memory. First add the missing columns (owner go for the dev schema change). A write failure is logged and never fails the run; no background worker.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the JPS playbook runtime, Dataverse Web API writes and resilient side-writes.</role>
+  <goal>After a BFF restart, GET /api/ai/playbooks/runs/{runId} and /detail return the stored state for a run that was started before the restart, with the same response shape as today; the schema gaps are closed; existing run tests pass.</goal>
+
+  <context>
+    <background>Spec FR-13 (owner: persist runs). Today run state lives only in PlaybookOrchestrationService._activeRuns (PlaybookOrchestrationService.cs:62, registered at :139/:212, read at :422/:441/:506, removed at :607), so a status check after a restart or on another instance returns not-found. Discovery (plan.md "Dataverse schema findings"): sprk_playbookrun exists (0 rows) but lacks a correlation/idempotency id, an error code, a regarding-record lookup and a short summary; sprk_playbooknoderun lacks started/completed timestamps and a sequence. specialist-legal-agents-r1 D-A18 later adds profile-version and parent-run lookups on top (not this task). Task 030 builds the MCP tools on this and enforces the StartedByOid owner rule through sprk_triggeredby.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRuns/PlaybookRunRecordStore.cs (writes/reads sprk_playbookrun and sprk_playbooknoderun; internal interface IPlaybookRunRecordStore in the same folder)</file>
+      <file role="new">tests/integration/data-mutation/PlaybookRuns/PlaybookRunPersistenceTests.cs</file>
+      <file role="new">scripts/dataverse/Add-PlaybookRunColumns.ps1 (idempotent schema script per the dataverse-create-schema skill)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookOrchestrationService.cs:692-728 (PlaybookRunStatus incl. JsonIgnore StartedByOid — the REST response shape that must not change)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookRunEndpoints.cs:245, :283, :380, :468 (status/detail consumers; not edited)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/WorkProductRecordPersister.cs (existing BFF-side Dataverse write from the AI runtime; copy its client choice and logging)</file>
+      <file role="canonical-reference">.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">Schema: add on sprk_playbookrun a correlation/idempotency id (string, alternate key only if the skill's rules allow it on this table), an error code (string), a regarding-record lookup (polymorphic or entity-name + id pair; choose per the skill and record the choice) and a short summary (multiline, ≤ 4,000 chars); on sprk_playbooknoderun started-on and completed-on (date-time) and a sequence (whole number). Confirm and record the existing sprk_status option values and that sprk_triggeredby targets systemuser. The dev schema change runs only after the owner's explicit go in this session; until then the script is written and reviewed but not executed.</constraint>
+    <constraint source="ADR-052">Writes happen inline on the run's own execution path (start, each state change, each node, completion); no BackgroundService, queue, timer or hosted service is added.</constraint>
+    <constraint source="project">A persistence write failure is caught, logged with an outcome code (for example playbook_run_persist_failed) and never changes the run's outcome, its streamed events or its in-memory status; the run continues.</constraint>
+    <constraint source="project">GetRunStatusAsync and GetRunDetailAsync keep their signatures; they return the in-memory state when present, else the stored state, else null. The REST run routes' response bodies keep their current shape byte-for-byte for the same state (PlaybookRunStatus is unchanged; StartedByOid stays JsonIgnore and is rehydrated from sprk_triggeredby's caller oid mapping or a stored oid column — record which).</constraint>
+    <constraint source="project">Do not edit IPlaybookOrchestrationService.cs (task 001 edits its :724 comment), PlaybookRunEndpoints.cs or Api/Agent/**. Register the store in the existing module that registers PlaybookOrchestrationService (grep); no new module.</constraint>
+    <constraint source="ADR-013">The store lives under Services/Ai/ and is consumed only inside the AI module; MCP tools (task 030) reach run status only through IPlaybookOrchestrationService or a PublicContracts facade, never this store directly.</constraint>
+    <constraint source="ADR-015">Persisted summary and error text exclude document content, prompts and model output beyond the short summary the run already exposes; logs carry run id, playbook id, node id, outcome code and timing only.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries (the Dataverse client seam), and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read sprk_playbookrun and sprk_playbooknoderun metadata read-only (Dataverse MCP per dataverse-mcp-usage, or the Web API EntityDefinitions endpoint); record existing columns, sprk_status option values and the sprk_triggeredby target in notes/005-schema.md.</step>
+    <step order="2">Write scripts/dataverse/Add-PlaybookRunColumns.ps1 (idempotent) for the missing columns; ask the owner for the go; run it against dev only after the go and record the result in notes/005-schema.md.</step>
+    <step order="3">Add PlaybookRunRecordStore and wire PlaybookOrchestrationService to write on start, state change, per node and completion, each write guarded so a failure is logged and swallowed.</step>
+    <step order="4">Make GetRunStatusAsync / GetRunDetailAsync fall back to the store when the run is not in _activeRuns.</step>
+    <step order="5">Write the data-mutation tests for the acceptance criteria; run the existing playbook run and AI suites.</step>
+    <step order="6">Measure the publish-size delta; run the CVE check.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner has not given the go for the dev schema change, STOP after step 2's script review; do not run it and do not proceed with code that needs the new columns to exist at runtime without marking the task blocked.</trigger>
+    <trigger>If sprk_status's option values or sprk_triggeredby's target differ from what the run state needs (for example triggeredby is a contact lookup), STOP and escalate with the metadata.</trigger>
+    <trigger>If the REST run routes (GET /api/ai/playbooks/runs/{runId}, /detail) apply no caller/owner check today, do not add one here (REST bytes frozen); record it as a found defect with /project-defer-issue-tracking and tell the main session for uac-r2 (root CLAUDE.md §8.5).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row "Long-running pattern": in-memory _activeRuns in PlaybookOrchestrationService and the existing sprk_playbookrun / sprk_playbooknoderun tables (0 rows); IJobStatusService (Services/Office/) belongs to the Office module and is not used. CAPABILITY-INDEX: no row for run persistence (grep "playbookrun" .claude/patterns/CAPABILITY-INDEX.md).</existing>
+    <extension>Yes, extended: PlaybookOrchestrationService keeps ownership of run state and gains a store for the existing tables; the store is a separate class only because the service already has 8+ dependencies and the persistence must be swappable in tests at the Dataverse seam.</extension>
+    <cost-of-doing-nothing>A status check after a BFF restart or on another instance returns 404, so a run started from Copilot (FR-05) or the Console is lost to the user; FR-13 and FR-05's "run survives a restart" acceptance fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/, dotnet test, dotnet publish</tool>
+    <tool name="pwsh">scripts/dataverse/Add-PlaybookRunColumns.ps1 (dev, after owner go)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRuns/PlaybookRunRecordStore.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</output>
+    <output type="code">scripts/dataverse/Add-PlaybookRunColumns.ps1</output>
+    <output type="test">tests/integration/data-mutation/PlaybookRuns/PlaybookRunPersistenceTests.cs</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/005-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/005-schema.md records the existing columns, the sprk_status option values, the sprk_triggeredby target, the owner's go (date) and the script result on dev.</criterion>
+    <criterion testable="true">Starting a run writes one sprk_playbookrun row (status Running, triggered-by the caller, correlation id, regarding record when the run has one); each node writes one sprk_playbooknoderun row with sequence, started-on and completed-on; completion updates status, completed-on, summary and (on failure) the error code.</criterion>
+    <criterion testable="true">With a fresh orchestration service instance (simulated restart, _activeRuns empty), GetRunStatusAsync and GetRunDetailAsync return the stored state, and the REST status/detail responses serialise identically to the in-memory responses for the same state.</criterion>
+    <criterion testable="true">Negative: when the store throws on every write, the run completes with the same outcome and streamed events as without persistence, and a log entry with outcome code playbook_run_persist_failed is written.</criterion>
+    <criterion testable="true">Negative: an unknown run id (neither in memory nor stored) returns null, and the REST route still returns 404.</criterion>
+    <criterion testable="true">StartedByOid is rehydrated for stored runs and still never appears in a REST response body.</criterion>
+    <criterion testable="true">Existing playbook run tests and the AI unit/integration suites pass.</criterion>
+    <criterion testable="true">The PR records the publish-size delta (total at or under 60 MB) and no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13, success criterion 3. The live restart check on dev is in task 039. Ask the main session to add a CAPABILITY-INDEX row proposal to notes/capability-index-pending.md for the run record store.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Shared widget MCP transport; move the Decisions widget onto it</title>
+    <phase>1 Read tools</phase>
+    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New shared client abstraction used by four widgets; moves a live widget (Decisions) onto it</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New abstraction with a placement decision (ADR-012) and a no-behaviour-change move of r1's live widget; three later widgets and task 011's McpToolCaller depend on its contract</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client-only (src/client/widgets/**); 020 is server-only</parallel-reason>
+    <deps>011</deps>
+    <tags>react, typescript, frontend, fluent-ui, refactoring</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Generalise the Decisions widget's MCP transport (src/mcp/mcpFetch.ts, mcpHost.ts, mcpHostContext.ts and lane/decideLaneFetch.ts) into one shared widget transport in src/client/widgets/shared/mcp/ that offers callTool(name, args) returning { structuredContent, isError, reasonCode } plus host theme/context, satisfying task 011's McpToolCaller type. Move the Decisions widget onto it with no behaviour change.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP Apps (ui:// widgets, host bridge) and Fluent v9.</role>
+  <goal>src/client/widgets/shared/mcp/ holds the transport; spaarke-decisions imports it instead of its own copies; every existing Decisions widget test passes unchanged; the bundle stays within budget; the new transport is structurally assignable to McpToolCaller.</goal>
+
+  <context>
+    <background>Spec FR-16 ("One shared widget MCP transport, generalised from decideLaneFetch.ts / mcpFetch.ts. The Decisions widget moves onto it with no behaviour change."). Planning decision (notes/decisions.md): a shared source folder src/client/widgets/shared/mcp/, imported by relative path or a Vite alias from each widget; not a new npm package and not in @spaarke/ui-components (the transport is widget-sandbox-only). Files at 37f0864afe: src/client/widgets/spaarke-decisions/src/mcp/{mcpFetch,mcpHost,mcpHostContext}.ts, src/lane/decideLaneFetch.ts. r1 owns the Decisions widget until #3161 merges; re-read after the master merge.</background>
+    <relevant-files>
+      <file role="new">src/client/widgets/shared/mcp/widgetMcpTransport.ts (callTool, host context, theme subscription)</file>
+      <file role="new">src/client/widgets/shared/mcp/index.ts</file>
+      <file role="new">src/client/widgets/shared/mcp/__tests__/widgetMcpTransport.test.ts</file>
+      <file role="new">src/client/widgets/shared/README.md (what lives here and how a widget imports it)</file>
+      <file role="modify">src/client/widgets/spaarke-decisions/src/mcp/mcpFetch.ts, mcpHost.ts, mcpHostContext.ts (become thin re-exports or are removed with imports updated)</file>
+      <file role="modify">src/client/widgets/spaarke-decisions/src/lane/decideLaneFetch.ts (calls through the shared transport)</file>
+      <file role="modify">src/client/widgets/spaarke-decisions/vite.config.ts, tsconfig.json, jest.config.cjs (alias or include for ../shared)</file>
+      <file role="canonical-reference">src/client/widgets/spaarke-decisions/src/App.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/mcpToolCaller.ts (from task 011)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">McpToolCaller type the transport must satisfy</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="ADR-012">Placement: a shared source folder under src/client/widgets/shared/, not a new package and not @spaarke/ui-components. If adr-check flags ADR-012 (unsanctioned shared surface), STOP and raise the ADR conflict (root CLAUDE.md §6.5) instead of choosing another location.</constraint>
+    <constraint source="project">No behaviour change in spaarke-decisions: every test under src/client/widgets/spaarke-decisions/src/__tests__/ passes unchanged; the same tool names, arguments and error handling; the bundle size from scripts/check-bundle-size.mjs does not grow by more than 5 KB.</constraint>
+    <constraint source="project">The transport's callTool result shape is structurally assignable to task 011's McpToolCaller (a compile-time assertion in the test); it performs no fetch of its own and no MSAL, and _meta.ui.csp stays empty (all data through the host's tools/call).</constraint>
+    <constraint source="project">Node install: npm install --legacy-peer-deps --no-audit --no-fund (not npm ci).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/decisions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Decisions widget transport" location="src/client/widgets/spaarke-decisions/src/mcp/mcpFetch.ts">The code to generalise; keep its error handling exactly</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate; merge master; read the four transport files and list what is Decisions-specific vs general in the task notes.</step>
+    <step order="2">Write the shared transport and its tests; add the McpToolCaller assignability assertion.</step>
+    <step order="3">Move spaarke-decisions onto it; run its jest suite and check-bundle-size.mjs; record the size before and after.</step>
+    <step order="4">Write the proposed CAPABILITY-INDEX row into notes/capability-index-pending.md.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the r1 gate is not met, STOP.</trigger>
+    <trigger>If a Decisions widget test must change to pass, STOP and escalate (no-behaviour-change rule).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>src/client/widgets/spaarke-decisions/src/mcp/{mcpFetch,mcpHost,mcpHostContext}.ts and lane/decideLaneFetch.ts (r1) are the only widget MCP transport; notes/reuse-scan.md row "Widget transport" verdict "Extend: generalise". CAPABILITY-INDEX: no widget-transport row.</existing>
+    <extension>The existing transport is generalised and moved, not copied; it cannot stay inside spaarke-decisions because three more widgets (034, 035, 040) must import it without depending on the Decisions widget.</extension>
+    <cost-of-doing-nothing>Each new widget copies mcpFetch.ts, and FR-16's "one shared widget MCP transport" acceptance fails; task 011's MCP email host has no real McpToolCaller to run on.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Decisions widget unchanged in Copilot Chat">
+      <steps>
+        <step>After deploy 029, open Copilot Chat with the Spaarke MCP source, ask "What decisions are waiting on me in Spaarke?"</step>
+        <step>Verify the Decide lane widget renders, categories switch, and paging works</step>
+        <step>Check the widget console for errors</step>
+      </steps>
+      <expected>Same behaviour as before the move; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host to dark theme</step>
+        <step>Verify the widget follows the host theme through the shared transport's theme context</step>
+      </steps>
+      <expected>Semantic tokens only; theme follows the host</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">jest and build in src/client/widgets/spaarke-decisions; node scripts/check-bundle-size.mjs</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/widgets/shared/mcp/widgetMcpTransport.ts</output>
+    <output type="test">src/client/widgets/shared/mcp/__tests__/widgetMcpTransport.test.ts</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/capability-index-pending.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every existing spaarke-decisions test passes unchanged.</criterion>
+    <criterion testable="true">check-bundle-size.mjs passes; size growth is at most 5 KB (before/after recorded).</criterion>
+    <criterion testable="true">widgetMcpTransport tests: callTool returns structuredContent on success; an isError result yields isError true with the reasonCode; a host bridge failure surfaces as an error result, not a thrown promise.</criterion>
+    <criterion testable="true">A compile-time test asserts the transport is assignable to McpToolCaller.</criterion>
+    <criterion testable="true">Negative: no file under src/client/widgets/shared/** calls fetch, XMLHttpRequest or MSAL (grep in the test).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16. Planning decision "shared widget transport placement" in notes/decisions.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
