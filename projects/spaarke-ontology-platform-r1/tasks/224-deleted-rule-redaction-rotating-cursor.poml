@@ -4,7 +4,7 @@
     <title>Deleted-rule evidence redaction covers every empty-lookup Signal over successive nights instead of re-reading the same first 100,000 (#2085, DI-116)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -58,4 +58,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt224); PR to master; do not merge.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3164 squash-merged to master (ef1dc4f2c9), closes #2085 (DI-116). Option (a): SignalClosureService.DeletedPolicyCodesWithSignalsAsync takes an optional sprk_signalid cursor (GreaterThan, same order, paging and bound) and returns SignalsRead and ResumeAfter; SignalReevaluationJob keeps the cursor in the existing IDistributedCache (key sprk:ontology:evaluator:deleted-policy-redaction-cursor, 7-day TTL, same shape as TodoAssigneeOwnerReconciliationJob), saves it after the sweep when the bound is reached, clears it at the end of a pass, and starts from the beginning when it is missing, unreadable or the cache read faults. Reaching the bound logs a Warning with counts and no longer fails the run; the run fails only if the cursor cannot be saved or cleared. Redaction rule, D-61 and one-failure-per-policy accounting unchanged; no schema or DI change. Tests: 8 new (10 cases) incl. a three-run must-fire that fails on master; the fake pages the empty-policy read in SqlGuid order (a .NET-max cursor mutation fails 2 tests); one R4 assertion pair changed per AC3. Signals filter 5,530 pass; full ArchTests 2,831 pass; publish size +3,580 bytes. Independent Opus adversarial review: merge, no F-class; known limits recorded in notes/task-224-notes.md (per-pass rather than nightly re-check of early codes; nightly cache eviction would stall with only a Warning; save-after-sweep not pinned by a test). The per-code MaxPages throw in ReadPolicySignalsAsync predates this task: filed as #3170 (DI-176). Dev check: the first 02:30Z re-evaluation run after the next dev BFF build.</completion>
 </task>
