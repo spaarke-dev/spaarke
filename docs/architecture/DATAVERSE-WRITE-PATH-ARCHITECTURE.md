@@ -101,7 +101,7 @@ The one thing only a plugin does — reject/mutate *any* client's write synchron
 
 | Engine | Where | Scope | Fate |
 |---|---|---|---|
-| `FieldMappingService.applyFieldMappings` (TS) | `@spaarke/ui-components`, called in every `Create*Wizard` | Full (Copy/Default/Concat/Template); **sole enforcement today** | Demote to **preview only** (WP-2), or remove once server returns mapped values |
+| `FieldMappingService.applyFieldMappings` (TS) — **deleted** | `@spaarke/ui-components`, was called in every `Create*Wizard` | Was full (Copy/Default/Concat/Template) | **Deleted in `field-mapping-server-write-path-r1` task 035 (FR-22)**; no client preview (owner decision Q4). `noClientFieldMapping.test.ts` keeps it deleted |
 | `ApplyMappingRule` | `Api/FieldMappings/FieldMappingEndpoints.cs` (`POST /push`) | Copy + basic coercion only | **Replace** with `CreateTimeFieldMapping` (update-time push uses the same engine) |
 | `CreateTimeFieldMapping` (C#) | word-add-in-r1 branch | Full, typed | **Canonical** — promote to a shared BFF service (e.g. `Services/FieldMapping/`) used by create, push, and fix-up |
 

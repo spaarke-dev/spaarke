@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 
 /// <summary>
 /// Validates type compatibility between field mapping source and target types.
-/// Mirrors the TypeScript STRICT_TYPE_COMPATIBILITY matrix from FieldMappingTypes.ts.
+/// Formerly mirrored the TypeScript STRICT_TYPE_COMPATIBILITY matrix (FieldMappingTypes.ts, deleted in field-mapping-server-write-path-r1 task 035); the server is now the only copy.
 /// </summary>
 /// <remarks>
 /// Type compatibility rules (Strict mode):
@@ -20,7 +20,7 @@ public static class TypeCompatibilityValidator
 {
     /// <summary>
     /// Strict compatibility matrix. Key is source type, value is array of compatible target types.
-    /// Mirrors TypeScript: STRICT_TYPE_COMPATIBILITY from FieldMappingTypes.ts
+    /// Formerly mirrored the TypeScript STRICT_TYPE_COMPATIBILITY (deleted in task 035); the server is now the only copy.
     /// </summary>
     private static readonly Dictionary<string, string[]> StrictCompatible = new(StringComparer.OrdinalIgnoreCase)
     {
