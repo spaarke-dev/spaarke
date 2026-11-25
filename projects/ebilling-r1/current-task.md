@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-25 ~16:45Z (checkpoint: issue batch 4 merged into work; dev BFF a1b7db1def live)
+> **Last Updated:** 2026-11-25 ~18:40Z (checkpoint: #3155 merged; issue batch 5 agents running)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,11 +10,12 @@
 
 ## Quick recovery
 
-- **NOW (2026-11-25 ~17:20Z): batch 4 master PR #3155 OPEN** (head 1bea5ffc58, master 5ca9b84cd4 merged in; publish +756 B, 194 files each; no vulnerable packages; filtered tests 2,011/0 + ArchTests 176/0). Waits for the owner's merge go; uac-r2 told (read-only diff check, not a hold). word-add-in-r1 OK'd the 413 (1bea5ffc58); tell it when #3155 merges.
+- **NOW (2026-11-25 ~18:40Z): issue batch 5 running** — four implementer agents (Sonnet, own worktrees, base 2f8031633c), branches `task/ebilling-def064` (#2643 ArchTest: invoice core-lookup writers call InvoiceFamilyCoreRecordGuard), `task/ebilling-iss016` (#2755 WizardShell blocks nav/close while saving; drop 084b's local guard if redundant), `task/ebilling-2965` (#2965 one copy of the e-billing pages' bootstrap / API-error mapping / vite config), `task/ebilling-def046` (#2312 Deploy-EbillingFormsViews navigation anchor; live full run needs the owner's go). Next: review each (one review pass per change set; reviewer briefs forbid checkout here), merge into work, then a batch 5 master PR on the owner's go.
+- **Batch 4 DONE: #3155 MERGED** 18:12:39Z at 6a968b2a00 (owner "Yes, merge on green"). #3106, #2730, #2642, #2553 closed by hand (no auto-close); defer-issues set Done. word-add-in-r1 and uac-r2 told. Its BFF part (DEF-052) is NOT on dev: dev BFF stays a1b7db1def until the owner names an exact SHA in uac-r2's session; the ISS-014 Invoice Review change reaches dev with the next page deploy (owner go). provisioning-r1 checked ACME read-only: all 7 queues duplicate detection false; no per-run check (recorded in ISS-053).
+- **Earlier (2026-11-25 ~17:20Z): batch 4 master PR #3155 opened** (publish +756 B; filtered tests 2,011/0 + ArchTests 176/0).
   - **Batch 4 on work:** ISS-053 #3106 (ArchTest `JobQueueDuplicateDetectionOffGuardTests` 8/0; jobs.md "Enforced by"), ISS-014 #2730 (Invoice Review re-reads the approval state while firmNeeded; jest 667/0), DEF-063 #2642 (scoped import with nothing to publish exits 0; app-settings-only still throws after review F2; Pester 96/0), DEF-052 #2553 (job copy + from-email marked files enforce the per-file limit; review F1 fixed: 413 at step 1 before the .eml save; filtered 2,539/0 + merged-tip 584/0; build 0/0). Closed as already fixed: #1904 (ISS-001, task 015), #2455 (dead `CoreOf` removed, 18d9ce62a8). Batch-4 agent worktrees removed.
   - **DEF-052 contract:** word-add-in-r1 acknowledged the additive 413 (owner confirmed the local session is genuine); its pane message comes in its own PR.
   - **Dev BFF a1b7db1def LIVE 15:58:53Z** (uac-r2, owner go; has #3084 + #3130; rollback ef0c566d2c). Checklist W all three checks ready; T backfill `-Apply` needs the owner's typed OK (+ uac-r2 notices); U waits for spa-r4's SPA deploy.
-  - **Stamp-side follow-up:** the read-only live check that sdap-jobs/sdap-communication keep duplicate detection off belongs to customer-provisioning-orchestration-r1 (recipe in the ISS-053 agent report: `az servicebus queue show ... --query requiresDuplicateDetection`, expect false); not yet sent to provisioning-r1.
   - **Lesson:** a non-isolated reviewer agent checked out a branch in this worktree; briefs now forbid checkout here (memory feedback_reviewer-agent-checkout).
 - **Earlier (2026-11-25 ~14:10Z):** no task is running. Work is e495ea68ee (master merged in after #3130).
   - **#3084 MERGED** 08:16Z at 2ac250cae4 (079 content, SpaarkeMaster 1.3.3.0 with ISS-042, batch 3); spa-r4 told. The "Server tests (office scope) (rest)" cancel is the known 20-minute cap (#2767/#1474).
