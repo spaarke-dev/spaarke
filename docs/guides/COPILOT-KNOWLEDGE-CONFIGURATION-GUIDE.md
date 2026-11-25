@@ -199,7 +199,7 @@ In addition to Dataverse knowledge configuration, the Declarative Agent's instru
 - **CRITICAL routing rule** - always use API Plugin functions, never native Dataverse
 - **Domain concepts** - explains Spaarke's entity model
 
-See `src/solutions/CopilotAgent/declarativeAgent.json` for the current instructions.
+Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2); Copilot reaches Spaarke through the Spaarke MCP connector (the `src/solutions/CopilotAgent/` declarative agent no longer exists).
 
 **Limit**: Instructions are capped at 8000 characters. Keep them focused on routing rules and vocabulary, not detailed entity descriptions -- those belong in Dataverse metadata.
 
