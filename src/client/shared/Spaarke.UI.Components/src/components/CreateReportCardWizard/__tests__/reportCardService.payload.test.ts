@@ -10,8 +10,10 @@
  *   (b) the regression: Law Firm 1, Assigned External and Assigned Internal each bind their OWN column even when a
  *       look-alike column is listed first (`findNavProp` binds the first column CONTAINING a fragment);
  *   (c) an unpicked picker is ABSENT: no key, no empty string, no null anywhere in the body;
- *   (d) no request reaches any `/field-mappings/` route and the create URL names no `mappingSource` (the route infers
- *       it from the regarding Matter / Project);
+ *   (d) no request reaches any `/field-mappings/` route, and the create URL NAMES the regarding Matter as its
+ *       `mappingSource`. It must: the route infers a source only for the tables in `InferMappingSourceTables` (the tables
+ *       being created), `sprk_reportcard` is not one, and a create naming none maps nothing (the 2026-11-24 dev check).
+ *       With no association no source is named;
  *   (e) a server warning in the 201 body reaches `result.warnings` and the status is `partial`.
  */
 
@@ -280,7 +282,7 @@ describe('ReportCardService — the server write path (task 027, FR-16)', () => 
   });
 
   // (d) -------------------------------------------------------------------------------------------------------------
-  it('reads no field-mapping profile and names no mappingSource on the create URL', async () => {
+  it('reads no field-mapping profile and names the regarding Matter as the mapping source on the create URL', async () => {
     const fetchMock = bffChildWriteFetch(makeDataService());
     const service = new ReportCardService(makeDataService(), fetchMock, BFF_BASE);
 
@@ -288,8 +290,20 @@ describe('ReportCardService — the server write path (task 027, FR-16)', () => 
 
     const urls = fetchMock.mock.calls.map(([url]) => String(url));
     expect(urls.filter(u => /field-mappings/i.test(u))).toEqual([]);
-    expect(urls.filter(u => /mappingSource/i.test(u))).toEqual([]);
+    expect(urls).toEqual([`${ROUTE}?mappingSourceEntity=sprk_matter&mappingSourceId=${MATTER_ID_CLEAN}`]);
+  });
+
+  it('with no association, names no mapping source and writes no regarding keys', async () => {
+    const fetchMock = bffChildWriteFetch(makeDataService());
+    const service = new ReportCardService(makeDataService(), fetchMock, BFF_BASE);
+
+    const result = await service.createReportCard(makeForm({ name: 'X' }), null);
+
+    expect(result.status).toBe('success');
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
     expect(urls).toEqual([ROUTE]);
+    const [call] = postsTo(fetchMock, ROUTE);
+    expect(call.body).toEqual({ sprk_name: 'X' });
   });
 
   it('creates through the BFF route, never through dataService.createRecord (Xrm.WebApi)', async () => {
