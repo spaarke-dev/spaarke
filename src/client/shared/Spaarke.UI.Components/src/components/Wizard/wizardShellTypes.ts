@@ -345,7 +345,8 @@ export interface IWizardShellProps {
   yieldToSidePane?: boolean;
   /**
    * Browse navigation ("‹ N of M ›") in the modal header, rendered by `SprkModal`'s own nav group
-   * (modal mode only). Put a discard check in `nav.onBeforeNavigate`.
+   * (modal mode only). Put a discard check in `nav.onBeforeNavigate`. While `onFinish` runs the shell disables ‹ › itself
+   * (and makes × / Escape / backdrop / Cancel no-ops), so a save's outcome cannot land under another record.
    * @since ontology task 056
    */
   nav?: SprkModalNav;

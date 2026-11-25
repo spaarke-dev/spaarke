@@ -51,6 +51,7 @@ import {
 
 import { ModalWindowControls } from '../ModalWindowControls';
 import { SprkModal } from '../SprkModal/SprkModal';
+import type { SprkModalNav } from '../SprkModal/SprkModal.types';
 import { WizardStepper } from './WizardStepper';
 import { WizardSuccessScreen } from './WizardSuccessScreen';
 import { wizardShellReducer, buildInitialShellState } from './wizardShellReducer';
@@ -205,6 +206,28 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
 
   // ── Finishing flow state ───────────────────────────────────────────────
   const [isFinishing, setIsFinishing] = React.useState(false);
+  // The same fact as `isFinishing`, readable synchronously by the handlers below (a click can land before the re-render).
+  const finishingRef = React.useRef(false);
+  // While `onFinish` runs the wizard cannot be closed or moved to another record: a result would land under the wrong item,
+  // and an error from a multi-call save would never be seen. Every user-driven close (×, Escape, backdrop, Cancel, a footer
+  // override's `close`) goes through this; `handleFinish` closes with the raw `onClose` once the save has succeeded.
+  const guardedClose = React.useCallback(() => {
+    if (!finishingRef.current) onClose();
+  }, [onClose]);
+  // Header ‹ › : disabled (visually, in SprkModal) while finishing; `onNavigate` is also guarded for a click that beat the render.
+  const guardedNav = React.useMemo<SprkModalNav | undefined>(
+    () =>
+      nav
+        ? {
+            ...nav,
+            disabled: nav.disabled || isFinishing,
+            onNavigate: dir => {
+              if (!finishingRef.current) nav.onNavigate(dir);
+            },
+          }
+        : undefined,
+    [nav, isFinishing]
+  );
   const [finishError, setFinishError] = React.useState<string | null>(null);
   const [successConfig, setSuccessConfig] = React.useState<IWizardSuccessConfig | null>(null);
 
@@ -341,6 +364,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
 
   // ── Handle finish ─────────────────────────────────────────────────────
   const handleFinish = React.useCallback(async () => {
+    finishingRef.current = true;
     setIsFinishing(true);
     setFinishError(null);
 
@@ -355,6 +379,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       const message = err instanceof Error ? err.message : 'An unknown error occurred.';
       setFinishError(message);
     } finally {
+      finishingRef.current = false;
       setIsFinishing(false);
     }
   }, [onFinish, onClose, stayOpenOnFinish]);
@@ -449,7 +474,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   // Standard footer: Cancel (+ footerLeftExtra) LEFT; [spinner] [step actions] Skip · Back · Next RIGHT.
   const standardFooterStart = (
     <>
-      <Button appearance="secondary" onClick={onClose} disabled={isFinishing}>
+      <Button appearance="secondary" onClick={guardedClose} disabled={isFinishing}>
         Cancel
       </Button>
       {footerLeftExtra}
@@ -504,7 +529,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       canAdvance,
       goBack: () => dispatch({ type: 'PREV_STEP' }),
       goNext: () => dispatch({ type: 'NEXT_STEP' }),
-      close: onClose,
+      close: guardedClose,
     };
     const slots = footerOverride(context);
     if (slots) {
@@ -528,7 +553,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
               {title}
             </Text>
             {/* Close only — an embedded mount has no independent viewport to maximize into. */}
-            <ModalWindowControls isMaximized={false} onToggleMaximize={undefined} onClose={onClose} />
+            <ModalWindowControls isMaximized={false} onToggleMaximize={undefined} onClose={guardedClose} />
           </div>
         )}
 
@@ -554,7 +579,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   return (
     <SprkModal
       open={open}
-      onClose={onClose}
+      onClose={guardedClose}
       title={title}
       size={size}
       dismiss={dismiss}
@@ -562,7 +587,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       uiScale={uiScale}
       nonBlocking={nonBlocking}
       yieldToSidePane={yieldToSidePane}
-      nav={nav}
+      nav={guardedNav}
       padded={false}
       footerStart={successConfig ? undefined : footerStart}
       footer={successConfig ? successConfig.actions : footerEnd}
