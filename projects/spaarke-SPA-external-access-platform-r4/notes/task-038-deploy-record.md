@@ -87,3 +87,36 @@ uac-r2 had already said (earlier that day) that `b64d988625` will be in its next
   - **GATE PASS** (window 00:09:50Z–00:40Z):
     - 27 requests; the only 5xx is the known `/healthz/catalog` drift.
     - External: 9 requests, all 2xx; 0 column-not-permitted; 0 exceptions after start.
+
+## Step 6: E2E (2026-11-25 ~00:50–01:30Z, owner's Chrome, partner test account)
+
+Setup:
+- Driven by Claude in Chrome after the owner chose "Drive it in your browser".
+- Partner sign-in was silent (CIAM test user).
+- Its grants: Collaborate on 114 records, Full Access on 6, **no View Only**.
+- Request statuses come from the page's resource timing. The direct BFF reads were made inside the page with the signed-in session; no token was printed.
+
+| Check | Result | Evidence |
+|---|---|---|
+| (a) FR-18 Information, project | Pass | PRJ-000044: Name, Number, Status, Practice area, Assigned attorney/paralegal (names shown), Description, Last modified. Every request 2xx. |
+| (a) FR-18 Information, matter | Pass | MAT-000113: adds Open date, Matter type, Practice area; empty lookups show "—". |
+| (a) FR-18 Information, WA | Pass | WRK-123456.01: Priority, Response due, Project, Matter, Matter type, Assigned to, Description. |
+| (a) allow-listed read | Pass | Direct fetch of the 031 project columns (practice area, attorney, paralegal, description): 200, 1 row. |
+| (b) unlisted column refused | Pass | Direct fetch of `sprk_project` with `ownerid`: 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED`. These are the only two 400s in the session; the first run of the script also sent this request. |
+| (c) `threadId` on messages | Pass | 11 messages across 3 projects, all with `threadId`. |
+| FR-22 threads grouped | Pass | PRJ-000046: 5 messages, 4 conversations; the reply shows under "2 messages in this conversation". No message body has a remote image (no image request to check). |
+| FR-19 widths persisted | Pass | WA grid: the narrowed name column (329 px) survives a reload. |
+| FR-19 sort persisted | Pass, via the header cell's edge only | Last Activity ascending is stored and restored after reload. |
+| FR-19 Clear all | Pass | Sort and widths back to defaults, stored entry removed. |
+| FR-20 Money sort | Pass, via the header cell's edge only | Total Amount (Local) ascending: ($0.03) < $77.25 < $234.80 < … < $28,784.99. Descending is the reverse. |
+| FR-20 export text | Pass | Captured in the page, no download: `sprk_invoice-Invoices-20261124.csv`, 10 rows. Labels, amounts (`($0.03)`, `"$7,920.00"`), dates and statuses match the grid text. The rows follow the loaded order, not the on-screen sort. |
+| Themes | Pass (light, dark) | Dark: grid and record use theme colours; no console errors. High contrast not run (OS setting). |
+| Esc closes the record | Pass | With focus in the dialog. |
+| FR-21 "Show new messages" | **Not run** | Needs a message posted from a second session (owner's call). |
+| View Only level | **Not run** | The test account has no View Only grant. |
+
+**Defect found (pre-existing, shared DataGrid; blocks FR-19/FR-20 sort in practice):**
+- A normal click on a column name does not sort. Almost the whole header is the column-menu trigger, and its click handlers stop the event. The menu's "A to Z" / "Z to A" items are no-ops: DataGrid passes an empty `onSortChange`, see `DataGrid.tsx` ~1531-1540 and `HeaderCellContent.tsx` ~706-729.
+- Sorting works only through a click on the header cell outside that button.
+- Present since datagrid-framework-r1 (`c1c428e92b`, 2026-06-05); not introduced by R4.
+- R4's jsdom tests click the header cell itself, so they pass.
