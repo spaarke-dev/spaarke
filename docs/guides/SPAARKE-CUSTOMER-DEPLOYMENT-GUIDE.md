@@ -3175,8 +3175,6 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | AI Document Intelligence module | [`AI-DEPLOYMENT-GUIDE.md`](AI-DEPLOYMENT-GUIDE.md) |
 | Email / Communication Service | [`COMMUNICATION-DEPLOYMENT-GUIDE.md`](COMMUNICATION-DEPLOYMENT-GUIDE.md) |
 | Per-customer Copilot agent (T257) | §7.12 above; for the customer's IT: [`COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md`](COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md) |
-| M365 Copilot integration | [`M365-COPILOT-DEPLOYMENT-GUIDE.md`](M365-COPILOT-DEPLOYMENT-GUIDE.md) |
-| Declarative agent | [`DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md`](DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md) |
 | Office add-ins | [`office-addins-deployment-checklist.md`](office-addins-deployment-checklist.md) |
 | AI playbook deploy recipe | [`ai-guide-playbook-deploy-recipe.md`](ai-guide-playbook-deploy-recipe.md) |
 | Cross-cutting verification quick-reference | [`DEPLOYMENT-VERIFICATION-GUIDE.md`](DEPLOYMENT-VERIFICATION-GUIDE.md) |

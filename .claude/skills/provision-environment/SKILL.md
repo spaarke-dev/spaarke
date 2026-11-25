@@ -2512,7 +2512,7 @@ to H8's container.
 
 #### 6f. Per-customer Copilot agent — Retired 2026-11-25 (do not run)
 
-> **Retired 2026-11-25.** The per-customer "Spaarke AI" Copilot agent was removed by spaarkeai-mcp-bff-api-r2 (tasks 001–002): the template workflow, `scripts/copilot-agent/` and the package are deleted, so step 5 cannot run. Skip this gate and record "6f retired" in the run. Copilot access is now the "Spaarke MCP" connector (`docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md`). Removing the T257 control-plane plumbing (client pre-authorization, `sprk_copilotauthconfigid`) is tracked in #3173. The steps below are kept as history until #3173 closes.
+> **Retired 2026-11-25.** The per-customer "Spaarke AI" Copilot agent was removed by spaarkeai-mcp-bff-api-r2 (tasks 001–002): the template workflow, the scripts/copilot-agent folder and the package are deleted, so step 5 cannot run. Skip this gate and record "6f retired" in the run. Copilot access is now the "Spaarke MCP" connector (`docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md`). Removing the T257 control-plane plumbing (client pre-authorization, `sprk_copilotauthconfigid`) is tracked in #3173. The steps below are kept as history until #3173 closes.
 
 Each customer gets its own Microsoft Copilot agent. The customer's IT installs it in THEIR tenant; never install it in
 Spaarke's catalog. The full procedure, with the one-time platform setup, is

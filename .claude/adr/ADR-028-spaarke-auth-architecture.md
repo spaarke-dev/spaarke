@@ -696,7 +696,7 @@ The BFF gains an MCP server (`/mcp/{area}`) that Microsoft 365 Copilot and Cowor
 
 ### New MUST rules (Copilot / Cowork connector plane)
 
-- **MUST** register the connector with **OAuth 2.0 and an authority pinned to the Spaarke tenant**: authorize and token endpoints at `https://login.microsoftonline.com/{Spaarke tenant id}/oauth2/v2.0/…`, PKCE on. The April 2026 Copilot plugin used this shape (`src/solutions/CopilotAgent/spaarke-bff-openapi.yaml:1301-1302`; Retired 2026-11-25 with that plugin — read it with `git show 37f0864afe:src/solutions/CopilotAgent/spaarke-bff-openapi.yaml`).
+- **MUST** register the connector with **OAuth 2.0 and an authority pinned to the Spaarke tenant**: authorize and token endpoints at `https://login.microsoftonline.com/{Spaarke tenant id}/oauth2/v2.0/…`, PKCE on. The April 2026 Copilot plugin used this shape (its OpenAPI file, lines 1301-1302; Retired 2026-11-25 with that plugin — read it with `git show 37f0864afe:src/solutions/CopilotAgent/spaarke-bff-openapi.yaml`).
 - **MUST** request `api://{bffAppId}/user_impersonation` (A8's scope), so the token's `aud` is that stamp's BFF app. No new audience or scope is added; `AgentToken:CopilotAudience` is not used by this plane.
 - **MUST** treat the connector plane as an **internal workforce plane**, like Code Pages and PCF. Tools run as the caller: OBO to Dataverse and Graph through the existing workforce paths, and authorization by the existing server-side checks (for example `DecisionCallerRights`). It is not a collaboration plane, so A1–A3's broker-only rule does not apply to it.
 - **MUST** serve only callers that resolve to a **`systemuser`** (licensed core users). A token that resolves to no `systemuser` gets the existing `UserContextRequired` refusal.

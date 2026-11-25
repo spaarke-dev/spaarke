@@ -175,7 +175,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | Creating AI playbook scopes | `SCOPE-CONFIGURATION-GUIDE.md`, `JPS-AUTHORING-GUIDE.md` |
 | Configuring RAG | `RAG-CONFIGURATION.md`, `RAG-TROUBLESHOOTING.md` |
 | M365 Copilot integration | `COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md` |
-| Per-customer Copilot agent (customer stamps) | `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.12, `COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md` |
+| Per-customer Copilot agent (customer stamps) — Retired 2026-11-25; plumbing removal tracked in #3173 | `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.12, `COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md` |
 | Communication admin | `COMMUNICATION-ADMIN-GUIDE.md`, `COMMUNICATION-DEPLOYMENT-GUIDE.md` |
 | Workspace entity creation | `WORKSPACE-ENTITY-CREATION-GUIDE.md`, `WORKSPACE-AI-PREFILL-GUIDE.md` |
 | Customer onboarding | `CUSTOMER-ONBOARDING-RUNBOOK.md`, `CUSTOMER-QUICK-START-CHECKLIST.md` |

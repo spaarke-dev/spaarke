@@ -60,3 +60,8 @@
 
 ### D-004-1: dataverse-mcp-usage skill and knowledge notes use removed tool names
 - **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3185
+
+## From task 002 verifier (2026-11-25)
+
+### D-002-2: BYOK template still provisions an Azure Bot for the retired agent; runbook E2 misses the bot's Key Vault access policy
+- **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3186

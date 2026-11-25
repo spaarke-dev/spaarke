@@ -33,7 +33,7 @@ A production release deploys across three tracks:
 |-------|------|-------------|------|
 | **Track 1: Dataverse** | SpaarkeMaster solution (schema, web resources, PCFs, security roles, env vars, MDA app) | `pac solution export` → `pac solution import` | Every release |
 | **Track 2: Azure** | BFF API (.NET 10), Office Add-ins | `Deploy-BffApi.ps1`, `Deploy-OfficeAddins.ps1` | Every release (BFF); if changed (Add-ins) |
-| **Track 2.5: Reference Data** | Playbook definitions, chat context mappings | `Deploy-NotificationPlaybooks.ps1`, `Deploy-ChatContextMappings.ps1` | Every release (idempotent upserts) |
+| **Track 2.5: Reference Data** | Playbook definitions, chat context mappings, model-driven app Copilot knowledge (entity descriptions, glossary, synonyms) | `Deploy-NotificationPlaybooks.ps1`, `Deploy-ChatContextMappings.ps1`, `Update-CopilotEntityDescriptions.ps1`, `Configure-CopilotKnowledge.ps1` | Every release (idempotent upserts) |
 | **Track 3: Infrastructure** | Azure resources (App Service, OpenAI, AI Search, Key Vault, Power BI) | `Deploy-Platform.ps1`, Bicep templates, `Deploy-ReportingReports.ps1` | Only when infra changes |
 
 **Track 1 assumption**: SpaarkeMaster in dev is production-ready — all web resources and PCF controls contain the latest built code artifacts. No code is built or uploaded during the release itself.
@@ -498,6 +498,13 @@ Reference data scripts are idempotent (safe to re-run every release):
 
 # Chat context mappings (AI chat configuration seed data)
 .\scripts\Deploy-ChatContextMappings.ps1 `
+    -DataverseUrl "https://myenv.crm.dynamics.com"
+
+# Model-driven app Copilot knowledge (entity descriptions; glossary + synonyms).
+# Not tied to the retired "Spaarke AI" agent: see docs/guides/COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md
+.\scripts\Update-CopilotEntityDescriptions.ps1 `
+    -EnvironmentUrl "https://myenv.crm.dynamics.com"
+.\scripts\Configure-CopilotKnowledge.ps1 `
     -DataverseUrl "https://myenv.crm.dynamics.com"
 ```
 

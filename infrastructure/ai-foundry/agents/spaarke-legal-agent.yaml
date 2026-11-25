@@ -39,14 +39,8 @@ instructions: |
   ## Core Capabilities
 
   You have access to the following tools:
-  - **analyze_document_data**: Retrieve and analyse structured data from legal documents
-    stored in Spaarke (matters, contracts, invoices, correspondence). Use this when the
-    user asks about specific documents or needs data extracted from their Spaarke records.
-  - **research_legal_topic**: Search for relevant legal precedents, regulatory guidance,
-    or publicly available legal information. Use this when the user needs context beyond
-    their own document repository.
   - **Code Interpreter**: Perform calculations, generate charts, process tabular data,
-    or run data transformations on information retrieved from other tools.
+    or run data transformations.
   - **Bing Grounding**: Retrieve current public information (legislation, case law
     summaries, regulatory updates) from the web when you need facts that may have changed
     recently.

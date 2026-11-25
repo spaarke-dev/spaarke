@@ -38,7 +38,7 @@ Read the package before changing it; the files are the source of truth (root CLA
 
 | Package | Folder | Schemas actually used | What it is |
 |---|---|---|---|
-| ~~**Spaarke AI**~~ (declarative agent) | ~~`src/solutions/CopilotAgent/`~~ | — | **Retired 2026-11-25** (spaarkeai-mcp-bff-api-r2 tasks 001–002): the April agent, its OpenAPI plugin over `/api/agent/*` and the package were deleted. Its useful functions move to `spaarke_*` MCP tools on "Spaarke MCP". Tenant removal is runbook E1/E2. History: `git show 37f0864afe:src/solutions/CopilotAgent/` |
+| ~~**Spaarke AI**~~ (declarative agent) | ~~src/solutions/CopilotAgent~~ | — | **Retired 2026-11-25** (spaarkeai-mcp-bff-api-r2 tasks 001–002): the April agent, its OpenAPI plugin over `/api/agent/*` and the package were deleted. Its useful functions move to `spaarke_*` MCP tools on "Spaarke MCP". Tenant removal is runbook E1/E2. History: `git show 37f0864afe:src/solutions/CopilotAgent/` |
 | **Spaarke** (plugin package, slug `spaarke`) | `src/solutions/CopilotPlugins/spaarke/` | app manifest **1.30** with `agentSkills` (`skills/spaarke-decisions/SKILL.md`); `npm run validate`, then `npm run build` → `dist/spaarke-plugin.zip` | A **skills-only** package: the skill `spaarke-decisions` calls `spaarke_show_decisions` on the Copilot connector **"Spaarke MCP"** (`/mcp/legal-operations`). No `agentConnectors` entry |
 
 Rules learned live (`projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md`, T2 and S-1):
@@ -105,7 +105,7 @@ Use `OAuthPluginVault` (pattern in `declarative-agent-foodbank-mcp/appPackage/`)
 
 ## Conventions
 
-- Copilot packages live under `src/solutions/`: plugin packages in `src/solutions/CopilotPlugins/{slug}/` (see "Spaarke's Copilot packages today"). The legacy DA folder `src/solutions/CopilotAgent/` was Retired 2026-11-25. A new declarative agent gets its own folder under `src/solutions/`
+- Copilot packages live under `src/solutions/`: plugin packages in `src/solutions/CopilotPlugins/{slug}/` (see "Spaarke's Copilot packages today"). The legacy DA folder (src/solutions/CopilotAgent) was Retired 2026-11-25. A new declarative agent gets its own folder under `src/solutions/`
 - TypeSpec source (`.tsp`) compiled with `tsp compile` — pattern in `knowledge/m365-copilot/copilot-camp-path-e/RepairServiceAgent/`
 - DA app package built and packaged for upload via the M365 Agents Toolkit (formerly Teams Toolkit — renamed; see `knowledge/declarative-agents/SOURCE.md` for the rename note)
 - Instruction file: `instruction.txt`, plain markdown body, no fenced code blocks
