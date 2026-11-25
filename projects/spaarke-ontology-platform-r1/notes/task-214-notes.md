@@ -63,7 +63,7 @@ skips the lookup. Plus a control theory proving the fake accepts a compliant que
   3502 passed, 0 failed, 2 skipped (includes the 15 new tests).
 - Full `tests/Spaarke.ArchTests` (built explicitly first): 2793 passed, 0 failed.
 - `dotnet list package --vulnerable --include-transitive` on Sprk.Bff.Api: no vulnerable packages; no package added.
-- Publish size (BFF hygiene, fresh short-path worktrees `C:wm214` = master b005279c4d and `C:wb214` = branch 589639fbbf, both
+- Publish size (BFF hygiene, fresh short-path worktrees `C:\wm214` = master b005279c4d and `C:\wb214` = branch 589639fbbf, both
   deleted with `Remove-WorktreeSafe.ps1`). Command `dotnet publish -c Release -o deploy/api-publish` (framework-dependent
   linux-x64 per the csproj), zipped with PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`,
   PDBs included:
