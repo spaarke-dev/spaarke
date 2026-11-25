@@ -219,7 +219,8 @@ Live on dev since ~02:20Z. The billing-rule-draft Action and Binding, the Billin
   - The four retired `/documents` routes answer 404.
 - [ ] 079 step 12: 077's UI tests against dev, including dark mode. This runs after the step 10 data exists.
 
-## W. Invoice Review review points 2-4 (#3130, merged 2026-11-25 at 6e04bc024e): after uac-r2 redeploys `sprk_invoicereviewpage` from that commit
+## W. Invoice Review review points 2-4 (#3130, merged 2026-11-25 at 6e04bc024e): READY, page live on dev since 2026-11-25 14:19:37Z
+uac-r2 deployed `sprk_invoicereviewpage` from a fresh worktree at 6e04bc024e: 2,002,832 B, sha256 fc4b9ec2…231095, read back identical (it replaced the 2026-11-24 build, 08b373e0…43ee). The first two checks can run now; the descriptions check waits for the dev BFF.
 Your review points: (2) UTBMS code without its description, (3) the highlight covering two invoice lines, (4) By rule showing nothing. Point 1 (no `<` `>` to the next invoice) is filed as DEF-070, #3124.
 - [ ] Open INV-123.1 (MAT-000113) and click a line that shares its timekeeper and rate with the line above or below it: the yellow row box covers only that line on the PDF, not its neighbour. Click a value (Hours, Amount): the value box sits inside the row box.
 - [ ] Switch to **By rule**. Rule findings show first (if any). Then the heading "Other checks (not billing rules)" lists groups such as "UTBMS code differs from the firm's", "Codes not checked by the AI" or "Timekeeper not on the firm's roster", each with a line count. Clicking **Line n** selects that line in the grid. An invoice with nothing flagged shows "No rule findings or other checks on these lines."
