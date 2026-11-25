@@ -86,6 +86,8 @@ The r2 tools could all go on `/mcp/legal-operations`, giving about 22 tools on o
 
 ### 4.5 Retiring the legacy agent
 
+> **Earlier owner direction (2026-11-24, recorded in `specialist-legal-agents-r1` current-task):** remove the "Spaarke AI" agent (tenant item D1) and its bot backend (A3); copilot-platform-coordination writes the removal steps. If that removal goes ahead now, the tenant registration is gone before parity, which is fine if no one relies on it outside the dev tenant. Steps 1–2 below then reduce to code removal after parity (Q6).
+
 1. All parity tools are live in dev and pass the routing eval.
 2. The owner removes the "Spaarke AI" tenant registration (an owner/admin action).
 3. One release later, remove `src/solutions/CopilotAgent/`, the `/api/agent/*` gateway and `AgentModule` registrations, closing #2575.
@@ -136,4 +138,5 @@ BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the exis
 3. **Long-running pattern:** A, start and poll (recommended), or spike B first?
 4. **Email:** expose `sendCommunication` as an app-only widget write, draft-only, or defer?
 5. **Widgets:** which tools get one in r2: briefing, search results, task list?
-6. **Timing:** start the design-to-spec now and execution after r1's wrap-up (recommended), or wait for r1 to merge first?
+6. **Agent removal order:** remove the tenant registration now, per the 2026-11-24 direction, or keep it until the parity tools are live?
+7. **Timing:** start the design-to-spec now and execution after r1's wrap-up (recommended), or wait for r1 to merge first?

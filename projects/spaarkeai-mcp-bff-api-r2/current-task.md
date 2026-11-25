@@ -7,7 +7,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | Owner review of `design.md` v0.1 |
-| **Next action** | Walk the owner through §9 (parity scope, route split, long-running pattern, email, widgets, timing); record each answer in design.md |
+| **Next action** | Walk the owner through §9 (parity scope, route split, long-running pattern, email, widgets, agent removal order, timing); record each answer in design.md |
 | **Uncommitted** | none |
 
 ## Decided (owner)
