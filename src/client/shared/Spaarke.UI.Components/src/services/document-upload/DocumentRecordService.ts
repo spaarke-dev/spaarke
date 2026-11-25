@@ -90,10 +90,7 @@ export class DocumentRecordService {
    * (best effort — `deleteRecord` when the client offers it) so no "document" is left without its file, and the
    * refusal propagates to the caller's per-file error.
    */
-  private async createAndAttach(
-    payload: Record<string, unknown>,
-    file: SpeFileMetadata
-  ): Promise<{ id: string }> {
+  private async createAndAttach(payload: Record<string, unknown>, file: SpeFileMetadata): Promise<{ id: string }> {
     const result = await this.dataverseClient.createRecord('sprk_document', payload);
     try {
       await this.attachFile(result.id, file);
@@ -102,7 +99,11 @@ export class DocumentRecordService {
         try {
           await this.dataverseClient.deleteRecord('sprk_document', result.id);
         } catch (deleteError) {
-          this.logger.warn('DocumentRecordService', `Could not remove document ${result.id} whose file was not attached`, deleteError);
+          this.logger.warn(
+            'DocumentRecordService',
+            `Could not remove document ${result.id} whose file was not attached`,
+            deleteError
+          );
         }
       }
       throw attachError;
@@ -119,29 +120,20 @@ export class DocumentRecordService {
    * - No risk of overwhelming API
    * - Metadata queries cached per relationship
    *
+   * The payload is only what the user entered (name, description), the file's own metadata and the filing parent.
+   * Everything derived from the parent is the server's (field-mapping-server-write-path-r1, FR-16, FR-40): mapped
+   * fields, owner and the I-1 stamp are applied by `POST /api/v1/child-records/sprk_document`, and the search index
+   * follows the content type (no client or server writes a record index column). This method sends none.
+   *
    * @param files - Array of uploaded file metadata from SPE
    * @param parentContext - Parent entity context
    * @param formData - Form data (document name, description)
-   * @param searchIndexName - Optional pre-resolved `sprk_searchindexname` from the
-   *                         FR-WIZ-06 3-step chain (parent record → parent's BU → empty).
-   *                         When non-empty, written to every Document payload created in
-   *                         this batch. When empty / undefined the field is OMITTED so the
-   *                         BFF tenant-default chain (FR-BFF-04) takes over server-side.
-   *                         Per spec FR-WIZ-07 (2026-06-07).
-   * @param searchIndexId - Optional GUID of `sprk_aisearchindex` lookup target. Cascaded from
-   *                        parent's `sprk_ai_search_index` lookup (Phase G canonical field).
-   *                        When non-empty, bound as `sprk_AI_Search_Index@odata.bind` on the
-   *                        new Document. When empty/undefined, the field is OMITTED so the
-   *                        Matter→Document Dataverse field mapping (or BFF resolver fallback)
-   *                        handles cascade server-side.
    * @returns Array of creation results (success/error per file)
    */
   async createDocuments(
     files: SpeFileMetadata[],
     parentContext: ParentContext,
-    formData: DocumentFormData,
-    searchIndexName?: string,
-    searchIndexId?: string
+    formData: DocumentFormData
   ): Promise<CreateResult[]> {
     this.logger.info('DocumentRecordService', `Creating ${files.length} Document records`);
 
@@ -149,7 +141,7 @@ export class DocumentRecordService {
 
     // Sequential creation
     for (const file of files) {
-      const result = await this.createSingleDocument(file, parentContext, formData, searchIndexName, searchIndexId);
+      const result = await this.createSingleDocument(file, parentContext, formData);
       results.push(result);
     }
 
@@ -203,9 +195,7 @@ export class DocumentRecordService {
   private async createSingleDocument(
     file: SpeFileMetadata,
     parentContext: ParentContext,
-    formData: DocumentFormData,
-    searchIndexName?: string,
-    searchIndexId?: string
+    formData: DocumentFormData
   ): Promise<CreateResult> {
     try {
       // Unassociated mode: create document without parent lookup binding
@@ -219,18 +209,6 @@ export class DocumentRecordService {
           sprk_filesize: file.size,
           sprk_documentdescription: formData.description || null,
         };
-        // FR-WIZ-07: include sprk_searchindexname when the caller resolved a non-empty value
-        // via the FR-WIZ-06 3-step chain (parent record → parent's BU → empty). Empty / undefined
-        // means the field is OMITTED so the BFF tenant-default chain (FR-BFF-04) applies server-side.
-        // No INV-5 guard needed here — payload is freshly assembled and has no pre-existing value.
-        if (this._isNonEmptyIndexName(searchIndexName)) {
-          payload.sprk_searchindexname = searchIndexName;
-        }
-        // Phase G: bind sprk_ai_search_index lookup when the caller resolved a GUID
-        // (parent's lookup → parent's BU's lookup). Nav-prop is sprk_AI_Search_Index (PascalCase).
-        if (searchIndexId && searchIndexId.trim() !== '') {
-          payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${searchIndexId.trim()})`;
-        }
         this.logger.info('DocumentRecordService', `Creating unassociated Document: ${file.name}`);
         const result = await this.createAndAttach(payload, file);
         this.logger.info('DocumentRecordService', `Created unassociated Document record: ${result.id}`);
@@ -285,9 +263,7 @@ export class DocumentRecordService {
         parentContext,
         formData,
         navigationPropertyName,
-        targetEntitySetName,
-        searchIndexName,
-        searchIndexId
+        targetEntitySetName
       );
 
       this.logger.info('DocumentRecordService', `Creating Document: ${file.name}`);
@@ -323,16 +299,10 @@ export class DocumentRecordService {
    * Uses OData @odata.bind syntax for lookup fields.
    * Preserves dynamic navigation property lookup (case-sensitive).
    *
-   * @param searchIndexName - Optional pre-resolved `sprk_searchindexname` from the FR-WIZ-06
-   *                          3-step chain (parent record → parent's BU → empty). When non-empty,
-   *                          included in the payload; when empty / undefined, the field is
-   *                          OMITTED so the BFF tenant-default chain (FR-BFF-04) takes over
-   *                          server-side. Per spec FR-WIZ-07 (2026-06-07).
-   * @param searchIndexId - Optional GUID of `sprk_aisearchindex` lookup target. When non-empty,
-   *                        bound as `sprk_AI_Search_Index@odata.bind`. When empty/undefined, the
-   *                        Matter→Document Dataverse field mapping cascades the parent's value.
+   * Carries no search-index key (FR-40) and no mapped or owner value (FR-02, FR-09): the server applies
+   * those. Only user-entered values, the file's metadata and the filing parent's lookup bind.
    *
-   *                          CRITICAL design invariant (design.md INV): the canonical Document
+   * CRITICAL design invariant (design.md INV): the canonical Document
    *                          container field is `sprk_graphdriveid`. `sprk_containerid` stays
    *                          NULL on `sprk_document` — Phase F backfill audit depends on this,
    *                          so this method MUST NOT set `sprk_containerid` under any circumstance.
@@ -342,9 +312,7 @@ export class DocumentRecordService {
     parentContext: ParentContext,
     formData: DocumentFormData,
     navigationPropertyName: string,
-    entitySetName: string,
-    searchIndexName?: string,
-    searchIndexId?: string
+    entitySetName: string
   ): Record<string, unknown> {
     // Sanitize GUID (remove curly braces, convert to lowercase)
     const sanitizedGuid = cleanGuid(parentContext.parentRecordId);
@@ -372,34 +340,11 @@ export class DocumentRecordService {
       [`${navigationPropertyName}@odata.bind`]: `/${entitySetName}(${sanitizedGuid})`,
     };
 
-    // FR-WIZ-07: include sprk_searchindexname when the caller resolved a non-empty value via the
-    // FR-WIZ-06 3-step chain (parent record → parent's BU → empty). Empty / undefined means the
-    // field is OMITTED so the BFF tenant-default chain (FR-BFF-04) applies server-side. No INV-5
-    // guard needed here — payload is freshly assembled and has no pre-existing value.
-    if (this._isNonEmptyIndexName(searchIndexName)) {
-      payload.sprk_searchindexname = searchIndexName;
-    }
-
-    // Phase G: bind sprk_ai_search_index lookup when caller resolved a GUID
-    // (parent's lookup → parent's BU's lookup). Nav-prop is sprk_AI_Search_Index (PascalCase).
-    if (searchIndexId && searchIndexId.trim() !== '') {
-      payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${searchIndexId.trim()})`;
-    }
-
     this.logger.info(
       'DocumentRecordService',
       `Lookup binding: ${navigationPropertyName}@odata.bind = /${entitySetName}(${sanitizedGuid})`
     );
 
     return payload;
-  }
-
-  /**
-   * Treat `undefined`, `null`, empty / whitespace-only string, and non-string types as "empty"
-   * for the FR-WIZ-06 cascade (mirrors the semantics in
-   * `searchIndexResolver.ts` (task 026) and `EntityCreationService._hasExplicitValue` (task 020)).
-   */
-  private _isNonEmptyIndexName(value: unknown): value is string {
-    return typeof value === 'string' && value.trim().length > 0;
   }
 }
