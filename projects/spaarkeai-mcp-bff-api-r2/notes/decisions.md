@@ -2,6 +2,17 @@
 
 > Full decision log. `CLAUDE.md` §3 keeps the one-line binding outcome with a link here. Newest first. Superseded entries stay, marked superseded with the date.
 
+## 2026-11-25 — Task 001 execution decisions (legacy agent removal)
+
+Full detail: `notes/001-task-notes.md`.
+
+- **`HandoffUrlBuilder` is registered in `ToolFrameworkExtensions.AddToolFramework`, not in `AiModule`/`AiChatModule`** (POML said "grep to confirm"). The grep showed that its only live consumer, `DataverseCreateRecordHandler`, is registered by that method's handler scan. Registering the builder there keeps the builder and its consumer under the same gate (§10 F.1 asymmetric-registration rule). The registration uses `TryAddSingleton` with the same `Dataverse:EnvironmentUrl` → `DataverseServiceClient:Url` → dev-URL fallback that `AgentModule` used.
+- **`AiAuthorizationFilter`'s `AgentMessageRequest` branch was removed with the route.** It has the same shape as the `PlaybookAuthorizationFilter` agent branch. Escalation trigger 1 does not fire, and no other chat DTO's branch changed.
+- **`AgentToken:CopilotAudience` stays.** `AuthorizationModule` reads it, and that file received comment edits only. The other `AgentToken` keys and the `CopilotAgent` section were removed from `appsettings.template.json`.
+- **`IdentityConfigurationValidator` rule 5 was removed.** It was log-only and checked only `AgentToken:ClientSecret`.
+- **The route-ledger rows for the agent routes were deleted, not re-pointed at a retirement test.** The precedent for deleted routes (for example S-54) keeps such rows, but this task's acceptance grep forbids "api/agent" in `tests/`. The ledger records the removal with a comment that names the pre-removal commit `37f0864afe`. Review pending: uac-r2.
+- **`LegacyAgentRouteRetirementTests` builds the removed prefix as `"/api/" + "agent"`.** This satisfies two criteria at once: the acceptance grep must find nothing in `tests/`, and the negative criterion needs a request to the removed message route that returns 404. The reason is documented in the class remarks.
+
 ## 2026-11-25 — Planning decisions (project-pipeline Step 3)
 
 - **`HandoffUrlBuilder` is relocated, not deleted.** It is injected by `Services/Ai/Handlers/DataverseCreateRecordHandler.cs:229` (chat create-record tool) and used by many data-mutation tests; MCP only mentions it in a comment. Task 001 moves it out of `Api/Agent/` and re-registers it before deleting `AgentModule`.
