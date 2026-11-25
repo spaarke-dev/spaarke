@@ -3074,6 +3074,17 @@ App Service restarts the app on a settings change. Cached principals and root se
 **Turn it off (the kill switch):** set `ExternalAccess__ImpersonatedRootSets__Enabled=false`, or delete the setting. The
 next composition uses the membership rules again. The "on" state writes nothing, so there is nothing to undo.
 
+### 12.9 Microsoft's Dataverse MCP server: do not allow it for end users (FR-18)
+
+In an environment that runs Spaarke, do not allow the Dataverse MCP client for end users. If named analysts need it, allow it read-only for them. End-user AI surfaces (Copilot, the Console) use the Spaarke MCP server only; Microsoft's built-in Dataverse MCP server (`https://<org>.crm.dynamics.com/api/mcp`) stays a developer and admin tool. Reasons:
+
+1. **Writes bypass the BFF.** Its create, update and delete tools write straight to Dataverse and skip the server-side write path (one owner per invariant, security fails closed), the confirmation gate and the Decision Record.
+2. **Reads follow Dataverse security roles only.** Spaarke's caller-scoping (privileged-item redaction, unified access control, SharePoint Embedded document access) does not apply.
+3. **It competes for tool choice.** If both servers are connected, Copilot can pick a generic `create_record` over a governed Spaarke tool.
+4. **It is metered.** Calls from agents built outside Copilot Studio are charged unless the tenant's licences cover them (qualifying Dynamics 365 Premium or a Microsoft 365 Copilot user licence).
+
+Where to control it: Power Platform admin center, Environments, the environment, Settings, Product, Features, "Dataverse Model Context Protocol". Leave a client's "Is Enabled" at No under Advanced Settings (the allowed-client list is per client app, so it cannot name individual users), or clear "Allow MCP clients to interact with Dataverse MCP server" to switch the server off for the environment (this also stops Copilot Studio agents that use it). Microsoft documents no read-only mode and no per-tool control for this server, so "read-only for named analysts" means giving those analysts a Dataverse security role with no create, write, delete or append privileges. Details and sources: `projects/spaarkeai-mcp-bff-api-r2/notes/dataverse-mcp-recheck-2026-11.md` (checked 2026-11-25).
+
 ---
 
 ## 13. Troubleshooting
