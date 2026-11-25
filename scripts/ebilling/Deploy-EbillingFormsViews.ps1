@@ -22,11 +22,14 @@
               is its own guarded script (Remove-EbillingInvoiceExtractionFormControls.ps1). Read-only (task 014/016 constraint):
               the five invoice totals and sprk_billingevent.sprk_amount (the Adjustment line amount is computed by
               IInvoiceTotalsService; Fee / Expense lines are written by the extraction pipeline, not typed) are disabled controls.
+              Task 079: the sprk_matter, sprk_project and sprk_workassignment main forms get section_ebilling (sprk_billingfirm,
+              sprk_billingresponsible) on their tab_billing; a form without that tab (Work Assignment) gets it appended.
               Forms carry no script and no business rule (ADR-002).
       Views   Replaces the columns of each table's "Active ..." view; creates "Invoices to review" on sprk_invoice (In Review
               invoices with a Pending sprk_invoiceapproval that lists the current user's contact as an eligible approver:
               contact.sprk_systemuser equals the current user).
-      Sitemap sprk_SpaarkeAdministration gets an eBilling area (settings, timekeeper, rate card, code set, rule set);
+      Sitemap sprk_SpaarkeAdministration gets an eBilling area (settings, timekeeper, rate card, code set, rule set, and, once the
+              sprk_rulereviewpage web resource exists, "Rule Review" (task 079, D-114));
               sprk_MatterManagement gets the invoice submission and billing export entries after the sprk_invoice entry.
       Publish PublishXml for the touched entities, the two sitemaps and the two app modules only. Never a tenant-wide publish.
 
@@ -47,7 +50,13 @@
     sprk_findingsjson off the live sprk_invoicesubmission form: on spaarkedev1 (2026-10-23) step 3 throws in the
     sprk_MatterManagement sitemap (sprk_invoice is listed in two areas and sprk_invoicesubmission sits in area_finance), after step 1
     has already written the form and before step 4 publishes it.
+.PARAMETER Tables
+    Sync only these spec tables' forms and views (unknown names refuse); the sitemaps still run, app tables are skipped. Added by
+    task 079 to apply the core-record Billing-tab entries and the Rule Review entry without rebuilding other forms: on spaarkedev1
+    (2026-11-25) a full run would also rebuild the sprk_ratecard, sprk_ruleset and sprk_invoicesubmission forms, which differ from
+    the spec on dev.
 .EXAMPLE
+    pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -Tables sprk_matter,sprk_project,sprk_workassignment -WhatIf
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -FormsOnly -WhatIf
@@ -58,7 +67,8 @@ param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [string]$SolutionUniqueName = 'SpaarkeMaster',
     [switch]$AllowPendingCollateral,
-    [switch]$FormsOnly
+    [switch]$FormsOnly,
+    [string[]]$Tables = @()
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -195,6 +205,31 @@ $Spec = [ordered]@{
         # Adjustment-line amount: computed by IInvoiceTotalsService; Fee / Expense lines are written by the pipeline (no manual typing).
         ForceReadOnly = 'sprk_amount'
     }
+    # Task 079 step 5: the billing firm and the responsible person (task 080's lookups, every FilingCores table) on the Billing tab of
+    # each core record's main form. Matter and Project already have tab_billing; the Work Assignment main form has none, so the
+    # script adds one (Tab.Name / Tab.Label). Only these two fields: no Rule Set subgrid on a core-record form (uac-r2 081.2).
+    sprk_matter            = @{
+        Form = 'Section'; FormName = 'Matter main form'; Tab = @{ Name = 'tab_billing'; Label = 'Billing' }
+        Sections = @(@{ Name = 'ebilling'; Label = 'Billing firm'; Cols = 'sprk_billingfirm', 'sprk_billingresponsible' })
+    }
+    sprk_project           = @{
+        Form = 'Section'; FormName = 'Project main form'; Tab = @{ Name = 'tab_billing'; Label = 'Billing' }
+        Sections = @(@{ Name = 'ebilling'; Label = 'Billing firm'; Cols = 'sprk_billingfirm', 'sprk_billingresponsible' })
+    }
+    sprk_workassignment    = @{
+        Form = 'Section'; FormName = 'Work Assignment main form'; Tab = @{ Name = 'tab_billing'; Label = 'Billing' }
+        Sections = @(@{ Name = 'ebilling'; Label = 'Billing firm'; Cols = 'sprk_billingfirm', 'sprk_billingresponsible' })
+    }
+}
+# 'a,b' arrives as one string under pwsh -File: split, trim, drop empties.
+$Tables = @($Tables | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($Tables.Count -gt 0) {
+    # Task 079: touch only the named tables' forms and views; the sitemaps still run (their edits are idempotent), app tables do not.
+    $unknown = @($Tables | Where-Object { -not $Spec.Contains($_) })
+    if ($unknown.Count -gt 0) { throw "-Tables: not in the spec: $($unknown -join ', ')" }
+    $kept = [ordered]@{}
+    foreach ($k in $Spec.Keys) { if ($Tables -contains $k) { $kept[$k] = $Spec[$k] } }
+    $Spec = $kept
 }
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -417,8 +452,25 @@ function Sync-Form([string]$Table, $S) {
         # rows that hold them) stays where it is; only the spec's own field cells are added or brought up to date.
         if (Merge-SpecCells $doc $oldSec (Get-SpecCells $meta $sec $false $force $secName)) { $dirty = $true }
     } else {
-        $host_ = $doc.SelectSingleNode('//tabs/tab[1]/columns/column[1]/sections')
-        if (-not $host_) { throw "$Table '$($S.FormName)': no first tab / column / sections node" }
+        if ($S.ContainsKey('Tab')) {
+            # Task 079: the section goes on a named tab. A missing tab is appended (last) with one full-width column; an existing
+            # tab is used as it is (its first column).
+            $tabName = $S.Tab.Name
+            $tab = $doc.SelectSingleNode("//tabs/tab[@name='$tabName']")
+            if (-not $tab) {
+                $tabs = $doc.SelectSingleNode('//tabs')
+                if (-not $tabs) { throw "$Table '$($S.FormName)': no tabs node" }
+                $frag = $doc.CreateDocumentFragment()
+                $frag.InnerXml = "<tab name=""$tabName"" id=""$(Get-DetGuid "$Table/$tabName")"" IsUserDefined=""1"" verticallayout=""true"" expanded=""true"" showlabel=""true""><labels><label description=""$(Esc $S.Tab.Label)"" languagecode=""1033"" /></labels><columns><column width=""100%""><sections /></column></columns></tab>"
+                [void]$tabs.AppendChild($frag)
+                $tab = $doc.SelectSingleNode("//tabs/tab[@name='$tabName']")
+            }
+            $host_ = $tab.SelectSingleNode('columns/column[1]/sections')
+            if (-not $host_) { throw "$Table '$($S.FormName)': tab '$tabName' has no first column / sections node" }
+        } else {
+            $host_ = $doc.SelectSingleNode('//tabs/tab[1]/columns/column[1]/sections')
+            if (-not $host_) { throw "$Table '$($S.FormName)': no first tab / column / sections node" }
+        }
         [void]$host_.AppendChild($doc.ImportNode($wantSec, $true)); $dirty = $true
     }
     # Existing controls that must be read-only, anywhere on the form, section_ebilling included: the section is merged now, so a forced
@@ -582,7 +634,7 @@ if ($FormsOnly) {
 } else {
 Write-Host "`n2. Views"
 foreach ($t in $Spec.Keys) { Sync-ActiveView $t $Spec[$t] }
-Sync-InvoicesToReview
+if ($Tables.Count -eq 0 -or $Tables -contains 'sprk_invoice') { Sync-InvoicesToReview }
 
 Write-Host "`n3. Navigation"
 Sync-SiteMap 'sprk_SpaarkeAdministration' {
@@ -598,6 +650,21 @@ Sync-SiteMap 'sprk_SpaarkeAdministration' {
         # sprk_timekeeper is also on the Matter Management sitemap; the entity check is per sitemap document.
         if (Add-SubArea $doc "//Area[@Id='area_ebilling']/Group[@Id='group_ebilling']" $e[0] $e[1] $null) { $dirty = $true }
     }
+    # Task 079 (D-114): "Rule Review" opens the sprk_rulereviewpage code page (its own rule set list), after the Rule Sets entry.
+    # Added only once the web resource exists, so the entry never points at nothing.
+    if (-not $doc.SelectSingleNode("//SubArea[@Id='subarea_eb_rulereview']")) {
+        $wr = @((Invoke-Dv -Path "webresourceset?`$select=webresourceid&`$filter=name eq 'sprk_rulereviewpage'").value)
+        if ($wr.Count -eq 1) {
+            $grp = $doc.SelectSingleNode("//Area[@Id='area_ebilling']/Group[@Id='group_ebilling']")
+            $frag = $doc.CreateDocumentFragment()
+            $frag.InnerXml = '<SubArea Id="subarea_eb_rulereview" Icon="/_imgs/imagestrips/transparent_spacer.gif" Url="$webresource:sprk_rulereviewpage" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="false" PassParams="false" Sku="All,OnPremise,Live,SPLA"><Titles><Title LCID="1033" Title="Rule Review" /></Titles></SubArea>'
+            $after = $doc.SelectSingleNode("//SubArea[@Id='subarea_eb_ruleset']")
+            if ($after) { [void]$grp.InsertAfter($frag, $after) } else { [void]$grp.AppendChild($frag) }
+            $dirty = $true
+        } else {
+            Write-Host '  WARN  sprk_rulereviewpage is not on this environment: Rule Review entry not added (deploy the page, then re-run)' -ForegroundColor Yellow
+        }
+    }
     return $dirty
 }
 Sync-SiteMap 'sprk_MatterManagement' {
@@ -611,8 +678,10 @@ Sync-SiteMap 'sprk_MatterManagement' {
     return $dirty
 }
 
-Sync-AppTables 'sprk_SpaarkeAdministration' @('sprk_ebillingsetting', 'sprk_timekeeper', 'sprk_ratecard', 'sprk_billingcodeset', 'sprk_ruleset')
-Sync-AppTables 'sprk_MatterManagement' @('sprk_invoicesubmission', 'sprk_billingexport')
+if ($Tables.Count -eq 0) {
+    Sync-AppTables 'sprk_SpaarkeAdministration' @('sprk_ebillingsetting', 'sprk_timekeeper', 'sprk_ratecard', 'sprk_billingcodeset', 'sprk_ruleset')
+    Sync-AppTables 'sprk_MatterManagement' @('sprk_invoicesubmission', 'sprk_billingexport')
+} else { Write-Host '  app tables skipped (-Tables)' -ForegroundColor DarkGray }
 }
 
 Write-Host "`n4. Publish (entity-scoped; never a tenant-wide publish)"
