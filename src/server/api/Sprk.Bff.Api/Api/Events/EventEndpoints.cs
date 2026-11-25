@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;
 using Sprk.Bff.Api.Api.Filters;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai.Context;
@@ -10,7 +9,6 @@ using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Events;
 using Sprk.Bff.Api.Services.RecordCreation;
-using Sprk.Bff.Api.Services.Workspace;
 // Type aliases to resolve ambiguity between API DTOs and Dataverse models
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 
@@ -98,7 +96,7 @@ public static class EventEndpoints
 
         // GET /api/v1/events/{id} - Get single event by ID
         group.MapGet("/{id:guid}", GetEventByIdAsync)
-            .AddRecordRouteAccessAuthorizationFilter("read", EventEntitySet, "id")
+            .AddRecordRouteAccessAuthorizationFilter(EventsCapability.ReadOperation, EventEntitySet, "id")
             .WithName("GetEventById")
             .WithSummary("Get a single event by ID")
             .WithDescription("Returns the event with the specified ID. Returns 404 if the event does not exist or the caller may not read it.")
@@ -111,7 +109,7 @@ public static class EventEndpoints
         // sprk_event and AppendTo on the regarding record, AS THE CALLER; then the app-only write.
         group.MapPost("/", CreateEventAsync)
             .AddEndpointFilter(ValidateCreateEventRequestAsync)
-            .AddRecordRouteAccessAuthorizationFilter("event.attach_regarding", ResolveCreateRegardingTargetAsync, CreateEventPrivilege)
+            .AddRecordRouteAccessAuthorizationFilter(EventsCapability.AttachRegardingOperation, ResolveCreateRegardingTargetAsync, CreateEventPrivilege)
             .WithName("CreateEvent")
             .WithSummary("Create a new event")
             .WithDescription("Creates a new Event record in Dataverse. Subject is required. " +
@@ -151,7 +149,7 @@ public static class EventEndpoints
 
         // POST /api/v1/events/{id}/complete - Mark event as completed
         group.MapPost("/{id:guid}/complete", CompleteEventAsync)
-            .AddRecordRouteAccessAuthorizationFilter("write", EventEntitySet, "id")
+            .AddRecordRouteAccessAuthorizationFilter(EventsCapability.WriteOperation, EventEntitySet, "id")
             .WithName("CompleteEvent")
             .WithSummary("Mark an event as completed")
             .WithDescription("Changes the event status to Completed. " +

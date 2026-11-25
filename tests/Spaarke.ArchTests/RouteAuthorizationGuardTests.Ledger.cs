@@ -2464,8 +2464,8 @@ public partial class RouteAuthorizationGuardTests
             "Task 159 (#1098; sweep S-12): the list runs AS the caller — QueryEventsAsCallerAsync refuses an empty caller "
             + "(DataverseWebApiService.cs:343-350) and sends MSCRMCallerID through DataverseImpersonation.ApplyAsSystemUser "
             + "(:205-207) in QueryEventsCoreAsync; an unresolvable caller is 403 before any query "
-            + "(EventsCapability.cs:418-428). spaarkeai-mcp-bff-api-r2 task 006 moved the body, unchanged, into "
-            + "EventsCapability.ListCoreAsync, which the handler calls (EventEndpoints.cs:361) and which the MCP events tool "
+            + "(EventsCapability.cs:423-433). spaarkeai-mcp-bff-api-r2 task 006 moved the body, unchanged, into "
+            + "EventsCapability.ListCoreAsync, which the handler calls (EventEndpoints.cs:359) and which the MCP events tool "
             + "shares. The query is the gate."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/decision-plan", "GetDecisionPlanAsync", "IDataverseUserClient",
             new[] { "DecisionCapability.GetPlanAsync", "SignalCoreRecordAccess.AuthorizeAsync" },

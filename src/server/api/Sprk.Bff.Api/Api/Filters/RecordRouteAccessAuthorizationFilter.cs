@@ -365,11 +365,14 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
             httpContext, probe, operation, entitySetName, recordId, logger, httpContext.RequestAborted);
         switch (decision.Access)
         {
-            case RouteRecordAccess.NoRead:
-                return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            case RouteRecordAccess.Allowed:
+                break;
             case RouteRecordAccess.InsufficientRights:
                 return ProblemDetailsHelper.Forbidden(
                     InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+            default:
+                // NoRead, and any answer not known to allow: the uniform 404 (fail closed).
+                return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
         }
 
         // Task 064: the handler may need the caller's FULL rights on this record (the per-record No Access read shows the
@@ -496,11 +499,12 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
             httpContext, probe, operation, () => resolveTarget(context), requiredPrivilege, logger, httpContext.RequestAborted);
         return access switch
         {
+            DeclaredTargetAccess.Allowed => await next(context),
             DeclaredTargetAccess.InsufficientPrivilege => ProblemDetailsHelper.Forbidden(
                 InsufficientPrivilegeReasonCode, InsufficientPrivilegeDetail, httpContext.TraceIdentifier),
-            DeclaredTargetAccess.InsufficientRights => ProblemDetailsHelper.Forbidden(
+            // InsufficientRights, and any answer not known to allow (fail closed).
+            _ => ProblemDetailsHelper.Forbidden(
                 InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier),
-            _ => await next(context),
         };
     }
 

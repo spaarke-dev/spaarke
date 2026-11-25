@@ -51,6 +51,12 @@ internal sealed class EventsCapability : IEventsCapability
     /// <summary>The create's regarding check: AppendTo on the record the event is filed under (OperationAccessPolicy).</summary>
     internal const string AttachRegardingOperation = "event.attach_regarding";
 
+    /// <summary>The get's check on <c>sprk_events({id})</c> (OperationAccessPolicy "read"); the REST filter names the same constant.</summary>
+    internal const string ReadOperation = "read";
+
+    /// <summary>The complete's check on <c>sprk_events({id})</c> (OperationAccessPolicy "write"); the REST filter names the same constant.</summary>
+    internal const string WriteOperation = "write";
+
     /// <summary>The list's refusal for a caller who does not resolve to a Dataverse systemuser.</summary>
     internal const string CallerUnresolvedReasonCode = "sdap.access.deny.caller_unresolved";
 
@@ -149,7 +155,7 @@ internal sealed class EventsCapability : IEventsCapability
             return Refuse<EventDto>("get");
         }
 
-        var gate = await RouteRecordGateAsync<EventDto>(httpContext!, "read", eventId, ct);
+        var gate = await RouteRecordGateAsync<EventDto>(httpContext!, ReadOperation, eventId, ct);
         return gate ?? await GetCoreAsync(eventId, _events, _logger, ct);
     }
 
@@ -179,16 +185,15 @@ internal sealed class EventsCapability : IEventsCapability
             CreateEventPrivilege,
             _logger,
             ct);
-        switch (access)
+        if (access != RecordRouteAccessAuthorizationFilter.DeclaredTargetAccess.Allowed)
         {
-            case RecordRouteAccessAuthorizationFilter.DeclaredTargetAccess.InsufficientPrivilege:
-                _logger.LogWarning("Events capability: create refused ({ReasonCode})",
-                    RecordRouteAccessAuthorizationFilter.InsufficientPrivilegeReasonCode);
-                return EventCapabilityResult<CreateEventResponse>.Of(EventCapabilityStatus.InsufficientPrivilege);
-            case RecordRouteAccessAuthorizationFilter.DeclaredTargetAccess.InsufficientRights:
-                _logger.LogWarning("Events capability: create refused ({ReasonCode})",
-                    RecordRouteAccessAuthorizationFilter.InsufficientRightsReasonCode);
-                return EventCapabilityResult<CreateEventResponse>.Of(EventCapabilityStatus.Forbidden);
+            // InsufficientPrivilege keeps its own answer; InsufficientRights, and any answer not known to allow, is the one
+            // rights refusal (fail closed), as the REST filter maps it.
+            var refusal = access == RecordRouteAccessAuthorizationFilter.DeclaredTargetAccess.InsufficientPrivilege
+                ? EventCapabilityResult<CreateEventResponse>.Of(EventCapabilityStatus.InsufficientPrivilege)
+                : EventCapabilityResult<CreateEventResponse>.Of(EventCapabilityStatus.Forbidden);
+            _logger.LogWarning("Events capability: create refused ({ReasonCode})", refusal.ReasonCode);
+            return refusal;
         }
 
         // (3) The create itself.
@@ -205,7 +210,7 @@ internal sealed class EventsCapability : IEventsCapability
             return Refuse<EventActionResponse>("complete");
         }
 
-        var gate = await RouteRecordGateAsync<EventActionResponse>(httpContext!, "write", eventId, ct);
+        var gate = await RouteRecordGateAsync<EventActionResponse>(httpContext!, WriteOperation, eventId, ct);
         return gate ?? await CompleteCoreAsync(eventId, httpContext!, _events, _ownership, _callerResolver, _entities, _logger, ct);
     }
 
@@ -234,11 +239,11 @@ internal sealed class EventsCapability : IEventsCapability
             httpContext, _probe, operation, EventEntitySet, eventId, _logger, ct);
         return decision.Access switch
         {
-            RecordRouteAccessAuthorizationFilter.RouteRecordAccess.NoRead =>
-                EventCapabilityResult<T>.Of(EventCapabilityStatus.NotFound),
+            RecordRouteAccessAuthorizationFilter.RouteRecordAccess.Allowed => null,
             RecordRouteAccessAuthorizationFilter.RouteRecordAccess.InsufficientRights =>
                 EventCapabilityResult<T>.Of(EventCapabilityStatus.Forbidden),
-            _ => null,
+            // NoRead, and any answer not known to allow: the uniform not-found (fail closed), as the REST filter maps it.
+            _ => EventCapabilityResult<T>.Of(EventCapabilityStatus.NotFound),
         };
     }
 

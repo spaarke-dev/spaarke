@@ -309,6 +309,20 @@ public sealed class EventCallerScopeTests
         world.AssertNothingWritten();
     }
 
+    [Fact]
+    public async Task Capability_Complete_WithReadButNotWrite_IsForbiddenWithRestsReason_AndWritesNothing()
+    {
+        var world = new CapabilityWorld();
+        world.Probe.Grants[(UserB, EventEndpoints.EventEntitySet, SharedWithB)] = AccessRights.Read; // Read only
+
+        var result = await world.Capability.CompleteAsync(world.Request("B"), SharedWithB, CancellationToken.None);
+
+        result.Status.Should().Be(EventCapabilityStatus.Forbidden, "complete asks Write, not Read");
+        result.ReasonCode.Should().Be(RestReasonCode("complete.403.read-only"), "the same reason as POST /api/v1/events/{id}/complete");
+        world.Dataverse.ReadsOf(SharedWithB).Should().Be(0, "the event is not read before Write is established");
+        world.AssertNothingWritten();
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
     internal static string Normalize(string body) =>
