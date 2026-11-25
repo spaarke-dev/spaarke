@@ -103,7 +103,7 @@ public class CommunicationsDelegatedAuthFailureContractTests : IClassFixture<Off
     public async Task OboExchangeTheCallerMustSignInAgainFor_Answers401WithOfficeErrorCode_Not404Or500(string route)
     {
         // Status 0: the request never reached Dataverse — Entra refused the On-Behalf-Of exchange with
-        // MsalUiRequiredException (invalid_grant, interaction or consent required), which a fresh sign-in fixes.
+        // MsalUiRequiredException for the caller's own grant (expired, revoked), which a fresh sign-in fixes.
         var (url, fragment) = Request(route);
         FailUserQuery(fragment, DataverseUserResponse.Fail(
             0, DataverseUserClientErrorCodes.OboExchangeFailed, "invalid_grant") with
@@ -113,6 +113,28 @@ public class CommunicationsDelegatedAuthFailureContractTests : IClassFixture<Off
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await ProblemOf(response)).GetProperty("errorCode").GetString().Should().Be(SignInNotUsable);
+    }
+
+    [Theory]
+    [MemberData(nameof(Routes))]
+    public async Task OboExchangeRefusedByPolicy_Answers403WithOfficeErrorCode_NeverSignInAgain(string route)
+    {
+        // #1571 fix round 2: admin consent missing, Conditional Access (MessageOnly) or a claims challenge. MSAL.NET
+        // raises MsalUiRequiredException for these too, but signing in again cannot fix them.
+        var (url, fragment) = Request(route);
+        FailUserQuery(fragment, DataverseUserResponse.Fail(
+            0, DataverseUserClientErrorCodes.OboExchangeFailed, "invalid_grant") with
+        { IsRefusedByPolicy = true });
+
+        var response = await _client.GetAsync(url);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("errorCode").GetString().Should().Be(OfficeAccessDenied);
+        problem.GetProperty("type").GetString().Should().Be(ForbiddenType);
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("sign-in policy").And.Contain("administrator");
+        detail.Should().NotContainEquivalentOf("sign in again");
     }
 
     [Theory]

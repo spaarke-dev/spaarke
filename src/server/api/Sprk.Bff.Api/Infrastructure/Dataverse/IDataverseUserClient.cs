@@ -149,7 +149,8 @@ public sealed record DataverseUserResponse
 
     /// <summary>
     /// True only when the failure is one the CALLER can fix by signing in again: the On-Behalf-Of exchange was
-    /// refused with <c>MsalUiRequiredException</c> (invalid_grant, interaction or consent required). False for every
+    /// refused with <c>MsalUiRequiredException</c> (invalid_grant: an expired or revoked grant) whose classification is
+    /// neither <c>ConsentRequired</c> nor <c>MessageOnly</c> and which carries no claims challenge. False for every
     /// other failure, including every other <see cref="DataverseUserClientErrorCodes.OboExchangeFailed"/> — the BFF's
     /// own credential rejected (invalid_client, a federated-credential mismatch), an Entra timeout,
     /// temporarily_unavailable or throttling are the server's fault, and a caller who signs in again gets the same
@@ -157,6 +158,15 @@ public sealed record DataverseUserResponse
     /// read this flag are unchanged.
     /// </summary>
     public bool IsCallerFixable { get; init; }
+
+    /// <summary>
+    /// True when Entra refused the On-Behalf-Of exchange for a reason a fresh sign-in cannot fix: admin consent missing
+    /// (<c>ConsentRequired</c>), a policy that only explains itself (<c>MessageOnly</c>, e.g. Conditional Access blocking
+    /// an unmanaged device), or a claims challenge the client cannot send (#1571 fix round 2). The organization's policy
+    /// refused the request; never set together with <see cref="IsCallerFixable"/>. The error code stays
+    /// <see cref="DataverseUserClientErrorCodes.OboExchangeFailed"/>.
+    /// </summary>
+    public bool IsRefusedByPolicy { get; init; }
 
     /// <summary>Creates a success response.</summary>
     public static DataverseUserResponse Ok(int statusCode, JsonElement? body) => new()

@@ -43,6 +43,37 @@ public class DataverseUserClientOboFailureKindSeamTests
         response.IsSuccess.Should().BeFalse();
         response.ErrorCode.Should().Be(DataverseUserClientErrorCodes.OboExchangeFailed);
         response.IsCallerFixable.Should().BeTrue("a fresh sign-in is what fixes invalid_grant");
+        response.IsRefusedByPolicy.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(UiRequiredExceptionClassification.None)]
+    [InlineData(UiRequiredExceptionClassification.BasicAction)]
+    [InlineData(UiRequiredExceptionClassification.AdditionalAction)]
+    [InlineData(UiRequiredExceptionClassification.UserPasswordExpired)]
+    public async Task AnExchangeASignInCanFix_IsCallerFixable(UiRequiredExceptionClassification classification)
+    {
+        var response = await ReadWith(UiRequired(classification, claims: null));
+
+        response.IsCallerFixable.Should().BeTrue();
+        response.IsRefusedByPolicy.Should().BeFalse();
+    }
+
+    // #1571 fix round 2: MSAL.NET raises MsalUiRequiredException for almost every OBO invalid_grant, including ones a
+    // fresh sign-in cannot fix. These are refused by the organization's policy, never "sign in again".
+    [Theory]
+    [InlineData(UiRequiredExceptionClassification.ConsentRequired, null)]
+    [InlineData(UiRequiredExceptionClassification.MessageOnly, null)]
+    [InlineData(UiRequiredExceptionClassification.None, "{\"access_token\":{\"capolids\":{\"essential\":true,\"values\":[\"c1\"]}}}")]
+    [InlineData(UiRequiredExceptionClassification.BasicAction, "{\"access_token\":{\"nbf\":{\"essential\":true,\"value\":\"1\"}}}")]
+    public async Task AnExchangeASignInCannotFix_IsRefusedByPolicy(UiRequiredExceptionClassification classification, string? claims)
+    {
+        var response = await ReadWith(UiRequired(classification, claims));
+
+        response.IsSuccess.Should().BeFalse();
+        response.ErrorCode.Should().Be(DataverseUserClientErrorCodes.OboExchangeFailed);
+        response.IsCallerFixable.Should().BeFalse("signing in again cannot grant consent, satisfy Conditional Access or answer a claims challenge");
+        response.IsRefusedByPolicy.Should().BeTrue();
     }
 
     [Theory]
@@ -57,6 +88,23 @@ public class DataverseUserClientOboFailureKindSeamTests
         response.ErrorCode.Should().Be(DataverseUserClientErrorCodes.OboExchangeFailed,
             "the code stays the same, so consumers that do not read the flag are unchanged");
         response.IsCallerFixable.Should().BeFalse("signing in again cannot fix the server's own credential or Entra being down");
+        response.IsRefusedByPolicy.Should().BeFalse("a server fault is not a policy refusal");
+    }
+
+    /// <summary>
+    /// An <see cref="MsalUiRequiredException"/> as MSAL.NET raises it for an OBO invalid_grant. <c>Claims</c> has no
+    /// public setter (MSAL fills it from the token response), so the test sets it the same way.
+    /// </summary>
+    private static MsalUiRequiredException UiRequired(UiRequiredExceptionClassification classification, string? claims)
+    {
+        var ex = new MsalUiRequiredException("invalid_grant", "AADSTS stub.", null, classification);
+        if (claims is not null)
+        {
+            typeof(MsalServiceException).GetProperty(nameof(MsalServiceException.Claims))!
+                .SetValue(ex, claims);
+        }
+
+        return ex;
     }
 
     private static async Task<DataverseUserResponse> ReadWith(MsalException credentialFailure)

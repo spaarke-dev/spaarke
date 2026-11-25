@@ -72,7 +72,9 @@ namespace Sprk.Bff.Api.Api.Office;
 /// itself with 401 — the route answers 401 with <c>OFFICE_AUTH_001</c>, the code <c>OfficeAuthFilter</c> already
 /// answers an unusable sign-in with. Dataverse refusing the query with 403 (no read privilege on the table, or no
 /// Dataverse user) answers 403 with <see cref="OfficeErrorCodes.AccessDenied"/> (<c>OFFICE_009</c>, catalogued as
-/// 403). Neither says anything about a ROW: a communication the caller cannot read is still the ordinary 404 above.
+/// 403), and so does an exchange Entra refused under the organization's policy, which signing in again cannot fix
+/// (<see cref="DataverseUserResponse.IsRefusedByPolicy"/>: admin consent missing, Conditional Access, a claims
+/// challenge). Neither says anything about a ROW: a communication the caller cannot read is still the ordinary 404 above.
 /// </para>
 /// <para>
 /// Every other failed read is the server's fault and answers <c>OFFICE_INTERNAL</c>: 503 when Dataverse is throttling
@@ -335,7 +337,9 @@ public static class OfficeCommunicationsEndpoints
     /// The status a failed delegated read answers when the CALLER's context is what failed (#1571): 401 when the read
     /// could not run as the caller (no usable caller token, an On-Behalf-Of exchange refused because the caller must
     /// sign in again, or Dataverse answering 401), 403 when Dataverse refused the query itself (no read privilege on
-    /// the table, no Dataverse user). Null for every other failure, which is the server's fault — including an
+    /// the table, no Dataverse user) or Entra refused the exchange under the organization's policy
+    /// (<see cref="DataverseUserResponse.IsRefusedByPolicy"/>: consent missing, Conditional Access, a claims challenge).
+    /// Null for every other failure, which is the server's fault — including an
     /// exchange that failed for the BFF's own reasons (<see cref="DataverseUserResponse.IsCallerFixable"/> false):
     /// signing in again would not fix it, so it must not be answered as a sign-in problem.
     /// </summary>
@@ -352,6 +356,8 @@ public static class OfficeCommunicationsEndpoints
         { StatusCode: 0, ErrorCode: DataverseUserClientErrorCodes.UserContextRequired } => StatusCodes.Status401Unauthorized,
         { StatusCode: 0, ErrorCode: DataverseUserClientErrorCodes.OboExchangeFailed, IsCallerFixable: true }
             => StatusCodes.Status401Unauthorized,
+        { StatusCode: 0, ErrorCode: DataverseUserClientErrorCodes.OboExchangeFailed, IsRefusedByPolicy: true }
+            => StatusCodes.Status403Forbidden,
         _ => null,
     };
 
@@ -410,11 +416,15 @@ public static class OfficeCommunicationsEndpoints
             route, refused.Status, refused.DataverseStatus, refused.ClientErrorCode, userId, traceId);
 
         var unauthorized = refused.Status == StatusCodes.Status401Unauthorized;
+        // A 403 whose exchange never reached Dataverse: Entra refused it under the organization's policy (#1571 round 2).
+        var refusedByPolicy = !unauthorized && refused.ClientErrorCode == DataverseUserClientErrorCodes.OboExchangeFailed;
         return Results.Problem(
             title: unauthorized ? "Unauthorized" : OfficeErrorCodes.GetTitle(OfficeErrorCodes.AccessDenied),
             detail: unauthorized
                 ? "Spaarke could not read your data with your current sign-in. Sign in again, then retry."
-                : "Your Spaarke account is not allowed to read this information. Ask your administrator to check your access.",
+                : refusedByPolicy
+                    ? "Your organization's sign-in policy does not allow this request from here. Ask your administrator."
+                    : "Your Spaarke account is not allowed to read this information. Ask your administrator to check your access.",
             statusCode: refused.Status,
             type: unauthorized ? SignInNotUsableType : OfficeErrorCodes.GetTypeUri(OfficeErrorCodes.AccessDenied),
             extensions: new Dictionary<string, object?>

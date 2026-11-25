@@ -202,14 +202,26 @@ public sealed class DataverseUserClient : IDataverseUserClient
                 .ConfigureAwait(false);
             dataverseToken = result.AccessToken;
         }
-        catch (MsalUiRequiredException ex)
+        catch (MsalUiRequiredException ex) when (IsFixableBySigningInAgain(ex))
         {
-            // invalid_grant, interaction or consent required: the caller's sign-in is what Entra refused, so a fresh
-            // sign-in can fix it. The only OBO failure marked caller-fixable (#1571 review F1).
+            // invalid_grant for the caller's own grant (expired, revoked): a fresh sign-in can fix it. The only OBO
+            // failure marked caller-fixable (#1571 review F1).
             _logger.LogWarning("[dataverse.*] OBO exchange needs the caller to sign in again: {ErrorCode}", ex.ErrorCode);
             return DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed,
                 $"On-Behalf-Of token exchange for Dataverse failed ({ex.ErrorCode}).") with
             { IsCallerFixable = true };
+        }
+        catch (MsalUiRequiredException ex)
+        {
+            // MSAL.NET raises MsalUiRequiredException for almost every OBO invalid_grant, including ones a fresh
+            // sign-in cannot fix: admin consent missing, a Conditional Access block, a claims challenge the client
+            // cannot send (#1571 fix round 2). The organization's policy refused the request.
+            _logger.LogWarning(
+                "[dataverse.*] OBO exchange refused by policy: {ErrorCode}, Classification={Classification}, ClaimsChallenge={HasClaims}",
+                ex.ErrorCode, ex.Classification, !string.IsNullOrEmpty(ex.Claims));
+            return DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed,
+                $"On-Behalf-Of token exchange for Dataverse failed ({ex.ErrorCode}).") with
+            { IsRefusedByPolicy = true };
         }
         catch (MsalException ex)
         {
@@ -371,4 +383,14 @@ public sealed class DataverseUserClient : IDataverseUserClient
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    /// <summary>
+    /// Whether a fresh sign-in can fix a refused On-Behalf-Of exchange: not when admin consent is missing
+    /// (<c>ConsentRequired</c>), when the refusal only explains itself (<c>MessageOnly</c>, e.g. Conditional Access
+    /// blocking an unmanaged device), or when Entra sent a claims challenge the client cannot answer (#1571 fix round 2).
+    /// </summary>
+    private static bool IsFixableBySigningInAgain(MsalUiRequiredException ex) =>
+        string.IsNullOrEmpty(ex.Claims)
+        && ex.Classification is not (UiRequiredExceptionClassification.ConsentRequired
+            or UiRequiredExceptionClassification.MessageOnly);
 }
