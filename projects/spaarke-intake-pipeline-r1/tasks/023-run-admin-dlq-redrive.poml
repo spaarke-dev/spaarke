@@ -46,6 +46,7 @@
     <constraint source="ADR-017">SCOPE = the run list/detail. Read from the persisted run record (`sprk_processingjob`, job type "Intake run"); never from the Office job-status store; never return Office runs (FR-06 b).</constraint>
     <constraint source="ADR-015">SCOPE = every response and log. Return ids, stages, statuses, timestamps, error codes and admin-attention text only; never `DlqMessage.RawBody`, payload contents or document text.</constraint>
     <constraint source="ADR-019">SCOPE = every non-2xx. ProblemDetails with stable `errorCode` (INTAKE_RUN_NOT_FOUND, INTAKE_RUN_TERMINAL, INTAKE_DLQ_MESSAGE_NOT_FOUND, INTAKE_DLQ_UNAVAILABLE).</constraint>
+    <constraint source="ADR-004">Scope: DLQ coverage (owner direction 2026-11-25, consistency). Intake work dead-letters on two queues: the BFF jobs queue (orchestrator, completion and timeout handlers) and the engine request queue `intake-engine-requests` (task 001 uses the same reason codes: `InvalidFormat`, `Poisoned`, `MaxRetriesExceeded`, `ProcessingError`). Extend the existing `DeadLetterQueueService` with an optional queue name, validated against a closed allow-list from configuration (the BFF jobs queue and the engine queue; the default is today's queue, so existing behaviour is unchanged). The admin DLQ list and re-drive cover both queues. No second registration and no new service.</constraint>
     <constraint source="ADR-010">SCOPE = DI. Use the existing `DeadLetterQueueService` registration; add no new registration for it and no interface.</constraint>
     <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
   </constraints>
@@ -92,7 +93,7 @@
   </steps>
 
   <escalation>
-    <trigger>If intake run messages dead-letter on a queue other than the one `DeadLetterQueueService` is bound to, STOP and escalate rather than adding a second service instance or registration.</trigger>
+    <trigger>If extending `DeadLetterQueueService` to the engine queue (see the constraint "engine queue DLQ") would change existing callers' behaviour or its public contract beyond an optional queue parameter, STOP and escalate rather than adding a second service instance or registration.</trigger>
     <trigger>If the owner expects an admin UI (not only endpoints) for FR-15, STOP and escalate; a UI is not in this task.</trigger>
   </escalation>
 

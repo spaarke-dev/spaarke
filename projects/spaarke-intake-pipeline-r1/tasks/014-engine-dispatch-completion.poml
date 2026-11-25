@@ -44,7 +44,7 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-004">Scope: every message sent or consumed here. Job Contract envelopes with deterministic `idempotencyKey` (derived from run id + attempt), ids and blob paths only; the completion and timeout handlers implement `IJobHandler` and claim atomically, so a duplicate completion or a completion after timeout changes nothing.</constraint>
+    <constraint source="ADR-004">Scope: every message sent or consumed here. Job Contract envelopes with deterministic `idempotencyKey` (`IntakeEngine:{runId}:{dispatchAttempt}`, following the colon convention of `Communication:{messageId}:Process` and `DocAnalysis:{documentId}`), ids and blob paths only; the completion and timeout handlers implement `IJobHandler` and claim atomically, so a duplicate completion or a completion after timeout changes nothing.</constraint>
     <constraint source="ADR-015">Scope: logs, exceptions and messages. Run id, blob path ids, outcome codes and durations only; no document bytes, plan content or clause text.</constraint>
     <constraint source="ADR-028">Scope: blob and Service Bus access. Managed identity only via the existing BlobGateway and ServiceBusClient registrations; no SAS, keys or connection strings.</constraint>
     <constraint source="ADR-052">Scope: timeout enforcement. A scheduled Service Bus message handled by an `IJobHandler`; no timer `BackgroundService`, no polling loop.</constraint>
