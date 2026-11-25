@@ -359,6 +359,41 @@ class HardeningTests(Base):
         src = fx.build_raw(self.path("fld.docx"), fx.P(fx.R("3. Notice. See "), FIELD % fx.R("Section 9"), fx.R(" for notice addresses.")))
         self.refused(src, {"para": "3. Notice.", "find": "Section 9", "replace": "Section 10"})
         self.accepted(src, {"para": "3. Notice.", "find": "notice addresses", "replace": "addresses for notice"})
+        # an insertion anchored on the field result would sit before the field's end marker and vanish on update
+        self.refused(src, {"para": "3. Notice.", "after": "Section 9", "insert": " (as amended)"})
+        self.accepted(src, {"para": "3. Notice.", "after": "notice addresses", "insert": " in writing"})
+
+    def test_comment_parts_register_in_prefixed_rels_and_content_types(self):
+        src = fx.build_raw(self.path("prefixed.docx"), fx.P(fx.R("9. Law. New York.")))
+        fx.edit_part(src, "word/_rels/document.xml.rels", lambda b: re.sub(
+            rb"<(/?)Relationship", rb"<\1pr:Relationship", b).replace(b"<pr:Relationships xmlns=", b"<pr:Relationships xmlns:pr="))
+        fx.edit_part(src, "[Content_Types].xml", lambda b: re.sub(
+            rb"<(/?)(Types|Default|Override)\b", rb"<\1ct:\2", b).replace(b"<ct:Types xmlns=", b"<ct:Types xmlns:ct="))
+        plan = dict(MIN, edits=[dict(LAW, comment="Delaware is our standard.")])
+        _, internal, ext, cln = self.package(plan, src)
+        rels = safe_docx.parse(fx.part(self.path("redline.docx"), "word/_rels/document.xml.rels"))
+        self.assertEqual([r.get("Target") for r in rels if r.get("Type") == fx.REL_COMMENTS], ["comments.xml"])
+        ct = safe_docx.parse(fx.part(self.path("redline.docx"), "[Content_Types].xml"))
+        self.assertEqual([o.get("ContentType") for o in ct if o.get("PartName") == "/word/comments.xml"], [fx.CT_COMMENTS])
+        self.assertEqual(failed(check_outputs.check(plan, internal, cln, src, ext)), {})
+
+    def test_accept_all_removes_deleted_cells(self):
+        tbl = ('<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="4000"/>'
+               '<w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc>' + fx.P(fx.R("Cell kept")) + '</w:tc>'
+               '<w:tc><w:tcPr><w:cellDel w:id="50" ' + fx.REV + '/></w:tcPr>' + fx.P(fx.R("Cell deleted")) + '</w:tc>'
+               '<w:tc><w:tcPr><w:cellIns w:id="51" ' + fx.REV + '/></w:tcPr>' + fx.P(fx.R("Cell inserted")) + '</w:tc>'
+               '</w:tr></w:tbl>')
+        src = fx.build_raw(self.path("cells.docx"), fx.P(fx.R("4. Purpose. Evaluate a deal.")) + tbl
+                           + fx.P(fx.R("9. Law. New York.")))
+        root = ooxml_redline.accept_all(fx.document_root(src))
+        self.assertEqual([t for t in check_outputs.para_texts(root) if t],
+                         ["4. Purpose. Evaluate a deal.", "Cell kept", "Cell inserted", "9. Law. New York."])
+        self.assertEqual(len(root.findall(".//" + fx.q("tc"))), 2)
+        self.assertEqual([t for t in check_outputs.accepted_texts(fx.document_root(src)) if t],
+                         ["4. Purpose. Evaluate a deal.", "Cell kept", "Cell inserted", "9. Law. New York."])
+        plan = dict(MIN, edits=[LAW])
+        _, internal, ext, cln = self.package(plan, src)
+        self.assertEqual(failed(check_outputs.check(plan, internal, cln, src, ext)), {})
 
     def test_star_find_keeps_number_and_heading(self):
         plan = dict(PLAN, edits=[{"para": "5. Anonymized Data.", "find": "*", "replace": "Intentionally Omitted.",

@@ -438,6 +438,9 @@ class Redliner:
             off = s + len(e["after"])
             self._split(p, off)
             prev = [r for r, rs_, t in self.runs(p) if t and rs_ + len(t) <= off][-1]
+            if prev in self._in_field(p):  # same rule as _span: Word drops field-result text on update
+                raise PlanError("anchor ends inside a field result (the insertion would be lost when Word "
+                                "updates fields); anchor on text after the field")
             ins = etree.Element(q("ins"), self._rev_attrs())
             ins.append(self._new_run(e["insert"], prev.find(q("rPr"))))
             prev.addnext(ins)
@@ -524,16 +527,22 @@ class Redliner:
             t.set(SPACE, "preserve")
         return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
-    def _ensure_comment_parts(self, out):
-        rels = out["word/_rels/document.xml.rels"].decode("utf-8")
-        if "comments.xml" not in rels:
-            rels = rels.replace("</Relationships>",
-                                '<Relationship Id="rIdSprkCmt1" Type="%s" Target="comments.xml"/></Relationships>' % REL_COMMENTS)
-            out["word/_rels/document.xml.rels"] = rels.encode("utf-8")
-        ct = out["[Content_Types].xml"].decode("utf-8")
-        if "/word/comments.xml" not in ct:
-            ct = ct.replace("</Types>", '<Override PartName="/word/comments.xml" ContentType="%s"/></Types>' % CT_COMMENTS)
-            out["[Content_Types].xml"] = ct.encode("utf-8")
+    @staticmethod
+    def _ensure_comment_parts(out):
+        """Register word/comments.xml in the document rels and content types (parsed, so any prefix works)."""
+        rels = safe_docx.parse(out["word/_rels/document.xml.rels"])
+        if not any(r.get("Type") == REL_COMMENTS for r in rels):
+            ids = {r.get("Id") for r in rels}
+            rid = next("rIdSprkCmt%d" % n for n in range(1, len(ids) + 2) if "rIdSprkCmt%d" % n not in ids)
+            etree.SubElement(rels, "{%s}Relationship" % etree.QName(rels).namespace,
+                             {"Id": rid, "Type": REL_COMMENTS, "Target": "comments.xml"})
+            out["word/_rels/document.xml.rels"] = etree.tostring(rels, xml_declaration=True, encoding="UTF-8",
+                                                                 standalone=True)
+        ct = safe_docx.parse(out["[Content_Types].xml"])
+        if not any(o.get("PartName") == "/word/comments.xml" for o in ct):
+            etree.SubElement(ct, "{%s}Override" % etree.QName(ct).namespace,
+                             {"PartName": "/word/comments.xml", "ContentType": CT_COMMENTS})
+            out["[Content_Types].xml"] = etree.tostring(ct, xml_declaration=True, encoding="UTF-8", standalone=True)
 
     @staticmethod
     def _set_tracking(out, on):
@@ -634,6 +643,11 @@ def accept_all(root):
             continue
         for m in trpr.findall(q("ins")):
             trpr.remove(m)
+    # cells: a deleted cell goes with its content (a merely unmarked cellDel would keep the counterparty's
+    # deleted cell in the clean copy); an inserted cell stays, its marker is stripped below
+    for tc in list(root.iter(q("tc"))):
+        if tc.getparent() is not None and tc.find("%s/%s" % (q("tcPr"), q("cellDel"))) is not None:
+            tc.getparent().remove(tc)
     # paragraph marks: a deleted mark joins the paragraph with the next one, which keeps its own
     # properties (Word stores paragraph formatting in the surviving mark); chains are followed
     for p in list(root.iter(q("p"))):
