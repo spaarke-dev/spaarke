@@ -25,6 +25,11 @@ public class CommunicationsDelegatedAuthFailureContractTests : IClassFixture<Off
 {
     private const string OfficeAccessDenied = "OFFICE_009";
 
+    // The 401 code and type OfficeAuthFilter answers an unusable sign-in with (#1571 review F4: OFFICE_009 is the 403).
+    private const string SignInNotUsable = "OFFICE_AUTH_001";
+    private const string SignInNotUsableType = "https://tools.ietf.org/html/rfc7235#section-3.1";
+    private const string ForbiddenType = "https://spaarke.com/errors/office/forbidden";
+
     private readonly OfficeCommunicationsTestWebAppFactory _factory;
     private readonly HttpClient _client;
 
@@ -88,23 +93,90 @@ public class CommunicationsDelegatedAuthFailureContractTests : IClassFixture<Off
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         var problem = await ProblemOf(response);
-        problem.GetProperty("errorCode").GetString().Should().Be(OfficeAccessDenied);
+        problem.GetProperty("errorCode").GetString().Should().Be(SignInNotUsable);
+        problem.GetProperty("type").GetString().Should().Be(SignInNotUsableType);
         problem.GetProperty("correlationId").GetString().Should().NotBeNullOrEmpty();
     }
 
     [Theory]
     [MemberData(nameof(Routes))]
-    public async Task OboExchangeRefused_Answers401WithOfficeErrorCode_Not404Or500(string route)
+    public async Task OboExchangeTheCallerMustSignInAgainFor_Answers401WithOfficeErrorCode_Not404Or500(string route)
     {
-        // Status 0: the request never reached Dataverse — the On-Behalf-Of exchange for the caller's token failed.
+        // Status 0: the request never reached Dataverse — Entra refused the On-Behalf-Of exchange with
+        // MsalUiRequiredException (invalid_grant, interaction or consent required), which a fresh sign-in fixes.
         var (url, fragment) = Request(route);
         FailUserQuery(fragment, DataverseUserResponse.Fail(
-            0, DataverseUserClientErrorCodes.OboExchangeFailed, "AADSTS50013: assertion is not within its valid time range."));
+            0, DataverseUserClientErrorCodes.OboExchangeFailed, "invalid_grant") with
+        { IsCallerFixable = true });
 
         var response = await _client.GetAsync(url);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        (await ProblemOf(response)).GetProperty("errorCode").GetString().Should().Be(OfficeAccessDenied);
+        (await ProblemOf(response)).GetProperty("errorCode").GetString().Should().Be(SignInNotUsable);
+    }
+
+    [Theory]
+    [MemberData(nameof(Routes))]
+    public async Task OboExchangeFailingForTheServersOwnReasons_Answers500_NotASignInProblem(string route)
+    {
+        // #1571 review F1: the BFF's own credential rejected (invalid_client, a federated-credential mismatch), an
+        // Entra timeout or temporarily_unavailable. Signing in again cannot fix any of them, so it is not a 401.
+        var (url, fragment) = Request(route);
+        FailUserQuery(fragment, DataverseUserResponse.Fail(
+            0, DataverseUserClientErrorCodes.OboExchangeFailed, "invalid_client"));
+
+        var response = await _client.GetAsync(url);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ProblemOf(response)).GetProperty("errorCode").GetString().Should().Be("OFFICE_INTERNAL");
+    }
+
+    public static TheoryData<string, int, string, HttpStatusCode> ServerFaults
+    {
+        get
+        {
+            var data = new TheoryData<string, int, string, HttpStatusCode>();
+            foreach (var route in new[] { "lookup", "suggestions", "linked-todos" })
+            {
+                data.Add(route, 429, DataverseUserClientErrorCodes.RateLimited, HttpStatusCode.ServiceUnavailable);
+                data.Add(route, 503, DataverseUserClientErrorCodes.ServiceError, HttpStatusCode.ServiceUnavailable);
+                data.Add(route, 500, DataverseUserClientErrorCodes.ServiceError, HttpStatusCode.InternalServerError);
+                // Status 0 + ServiceError: the transport failed before Dataverse answered.
+                data.Add(route, 0, DataverseUserClientErrorCodes.ServiceError, HttpStatusCode.InternalServerError);
+            }
+
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ServerFaults))]
+    public async Task AFailedRead_IsTheServersFault_NeverNotFoundOrAnEmptyList(
+        string route, int dataverseStatus, string clientErrorCode, HttpStatusCode expected)
+    {
+        // #1571 review F2: throttling, Dataverse 5xx and transport failures used to read as "email not captured"
+        // (lookup/suggestions 404) or "no linked to-dos" (an empty 200).
+        var (url, fragment) = Request(route);
+        FailUserQuery(fragment, DataverseUserResponse.Fail(dataverseStatus, clientErrorCode, "Dataverse failed."));
+
+        var response = await _client.GetAsync(url);
+
+        response.StatusCode.Should().Be(expected);
+        (await ProblemOf(response)).GetProperty("errorCode").GetString().Should().Be("OFFICE_INTERNAL");
+    }
+
+    [Fact]
+    public async Task LinkedTodos_TheCallerCanReadNone_StaysAnEmpty200()
+    {
+        // The non-oracle rule for this route: an unreadable or absent to-do is left out of the page, not refused.
+        var (url, fragment) = Request("linked-todos");
+        _factory.SetupUserQuery(fragment, "{\"value\":[]}");
+
+        var response = await _client.GetAsync(url);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("count").GetInt32().Should().Be(0);
     }
 
     [Theory]
@@ -118,7 +190,7 @@ public class CommunicationsDelegatedAuthFailureContractTests : IClassFixture<Off
         var response = await _client.GetAsync(url);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        (await ProblemOf(response)).GetProperty("errorCode").GetString().Should().Be(OfficeAccessDenied);
+        (await ProblemOf(response)).GetProperty("errorCode").GetString().Should().Be(SignInNotUsable);
     }
 
     [Theory]
@@ -136,6 +208,7 @@ public class CommunicationsDelegatedAuthFailureContractTests : IClassFixture<Off
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         var problem = await ProblemOf(response);
         problem.GetProperty("errorCode").GetString().Should().Be(OfficeAccessDenied);
+        problem.GetProperty("type").GetString().Should().Be(ForbiddenType);
         // Fixed text: Dataverse's own message (privilege names, ids) never reaches the caller.
         problem.GetProperty("detail").GetString().Should().NotContain("prvRead");
     }

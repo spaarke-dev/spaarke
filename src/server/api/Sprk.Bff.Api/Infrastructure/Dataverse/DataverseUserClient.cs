@@ -202,8 +202,19 @@ public sealed class DataverseUserClient : IDataverseUserClient
                 .ConfigureAwait(false);
             dataverseToken = result.AccessToken;
         }
+        catch (MsalUiRequiredException ex)
+        {
+            // invalid_grant, interaction or consent required: the caller's sign-in is what Entra refused, so a fresh
+            // sign-in can fix it. The only OBO failure marked caller-fixable (#1571 review F1).
+            _logger.LogWarning("[dataverse.*] OBO exchange needs the caller to sign in again: {ErrorCode}", ex.ErrorCode);
+            return DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed,
+                $"On-Behalf-Of token exchange for Dataverse failed ({ex.ErrorCode}).") with
+            { IsCallerFixable = true };
+        }
         catch (MsalException ex)
         {
+            // Every other MSAL failure is the server's fault (the BFF's own credential rejected, an Entra timeout,
+            // temporarily_unavailable, throttling): not caller-fixable.
             // ADR-015: MSAL error CODE only — never the assertion or token material.
             _logger.LogWarning("[dataverse.*] OBO exchange failed: {ErrorCode}", ex.ErrorCode);
             return DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed,

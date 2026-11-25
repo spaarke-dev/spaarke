@@ -147,6 +147,17 @@ public sealed record DataverseUserResponse
     /// </summary>
     public string? ErrorMessage { get; init; }
 
+    /// <summary>
+    /// True only when the failure is one the CALLER can fix by signing in again: the On-Behalf-Of exchange was
+    /// refused with <c>MsalUiRequiredException</c> (invalid_grant, interaction or consent required). False for every
+    /// other failure, including every other <see cref="DataverseUserClientErrorCodes.OboExchangeFailed"/> — the BFF's
+    /// own credential rejected (invalid_client, a federated-credential mismatch), an Entra timeout,
+    /// temporarily_unavailable or throttling are the server's fault, and a caller who signs in again gets the same
+    /// answer (#1571 review F1). The error code stays <c>OboExchangeFailed</c> for both, so consumers that do not
+    /// read this flag are unchanged.
+    /// </summary>
+    public bool IsCallerFixable { get; init; }
+
     /// <summary>Creates a success response.</summary>
     public static DataverseUserResponse Ok(int statusCode, JsonElement? body) => new()
     {
