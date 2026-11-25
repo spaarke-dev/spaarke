@@ -105,6 +105,15 @@ export function fieldLabel(draft: ItemDraft, scope: StepScope, parameterCode: st
 }
 
 /**
+ * The name shown for a pick: "Name (secondary)" when the pick carries a secondary line (a person's email, task 211), else the name.
+ * Display only; the committed value is the id.
+ */
+export function pickLabel(item: { name: string; secondaryText?: string | null }): string {
+  const secondary = item.secondaryText?.trim();
+  return secondary ? `${item.name} (${secondary})` : item.name;
+}
+
+/**
  * A Lookup / Person pick. `asDefault` records a pre-selection (a matter with exactly one budget, D-18): a starting value, not
  * a choice, so it does not make the draft dirty. A pick the user makes (`asDefault` false) is a typed value.
  */
@@ -112,11 +121,11 @@ export function withLookup(
   draft: ItemDraft,
   scope: StepScope,
   parameterCode: string,
-  item: { id: string; name: string } | null,
+  item: { id: string; name: string; secondaryText?: string | null } | null,
   asDefault = false
 ): ItemDraft {
   const labels = { ...draft.labels };
-  if (item) labels[labelKey(scope, parameterCode)] = item.name;
+  if (item) labels[labelKey(scope, parameterCode)] = pickLabel(item);
   else delete labels[labelKey(scope, parameterCode)];
   const next = { ...draft, labels };
   return asDefault
