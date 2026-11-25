@@ -167,13 +167,8 @@ export interface IndexFileRequest {
   /** Optional parent entity context for entity-scoped search. */
   parentEntity?: ParentEntityContext;
 
-  /**
-   * Optional explicit Azure AI Search index name. When provided, routes to that
-   * index after validating against the BFF's `AiSearchOptions.AllowedIndexes`.
-   * When omitted, the BFF resolver falls through the standard chain
-   * (parent record → BU cascade → tenant default).
-   */
-  searchIndexName?: string;
+  // No search index is named here: the server's index-file request has no such member and the index follows the
+  // document's content type (field-mapping-server-write-path-r1 FR-40). A client that names one is a regression.
 }
 
 /**
