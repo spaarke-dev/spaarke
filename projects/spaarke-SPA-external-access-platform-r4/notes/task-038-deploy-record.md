@@ -166,3 +166,36 @@ Sent to uac-r2 to look for in the logs. **uac-r2 then confirmed (b) PASS.** Only
 
 - Clean-up: Invoices left on Total Amount (Local) descending, as found. Projects "Clear all" applied, back to no sort, as found.
 - FR-19/FR-20 sort is now **Pass** through the column menu, not only through the edge of the header cell.
+
+## Step 8: View Only and FR-21 (2026-11-25 ~12:45–12:52Z, owner's Chrome, same partner account)
+
+Owner go: "run them and approved for view and test message". Before starting, the served build was re-checked: `/assets/app.js` was still 1,621,782 bytes, SHA-256 `AF0C295524F8EE0B…` (SPA `0267ee64a2`).
+
+**View Only.**
+- Setup: in Matter Management, the PRJ-000047 Tracking card's "Grant access" (Manage Access) gave CIAM Test User **View Only** at about 12:47Z. PRJ-000047 had no grants before; the partner could not see it.
+  - On the way there, Access ▸ "Update Access" was clicked by mistake. It reported "Access is up to date" and changed nothing.
+  - The built-in Share panel was also opened by mistake and closed without changes.
+- Rollback: Revoke in the same dialog. Done at about 12:48Z ("Revoked access for CIAM Test User"). The partner's project list was back to 7 rows, without PRJ-000047.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Record appears with the grant | Pass | Projects grid 8 rows, PRJ-000047 included. |
+| "Your access" | Pass | Header shows "View Only". |
+| No create actions | Pass | The record has only Refresh, Copy link, section toggles, column options, Download, Version history, Refresh messages and Open event. There is no Upload, New message, Add event, Submit invoice or Delete. |
+| Read-only lines | Pass | "You can view these documents. Uploading needs Collaborate access." / "You can read this thread. Posting needs Collaborate access." / "You can view these events. Adding one needs Collaborate access." |
+| Event at View Only | Pass | The event opens with Refresh and Copy link only; no Edit, Change status or Delete. |
+| Nothing offered is refused | Pass | 0 API responses ≥ 400 in the session. |
+
+**FR-21 "Show new messages".**
+- Tab A opened PRJ-000046 (Collaborate) at 12:49:21Z. Tab B, same partner, posted "Test message from the R4 E2E check (task 038, FR-21). Please ignore." at about 12:50:15Z (POST 201). The message stays in the thread.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Hidden tab makes no request | Pass | Tab A was hidden from +21 s to +66 s; no thread read in that time. |
+| Check on return after the interval | Pass | One read (200) right after the tab became visible at +66 s. |
+| Indicator | Pass | "New messages are available. Show new messages" under the thread. The new message was not inserted until asked. |
+| Show new messages | Pass | Re-read 200. The message shows as the 3rd in "3 messages in this conversation"; the notice cleared; focus stayed on the status region. |
+
+**Observation (told to the owner, not filed yet):** an older system email in PRJ-000046's thread shows its raw filing-reference footer to the external user.
+
+**Task 038 E2E: all checks pass.**
