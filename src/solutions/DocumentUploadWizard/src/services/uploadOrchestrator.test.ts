@@ -12,7 +12,13 @@
  * Classification (ADR-038 §7): MAINTAIN — the wizard's per-file outcome contract.
  */
 
-type Scripted = { uploads: { source: string; stored: string }[]; failedUploads?: string[]; failedCreates?: string[] };
+type Scripted = {
+    uploads: { source: string; stored: string }[];
+    failedUploads?: string[];
+    failedCreates?: string[];
+    /** Server warnings on a file's create, by STORED name; a file not listed gets no `warnings` key. */
+    warningsFor?: Record<string, string[]>;
+};
 
 let script: Scripted = { uploads: [] };
 
@@ -48,7 +54,15 @@ jest.mock(
                 return files.map((f, i) =>
                     (script.failedCreates ?? []).includes(f.name)
                         ? { success: false, fileName: f.name, error: "Create failed" }
-                        : { success: true, fileName: f.name, recordId: `doc-${i}`, documentId: `doc-${i}`, driveId: f.driveId, itemId: f.id },
+                        : {
+                              success: true,
+                              fileName: f.name,
+                              recordId: `doc-${i}`,
+                              documentId: `doc-${i}`,
+                              driveId: f.driveId,
+                              itemId: f.id,
+                              ...(script.warningsFor?.[f.name] ? { warnings: script.warningsFor[f.name] } : {}),
+                          },
                 );
             }
         }
@@ -241,5 +255,34 @@ describe('orchestrateUpload — the document create carries no value the server 
             ['documentId', 'driveId', 'fileName', 'itemId', 'parentEntity', 'tenantId'].sort(),
         );
         expect(bodies[0]).not.toHaveProperty('searchIndexName');
+    });
+});
+
+describe("orchestrateUpload — the server's create warnings reach the per-file result (field-mapping-server-write-path-r1 task 029 review F1)", () => {
+    it("carries a created document's warnings on its file result, and the file still succeeds", async () => {
+        const { result } = await run(["a.docx", "b.docx"], {
+            uploads: [
+                { source: "a.docx", stored: "a.docx" },
+                { source: "b.docx", stored: "b.docx" },
+            ],
+            warningsFor: { "a.docx": ["Mapped values were not copied because the source is secure."] },
+        });
+
+        expect(result.successCount).toBe(2);
+        expect(result.fileResults[0].success).toBe(true);
+        expect(result.fileResults[0].warnings).toEqual(["Mapped values were not copied because the source is secure."]);
+        // Negative: a file whose create had no warnings has no warnings key at all.
+        expect("warnings" in result.fileResults[1]).toBe(false);
+    });
+
+    it("attaches no warnings to a file whose create failed", async () => {
+        const { result } = await run(["a.docx"], {
+            uploads: [{ source: "a.docx", stored: "a.docx" }],
+            failedCreates: ["a.docx"],
+            warningsFor: { "a.docx": ["ignored"] },
+        });
+
+        expect(result.fileResults[0].success).toBe(false);
+        expect("warnings" in result.fileResults[0]).toBe(false);
     });
 });

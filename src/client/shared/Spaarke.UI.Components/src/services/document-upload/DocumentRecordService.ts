@@ -19,6 +19,7 @@
 import { NavMapClient } from './NavMapClient';
 import type {
   IDataverseClient,
+  DataverseRecordRef,
   ILogger,
   SpeFileMetadata,
   ParentContext,
@@ -67,6 +68,11 @@ export interface DocumentRecordServiceOptions {
   logger?: ILogger;
 }
 
+/** `{ warnings }` when the create returned any (a key only when non-empty), else nothing — spread into a result. */
+function warningsOf(created: DataverseRecordRef): { warnings?: string[] } {
+  return created.warnings && created.warnings.length > 0 ? { warnings: [...created.warnings] } : {};
+}
+
 /**
  * Service for creating Document records in Dataverse.
  */
@@ -90,7 +96,7 @@ export class DocumentRecordService {
    * (best effort — `deleteRecord` when the client offers it) so no "document" is left without its file, and the
    * refusal propagates to the caller's per-file error.
    */
-  private async createAndAttach(payload: Record<string, unknown>, file: SpeFileMetadata): Promise<{ id: string }> {
+  private async createAndAttach(payload: Record<string, unknown>, file: SpeFileMetadata): Promise<DataverseRecordRef> {
     const result = await this.dataverseClient.createRecord('sprk_document', payload);
     try {
       await this.attachFile(result.id, file);
@@ -219,6 +225,7 @@ export class DocumentRecordService {
           documentId: result.id,
           driveId: file.driveId,
           itemId: file.id,
+          ...warningsOf(result),
         };
       }
 
@@ -280,6 +287,7 @@ export class DocumentRecordService {
         documentId: result.id,
         driveId: file.driveId,
         itemId: file.id,
+        ...warningsOf(result),
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
