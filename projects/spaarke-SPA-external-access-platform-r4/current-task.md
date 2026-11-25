@@ -7,9 +7,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Active** | None. Task 040 (FR-24, #2508) is ✅ completed: code, tests, reviews, notes (`notes/task-040-notes.md`), TASK-INDEX/POML, portfolio (32/46). |
-| **In flight** | Task 040's PR to master: merge only on the owner's go. Then the dev deploy for its ui-tests: BFF through uac-r2 (owner go on the exact merged SHA in uac-r2's session), SPA with the owner's go. |
-| **Next action** | After the PR: next 🔲 in `tasks/TASK-INDEX.md` through task-execute, when the owner says so. |
+| **Active** | **Task 041**: a licensed user's first sign-in skips the profile form (FR-25, #2192). FULL rigor, opus @ high, directional. POML `tasks/041-licensed-first-signin.poml`. Status: in-progress since 2026-11-25 ~19:00Z. |
+| **In flight** | PR #3160 (task 040) has auto-merge on, by the owner's go. After it merges, the dev deploy: the BFF through uac-r2 (owner go on the exact merged SHA, in uac-r2's session) and the SPA (owner go). |
+| **Done (041)** | Step 0.5: conflict check clean (32 open PRs, none on 041's files). Step 1 trace done (below). No files changed yet. |
+| **Next action** | Step 2, BFF part. In `CallerPrincipalResolver.cs` `WorkforcePrincipalStrategy` (registration_required branch ~:792-811), add extension `licensedUser` (bool). True only when `ContactBindingDecision.DecideLicensedUserEmail(store.FindEnabledSystemUsersByEmailAsync(email), email) == LicensedUser`, with email = `ExternalRegistrationEndpoints.TokenEmail(home)` (the strict email-claim rule the registration POST uses, NOT `WorkforceCallerClaims.TokenEmail`). If there is no email, the outcome is Unknown/NotLicensed, or the read throws: false, and the throw is logged by code only. Inject `IContactIdentityStore` as an OPTIONAL last ctor param (`= null`; ~15 test sites build the strategy with 3 args; the store is already a registered singleton, `ExternalAccessModule.cs:250`). Then the SPA: `parseRegistrationRequired` returns `licensedUser`; the gate's `afterSilentLinkFailure` and the `no_systemuser` branch pass it; `RegistrationPage` opens in `linkRequired` when the hint is true; NO auto-popup. Tests: `tests/unit/.../CallerPrincipalResolverTests.cs` holds the registration_required cases (extend them, or add a KEEP-path test under `tests/integration/auth/ExternalAccess/`); SPA `tests/workforce-home-auth.test.ts`, `registration-refusals.test.ts`. Then step 3: find the 60 s popup timeout (msal-auth.ts `acquireTokenPopup` ~:1449, likely the MSAL default) and request the auth/UAC review from uac-r2. |
+
+## Task 041 trace (step 1)
+- Gate (`WorkforceHomeGate.tsx`): `/me` 403 `registration_required` → silent guest token → `POST /workforce/link`. With no token (`afterSilentLinkFailure`) or `no_systemuser` it shows `RegistrationPage` (form). The form POST → 403 `licensed_user_link_required` → `linkRequired` view ("Link my account", popup on click only).
+- BFF: the licensed check runs only inside `ContactIdentityBinder.RegisterHomeContactAsync` (~:1040), after the readability probes. Email = `ExternalRegistrationEndpoints.TokenEmail` (email claim only, exactly one value). The prefill email uses `WorkforceCallerClaims.TokenEmail` (with upn fallbacks), which is different.
+- Precedent for Infrastructure calling an Api static: `WorkforcePrincipalResolver` uses `MembershipEndpoints.ExtractAadObjectId`.
 
 ## Task 040 outcome (details in notes/task-040-notes.md)
 - Server: `ModuleEntitlementResolver.IsGrantedWorkforceContact` adds `assigned-work` for a workforce contact that can read ≥ 1 project, matter or WA. The code is stripped from role-map extras, so a systemuser never gets it. No new endpoint, field, DI or package.
