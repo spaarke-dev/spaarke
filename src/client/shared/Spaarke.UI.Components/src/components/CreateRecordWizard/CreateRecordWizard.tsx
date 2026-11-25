@@ -63,7 +63,7 @@ import {
   CreateEventFollowOnStep,
   SendEmailFollowOnStep,
 } from '../WizardFollowOns';
-import { useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
+import { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import type { FollowOnCardConfig, WorkAssignmentPriorityValue } from '../WizardFollowOns';
 import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady, joinRecipientAddresses } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
@@ -876,7 +876,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       ariaLabel={config.title}
       steps={stepConfigs}
       onClose={onClose}
-      onFinish={handleFinish}
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish={() => holdComposedEmailUploadsDuring(emailRef.current, handleFinish)}
       finishingLabel={config.finishingLabel ?? 'Creating\u2026'}
       finishLabel="Finish"
       {...(uiScale !== undefined ? { uiScale } : {})}

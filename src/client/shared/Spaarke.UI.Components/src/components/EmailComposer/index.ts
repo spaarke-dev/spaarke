@@ -102,7 +102,7 @@ export {
   sendComposedEmail,
 } from './composeOnlySend';
 // Task 220 (#2813): a compose-only wizard deletes its Send Email step's unsent uploads when it closes.
-export { useDiscardComposedEmailUploadsOnClose } from './uploadDiscard';
+export { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from './uploadDiscard';
 export type {
   IComposedEmail,
   IEmailComposeHandlers,

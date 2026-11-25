@@ -120,6 +120,7 @@ import {
   cleanGuid,
   createRecordViaBffWithWarnings,
   createTodoRegardingChild,
+  holdComposedEmailUploadsDuring,
   useDiscardComposedEmailUploadsOnClose,
   createWebApiFromDataService,
   discoverNavProps,
@@ -732,415 +733,418 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
 
       resolveSpeContainerId: data?.resolveSpeContainerId,
 
-      onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
-        const finishName = nameRef.current.trim();
-        if (!finishName) {
-          throw new Error('Please enter a name for the analysis.');
-        }
-
-        // -- Step 1: resolve the document (upload OR selected-existing) -----
-        let documentId: string | null = null;
-        let documentName = finishName;
-        // SPE pointer for opening the document in the editable Compose surface (Phase 1).
-        let speDriveItemId: string | undefined;
-        let speDriveId: string | undefined;
-
-        if (context.selectedExistingRecord) {
-          documentId = context.selectedExistingRecord.recordId;
-          documentName = context.selectedExistingRecord.recordName;
-          // Resolve the SPE pointer from the picked sprk_document (mirrors DocumentComposeLaunch).
-          try {
-            const docRec = await dataService.retrieveRecord(
-              'sprk_document',
-              documentId,
-              '?$select=sprk_filename,sprk_graphitemid,sprk_graphdriveid'
-            );
-            speDriveItemId = docRec['sprk_graphitemid'] as string | undefined;
-            speDriveId = docRec['sprk_graphdriveid'] as string | undefined;
-            documentName = (docRec['sprk_filename'] as string | undefined) ?? documentName;
-          } catch {
-            /* pointer unavailable — the compose open falls back to the read-only viewer below */
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish: (context: IFinishContext): Promise<IWizardSuccessConfig> =>
+        holdComposedEmailUploadsDuring(emailRef.current, async (): Promise<IWizardSuccessConfig> => {
+          const finishName = nameRef.current.trim();
+          if (!finishName) {
+            throw new Error('Please enter a name for the analysis.');
           }
-        } else if (context.uploadedFiles.length > 0) {
-          if (!authFetch || !bffBaseUrl || !webApiAdapter) {
-            throw new Error('Document upload is not available right now. Please try again shortly.');
-          }
-          // 🔴 PARENTLESS UPLOAD. Task 076: the `sprk_analysis` row does not exist yet — it is
-          // created further down, and the document it needs must exist first. So this uses the
-          // record-LESS route (`PUT /api/obo/me/files/{path}`) and the SERVER derives the container
-          // from the acting user's business unit. Task 076's classification (project notes
-          // `task-076-client-cutover-and-supplier-classification.md:54-55`) reads this as legitimately
-          // parentless, alongside EmailComposer's local-attachment flow — the only other caller of
-          // `uploadFilesWithoutRecord` at HEAD.
-          //
-          // The client-side `context.speContainerId` guard is GONE: the client no longer resolves a
-          // container, so it is not in a position to report one missing. If none can be derived the
-          // server refuses with its own explanation, which surfaces through `uploadResult.errors`
-          // below.
-          //
-          // Reuse the shared EntityCreationService — the SAME proven upload path every other
-          // Create*Wizard uses (Matter/Project/Event/Invoice/WorkAssignment). See
-          // docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md §Step 4:
-          //   uploadFilesWithoutRecord → PUT /api/obo/me/files/{path}   (record-less)
-          //   createDocumentRecords    → durable sprk_document + Document Profile analysis (auto)
-          // This REPLACES a bespoke POST /api/documents/upload call that targeted a NON-EXISTENT
-          // BFF endpoint (§11 reuse violation caught in the 2026-07-29 duplicate-component audit).
-          const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
 
-          const uploadResult = await entityService.uploadFilesWithoutRecord(context.uploadedFiles);
-          if (uploadResult.uploadedFiles.length === 0) {
-            const firstErr = uploadResult.errors[0]?.error ?? 'unknown error';
-            throw new Error(`Document upload failed: ${firstErr}`);
-          }
-          // Capture the SPE pointer from the upload (id = drive-item, driveId = drive) so
-          // the document can open in the editable Compose surface (Phase 1).
-          speDriveItemId = uploadResult.uploadedFiles[0]?.id;
-          speDriveId = uploadResult.uploadedFiles[0]?.driveId;
+          // -- Step 1: resolve the document (upload OR selected-existing) -----
+          let documentId: string | null = null;
+          let documentName = finishName;
+          // SPE pointer for opening the document in the editable Compose surface (Phase 1).
+          let speDriveItemId: string | undefined;
+          let speDriveId: string | undefined;
 
-          // Create a STANDALONE sprk_document (empty navigationProperty → createDocumentRecords
-          // skips the parent @odata.bind). The Analysis is the SUBJECT-owner via its
-          // sprk_documentid lookup (ADR-007), not a parent of the document — so no child binding.
-          // No `containerId` option — `sprk_graphdriveid` is taken from the drive the SERVER
-          // reported on the upload response (the same value `speDriveId` above already reads).
-          const docResult = await entityService.createDocumentRecords('', '', '', uploadResult.uploadedFiles);
-          documentId = docResult.createdDocumentIds[0] ?? null;
-          if (!documentId) {
-            const firstWarn = docResult.warnings[0] ?? 'the document record could not be created';
-            throw new Error(`Document upload succeeded but ${firstWarn}.`);
-          }
-          documentName = context.uploadedFiles[0]?.name ?? finishName;
-        }
-
-        if (!documentId) {
-          throw new Error('Please attach a document or select an existing one before finishing.');
-        }
-
-        // -- Build the sprk_analysis create payload --------------------------
-        const payload: Record<string, unknown> = {
-          sprk_name: finishName,
-          sprk_description: descriptionRef.current.trim() || null,
-          sprk_worktype: workTypeValue,
-          // "Run the analysis" (scoped per this widget's header doc comment):
-          // mark InProgress — the session/AI-execution binding is owned by
-          // other tasks in this project (020–025).
-          sprk_analysisstatus: SprkAnalysisStatus.InProgress,
-          'sprk_documentid@odata.bind': `/sprk_documents(${documentId})`,
-        };
-
-        const warnings: string[] = [];
-
-        // -- Assigned Attorney / Paralegal (both `contact` lookups, UAT #6) --------
-        // Bind via the discovered PascalCase nav-props (`sprk_AssignedAttorney1` /
-        // `sprk_AssignedParalegal1`) → `/contacts(id)`, the SAME pattern matterService
-        // uses. Discovery is best-effort; the hardcoded PascalCase fallback matches
-        // the schema names when discovery is unavailable (e.g. dev).
-        const attorneyPick = attorneyRef.current;
-        const paralegalPick = paralegalRef.current;
-        if (attorneyPick?.id || paralegalPick?.id) {
-          let assignNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
-          try {
-            assignNavProps = await discoverNavProps('sprk_analysis');
-          } catch {
-            /* fall through to hardcoded nav-prop names below */
-          }
-          const navPropFor = (col: string, fallback: string): string =>
-            assignNavProps.find(e => e.columnName === col)?.navPropName ?? fallback;
-          if (attorneyPick?.id) {
-            payload[`${navPropFor('sprk_assignedattorney1', 'sprk_AssignedAttorney1')}@odata.bind`] =
-              `/contacts(${cleanGuid(attorneyPick.id)})`;
-          }
-          if (paralegalPick?.id) {
-            payload[`${navPropFor('sprk_assignedparalegal1', 'sprk_AssignedParalegal1')}@odata.bind`] =
-              `/contacts(${cleanGuid(paralegalPick.id)})`;
-          }
-        }
-
-        // -- Agreement sub-domain (A1/A2): bind the sprk_agreementtype lookup — the
-        // level-2 type the review machine orients on. Same discover-nav-prop pattern
-        // as the assignees; PascalCase fallback matches the schema name when metadata
-        // discovery is unavailable (e.g. dev).
-        const agreementTypeId = selectedAgreementTypeIdRef.current;
-        if (agreementTypeId) {
-          let atNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
-          try {
-            atNavProps = await discoverNavProps('sprk_analysis');
-          } catch {
-            /* fall through to hardcoded nav-prop name below */
-          }
-          // The lookup ATTRIBUTE on sprk_analysis is `sprk_agreementtype` (OData
-          // `_sprk_agreementtype_value`); `sprk_agreementtypeid` is the reference table's PK.
-          // discoverNavProps keys on the attribute logical name; fallback = PascalCase nav-prop.
-          const atNavProp =
-            atNavProps.find(e => e.columnName === 'sprk_agreementtype')?.navPropName ?? 'sprk_AgreementType';
-          payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${cleanGuid(agreementTypeId)})`;
-        }
-
-        // -- Associate-to: ADR-024 resolver fields + Field-Mapping inheritance --
-        // Association now comes from the dedicated "Associate To" first step
-        // (config.associateToStep → IFinishContext.association), not a local field.
-        const finishAssociation = context.association;
-        let mappingSource: { entity: string; id: string } | undefined;
-        if (finishAssociation) {
-          const entitySet = REGARDING_ENTITY_SET_BY_TYPE[finishAssociation.entityType];
-          const navPropHint = REGARDING_NAVPROP_HINT_BY_TYPE[finishAssociation.entityType];
-          if (entitySet) {
+          if (context.selectedExistingRecord) {
+            documentId = context.selectedExistingRecord.recordId;
+            documentName = context.selectedExistingRecord.recordName;
+            // Resolve the SPE pointer from the picked sprk_document (mirrors DocumentComposeLaunch).
             try {
-              const navProps = await discoverNavProps('sprk_analysis');
-              await applyResolverFields(
-                webApiAdapter,
-                payload,
-                navProps,
-                finishAssociation.entityType,
-                entitySet,
-                finishAssociation.recordId,
-                finishAssociation.recordName,
-                navPropHint
+              const docRec = await dataService.retrieveRecord(
+                'sprk_document',
+                documentId,
+                '?$select=sprk_filename,sprk_graphitemid,sprk_graphdriveid'
               );
-            } catch (err) {
-              warnings.push(
-                `Could not link the regarding record (${err instanceof Error ? err.message : 'unknown error'}).`
-              );
+              speDriveItemId = docRec['sprk_graphitemid'] as string | undefined;
+              speDriveId = docRec['sprk_graphdriveid'] as string | undefined;
+              documentName = (docRec['sprk_filename'] as string | undefined) ?? documentName;
+            } catch {
+              /* pointer unavailable — the compose open falls back to the read-only viewer below */
+            }
+          } else if (context.uploadedFiles.length > 0) {
+            if (!authFetch || !bffBaseUrl || !webApiAdapter) {
+              throw new Error('Document upload is not available right now. Please try again shortly.');
+            }
+            // 🔴 PARENTLESS UPLOAD. Task 076: the `sprk_analysis` row does not exist yet — it is
+            // created further down, and the document it needs must exist first. So this uses the
+            // record-LESS route (`PUT /api/obo/me/files/{path}`) and the SERVER derives the container
+            // from the acting user's business unit. Task 076's classification (project notes
+            // `task-076-client-cutover-and-supplier-classification.md:54-55`) reads this as legitimately
+            // parentless, alongside EmailComposer's local-attachment flow — the only other caller of
+            // `uploadFilesWithoutRecord` at HEAD.
+            //
+            // The client-side `context.speContainerId` guard is GONE: the client no longer resolves a
+            // container, so it is not in a position to report one missing. If none can be derived the
+            // server refuses with its own explanation, which surfaces through `uploadResult.errors`
+            // below.
+            //
+            // Reuse the shared EntityCreationService — the SAME proven upload path every other
+            // Create*Wizard uses (Matter/Project/Event/Invoice/WorkAssignment). See
+            // docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md §Step 4:
+            //   uploadFilesWithoutRecord → PUT /api/obo/me/files/{path}   (record-less)
+            //   createDocumentRecords    → durable sprk_document + Document Profile analysis (auto)
+            // This REPLACES a bespoke POST /api/documents/upload call that targeted a NON-EXISTENT
+            // BFF endpoint (§11 reuse violation caught in the 2026-07-29 duplicate-component audit).
+            const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
+
+            const uploadResult = await entityService.uploadFilesWithoutRecord(context.uploadedFiles);
+            if (uploadResult.uploadedFiles.length === 0) {
+              const firstErr = uploadResult.errors[0]?.error ?? 'unknown error';
+              throw new Error(`Document upload failed: ${firstErr}`);
+            }
+            // Capture the SPE pointer from the upload (id = drive-item, driveId = drive) so
+            // the document can open in the editable Compose surface (Phase 1).
+            speDriveItemId = uploadResult.uploadedFiles[0]?.id;
+            speDriveId = uploadResult.uploadedFiles[0]?.driveId;
+
+            // Create a STANDALONE sprk_document (empty navigationProperty → createDocumentRecords
+            // skips the parent @odata.bind). The Analysis is the SUBJECT-owner via its
+            // sprk_documentid lookup (ADR-007), not a parent of the document — so no child binding.
+            // No `containerId` option — `sprk_graphdriveid` is taken from the drive the SERVER
+            // reported on the upload response (the same value `speDriveId` above already reads).
+            const docResult = await entityService.createDocumentRecords('', '', '', uploadResult.uploadedFiles);
+            documentId = docResult.createdDocumentIds[0] ?? null;
+            if (!documentId) {
+              const firstWarn = docResult.warnings[0] ?? 'the document record could not be created';
+              throw new Error(`Document upload succeeded but ${firstWarn}.`);
+            }
+            documentName = context.uploadedFiles[0]?.name ?? finishName;
+          }
+
+          if (!documentId) {
+            throw new Error('Please attach a document or select an existing one before finishing.');
+          }
+
+          // -- Build the sprk_analysis create payload --------------------------
+          const payload: Record<string, unknown> = {
+            sprk_name: finishName,
+            sprk_description: descriptionRef.current.trim() || null,
+            sprk_worktype: workTypeValue,
+            // "Run the analysis" (scoped per this widget's header doc comment):
+            // mark InProgress — the session/AI-execution binding is owned by
+            // other tasks in this project (020–025).
+            sprk_analysisstatus: SprkAnalysisStatus.InProgress,
+            'sprk_documentid@odata.bind': `/sprk_documents(${documentId})`,
+          };
+
+          const warnings: string[] = [];
+
+          // -- Assigned Attorney / Paralegal (both `contact` lookups, UAT #6) --------
+          // Bind via the discovered PascalCase nav-props (`sprk_AssignedAttorney1` /
+          // `sprk_AssignedParalegal1`) → `/contacts(id)`, the SAME pattern matterService
+          // uses. Discovery is best-effort; the hardcoded PascalCase fallback matches
+          // the schema names when discovery is unavailable (e.g. dev).
+          const attorneyPick = attorneyRef.current;
+          const paralegalPick = paralegalRef.current;
+          if (attorneyPick?.id || paralegalPick?.id) {
+            let assignNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
+            try {
+              assignNavProps = await discoverNavProps('sprk_analysis');
+            } catch {
+              /* fall through to hardcoded nav-prop names below */
+            }
+            const navPropFor = (col: string, fallback: string): string =>
+              assignNavProps.find(e => e.columnName === col)?.navPropName ?? fallback;
+            if (attorneyPick?.id) {
+              payload[`${navPropFor('sprk_assignedattorney1', 'sprk_AssignedAttorney1')}@odata.bind`] =
+                `/contacts(${cleanGuid(attorneyPick.id)})`;
+            }
+            if (paralegalPick?.id) {
+              payload[`${navPropFor('sprk_assignedparalegal1', 'sprk_AssignedParalegal1')}@odata.bind`] =
+                `/contacts(${cleanGuid(paralegalPick.id)})`;
             }
           }
 
-          // The association parent is also the mapping source: the server maps from it (fill-only), after probing Read
-          // as the caller (FR-04). The client maps nothing.
-          mappingSource = { entity: finishAssociation.entityType, id: cleanGuid(finishAssociation.recordId) };
-        }
-
-        // -- Create the sprk_analysis record ---------------------------------
-        // UAC-r2 task 147 r1 (owner round 28 item 1): the analysis (and its follow-on To Do) is created through the BFF
-        // (G5) — the server decides the owner; nothing is created as the user. A refusal surfaces the server's message.
-        // field-mapping-server-write-path-r1 task 028 (FR-16): the association parent is named as the `mappingSource`
-        // (`?mappingSourceEntity=&mappingSourceId=`), so the server fills what the user did not enter; its warnings
-        // (a mapped value not written, a source that could not be read) are shown like any other.
-        if (!authFetch || !bffBaseUrl) {
-          throw new Error('Creating the analysis is not available right now. Please try again shortly.');
-        }
-        const childWrites = withBffChildWrites(dataService, authFetch, bffBaseUrl);
-        const created = await createRecordViaBffWithWarnings(
-          authFetch,
-          bffBaseUrl,
-          'sprk_analysis',
-          payload,
-          mappingSource ? { mappingSource } : undefined
-        );
-        const analysisId = created.id;
-        warnings.push(...created.warnings);
-
-        // -- Follow-on: Create To Do (Field-Mapping-driven internally via
-        //    TodoService.createTodo — task 021) --------------------------------
-        if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
-          try {
-            const todoResult = await createTodoRegardingChild(
-              childWrites,
-              todoFormRef.current,
-              {
-                entityType: 'sprk_analysis',
-                recordId: analysisId,
-                recordName: finishName,
-              },
-              authFetch,
-              bffBaseUrl
-            );
-            if (!todoResult.success) {
-              warnings.push(
-                `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +
-                  'You can create it manually from the analysis record.'
-              );
-            } else if (todoResult.warnings?.length) {
-              warnings.push(...todoResult.warnings.map(w => `[Field Mapping] ${w}`));
+          // -- Agreement sub-domain (A1/A2): bind the sprk_agreementtype lookup — the
+          // level-2 type the review machine orients on. Same discover-nav-prop pattern
+          // as the assignees; PascalCase fallback matches the schema name when metadata
+          // discovery is unavailable (e.g. dev).
+          const agreementTypeId = selectedAgreementTypeIdRef.current;
+          if (agreementTypeId) {
+            let atNavProps: Awaited<ReturnType<typeof discoverNavProps>> = [];
+            try {
+              atNavProps = await discoverNavProps('sprk_analysis');
+            } catch {
+              /* fall through to hardcoded nav-prop name below */
             }
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            warnings.push(
-              `To do could not be created (${message}). You can create it manually from the analysis record.`
-            );
+            // The lookup ATTRIBUTE on sprk_analysis is `sprk_agreementtype` (OData
+            // `_sprk_agreementtype_value`); `sprk_agreementtypeid` is the reference table's PK.
+            // discoverNavProps keys on the attribute logical name; fallback = PascalCase nav-prop.
+            const atNavProp =
+              atNavProps.find(e => e.columnName === 'sprk_agreementtype')?.navPropName ?? 'sprk_AgreementType';
+            payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${cleanGuid(agreementTypeId)})`;
           }
-        }
 
-        // -- Follow-on: Send Email (the server fills an empty subject/body from the mapping at send) --
-        if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
-          // field-mapping-server-write-path-r1 task 028 (FR-17): the user-typed subject and body go as they are (empty
-          // allowed). The send path fills an EMPTY one from the sprk_analysis -> sprk_communication mapping; a typed
-          // value is never replaced. The client computes no mapped text.
-          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the analysis.
-          const composed = emailRef.current;
-          const emailResult = await sendComposedEmail(composed, {
-            associations: [{ entityType: 'sprk_analysis', entityId: analysisId, entityName: finishName }],
-            authenticatedFetch: authFetch,
+          // -- Associate-to: ADR-024 resolver fields + Field-Mapping inheritance --
+          // Association now comes from the dedicated "Associate To" first step
+          // (config.associateToStep → IFinishContext.association), not a local field.
+          const finishAssociation = context.association;
+          let mappingSource: { entity: string; id: string } | undefined;
+          if (finishAssociation) {
+            const entitySet = REGARDING_ENTITY_SET_BY_TYPE[finishAssociation.entityType];
+            const navPropHint = REGARDING_NAVPROP_HINT_BY_TYPE[finishAssociation.entityType];
+            if (entitySet) {
+              try {
+                const navProps = await discoverNavProps('sprk_analysis');
+                await applyResolverFields(
+                  webApiAdapter,
+                  payload,
+                  navProps,
+                  finishAssociation.entityType,
+                  entitySet,
+                  finishAssociation.recordId,
+                  finishAssociation.recordName,
+                  navPropHint
+                );
+              } catch (err) {
+                warnings.push(
+                  `Could not link the regarding record (${err instanceof Error ? err.message : 'unknown error'}).`
+                );
+              }
+            }
+
+            // The association parent is also the mapping source: the server maps from it (fill-only), after probing Read
+            // as the caller (FR-04). The client maps nothing.
+            mappingSource = { entity: finishAssociation.entityType, id: cleanGuid(finishAssociation.recordId) };
+          }
+
+          // -- Create the sprk_analysis record ---------------------------------
+          // UAC-r2 task 147 r1 (owner round 28 item 1): the analysis (and its follow-on To Do) is created through the BFF
+          // (G5) — the server decides the owner; nothing is created as the user. A refusal surfaces the server's message.
+          // field-mapping-server-write-path-r1 task 028 (FR-16): the association parent is named as the `mappingSource`
+          // (`?mappingSourceEntity=&mappingSourceId=`), so the server fills what the user did not enter; its warnings
+          // (a mapped value not written, a source that could not be read) are shown like any other.
+          if (!authFetch || !bffBaseUrl) {
+            throw new Error('Creating the analysis is not available right now. Please try again shortly.');
+          }
+          const childWrites = withBffChildWrites(dataService, authFetch, bffBaseUrl);
+          const created = await createRecordViaBffWithWarnings(
+            authFetch,
             bffBaseUrl,
-            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
-            allowEmptySubjectAndBody: true,
-          });
-          if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
-        } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
-          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
-        }
+            'sprk_analysis',
+            payload,
+            mappingSource ? { mappingSource } : undefined
+          );
+          const analysisId = created.id;
+          warnings.push(...created.warnings);
 
-        // -- Open the document in the EDITABLE Compose/TipTap surface (Phase 1, UAT
-        // round 5) so the analysis surface IS the review surface, not a read-only
-        // preview. Requires BOTH the SPE drive-item id and drive id (ComposeEditor
-        // contract; mirrors DocumentComposeLaunch). Falls back to the read-only
-        // document-viewer when the SPE pointer is incomplete.
-        const analysisActiveWorkType =
-          workTypeValue === SprkAnalysisWorkType.AgreementAnalysis ? 'agreement-analysis' : undefined;
-        // agreements-r1 contract A3: carry the picked agreement sub-domain (sprk_key) so the
-        // review machine opens ORIENTED (binds the type's knowledge pack) instead of re-inferring.
-        const selectedSubDomain = agreementTypes.find(r => r.id === selectedAgreementTypeIdRef.current)?.key;
-
-        // -- FR-17 (agreements-r1 task 033, path B-i): mint the ANALYSIS-OWNED compose session --
-        // The wizard-finish flow has no chat session yet; minting it HERE — document-anchored
-        // (`documentId` = the durable sprk_document GUID) and Analysis-owned (HostContext sentinel)
-        // — does three things at once:
-        //   1. DURABLE BIND: `CreateSessionAsync`'s create-time FK write stamps `sprk_analysis` on
-        //      the session's `sprk_aichatsummary` row → the session is visible via
-        //      `GET /sessions/by-analysis/{analysisId}` (the FR-17 durable-bind acceptance; the
-        //      promote silent-FK gap is bypassed entirely — no promote call, hub fix 2f8f11123
-        //      hardens the fallback path).
-        //   2. SESSION COINCIDENCE: the seed's `composeSessionId` below threads into
-        //      `ComposeWorkspace`'s Load request (`?sessionId=`), whose resume path
-        //      (`ComposeService.LoadAsync` — `IsSameCrossVersionBinding` on DocumentId) RESUMES
-        //      this session as the DOCUMENT session. Chat session ≡ document session, exactly like
-        //      the shipped upload-mount door "by construction" — so the DEF-10 register's file
-        //      upload, the review dispatch's `sessionIdOverride`, and ComposeWorkspace's
-        //      compose-outputs read all target ONE session (no file-id impedance, DEF-09 holds).
-        //   3. ADOPTION HAND-OFF: ConversationPane's workspace listener adopts this session as the
-        //      pane's active chat session, so the Assistant sees the file + review conversation.
-        // Failure is NON-FATAL and DISTINCT (ADR-019): the wizard still succeeds, Compose still
-        // opens (shipped behavior), and the warning below tells the user the review must be
-        // started manually — no silent partial success, no orphan (the Analysis is already
-        // consistent and durable at this point).
-        let composeSessionId: string | undefined;
-        if (analysisActiveWorkType && speDriveItemId && speDriveId) {
-          // ADR-044: bare-lowercase GUIDs. The session's DocumentId must ORDINAL-match the
-          // server's resume bindingId (`DocumentRecordId.Value.ToString()` — "D" lowercase).
-          const cleanDocumentId = cleanGuid(documentId);
-          const cleanAnalysisId = cleanGuid(analysisId);
-          try {
-            const sessionResp = await authFetch(`${bffBaseUrl}/api/ai/chat/sessions`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                documentId: cleanDocumentId,
-                hostContext: {
-                  entityType: ANALYSIS_SESSION_HOST_ENTITY_TYPE,
-                  entityId: cleanAnalysisId,
-                  entityName: finishName,
+          // -- Follow-on: Create To Do (Field-Mapping-driven internally via
+          //    TodoService.createTodo — task 021) --------------------------------
+          if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
+            try {
+              const todoResult = await createTodoRegardingChild(
+                childWrites,
+                todoFormRef.current,
+                {
+                  entityType: 'sprk_analysis',
+                  recordId: analysisId,
+                  recordName: finishName,
                 },
-              }),
-            });
-            // A non-2xx THROWS (ApiError) → the catch degrades to the warning below.
-            const sessionJson = (await sessionResp.json()) as { sessionId?: string };
-            composeSessionId =
-              typeof sessionJson?.sessionId === 'string' && sessionJson.sessionId.length > 0
-                ? sessionJson.sessionId
-                : undefined;
-          } catch {
-            /* degrade to the warning below — the wizard result is already durable */
+                authFetch,
+                bffBaseUrl
+              );
+              if (!todoResult.success) {
+                warnings.push(
+                  `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +
+                    'You can create it manually from the analysis record.'
+                );
+              } else if (todoResult.warnings?.length) {
+                warnings.push(...todoResult.warnings.map(w => `[Field Mapping] ${w}`));
+              }
+            } catch (err) {
+              const message = err instanceof Error ? err.message : 'Unknown error';
+              warnings.push(
+                `To do could not be created (${message}). You can create it manually from the analysis record.`
+              );
+            }
           }
-          if (!composeSessionId) {
-            warnings.push(
-              'The review could not be started automatically — open the document and ask the Assistant to review it.'
-            );
-          }
-        }
 
-        if (speDriveItemId && speDriveId) {
-          dispatch('workspace', {
-            type: 'widget_load',
-            widgetType: 'compose',
-            widgetData: {
-              compose: {
-                speDriveItemId,
-                speDriveId,
-                sprkDocumentId: documentId,
-                fileName: documentName,
-                ...(analysisActiveWorkType ? { activeWorkType: analysisActiveWorkType } : {}),
-                ...(selectedSubDomain ? { subDomain: selectedSubDomain } : {}),
-                // FR-17 (task 033) hand-off: the Analysis-owned session (adopt + resume as the
-                // document session) + the analysisId it is durably bound to. `autoRunReview`
-                // arms ConversationPane's explicit review door (runExplicit on the picked
-                // sub-domain's pack) — only when a sub-domain was actually picked (a
-                // deterministic explicit run needs a subDomainKey; without one the user
-                // triggers the review conversationally, classifier-gated, as today).
-                ...(composeSessionId
-                  ? {
-                      composeSessionId,
-                      analysisId: cleanGuid(analysisId),
-                      // ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector):
-                      // `reviewDepth` rides alongside `autoRunReview` so ConversationPane's wizard
-                      // hand-off listener can call `runExplicit` with the depth already decided —
-                      // no post-open depth-choice ask (would defeat the auto-run's whole point).
-                      ...(selectedSubDomain ? { autoRunReview: true, reviewDepth: reviewDepthRef.current } : {}),
-                    }
+          // -- Follow-on: Send Email (the server fills an empty subject/body from the mapping at send) --
+          if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
+            // field-mapping-server-write-path-r1 task 028 (FR-17): the user-typed subject and body go as they are (empty
+            // allowed). The send path fills an EMPTY one from the sprk_analysis -> sprk_communication mapping; a typed
+            // value is never replaced. The client computes no mapped text.
+            // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the analysis.
+            const composed = emailRef.current;
+            const emailResult = await sendComposedEmail(composed, {
+              associations: [{ entityType: 'sprk_analysis', entityId: analysisId, entityName: finishName }],
+              authenticatedFetch: authFetch,
+              bffBaseUrl,
+              onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
+              allowEmptySubjectAndBody: true,
+            });
+            if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+          } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
+            warnings.push(EMAIL_NOT_SENT_NO_SERVER);
+          }
+
+          // -- Open the document in the EDITABLE Compose/TipTap surface (Phase 1, UAT
+          // round 5) so the analysis surface IS the review surface, not a read-only
+          // preview. Requires BOTH the SPE drive-item id and drive id (ComposeEditor
+          // contract; mirrors DocumentComposeLaunch). Falls back to the read-only
+          // document-viewer when the SPE pointer is incomplete.
+          const analysisActiveWorkType =
+            workTypeValue === SprkAnalysisWorkType.AgreementAnalysis ? 'agreement-analysis' : undefined;
+          // agreements-r1 contract A3: carry the picked agreement sub-domain (sprk_key) so the
+          // review machine opens ORIENTED (binds the type's knowledge pack) instead of re-inferring.
+          const selectedSubDomain = agreementTypes.find(r => r.id === selectedAgreementTypeIdRef.current)?.key;
+
+          // -- FR-17 (agreements-r1 task 033, path B-i): mint the ANALYSIS-OWNED compose session --
+          // The wizard-finish flow has no chat session yet; minting it HERE — document-anchored
+          // (`documentId` = the durable sprk_document GUID) and Analysis-owned (HostContext sentinel)
+          // — does three things at once:
+          //   1. DURABLE BIND: `CreateSessionAsync`'s create-time FK write stamps `sprk_analysis` on
+          //      the session's `sprk_aichatsummary` row → the session is visible via
+          //      `GET /sessions/by-analysis/{analysisId}` (the FR-17 durable-bind acceptance; the
+          //      promote silent-FK gap is bypassed entirely — no promote call, hub fix 2f8f11123
+          //      hardens the fallback path).
+          //   2. SESSION COINCIDENCE: the seed's `composeSessionId` below threads into
+          //      `ComposeWorkspace`'s Load request (`?sessionId=`), whose resume path
+          //      (`ComposeService.LoadAsync` — `IsSameCrossVersionBinding` on DocumentId) RESUMES
+          //      this session as the DOCUMENT session. Chat session ≡ document session, exactly like
+          //      the shipped upload-mount door "by construction" — so the DEF-10 register's file
+          //      upload, the review dispatch's `sessionIdOverride`, and ComposeWorkspace's
+          //      compose-outputs read all target ONE session (no file-id impedance, DEF-09 holds).
+          //   3. ADOPTION HAND-OFF: ConversationPane's workspace listener adopts this session as the
+          //      pane's active chat session, so the Assistant sees the file + review conversation.
+          // Failure is NON-FATAL and DISTINCT (ADR-019): the wizard still succeeds, Compose still
+          // opens (shipped behavior), and the warning below tells the user the review must be
+          // started manually — no silent partial success, no orphan (the Analysis is already
+          // consistent and durable at this point).
+          let composeSessionId: string | undefined;
+          if (analysisActiveWorkType && speDriveItemId && speDriveId) {
+            // ADR-044: bare-lowercase GUIDs. The session's DocumentId must ORDINAL-match the
+            // server's resume bindingId (`DocumentRecordId.Value.ToString()` — "D" lowercase).
+            const cleanDocumentId = cleanGuid(documentId);
+            const cleanAnalysisId = cleanGuid(analysisId);
+            try {
+              const sessionResp = await authFetch(`${bffBaseUrl}/api/ai/chat/sessions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  documentId: cleanDocumentId,
+                  hostContext: {
+                    entityType: ANALYSIS_SESSION_HOST_ENTITY_TYPE,
+                    entityId: cleanAnalysisId,
+                    entityName: finishName,
+                  },
+                }),
+              });
+              // A non-2xx THROWS (ApiError) → the catch degrades to the warning below.
+              const sessionJson = (await sessionResp.json()) as { sessionId?: string };
+              composeSessionId =
+                typeof sessionJson?.sessionId === 'string' && sessionJson.sessionId.length > 0
+                  ? sessionJson.sessionId
+                  : undefined;
+            } catch {
+              /* degrade to the warning below — the wizard result is already durable */
+            }
+            if (!composeSessionId) {
+              warnings.push(
+                'The review could not be started automatically — open the document and ask the Assistant to review it.'
+              );
+            }
+          }
+
+          if (speDriveItemId && speDriveId) {
+            dispatch('workspace', {
+              type: 'widget_load',
+              widgetType: 'compose',
+              widgetData: {
+                compose: {
+                  speDriveItemId,
+                  speDriveId,
+                  sprkDocumentId: documentId,
+                  fileName: documentName,
+                  ...(analysisActiveWorkType ? { activeWorkType: analysisActiveWorkType } : {}),
+                  ...(selectedSubDomain ? { subDomain: selectedSubDomain } : {}),
+                  // FR-17 (task 033) hand-off: the Analysis-owned session (adopt + resume as the
+                  // document session) + the analysisId it is durably bound to. `autoRunReview`
+                  // arms ConversationPane's explicit review door (runExplicit on the picked
+                  // sub-domain's pack) — only when a sub-domain was actually picked (a
+                  // deterministic explicit run needs a subDomainKey; without one the user
+                  // triggers the review conversationally, classifier-gated, as today).
+                  ...(composeSessionId
+                    ? {
+                        composeSessionId,
+                        analysisId: cleanGuid(analysisId),
+                        // ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector):
+                        // `reviewDepth` rides alongside `autoRunReview` so ConversationPane's wizard
+                        // hand-off listener can call `runExplicit` with the depth already decided —
+                        // no post-open depth-choice ask (would defeat the auto-run's whole point).
+                        ...(selectedSubDomain ? { autoRunReview: true, reviewDepth: reviewDepthRef.current } : {}),
+                      }
+                    : {}),
+                },
+              },
+              displayName: documentName,
+            });
+          } else {
+            // Incomplete SPE pointer → read-only preview fallback (correct shape so it
+            // doesn't render "Unknown file"). Reuse the shared resolver by treating the
+            // document id as the analysis's `sprk_documentid` value.
+            // The authenticated fetch is always present here (the create above requires it), so the preview never
+            // falls back to an unauthenticated `globalThis.fetch`.
+            const createdFilePreview: AnalysisFilePreviewResolution = resolveAnalysisFilePreview(
+              { _sprk_documentid_value: documentId, sprk_name: documentName },
+              { bffBaseUrl, authenticatedFetch: authFetch }
+            );
+            dispatch('workspace', {
+              type: 'widget_load',
+              widgetType: 'document-viewer',
+              widgetData: {
+                filename: documentName,
+                contentType: 'application/octet-stream',
+                textContent: '',
+                documentId,
+                ...(createdFilePreview.status === 'resolved'
+                  ? { fetchPreviewUrl: createdFilePreview.fetchPreviewUrl }
                   : {}),
               },
-            },
-            displayName: documentName,
-          });
-        } else {
-          // Incomplete SPE pointer → read-only preview fallback (correct shape so it
-          // doesn't render "Unknown file"). Reuse the shared resolver by treating the
-          // document id as the analysis's `sprk_documentid` value.
-          // The authenticated fetch is always present here (the create above requires it), so the preview never
-          // falls back to an unauthenticated `globalThis.fetch`.
-          const createdFilePreview: AnalysisFilePreviewResolution = resolveAnalysisFilePreview(
-            { _sprk_documentid_value: documentId, sprk_name: documentName },
-            { bffBaseUrl, authenticatedFetch: authFetch }
-          );
-          dispatch('workspace', {
-            type: 'widget_load',
-            widgetType: 'document-viewer',
-            widgetData: {
-              filename: documentName,
-              contentType: 'application/octet-stream',
-              textContent: '',
-              documentId,
-              ...(createdFilePreview.status === 'resolved'
-                ? { fetchPreviewUrl: createdFilePreview.fetchPreviewUrl }
-                : {}),
-            },
-            displayName: documentName,
-          });
-        }
-
-        setCompletedName(finishName);
-
-        const hasWarnings = warnings.length > 0;
-        // "View" opens the new Analysis as a MODAL (UAT round 3): the OOB
-        // `sprk_analysis` form at 85%×85% (openRecordModal), consistent with the
-        // grid row-click. Falls back to a plain openRecord when the host adapter
-        // doesn't implement the modal variant. The embedded SpaarkeAi on that form
-        // now resolves the record via the parent-form frame-walk (main.tsx), so the
-        // modal shows THIS analysis rather than the cold workspace.
-        const viewAnalysis = () => {
-          if (navigationService?.openRecordModal) {
-            void navigationService.openRecordModal('sprk_analysis', analysisId);
-          } else {
-            void navigationService?.openRecord?.('sprk_analysis', analysisId);
+              displayName: documentName,
+            });
           }
-          handleClose();
-        };
 
-        return {
-          icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
-          title: hasWarnings ? 'Analysis created with warnings' : 'Analysis created!',
-          body: (
-            <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{finishName}&rdquo;</span>{' '}
-              has been created and the analysis is running.
-              {hasWarnings ? ' Some follow-on operations could not complete — see details below.' : ''}
-            </Text>
-          ),
-          warnings: hasWarnings ? warnings : undefined,
-          actions: (
-            <Button appearance="primary" onClick={viewAnalysis} data-testid="view-analysis-button">
-              View
-            </Button>
-          ),
-        };
-      },
+          setCompletedName(finishName);
+
+          const hasWarnings = warnings.length > 0;
+          // "View" opens the new Analysis as a MODAL (UAT round 3): the OOB
+          // `sprk_analysis` form at 85%×85% (openRecordModal), consistent with the
+          // grid row-click. Falls back to a plain openRecord when the host adapter
+          // doesn't implement the modal variant. The embedded SpaarkeAi on that form
+          // now resolves the record via the parent-form frame-walk (main.tsx), so the
+          // modal shows THIS analysis rather than the cold workspace.
+          const viewAnalysis = () => {
+            if (navigationService?.openRecordModal) {
+              void navigationService.openRecordModal('sprk_analysis', analysisId);
+            } else {
+              void navigationService?.openRecord?.('sprk_analysis', analysisId);
+            }
+            handleClose();
+          };
+
+          return {
+            icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
+            title: hasWarnings ? 'Analysis created with warnings' : 'Analysis created!',
+            body: (
+              <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{finishName}&rdquo;</span>{' '}
+                has been created and the analysis is running.
+                {hasWarnings ? ' Some follow-on operations could not complete — see details below.' : ''}
+              </Text>
+            ),
+            warnings: hasWarnings ? warnings : undefined,
+            actions: (
+              <Button appearance="primary" onClick={viewAnalysis} data-testid="view-analysis-button">
+                View
+              </Button>
+            ),
+          };
+        }),
     };
   }, [
     dataService,

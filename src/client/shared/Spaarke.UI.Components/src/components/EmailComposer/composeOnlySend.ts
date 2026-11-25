@@ -28,7 +28,7 @@ import {
   toSendCommunicationError,
   toSendRequestError,
 } from './describeSendFailure';
-import { discardUpload, keepUploads, releaseUploads } from './uploadDiscard';
+import { discardUpload, holdUploads, keepUploads } from './uploadDiscard';
 import type {
   EmailComposerBodyFormat,
   EmailComposerState,
@@ -281,17 +281,18 @@ export async function sendComposedEmail(
     fromMailbox: email.fromMailbox,
   };
 
-  // Task 220: what this send carries is kept from cleanup until the outcome is known, and for good when it went out or
-  // may have (no response, 5xx, success without an id). A send that provably sent nothing releases it again.
-  const carried = email.attachments.filter(a => a.selected !== false && !!a.documentId).map(a => a.discard);
-  keepUploads(carried);
+  // Task 220: every document this email names is held from cleanup until the outcome is known — attached or only linked
+  // (`buildBodyWithAttachmentLinks` links every `linkSelected` item to its row, whether or not it is attached) — and kept
+  // for good when the send went out or may have (no response, 5xx, success without an id). A send that provably sent
+  // nothing only ends its hold; it never undoes what an earlier attempt kept.
+  const carried = email.attachments.filter(a => !!a.documentId).map(a => a.discard);
+  const hold = holdUploads(carried);
   let requestSent = false;
   try {
     // Same order as EmailComposer.send(): resolve linked documents' record links, refuse a link that cannot be built.
     const attachments = await resolveAttachmentShareLinks(state.attachments, options.onResolveShareLink);
     const unresolved = findUnresolvedLinks(attachments);
     if (unresolved.length > 0) {
-      releaseUploads(carried);
       return {
         success: false,
         warning: `The email was not sent: the Spaarke record link for ${unresolved.map(a => a.fileName).join(', ')} could not be built here.`,
@@ -312,9 +313,10 @@ export async function sendComposedEmail(
       // What the request itself threw without a response is a connection failure, whatever the browser called it.
       throw toSendRequestError(requestErr);
     }
+    keepUploads(carried);
     return { success: true, communicationId: result.communicationId };
   } catch (err) {
-    if (!requestSent || !mayHaveBeenSent(toSendCommunicationError(err))) releaseUploads(carried);
+    if (requestSent && mayHaveBeenSent(toSendCommunicationError(err))) keepUploads(carried);
     return {
       success: false,
       warning: failureWarning(err, {
@@ -323,5 +325,7 @@ export async function sendComposedEmail(
         retryLabel: options.retryLabel,
       }),
     };
+  } finally {
+    hold.release();
   }
 }

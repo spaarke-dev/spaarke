@@ -7,10 +7,14 @@
  * the item travels: a compose-only wizard step lifts it into the wizard's state and restores it when the step reopens.
  * Picked and host-passed documents have no `discard`, so they can never be deleted through here.
  *
- * Two rules, keyed on the `discard` function itself (it travels with the item through every copy of the state):
- * - **kept**: a send that carried the document and succeeded, or may have gone out (no response, 5xx, success without
- *   an id), keeps it for good (a sent email's `sprk_communicationattachment` row is RemoveLink on document delete — it
- *   would be silently unlinked, not refused). A send that provably sent nothing releases it again.
+ * Rules, keyed on the `discard` function itself (it travels with the item through every copy of the state):
+ * - **kept** (for good): a send that carried the document and went out, or may have (no response, 5xx, success without
+ *   an id), keeps it. A sent email's `sprk_communicationattachment` row is RemoveLink on document delete — the document
+ *   would be silently unlinked, not refused — and its body may link to the document. A keep is never undone: a later
+ *   attempt that provably sent nothing does not release what an earlier attempt kept.
+ * - **held** (while the outcome is unknown): a wizard's Finish holds its email's uploads from its first moment (record
+ *   creation runs before the send), and a send holds what it carries. A delete asked for while held (the wizard closed
+ *   during "Creating…") is deferred; when the last hold ends it runs, unless the document was kept meanwhile.
  * - **once**: a delete runs at most once, however many paths ask for it (removal in the step, the wizard closing).
  *
  * Deletes are best effort: a rejected delete is logged and the document stays, exactly as before this cleanup existed.
@@ -23,24 +27,76 @@ type Discard = () => Promise<void>;
 
 const kept = new WeakSet<Discard>();
 const done = new WeakSet<Discard>();
+const holds = new WeakMap<Discard, number>();
+const deferred = new WeakSet<Discard>();
 
-/** Keep these uploads for good, or until {@link releaseUploads} (a send that carried them may have delivered them). */
+/** Keep these uploads for good: a send that carried them went out or may have. */
 export function keepUploads(discards: ReadonlyArray<Discard | undefined>): void {
   for (const d of discards) if (d) kept.add(d);
 }
 
-/** A send that provably sent nothing: its uploads may be removed again. */
-export function releaseUploads(discards: ReadonlyArray<Discard | undefined>): void {
-  for (const d of discards) if (d) kept.delete(d);
+/** A hold on some uploads; {@link IUploadHold.release} ends it (call it once, in a `finally`). */
+export interface IUploadHold {
+  release(): void;
 }
 
-/** Remove one upload's document, unless a send kept it or it was already removed. Never throws. */
+/** Hold these uploads until `release()`: no delete runs meanwhile; one asked for is run at release unless kept. */
+export function holdUploads(discards: ReadonlyArray<Discard | undefined>): IUploadHold {
+  const held = discards.filter((d): d is Discard => !!d);
+  for (const d of held) holds.set(d, (holds.get(d) ?? 0) + 1);
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      for (const d of held) {
+        const left = (holds.get(d) ?? 1) - 1;
+        if (left > 0) {
+          holds.set(d, left);
+          continue;
+        }
+        holds.delete(d);
+        if (deferred.has(d)) {
+          deferred.delete(d);
+          discardUpload(d);
+        }
+      }
+    },
+  };
+}
+
+/** Remove one upload's document, unless a send kept it or it was already removed; deferred while it is held. */
 export function discardUpload(discard: Discard | undefined): void {
   if (!discard || kept.has(discard) || done.has(discard)) return;
+  if ((holds.get(discard) ?? 0) > 0) {
+    deferred.add(discard);
+    return;
+  }
   done.add(discard);
   void Promise.resolve()
     .then(discard)
     .catch((err: unknown) => console.warn('[EmailComposer] could not remove an uploaded attachment document:', err));
+}
+
+/** Every upload this email carries (attached or only linked: a body link names the document too). */
+function emailDiscards(email: IComposedEmail): Array<Discard | undefined> {
+  return email.attachments.filter(a => !!a.documentId).map(a => a.discard);
+}
+
+/**
+ * A wizard's Finish: hold the Send Email step's uploads from its very first moment until it ends (task 220, #2813).
+ * Record creation runs before the send, and the wizard can be closed meanwhile; without the hold, the close would delete
+ * documents the send is about to carry. Call it synchronously as the Finish starts: `onFinish={() =>
+ * holdComposedEmailUploadsDuring(emailRef.current, handleFinish)}`. When the Finish ends without sending (or the send
+ * provably sent nothing) and the wizard was closed meanwhile, the deferred delete runs then.
+ */
+export async function holdComposedEmailUploadsDuring<T>(email: IComposedEmail, run: () => Promise<T>): Promise<T> {
+  const hold = holdUploads(emailDiscards(email));
+  try {
+    return await run();
+  } finally {
+    hold.release();
+  }
 }
 
 /**

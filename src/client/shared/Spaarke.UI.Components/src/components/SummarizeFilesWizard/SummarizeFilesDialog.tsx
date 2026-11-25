@@ -35,7 +35,7 @@ import { searchUsersAsLookup } from '../CreateMatterWizard/matterService';
 
 import { SummaryResultsStep } from './SummaryResultsStep';
 import { FollowOnGrid, SendEmailFollowOnStep } from '../WizardFollowOns';
-import { useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
+import { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
 import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
@@ -764,7 +764,9 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       ariaLabel="Summarize New File(s)"
       steps={stepConfigs}
       onClose={onClose}
-      onFinish={handleFinish}
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish={() => holdComposedEmailUploadsDuring(emailRef.current, handleFinish)}
       finishingLabel="Processing&hellip;"
       finishLabel="Done"
       embedded={embedded}

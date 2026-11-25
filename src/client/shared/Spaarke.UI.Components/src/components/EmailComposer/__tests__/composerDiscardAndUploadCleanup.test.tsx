@@ -43,6 +43,13 @@ function sendAnswering(status: number): AuthenticatedFetchFn {
   ) as unknown as AuthenticatedFetchFn;
 }
 
+/** A 2xx whose body carries no communication id: the server may have sent it (SENT_UNCONFIRMED). */
+function sendAnsweringWithoutId(): AuthenticatedFetchFn {
+  return throwingAuthenticatedFetch(
+    async () => ({ ok: true, status: 200, json: async () => ({}) }) as unknown as Response
+  ) as unknown as AuthenticatedFetchFn;
+}
+
 function sendThrowing(err: unknown): AuthenticatedFetchFn {
   return jest.fn().mockRejectedValue(err) as unknown as AuthenticatedFetchFn;
 }
@@ -179,6 +186,29 @@ describe('EmailComposer — closing a typed draft asks first (#2946)', () => {
   it('an empty draft closes without asking', () => {
     const { onClose } = renderDialog();
     clickClose();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alertdialog', { name: 'Discard this email?' })).toBeNull();
+  });
+
+  it('an untouched reply prefill with &quot; / &#39; entities and <style> text closes without asking (K3)', async () => {
+    const { onClose } = renderDialog({
+      mode: 'reply',
+      sourceRecord: {
+        communicationId: 'comm-0',
+        from: 'alice@example.com',
+        to: ['me@example.com'],
+        subject: 'Fees',
+        body: '<style>p { color: red; }</style><p>She said &quot;fine&quot; and it&#39;s agreed &amp; signed.</p>',
+        bodyFormat: 'HTML',
+      },
+    } as Partial<ISendEmailDialogProps>);
+    // Let the editor mount and re-serialise the quoted body.
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+
+    clickClose();
+
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alertdialog', { name: 'Discard this email?' })).toBeNull();
   });
@@ -350,6 +380,7 @@ describe('EmailComposer — documents this session uploaded are deleted when the
       'Email may not have been sent',
     ],
     ['a 500 (the email may have gone out)', sendAnswering(500), 'Email not sent'],
+    ['a success without an id (SENT_UNCONFIRMED)', sendAnsweringWithoutId(), 'Email may have been sent'],
   ])('Cancel after %s deletes nothing', async (_label, authenticatedFetch, failureTitle) => {
     const docs = fakeDocuments();
     renderDialog({ ...SEEDED, onUploadLocalAttachment: docs.upload, authenticatedFetch });
@@ -359,7 +390,11 @@ describe('EmailComposer — documents this session uploaded are deleted when the
     const failure = await screen.findByRole('alertdialog', { name: failureTitle });
     fireEvent.click(dialogButton(failure, 'OK'));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await confirmDiscard();
+    // F4-4: once an attempt may have sent the email, the prompt does not claim it "will not be sent".
+    const ask = await screen.findByRole('alertdialog', { name: 'Discard this email?' });
+    expect(ask).toHaveTextContent('What you have written will be lost.');
+    expect(ask).not.toHaveTextContent(/will not be sent/);
+    fireEvent.click(dialogButton(ask, 'Discard'));
 
     // Nothing to wait for: give any stray delete a chance to run, then check none did.
     await act(async () => {
@@ -435,6 +470,40 @@ describe('EmailComposer — documents this session uploaded are deleted when the
       await Promise.resolve();
     });
     expect(docs.deleteDocument).not.toHaveBeenCalled();
+  });
+
+  it('an upload sent only as a body link (Attach off, Link on) is kept when the send may have gone out (F1-1)', async () => {
+    const deleteDocument = jest.fn(async (_id: string) => undefined);
+    const { onClose } = renderDialog({
+      ...SEEDED,
+      authenticatedFetch: sendThrowing(new TypeError('Failed to fetch')),
+      initialAttachments: [
+        {
+          id: 'local:fees',
+          source: 'local',
+          fileName: 'fees.pdf',
+          sizeBytes: 1,
+          documentId: 'doc-linked',
+          discard: () => deleteDocument('doc-linked'),
+          selected: false,
+          linkSelected: true,
+          linkUrl: 'https://org.example.com/main.aspx?etn=sprk_document&id=doc-linked',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    const failure = await screen.findByRole('alertdialog', { name: 'Email may not have been sent' });
+    fireEvent.click(dialogButton(failure, 'OK'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    const ask = screen.queryByRole('alertdialog', { name: 'Discard this email?' });
+    if (ask) fireEvent.click(dialogButton(ask, 'Discard'));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(deleteDocument).not.toHaveBeenCalled();
   });
 
   it('an upload whose handler hands back no delete behaves as before (discard closes, nothing thrown)', async () => {

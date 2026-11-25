@@ -143,10 +143,23 @@ function isComposeBodyEmpty(body: string): boolean {
 
 // The words of a body, for "did the user change it": tags, &nbsp; and spacing are ignored, so the editor
 // re-serializing a seeded body (or an empty one as <p><br></p>) never reads as a change.
+// Style and script blocks are not words, and an entity is the character it stands for: the editor drops a quoted reply's
+// <style> and writes `&quot;` back as `"`, which is not an edit (task 220 K3).
 function bodyWords(body: string): string {
   return (body || '')
+    .replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
     .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
+    .replace(/&(nbsp|quot|apos|lt|gt|#\d+|#x[0-9a-f]+);/gi, (_m, name: string) => {
+      const n = name.toLowerCase();
+      if (n === 'nbsp') return ' ';
+      if (n === 'quot') return '"';
+      if (n === 'apos') return "'";
+      if (n === 'lt') return '<';
+      if (n === 'gt') return '>';
+      const code = n.startsWith('#x') ? parseInt(n.slice(2), 16) : parseInt(n.slice(1), 10);
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+    })
+    .replace(/&amp;/gi, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -763,6 +776,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const sentOrMaybeSentRef = React.useRef(new Set<string>());
   // Set once a send succeeded: closing afterwards neither asks "Discard this email?" nor deletes anything.
   const deliveredRef = React.useRef(false);
+  // Set once an attempt may have sent the email: the discard prompt then no longer says it "will not be sent".
+  const maybeSentRef = React.useRef(false);
   // Attachments whose upload was still running when the user removed them or abandoned the draft: the document such
   // an upload creates is deleted when it arrives (its id never reached the draft, the host or a send).
   const removedWhileUploadingRef = React.useRef(new Set<string>());
@@ -1194,6 +1209,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       const reset = initialState(props);
       openedWithRef.current = reset;
       deliveredRef.current = false;
+      maybeSentRef.current = false;
       dispatch({ type: 'RESET', state: reset });
       rootRef.current?.focus();
     }
@@ -1250,8 +1266,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     dispatch({ type: 'BEGIN_SEND' });
     // Task 220: from here until the outcome is known, nothing this attempt carries may be deleted (a Close while the
     // send is in flight must not pull a document out from under it). Released below only when nothing was sent.
+    // Every document the email names, attached or only linked (a body link to the row is written for every
+    // `linkSelected` item, attached or not — buildBodyWithAttachmentLinks).
     const carried = stateRef.current.attachments
-      .filter(a => a.selected !== false && !!a.documentId)
+      .filter(a => !!a.documentId)
       .map(a => a.documentId as string)
       .filter(id => !sentOrMaybeSentRef.current.has(id));
     carried.forEach(id => sentOrMaybeSentRef.current.add(id));
@@ -1309,6 +1327,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       // A send that provably sent nothing frees its documents for cleanup again; one that may have gone out
       // (no response, 5xx, 2xx without an id) keeps them for good.
       if (!mayHaveBeenSent(failure)) releaseCarried();
+      else maybeSentRef.current = true;
       props.onError?.(failure);
       if (props.sendFailureDisplay !== 'host' && mountedRef.current) {
         setFailureNotice(describeSendFailure(failure));
@@ -1802,7 +1821,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           abandon();
         }}
         title="Discard this email?"
-        message="What you have written will be lost. The email will not be sent."
+        message={
+          maybeSentRef.current
+            ? 'What you have written will be lost.'
+            : 'What you have written will be lost. The email will not be sent.'
+        }
         confirmLabel="Discard"
         cancelLabel="Keep editing"
         destructive

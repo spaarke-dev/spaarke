@@ -54,7 +54,7 @@ import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
 // contracts differ from the shared AssignWork/CreateEvent follow-on steps
 // (those create *child* records for CreateRecordWizard). See task 023 notes.
 import { FollowOnGrid, SendEmailFollowOnStep, followOnStepId } from '../WizardFollowOns';
-import { useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
+import { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
@@ -704,7 +704,9 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       title="Create Work Assignment"
       steps={steps}
       onClose={onClose}
-      onFinish={handleFinish}
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish={() => holdComposedEmailUploadsDuring(emailRef.current, handleFinish)}
       finishLabel="Create"
       finishingLabel={finishingLabel}
       embedded={embedded}
