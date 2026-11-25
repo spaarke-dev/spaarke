@@ -22,13 +22,16 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Events;
+using CreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Events;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
@@ -154,10 +157,228 @@ public sealed class EventCallerScopeTests
         json["subject"]!.GetValue<string>().Should().Be("A's private hearing");
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // The capability (IEventsCapability): what an MCP tool calls, with no endpoint filter in front of it
+    // ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Capability_List_CallerB_NeverSeesAPrivateEventOfCallerA_OnAnyPageOrInTheCount()
+    {
+        var world = new CapabilityWorld();
+
+        var seen = new List<Guid>();
+        int? totalCount = null;
+        for (var page = 1; ; page++)
+        {
+            var result = await world.Capability.ListAsync(
+                world.Request("B"), new EventListQuery { PageSize = 1, PageNumber = page }, CancellationToken.None);
+
+            result.Status.Should().Be(EventCapabilityStatus.Ok);
+            totalCount ??= result.Value!.TotalCount;
+            result.Value!.TotalCount.Should().Be(totalCount, "every page reports the same trimmed count");
+            seen.AddRange(result.Value.Items.Select(i => i.Id));
+            if (!result.Value.HasNextPage)
+            {
+                break;
+            }
+        }
+
+        seen.Should().NotContain(PrivateToA);
+        seen.Should().BeEquivalentTo(OwnedByB.Append(SharedWithB), "B sees exactly what B may read");
+        totalCount.Should().Be(4, "the count is B's trimmed count, not the table's 5 rows");
+        world.Dataverse.ListQueries.Should().OnlyContain(q => q.ImpersonatedUser == UserB, "every page is queried AS B");
+    }
+
+    [Fact]
+    public async Task Capability_Get_CallerBOnCallerAsPrivateEvent_IsNotFound_AsForAnAbsentId_AndNeverReadsIt()
+    {
+        var world = new CapabilityWorld();
+
+        var forPrivate = await world.Capability.GetAsync(world.Request("B"), PrivateToA, CancellationToken.None);
+        var forAbsent = await world.Capability.GetAsync(world.Request("B"), Absent, CancellationToken.None);
+
+        forPrivate.Should().BeEquivalentTo(forAbsent, "a private event and an absent one get one answer");
+        forPrivate.Status.Should().Be(EventCapabilityStatus.NotFound);
+        forPrivate.Value.Should().BeNull();
+        forPrivate.ReasonCode.Should().Be("sdap.access.deny.record_unavailable", "the uniform 404's reason code");
+        world.Dataverse.ReadsOf(PrivateToA).Should().Be(0, "the event is never read for a caller who may not read it");
+    }
+
+    [Fact]
+    public async Task Capability_Get_CallerAOnTheirOwnPrivateEvent_IsOk()
+    {
+        var world = new CapabilityWorld();
+
+        var result = await world.Capability.GetAsync(world.Request("A"), PrivateToA, CancellationToken.None);
+
+        result.Status.Should().Be(EventCapabilityStatus.Ok);
+        result.Value!.Id.Should().Be(PrivateToA);
+    }
+
+    public static TheoryData<string> NoSignedInCaller => new() { "null context", "no principal claims", "unauthenticated identity" };
+
+    [Theory]
+    [MemberData(nameof(NoSignedInCaller))]
+    public async Task Capability_WithoutASignedInCaller_IsUserContextRequired_ForEveryMethod_AndAsksDataverseNothing(string shape)
+    {
+        var world = new CapabilityWorld();
+        world.Probe.HeldPrivileges.Add(EventEndpoints.CreateEventPrivilege);
+        HttpContext? context = shape switch
+        {
+            "null context" => null,
+            "no principal claims" => new DefaultHttpContext { User = new ClaimsPrincipal() },
+            // Claims, and the bearer token, but no authentication type: not signed in.
+            _ => world.Request("A", new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", OidA.ToString("D"))]))),
+        };
+
+        var list = await world.Capability.ListAsync(context, new EventListQuery(), CancellationToken.None);
+        var get = await world.Capability.GetAsync(context, PrivateToA, CancellationToken.None);
+        var create = await world.Capability.CreateAsync(context, new CreateEventRequest("Subject"), CancellationToken.None);
+        var complete = await world.Capability.CompleteAsync(context, PrivateToA, CancellationToken.None);
+
+        foreach (var (status, reasonCode) in new[]
+        {
+            (list.Status, list.ReasonCode), (get.Status, get.ReasonCode),
+            (create.Status, create.ReasonCode), (complete.Status, complete.ReasonCode),
+        })
+        {
+            status.Should().Be(EventCapabilityStatus.UserContextRequired);
+            reasonCode.Should().Be(DataverseUserClientErrorCodes.UserContextRequired);
+        }
+
+        world.Dataverse.Requests.Should().Be(0, "no Dataverse call without a signed-in caller");
+        world.Probe.Calls.Should().Be(0, "not even an as-caller access question");
+        world.CallerResolver.Invocations.Should().BeEmpty();
+        world.UserClient.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Capability_Create_WithoutTheCreatePrivilege_IsRefusedWithRestsReason_AndWritesNothing()
+    {
+        var world = new CapabilityWorld(); // B holds no privilege
+
+        var result = await world.Capability.CreateAsync(
+            world.Request("B"), new CreateEventRequest("Subject"), CancellationToken.None);
+
+        result.Status.Should().Be(EventCapabilityStatus.InsufficientPrivilege);
+        result.ReasonCode.Should().Be(RestReasonCode("create.403.privilege"), "the same reason as POST /api/v1/events");
+        world.AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task Capability_Create_WithoutAppendToOnTheRegardingRecord_IsRefusedWithRestsReason_AndWritesNothing()
+    {
+        var world = new CapabilityWorld();
+        world.Probe.HeldPrivileges.Add(EventEndpoints.CreateEventPrivilege); // Create held; no rights on the matter
+        var matter = Guid.Parse("a7060000-0000-4000-8000-000000000001");
+
+        var result = await world.Capability.CreateAsync(
+            world.Request("B"),
+            new CreateEventRequest("Subject", RegardingRecordId: matter, RegardingRecordType: Spaarke.Dataverse.RegardingRecordType.Matter),
+            CancellationToken.None);
+
+        result.Status.Should().Be(EventCapabilityStatus.Forbidden);
+        result.ReasonCode.Should().Be(RestReasonCode("create.403.rights"), "the same reason as POST /api/v1/events");
+        world.Probe.Calls.Should().Be(2, "the privilege, then the rights on the regarding record, both as the caller");
+        world.AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task Capability_Create_WithAnInvalidShape_IsInvalid_BeforeAnyAccessQuestion()
+    {
+        var world = new CapabilityWorld();
+
+        var result = await world.Capability.CreateAsync(world.Request("B"), new CreateEventRequest("  "), CancellationToken.None);
+
+        result.Status.Should().Be(EventCapabilityStatus.Invalid);
+        result.Field.Should().Be("Subject");
+        world.Probe.Calls.Should().Be(0, "a 400 is never turned into a 403");
+        world.AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task Capability_Complete_CallerBOnCallerAsPrivateEvent_IsNotFound_AndNeverReadsIt()
+    {
+        var world = new CapabilityWorld();
+
+        var result = await world.Capability.CompleteAsync(world.Request("B"), PrivateToA, CancellationToken.None);
+
+        result.Status.Should().Be(EventCapabilityStatus.NotFound);
+        result.ReasonCode.Should().Be("sdap.access.deny.record_unavailable");
+        world.Dataverse.ReadsOf(PrivateToA).Should().Be(0);
+        world.AssertNothingWritten();
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
     internal static string Normalize(string body) =>
         Regex.Replace(body, "\"(traceId|correlationId)\"\\s*:\\s*\"[^\"]*\"", "\"$1\":\"<volatile>\"");
+
+    /// <summary>The <c>reasonCode</c> the REST route answered for a case, as its frozen golden file records it.</summary>
+    private static string RestReasonCode(string caseName)
+    {
+        var path = Path.Combine(
+            Sprk.Bff.Api.Tests.Integration.Contract.Signals.GoldenContract.BaselineDirectoryOf("Events"), caseName + ".json");
+        using var golden = JsonDocument.Parse(File.ReadAllText(path));
+        using var body = JsonDocument.Parse(golden.RootElement.GetProperty("body").GetString()!);
+        return body.RootElement.GetProperty("reasonCode").GetString()!;
+    }
+
+    /// <summary>
+    /// The real <see cref="EventsCapability"/> over the row-secured world. Everything a write would use is a strict double with no
+    /// setup (or absent), so a refusal that reached a write would fault and fail the test rather than pass it.
+    /// </summary>
+    private sealed class CapabilityWorld
+    {
+        public CapabilityWorld()
+        {
+            Dataverse = World();
+            Probe = new RowSecurityProbe(Dataverse);
+            Entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string logicalName, CancellationToken _) => logicalName + "s");
+            Capability = new EventsCapability(
+                new OfflineDataverseService(Dataverse),
+                new Mock<ICommunicationDataverseService>(MockBehavior.Strict).Object,
+                CallerResolver.Object,
+                NoLinkedContacts().Object,
+                Entities.Object,
+                recordCreation: null!, // never reached by these tests: a refusal that got this far would fault
+                UserClient.Object,
+                Ownership.Object,
+                Probe,
+                NullLogger<EventsCapability>.Instance);
+        }
+
+        public FakeDataverse Dataverse { get; }
+
+        public RowSecurityProbe Probe { get; }
+
+        public Mock<ICallerSystemUserResolver> CallerResolver { get; } = EventCallerScopeTests.CallerResolver();
+
+        public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
+
+        public Mock<IDataverseUserClient> UserClient { get; } = new(MockBehavior.Strict);
+
+        public Mock<IRecordOwnershipResolver> Ownership { get; } = new(MockBehavior.Strict);
+
+        public EventsCapability Capability { get; }
+
+        /// <summary>A request from caller A or B: the signed-in principal and the caller's own bearer token.</summary>
+        public HttpContext Request(string who, ClaimsPrincipal? principal = null)
+        {
+            var context = new DefaultHttpContext { User = principal ?? Principal(who) };
+            context.Request.Headers.Authorization = "Bearer token-" + who;
+            return context;
+        }
+
+        public void AssertNothingWritten()
+        {
+            UserClient.Invocations.Should().BeEmpty("no write as the caller");
+            Ownership.Invocations.Should().BeEmpty("no owner decided for a write");
+            Dataverse.ListQueries.Should().BeEmpty();
+            Dataverse.Requests.Should().Be(0, "no app-only Dataverse call either");
+        }
+    }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════════════════
     // The world: Dataverse with row security, the caller-rights probe over the same rows, two signed-in callers
