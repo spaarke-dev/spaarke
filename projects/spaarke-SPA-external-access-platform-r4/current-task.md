@@ -22,7 +22,7 @@
 - `assigned-work` for a workforce contact with ≥ 1 readable project/matter/WA. The SPA's record tabs use `RECORD_TAB_GATE`. Submit invoice is hidden on the workforce plane (F1, owner 2026-11-25); the question went to ebilling as D-41 #3159.
 
 ## Live on dev
-SPA `0267ee64a2` (rollback `3067fb3bdc`); BFF `a1b7db1def` since 2026-11-25 15:58:53Z (rollback `ef0c566d2c`; uac-r2 deploys; owner go per SHA). Tasks 040 and 041 are not in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal.
+SPA `0267ee64a2` (rollback `3067fb3bdc`); BFF `aa933c09e6` since 2026-11-25 21:49:11Z (rollback `a1b7db1def`; uac-r2 deploys; owner go per SHA; uac-r2's 30-minute gate PASSED at 22:20Z). Tasks 040 and 041 are not in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal.
 
 ## Owner questions open
 - Track the raw filing-reference footer seen in an older PRJ-000046 system email? (Told to the owner; not filed. The repo is public.)
