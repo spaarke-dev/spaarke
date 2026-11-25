@@ -15,3 +15,13 @@
   - `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` section 7.12 (task 004 of the r2 project).
   Decide: remove the column and bicep param (needs a Dataverse schema change and a control-plane redeploy), or keep them dormant. Tenant resources (Registry rows, Azure Bot, Entra app) are the owner's runbook E1/E2.
 - **Labels**: project label for customer-provisioning-orchestration-r1; Type=Task.
+
+## From task 005 (2026-11-25)
+
+### D-005-1: Runs left "Running" after a restart or failed final write
+- **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3178
+- Staleness limit after which a stored Running run reads as failed; decide in task 030 / FR-14.
+
+### D-005-2: Retention for sprk_playbookrun / sprk_playbooknoderun
+- **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3179
+- ADR-015; mechanism likely a Dataverse bulk-delete job.

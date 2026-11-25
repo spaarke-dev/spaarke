@@ -50,3 +50,15 @@ The POML says an internal caller without Read on the matter gets "the uniform re
 - K4: the deny log lines carry the caller's `oid`, as the REST filter's always have; ADR-028 A10 allows `oid` in `/mcp/*` audit enrichment. Task 033 adds its own NFR-05 log line.
 
 rework: none task 008
+
+## 🔔 ADR Conflict — Resolution Required (verifier pass 1, 2026-11-25)
+
+- **ADR:** ADR-028 A10.
+- **Rule (quoted from verifier):** a `/mcp` caller who resolves to no `systemuser` "gets the existing `UserContextRequired` refusal".
+- **Conflict:** `AuthorizeMatterFinanceReadAsync` returns `Refused(sdap.access.deny.internal_callers_only)` for that caller, because finance step 0 (`IsExternal || SystemUserId is null` → `InternalCallersOnly`) does not distinguish an external caller from a caller with no row. FR-11 requires the tool to return the same `reasonCode` as REST. The r1 decision tools answer the same identity `DATAVERSE_USER_CONTEXT_REQUIRED`, so Copilot would see two refusals for one identity problem.
+- **Proposed path:** A (project exception in spec ADR Tensions: FR-11 parity wins; code unchanged). Both answers refuse; nothing is exposed either way.
+- **Alternative:** C — expose a distinct no-row verdict from `EvaluateStepZeroAsync` (REST code unchanged) and map it to `UserContextRequired` in the method; gives up FR-11 parity for that one case.
+- **Impact:** blocks 008 completion and task 033's error mapping; nothing in Phase 0 waits on it.
+- **Status:** OPEN — owner chooses A or C.
+
+Other pass-1 findings: K2 method/route linked by tests not shared code (a future extra filter on the summary route would not reach the tool; optional pin test); K4 publish delta to be re-measured vs fresh master before the PR. No other F-class findings; REST behaviour unchanged for every route using the filter; method fail-closed for every input; 403 (not 404) is correct and leaks nothing.
