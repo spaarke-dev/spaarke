@@ -1,0 +1,105 @@
+# Task 028 — Analysis wizard + analysis-to-email mapping at send (FR-16, FR-17)
+
+FULL rigor, sonnet @ xhigh, directional. Started 2026-11-25.
+
+## Coordination (step 1)
+
+- PR #1501: CLOSED, not merged. The project CLAUDE.md records it as superseded, so there is nothing to rebase onto.
+- PR #2110: MERGED. `CommunicationService.cs` on master already carries it; the conflict check runs against master at edit time.
+
+## Inventory (step 2, 2026-11-25)
+
+There are two analysis creators in the client.
+
+| Creator | Route | Client mapping |
+|---|---|---|
+| `Spaarke.AI.Widgets/.../CreateAnalysisWizardWidget.tsx` (the spec's "Analysis wizard"; hosted by the Console `WorkspacePane` and `InAppWizardHost`) | `POST /api/v1/child-records/sprk_analysis` via `withBffChildWrites(...).createRecord` (:912-913) | `applyFieldMappings(association parent -> sprk_analysis)` :894; `applyFieldMappings(sprk_analysis -> sprk_communication)` for the Send Email subject/body :958 |
+| `Spaarke.UI.Components/.../Playbook/analysisService.ts` `createAndAssociate` (used by `PlaybookLibraryShell`) | `POST /api/ai/analysis/create` | none; the server maps Document -> Analysis (task 043) |
+
+Widget payload (:807-907):
+- user-entered: `sprk_name`, `sprk_description` (or null), the Attorney 1 / Paralegal 1 binds when picked, the agreement type bind when picked;
+- the document bind (the uploaded or selected document; required);
+- the regarding keys from `applyResolverFields` when an association is chosen;
+- client-set: `sprk_worktype` (the user's work-type choice) and `sprk_analysisstatus = InProgress` (the wizard's own run state, not a mapped default).
+
+`/api/ai/analysis/create` (`CreateAnalysisRequest`) takes only Name, DocumentId, skill/knowledge/tool ids, PlaybookId and ActionId. It has no description, work type, status, assignees, agreement type or regarding.
+
+## Criteria conflict (escalated to the owner 2026-11-25)
+
+The two criteria added from the task 043 review name `analysisService.ts` as "the Analysis wizard", and say "the wizard keeps creating the analysis through /api/ai/analysis/create". The wizard this task migrates (the widget) has never used that route; it creates through the child-records route. `analysisService.ts` belongs to the Playbook Library.
+
+Recommendation:
+- The widget stays on the child-records route and names the association parent as `mappingSource`, like the other wizards. With no association, no source is named.
+- The 043 criteria apply to `analysisService.ts` / `PlaybookLibraryShell`: show the 201 `warnings`, and keep that path on `/api/ai/analysis/create`.
+- Known limit: a Document -> Analysis profile is not applied to an analysis the widget creates. This is the same as today, since the widget maps only from the association parent.
+- Moving the widget onto `/api/ai/analysis/create` would need a BFF contract change for six fields. That is out of scope.
+
+**Owner decision (2026-11-25): as recommended.**
+
+## Execution
+
+- Master was merged into the work branch first: 83543888fe, `--no-verify`, a master merge. The BFF builds with 0 errors.
+- Open PRs: none touch `CommunicationService.cs`, the widget, `createXrmEmailComposeHandlers.ts`, `analysisService.ts`, `PlaybookLibraryShell.tsx` or `composeOnlySend.ts` (checked 2026-11-25).
+- The send path refuses an empty Subject or Body in `ValidateRequest`, in both the send-as-user and shared-mailbox branches. The fill step therefore runs in `SendAsync` before either branch.
+- Dev has no `* -> Analysis` and no `Analysis -> Communication` profile. The live check needs temporary profiles, as task 024 did; each needs the owner's go.
+- One implementer agent (Sonnet) works on `task/fm-028` from 83543888fe.
+
+## Implementation (agent on `task/fm-028`, merged `--no-ff` as d1fef67b64)
+
+Commits 125ac691ee (client), 2a7cf1d6bd (an analysis can be a mapping source read as the caller), 9b1d878e01 (server send step).
+
+- **Widget** (`CreateAnalysisWizardWidget.tsx`):
+  - No `applyFieldMappings` (grep empty).
+  - Creates through `createRecordViaBffWithWarnings` on `POST /api/v1/child-records/sprk_analysis`, naming the association parent as `mappingSource` when there is one; the server's warnings are shown.
+  - The Send Email follow-on sends the typed subject and body unchanged, filed under the new analysis.
+- **Server**:
+  - `Services/Dataverse/FieldMapping/SendTimeFieldMapping.cs`, called once from `CommunicationService.SendAsync` after the Message branch and before both email branches.
+  - For a caller email with exactly one `sprk_analysis` association, it fills an EMPTY subject and/or body from the active `sprk_analysis -> sprk_communication` profile, fill-only. The source is read as the caller, put to the narrowing and the copy gate, and masked to the columns the caller can read.
+  - No new endpoint, DI registration, package or route filter (ADR-008 path A, ADR-010).
+- **FR-40**: `createXrmEmailComposeHandlers.ts` no longer sends `sprk_searchindexname` or the `sprk_AI_Search_Index` bind on the attachment's `sprk_document` create. `resolveUserBuDefaults` is gone from that handler: nothing else on the path read it.
+- **043 criteria**: `analysisService.createAndAssociateWithWarnings` reads the optional `warnings` of the 201 body; `PlaybookLibraryShell` shows them (Fluent v9 MessageBar, tokens only) and shows nothing for a body with no `warnings`. That path stays on `/api/ai/analysis/create`.
+
+## Review and fixes
+
+The main session's review of the email step found that its gate (`isComposedEmailReady`) and the client send (`sendCommunication`) both refuse an empty subject, so the server fill could never be reached from the wizard.
+- **Owner decision (2026-11-25): allow empty.** The Analysis wizard's email step lets the subject and body be empty. The server fills them, or refuses the send, which the user sees as a Finish warning; the analysis is kept.
+- Built as explicit opt-ins, so every other wizard is unchanged:
+  - `isComposedEmailReady(email, { allowEmptySubjectAndBody })`;
+  - `SendEmailFollowOnStep allowEmptySubjectAndBody` (the body is not marked required);
+  - `sendComposedEmail({ allowEmptySubjectAndBody })`;
+  - `SendCommunicationOptions.serverFillsEmptySubject`, client-only and never sent.
+- Commit fa92efe766. The widget test for an empty subject failed until the client send's check was opted out; that is how the second refusal was found.
+
+One adversarial review (Opus) of d1fef67b64. Its findings, with the fixes (agent on `task/fm-028b`, commit b188946b6c, merged as b9e426ff78):
+
+| Finding | Class | Fix |
+|---|---|---|
+| An analysis mapping source was not put to the external document narrowing that the analysis routes apply | F1 | `MappingSourceReader.AnalysisShown`, mirroring `DocumentShown`. Only the send fill gives it, using `AnalysisAuthorizationFilter.IsAnalysisDocumentHiddenFromCallerAsync`; a hide or a fault maps nothing. `TryResolveSourceEntitySet` / `CheckCallerReadOfSourceAsync` resolve an analysis only with `includeAnalysis`, so create and push still map nothing from an analysis, as before the task. |
+| A mapped subject longer than `sprk_subject` (2000) would be sent and then leave no communication row | F1 | A mapped subject over 2000, or a body over 100000, is not used (docs/data-model/sprk_communication.md). |
+| No test for a secure-owned analysis | F4 | Added, with an ordinary-team control. |
+| The send test used mocks and DI under `unit/domain` | nit | Moved to `tests/integration/data-mutation/Communication/`. Added a test where the caller holds Read but the analysis is missing. |
+| An empty `bffBaseUrl` is now refused | K | The only host (`WorkspacePane`) passes the session URL and already treats an empty one as not ready. |
+| A bulk send refuses an empty subject before `SendAsync` | K | FR-17 covers the wizard's single send. |
+
+Fail-before: 13 of the 63 affected server tests fail with the three fixes disabled. The secure-team, at-limit and shown controls pass both ways, as controls should.
+
+Filed: DI-040 / #3126. A TYPED subject over 2000 characters is sent and then has no communication row. This was there before the task; the composer has no limit and the send's validation checks only for an empty subject.
+
+## Gates
+
+- Client: UI.Components jest, 83 suites / 1146 tests passed. `tsc --noEmit` clean; eslint 0 errors (1 old warning). AI.Widgets workspace jest, 20 suites, all passed. The widget test has 16 tests, including empty subject → sent empty, and no recipient → Finish disabled.
+- First server run (on d1fef67b64, while an agent was also building): build 0/0, ArchTests 2793/2793. The filtered BFF tests had 5 failures, all Office/Document `WebApplicationFactory` contract tests that each took over 3 minutes. They were rerun on b9e426ff78 with nothing else running (below).
+- Rerun on b9e426ff78 (the merge with the fixes):
+  - build 0 warnings / 0 errors; ArchTests (built fresh) 2793/2793;
+  - filtered BFF tests: 30 failures, every one an HTTP request in a `WebApplicationFactory` host that hung for about 3 minutes and was cancelled. They include `GetLinkedTodos_WithoutAuth_Returns401`, which never reaches the changed code: machine load.
+  - The 25 failed classes rerun alone with `--no-build`: 398 passed, 0 failed.
+  - The fix agent's own filtered run (Communication|FieldMapping|MappingSource|RecordCreation|ChildRecord|AnalysisAuthorization): 5413 passed, 0 failed, 2 skipped (live-env).
+- Publish size (`publish-delta.ps1`, a copy using the paths `C:\tmp\f28m` / `C:\tmp\f28b`; Compress-Archive): master base e9393ace47 43,574,589 bytes against b9e426ff78 43,578,749 bytes. Delta **+4,160 bytes**, 194 files on both sides, 41.56 MB total.
+- CVE (`dotnet list package --vulnerable --include-transitive`): no vulnerable packages.
+- Placement: in the BFF, extending the existing send path (`CommunicationService.SendAsync`) with one static step beside the create-time mapping engine it reuses. No endpoint, DI registration, package or background work. ADR-008 path A: no route filter changed.
+
+## Coordination during the task
+
+- word-add-in-r1 task 138 (#2209, an email re-save adds the attachments it missed) touches `OfficeService.SaveAsync` and `UploadFinalizationWorker`, our W3 paths.
+  - Conditions given 2026-11-25: children only through `ProcessSingleAttachmentAsync`; guards G1/G3/G5/G6 hold; full ArchTests; current rights re-checked on the duplicate path, failing closed.
+  - Their diff was read against the guards: OK to merge, with two observations (the job is marked Completed before the worker runs; children follow the current record-first owner).
