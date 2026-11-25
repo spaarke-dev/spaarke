@@ -1392,6 +1392,8 @@ back**: both slots must carry a GUID equal to H2a's writer, and never the stamp 
 
 **H4b session-file store (T186 follow-up).** H4b also writes `SessionFileStore__BlobEndpoint` on both slots: the stamp storage account's blob endpoint, from H2a's `storagePrimaryEndpoint` output (`InterStepState.StorageBlobEndpoint`). The container is not written — the BFF defaults to `ai-chunks`, which every stamp creates. Without it chat session-file uploads are refused (`StoreDisabled`).
 
+**H4b keyless SignalR and the three keys a stamp does not carry (ISS-022, plan D36).** Only when the stamp's SignalR was deployed (`signalrEnabled`; the resource has local auth disabled, so it has no access key), H4b writes `Notifications__SignalR__ConnectionString` as the managed-identity string `Endpoint=https://{name}.service.signalr.net;AuthType=azure.msi;ClientId={stamp UAMI client id};Version=1.0;` (from H2a's `signalrHostName` output, `InterStepState.SignalRHostName`) and `Notifications__SignalR__Enabled=true`. The UAMI holds "SignalR App Server" on the resource (`signalr.bicep`). Not deployed means neither setting is written: the BFF keeps its Null-Object delivery service and clients poll (ADR-032). The other two keys named in ISS-022 are deliberately absent on a stamp: `PowerBi__ClientSecret` (Reporting is off; the module self-gates while `PowerBi:TenantId` is unset) and `Rag__ApiKey` (`POST /api/ai/rag/enqueue-indexing` stays closed, 401). None is a Key Vault secret; the decision is recorded in `scripts/canonical-secret-catalog/manifest.yaml`.
+
 ### 7.4 Phase 4 — Dataverse Environment (H5, H6, H7)
 
 **H5** adopts the Dataverse environment the operator created (PRQ-C-09) — it never creates one (owner D4 / Q1;

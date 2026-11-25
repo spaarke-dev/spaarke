@@ -527,6 +527,8 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             OntologyWriterClientId = hasRoot ? ReadString(root, "ontologyWriterIdentityClientId") : string.Empty,
             OntologyWriterObjectId = hasRoot ? ReadString(root, "ontologyWriterIdentityObjectId") : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
+            // customer.bicep emits '' when signalrEnabled=false (signalr.?outputs.signalrHostName ?? '').
+            SignalRHostName = hasRoot ? ReadString(root, "signalrHostName") : string.Empty,
         };
     }
 
