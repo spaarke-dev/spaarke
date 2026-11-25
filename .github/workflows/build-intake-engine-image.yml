@@ -1,0 +1,284 @@
+# ============================================================================
+# build-intake-engine-image.yml — Build, Trivy-scan, and push the intake
+# engine image (the NDA redline engines + ADR-004 A2 queue-consumer entrypoint)
+# to the platform ACR.
+# ============================================================================
+#
+# Authored by spaarke-intake-pipeline-r1 task 003 (FR-01(d), NFR-07), copied
+# from build-provisioning-sidecar.yml (the only other container build -> Trivy
+# -> ACR workflow). It is a separate workflow, not a second image in the
+# sidecar's, because the two images have unrelated release cycles (the sidecar
+# rebuilds monthly on the EXO module-patch cycle; this one rebuilds whenever an
+# engine or the entrypoint changes).
+#
+# Image: src/server/services/Sprk.Intake.EngineJob/Dockerfile (task 001), built
+# with the REPO ROOT as context because the Dockerfile COPYs the accelerator's
+# engines from src/accelerators/core/engines/ at build time; they are never
+# vendored into the job folder. That is why an engine edit in the accelerator's
+# folder must rebuild this image too, and why that folder is in `paths` below.
+#
+# What the Trivy gate covers:
+#   - the OS layer of the base image, AND
+#   - the Python packages in the image: the engines' lxml plus the entrypoint
+#     layer's hash-pinned Azure SDKs (azure-identity, azure-servicebus,
+#     azure-storage-blob) installed from
+#     src/server/services/Sprk.Intake.EngineJob/requirements.txt (decided
+#     2026-11-25). Trivy's image scan detects installed Python packages from
+#     their dist-info metadata. TRIVY_PKG_TYPES below names both package types
+#     explicitly so the gate does not rely on a default that could change.
+#   A separate step fails fast if requirements.txt is missing or any requirement
+#   is not `==`-pinned with a --hash (the hash pin is a supply-chain control and
+#   Trivy cannot see its absence).
+#
+# Trivy gate: fails the build on any FIXABLE HIGH or CRITICAL finding
+# (ignore-unfixed: true, exit-code: 1). Same posture as the sidecar workflow
+# (amended there 2026-08-27): a gate that can go red with no action open to
+# anyone gets routed around. Findings with no patch yet are NOT hidden: a
+# separate reporting scan (ignore-unfixed: false, exit-code 0) feeds the SARIF
+# upload, which runs `if: always()`, so they reach the Security tab even when
+# the gate fails the job. (The sidecar workflow uploads the output of its single
+# ignore-unfixed scan, so unfixed findings are in fact filtered from its SARIF.)
+#
+# Publish path: master push / workflow_dispatch only, via OIDC federated login
+# (ADR-028: no client secret, no ACR admin credentials, no stored ACR password).
+# On pull_request the job builds, scans and size-checks, then stops; the login
+# and push steps are gated off, so a PR can never publish.
+#
+# COORDINATION: ci-workflows = Y for spaarke-intake-pipeline-r1
+# (projects/INDEX.md). No other project holds a coordination window on
+# .github/workflows/** (the earlier window closed 2026-07-23, declared expired
+# 2026-08-19); /conflict-check before merging this PR.
+#
+# OWNER ACTIONS before the push leg can go green (the build + scan legs need
+# none of them):
+#   1. Repo variable INTAKE_ENGINE_ACR_LOGIN_SERVER (a login-server FQDN is not
+#      confidential, so a variable, not a secret). Falls back to the sidecar's
+#      SIDECAR_ACR_LOGIN_SERVER (the same platform ACR) when unset.
+#   2. The OIDC federated identity credential for subject
+#      `repo:spaarke-dev/spaarke:ref:refs/heads/master` and AcrPush on that ACR
+#      for the AZURE_CLIENT_ID identity. Runbook:
+#      docs/guides/GITHUB-ACTIONS-AZURE-OIDC-SETUP.md. This is the same blocker
+#      the sidecar's push leg documents.
+#   Deliberately NOT gated behind an `if: vars... != ''` skip: that would turn
+#   the job green while silently never publishing.
+# ============================================================================
+
+name: Build Intake Engine Image
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/server/services/Sprk.Intake.EngineJob/**'
+      - 'src/accelerators/core/engines/**'
+      - '.github/workflows/build-intake-engine-image.yml'
+  pull_request:
+    paths:
+      - 'src/server/services/Sprk.Intake.EngineJob/**'
+      - 'src/accelerators/core/engines/**'
+      - '.github/workflows/build-intake-engine-image.yml'
+  workflow_dispatch:
+    inputs:
+      image_tag_suffix:
+        description: 'Optional extra tag suffix (e.g. a manual patch build)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write        # OIDC federated credential for azure/login -- no stored ACR password/secret
+  security-events: write # Upload Trivy SARIF to the GitHub Security tab
+
+concurrency:
+  group: build-intake-engine-image-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel an in-flight image push (matches deploy-bff-api.yml convention)
+
+env:
+  IMAGE_NAME: sprk-intake-engine
+  DOCKERFILE: src/server/services/Sprk.Intake.EngineJob/Dockerfile
+  REQUIREMENTS_FILE: src/server/services/Sprk.Intake.EngineJob/requirements.txt
+  # Build context is the REPO ROOT: the Dockerfile COPYs src/accelerators/core/engines/.
+  BUILD_CONTEXT: .
+  # Compressed-size ceiling. Python slim + lxml + three Azure SDKs is expected well
+  # under this; it is a runaway guard (a stray COPY of the repo, a fat base), not a
+  # design budget. No engine-image size budget is set in spec/design; tighten it from
+  # the first measured size (reported in the step summary).
+  MAX_COMPRESSED_MB: '400'
+  ACR_LOGIN_SERVER: ${{ vars.INTAKE_ENGINE_ACR_LOGIN_SERVER || vars.SIDECAR_ACR_LOGIN_SERVER }}
+
+jobs:
+  build-scan-push:
+    name: Build, Trivy scan, push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Fails before the (slow) build when the entrypoint layer's dependency pins are
+      # missing or loosened. Trivy reports known CVEs in what is installed; it cannot
+      # report that a requirement lost its hash.
+      - name: Verify requirements.txt is fully hash-pinned
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f "$REQUIREMENTS_FILE" ]; then
+            echo "::error::$REQUIREMENTS_FILE not found. The engine image installs hash-pinned Azure SDKs from it (task 001)."
+            exit 1
+          fi
+          # Join backslash continuation lines so each requirement is one logical line.
+          joined="$(sed -e ':a' -e '/\\$/{N;s/\\\n//;ba' -e '}' "$REQUIREMENTS_FILE")"
+          bad=0
+          count=0
+          while IFS= read -r line; do
+            trimmed="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            case "$trimmed" in
+              ''|'#'*|-*) continue ;;   # blank, comment, or pip option line (--require-hashes etc.)
+            esac
+            count=$((count + 1))
+            if ! echo "$trimmed" | grep -Eq '^[][A-Za-z0-9_.,-]+[[:space:]]*==[[:space:]]*[^[:space:]]+'; then
+              echo "::error::Not pinned with '==': $trimmed"
+              bad=1
+            fi
+            if ! echo "$trimmed" | grep -Eq -- '--hash=sha256:[0-9a-f]{64}'; then
+              echo "::error::No --hash=sha256:<digest>: $trimmed"
+              bad=1
+            fi
+          done <<< "$joined"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::$REQUIREMENTS_FILE lists no requirements."
+            exit 1
+          fi
+          if [ "$bad" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Verified $count requirement(s), all == pinned with sha256 hashes."
+
+      - name: Compute image tags
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha_tag="${{ github.sha }}"
+          semver_tag="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
+          suffix="${{ github.event.inputs.image_tag_suffix }}"
+          if [ -n "$suffix" ]; then
+            semver_tag="${semver_tag}-${suffix}"
+          fi
+          echo "sha_tag=${sha_tag}" >> "$GITHUB_OUTPUT"
+          echo "semver_tag=${semver_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local only -- Trivy scans BEFORE any push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.BUILD_CONTEXT }}
+          file: ${{ env.DOCKERFILE }}
+          push: false
+          load: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
+
+      # Reporting scan: every HIGH/CRITICAL finding, fixed or not, into SARIF. It never
+      # fails the job (exit-code 0); the gate is the next step. Both findings classes
+      # reach the Security tab via the always() upload below.
+      - name: Run Trivy vulnerability scanner (image, report incl. unfixed)
+        # Pinned, not @master (see build-provisioning-sidecar.yml: tracking master let an
+        # upstream input-validation change break a hard gate).
+        uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PKG_TYPES: 'os,library'   # OS layer AND the Python packages (lxml, Azure SDKs)
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}'
+          format: 'sarif'
+          output: 'trivy-intake-engine-results.sarif'
+          severity: 'HIGH,CRITICAL'
+          limit-severities-for-sarif: true
+          ignore-unfixed: false
+          exit-code: '0'
+
+      # Gate: a FIXABLE HIGH/CRITICAL finding (OS or Python package) fails the build.
+      - name: Run Trivy vulnerability scanner (image, gate on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PKG_TYPES: 'os,library'
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}'
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'   # FAIL the build on any FIXABLE HIGH/CRITICAL -- hard gate, not advisory
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-intake-engine-results.sarif'
+          category: 'trivy-intake-engine-image'
+
+      - name: Verify compressed size ceiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `docker save | gzip` is what a registry push actually stores, so this measures
+          # the COMPRESSED size (same method as the sidecar workflow).
+          ref="${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}"
+          uncompressed_mb=$(( $(docker image inspect "$ref" --format='{{.Size}}') / 1024 / 1024 ))
+          compressed_bytes=$(docker save "$ref" | gzip -c | wc -c)
+          compressed_mb=$(( compressed_bytes / 1024 / 1024 ))
+
+          echo "Uncompressed: ${uncompressed_mb} MB | Compressed: ${compressed_mb} MB (ceiling ${MAX_COMPRESSED_MB} MB)"
+          {
+            echo "### Intake engine image size"
+            echo "- Compressed: **${compressed_mb} MB** (runaway-guard ceiling: ${MAX_COMPRESSED_MB} MB)"
+            echo "- Uncompressed: ${uncompressed_mb} MB"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$compressed_mb" -gt "$MAX_COMPRESSED_MB" ]; then
+            echo "::error::Compressed size ${compressed_mb} MB exceeds the ${MAX_COMPRESSED_MB} MB ceiling."
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        # Publish path only -- a pull_request build stops after scan + size check.
+        if: github.event_name != 'pull_request'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login (via OIDC-authenticated az session -- no ACR password/secret)
+        if: github.event_name != 'pull_request'
+        run: az acr login --name "${ACR_LOGIN_SERVER%%.*}"
+
+      - name: Push image (SHA tag + date-versioned semver tag -- NEVER `latest`)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.BUILD_CONTEXT }}
+          file: ${{ env.DOCKERFILE }}
+          push: true
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.semver_tag }}
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Intake engine image build"
+            echo "- SHA tag: \`${{ steps.tags.outputs.sha_tag }}\`"
+            echo "- Semver tag: \`${{ steps.tags.outputs.semver_tag }}\`"
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "- Pushed: no (pull_request builds never publish)"
+            else
+              echo "- Pushed to: \`${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

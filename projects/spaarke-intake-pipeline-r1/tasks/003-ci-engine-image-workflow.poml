@@ -4,7 +4,7 @@
     <title>FR-01 CI: engine image build → Trivy scan (fail on fixable HIGH/CRITICAL) → ACR push, copied from build-provisioning-sidecar.yml</title>
     <phase>0 Foundations and cleanup</phase>
     <gate>startable (authoring); first green run needs task 001's Dockerfile</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new CI workflow file with explicit constraints; no application code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,7 +88,7 @@
     <criterion testable="true">Once task 001's Dockerfile exists, a PR run builds and scans the image green (recorded in task 008's spike report if 001 lands later).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-01(d), NFR-07. Root CLAUDE.md hot-path `ci-workflows` = Y for this project.</notes>
+  <notes>Spec FR-01(d), NFR-07. Root CLAUDE.md hot-path `ci-workflows` = Y for this project. Completed 2026-11-25: workflow authored, YAML parsed with PyYAML (no actionlint or Docker locally); first green run waits on task 001. Deviations (two-scan Trivy split, Python packages in scan scope, hash-pin guard, 400 MB size guard, ACR variable fallback): notes/003-ci-engine-image-workflow-deviations.md. rework: none task 003</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
