@@ -67,6 +67,11 @@ export interface IDataverseClient {
 export interface DataverseRecordRef {
   /** Record GUID */
   id: string;
+  /**
+   * The server's non-fatal warnings on the create (a mapping source it could not read, a mapped value it did not
+   * write; field-mapping-server-write-path-r1). Present only when there are some.
+   */
+  warnings?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +397,9 @@ export interface CreateResult {
 
   /** Error message (if failed) */
   error?: string;
+
+  /** The server's non-fatal warnings on the create (if any); present only when non-empty. */
+  warnings?: string[];
 }
 
 // ---------------------------------------------------------------------------

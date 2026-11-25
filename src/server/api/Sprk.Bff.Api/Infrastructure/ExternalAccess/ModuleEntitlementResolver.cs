@@ -24,7 +24,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 ///   <see cref="WorkforceDefaultEntitlements"/> (<c>legal-front-door</c> + <c>policy-library</c>), plus any
 ///   EXTRAS the caller's Entra <b>App-Role</b> claims (<c>roles</c>) map to through the active
 ///   <c>sprk_approlemodulemap</c> rows (<c>sprk_approlename</c> → <c>sprk_modulecode</c>). The map is never
-///   required for the defaults; adding a role→module mapping is a single data row (FR-08).</item>
+///   required for the defaults; adding a role→module mapping is a single data row (FR-08). A workforce CONTACT that can
+///   read at least one record also gets <c>assigned-work</c> (the record tabs); that code is never a map extra on this
+///   plane (<see cref="IsGrantedWorkforceContact"/>, R4 task 040, FR-24).</item>
 ///   <item><b>CIAM (external partner)</b>: the outside-counsel set (<see cref="OutsideCounselEntitlements"/>,
 ///   <c>assigned-work</c>), plus <c>legal-front-door</c> when
 ///   <see cref="ExternalAccessOptions.PartnerServiceRequestsEnabled"/> is on (default off). There is no
@@ -42,17 +44,17 @@ public class ModuleEntitlementResolver
 {
     /// <summary>
     /// The outside-counsel blanket entitlement set (Option B): every CIAM external contact is entitled
-    /// to the outside-counsel module family. The CIAM data widgets (Projects/Matters/Work Assignments/
-    /// Documents/Invoices) are blanket-visible per plane; record visibility is Tier-2. Kept as the exact
-    /// code the client's mock + widget metadata use (<c>assigned-work</c>) so the two stay aligned.
+    /// to the outside-counsel module family. <c>assigned-work</c> is the code the external SPA gates the five
+    /// record tabs (Projects/Matters/Work Assignments/Documents/Invoices) on, for a CIAM partner and for a granted
+    /// workforce contact (<see cref="IsGrantedWorkforceContact"/>); record visibility is Tier-2 either way.
     /// </summary>
-    private static readonly IReadOnlyList<string> OutsideCounselModules = new[] { "assigned-work" };
+    private static readonly IReadOnlyList<string> OutsideCounselModules = new[] { AssignedWorkModule };
 
     /// <summary>
     /// The CIAM set when the partner service-request switch is on (FR-06/FR-19): the outside-counsel set plus
     /// <c>legal-front-door</c>. Never <c>policy-library</c> — A8 gives partners only the Front Door.
     /// </summary>
-    private static readonly IReadOnlyList<string> PartnerServiceRequestModules = new[] { "assigned-work", "legal-front-door" };
+    private static readonly IReadOnlyList<string> PartnerServiceRequestModules = new[] { AssignedWorkModule, LegalFrontDoorModule };
 
     /// <summary>
     /// The workforce default set (A8): every workforce caller — <c>systemuser</c> or workforce contact — gets these
@@ -104,6 +106,29 @@ public class ModuleEntitlementResolver
 
     /// <summary>The Legal Front Door module code: the four intake wizards and their submit route (r3 task 035, FR-05).</summary>
     public const string LegalFrontDoorModule = "legal-front-door";
+
+    /// <summary>
+    /// The record-tab module code: the Projects, Matters, Work Assignments, Documents and Invoices tabs. Blanket for a
+    /// CIAM partner (<see cref="OutsideCounselEntitlements"/>); on the workforce plane it is decided ONLY by
+    /// <see cref="IsGrantedWorkforceContact"/> (spaarke-SPA-external-access-platform-r4 task 040, FR-24 / #2508).
+    /// </summary>
+    public const string AssignedWorkModule = "assigned-work";
+
+    /// <summary>
+    /// Whether <paramref name="principal"/> is a workforce-plane CONTACT (no systemuser; a WorkforceHome sign-in is the
+    /// usual case) whose server-composed accessible set holds at least one record it may READ: a project, a matter or a
+    /// work assignment (R4 task 040, FR-24 / #2508; owner 2026-11-09: a contact with no grants sees none of the record
+    /// tabs). The set is the one the caller-principal filter already composed for this request
+    /// (<c>WorkforcePrincipalStrategy.ComposeAsync</c>): no extra read. Every list behind those tabs stays Tier-2-scoped
+    /// by the same set, so this decides only whether the tabs are offered, never which records they list. A licensed
+    /// <c>systemuser</c> is never one, whatever it holds: licensed users keep their own model.
+    /// </summary>
+    internal static bool IsGrantedWorkforceContact(CallerPrincipal principal) =>
+        principal.Plane == CallerPrincipalPlane.Workforce
+        && principal.IsContactPrincipal
+        && (principal.ReadableProjects.Any()
+            || principal.AccessibleMatterIds.Count > 0
+            || principal.AccessibleWorkAssignmentIds.Count > 0);
 
     /// <summary>
     /// THE server-side Tier-1 check for a module-gated route (r3 task 035; review 011 K2): whether
@@ -163,7 +188,9 @@ public class ModuleEntitlementResolver
     /// <summary>
     /// Resolves the caller's module entitlement codes by server-resolved principal kind (A8). CIAM → the
     /// outside-counsel set, plus <c>legal-front-door</c> when the partner switch is on; workforce → the
-    /// default set ∪ the extras its App-Role claims map to through active <c>sprk_approlemodulemap</c> rows.
+    /// default set ∪ the extras its App-Role claims map to through active <c>sprk_approlemodulemap</c> rows (never
+    /// <c>assigned-work</c>), ∪ <c>assigned-work</c> for a contact that can read at least one record
+    /// (<see cref="IsGrantedWorkforceContact"/>).
     /// </summary>
     /// <param name="principal">The resolved plane-agnostic caller (its <see cref="CallerPrincipal.Plane"/>
     /// selects the resolution term).</param>
@@ -181,12 +208,17 @@ public class ModuleEntitlementResolver
             return _options.PartnerServiceRequestsEnabled ? PartnerServiceRequestModules : OutsideCounselModules;
         }
 
+        // R4 task 040 (FR-24 / #2508): a workforce contact with at least one readable record also gets the record tabs.
+        var recordTabs = IsGrantedWorkforceContact(principal);
+
         // ADR-028 A9 (task 046, finding (e)): a home principal's roles claim was issued by the CUSTOMER directory for its
         // own app registration — never Spaarke's App-Role assignment. It is ignored: the defaults only, and no map read.
         if (WorkforcePrincipalResolver.IsWorkforceHomePrincipal(user))
         {
-            _logger.LogInformation("[EXT-ENTITLE] Workforce home principal — roles claim ignored, default modules only.");
-            return WorkforceDefaultModules;
+            _logger.LogInformation(
+                "[EXT-ENTITLE] Workforce home principal — roles claim ignored, default modules only (record tabs: {RecordTabs}).",
+                recordTabs);
+            return WithRecordTabs(WorkforceDefaultModules, recordTabs);
         }
 
         // Workforce plane (systemuser or workforce contact) → the default set; no map row is needed for it (A8).
@@ -194,14 +226,20 @@ public class ModuleEntitlementResolver
         if (roles.Count == 0)
         {
             // No App-Roles on the token → no extras can apply, so the map is not read.
-            _logger.LogInformation("[EXT-ENTITLE] Workforce caller has no App-Role claims — default modules only.");
-            return WorkforceDefaultModules;
+            _logger.LogInformation(
+                "[EXT-ENTITLE] Workforce caller has no App-Role claims — default modules only (record tabs: {RecordTabs}).",
+                recordTabs);
+            return WithRecordTabs(WorkforceDefaultModules, recordTabs);
         }
 
-        // Extras: App-Role claims ∩ active sprk_approlemodulemap, unioned onto the defaults (deterministic order).
+        // Extras: App-Role claims ∩ active sprk_approlemodulemap, unioned onto the defaults (deterministic order). The
+        // record-tab code is never a map extra on this plane: only IsGrantedWorkforceContact decides it, so a role row can
+        // neither give a licensed user the record tabs nor give them to a contact with no grants (R4 task 040).
         var map = await GetActiveMapAsync(ct).ConfigureAwait(false);
         var entitlements = WorkforceDefaultModules
-            .Concat(ResolveWorkforceEntitlements(roles, map))
+            .Concat(ResolveWorkforceEntitlements(roles, map)
+                .Where(code => !string.Equals(code, AssignedWorkModule, StringComparison.OrdinalIgnoreCase)))
+            .Concat(recordTabs ? new[] { AssignedWorkModule } : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(c => c, StringComparer.Ordinal)
             .ToList();
@@ -210,6 +248,10 @@ public class ModuleEntitlementResolver
             roles.Count, entitlements.Count, string.Join(",", entitlements));
         return entitlements;
     }
+
+    /// <summary>The workforce set <paramref name="modules"/>, plus <see cref="AssignedWorkModule"/> when <paramref name="recordTabs"/>.</summary>
+    private static IReadOnlyList<string> WithRecordTabs(IReadOnlyList<string> modules, bool recordTabs) =>
+        recordTabs ? modules.Append(AssignedWorkModule).ToList() : modules;
 
     /// <summary>
     /// The PURE resolution core (unit-tested directly, no Dataverse): the module codes granted by the

@@ -43,6 +43,23 @@ public interface IDecisionCapability
     Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct);
 
     /// <summary>
+    /// One Work Item's full row as the caller's <see cref="WorklistSet.Lanes"/> read has it (<c>spaarke_get_decision_plan</c>): a lanes
+    /// response that contains that row when the caller's lanes show the Signal and does not contain it otherwise (hidden and unknown are
+    /// the same answer); callers find the row by its id. Failures are the lane read's outcomes. <see cref="DecisionCapability"/> reads
+    /// only that Signal (<see cref="SignalReadService.ReadAsync"/> with <c>onlySignalId</c>, ontology task 222 B, NFR-01), so its response
+    /// holds that one row or none; this default, which test doubles inherit, returns the whole lane from <see cref="ListDecideAsync"/>,
+    /// which contains the same row among the others.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="ListDecideAsync"/>, the whole caller lane read.
+    /// Extension: this narrows the same read, as the caller, through the read's own <c>onlySignalId</c> parameter; no rule, route or
+    /// identity changes. Cost of doing nothing: opening one item in Copilot reads every Work Item the caller has (~2 s of serial
+    /// Dataverse reads, dev App Insights 2026-11-25) against NFR-01's 3 s plan target.</remarks>
+    /// <param name="user">The request's principal.</param>
+    /// <param name="signalId">The Work Item to read.</param>
+    /// <param name="ct">Cancellation.</param>
+    Task<SignalReadResult> GetWorkItemAsync(ClaimsPrincipal? user, Guid signalId, CancellationToken ct) => ListDecideAsync(user, ct);
+
+    /// <summary>
     /// A Signal's decision plan, resolved as the caller exactly as <c>GET /api/v1/signals/{signalId}/decision-plan</c> resolves it,
     /// and the plan-read stamp the commit route reads (<see cref="DecisionPlanReadStamp"/>), written only when the plan is returned.
     /// </summary>

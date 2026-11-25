@@ -3,11 +3,14 @@
  * Follow-on step for "Work on Analysis" in the Summarize Files wizard.
  *
  * When the user clicks a playbook card this step:
- *   1. Queries the current user's business unit to obtain sprk_containerid.
- *   2. Creates sprk_document records for each uploaded file via BFF
- *      POST /api/v1/documents (ADR-013: AI features use BFF, not Xrm.WebApi).
- *   3. Collects the created document IDs.
- *   4. Opens the PlaybookLibrary Code Page via navigationService.openDialog,
+ *   1. Creates a sprk_document record for each uploaded file through the BFF child-record route
+ *      (POST /api/v1/child-records/sprk_document, ADR-013: AI features use BFF, not Xrm.WebApi). The
+ *      payload is the file name only: the server decides the owner (the caller's business-unit team)
+ *      and applies any field mapping. The client reads no business unit and sends no container, owner,
+ *      team or search index (field-mapping-server-write-path-r1, FR-16, FR-09, FR-40). The documents
+ *      are unfiled: this wizard files them under nothing, so no parent key is sent.
+ *   2. Collects the created document IDs.
+ *   3. Opens the PlaybookLibrary Code Page via navigationService.openDialog,
  *      passing documentIds as a comma-separated query parameter.
  *
  * NFR-05: document creation must complete within 3 seconds for ≤10 files.
@@ -22,8 +25,7 @@ import type { IPlaybook, AuthenticatedFetchFn } from '../Playbook';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { INavigationService } from '../../types/serviceInterfaces';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import { cleanGuid } from '../../utils/guid';
-import { getXrm } from '../../utils/xrmContext';
+import { createChildRecordViaBff } from '../../utils/adapters/bffChildWriteAdapter';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -51,89 +53,23 @@ export interface ICreateDocumentResult {
 }
 
 /**
- * Retrieves the sprk_containerid from the current user's business unit.
+ * Creates a single sprk_document record through the BFF child-record route.
  *
- * Pattern: systemuser → _businessunitid_value → businessunit → sprk_containerid.
- * Matches the SemanticSearchControl NavigationService pattern.
- */
-async function getBusinessUnitContainerId(dataService: IDataService): Promise<string> {
-  // Retrieve the current user id via the shared cross-frame `getXrm()` walker
-  // (task 081 / C-8 — this previously hand-rolled its own window/parent/top
-  // frame walk, one of six duplicates converged onto `xrmContext.ts:306`).
-  // Uses `Utility.getGlobalContext().userSettings.userId` — the modern
-  // equivalent of the older `Xrm.Utility.getUserId()` this comment used to
-  // describe as unavailable via `IDataService`; both resolve the signed-in
-  // user's id, and `getGlobalContext` is on the shared `XrmUtility` contract.
-  const userId = cleanGuid(getXrm('utility')?.Utility?.getGlobalContext?.()?.userSettings?.userId ?? '');
-
-  if (!userId) {
-    throw new Error(`${LOG_PREFIX} Cannot determine current user — Xrm.Utility.getGlobalContext() is unavailable.`);
-  }
-
-  // Step 1: Get the user's business unit ID
-  const userRecord = await dataService.retrieveRecord('systemuser', userId, '?$select=_businessunitid_value');
-
-  const buId = userRecord['_businessunitid_value'] as string | undefined;
-  if (!buId) {
-    throw new Error(`${LOG_PREFIX} Current user has no associated business unit.`);
-  }
-
-  // Step 2: Get the business unit's sprk_containerid
-  const buRecord = await dataService.retrieveRecord('businessunit', buId, '?$select=sprk_containerid');
-
-  const containerId = buRecord['sprk_containerid'] as string | undefined;
-  if (!containerId) {
-    throw new Error(
-      `${LOG_PREFIX} Business unit ${buId} does not have a container configured (sprk_containerid is empty). ` +
-        'Ask your administrator to configure the SPE container for your business unit.'
-    );
-  }
-
-  return containerId;
-}
-
-/**
- * Creates a single sprk_document record via the BFF API.
+ * POST /api/v1/child-records/sprk_document
+ * Body: { sprk_documentname }
  *
- * POST /api/v1/documents
- * Body: { Name, ContainerId }
+ * Only the file name goes: the record is unfiled, the server derives the owner (the caller's business-unit team) and
+ * the I-1 stamp, and no container, owner, team or search index is sent (FR-09, FR-40). A refusal rejects with the
+ * server's own message (`ChildRecordWriteError`).
  *
- * Returns the created document GUID extracted from the 201 Created response.
+ * Returns the created document GUID.
  */
 async function createDocumentRecord(
   authenticatedFetch: AuthenticatedFetchFn,
   bffBaseUrl: string,
-  fileName: string,
-  containerId: string
+  fileName: string
 ): Promise<string> {
-  const url = `${bffBaseUrl}/api/v1/documents`;
-
-  const response = await authenticatedFetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: fileName,
-      containerId,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    throw new Error(`BFF returned ${response.status} for "${fileName}": ${errorText}`);
-  }
-
-  // Response shape: { data: { sprk_documentid: "...", ... }, metadata: { ... } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const json: any = await response.json();
-
-  // Try common ID field names in the response
-  const documentId: string | undefined = json?.data?.sprk_documentid ?? json?.data?.id ?? json?.id;
-
-  if (!documentId) {
-    throw new Error(`${LOG_PREFIX} BFF response did not include a document ID for "${fileName}".`);
-  }
-
-  return documentId;
+  return createChildRecordViaBff(authenticatedFetch, bffBaseUrl, 'sprk_document', { sprk_documentname: fileName });
 }
 
 /**
@@ -147,12 +83,11 @@ async function createDocumentRecord(
 async function createDocumentRecords(
   authenticatedFetch: AuthenticatedFetchFn,
   bffBaseUrl: string,
-  files: IUploadedFile[],
-  containerId: string
+  files: IUploadedFile[]
 ): Promise<ICreateDocumentResult[]> {
   const settled = await Promise.allSettled(
     files.map(f =>
-      createDocumentRecord(authenticatedFetch, bffBaseUrl, f.name, containerId)
+      createDocumentRecord(authenticatedFetch, bffBaseUrl, f.name)
         .then(id => ({ fileName: f.name, documentId: id }))
         .catch(err => ({
           fileName: f.name,
@@ -286,16 +221,12 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
           return;
         }
 
-        // ── Step 1: Get business unit container ID ───────────────────────
-        setLaunchStatusLabel('Retrieving container…');
-        const containerId = await getBusinessUnitContainerId(dataService);
-
-        // ── Step 2: Create sprk_document records (parallel, ≤3 s for ≤10) ─
+        // ── Step 1: Create sprk_document records (parallel, ≤3 s for ≤10) ─
         setLaunchStatusLabel(`Creating ${uploadedFiles.length} document record${uploadedFiles.length > 1 ? 's' : ''}…`);
 
-        const createResults = await createDocumentRecords(authenticatedFetch, bffBaseUrl, uploadedFiles, containerId);
+        const createResults = await createDocumentRecords(authenticatedFetch, bffBaseUrl, uploadedFiles);
 
-        // ── Step 3: Collect IDs and gather warnings ──────────────────────
+        // ── Step 2: Collect IDs and gather warnings ──────────────────────
         const successfulIds: string[] = [];
         const failures: string[] = [];
 
@@ -320,7 +251,7 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
           return;
         }
 
-        // ── Step 4: Open PlaybookLibrary with documentIds ────────────────
+        // ── Step 3: Open PlaybookLibrary with documentIds ────────────────
         setLaunchStatusLabel('Opening Playbook Library…');
         const documentIdsParam = encodeURIComponent(successfulIds.join(','));
         const bffUrlParam = encodeURIComponent(bffBaseUrl);

@@ -23,9 +23,9 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 /// (ADR-019: <see cref="DecisionResultMapper.ToToolError(DecisionPlanReadResult)"/> through <see cref="McpToolResults.FromError"/>).
 /// Suppression and the row are read after the plan, and a failure of either leaves the plan and its stamp standing: the wizard already
 /// opens without the dismissal count (<c>suppressionFailed</c>).</para>
-/// <para><b>The full row.</b> No route returns one Work Item's full row, so it is found in the caller's own worklist read
-/// (<see cref="IDecisionCapability.ListDecideAsync"/>, the read the Console's lane makes), not by a new read path. See
-/// <c>notes/task-023-notes.md</c> for the cost and the follow-up. The row is bounded for the 64 KiB result limit
+/// <para><b>The full row.</b> No route returns one Work Item's full row, so it is the caller's own lanes read narrowed to this
+/// Signal (<see cref="IDecisionCapability.GetWorkItemAsync"/>: the read the Console's lane makes, with the same rules, for one Signal;
+/// NFR-01, 2026-11-25, replacing the whole-lane read of <c>notes/task-023-notes.md</c>), not a new read path. The row is bounded for the 64 KiB result limit
 /// (<see cref="PlanAndLookupToolSupport.BoundRow"/>: clipped text, at most 100 evidence lines and 20,000 bytes of them, with
 /// <c>evidenceTotal</c> and <c>evidenceTruncated</c> beside it); a row inside the bounds equals the REST row. The plan may carry the caller's
 /// unfinished review, which is returned intact: the room it takes comes out of the evidence budget, and a plan that alone leaves no room is
@@ -105,7 +105,7 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         // Read whenever the plan was returned (never null then); kept non-null for the mapper.
         var suppressionError = DecisionResultMapper.ToToolError(suppression!);
 
-        var lanes = await decisions.ListDecideAsync(http!.User, cancellationToken);
+        var lanes = await decisions.GetWorkItemAsync(http!.User, signalId, cancellationToken);
         var rowError = DecisionResultMapper.ToToolError(lanes);
 
         // FR-05 / FR-11: the row is the one member of the result no catalog or route bounds (evidenceRefs and the rule sentence have no cap),

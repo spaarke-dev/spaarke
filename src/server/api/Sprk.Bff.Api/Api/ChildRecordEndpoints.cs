@@ -95,9 +95,9 @@ public static class ChildRecordEndpoints
     /// single typed parent; none is a silent no-op). Only tables whose browser writers no longer map on the client: the Matter
     /// and Project wizards create here only once they stop (tasks 021, 022). Every other create table asks for mapping only
     /// when the caller names a source, so a create with no <c>mappingSource</c> is exactly what it was before task 020.
-    /// Tasks 023-029 add their table HERE (this one set is the switch) when their wizard moves off the client mapping engine.
-    /// Exception: the Event wizard (task 023) names its source (the regarding parent), so <c>sprk_event</c> is not here yet.
-    /// It joins with task 026, whose work-assignment follow-on event is the table's last browser create that names none.
+    /// A table joins this set (the one switch) only when its browser creates name no source. Wizards that name their source
+    /// keep their table out of it: the Event wizard (task 023) names the regarding parent, and the Document Upload wizard
+    /// (task 029) names the filing parent, so <c>sprk_event</c> and <c>sprk_document</c> are not here.
     /// </summary>
     internal static readonly IReadOnlySet<string> InferMappingSourceTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {

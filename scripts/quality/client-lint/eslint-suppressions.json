@@ -1001,7 +1001,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeAnalysisStep.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 5
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummaryResultsStep.tsx": {
