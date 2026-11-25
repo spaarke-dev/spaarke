@@ -483,3 +483,14 @@ Everything below is in the widget unless it says "shared". Every shared change i
 - **Why.** Dev has no privileged Decide item: the "No active budget" rule raised items only on business-unit-owned matters, and a privileged item comes only from a qualifying Secure matter or a privileged communication. Creating one is a dev Dataverse write.
 - **Coverage instead.** The automated tests cover FR-04: task 018's derivation (`WorkItemPrivilege`, fail closed) and task 022's marker-string negative test with a seeding proof (`DecideLanePagingTests`, `ShowDecisionsToolTests`).
 - **Reopen when.** A privileged Decide item exists on dev or another test environment; then run the spot-check and record it here.
+
+## 2026-11-25 — Owner: the Assign Task email and the "What was found" heading
+
+**1. The email (ISS-010).** Owner: "If the email is not sent the user needs to know no matter the surface; if send after save then still must surface an error message."
+- Consequence for ISS-010: the send stays in the request, so a failed send still returns `assignee_email_not_sent` in the commit response on every surface. Only the work after a successful send (sent-items read, `.eml` archive to SPE, the analysis job) may move off the request; `CommunicationService.ArchiveExistingAsync` is the existing idempotent path a job can call.
+- Gap the rule exposes (pre-existing): when the in-request send fails and the system-mailbox job is queued, the response carries no warning (`AssignTaskNotifier.cs:462`, `:532` return null), and when that job later gives up nobody tells the assigner (`AssignTaskEmailJobHandler` has no notice). Under the owner's rule the assigner must learn of a final failure, for example by a bell. Scoped with the email part of ISS-010; ontology-r1 and the email/communication owner review.
+
+**2. The heading (042 run 3 feedback).** Owner: "Change should apply to all surfaces; these are shared components and therefore should be the same."
+- The Decision wizard's first step drops the title-level "What was found" heading; the finding ("Matter has no active budget") is the top line (`DecisionWizard/steps/FoundStep.tsx:124-127`).
+- The row card's first line is the finding; the second line is the record name and number (`Worklist/IssueLine.tsx`, `composeIssueLine.ts`; today the headline is the subject name).
+- Both are ontology-owned shared components (`Spaarke.UI.Components`), and the row layout is ontology's binding v4 (HANDOFF §1.2), so ontology-r1 agrees the change and reviews it. It reaches the Console, the Copilot widget and every other host of the components. mcp-r2 is told before the widget tests change.
