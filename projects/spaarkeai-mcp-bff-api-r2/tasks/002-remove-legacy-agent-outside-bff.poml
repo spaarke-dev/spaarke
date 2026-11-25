@@ -4,7 +4,7 @@
     <title>Remove the legacy agent outside the BFF</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deletes a solution, CI workflow, scripts and infra and edits docs; explicit constraints; no .cs/.ts code changes</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,7 +99,8 @@
     <criterion testable="true">notes/defer-issues.md has the coordination entry with its GitHub issue URL.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-01. .claude/skills (declarative-agent, mcp-tool-handler, adr-check references) and ADR-028:810 are task 003's (main session).</notes>
+  <notes>Completed 2026-11-25. Deleted the agent solution, workflow, scripts, bot-service infra and bff-function-tools.yaml; edited or deleted the docs (see notes/002-blast-radius.md, 002-decisions.md). Out-of-scope T257 references: notes/002-out-of-scope-references.md; coordination issue drafted in notes/defer-issues.md (not yet filed; main session files it). rework: none task 002
+  Spec FR-01..claude/skills (declarative-agent, mcp-tool-handler, adr-check references) and ADR-028:810 are task 003's (main session).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
