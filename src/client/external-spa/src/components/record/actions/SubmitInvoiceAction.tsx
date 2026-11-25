@@ -10,7 +10,8 @@
  * Upload and New message).
  *
  * OFFERED (hide, don't disable; the server re-checks Read, Create and the firm link on submit, so this is a display rule):
- *   - `/me` `firms` is a non-empty array (the `InvoicesWidget` rule), AND
+ *   - `/me` `firms` is a non-empty array and the caller is not on the workforce plane (`callerMaySubmitInvoices`, the
+ *     `InvoicesWidget` rule; SPA-r4 task 040), AND
  *   - for at least one of those firms the firm-records answer lists this record under its kind (`submitInvoiceRightOf`).
  * Unknown (the caller context or an answer not in yet), a failed read, and an answer that does not list the record, even
  * one flagged `partial` / `truncated`, all leave it hidden. It needs no router: nothing navigates.
@@ -70,12 +71,19 @@ import {
   readInvoiceFirmRecords,
   submitInvoice,
 } from '../../../api/web-api-client';
+import { activePlaneOrNull } from '../../../auth/backend-selection';
 import type { ExternalUserContextResponse } from '../../../auth/bff-client';
 import { renderSubmissionReport } from '../../ebilling/InvoiceOutcomeReport';
 import { coreRecordTarget, INVOICE_ENTITY } from '../../ebilling/submissionLinks';
 import { useChildDialog } from '../../createAction';
 import { useChildRecordOpener } from '../childRecord';
-import { callerFirmIdsOf, invoiceKindOfEntity, submitInvoiceRightOf, type FirmRecordsRead } from '../recordAccess';
+import {
+  callerFirmIdsOf,
+  callerMaySubmitInvoices,
+  invoiceKindOfEntity,
+  submitInvoiceRightOf,
+  type FirmRecordsRead,
+} from '../recordAccess';
 import { recordText } from '../recordTemplates';
 import type { RecordActionHostContext } from '../recordTemplate.types';
 
@@ -149,8 +157,10 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
 }) => {
   const styles = useStyles();
   const kind = invoiceKindOfEntity(config.entity);
-  const reads = useFirmRecordsReads(callerContext, kind !== undefined);
-  const visible = submitInvoiceRightOf({ callerContext, kind, recordId, reads });
+  const plane = activePlaneOrNull();
+  // No firm-records read for a caller the plane rule already hides it from (task 040).
+  const reads = useFirmRecordsReads(callerContext, kind !== undefined && callerMaySubmitInvoices(callerContext, plane));
+  const visible = submitInvoiceRightOf({ callerContext, plane, kind, recordId, reads });
   const dialog = useChildDialog();
 
   // The record the wizard fixes: this one, named as the record view names it (never read again).
