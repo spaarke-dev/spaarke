@@ -162,7 +162,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         if (Environment.GetEnvironmentVariable("ISS010_PROFILE_OUT") is not { Length: > 0 } path)
             return;
         File.AppendAllText(path, $"## {heading}\n{profile.Table()}\nTOTAL {profile.Calls.Count} calls; writes {profile.Calls.Count(c => c.IsWrite)}\n\n"
-            + $"WRITES\n{profile.WriteTranscript()}\n\n");
+            + $"SUMMARY\n{profile.Summary()}\nWRITES\n{profile.WriteTranscript()}\n\n");
     }
 
     [Fact]
@@ -176,6 +176,28 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Select(c => c.Table).Should().Equal("sprk_budget", "sprk_event", "sprk_todo", "sprk_workassignment");
         w.Rig.Records.Should().ContainSingle().Which.LogicalName.Should().Be("sprk_decisionrecord");
         WriteProfile("four-action commit (no latency)", w.Profile);
+    }
+
+    /// <summary>
+    /// ISS-010 fix 1: on the route, the four creates' caller checks share the request's table-metadata answers, so a metadata
+    /// path is read again only by the step that keeps the caller's own client (the work assignment's re-map,
+    /// <c>DataverseWriteItemMapper.MapCoreAsync</c> / <c>MapWebApiPayloadAsync</c>, a follow-up). Before the fix every create
+    /// re-read its tables' metadata, and each create's two check passes read it twice.
+    /// </summary>
+    [Fact]
+    public async Task Iss010_OnTheRoute_TheFourCreates_ReadEachMetadataPathOnce_ExceptTheStepThatKeepsTheCallersOwnClient()
+    {
+        var w = BuildFourActionWorld();
+
+        var result = await w.CommitAsync();
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var repeated = w.Profile.MetadataReads.GroupBy(c => c.Key).Where(g => g.Count() > 1).ToList();
+        repeated.Should().OnlyContain(g => g.Count() == 2 && g.Last().Stage == "assign-work execute"
+                && (g.Last().Site == "DataverseWriteItemMapper.MapCoreAsync" || g.Last().Site == "DataverseWriteItemMapper.MapWebApiPayloadAsync"),
+            "every other repeat of a metadata path within one commit request is answered from the request's memo: "
+            + string.Join("; ", repeated.Select(g => $"{g.Key} x{g.Count()} <- {string.Join(", ", g.Select(c => $"{c.Stage}: {c.Site}"))}")));
+        w.Profile.MetadataReads.Select(c => c.Key).Distinct().Count().Should().Be(21, "the distinct metadata paths this decision needs");
     }
 
     [Fact]

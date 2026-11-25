@@ -102,6 +102,29 @@ internal sealed class DecisionCommitCallProfile
         return sb.ToString();
     }
 
+    /// <summary>The table-metadata reads (<c>EntityDefinitions(…)</c>, sub-paths included) that reached Dataverse.</summary>
+    public IReadOnlyList<Call> MetadataReads => Calls.Where(c => c.Target.StartsWith("EntityDefinitions(", StringComparison.Ordinal)).ToList();
+
+    /// <summary>Counts by kind of call, and every metadata path read more than once with the sites that read it.</summary>
+    public string Summary()
+    {
+        var calls = Calls;
+        bool Sdk(Call c) => c.Seam.Contains("IGenericEntityService", StringComparison.Ordinal) || c.Seam.Contains("IOrganizationServiceAsync2", StringComparison.Ordinal)
+            || c.Seam.Contains("IFieldMappingDataverseService", StringComparison.Ordinal) || c.Seam.Contains("IDataverseRecordShareService", StringComparison.Ordinal);
+        var metadata = MetadataReads;
+        var sb = new StringBuilder();
+        sb.AppendLine(CultureInfo.InvariantCulture, $"metadata reads (EntityDefinitions): {metadata.Count}, distinct paths {metadata.Select(c => c.Key).Distinct().Count()}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"sprk_recordtype_refs(id) reads: {calls.Count(c => c.Target.StartsWith("sprk_recordtype_refs({id})", StringComparison.Ordinal))}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"RetrievePrincipalAccess: {calls.Count(c => c.Target.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"RetrieveUserSetOfPrivilegesByNames: {calls.Count(c => c.Target.Contains("RetrieveUserSetOfPrivilegesByNames", StringComparison.Ordinal))}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"WhoAmI: {calls.Count(c => c.Target.StartsWith("WhoAmI", StringComparison.Ordinal))}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"SDK-side (app-only and writer) calls: {calls.Count(Sdk)} (writes {calls.Count(c => Sdk(c) && c.IsWrite)})");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"all calls: {calls.Count}");
+        foreach (var repeat in metadata.GroupBy(c => c.Key).Where(g => g.Count() > 1))
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  repeated x{repeat.Count()}: {repeat.Key} <- {string.Join(", ", repeat.Select(c => $"{c.Stage}: {c.Site}"))}");
+        return sb.ToString();
+    }
+
     internal object? Intercept(object inner, string seam, bool staged, MethodInfo method, object?[]? args)
     {
         if (!typeof(Task).IsAssignableFrom(method.ReturnType))
