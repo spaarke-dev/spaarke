@@ -54,12 +54,15 @@ import {
   type FilterSettings,
 } from './components/ControlPanel';
 // NodeActionBar removed — node click now opens FilePreviewDialog
-import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
+import {
+  useVisualizationApi,
+  formatVisualizationError,
+  type DocumentGraphNode as DocumentNode,
+} from '@spaarke/ui-components';
 import { useAuth } from '@spaarke/auth';
 import { exportToCsv } from './services/CsvExportService';
 import { authenticatedFetch } from './services/authInit';
 import { FilePreviewDialog } from './components/FilePreviewDialog';
-import type { DocumentNode } from './types/graph';
 // Deep import — DRV's webpack alias maps '@spaarke/ui-components' to the dist
 // folder directly, so we drop the '/dist/' prefix here (otherwise we'd resolve
 // to dist/dist/...). Same anti-barrel intent as elsewhere — avoids pulling

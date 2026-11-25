@@ -1,29 +1,38 @@
 /**
- * useVisualizationApi Hook — Code Page version
- * Identical logic to PCF version; framework-agnostic data fetching.
+ * useVisualizationApi — fetches document relationship graph data from the BFF, with loading,
+ * error and refetch state. React 16-safe (useState / useMemo / useCallback / useEffect only).
+ *
+ * Shared by the DocumentRelationshipViewer code page and PCF (#3093).
  */
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { VisualizationApiService, VisualizationApiError } from '../services/VisualizationApiService';
-import type { DocumentNode, DocumentEdge } from '../types/graph';
-import type { VisualizationQueryParams, GraphMetadata } from '../types/api';
+import { VisualizationApiService, VisualizationApiError } from './VisualizationApiService';
+import type { DocumentGraphNode, DocumentGraphEdge, VisualizationQueryParams, GraphMetadata } from './types';
 
 export interface UseVisualizationApiOptions {
+  /** BFF API base URL (host only) */
   apiBaseUrl: string;
+  /** Source document GUID */
   documentId: string;
-  /** Gates the fetch only; NOT sent to the BFF (it uses the token's `tid`). */
+  /** Configured tenant — only gates the fetch; it is NOT sent to the BFF (the BFF uses the token's `tid`). */
   tenantId: string;
+  /** Minimum similarity threshold (default: 0.65) */
   threshold?: number;
+  /** Maximum documents per level (default: 25) */
   limit?: number;
+  /** Relationship depth (default: 1) */
   depth?: number;
+  /** Document type filters */
   documentTypes?: string[];
+  /** Relationship type filters (e.g., ["same_email", "semantic"]) */
   relationshipTypes?: string[];
+  /** Whether the API should be called (skip if false) */
   enabled?: boolean;
 }
 
 export interface VisualizationApiState {
-  nodes: DocumentNode[];
-  edges: DocumentEdge[];
+  nodes: DocumentGraphNode[];
+  edges: DocumentGraphEdge[];
   metadata: GraphMetadata | null;
   isLoading: boolean;
   error: VisualizationApiError | Error | null;
@@ -43,8 +52,8 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
     enabled = true,
   } = options;
 
-  const [nodes, setNodes] = useState<DocumentNode[]>([]);
-  const [edges, setEdges] = useState<DocumentEdge[]>([]);
+  const [nodes, setNodes] = useState<DocumentGraphNode[]>([]);
+  const [edges, setEdges] = useState<DocumentGraphEdge[]>([]);
   const [metadata, setMetadata] = useState<GraphMetadata | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<VisualizationApiError | Error | null>(null);
@@ -56,10 +65,10 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
       threshold,
       limit,
       depth,
-      documentTypes,
-      relationshipTypes,
       includeKeywords: true,
       includeParentEntity: true,
+      documentTypes,
+      relationshipTypes,
     }),
     [threshold, limit, depth, documentTypes, relationshipTypes]
   );
@@ -84,6 +93,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
     } catch (err) {
       if (err instanceof VisualizationApiError) {
         setError(err);
+        // 404: the document is not indexed yet — show an empty graph rather than stale data.
         if (err.isNotFound()) {
           setNodes([]);
           setEdges([]);
@@ -97,7 +107,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
     } finally {
       setIsLoading(false);
     }
-  }, [enabled, documentId, tenantId, service, queryParams, threshold, limit, depth]);
+  }, [enabled, documentId, tenantId, service, queryParams]);
 
   useEffect(() => {
     void fetchData();
@@ -106,10 +116,13 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
   return { nodes, edges, metadata, isLoading, error, refetch: fetchData };
 }
 
+/** User-facing text for a visualization error. */
 export function formatVisualizationError(error: VisualizationApiError | Error | null): string {
   if (!error) return '';
   if (error instanceof VisualizationApiError) {
-    if (error.isNotFound()) return 'Document not found or has no relationship data yet.';
+    if (error.isNotFound()) {
+      return 'Document not found or has no relationship data yet. The document may still be processing.';
+    }
     if (error.isUnauthorized()) return "You don't have permission to view relationships for this document.";
     return error.message || 'Failed to load document relationships.';
   }

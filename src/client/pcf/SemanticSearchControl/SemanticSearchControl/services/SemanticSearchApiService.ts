@@ -8,6 +8,7 @@
  */
 
 import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
+import { toUtcDateRangeBounds } from '@spaarke/ui-components/dist/components/SearchFilters/dateRangeBounds';
 import { SearchRequest, SearchResponse, SearchError } from '../types';
 
 /**
@@ -600,12 +601,10 @@ export class SemanticSearchApiService {
             documentTypes: request.filters.documentTypes,
             matterTypes: request.filters.matterTypes,
             fileTypes: request.filters.fileTypes,
+            // The filter's dates are the user's LOCAL days; send local midnight .. 23:59:59.999 as UTC
+            // instants (#3093 — appending `T..Z` treated them as UTC days).
             dateRange: request.filters.dateRange
-              ? {
-                  field: 'createdAt',
-                  from: request.filters.dateRange.from ? `${request.filters.dateRange.from}T00:00:00Z` : undefined,
-                  to: request.filters.dateRange.to ? `${request.filters.dateRange.to}T23:59:59Z` : undefined,
-                }
+              ? { field: 'createdAt', ...toUtcDateRangeBounds(request.filters.dateRange) }
               : undefined,
           }
         : undefined,

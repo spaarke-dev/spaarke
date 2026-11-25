@@ -2,7 +2,9 @@
  * DocumentGraph - React Flow canvas with d3-force layout
  *
  * This component renders the document relationship graph using React Flow
- * with node positions calculated by d3-force simulation.
+ * with node positions from the shared synchronous `useForceSimulation` (the same
+ * layout the code page uses, #3093): positions exist before the first render, so
+ * there is no "Calculating layout" pass and `fitView` frames the final layout.
  *
  * Follows:
  * - ADR-006: PCF for all custom UI
@@ -24,11 +26,17 @@ import ReactFlow, {
   EdgeTypes,
 } from 'react-flow-renderer';
 import 'react-flow-renderer/dist/style.css';
-import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
-import { useForceLayout } from '../hooks/useForceLayout';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { useForceSimulation } from '@spaarke/ui-components/dist/hooks/useForceSimulation';
+import type { ForceNode, ForceEdge } from '@spaarke/ui-components/dist/hooks/useForceSimulation';
+import type {
+  DocumentGraphNode as DocumentNode,
+  DocumentGraphEdge as DocumentEdge,
+  DocumentNodeData,
+  ForceLayoutOptions,
+} from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
 import { DocumentNode as DocumentNodeComponent } from './DocumentNode';
 import { DocumentEdge as DocumentEdgeComponent } from './DocumentEdge';
-import type { DocumentNode, DocumentEdge, DocumentNodeData, ForceLayoutOptions } from '../types/graph';
 
 /**
  * Props for DocumentGraph component
@@ -63,20 +71,6 @@ const useStyles = makeStyles({
     height: '100%',
     minHeight: '300px',
     position: 'relative',
-  },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: tokens.colorNeutralBackground1,
-    opacity: 0.9,
-    zIndex: 10,
   },
   emptyState: {
     display: 'flex',
@@ -114,48 +108,56 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
   isDarkMode = false,
   onNodeSelect,
   layoutOptions,
-  width,
-  height,
   showMinimap = false,
   compactMode = false,
 }) => {
   const styles = useStyles();
 
-  // Use (0,0) as center - React Flow's fitView will handle viewport positioning
-  // Using container center caused issues with large viewport widths
-  const centerX = 0;
-  const centerY = 0;
+  // Force-layout inputs (similarity → link weight). The source node is the pinned hub.
+  const forceNodes = React.useMemo<ForceNode[]>(
+    () => inputNodes.map(n => ({ id: n.id, label: n.data.name, isSource: n.data.isSource })),
+    [inputNodes]
+  );
+  const forceEdges = React.useMemo<ForceEdge[]>(
+    () => inputEdges.map(e => ({ source: e.source, target: e.target, weight: e.data?.similarity ?? 0.5 })),
+    [inputEdges]
+  );
 
-  // Use force layout hook to calculate positions
-  const { layoutNodes, layoutEdges, isSimulating } = useForceLayout(inputNodes, inputEdges, {
-    ...layoutOptions,
-    centerX,
-    centerY,
+  // Centre on (0,0) - React Flow's fitView handles the viewport (a container-centred layout
+  // misplaced the graph on wide viewports).
+  const layout = useForceSimulation(forceNodes, forceEdges, {
+    mode: 'hub-spoke',
+    chargeStrength: layoutOptions?.chargeStrength ?? -1000,
+    linkDistanceMultiplier: layoutOptions?.distanceMultiplier ?? 400,
+    collisionRadius: layoutOptions?.collisionRadius ?? 100,
+    center: { x: layoutOptions?.centerX ?? 0, y: layoutOptions?.centerY ?? 0 },
   });
 
-  // React Flow state - add compactMode to node data
-  const nodesWithCompactMode = React.useMemo(() => {
-    return layoutNodes.map(node => ({
-      ...node,
-      data: {
-        ...node.data,
-        compactMode,
-      },
-    }));
-  }, [layoutNodes, compactMode]);
+  // Positioned nodes for React Flow, with compactMode on the node data
+  const layoutNodes = React.useMemo<Node<DocumentNodeData>[]>(() => {
+    const positions = new Map(layout.nodes.map(pn => [pn.id, pn]));
+    return inputNodes.map(node => {
+      const pos = positions.get(node.id);
+      return {
+        ...node,
+        position: { x: pos?.x ?? 0, y: pos?.y ?? 0 },
+        data: { ...node.data, compactMode },
+      };
+    });
+  }, [inputNodes, layout.nodes, compactMode]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(nodesWithCompactMode);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(inputEdges as Edge[]);
 
   // Update nodes when layout changes or compact mode changes
   React.useEffect(() => {
-    setNodes(nodesWithCompactMode);
-  }, [nodesWithCompactMode, setNodes]);
+    setNodes(layoutNodes);
+  }, [layoutNodes, setNodes]);
 
-  // Update edges when layout changes
+  // Update edges when the input changes
   React.useEffect(() => {
-    setEdges(layoutEdges);
-  }, [layoutEdges, setEdges]);
+    setEdges(inputEdges as Edge[]);
+  }, [inputEdges, setEdges]);
 
   // Handle node click
   const handleNodeClick = React.useCallback(
@@ -187,12 +189,6 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
 
   return (
     <div className={styles.container}>
-      {isSimulating && (
-        <div className={styles.loadingOverlay}>
-          <Spinner size="medium" label="Calculating layout..." />
-        </div>
-      )}
-
       <ReactFlow
         nodes={nodes}
         edges={typedEdges}

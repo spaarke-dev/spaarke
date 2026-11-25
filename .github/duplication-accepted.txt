@@ -58,16 +58,6 @@ src/solutions/LegalWorkspace/src/App.tsx | src/solutions/SpeAdminApp/src/App.tsx
 src/solutions/Reporting/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 src/solutions/sprk_invoicespage/src/main.tsx | src/solutions/sprk_kpiassessmentspage/src/main.tsx | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 
-# --- Tracked: PCF and code-page document twins (#3093) ---
-src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentNode.tsx | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/components/DocumentNode.tsx | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-src/client/code-pages/DocumentRelationshipViewer/src/hooks/useForceLayout.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/hooks/useForceLayout.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-src/client/code-pages/DocumentRelationshipViewer/src/hooks/useVisualizationApi.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/hooks/useVisualizationApi.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/services/VisualizationApiService.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-src/client/code-pages/DocumentRelationshipViewer/src/types/api.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/types/api.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-src/client/code-pages/DocumentRelationshipViewer/src/types/graph.ts | src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/types/graph.ts | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-src/client/code-pages/SemanticSearch/src/components/DateRangeFilter.tsx | src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/DateRangeFilter.tsx | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-src/client/code-pages/SemanticSearch/src/components/FilterDropdown.tsx | src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilterDropdown.tsx | #3093 | PCF and code-page copies of the same document UI; to move into ui-components pcf-safe.
-
 # --- Tracked: twin schema validators (#3094) ---
 src/client/code-pages/PlaybookBuilder/src/services/schemaValidation.ts | src/client/pcf/ScopeConfigEditor/ScopeConfigEditor/utils/openAiSchemaValidator.ts | #3094 | Twin OpenAI schema validators; one to be hoisted into ui-components.
 

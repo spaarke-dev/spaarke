@@ -42,10 +42,24 @@ export type { IModalWindowControlsProps } from './components/ModalWindowControls
 export { RelationshipCountCard } from './components/RelationshipCountCard';
 export { MiniGraph } from './components/MiniGraph';
 export { AiSummaryPopover } from './components/AiSummaryPopover';
+// DocumentRelationshipViewer + SemanticSearch shared pieces (#3093): hooks use useState/useMemo/
+// useCallback/useEffect only; the filters use Fluent's useId (its own React 16 fallback), not React's.
+export * from './components/DocumentRelationshipGraph';
+export * from './components/SearchFilters';
 
 // ─── Hooks (PCF-safe — React 16 compatible) ────────────────────────────────
 export { useAiSummary } from './hooks';
 export type { DocumentSummaryState, SummaryStatus, SummaryDocument, ExtractedEntities } from './hooks';
+// Synchronous d3-force layout (useMemo only) — the DocumentRelationshipViewer PCF graph uses it (#3093).
+export { useForceSimulation } from './hooks/useForceSimulation';
+export type {
+  ForceNode,
+  ForceEdge,
+  ForceSimulationOptions,
+  ForceLayoutResult,
+  PositionedNode,
+  PositionedEdge,
+} from './hooks/useForceSimulation';
 // Note: useSseStream is React 18+ only (uses SprkChat internals) — NOT pcf-safe
 
 // ─── Services (no React dependency) ────────────────────────────────────────
