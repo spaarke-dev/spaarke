@@ -906,6 +906,27 @@ public sealed class SecureRecordSetupProcedureTests
                         .Add(new SecureSetupFieldPermission(dv.AddProfile("Contact Admins"), "contact", 4, 0, 0));
                 },
                 SecureRecordSetupRejectionCodes.InviteCodeHashLockOtherAccess, FailureClass.QuarantineRequired },
+            { "contact.sprk_externalinvitecodehash is audited", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+                        new SecureSetupAttributeExposure(IsAuditEnabled: true, IsValidForAdvancedFind: false);
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn, FailureClass.Resumable },
+            { "contact.sprk_externalinvitecodehash is valid for Advanced Find", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+                        new SecureSetupAttributeExposure(IsAuditEnabled: false, IsValidForAdvancedFind: true);
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn, FailureClass.Resumable },
+            { "contact.sprk_externalinvitecodehash is audited AND valid for Advanced Find", dv =>
+                {
+                    dv.AddInviteCodeHash();
+                    dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+                        new SecureSetupAttributeExposure(IsAuditEnabled: true, IsValidForAdvancedFind: true);
+                },
+                SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn, FailureClass.Resumable },
 
             // ---- S19 (#2317): the access level's lock ----
             { "contact.sprk_accesspermissiongrant not secured", dv =>
@@ -1138,6 +1159,85 @@ public sealed class SecureRecordSetupProcedureTests
             .Where(n => n.Contains(SecureRecordSetupProcedure.InviteCodeHashColumn, StringComparison.Ordinal)).ToArray();
         codeHashNotes.Should().ContainSingle().Which.Should().Contain("present, secured");
         codeHashNotes.Should().NotContain(n => n.Contains("absent", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InviteCodeHash_AuditAndAdvancedFindOff_Passes_AndTheNoteSaysSo()
+    {
+        var dv = NewEnv();
+        dv.AddInviteCodeHash();
+        dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+            new SecureSetupAttributeExposure(IsAuditEnabled: false, IsValidForAdvancedFind: false);
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes!.Should().ContainSingle(n => n.Contains(SecureRecordSetupProcedure.InviteCodeHashColumn, StringComparison.Ordinal))
+            .Which.Should().Contain("auditing and Advanced Find off");
+        dv.Writes.Should().NotContain(w => w.Contains("invite", StringComparison.OrdinalIgnoreCase), "S22 verifies, never changes a column");
+    }
+
+    [Theory]
+    [InlineData(true, false, "IsAuditEnabled=True, IsValidForAdvancedFind=False")]
+    [InlineData(false, true, "IsAuditEnabled=False, IsValidForAdvancedFind=True")]
+    public async Task InviteCodeHash_AuditOrAdvancedFindOn_IsRefused_NamingTheColumnTheValuesAndTheRemedy_WritingNothing(
+        bool audit, bool find, string expectedValues)
+    {
+        var dv = NewEnv();
+        dv.AddInviteCodeHash();
+        dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+            new SecureSetupAttributeExposure(audit, find);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("contact.sprk_externalinvitecodehash").And.Contain(expectedValues)
+            .And.Contain("Set-ExternalInviteCodeHashSchema.ps1 -Apply").And.Contain("H7b changes no column setting");
+        // The only remedy is the script: a SpaarkeMaster import (H6) skips an unchanged version and cannot clear a hand-set value.
+        refused.Diagnostic.Should().NotContain("import SpaarkeMaster (H6)");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InviteCodeHash_Absent_NeverReadsItsAuditOrAdvancedFindSettings()
+    {
+        var dv = NewEnv();   // the column is not in the environment
+        dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+            new SecureSetupAttributeExposure(true, true);   // would refuse if read
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().ContainSingle(n => n.Contains("sprk_externalinvitecodehash", StringComparison.Ordinal)
+                                                       && n.Contains(CodeHashAbsentNote, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InviteCodeHash_AuditOnButNotSecured_StillReportsTheSecurityLockFirst()
+    {
+        // Order: the existing locks are checked first, so an environment that is wrong in both ways gets the established code.
+        var dv = NewEnv();
+        dv.AddInviteCodeHash();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] = false;
+        dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+            new SecureSetupAttributeExposure(true, true);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InviteCodeHashLockIncomplete, FailureClass.Resumable);
+    }
+
+    [Fact]
+    public async Task InviteCodeHash_ExposureReadFault_Propagates_NeverTreatedAsOff()
+    {
+        var dv = NewEnv();
+        dv.AddInviteCodeHash();
+        var codeHashKey = FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash");
+        var securedReads = 0;
+        // The IsSecured read answers; the exposure read (the next call for the same key) faults.
+        dv.ColumnReadFault = key => key.Equals(codeHashKey, StringComparison.OrdinalIgnoreCase) && ++securedReads > 1
+            ? new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other, "503")
+            : null;
+
+        var act = () => RunAsync(dv);
+
+        await act.Should().ThrowAsync<SecureRecordSetupDataverseException>("a failed read is not 'both off'");
+        dv.Writes.Should().BeEmpty();
     }
 
     // ------------------------------------------------------------ S19/S22 (#2317): access level, BFF-only columns, removed-on

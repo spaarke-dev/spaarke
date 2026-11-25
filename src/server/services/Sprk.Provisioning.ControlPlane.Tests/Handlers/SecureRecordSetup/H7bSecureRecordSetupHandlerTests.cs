@@ -516,6 +516,39 @@ public sealed class H7bSecureRecordSetupHandlerTests
         dv.Writes.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion11_DoesNotShortCircuit_AndChecksTheInviteCodeHashExposure()
+    {
+        // ISS-025 / #1803: an environment H7b configured before S22 verified audit and Advanced Find on the invite-code hash,
+        // where either has since been turned on. The re-run reaches S22 and refuses; nothing is written.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        dv.AddInviteCodeHash();
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+            new SecureSetupAttributeExposure(IsAuditEnabled: true, IsValidForAdvancedFind: false);
+        dv.Writes.Clear();
+        var v11Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=11\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v11Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn);
+        dv.Writes.Should().BeEmpty();
+        H7bSecureRecordSetupHandler.ProcedureVersion.Should().Be("secure-setup-procedure=12");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("not-a-guid")]

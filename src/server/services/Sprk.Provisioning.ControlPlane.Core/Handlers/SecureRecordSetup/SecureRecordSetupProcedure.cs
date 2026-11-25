@@ -8,7 +8,7 @@
 // the standing-grant environment (S19 the Standing Grant Administrators profile and its lock on contact.sprk_standinggrant,
 // S20 the BFF's application users as its members, S21 the sprk_noaccessentry role split unified-access-control-r2 task 154
 // ships) — plus S22 (ISS-025 / #1803): the locks on contact.sprk_externalinvitedon and, once it ships,
-// contact.sprk_externalinvitecodehash, VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
+// contact.sprk_externalinvitecodehash (its auditing and Advanced Find also off), VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
 // contact.sprk_accesspermissiongrant, and S22 the locks on the BFF-only columns sprk_externalinvitedemailhash,
 // sprk_externalinvitedtenantid and sprk_externalaccessremovedon once they ship — plus S23: the BFF's runtime Dataverse identity (the managed identity's
 // application user) holds the "Spaarke Ontology Service" role, and no team or interactive user does — plus S24 (#2605): the
@@ -1300,7 +1300,22 @@ public sealed class SecureRecordSetupProcedure
                     $" (the Readers profile must hold no row or 0/0/0 — every default team is its member). Only the BFF may " +
                     "touch the invite-code hash; who was granted access is an operator decision. Nothing was written.");
             }
-            notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access.");
+
+            // Verified only (never changed): auditing and Advanced Find are both OFF on the column, as the package ships it
+            // (Entity.xml IsAuditEnabled 0, no ValidForAdvancedFind in DisplayMask) and Set-ExternalInviteCodeHashSchema.ps1 sets it.
+            // The seam returning null here would mean the column vanished between two reads: not a pass.
+            var exposure = await dv.GetAttributeExposureAsync(t, InviteTable, InviteCodeHashColumn, ct).ConfigureAwait(false);
+            if (exposure is null || exposure.IsAuditEnabled || exposure.IsValidForAdvancedFind)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn,
+                    $"{InviteTable}.{InviteCodeHashColumn}: IsAuditEnabled={(exposure is null ? "(column not readable)" : exposure.IsAuditEnabled)}, " +
+                    $"IsValidForAdvancedFind={(exposure is null ? "(column not readable)" : exposure.IsValidForAdvancedFind)} " +
+                    "(expected both false). The package ships the column with auditing and Advanced Find off; turn them off — " +
+                    "run scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply for the environment (it sets both off; it takes " +
+                    "-BffApplicationIds) and check it with -Verify — then resume. A SpaarkeMaster re-import does not clear a " +
+                    "value set by hand. H7b changes no column setting. Nothing was written.");
+            }
+            notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access, auditing and Advanced Find off.");
         }
 
         // S22 (#2317) — the BFF-only columns, as the invite-code hash: ABSENT is expected until the SpaarkeMaster release that

@@ -75,6 +75,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
     /// <summary><c>IsSecured</c> per <c>"table.column"</c> (see <see cref="ColumnKey"/>); absent = no such column.</summary>
     internal Dictionary<string, bool?> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>S22: a column's audit / Advanced Find settings per <c>"table.column"</c> where a test sets them; a column the environment has defaults to both off.</summary>
+    internal Dictionary<string, SecureSetupAttributeExposure?> ColumnExposure { get; } = new(StringComparer.OrdinalIgnoreCase);
     internal Dictionary<string, HashSet<Guid>> NullFlagRows { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     internal int Reads { get; private set; }
@@ -621,6 +623,20 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             throw ex;
         }
         return Task.FromResult(SecuredColumns.GetValueOrDefault(key));
+    }
+
+    public Task<SecureSetupAttributeExposure?> GetAttributeExposureAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken)
+    {
+        Read(nameof(GetAttributeExposureAsync));
+        var key = ColumnKey(tableLogicalName, attributeLogicalName);
+        if (ColumnReadFault?.Invoke(key) is { } ex)
+        {
+            throw ex;
+        }
+        // A column the environment has (it has an IsSecured answer) is, as the package ships it, audit off and Advanced Find off.
+        return Task.FromResult(ColumnExposure.TryGetValue(key, out var set)
+            ? set
+            : SecuredColumns.GetValueOrDefault(key) is null ? null : new SecureSetupAttributeExposure(false, false));
     }
 
     public Task<SecureSetupTableIdentity> GetTableIdentityAsync(SecureRecordSetupTarget target, string tableLogicalName, CancellationToken cancellationToken)
