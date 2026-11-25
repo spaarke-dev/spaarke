@@ -208,3 +208,10 @@ Owner points: separate how a request starts (email, Teams or Front Door form, Co
 - `spaarke-legal-front-door-r1` (pre-spec, last change 2026-10-05) proposed a new `sprk_legalrequest` spine.
 - The ontology project's open **CM-5** ("are Inquiry and Request one object?") "would also settle `sprk_servicerequest` vs `sprk_legalrequest`". The ontology is adding `sprk_direction` / `sprk_disposition` / `sprk_responseduedate` to `sprk_servicerequest`.
 - **Proposal:** `sprk_servicerequest` is the one request record. It adds a channel, an assigned attorney and a stage. Each AI run stays on the existing analysis records (`sprk_analysis` / `sprk_analysisoutput`) linked to the request's document. A counterparty's revised draft is a new run on the same request. This needs agreement from front-door-r1 and the ontology (CM-5) before any spec.
+
+**Owner decisions (2026-11-24):**
+- **`sprk_servicerequest` is the request entity (option A).** `spaarke-legal-front-door-r1` is not going forward, and no `sprk_legalrequest` will be created.
+- In the ontology an Inquiry is a different concept from a Service Request.
+- Aim for **one process model** across intake (email → document, file → document, invoice intake, and others).
+- A separate processing record is probably needed for routing and orchestration, and because a negotiation is one request with several runs. Open question: can the invoice-processing machinery be reused, or is it type-specific?
+- Proposed approach: `notes/intake-process-model-proposal.md`.
