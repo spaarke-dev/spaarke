@@ -392,3 +392,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing. The composer's subject has no length limit and `ValidateRequest` checks only for an empty subject. The `sprk_communication` create after the send is best-effort, so an over-long subject is delivered with no row. |
 | **Need** | Refuse a subject longer than `sprk_subject` (2000) before sending, and limit the composer field; tests at and over the limit. |
 | **Status** | Filed. Task 028 covers only the mapped subject (an over-long mapped value is not used); the typed case is the communication path's owner's. |
+
+## DI-041 — One email's attachments must each keep their own bytes (pointer; found in word-add-in-r1 task 138's review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, word-add-in-r1 task 138 adversarial review; registered there as ISS-040. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3135 |
+| **Class** | Pre-existing, in the Office save / upload-finalization path. This project touched that worker only for the record-first owner (015) and the save stamp (030). |
+| **Need** | Two attachments with the same name in one email keep their own files; redelivery stays idempotent. |
+| **Status** | Filed; owner is the Office save / upload-finalization path, not this project. Pointer only. |
