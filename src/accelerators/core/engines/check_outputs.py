@@ -132,8 +132,10 @@ def accepted_texts(root):
     """Independent oracle for "accept all": works on text, never on the tree surgery the engine uses."""
     out, carry = [], None
     for p in root.find(q("body")).iter(q("p")):
-        if any(a.tag == q("tr") and a.find("%s/%s" % (q("trPr"), q("del"))) is not None for a in p.iterancestors()):
-            continue
+        if any((a.tag == q("tr") and a.find("%s/%s" % (q("trPr"), q("del"))) is not None)
+               or (a.tag == q("tc") and a.find("%s/%s" % (q("tcPr"), q("cellDel"))) is not None)
+               for a in p.iterancestors()):
+            continue  # deleted rows and deleted cells disappear on accept
         parts = []
         for e in p.iter(q("t"), q("tab"), q("br")):
             if any(a.tag in (q("del"), q("moveFrom")) for a in e.iterancestors()):
