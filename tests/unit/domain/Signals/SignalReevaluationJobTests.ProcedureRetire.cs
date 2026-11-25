@@ -148,6 +148,9 @@ public partial class SignalReevaluationJobTests
         await h.Closure.SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject: true, default);              // Procedure retire preview
         await h.Closure.ClosePolicySignalsRetiredAsync(policyId, PolicyCode, withBillingSubject: true, default);   // Procedure retire close
         await h.Closure.ClosePolicyRetiredNowAsync(policyId);                                                     // admin retire close
+        // Task 209 (#3014): the sweep selects only a not-in-force policy that still has an open Signal, so the policy gets one here.
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId, policyId: policyId,
+            versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
         await h.Closure.ClosePoliciesNotInForceAsync(default);                                                    // nightly sweep
 
         reads.Should().HaveCount(4);
