@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Document tools: spaarke_list_documents, spaarke_get_document</title>
+    <phase>1 Read tools</phase>
+    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF surface (two MCP tools) over document access; adds uniform not-found tests</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Thin adapters copying CompleteDecisionTool over existing document list and file-access logic</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/LegalOperations/Documents/**, the Documents ledger partial and its tests</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, api, integration-test</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add two read-only MCP tools: spaarke_list_documents with the GET /api/v1/documents logic (filters such as regarding matter), and spaarke_get_document returning metadata plus preview and open links from the FileAccessEndpoints logic (/api/documents/{id}/preview-url, /open-links). Both run as the caller; a document the caller cannot read returns a uniform not-found.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool handlers and SharePoint Embedded document access.</role>
+  <goal>Both tools match REST for an allowed document, return a uniform not-found for a forbidden or missing one, and serve as the data source for task 011's attachment picker (list by regarding matter).</goal>
+
+  <context>
+    <background>Spec FR-03, NFR-02, NFR-07. REST: Api/DataverseDocumentsEndpoints.cs (group /api/v1/documents, GET "/" ListDocumentsAsync :622, GET "/{id}" :38); Api/FileAccessEndpoints.cs (group /api/documents; preview-url :65, open-links :111, view-url :122). IDocumentDataverseService is in src/server/shared/Spaarke.Dataverse/. If list/get logic lives inline in the endpoint lambdas, extract it to a method both the route and the tool call (no copy), with a frozen-bytes contract test first.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Documents/ListDocumentsTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Documents/GetDocumentTool.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs (only if list/get logic must be extracted from a lambda)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Documents.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Documents/DocumentToolsContractTests.cs</file>
+      <file role="new">tests/integration/auth/Mcp/Documents/DocumentToolsNotFoundTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Signals/SignalRoutesContractBaselineTests.cs (frozen bytes, if an extraction is needed)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">General McpToolResults, ledger partials</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback; never pass or log the token). Use the same authorization the REST routes apply; a forbidden and a missing document both return the same isError not-found result (reasonCode and message identical).</constraint>
+    <constraint source="project">Each tool: [McpArea("legal-operations")], readOnlyHint true, destructiveHint false, idempotentHint true, a title, "use for / not for" description ≤ 1,024 characters. Ledger rows in RouteAuthorizationGuardTests.Mcp.Documents.cs.</constraint>
+    <constraint source="project">If an extraction from DataverseDocumentsEndpoints is needed, write the frozen-bytes contract test for the REST route before the refactor; REST response bytes stay unchanged.</constraint>
+    <constraint source="ADR-015">Model-visible: id, name, file type, size, modified date, regarding matter name, preview/open links; no document content and no secured fields. Logs: tool name, latency, row count, outcome, correlation id only. Result &lt; 64 KiB at the list maximum.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and 020; read the list/get/preview/open-link handlers and decide whether an extraction is needed (note it).</step>
+    <step order="2">If needed, write the frozen-bytes test, then extract.</step>
+    <step order="3">Write the two tools and ledger rows; write the contract and not-found tests; run MCP suites, ArchTests and conformance.</step>
+    <step order="4">Measure the publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the REST routes answer 403 vs 404 differently for forbidden vs missing and a uniform tool result would contradict a documented contract, STOP and escalate (uac-r2).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md rows "Document list" and "Document preview/open links": DataverseDocumentsEndpoints ListDocumentsAsync, FileAccessEndpoints preview-url/open-links over IDocumentDataverseService and SPE; CAPABILITY-INDEX document-access row.</existing>
+    <extension>The route logic is reused (extracted to a shared method only if it is inline); the tools are thin adapters on r1's host.</extension>
+    <cost-of-doing-nothing>Copilot users cannot list or open matter documents, and the email widget (011/040) has no attachment source (FR-03, FR-12 fail).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Documents/ListDocumentsTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Documents/GetDocumentTool.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Documents/DocumentToolsContractTests.cs</output>
+    <output type="test">tests/integration/auth/Mcp/Documents/DocumentToolsNotFoundTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For an allowed document, get returns the REST metadata and the same preview/open links; list by regarding matter returns the REST ids.</criterion>
+    <criterion testable="true">Negative: a forbidden document and a non-existent id return byte-identical isError not-found results.</criterion>
+    <criterion testable="true">Negative: no caller context returns UserContextRequired.</criterion>
+    <criterion testable="true">If an extraction happened, the REST frozen-bytes test passes before and after.</criterion>
+    <criterion testable="true">Results under 64 KiB at the list maximum; ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03. uac-r2 reviews.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

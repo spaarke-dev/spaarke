@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using Spaarke.Core.Auth;
-using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Ai;
@@ -44,8 +43,8 @@ public static class PlaybookAuthorizationFilterExtensions
         => builder.AddPlaybookAuthorizationFilter(PlaybookAuthorizationMode.UniformById);
 
     /// <summary>
-    /// Adds the run decision for <c>POST /api/ai/playbooks/{id:guid}/execute</c> and
-    /// <c>POST /api/agent/run-playbook</c> (<see cref="PlaybookAuthorizationMode.Run"/>): the shared playbook-parameter
+    /// Adds the run decision for <c>POST /api/ai/playbooks/{id:guid}/execute</c>
+    /// (<see cref="PlaybookAuthorizationMode.Run"/>): the shared playbook-parameter
     /// policy's syntax half (400), the playbook-use decision (uniform 404), then the caller's own rights on every document
     /// and every record parameter the run reads or writes (uniform 403); the run's user is the caller's systemuserid.
     /// </summary>
@@ -124,7 +123,7 @@ public enum PlaybookAuthorizationMode
     UniformById,
 
     /// <summary>
-    /// <c>POST /api/ai/playbooks/{id:guid}/execute</c> and <c>POST /api/agent/run-playbook</c> (task 164): the
+    /// <c>POST /api/ai/playbooks/{id:guid}/execute</c> (task 164): the
     /// playbook-use decision (uniform 404), then Read — or Write, when the run can write to them — on every
     /// document the run is given and every record parameter (uniform 403), after the parameter policy's 400s.
     /// </summary>
@@ -288,7 +287,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     /// <summary>
     /// The playbook-use decision — "may this caller run this playbook" — shared by every route that runs or binds a
     /// caller-chosen playbook (unified-access-control-r2 task 162: /api/ai/analysis/execute and /promote; task 164
-    /// switches this filter's own routes and the chat/agent playbook routes to it).
+    /// switches this filter's own routes and the chat playbook routes to it).
     /// </summary>
     /// <returns>
     /// <c>null</c> when no check is needed: the playbook exists and is PUBLIC (<c>sprk_ispublic</c>, an application
@@ -360,7 +359,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     public const string PlaybookNotFoundDetail = "The requested playbook was not found.";
 
     /// <summary>
-    /// The ONE "playbook unavailable" response for the playbook-id kind on by-id, execute and agent run-playbook:
+    /// The ONE "playbook unavailable" response for the playbook-id kind on by-id and execute:
     /// identical (status, type, title, detail, reasonCode, extension keys) for an unknown playbook, a playbook the
     /// caller may not use and a decision fault. No detail or extension carries the requested id; <c>instance</c> is
     /// the request path. The by-id handler returns the same body when its own lookup misses.
@@ -538,7 +537,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// Run (<c>POST /api/ai/playbooks/{id:guid}/execute</c>, <c>POST /api/agent/run-playbook</c>): the ids come from
+    /// Run (<c>POST /api/ai/playbooks/{id:guid}/execute</c>): the ids come from
     /// the SAME argument the handler binds. Validation 400s first (no rights query) — including the syntax half of the
     /// shared playbook-parameter policy — then the playbook-use decision (uniform 404), then every document and every
     /// record parameter (uniform 403), then the run's user. The handler writes SSE headers only after this passes.
@@ -566,27 +565,8 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
         string source;
         IReadOnlyDictionary<string, string>? parameters;
 
-        var agentRequest = context.Arguments.OfType<AgentPlaybookRequest>().FirstOrDefault();
         var executeRequest = context.Arguments.OfType<ExecutePlaybookRequest>().FirstOrDefault();
-        if (agentRequest is not null)
-        {
-            // The agent handler's existing 400s, returned before any lookup or rights query.
-            if (agentRequest.PlaybookId == Guid.Empty)
-            {
-                return BadRequestProblem(AgentEndpoints.PlaybookIdRequiredDetail);
-            }
-
-            if (agentRequest.DocumentId == Guid.Empty)
-            {
-                return BadRequestProblem(AgentEndpoints.DocumentIdRequiredDetail);
-            }
-
-            playbookId = agentRequest.PlaybookId;
-            documentIds = [agentRequest.DocumentId];
-            source = "body.playbookId";
-            parameters = agentRequest.Parameters;
-        }
-        else if (executeRequest is not null && TryGetRouteGuid(httpContext, out playbookId))
+        if (executeRequest is not null && TryGetRouteGuid(httpContext, out playbookId))
         {
             // The execute handler's existing 400 (same constant, same ProblemDetails body), before any rights query.
             if (executeRequest.DocumentIds is not { Length: > 0 } requested)
@@ -602,7 +582,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
         else
         {
             // A Run-mode route whose request this filter cannot read is a configuration fault: deny.
-            _logger?.LogError("Playbook run authorization: no AgentPlaybookRequest or ExecutePlaybookRequest argument (or no route id); denying (fail closed)");
+            _logger?.LogError("Playbook run authorization: no ExecutePlaybookRequest argument (or no route id); denying (fail closed)");
             return UniformPlaybookNotFound(httpContext);
         }
 
@@ -964,11 +944,4 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
             statusCode: 400,
             title: "Bad Request",
             detail: "Playbook identifier not found in request");
-
-    private static IResult BadRequestProblem(string detail) =>
-        Results.Problem(
-            statusCode: 400,
-            title: "Bad Request",
-            detail: detail,
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
 }

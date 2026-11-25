@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Remove the legacy agent from the BFF</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api and deletion; modifies and deletes .cs files and tests across the BFF, ArchTests and contract suites</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting removal touching 3+ existing consumers (filters, DI, auth comments, ledger, contract and seam tests) with a hidden live dependency (HandoffUrlBuilder in the chat create-record tool)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Agent/**, AgentModule, Program.cs, EndpointMappingExtensions.cs, PlaybookAuthorizationFilter.cs, AiAuthorizationFilter.cs, AuthorizationModule.cs comments and the agent ledger rows; no other Phase 0 Wave 1 task edits these files</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, refactoring, deletion, testing, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Delete the legacy M365 Copilot agent gateway from the BFF: Api/Agent/**, AgentModule, AgentTokenOptions, their Program.cs and EndpointMappingExtensions registrations, their tests, route-guard ledger rows and /api/agent/* contract tests. First remove PlaybookAuthorizationFilter's dependency on AgentEndpoints (its agent-only branch and the two constants it uses), and relocate HandoffUrlBuilder (still used by the chat create-record tool) out of Api/Agent/ with its own registration. Measure the publish-size delta.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal API module DI, the route-guard ArchTests and safe large deletions.</role>
+  <goal>No /api/agent/* route, Agent* service, AgentModule or AgentTokenOptions remains in the BFF; HandoffUrlBuilder lives outside Api/Agent/ and DataverseCreateRecordHandler still resolves it; the BFF builds with 0 warnings; ArchTests, unit, contract and seam suites pass; the publish-size delta is recorded.</goal>
+
+  <context>
+    <background>Spec FR-01 (Phase 0's first task; owner 2026-11-25: remove now, no parallel period). Inventory: notes/legacy-agent-inventory-2026-11-25.md; blast radius: notes/reuse-scan.md "Legacy removal blast radius (FR-01)". The pre-removal tree is commit 37f0864afe; tasks 020, 024 and 030 read the deleted start/poll and de-duplication code from there. Closes #2575; records the decision on #1523 (AgentTokenService).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/PlaybookAuthorizationFilter.cs (:3 using; :569-588 AgentPlaybookRequest branch using AgentEndpoints.PlaybookIdRequiredDetail / DocumentIdRequiredDetail at :576, :581; comments :48, :127, :541, :605)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs (:3 using, :60 AgentMessageRequest cref)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs (:232 AddAgentModule)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (:5 using, :479-480 MapAgentEndpoints)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs (:229 HandoffUrlBuilder field; namespace import only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookOrchestrationService.cs (:724 comment only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookParameterPolicy.cs (:18 comment only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/IdentityConfigurationValidator.cs, Infrastructure/Auth/OrderedCredentialClientProvider.cs, Infrastructure/Dataverse/DataverseUserClient.cs, Infrastructure/DI/AuthorizationModule.cs, appsettings.template.json, Sprk.Bff.Api.csproj, Directory.Build.props (agent mentions per reuse-scan)</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs, IConfidentialClientProvider.cs (comments)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs (:174, :2780, :3654, :3875-3879), RouteAuthorizationGuardTests.ProvenByTest.cs (:209-220), RouteAuthorizationGuardTests.cs, SessionOwnershipGuardTests.cs, ADR013_AiBoundaryTests.cs, TenantIsolation/I6_ObAppRegDerivationTests.cs, TenantIsolation/SpeAppOnlyContainerGuardTests.cs</file>
+      <file role="modify">tests/integration/contract/Api/Ai/ChatAgentRouteProofTests.cs, PlaybookRouteAuthorizationContractTests.cs (:535), ChatContextAuthorizationContractTests.cs, BusinessSliceDeterminismContractTests.cs; tests/integration/contract/Eval/P2LoopInjectionEvalSuiteTests.cs</file>
+      <file role="modify">tests/integration/seam/Auth/ConfidentialClientMigrationSeamTests.cs, ConfidentialClientSharingSeamTests.cs</file>
+      <file role="modify">every test file that imports HandoffUrlBuilder (namespace update only; grep "HandoffUrlBuilder" under tests/)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/Handoff/HandoffUrlBuilder.cs (moved from Api/Agent/HandoffUrlBuilder.cs, content unchanged except namespace)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/Agent/HandoffUrlBuilderTests.cs (move beside the new location's test folder; namespace only)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AgentModule.cs:45-49 (current HandoffUrlBuilder registration and Dataverse URL fallback to preserve)</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">PlaybookAuthorizationFilter.AuthorizeRunAsync (:560-610) has an agent branch keyed on AgentPlaybookRequest (:569-588) that is the only user of AgentEndpoints.PlaybookIdRequiredDetail / DocumentIdRequiredDetail. Remove that branch with the agent route and update the fail-closed log text at :605; the execute branch (ExecutePlaybookRequest, PlaybookRunEndpoints.DocumentIdsRequiredMessage) and every other mode stay byte-for-byte unchanged. If grep shows any non-agent caller of the two constants, move them (identical values) into Api/Filters/ before deleting AgentEndpoints instead.</constraint>
+    <constraint source="project">HandoffUrlBuilder is relocated, not deleted: move it to Services/Ai/Handoff/HandoffUrlBuilder.cs (namespace Sprk.Bff.Api.Services.Ai.Handoff), keep every public method unchanged, and register it as a singleton with the same Dataverse URL fallback (AgentModule.cs:45-49) in the existing module that registers the AI chat tool handlers (AiModule.cs or AiChatModule.cs; grep to confirm). Do not add a new module.</constraint>
+    <constraint source="project">Leave every file under src/server/api/Sprk.Bff.Api/Api/Mcp/** untouched (spaarkeai-mcp-bff-api-r1 owns it until PR #3161 merges). The comment at Api/Mcp/LegalOperations/Decisions/DecisionsTextSummary.cs:11 is cleared by task 020; record it in the task notes as the one known remaining grep hit.</constraint>
+    <constraint source="project">Do not edit PlaybookOrchestrationService.cs (task 005 owns it), EventEndpoints.cs (006), FinanceAuthorizationFilter.cs or Api/Finance/** (008); comment-only edits in IPlaybookOrchestrationService.cs and PlaybookParameterPolicy.cs are this task's.</constraint>
+    <constraint source="ADR-008">Every ledger row removed from RouteAuthorizationGuardTests.Ledger.cs is for a route under /api/agent/*; no other route's ledger row, PermanentBasis or SweepFinding changes. Remove ProvenByTest cases for /api/agent/* only; if a ProvenByTest case uses /api/agent/* as a stand-in for a generic rule, replace the route with an existing route of the same shape instead of deleting the proof.</constraint>
+    <constraint source="ADR-028">Delete AgentTokenService and AgentTokenOptions without changing any other credential path: OrderedCredentialClientProvider, IdentityConfigurationValidator, DataverseUserClient and AuthorizationModule keep their runtime behaviour; only agent-specific comments, options and validator branches are removed. Any change beyond comments in AuthorizationModule.cs is out of scope: escalate.</constraint>
+    <constraint source="ADR-038">Tests are deleted only when they test removed /api/agent/* behaviour; a test that proves a still-live rule through an agent route is rewritten against a live route in the same PR (KEEP-path tests are never deleted without same-PR replacement). No Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule' (expected negative): +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master and /conflict-check (route-guard ledger files may overlap r1 PR #3161 and Word add-in PR #3157). CS0618 is a build error: migrate, never suppress. If Directory.Build.props:28's AgentEndpoints suppression note becomes dead, remove it.</constraint>
+    <constraint source="project">The PR description includes "Closes #2575". Draft the #1523 decision comment (AgentTokenService removed with the agent) in projects/spaarkeai-mcp-bff-api-r2/notes/001-issue-comments.md for the main session to post; do not post it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/legacy-agent-inventory-2026-11-25.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/reuse-scan.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Re-run the blast-radius grep: git grep -n -i "api/agent\|AgentEndpoints\|AgentModule\|AgentTokenService\|AgentTokenOptions\|Api\.Agent\|HandoffUrlBuilder" -- src/server tests ':!**/bin/**' ':!**/obj/**'; save the list to projects/spaarkeai-mcp-bff-api-r2/notes/001-blast-radius.md.</step>
+    <step order="2">In PlaybookAuthorizationFilter, remove the AgentPlaybookRequest branch of AuthorizeRunAsync and the agent-route doc comments (:48, :127, :541); grep for any other use of the two AgentEndpoints constants (move them only if one exists); in PlaybookRouteAuthorizationContractTests, delete the AgentRunPlaybook_* tests and rewrite any Run-mode proof that exists only on the agent route against POST /api/ai/playbooks/{id}/execute; build.</step>
+    <step order="3">Move HandoffUrlBuilder to Services/Ai/Handoff/, register it in the AI module that registers the chat tool handlers, update the namespace in DataverseCreateRecordHandler and every test that uses it, and move HandoffUrlBuilderTests beside it; build and run the DataverseCreateRecordHandler and HandoffUrlBuilder tests.</step>
+    <step order="4">Delete Api/Agent/**, Infrastructure/DI/AgentModule.cs, Configuration/AgentTokenOptions.cs; remove AddAgentModule (Program.cs:232) and MapAgentEndpoints (EndpointMappingExtensions.cs:479-480 and :5 using); remove agent-only config keys from appsettings.template.json and agent-only branches/comments in the other BFF files listed.</step>
+    <step order="5">Update ArchTests (ledger rows, ProvenByTest, SessionOwnership, ADR013, TenantIsolation guards), delete or rewrite the /api/agent/* contract, eval and seam tests per the ADR-038 constraint; delete tests/unit/Sprk.Bff.Api.Tests/Api/Agent/AgentConfigurationServiceTests.cs and AgentConversationServiceTests.cs.</step>
+    <step order="6">dotnet build src/server/api/Sprk.Bff.Api/ (0 warnings); dotnet test for Spaarke.ArchTests, the BFF unit tests and the touched integration folders.</step>
+    <step order="7">Re-run the FR-01 grep exactly as the first acceptance criterion states it; every remaining hit is DecisionsTextSummary.cs:11 (task 020's); list hits elsewhere in the repo (task 002's or history) in the task notes.</step>
+    <step order="8">Publish the BFF (Release) and record the publish-size delta against a fresh master build; run dotnet list package --vulnerable --include-transitive.</step>
+    <step order="9">Write notes/001-issue-comments.md (#1523 decision draft) and the PR Placement Justification text.</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="11">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any code outside Api/Agent/** (other than HandoffUrlBuilder's consumers and the two constants) depends at runtime on an Agent* type or an /api/agent/* route, STOP and escalate with the dependency list rather than relocating more code.</trigger>
+    <trigger>If removing agent-specific branches would change a non-agent credential, token or authorization path (AuthorizationModule, OrderedCredentialClientProvider, IdentityConfigurationValidator), STOP and escalate (root CLAUDE.md §6: security-sensitive).</trigger>
+    <trigger>If a ProvenByTest or guard test cannot be rewritten against a live route without weakening the proof, STOP and escalate to the main session for uac-r2 review.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>HandoffUrlBuilder (Api/Agent/HandoffUrlBuilder.cs) is the existing deep-link composer; the new file is the same class moved (CAPABILITY-INDEX: no row; grep "HandoffUrlBuilder" shows DataverseCreateRecordHandler.cs:229 as its live consumer). notes/reuse-scan.md "Legacy removal blast radius (FR-01)".</existing>
+    <extension>No new behaviour: the class moves out of the folder being deleted so its live consumer keeps compiling; it cannot stay in Api/Agent/ because that folder is removed by FR-01.</extension>
+    <cost-of-doing-nothing>Deleting Api/Agent/ without moving it breaks the BFF build and DI resolution of DataverseCreateRecordHandler, so the chat create-record tool fails at startup.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/, dotnet test, dotnet publish, dotnet list package --vulnerable</tool>
+    <tool name="terminal">git grep, bash scripts/quality/check-changed-cs-format.sh</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handoff/HandoffUrlBuilder.cs</output>
+    <output type="code">Deletions: src/server/api/Sprk.Bff.Api/Api/Agent/**, Infrastructure/DI/AgentModule.cs, Configuration/AgentTokenOptions.cs</output>
+    <output type="test">Updated ArchTests, contract, seam and unit tests listed in relevant-files</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/001-blast-radius.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/001-issue-comments.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">git grep -i "api/agent\|AgentModule\|AgentTokenService\|CopilotAgent" -- src/server/api src/server/shared tests ':!tests/scripts' returns only Api/Mcp/LegalOperations/Decisions/DecisionsTextSummary.cs:11 (left for task 020). tests/scripts is task 002's; the history comment in src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs:33 ("REMOVED BY TASK 230b", customer-provisioning) is left unchanged.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ succeeds with 0 warnings and 0 errors.</criterion>
+    <criterion testable="true">Spaarke.ArchTests, the BFF unit tests and the touched integration test folders pass.</criterion>
+    <criterion testable="true">PlaybookAuthorizationFilter has no agent branch; POST /api/ai/playbooks/{id}/execute keeps its exact 400/403/404 responses (PlaybookRouteAuthorizationContractTests' execute-route tests pass unchanged), and every Run-mode rule that was proven only on the agent route is now proven on the execute route.</criterion>
+    <criterion testable="true">DataverseCreateRecordHandler resolves HandoffUrlBuilder from DI in the test host, and the HandoffUrlBuilder tests and data-mutation tests that use it pass.</criterion>
+    <criterion testable="true">Negative: an in-process test host request to POST /api/agent/message returns 404 (route not mapped).</criterion>
+    <criterion testable="true">No ledger row, PermanentBasis or SweepFinding for a route outside /api/agent/* changed (diff review in the PR).</criterion>
+    <criterion testable="true">The PR records the publish-size delta (expected negative; total at or under 60 MB) and no new HIGH CVE.</criterion>
+    <criterion testable="true">The PR description contains "Closes #2575"; notes/001-issue-comments.md holds the #1523 draft.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01; plan risk R3. uac-r2 reviews this diff (ledger rows, guard tests, credential-path comments). Tagged auth because AgentTokenService and the confidential-client seams change: two adversarial-verifier passes. The 404 on dev is verified in task 019, not here.
+
+EXECUTION 2026-11-25 (worktree-agent-a3c0a6c062265ea73): implementation committed (8a92da8751 + follow-ups); code-review and adr-check done in-session (0 violations); BFF build 0 warnings; publish -0.48 MB (41.61 -> 41.13 MB zip); no vulnerable packages. Status stays in-progress ONLY because the two adversarial-verifier passes could not be launched (concurrent-subagent cap) - the main session runs them, then sets completed. Details: notes/001-task-notes.md. Review pending: uac-r2, ebilling-r1, ontology-r1.
+rework: none task 001</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

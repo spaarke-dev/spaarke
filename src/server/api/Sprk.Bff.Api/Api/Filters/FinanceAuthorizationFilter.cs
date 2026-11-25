@@ -3,6 +3,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
@@ -315,24 +316,77 @@ public sealed class FinanceAuthorizationTargets
     /// yields NO check, which the filter denies — never a pass-through.
     /// </summary>
     internal static FinanceAuthorizationTargets FromRoute(
-        EndpointFilterInvocationContext context, string routeKey, string entitySetName, string operation)
-    {
-        if (context.HttpContext.Request.RouteValues.TryGetValue(routeKey, out var raw)
-            && Guid.TryParse(raw?.ToString(), out var id)
-            && id != Guid.Empty)
-        {
-            return Authorize(new FinanceAuthorizationCheck
+        EndpointFilterInvocationContext context, string routeKey, string entitySetName, string operation) =>
+        context.HttpContext.Request.RouteValues.TryGetValue(routeKey, out var raw) && Guid.TryParse(raw?.ToString(), out var id)
+            ? ForRecord(entitySetName, id, operation, "route." + routeKey)
+            : Authorize();
+
+    /// <summary>
+    /// A single Record-path check on <paramref name="entitySetName"/>(<paramref name="recordId"/>): the declaration
+    /// <see cref="FromRoute"/> makes once it has read the route value, and the one
+    /// <see cref="FinanceAuthorizationFilter.AuthorizeMatterFinanceReadAsync"/> makes from its argument. An empty id yields NO
+    /// check, which the filter denies (<see cref="FinanceAuthorizationFilter.NoTargetReasonCode"/>).
+    /// </summary>
+    internal static FinanceAuthorizationTargets ForRecord(string entitySetName, Guid recordId, string operation, string source) =>
+        recordId == Guid.Empty
+            ? Authorize()
+            : Authorize(new FinanceAuthorizationCheck
             {
                 Path = FinanceCheckPath.Record,
                 EntitySetName = entitySetName,
-                RecordId = id,
+                RecordId = recordId,
                 Operation = operation,
-                Source = "route." + routeKey,
+                Source = source,
             });
-        }
+}
 
-        return Authorize();
+/// <summary>What <see cref="FinanceAuthorizationFilter.AuthorizeMatterFinanceReadAsync"/> decided.</summary>
+/// <remarks><see cref="UserContextRequired"/> is the zero value, so <c>default</c> is never <see cref="Allowed"/>.</remarks>
+public enum MatterFinanceReadOutcome
+{
+    /// <summary>No request context, or no signed-in caller with a resolvable Entra <c>oid</c>. Nothing was read.</summary>
+    UserContextRequired = 0,
+
+    /// <summary>Refused, with the <c>reasonCode</c> the REST summary route's 403 carries for the same caller and matter.</summary>
+    Refused = 1,
+
+    /// <summary>The caller may read this matter's finance summary.</summary>
+    Allowed = 2,
+}
+
+/// <summary>
+/// The answer of <see cref="FinanceAuthorizationFilter.AuthorizeMatterFinanceReadAsync"/>: an outcome and the machine-readable
+/// <c>reasonCode</c> of a refusal. It carries no <see cref="IResult"/> and no ProblemDetails, so a non-HTTP host (the MCP tool,
+/// spaarkeai-mcp-bff-api-r2 task 033) renders it in its own error shape (ADR-019).
+/// </summary>
+public sealed record MatterFinanceReadAuthorization
+{
+    private MatterFinanceReadAuthorization(MatterFinanceReadOutcome outcome, string? reasonCode)
+    {
+        Outcome = outcome;
+        ReasonCode = reasonCode;
     }
+
+    /// <summary>The caller may read the matter's finance summary.</summary>
+    public static readonly MatterFinanceReadAuthorization Allowed = new(MatterFinanceReadOutcome.Allowed, null);
+
+    /// <summary>No request context or no signed-in caller (ADR-028 A10): <see cref="DataverseUserClientErrorCodes.UserContextRequired"/>.</summary>
+    public static readonly MatterFinanceReadAuthorization UserContextRequired =
+        new(MatterFinanceReadOutcome.UserContextRequired, DataverseUserClientErrorCodes.UserContextRequired);
+
+    public MatterFinanceReadOutcome Outcome { get; }
+
+    /// <summary>
+    /// <c>null</c> when allowed. On a refusal, the <c>reasonCode</c> REST returns: a step-0 code
+    /// (<see cref="FinanceAuthorizationFilter.InternalCallersOnlyReasonCode"/>, <see cref="FinanceAuthorizationFilter.SystemFailureReasonCode"/>)
+    /// or a record-check code (<see cref="FinanceAuthorizationFilter.InsufficientRightsReasonCode"/>,
+    /// <see cref="FinanceAuthorizationFilter.NoTargetReasonCode"/>, <see cref="FinanceAuthorizationFilter.SystemFailureReasonCode"/>).
+    /// </summary>
+    public string? ReasonCode { get; }
+
+    public bool IsAllowed => Outcome == MatterFinanceReadOutcome.Allowed;
+
+    internal static MatterFinanceReadAuthorization Refused(string reasonCode) => new(MatterFinanceReadOutcome.Refused, reasonCode);
 }
 
 /// <summary>
@@ -442,48 +496,81 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
+        var stepZero = httpContext.GetEndpoint()?.Metadata.GetMetadata<FinanceInternalCallersOnly>() is not null;
+        var decision = await DecideAsync(httpContext, userId, stepZero, () => _resolveTargets(context), logger, httpContext.RequestAborted);
+
+        // A validation rejection (400) is returned BEFORE any rights query (see DecideAsync).
+        if (decision.Rejection is not null)
+        {
+            return decision.Rejection;
+        }
+
+        if (decision.DenyReason is not null)
+        {
+            return Deny(httpContext, decision.DenyReason);
+        }
+
+        if (stepZero)
+        {
+            httpContext.Items[StepZeroVerdictKey] = FinanceStepZeroVerdict.Internal;
+        }
+
+        return await next(context);
+    }
+
+    /// <summary>The filter's decision for one request: allowed (both null), a validation rejection, or a deny reason code.</summary>
+    private readonly record struct FinanceDecision(string? DenyReason, IResult? Rejection);
+
+    /// <summary>
+    /// The filter's decision, shared by <see cref="InvokeAsync"/> (every route that runs this filter) and
+    /// <see cref="AuthorizeMatterFinanceReadAsync"/> (the summary route's rule for a non-HTTP host), so the two cannot differ:
+    /// step 0 when <paramref name="stepZero"/>, then the target declaration, then each check through <see cref="EvaluateAsync"/>.
+    /// Renders nothing; the caller maps a deny reason to its own response. <paramref name="userId"/> is the resolved Entra oid.
+    /// </summary>
+    private async Task<FinanceDecision> DecideAsync(
+        HttpContext httpContext, string userId, bool stepZero, Func<FinanceAuthorizationTargets> resolveTargets, ILogger? logger,
+        CancellationToken ct)
+    {
         // Step 0 (section 5.3; task 099): on a route flagged internal-callers-only, refuse a flagged-external caller, a
         // caller with no systemuser row and a caller whose flag cannot be read — BEFORE the target declaration runs (it may
         // read records) and before any check, with the route's own Deny(). The log carries the reason only.
-        var stepZero = httpContext.GetEndpoint()?.Metadata.GetMetadata<FinanceInternalCallersOnly>() is not null;
         if (stepZero)
         {
-            var refusal = await RunStepZeroAsync(httpContext, userId, logger, httpContext.RequestAborted);
+            var refusal = await RunStepZeroAsync(httpContext, userId, logger, ct);
             if (refusal is not null)
             {
                 logger?.LogWarning("Finance authorization DENIED at step 0 for caller {UserId}: reason {Reason}", userId, refusal);
-                return Deny(httpContext, refusal);
+                return new FinanceDecision(refusal, null);
             }
         }
 
         FinanceAuthorizationTargets targets;
         try
         {
-            targets = _resolveTargets(context);
+            targets = resolveTargets();
         }
         catch (Exception ex)
         {
             logger?.LogError(ex, "Finance authorization: the route's target declaration threw for caller {UserId}; denying", userId);
-            return Deny(httpContext, SystemFailureReasonCode);
+            return new FinanceDecision(SystemFailureReasonCode, null);
         }
 
         // A validation rejection (400) is returned BEFORE any rights query — an empty or missing id must not
         // spend a Dataverse round trip, and must not be turned into a 403 by filter ordering.
         if (targets.Rejection is not null)
         {
-            return targets.Rejection;
+            return new FinanceDecision(null, targets.Rejection);
         }
 
         if (targets.Checks.Count == 0)
         {
             logger?.LogWarning("Finance authorization DENIED for caller {UserId}: the route declared no resolvable target", userId);
-            return Deny(httpContext, NoTargetReasonCode);
+            return new FinanceDecision(NoTargetReasonCode, null);
         }
 
         // Fail closed: a null token is forwarded as null, and both paths deny on it (AuthorizeAsync returns
         // no_caller_token; GetCallerRecordAccessAsync returns AccessRights.None). There is no app-only branch.
         var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
-        var ct = httpContext.RequestAborted;
 
         foreach (var check in targets.Checks)
         {
@@ -507,16 +594,68 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                     "Finance authorization DENIED: caller {UserId} on {EntitySet}({RecordId}) [{Source}] " +
                     "operation {Operation} reason {Reason}",
                     userId, check.EntitySetName, check.RecordId, check.Source, check.Operation, denyReason);
-                return Deny(httpContext, denyReason);
+                return new FinanceDecision(denyReason, null);
             }
         }
 
-        if (stepZero)
+        return new FinanceDecision(null, null);
+    }
+
+    /// <summary>
+    /// The operation the matter finance summary route authorizes (<c>GET /api/finance/matters/{matterId}/summary</c>,
+    /// <c>FinanceEndpoints</c>). The route keeps its literal for the route guards that read it; <c>MatterFinanceReadSharedMethodTests</c>
+    /// proves the route and <see cref="AuthorizeMatterFinanceReadAsync"/> answer every case alike.
+    /// </summary>
+    internal const string MatterFinanceReadOperation = "finance.read";
+
+    /// <summary>
+    /// May the caller of <paramref name="httpContext"/> read the finance summary of matter <paramref name="matterId"/>? THE rule of
+    /// <c>GET /api/finance/matters/{matterId}/summary</c> for a host that is not that route (the MCP finance tool,
+    /// spaarkeai-mcp-bff-api-r2 task 033, spec FR-11): step 0 (procedure-and-file-model section 5.3, the route group's
+    /// <see cref="FinanceAuthorizationFilterExtensions.RequireInternalFinanceCaller{TBuilder}"/>), then
+    /// <see cref="MatterFinanceReadOperation"/> on <see cref="MatterEntitySet"/>(<paramref name="matterId"/>), through the same
+    /// <see cref="DecideAsync"/> and <see cref="EvaluateAsync"/> the route's filter runs, in the route's
+    /// <see cref="FinanceDenial.Forbidden"/> mode, as the caller. A refusal carries the <c>reasonCode</c> the route's 403 carries.
+    /// <para>Fails closed (ADR-028 A10): a null context, a principal with no authenticated identity, or one with no Entra <c>oid</c> is
+    /// <see cref="MatterFinanceReadAuthorization.UserContextRequired"/> before any Dataverse call (REST answers each of these with a
+    /// 401 that carries no reasonCode); a missing <see cref="AuthorizationService"/> is <see cref="SystemFailureReasonCode"/>. Never falls back to app-only.
+    /// Does not set <see cref="StepZeroVerdictKey"/> (that item is for the REST pipeline). Never throws: a fault, a cancelled request
+    /// included, is a refusal, as on the route.</para>
+    /// </summary>
+    public static async Task<MatterFinanceReadAuthorization> AuthorizeMatterFinanceReadAsync(
+        HttpContext? httpContext, Guid matterId, CancellationToken ct)
+    {
+        if (httpContext?.User is not { } user || !user.Identities.Any(i => i.IsAuthenticated) || httpContext.RequestServices is not { } services)
         {
-            httpContext.Items[StepZeroVerdictKey] = FinanceStepZeroVerdict.Internal;
+            return MatterFinanceReadAuthorization.UserContextRequired;
         }
 
-        return await next(context);
+        var userId = CallerResolution.ResolveObjectId(user);
+        if (string.IsNullOrEmpty(userId))
+        {
+            return MatterFinanceReadAuthorization.UserContextRequired;
+        }
+
+        var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>();
+        var authorizationService = services.GetService<AuthorizationService>();
+        if (authorizationService is null)
+        {
+            logger?.LogError("Matter finance read: AuthorizationService is not registered; refusing caller {UserId}", userId);
+            return MatterFinanceReadAuthorization.Refused(SystemFailureReasonCode);
+        }
+
+        var filter = new FinanceAuthorizationFilter(
+            authorizationService, static _ => FinanceAuthorizationTargets.Authorize(), FinanceDenial.Forbidden,
+            services.GetService<CallerRecordAccessProbe>());
+        var decision = await filter.DecideAsync(
+            httpContext, userId, stepZero: true,
+            () => FinanceAuthorizationTargets.ForRecord(MatterEntitySet, matterId, MatterFinanceReadOperation, "matterId"),
+            logger, ct);
+
+        // The declaration never rejects; a rejection here would be a new code path, so it is refused rather than allowed.
+        return decision.DenyReason is null && decision.Rejection is null
+            ? MatterFinanceReadAuthorization.Allowed
+            : MatterFinanceReadAuthorization.Refused(decision.DenyReason ?? SystemFailureReasonCode);
     }
 
     /// <summary>

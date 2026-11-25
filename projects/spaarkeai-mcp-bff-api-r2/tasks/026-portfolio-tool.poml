@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Tool: spaarke_get_portfolio</title>
+    <phase>1 Read tools</phase>
+    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF surface (MCP tool)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single thin adapter over PortfolioService.GetPortfolioSummaryAsync</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/LegalOperations/Portfolio/** and the Portfolio ledger partial</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, api, integration-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the read-only MCP tool spaarke_get_portfolio over PortfolioService.GetPortfolioSummaryAsync, matching GET /api/workspace/portfolio for the same caller, returning text plus structured content and no widget.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool handlers.</role>
+  <goal>The tool's structured content equals the REST response for the same caller; the text is a short summary; no widget is attached.</goal>
+
+  <context>
+    <background>Spec FR-08. REST: Api/Workspace/WorkspaceEndpoints.cs (group /api/workspace, GET /portfolio :32 → GetPortfolio); service Services/Workspace/PortfolioService.cs.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Portfolio/GetPortfolioTool.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Portfolio.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Portfolio/GetPortfolioToolTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Workspace/PortfolioService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">General McpToolResults, ledger partials</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback); resolve the user id exactly as GetPortfolio does.</constraint>
+    <constraint source="project">[McpArea("legal-operations")], readOnlyHint true, destructiveHint false, idempotentHint true, a title, description ≤ 1,024 characters; no _meta.ui (no widget). Ledger row in RouteAuthorizationGuardTests.Mcp.Portfolio.cs.</constraint>
+    <constraint source="ADR-015">Text is a ≤ 5-line summary of counts and totals; no secured fields. Logs: tool name, latency, outcome, correlation id. Result &lt; 64 KiB.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and 020; read GetPortfolio and PortfolioService.</step>
+    <step order="2">Write the tool, ledger row and test; run MCP suites, ArchTests and conformance; measure the publish-size delta.</step>
+    <step order="3">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="4">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <justification>
+    <existing>PortfolioService.GetPortfolioSummaryAsync behind GET /api/workspace/portfolio; notes/reuse-scan.md row "Portfolio".</existing>
+    <extension>The service is reused unchanged; the tool is a thin adapter.</extension>
+    <cost-of-doing-nothing>Copilot users cannot ask for their matter portfolio summary (FR-08 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Portfolio/GetPortfolioTool.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Portfolio/GetPortfolioToolTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">structuredContent equals the GET /api/workspace/portfolio body for the same caller.</criterion>
+    <criterion testable="true">Negative: no caller context returns UserContextRequired; the tool has no _meta.ui.</criterion>
+    <criterion testable="true">ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-08.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

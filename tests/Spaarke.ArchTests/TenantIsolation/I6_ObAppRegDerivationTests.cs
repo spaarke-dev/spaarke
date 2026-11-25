@@ -86,14 +86,15 @@ namespace Spaarke.ArchTests.TenantIsolation;
 /// </para>
 ///
 /// <para>
-/// <b>Compliant baseline references (the five current OBO files)</b>:
+/// <b>Compliant baseline references (the OBO files, current and removed)</b>:
 /// <c>Infrastructure/Graph/GraphClientFactory.cs</c> —
 /// <c>Create(apiAppId)</c> with <c>configuration["API_APP_ID"] ?? throw</c>
 /// (required config, throws — NOT a fallback);
 /// <c>Services/SpeAdmin/SpeAdminTokenProvider.cs</c> (removed 2026-10-04) —
 /// <c>Create(config.OwningAppId)</c> per-request BU config (request-context
 /// derivation, the strongest shape at the time);
-/// <c>Api/Agent/AgentTokenService.cs</c> — <c>Create(_options.ClientId)</c>
+/// the legacy Copilot agent's token service (removed 2026-11-25 with the agent,
+/// spaarkeai-mcp-bff-api-r2 task 001) — <c>Create(_options.ClientId)</c>
 /// options-bound;
 /// <c>Services/Ai/Handlers/Dataverse/DataverseUserClient.cs</c> and
 /// <c>Spaarke.Dataverse/DataverseAccessDataSource.cs</c> —
@@ -239,12 +240,12 @@ public class I6_ObAppRegDerivationTests
         Assert.True(IsNonDerivedAppRegExpression("_options.ClientId ?? \"fallback-app\""));
     }
 
-    [Fact(DisplayName = "FR-40 negative control: Create(...) predicate passes the derived shapes the five current OBO files use")]
+    [Fact(DisplayName = "FR-40 negative control: Create(...) predicate passes the derived shapes the OBO files use")]
     public void CreateArgPredicate_PassesDerivedShapes()
     {
         Assert.False(IsNonDerivedAppRegExpression("apiAppId"));                   // GraphClientFactory
         Assert.False(IsNonDerivedAppRegExpression("config.OwningAppId"));         // shape of the former SpeAdminTokenProvider
-        Assert.False(IsNonDerivedAppRegExpression("_options.ClientId"));          // AgentTokenService
+        Assert.False(IsNonDerivedAppRegExpression("_options.ClientId"));          // options-bound shape (the removed legacy agent token service)
         Assert.False(IsNonDerivedAppRegExpression("clientId"));                   // DataverseUserClient / DataverseAccessDataSource
         // Fallback to ANOTHER config key is still config-derived (no literal default).
         Assert.False(IsNonDerivedAppRegExpression("configuration[\"AzureAd:ClientId\"] ?? configuration[\"API_APP_ID\"]"));
