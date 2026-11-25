@@ -76,7 +76,7 @@ stamp with `upgradeOfProvisionedOn` and never sends `provisionedOn`.
 
 | Field | Value |
 |---|---|
-| **Status** | PR #3077 open (2026-11-24): the import job + solution history decide the outcome (async op advisory), in-flight check before starting, 120-min timeout recording job ids; queries checked read-only on ACME; awaiting CI + owner merge, then a Worker deploy (owner OK) |
+| **Status** | Fixed by PR #3077 (merged `42ed4abffc`, 2026-11-24): the import job + solution history decide the outcome (async op advisory), in-flight check before starting, 120-min timeout recording job ids; queries checked read-only on ACME; awaiting CI + owner merge, then a Worker deploy (owner OK) |
 | **Urgency** | now (every SpaarkeMaster upgrade of a stamp) |
 | **Filed** | 2026-11-22 |
 | **Source** | ACME upgrade to SpaarkeMaster 1.3.2.1, run `3b6f7b65`: H6 failed `import-timeout`; the import then succeeded |
@@ -421,7 +421,7 @@ principal. F2, F4 and F5 are unchanged.
 
 | Field | Value |
 |---|---|
-| **Status** | Build PR #3076 open (2026-11-24): H2a carries the SignalR host, H4b writes the keyless MI string + Enabled only when SignalR is deployed; manifest records PowerBI/RAG as not on stamps; awaiting CI + owner merge. Live check of the string when a stamp first enables SignalR |
+| **Status** | Fixed by PR #3076 (merged `46ef2fb0e6`, 2026-11-24): H2a carries the SignalR host, H4b writes the keyless MI string + Enabled only when SignalR is deployed; manifest records PowerBI/RAG as not on stamps; awaiting CI + owner merge. Live check of the string when a stamp first enables SignalR |
 | **Urgency** | soon (a stamp starts without them; nothing is broken at boot) |
 | **Filed** | 2026-10-09 (from the auth-system-of-record-r1 note §3, analysis only) |
 | **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3; `scripts/canonical-secret-catalog/manifest.yaml` has none of the three keys |
@@ -479,7 +479,7 @@ PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
 
 | Field | Value |
 |---|---|
-| **Status** | Code complete; invitedon + codehash locks verified live on ACME by H7b (run 3b6f7b65). Follow-up (audit / Advanced Find off on the codehash column): PR #3079 open (2026-11-24), H7b procedure 12 |
+| **Status** | Code complete; invitedon + codehash locks verified live on ACME by H7b (run 3b6f7b65). Follow-up (audit / Advanced Find off on the codehash column): PR #3079 merged `1609245ab0` 2026-11-24, H7b procedure 12; live once the Worker is deployed |
 | **Filed** | 2026-10-13 (filed by unified-access-control-r2 for this project) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1803 |
 
@@ -534,7 +534,7 @@ per-customer API app (a resource, not the client) changes the consent prompt at 
 
 | Field | Value |
 |---|---|
-| **Status** | PR #3074 open (2026-11-24): removed from SpaarkeMaster source + legacy copy deleted; spaarkedev1 dependency check none; release owner removes it from the dev solution before the next export (live, owner OK) |
+| **Status** | Fixed by PR #3074 (merged `276f5b4743`, 2026-11-24): removed from SpaarkeMaster source + legacy copy deleted; spaarkedev1 dependency check none; release owner removes it from the dev solution before the next export (live, owner OK) |
 | **Filed** | 2026-10-14 (found during the old-demo retirement, D35) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1866 |
 
