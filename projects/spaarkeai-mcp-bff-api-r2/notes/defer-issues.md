@@ -55,3 +55,8 @@
   status column the guard forbids; task 006 touched no file under `scripts/`.
 - **Fix:** move the demo-data scripts to the replacement column, or add them to the guard's documented exceptions with a reason.
 - **GitHub issue:** https://github.com/spaarke-dev/spaarke/issues/3182
+
+## From task 004 (2026-11-25)
+
+### D-004-1: dataverse-mcp-usage skill and knowledge notes use removed tool names
+- **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3185
