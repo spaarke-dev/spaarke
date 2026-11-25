@@ -9,7 +9,7 @@ realistic legal-department story, and removes it again. Data plan D6
 | `scripts/Load-DemoSampleData.ps1` | The operator script: load, dry run, reset. |
 | `scripts/demo-data/demo-records.json` | The dataset (`datasetVersion` 2.0.0). |
 | `scripts/demo-data/DemoDataLib.ps1` | Pure functions (table specs, validation, payloads, guard, reset order). No network. Dot-sourced by the loader and the tests. |
-| `scripts/demo-data/reference-names.json` | Snapshot of the reference values the dataset needs (taxonomy names, event types, choice labels). The offline oracle for the tests. |
+| `scripts/demo-data/reference-names.json` | The reference values no seed file carries: choice labels (English) and record types. Taxonomy names and event types are NOT copied here: they are read from the D4 pack (`scripts/seed-data/reference/packs/legal-standard/*.json`) and the event-type seed (`scripts/seed-data/reference/sprk_eventtype_ref.json`) by `Get-DemoSeedReference`, so they cannot drift. |
 | `scripts/demo-data/sample-documents/` | Eight sample files. Not uploaded today (see "Documents and files"). |
 | `tests/scripts/Load-DemoSampleData.Tests.ps1` | Pester 3.4.0 tests. |
 
@@ -43,9 +43,16 @@ failed.
 ### The demo guard
 
 The registry row of the target must be **Environment Type = Demo** and **active**. Otherwise the script refuses.
-`-AllowNonDemo` overrides that for a Development, Sandbox, Trial, Partner or Training row, or for a URL with no registry
-row, and prints a warning. **A Production row is refused even with `-AllowNonDemo`.** (The plan says "never on a production
-customer"; there is no override for it by design.) The ACME registry row is Demo and active (checked 2026-11-25).
+`-AllowNonDemo` overrides that for a Development, Sandbox, Trial, Partner or Training row, or for "the registry was read
+successfully and has no row for this URL", and prints a warning that says which. **A Production row is refused even with
+`-AllowNonDemo`.** (The plan says "never on a production customer"; there is no override for it by design.) The ACME
+registry row is Demo and active (checked 2026-11-25).
+
+A registry read that **fails** (token, network, permission) stops the script. It is never treated as "no row", because "no
+row" is exactly what `-AllowNonDemo` accepts. URLs are compared by host on both sides (case, trailing slash, path, scheme and
+port do not matter), a registry value too malformed to read still counts as a match when it mentions the target host, a
+Production row that names the URL wins over a Demo row for the same URL (also when `-CustomerId` picked the Demo one), and two
+active rows for one URL are an error.
 
 ### What is checked before anything is written
 
@@ -69,8 +76,20 @@ independent of the natural key, so a user can rename a demo matter and reset sti
 happens to share a name is never touched.
 
 Reset also checks relationships. All Spaarke lookups are RemoveLink, so deleting a tagged matter would silently detach
-an **untagged** event someone filed under it. Reset therefore keeps (and reports) any tagged parent that an untagged row
-points at, and fails closed if a relationship cannot be read.
+an **untagged** event someone filed under it, and a cascade-delete relationship (a note or an activity regarding a contact)
+would silently delete the child. Reset therefore checks **every** 1:N relationship into the table (system tables included;
+only created/modified-by and owner columns are skipped) and every many-to-many association, and **keeps** a tagged row while
+any row this reset does not delete still points at it:
+
+- a referencing row blocks unless it is a tagged row that this run has deleted (or, under `-WhatIf`, would delete). Children
+  are deleted before parents, so a parent is checked after its demo children are gone; a demo child that is itself kept
+  keeps its parent too;
+- a many-to-many association blocks unless the other side is also a tagged demo row;
+- a relationship that cannot be read keeps every row of that table (**fails closed**) and is listed. The one exception is a
+  system table the platform refuses to retrieve at all (`RetrieveMultiple ... does not support entities of type`, for example
+  `postrole`): it is noted, not treated as a failure;
+- the summary ends with how many tagged rows were **kept** and what still points at each. The exit code does not change
+  (a kept row is the safe outcome).
 
 Re-running a load matches existing rows by **tag + natural key** (matter number, project number, organization name,
 contact email, event/to-do/communication/document name). It never adopts or changes an untagged row; if an untagged
@@ -102,8 +121,13 @@ are typed, and events use the product's event types (16 of the 17 appear; the sy
 table, not here). Events, to-dos and communications are filed under a matter or a project (the typed lookup plus the
 `sprk_regarding*` stamp the product itself writes). A matter has no subtype column, so none is written.
 
-Add a row by adding it to the JSON; add a taxonomy name by adding it to `reference-names.json` in the same change (the
-test fails otherwise). Run the tests before committing.
+Matter numbers are `MTR-DEMO-001`..`010` and project numbers `PRJ-DEMO-001`..`009`, so they cannot collide with the v1
+dataset (`MTR-2026-001`..`005`, `PRJ-2026-001`..`003`).
+
+Taxonomy values are the **D4 pack names exactly** (matter types `Patent` and `Trademark`; project type `Intellectual
+Property - Patent` with a plain hyphen). Add a row by adding it to the JSON. A taxonomy name that is not in the pack, or an
+event type code that is not in the event-type seed, fails the loader's dataset check and the Pester tests; a new choice
+label goes in `reference-names.json` in the same change. Run the tests before committing.
 
 ## Documents and files
 
@@ -124,9 +148,27 @@ add its spec to `Get-DemoTableSpecs` and its position to the create order in `De
 
 - Event types seeded (data plan D2 / ISS-039) and the taxonomy pack seeded (D4, the `legal-standard` pack of §6). Until
   they are, the loader reports exactly which names are missing and writes nothing.
-- The taxonomy names come from data plan §6. If D4 ships different names, change `demo-records.json` and
-  `reference-names.json` to match; the loader resolves by name on the target and does not guess.
+- The taxonomy names come from the D4 pack files. If a pack changes a name, `demo-records.json` must follow: the loader
+  checks the dataset against the pack files first, then resolves each name on the target and does not guess.
 - The signed-in operator can create and delete rows in the demo tables and read the registry on the admin environment.
+
+## Upgrading a stamp that has the v1 data
+
+The v1 script created **untagged** rows, and this loader never touches an untagged row, so v1 rows stay next to the v2 story
+until you remove them by hand (model-driven app, or Advanced Find then delete). The v1 rows are:
+
+- 5 contacts: `sarah.mitchell@contoso.com`, `james.chen@fabrikam.com`, `maria.rodriguez@northwindtraders.com`,
+  `david.kim@adventureworks.com`, `emily.thompson@woodgrove.com`;
+- 5 matters `MTR-2026-001`..`005` and 3 projects `PRJ-2026-001`..`003`;
+- 5 events (`Contract Renewal Deadline - Contoso`, `GDPR Audit Preparation Meeting`, `IP License Fee Payment Due`,
+  `Board Compliance Report`, `Vendor Risk Assessment - Northwind`);
+- 8 documents (`Contoso Supply Agreement v3.2`, `Fabrikam Patent License Agreement`, `Northwind DPA - GDPR Compliant`,
+  `Employment Non-Compete Analysis`, `Woodgrove Compliance Checklist 2026`, `Vendor Risk Assessment Template`,
+  `Q1 2026 Invoice Summary - Fabrikam`, `Board Meeting Minutes - March 2026`);
+- the v1 chart definitions and AI seed rows (product configuration; leave them if H12a/H12b seeded the stamp).
+
+Delete the events and documents first, then the projects and matters, then the contacts. v2 uses different numbers
+(`MTR-DEMO-*`, `PRJ-DEMO-*`) and `example.com` emails, so loading v2 first does not collide; it only shows both stories.
 
 ## What changed from v1
 

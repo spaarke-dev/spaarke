@@ -314,7 +314,7 @@
     {
       "key": "mt-pinnacle",
       "fields": {
-        "sprk_matternumber": "MTR-2026-001",
+        "sprk_matternumber": "MTR-DEMO-001",
         "sprk_mattername": "Meridian Corp v. Pinnacle Industries - Patent Infringement",
         "sprk_matterdescription": "Patent infringement action in the Northern District of California (Case No. 3:2025-cv-04892). Meridian asserts three precision-manufacturing patents against Pinnacle's AutoForge product line. Outside counsel: Baker & Associates LLP. Claim construction (Markman) ruling received; expert discovery and settlement posture are the live workstreams.",
         "sprk_highpriority": true
@@ -332,7 +332,7 @@
     {
       "key": "mt-contoso",
       "fields": {
-        "sprk_matternumber": "MTR-2026-002",
+        "sprk_matternumber": "MTR-DEMO-002",
         "sprk_mattername": "Contoso Supply Agreement Renewal",
         "sprk_matterdescription": "Review and renegotiate the annual supply agreement with Contoso Ltd. (version 3.2): pricing schedules, delivery commitments, liability caps and force majeure. The agreement expires in about five weeks; notice of intent to renew is due 60 days before expiry."
       },
@@ -347,13 +347,13 @@
     {
       "key": "mt-fabrikam",
       "fields": {
-        "sprk_matternumber": "MTR-2026-003",
+        "sprk_matternumber": "MTR-DEMO-003",
         "sprk_mattername": "Fabrikam Patent Cross-License",
         "sprk_matterdescription": "Cross-licensing of software patents between Meridian and Fabrikam Inc. covering patent families US-9,876,543 and US-10,234,567, with a quarterly royalty on usage metrics. Draft is in final review."
       },
       "dates": { "sprk_openeddate": "-120d", "sprk_nextreviewdate": "+21d" },
       "reference": {
-        "matterType": "Intellectual Property \u2013 Patent",
+        "matterType": "Patent",
         "practiceArea": "Intellectual Property Patents"
       },
       "links": { "assignedLawFirm1": "org-baker", "assignedAttorney1": "ct-park", "assignedToInternal": "ct-chen" }
@@ -361,7 +361,7 @@
     {
       "key": "mt-northwind",
       "fields": {
-        "sprk_matternumber": "MTR-2026-004",
+        "sprk_matternumber": "MTR-DEMO-004",
         "sprk_mattername": "Northwind Data Processing Agreement",
         "sprk_matterdescription": "Data processing agreement with Northwind Traders under GDPR Article 28 and CCPA: controller and processor roles, data categories, security measures, breach notification timelines and sub-processor approval."
       },
@@ -372,7 +372,7 @@
     {
       "key": "mt-adventure",
       "fields": {
-        "sprk_matternumber": "MTR-2026-005",
+        "sprk_matternumber": "MTR-DEMO-005",
         "sprk_mattername": "Adventure Works Non-Compete Dispute",
         "sprk_matterdescription": "Dispute over enforcement of a non-compete clause against a former senior engineer now at Adventure Works. Covers arbitration preparation, witness statements and settlement talks. Enforceability analysis spans Washington, California and New York law.",
         "sprk_highpriority": true
@@ -389,7 +389,7 @@
     {
       "key": "mt-woodgrove",
       "fields": {
-        "sprk_matternumber": "MTR-2026-006",
+        "sprk_matternumber": "MTR-DEMO-006",
         "sprk_mattername": "Woodgrove Banking Compliance Audit",
         "sprk_matterdescription": "Annual compliance audit of the Woodgrove Bank partnership agreements: OCC and FDIC requirements, BSA/AML obligations, consumer protection clauses and fair lending."
       },
@@ -400,13 +400,13 @@
     {
       "key": "mt-trademark",
       "fields": {
-        "sprk_matternumber": "MTR-2026-007",
+        "sprk_matternumber": "MTR-DEMO-007",
         "sprk_mattername": "AutoForge Trademark Registration",
         "sprk_matterdescription": "Federal registration of the AutoForge-adjacent house mark and product mark in classes 7 and 42, plus a clearance search and watch notice for confusingly similar filings."
       },
       "dates": { "sprk_openeddate": "-30d", "sprk_nextreviewdate": "+30d" },
       "reference": {
-        "matterType": "Intellectual Property \u2013 Trademark",
+        "matterType": "Trademark",
         "practiceArea": "Intellectual Property Trademarks"
       },
       "links": { "assignedLawFirm1": "org-baker", "assignedAttorney1": "ct-park", "assignedToInternal": "ct-chen" }
@@ -414,7 +414,7 @@
     {
       "key": "mt-atlas",
       "fields": {
-        "sprk_matternumber": "MTR-2026-008",
+        "sprk_matternumber": "MTR-DEMO-008",
         "sprk_mattername": "Project Atlas - Acquisition of Horizon Systems",
         "sprk_matterdescription": "Proposed acquisition of Horizon Systems Inc.: deal structure, legal due diligence, antitrust clearance and signing mechanics. Confidential; deal team only.",
         "sprk_highpriority": true
@@ -430,7 +430,7 @@
     {
       "key": "mt-financing",
       "fields": {
-        "sprk_matternumber": "MTR-2026-009",
+        "sprk_matternumber": "MTR-DEMO-009",
         "sprk_mattername": "Equipment Financing Facility Amendment",
         "sprk_matterdescription": "Amendment to the equipment financing facility: revised borrowing base, updated financial covenants and a new collateral schedule."
       },
@@ -445,7 +445,7 @@
     {
       "key": "mt-insurance",
       "fields": {
-        "sprk_matternumber": "MTR-2026-010",
+        "sprk_matternumber": "MTR-DEMO-010",
         "sprk_mattername": "Pinnacle Counterclaim - Insurance Coverage Position",
         "sprk_matterdescription": "Notice to Hartwell Mutual of Pinnacle's counterclaim for declaratory relief, and the coverage position under the product liability policy."
       },
@@ -459,7 +459,7 @@
     {
       "key": "pj-contracts",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-001",
+        "sprk_projectnumber": "PRJ-DEMO-001",
         "sprk_projectname": "Q2 Contract Portfolio Review",
         "sprk_projectdescription": "Review of all active contracts expiring in the next two quarters: renewal candidates, renegotiations and terminations. 47 contracts across 12 vendors."
       },
@@ -470,7 +470,7 @@
     {
       "key": "pj-gdpr",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-002",
+        "sprk_projectnumber": "PRJ-DEMO-002",
         "sprk_projectname": "GDPR Compliance Documentation",
         "sprk_projectdescription": "Prepare and organise the documentation for the GDPR compliance audit: data processing agreements, privacy impact assessments and records of processing activities."
       },
@@ -481,7 +481,7 @@
     {
       "key": "pj-vendor",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-003",
+        "sprk_projectnumber": "PRJ-DEMO-003",
         "sprk_projectname": "Vendor Due Diligence Program",
         "sprk_projectdescription": "Due diligence for new and existing critical vendors: risk assessment templates, financial stability checks and ongoing monitoring."
       },
@@ -492,7 +492,7 @@
     {
       "key": "pj-atlas-dd",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-004",
+        "sprk_projectnumber": "PRJ-DEMO-004",
         "sprk_projectname": "Atlas - Legal Due Diligence",
         "sprk_projectdescription": "Legal due diligence on Horizon Systems for Project Atlas: corporate records, material contracts, IP, litigation and employment matters."
       },
@@ -507,7 +507,7 @@
     {
       "key": "pj-hsr",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-005",
+        "sprk_projectnumber": "PRJ-DEMO-005",
         "sprk_projectname": "Atlas - HSR Premerger Filing",
         "sprk_projectdescription": "Hart-Scott-Rodino premerger notification for Project Atlas: filing preparation, item 4(c)/4(d) document collection and agency correspondence."
       },
@@ -522,7 +522,7 @@
     {
       "key": "pj-hold",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-006",
+        "sprk_projectnumber": "PRJ-DEMO-006",
         "sprk_projectname": "Pinnacle Litigation Hold and Discovery",
         "sprk_projectdescription": "Litigation hold, custodian interviews, ESI collection and production logistics for Meridian Corp v. Pinnacle Industries.",
         "sprk_highpriority": true
@@ -534,13 +534,13 @@
     {
       "key": "pj-patents",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-007",
+        "sprk_projectnumber": "PRJ-DEMO-007",
         "sprk_projectname": "Patent Portfolio Maintenance Review",
         "sprk_projectdescription": "Annual review of the patent portfolio: maintenance fee deadlines, continuation strategy and abandonment candidates."
       },
       "dates": { "sprk_openeddate": "-55d", "sprk_nextreviewdate": "+45d" },
       "reference": {
-        "projectType": "Intellectual Property \u2013 Patent",
+        "projectType": "Intellectual Property - Patent",
         "practiceArea": "Intellectual Property Patents"
       },
       "links": { "assignedLawFirm1": "org-baker", "assignedAttorney1": "ct-park", "assignedToInternal": "ct-chen" }
@@ -548,7 +548,7 @@
     {
       "key": "pj-policy",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-008",
+        "sprk_projectnumber": "PRJ-DEMO-008",
         "sprk_projectname": "Records Retention Policy Review",
         "sprk_projectdescription": "Refresh of the corporate records retention schedule and legal hold procedures after the Pinnacle preservation exercise."
       },
@@ -559,7 +559,7 @@
     {
       "key": "pj-investigation",
       "fields": {
-        "sprk_projectnumber": "PRJ-2026-009",
+        "sprk_projectnumber": "PRJ-DEMO-009",
         "sprk_projectname": "Ethics Hotline Report 2026-04 Review",
         "sprk_projectdescription": "Privileged internal review of an ethics hotline report: scope, interviews, findings memorandum and remediation recommendations."
       },

@@ -207,6 +207,34 @@ function ConvertTo-DemoODataString {
     return $Value.Replace("'", "''")
 }
 
+function ConvertTo-DemoQuery {
+    <# 'set?$select=...&$filter=...' with the filter URL-encoded. The one place a Web API path is assembled. #>
+    param([Parameter(Mandatory)][string]$Set, [string]$Select, [string]$Filter)
+    $q = $Set
+    $sep = '?'
+    if ($Select) { $q += $sep + '$select=' + $Select; $sep = '&' }
+    if ($Filter) { $q += $sep + '$filter=' + [uri]::EscapeDataString($Filter) }
+    return $q
+}
+
+function Get-DemoOptionMap {
+    <#
+      A picklist's options as English label -> value. Labels are matched on the 1033 (English) entry of LocalizedLabels,
+      NOT UserLocalizedLabel: that one follows the signed-in operator's language, so a French-speaking operator would
+      see no 'Open' and the load would stop. Input is the Options array of OptionSet metadata. An option with no 1033
+      label is left out; a label two options share is reported as ambiguous (value -1) rather than guessed.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Options)
+    $map = @{}
+    foreach ($opt in $Options) {
+        $en = @($opt.Label.LocalizedLabels | Where-Object { $_.LanguageCode -eq 1033 }) | Select-Object -First 1
+        if ($null -eq $en -or [string]::IsNullOrEmpty("$($en.Label)")) { continue }
+        $label = "$($en.Label)"
+        if ($map.ContainsKey($label)) { $map[$label] = -1 } else { $map[$label] = [int]$opt.Value }
+    }
+    return $map
+}
+
 function ConvertTo-DemoDateValue {
     <#
       "-3d" / "+14d" / "14d" -> 'yyyy-MM-dd'; "-3d 14:30" -> 'yyyy-MM-ddTHH:mm:00Z' (UTC). Offsets are from -Today, so a
@@ -234,10 +262,61 @@ function Get-DemoRowProperty {
     return $result
 }
 
+function Get-DemoSeedReference {
+    <#
+      The reference values the dataset may name, READ FROM THE SEED FILES THEMSELVES so they cannot drift:
+        taxonomy names  - scripts/seed-data/reference/packs/legal-standard/<table>.json (the D4 pack; the name column
+                          each pack file declares in "nameColumn"),
+        event types     - scripts/seed-data/reference/sprk_eventtype_ref.json (code, name, id, requires*Date),
+        choice labels and record types - scripts/demo-data/reference-names.json (a metadata snapshot: no seed file
+                          carries them).
+      Returns an object shaped like the old snapshot (taxonomy, eventTypes, options, recordTypes) for Test-DemoDataset.
+      Throws when a seed file is missing: a missing file is a failure, never an empty list.
+    #>
+    param(
+        [string]$ScriptsRoot = (Join-Path $PSScriptRoot '..'),
+        [string]$OptionsFile = (Join-Path $PSScriptRoot 'reference-names.json')
+    )
+    $packDir = Join-Path $ScriptsRoot 'seed-data' 'reference' 'packs' 'legal-standard'
+    $eventSeed = Join-Path $ScriptsRoot 'seed-data' 'reference' 'sprk_eventtype_ref.json'
+    foreach ($f in $packDir, $eventSeed, $OptionsFile) {
+        if (-not (Test-Path $f)) { throw "Reference source not found: $f (the demo dataset is checked against the D4 taxonomy pack, the event-type seed and reference-names.json)." }
+    }
+
+    $taxonomy = [ordered]@{}
+    foreach ($table in 'sprk_mattertype_ref', 'sprk_practicearea_ref', 'sprk_projecttype_ref', 'sprk_contacttype_ref', 'sprk_organizationtype_ref') {
+        $file = Join-Path $packDir "$table.json"
+        if (-not (Test-Path $file)) { throw "Taxonomy pack file not found: $file" }
+        $pack = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json
+        $nameColumn = "$($pack.nameColumn)"
+        if (-not $nameColumn) { throw "Taxonomy pack file $file declares no nameColumn." }
+        $taxonomy[$table] = @($pack.rows | ForEach-Object { "$($_.$nameColumn)" })
+    }
+
+    $seed = Get-Content $eventSeed -Raw -Encoding UTF8 | ConvertFrom-Json
+    $eventTypes = @($seed.rows | ForEach-Object {
+            [pscustomobject]@{
+                id               = "$($_.sprk_eventtype_refid)"
+                code             = "$($_.sprk_eventtypecode)"
+                name             = "$($_.sprk_name)"
+                requiresDueDate  = [bool]$_.sprk_requiredduedate
+                requiresBaseDate = [bool]$_.sprk_requiresbasedate
+            }
+        })
+
+    $opts = Get-Content $OptionsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    return [pscustomobject]@{
+        taxonomy    = [pscustomobject]$taxonomy
+        eventTypes  = $eventTypes
+        options     = $opts.options
+        recordTypes = @($opts.recordTypes)
+    }
+}
+
 function Test-DemoDataset {
     <#
-      Validates the dataset against the table specs and, when -Reference (reference-names.json) is given, against the
-      reference snapshot. Returns an array of error strings (empty = valid). Never throws on bad data.
+      Validates the dataset against the table specs and, when -Reference (Get-DemoSeedReference) is given, against
+      the reference values. Returns an array of error strings (empty = valid). Never throws on bad data.
     #>
     param([Parameter(Mandatory)]$Dataset, $Reference)
 
@@ -298,10 +377,10 @@ function Test-DemoDataset {
                 if ($Reference) {
                     $table = $spec.Reference[$name].Table
                     if ($table -eq 'sprk_eventtype_ref') {
-                        if (-not (@($Reference.eventTypes) | Where-Object { $_.code -ceq "$($rowRefs[$name])" })) { $errors.Add("$where : event type code '$($rowRefs[$name])' is not one of the 17 product event types.") }
+                        if (-not (@($Reference.eventTypes) | Where-Object { $_.code -ceq "$($rowRefs[$name])" })) { $errors.Add("$where : event type code '$($rowRefs[$name])' is not an event type in scripts/seed-data/reference/sprk_eventtype_ref.json.") }
                     }
                     elseif ($Reference.taxonomy.PSObject.Properties.Name -notcontains $table -or @($Reference.taxonomy.$table) -cnotcontains "$($rowRefs[$name])") {
-                        $errors.Add("$where : $name '$($rowRefs[$name])' is not a $table name in reference-names.json (data plan section 6).")
+                        $errors.Add("$where : $name '$($rowRefs[$name])' is not a $table name in the D4 pack (scripts/seed-data/reference/packs/legal-standard/$table.json).")
                     }
                 }
             }
@@ -478,7 +557,8 @@ function Test-DemoTargetAllowed {
     $warnings = New-Object System.Collections.Generic.List[string]
 
     if ($null -eq $RegistryRow) {
-        $reasons.Add('The target has no environment registry row (sprk_dataverseenvironment), so it cannot be shown to be a demo stamp.')
+        # Only reached after a SUCCESSFUL registry read (a failed read throws in Get-DemoRegistryRowForUrl and never gets here).
+        $reasons.Add('The registry was read successfully but has no row (sprk_dataverseenvironment) for this URL, so the target cannot be shown to be a demo stamp.')
     }
     else {
         $type = $RegistryRow.sprk_environmenttype
@@ -496,6 +576,62 @@ function Test-DemoTargetAllowed {
         return [pscustomobject]@{ Allowed = $true; Reasons = @(); Warnings = $warnings.ToArray() }
     }
     return [pscustomobject]@{ Allowed = $false; Reasons = $reasons.ToArray(); Warnings = @() }
+}
+
+function ConvertTo-DemoComparableHost {
+    <#
+      The host of a registry or target URL, lower case: 'https://X.crm.dynamics.com/main.aspx?a=1' -> 'x.crm.dynamics.com'.
+      Used on BOTH sides of a registry comparison, so a trailing slash, a path, upper case or a port never makes a row
+      "not match". $null when no host can be read.
+    #>
+    param([string]$Url)
+    if ([string]::IsNullOrWhiteSpace($Url)) { return $null }
+    if ($Url.Trim() -match '^(?i:(?:https?://)?)([a-z0-9][a-z0-9.-]*)(?::\d+)?(?:[/?#].*)?$') { return $Matches[1].ToLowerInvariant() }
+    return $null
+}
+
+function Test-DemoRegistryUrlMatch {
+    <# Does a registry row's sprk_dataverseurl name the target? A value whose shape cannot be read still matches when it mentions the target host (fail towards refusing). #>
+    param([string]$RowUrl, [Parameter(Mandatory)][string]$Target)
+    $t = ConvertTo-DemoComparableHost $Target
+    if (-not $t) { throw "Target '$Target' has no readable host." }
+    $h = ConvertTo-DemoComparableHost $RowUrl
+    if ($h) { return ($h -eq $t) }
+    return $RowUrl.ToLowerInvariant().Contains($t)
+}
+
+function Get-DemoRegistryRowForUrl {
+    <#
+      The registry row for a target URL. -ReadRows returns every registry row (the loader's reader calls Dataverse).
+      A FAILED READ THROWS: it is never "no row", because "no row" lets -AllowNonDemo through. Precedence among rows that
+      name the URL: a Production row (always, active or not) > the one active row (two active rows throw) > the first
+      inactive row. $null only when the registry was read and no row names the URL.
+    #>
+    param([Parameter(Mandatory)][scriptblock]$ReadRows, [Parameter(Mandatory)][string]$Target)
+    try { $rows = @(& $ReadRows) }
+    catch { throw "The environment registry could not be read ($_). Refusing: a failed read is never treated as 'no registry row'." }
+    $match = @($rows | Where-Object { $_.sprk_dataverseurl -and (Test-DemoRegistryUrlMatch -RowUrl "$($_.sprk_dataverseurl)" -Target $Target) })
+    $production = @($match | Where-Object { $null -ne $_.sprk_environmenttype -and "$($_.sprk_environmenttype)" -ne '' -and [int]$_.sprk_environmenttype -eq 6 })
+    if ($production.Count -ge 1) { return $production[0] }
+    $active = @($match | Where-Object { $_.sprk_isactive -eq $true })
+    if ($active.Count -gt 1) { throw "$($active.Count) active registry rows name the URL $Target; refusing to guess." }
+    if ($active.Count -eq 1) { return $active[0] }
+    if ($match.Count -ge 1) { return $match[0] }
+    return $null
+}
+
+function Resolve-DemoTarget {
+    <#
+      The guard wiring: registry row + guard verdict for one target. -CustomerRow is the row found by -CustomerId (the
+      URL lookup still runs, and a Production row anywhere that names the same URL wins). Throws when the registry
+      cannot be read; returns Row and Guard (Test-DemoTargetAllowed) otherwise.
+    #>
+    param([Parameter(Mandatory)][scriptblock]$ReadRows, [Parameter(Mandatory)][string]$Target, $CustomerRow, [switch]$AllowNonDemo)
+    $urlRow = Get-DemoRegistryRowForUrl -ReadRows $ReadRows -Target $Target
+    $row = if ($CustomerRow) { $CustomerRow } else { $urlRow }
+    if ($CustomerRow -and $urlRow -and "$($urlRow.sprk_environmenttype)" -ne '' -and [int]$urlRow.sprk_environmenttype -eq 6) { $row = $urlRow }
+    $guard = Test-DemoTargetAllowed -RegistryRow $row -AllowNonDemo:$AllowNonDemo
+    return [pscustomobject]@{ Row = $row; Guard = $guard }
 }
 
 function Test-DemoOperatorIdentity {
@@ -518,7 +654,11 @@ function Get-DemoOwnerPlan {
     $bu = $null; $team = $null; $source = $null
     if ($OwnerBusinessUnitName) { $bu = $OwnerBusinessUnitName; $team = $OwnerTeamName; $source = 'parameter' }
     elseif ($RegistryRow) {
-        if ($RegistryRow.sprk_businessunitname) { $bu = "$($RegistryRow.sprk_businessunitname)"; $team = "$($RegistryRow.sprk_teamname)"; $source = 'registry (sprk_businessunitname)' }
+        if ($RegistryRow.sprk_businessunitname) {
+            # -OwnerTeamName alone overrides the registry's team (the unit still comes from the registry).
+            $bu = "$($RegistryRow.sprk_businessunitname)"; $source = 'registry (sprk_businessunitname)'
+            if ($OwnerTeamName) { $team = $OwnerTeamName; $source += ' + -OwnerTeamName' } else { $team = "$($RegistryRow.sprk_teamname)" }
+        }
         elseif ($RegistryRow.sprk_name) { $bu = "$($RegistryRow.sprk_name)"; $team = $OwnerTeamName; $source = 'registry (sprk_name = customer display name)' }
     }
     if ($team -eq '') { $team = $null }
@@ -556,8 +696,195 @@ function Get-DemoTaggedFilter {
     return "importsequencenumber eq $(Get-DemoImportSequenceNumber)"
 }
 
-function Get-DemoUntaggedFilter {
-    param([Parameter(Mandatory)][string]$LookupColumn)
-    $tag = Get-DemoImportSequenceNumber
-    return "_$($LookupColumn)_value ne null and (importsequencenumber eq null or importsequencenumber ne $tag)"
+function Get-DemoTaggedRows {
+    <# The tagged rows of one table as @{ Id; Name } (Name = the natural key). -Get takes a Web API path and returns every row (paged). A read error throws. #>
+    param([Parameter(Mandatory)][scriptblock]$Get, [Parameter(Mandatory)][hashtable]$Spec)
+    $path = ConvertTo-DemoQuery -Set $Spec.EntitySet -Select "$($Spec.IdColumn),$($Spec.NaturalKey)" -Filter (Get-DemoTaggedFilter)
+    return @(@(& $Get $path) | ForEach-Object { [pscustomobject]@{ Id = "$($_.($Spec.IdColumn))"; Name = "$($_.($Spec.NaturalKey))" } })
 }
+
+function Get-DemoBlockingReferences {
+    <#
+      What stops a tagged row being deleted. A row blocks when it still exists after this run's deletes and points at the
+      tagged row through ANY 1:N relationship (every Spaarke lookup is RemoveLink, so the delete would silently edit that
+      row; a cascade-delete relationship, e.g. a note or an activity regarding a contact, would silently DELETE it), or
+      through a many-to-many association whose other side is not a tagged row.
+        -Get   reads a Web API path and returns every row (the loader's reader pages through nextLink). Injectable so the
+               tests can fake Dataverse.
+        -Gone  lower-case ids of tagged rows this run has deleted or, under -WhatIf, would delete. Those do not block:
+               children are deleted before parents, so by the time a parent is checked its tagged children are gone.
+               A tagged child that was KEPT is not in the set and does block (its parent is kept too).
+      EVERY 1:N relationship into the table is checked except the system plumbing columns (created/modified by,
+      owner*): the old filter looked only at sprk_/contact/account tables and missed email, systemuser, notes and the like.
+      FAILS CLOSED: a relationship that cannot be read is returned in Unchecked, and the caller keeps every row.
+      Returns Refs (parent id lower case -> reason strings) and Unchecked (strings).
+    #>
+    param(
+        [Parameter(Mandatory)][scriptblock]$Get,
+        [Parameter(Mandatory)][string]$Logical,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Ids,
+        [System.Collections.Generic.HashSet[string]]$Gone
+    )
+    if ($null -eq $Gone) { $Gone = New-Object 'System.Collections.Generic.HashSet[string]' }
+    $refs = @{}
+    $unchecked = New-Object System.Collections.Generic.List[string]
+    $parents = @($Ids | ForEach-Object { "$_".ToLowerInvariant() })
+    if ($parents.Count -eq 0) { return [pscustomobject]@{ Refs = $refs; Unchecked = @() } }
+    $plumbing = @('createdby', 'modifiedby', 'createdonbehalfby', 'modifiedonbehalfby', 'owninguser', 'owningteam', 'owningbusinessunit', 'ownerid')
+    $notRetrievable = New-Object System.Collections.Generic.List[string]
+    # The ONE read error that is not a failure: a few system tables (postrole, postregarding, subscriptionmanuallytrackedobject
+    # ... as seen on a live stamp) answer every Web API read with "RetrieveMultiple does not support entities of type". Nothing
+    # a user filed can live there, and treating them as unreadable would keep every contact on every reset. Any other error
+    # (403, timeout, 5xx, a missing table) is still Unchecked.
+    $notRetrievablePattern = "method does not support entities of type"
+    $infoCache = @{}
+    $taggedCache = @{}
+    $logicals = @(Get-DemoTableSpecs | ForEach-Object { $_.Logical })
+
+    $entityInfo = {
+        param([string]$Name)
+        if (-not $infoCache.ContainsKey($Name)) {
+            $found = @(& $Get (ConvertTo-DemoQuery -Set 'EntityDefinitions' -Select 'LogicalName,EntitySetName,PrimaryIdAttribute' -Filter "LogicalName eq '$(ConvertTo-DemoODataString $Name)'"))
+            if ($found.Count -ne 1 -or -not $found[0].EntitySetName) { throw "metadata for table '$Name' is not readable" }
+            $infoCache[$Name] = @{ EntitySet = "$($found[0].EntitySetName)"; PrimaryId = "$($found[0].PrimaryIdAttribute)" }
+        }
+        return $infoCache[$Name]
+    }
+    $addRef = {
+        param([string]$Parent, [string]$Label)
+        if (-not $refs.ContainsKey($Parent)) { $refs[$Parent] = New-Object System.Collections.Generic.List[string] }
+        $refs[$Parent].Add($Label)
+    }
+    $chunks = {
+        param([string[]]$All)
+        for ($i = 0; $i -lt $All.Count; $i += 20) { , @($All[$i..([math]::Min($i + 19, $All.Count - 1))]) }
+    }
+
+    # 1:N - every referencing table.
+    $oneToMany = @()
+    try {
+        $oneToMany = @(& $Get (ConvertTo-DemoQuery -Set "EntityDefinitions(LogicalName='$Logical')/OneToManyRelationships" -Select 'SchemaName,ReferencingEntity,ReferencingAttribute'))
+    }
+    catch { $unchecked.Add("1:N relationships of $Logical ($_)") }
+    foreach ($rel in $oneToMany) {
+        if ("$($rel.ReferencingAttribute)" -in $plumbing) { continue }
+        $label = "$($rel.ReferencingEntity).$($rel.ReferencingAttribute)"
+        try {
+            $info = & $entityInfo "$($rel.ReferencingEntity)"
+            if (-not $info.PrimaryId) { throw "no primary id column for '$($rel.ReferencingEntity)'" }
+            $col = "$($rel.ReferencingAttribute)"
+            foreach ($chunk in (& $chunks $parents)) {
+                $anyOf = ($chunk | ForEach-Object { "_$($col)_value eq $_" }) -join ' or '
+                $rows = @(& $Get (ConvertTo-DemoQuery -Set $info.EntitySet -Select "_$($col)_value,$($info.PrimaryId)" -Filter $anyOf))
+                foreach ($r in $rows) {
+                    if ($Gone.Contains("$($r.($info.PrimaryId))".ToLowerInvariant())) { continue }
+                    $parentId = ("$($r.("_$($col)_value"))").ToLowerInvariant()
+                    & $addRef $parentId $label
+                }
+            }
+        }
+        catch { if ("$_" -match $notRetrievablePattern) { $notRetrievable.Add($label) } else { $unchecked.Add("$label ($_)") } }
+    }
+
+    # M:N - every association of the table.
+    $manyToMany = @()
+    try {
+        $manyToMany = @(& $Get (ConvertTo-DemoQuery -Set "EntityDefinitions(LogicalName='$Logical')/ManyToManyRelationships" -Select 'SchemaName,IntersectEntityName,Entity1LogicalName,Entity1IntersectAttribute,Entity2LogicalName,Entity2IntersectAttribute'))
+    }
+    catch { $unchecked.Add("M:N relationships of $Logical ($_)") }
+    foreach ($rel in $manyToMany) {
+        $sides = @()
+        if ("$($rel.Entity1LogicalName)" -eq $Logical) { $sides += @{ Mine = "$($rel.Entity1IntersectAttribute)"; Other = "$($rel.Entity2IntersectAttribute)"; OtherEntity = "$($rel.Entity2LogicalName)" } }
+        if ("$($rel.Entity2LogicalName)" -eq $Logical) { $sides += @{ Mine = "$($rel.Entity2IntersectAttribute)"; Other = "$($rel.Entity1IntersectAttribute)"; OtherEntity = "$($rel.Entity1LogicalName)" } }
+        foreach ($side in $sides) {
+            $label = "m:n $($rel.SchemaName)"
+            try {
+                $info = & $entityInfo "$($rel.IntersectEntityName)"
+                foreach ($chunk in (& $chunks $parents)) {
+                    $anyOf = ($chunk | ForEach-Object { "$($side.Mine) eq $_" }) -join ' or '
+                    $rows = @(& $Get (ConvertTo-DemoQuery -Set $info.EntitySet -Select "$($side.Mine),$($side.Other)" -Filter $anyOf))
+                    if ($rows.Count -eq 0) { continue }
+                    # The other side may be a tagged demo row (it goes in this reset or is a demo row anyway): then the
+                    # association is demo-to-demo and does not block. Anything else is someone else's link.
+                    if (-not $taggedCache.ContainsKey($side.OtherEntity)) {
+                        $set = New-Object 'System.Collections.Generic.HashSet[string]'
+                        if ($side.OtherEntity -in $logicals) {
+                            $oi = & $entityInfo $side.OtherEntity
+                            foreach ($t in @(& $Get (ConvertTo-DemoQuery -Set $oi.EntitySet -Select $oi.PrimaryId -Filter (Get-DemoTaggedFilter)))) { $null = $set.Add("$($t.($oi.PrimaryId))".ToLowerInvariant()) }
+                        }
+                        $taggedCache[$side.OtherEntity] = $set
+                    }
+                    foreach ($r in $rows) {
+                        $other = "$($r.($side.Other))".ToLowerInvariant()
+                        if ($Gone.Contains($other) -or $taggedCache[$side.OtherEntity].Contains($other)) { continue }
+                        $parentId = ("$($r.($side.Mine))").ToLowerInvariant()
+                        & $addRef $parentId $label
+                    }
+                }
+            }
+            catch { if ("$_" -match $notRetrievablePattern) { $notRetrievable.Add($label) } else { $unchecked.Add("$label ($_)") } }
+        }
+    }
+    return [pscustomobject]@{ Refs = $refs; Unchecked = $unchecked.ToArray(); NotRetrievable = $notRetrievable.ToArray() }
+}
+
+function Invoke-DemoResetSection {
+    <#
+      Resets ONE table: reads its tagged rows, keeps every row something else still points at (Get-DemoBlockingReferences;
+      fails closed), deletes the rest one by one. Rows are only ever found by the tag filter, so nothing untagged is
+      deleted. Injectable so the tests run it without Dataverse:
+        -Get      path -> every row.            -Delete   { param($Spec, $Row) } performs one DELETE.
+        -Approve  { param($Target, $Action) } returns $false under -WhatIf (the row is counted WouldDelete, never deleted).
+        -Gone     shared set of ids deleted or would-be-deleted so far in this run (see Get-DemoBlockingReferences).
+        -Say      { param($Text, $Color) } progress output.
+      Returns Counts (Deleted / WouldDelete / Kept / Errors) and Kept (Section, Name, Reasons).
+    #>
+    param(
+        [Parameter(Mandatory)][hashtable]$Spec,
+        [Parameter(Mandatory)][scriptblock]$Get,
+        [Parameter(Mandatory)][scriptblock]$Delete,
+        [Parameter(Mandatory)][scriptblock]$Approve,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$Gone,
+        [scriptblock]$Say = { }
+    )
+    $counts = [ordered]@{ Deleted = 0; WouldDelete = 0; Kept = 0; Errors = 0 }
+    $keptReport = New-Object System.Collections.Generic.List[object]
+    $rows = @(Get-DemoTaggedRows -Get $Get -Spec $Spec)
+    if ($rows.Count -eq 0) {
+        & $Say '  nothing tagged' 'Gray'
+        return [pscustomobject]@{ Counts = $counts; Kept = @() }
+    }
+
+    $check = Get-DemoBlockingReferences -Get $Get -Logical $Spec.Logical -Ids @($rows | ForEach-Object { $_.Id }) -Gone $Gone
+    $blocking = $check.Refs
+    if (@($check.NotRetrievable).Count -gt 0) { & $Say "  Not checked (the platform does not allow reading them): $(@($check.NotRetrievable) -join ', ')" 'DarkGray' }
+    if ($check.Unchecked.Count -gt 0) {
+        & $Say "  Could not check $($check.Unchecked.Count) relationship(s); keeping every row of this table (fail closed):" 'Yellow'
+        foreach ($u in $check.Unchecked) { & $Say "    $u" 'Yellow' }
+        $blocking = @{}
+        foreach ($r in $rows) { $blocking[$r.Id.ToLowerInvariant()] = @("a relationship could not be read ($($check.Unchecked.Count) unreadable)") }
+    }
+    $plan = Select-DemoDeletableRows -Rows $rows -UntaggedReferences $blocking
+    foreach ($k in $plan.Kept) {
+        $counts.Kept++
+        $keptReport.Add([pscustomobject]@{ Section = $Spec.Section; Name = $k.Name; Reasons = @($k.Reasons) })
+        & $Say "  KEEP   '$($k.Name)': still referenced by rows this reset does not delete: $($k.Reasons -join ', ')" 'Yellow'
+    }
+    foreach ($row in $plan.Deletable) {
+        if ([bool](& $Approve "$($Spec.Logical) '$($row.Name)' ($($row.Id))" "Delete tagged demo row (importsequencenumber = $(Get-DemoImportSequenceNumber))")) {
+            try {
+                & $Delete $Spec $row
+                $counts.Deleted++
+                $null = $Gone.Add($row.Id.ToLowerInvariant())
+                & $Say "  DELETED '$($row.Name)'" 'Green'
+            }
+            catch { $counts.Errors++; & $Say "  ERROR  '$($row.Name)': $_" 'Red' }
+        }
+        else {
+            $counts.WouldDelete++
+            $null = $Gone.Add($row.Id.ToLowerInvariant())
+        }
+    }
+    return [pscustomobject]@{ Counts = $counts; Kept = $keptReport.ToArray() }
+}
+

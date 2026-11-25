@@ -14,13 +14,17 @@
       2. DEMO GUARD. The target's row in the environment registry (sprk_dataverseenvironment on the admin environment)
          must be Environment Type = Demo and active. Anything else is refused unless -AllowNonDemo is given (with a
          warning). A Production row is refused even with -AllowNonDemo. -CustomerId resolves the stamp from that row;
-         -DataverseUrl names it directly and is checked against the same registry.
+         -DataverseUrl names it directly and is checked against the same registry. A registry read that FAILS stops
+         the script: it is never taken as "no row" (-AllowNonDemo accepts "registry read OK, no row for this URL",
+         and nothing else about a failed read).
       3. Everything the dataset references is resolved on the target BEFORE anything is written: the taxonomy rows by
          name (matter types, practice areas, project/contact/organization types), the event types by code, the record
          types, the choice labels, the schema, and the owner team. Every missing value is listed, and nothing is written.
       4. Every row is TAGGED (standard column importsequencenumber, see scripts/demo-data/DemoDataLib.ps1). Re-running
          matches by tag + natural key and creates nothing new. -Reset deletes only tagged rows, children first, and keeps
-         a tagged parent that an untagged row points at.
+         a tagged row while anything this reset does not delete still points at it (any 1:N relationship, including
+         system tables and cascade-delete children such as notes and activities, and any many-to-many association to
+         a row that is not itself a demo row). A relationship it cannot read keeps every row of that table.
       5. Rows are owned by the customer's business unit default team, so users of that unit (who read at Deep) see them.
 
     Documents are METADATA ONLY (no file): uploading needs the stamp's BFF with a user token. See
@@ -190,15 +194,6 @@ function Get-DvAll {
     return $all.ToArray()
 }
 
-function ConvertTo-Query {
-    param([Parameter(Mandatory)][string]$Set, [string]$Select, [string]$Filter)
-    $q = $Set
-    $sep = '?'
-    if ($Select) { $q += $sep + '$select=' + $Select; $sep = '&' }
-    if ($Filter) { $q += $sep + '$filter=' + [uri]::EscapeDataString($Filter) }
-    return $q
-}
-
 # ============================================================================
 # OPERATOR, REGISTRY, GUARD
 # ============================================================================
@@ -215,25 +210,16 @@ $registrySelect = 'sprk_dataverseenvironmentid,sprk_name,sprk_customerid,sprk_da
 
 function Get-RegistryRowByCustomer {
     param([string]$Registry, [string]$Customer)
-    $rows = @(Get-DvAll -Url $Registry -PathAndQuery (ConvertTo-Query -Set 'sprk_dataverseenvironments' -Select $registrySelect -Filter "sprk_customerid eq '$(ConvertTo-DemoODataString $Customer)'"))
+    $rows = @(Get-DvAll -Url $Registry -PathAndQuery (ConvertTo-DemoQuery -Set 'sprk_dataverseenvironments' -Select $registrySelect -Filter "sprk_customerid eq '$(ConvertTo-DemoODataString $Customer)'"))
     if ($rows.Count -eq 0) { throw "No registry row has sprk_customerid '$Customer' on $Registry." }
     if ($rows.Count -gt 1) { throw "$($rows.Count) registry rows have sprk_customerid '$Customer'; refusing to guess." }
     return $rows[0]
 }
 
-function Get-RegistryRowByUrl {
-    param([string]$Registry, [string]$Target)
-    $rows = @(Get-DvAll -Url $Registry -PathAndQuery (ConvertTo-Query -Set 'sprk_dataverseenvironments' -Select $registrySelect))
-    $match = @($rows | Where-Object {
-            $u = $null
-            if ($_.sprk_dataverseurl) { try { $u = Resolve-DemoDataverseUrl $_.sprk_dataverseurl } catch { $u = $null } }
-            $u -eq $Target
-        })
-    $active = @($match | Where-Object { $_.sprk_isactive -eq $true })
-    if ($active.Count -gt 1) { throw "$($active.Count) active registry rows have the URL $Target; refusing to guess." }
-    if ($active.Count -eq 1) { return $active[0] }
-    if ($match.Count -ge 1) { return $match[0] }
-    return $null
+function Get-RegistryRows {
+    <# Every registry row. A failure (token, network, 4xx) throws; the guard (Resolve-DemoTarget) turns it into a refusal, never into "no row". #>
+    param([string]$Registry)
+    return @(Get-DvAll -Url $Registry -PathAndQuery (ConvertTo-DemoQuery -Set 'sprk_dataverseenvironments' -Select $registrySelect))
 }
 
 # ============================================================================
@@ -279,7 +265,7 @@ function Resolve-TargetReferences {
     foreach ($group in ($Requirements | Where-Object { $_.Kind -eq 'taxonomy' } | Group-Object Table)) {
         $t = $taxonomy[$group.Name]
         $refIds[$group.Name] = @{}
-        try { $rows = @(Get-DvAll -Url $Url -PathAndQuery (ConvertTo-Query -Set $t.EntitySet -Select "$($t.IdColumn),$($t.NameColumn)" -Filter 'statecode eq 0')) }
+        try { $rows = @(Get-DvAll -Url $Url -PathAndQuery (ConvertTo-DemoQuery -Set $t.EntitySet -Select "$($t.IdColumn),$($t.NameColumn)" -Filter 'statecode eq 0')) }
         catch { $missing.Add("$($group.Name): table not readable on the target ($_)"); continue }
         $byName = @{}
         foreach ($r in $rows) {
@@ -300,10 +286,13 @@ function Resolve-TargetReferences {
             $o = Invoke-Dv -Url $Url -PathAndQuery "EntityDefinitions(LogicalName='$($first.Entity)')/Attributes(LogicalName='$($first.Column)')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$expand=OptionSet(`$select=Options)"
         }
         catch { $missing.Add("$($group.Name): not a readable choice column on the target ($_)"); continue }
-        $map = @{}
-        foreach ($opt in $o.OptionSet.Options) { $map["$($opt.Label.UserLocalizedLabel.Label)"] = [int]$opt.Value }
+        # English (1033) labels, not the label in the signed-in operator's own language.
+        $map = Get-DemoOptionMap -Options @($o.OptionSet.Options)
         $optionValues[$group.Name] = $map
-        foreach ($req in $group.Group) { if (-not $map.ContainsKey($req.Name)) { $missing.Add("$($group.Name) (choice): label '$($req.Name)' not found") } }
+        foreach ($req in $group.Group) {
+            if (-not $map.ContainsKey($req.Name)) { $missing.Add("$($group.Name) (choice): label '$($req.Name)' not found") }
+            elseif ($map[$req.Name] -lt 0) { $missing.Add("$($group.Name) (choice): label '$($req.Name)' is ambiguous (two options share it)") }
+        }
     }
     return [pscustomobject]@{ RefIds = $refIds; OptionValues = $optionValues; Missing = $missing.ToArray() }
 }
@@ -312,48 +301,14 @@ function Resolve-OwnerTeam {
     param([string]$Url, $Plan)
     if (-not $Plan.BusinessUnitName) { throw 'No owner business unit is known (the registry row names none). Pass -OwnerBusinessUnitName, or -OwnerIsOperator.' }
     if (Test-DemoReservedBusinessUnit $Plan.BusinessUnitName) { throw "'$($Plan.BusinessUnitName)' is a reserved business unit; demo rows are never owned there." }
-    $bus = @(Get-DvAll -Url $Url -PathAndQuery (ConvertTo-Query -Set 'businessunits' -Select 'businessunitid,name,_parentbusinessunitid_value' -Filter "name eq '$(ConvertTo-DemoODataString $Plan.BusinessUnitName)' and isdisabled eq false"))
+    $bus = @(Get-DvAll -Url $Url -PathAndQuery (ConvertTo-DemoQuery -Set 'businessunits' -Select 'businessunitid,name,_parentbusinessunitid_value' -Filter "name eq '$(ConvertTo-DemoODataString $Plan.BusinessUnitName)' and isdisabled eq false"))
     if ($bus.Count -ne 1) { throw "Expected exactly one business unit named '$($Plan.BusinessUnitName)' on the target, found $($bus.Count)." }
     if (-not $bus[0]._parentbusinessunitid_value) { throw "'$($Plan.BusinessUnitName)' is the root business unit; demo rows belong in the customer's own unit." }
     $filter = "_businessunitid_value eq $($bus[0].businessunitid) and teamtype eq 0"
     if ($Plan.TeamName) { $filter += " and name eq '$(ConvertTo-DemoODataString $Plan.TeamName)'" } else { $filter += ' and isdefault eq true' }
-    $teams = @(Get-DvAll -Url $Url -PathAndQuery (ConvertTo-Query -Set 'teams' -Select 'teamid,name' -Filter $filter))
+    $teams = @(Get-DvAll -Url $Url -PathAndQuery (ConvertTo-DemoQuery -Set 'teams' -Select 'teamid,name' -Filter $filter))
     if ($teams.Count -ne 1) { throw "Expected exactly one owner team ($(if ($Plan.TeamName) { "named '$($Plan.TeamName)'" } else { 'the default team' })) in business unit '$($Plan.BusinessUnitName)', found $($teams.Count)." }
     return [pscustomobject]@{ TeamId = $teams[0].teamid; TeamName = $teams[0].name; BusinessUnitId = $bus[0].businessunitid; BusinessUnitName = $bus[0].name }
-}
-
-# ============================================================================
-# RESET HELPERS
-# ============================================================================
-
-function Get-UntaggedReferences {
-    <# Untagged rows that point at any of -Ids through any Spaarke lookup. Fails closed: an unreadable relationship is reported. #>
-    param([string]$Url, [string]$Logical, [string[]]$Ids)
-    $refs = @{}
-    $unchecked = New-Object System.Collections.Generic.List[string]
-    if ($Ids.Count -eq 0) { return [pscustomobject]@{ Refs = $refs; Unchecked = @() } }
-    $rels = (Invoke-Dv -Url $Url -PathAndQuery "EntityDefinitions(LogicalName='$Logical')/OneToManyRelationships?`$select=ReferencingEntity,ReferencingAttribute").value |
-        Where-Object { $_.ReferencingEntity -match '^(sprk_|contact$|account$)' }
-    $setNames = @{}
-    foreach ($rel in $rels) {
-        $label = "$($rel.ReferencingEntity).$($rel.ReferencingAttribute)"
-        try {
-            if (-not $setNames.ContainsKey($rel.ReferencingEntity)) {
-                $setNames[$rel.ReferencingEntity] = (Invoke-Dv -Url $Url -PathAndQuery "EntityDefinitions(LogicalName='$($rel.ReferencingEntity)')?`$select=EntitySetName").EntitySetName
-            }
-            $col = $rel.ReferencingAttribute
-            $anyOf = ($Ids | ForEach-Object { "_$($col)_value eq $_" }) -join ' or '
-            $filter = "($anyOf) and (importsequencenumber eq null or importsequencenumber ne $(Get-DemoImportSequenceNumber))"
-            $rows = @(Get-DvAll -Url $Url -PathAndQuery (ConvertTo-Query -Set $setNames[$rel.ReferencingEntity] -Select "_$($col)_value" -Filter $filter))
-            foreach ($r in $rows) {
-                $parent = "$($r.("_$($col)_value"))".ToLowerInvariant()
-                if (-not $refs.ContainsKey($parent)) { $refs[$parent] = New-Object System.Collections.Generic.List[string] }
-                $refs[$parent].Add($label)
-            }
-        }
-        catch { $unchecked.Add("$label ($_)") }
-    }
-    return [pscustomobject]@{ Refs = $refs; Unchecked = $unchecked.ToArray() }
 }
 
 # ============================================================================
@@ -375,7 +330,9 @@ if (-not (Test-Path $DataFile)) { throw "Data file not found: $DataFile" }
 
 # 1. Dataset
 $dataset = Get-Content $DataFile -Raw -Encoding UTF8 | ConvertFrom-Json
-$datasetErrors = @(Test-DemoDataset -Dataset $dataset)
+# Names are checked against the D4 taxonomy pack and the event-type seed themselves (not a copy), so a rename in a pack stops the load here.
+$reference = Get-DemoSeedReference -ScriptsRoot $PSScriptRoot
+$datasetErrors = @(Test-DemoDataset -Dataset $dataset -Reference $reference)
 if ($datasetErrors.Count -gt 0) {
     Write-Host "The dataset is invalid ($($datasetErrors.Count) problem(s)):" -ForegroundColor Red
     $datasetErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
@@ -393,24 +350,25 @@ Write-Host "Operator:    $($account.user.name)"
 # 3. Target + demo guard
 if (-not $RegistryUrl) { $RegistryUrl = Get-DefaultRegistryUrl }
 $RegistryUrl = Resolve-DemoDataverseUrl $RegistryUrl
-$registryRow = $null
+$customerRow = $null
 if ($CustomerId) {
-    $registryRow = Get-RegistryRowByCustomer -Registry $RegistryUrl -Customer $CustomerId
-    if (-not $registryRow.sprk_dataverseurl) { throw "Registry row '$($registryRow.sprk_name)' has no sprk_dataverseurl." }
-    $targetUrl = Resolve-DemoDataverseUrl $registryRow.sprk_dataverseurl
+    $customerRow = Get-RegistryRowByCustomer -Registry $RegistryUrl -Customer $CustomerId
+    if (-not $customerRow.sprk_dataverseurl) { throw "Registry row '$($customerRow.sprk_name)' has no sprk_dataverseurl." }
+    $targetUrl = Resolve-DemoDataverseUrl $customerRow.sprk_dataverseurl
 }
-else {
-    $targetUrl = Resolve-DemoDataverseUrl $DataverseUrl
-    try { $registryRow = Get-RegistryRowByUrl -Registry $RegistryUrl -Target $targetUrl }
-    catch { Write-Host "Registry lookup failed: $_" -ForegroundColor Yellow }
-}
+else { $targetUrl = Resolve-DemoDataverseUrl $DataverseUrl }
+
+# The registry read is fatal when it fails (token, network, two active rows): a failed read is never "no row", because
+# "no row" is what -AllowNonDemo accepts. Both sides of the URL match are reduced to the host the same way.
+$resolvedTarget = Resolve-DemoTarget -ReadRows { Get-RegistryRows -Registry $RegistryUrl } -Target $targetUrl -CustomerRow $customerRow -AllowNonDemo:$AllowNonDemo
+$registryRow = $resolvedTarget.Row
+$guard = $resolvedTarget.Guard
 Write-Host "Target:      $targetUrl"
 if ($registryRow) {
     Write-Host ("Registry:    '{0}' customerId='{1}' type={2} active={3} setup={4}" -f $registryRow.sprk_name, $registryRow.sprk_customerid, (Get-DemoEnvironmentTypeName $registryRow.sprk_environmenttype), $registryRow.sprk_isactive, $registryRow.'sprk_setupstatus@OData.Community.Display.V1.FormattedValue')
 }
-else { Write-Host 'Registry:    (no row for this target)' -ForegroundColor Yellow }
+else { Write-Host 'Registry:    (registry read OK, no row for this URL)' -ForegroundColor Yellow }
 
-$guard = Test-DemoTargetAllowed -RegistryRow $registryRow -AllowNonDemo:$AllowNonDemo
 if (-not $guard.Allowed) {
     Write-Host ''
     Write-Host 'REFUSED: this is not a demo stamp.' -ForegroundColor Red
@@ -435,46 +393,27 @@ if ($Reset) { $specs = @(Get-DemoResetOrder | Where-Object { $_ -notin $skip } |
 try { $null = Invoke-Dv -Url $targetUrl -PathAndQuery 'sprk_matters?$top=1&$select=sprk_matterid' }
 catch { throw "The target has no Spaarke tables ($_). Import SpaarkeMaster first (solution-authoring/Import-SpaarkeMasterPackage.ps1)." }
 
+# Every read of the target below goes through this one reader (path -> every row, paged).
+$reader = { param($PathAndQuery) Get-DvAll -Url $targetUrl -PathAndQuery $PathAndQuery }
+
 # ============================================================================
 # RESET
 # ============================================================================
 
 if ($Reset) {
-    $tag = Get-DemoImportSequenceNumber
+    # The whole reset runs in DemoDataLib.ps1 (Invoke-DemoResetSection) against these callbacks, so the tests drive the
+    # same code with a fake Dataverse. Deletes happen only inside -Delete, which the lib calls only after -Approve
+    # (ShouldProcess) said yes, and only for rows found by the tag filter.
+    $deleter = { param($Spec, $Row) Invoke-DvWrite -Url $targetUrl -PathAndQuery "$($Spec.EntitySet)($($Row.Id))" -Method DELETE }
+    $confirmer = { param($Target, $Action) $PSCmdlet.ShouldProcess($Target, $Action) }
+    $say = { param($Text, $Color) Write-Host $Text -ForegroundColor $Color }
+    $gone = New-Object 'System.Collections.Generic.HashSet[string]'
+    $keptParents = New-Object System.Collections.Generic.List[object]
     foreach ($spec in $specs) {
         Write-Section "Reset: $($spec.Section) ($($spec.EntitySet))"
-        $rows = @(Get-DvAll -Url $targetUrl -PathAndQuery (ConvertTo-Query -Set $spec.EntitySet -Select "$($spec.IdColumn),$($spec.NaturalKey)" -Filter (Get-DemoTaggedFilter)) |
-                ForEach-Object { [pscustomobject]@{ Id = $_.($spec.IdColumn); Name = "$($_.($spec.NaturalKey))" } })
-        $counts = [ordered]@{ Deleted = 0; WouldDelete = 0; Kept = 0; Errors = 0 }
-        $summary[$spec.Section] = $counts
-        if ($rows.Count -eq 0) { Write-Host '  nothing tagged'; continue }
-
-        $untagged = @{}
-        # Every table: any untagged row that points at a demo row would lose its link (every lookup is RemoveLink on delete).
-        $check = Get-UntaggedReferences -Url $targetUrl -Logical $spec.Logical -Ids @($rows | ForEach-Object { $_.Id })
-        $untagged = $check.Refs
-        if ($check.Unchecked.Count -gt 0) {
-            Write-Host "  Could not check $($check.Unchecked.Count) relationship(s); keeping every row of this table (fail closed):" -ForegroundColor Yellow
-            $check.Unchecked | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
-            $untagged = @{}
-            foreach ($r in $rows) { $untagged["$($r.Id)".ToLowerInvariant()] = @('unchecked relationships') }
-        }
-        $plan = Select-DemoDeletableRows -Rows $rows -UntaggedReferences $untagged
-        foreach ($k in $plan.Kept) {
-            $counts.Kept++
-            Write-Host "  KEEP   '$($k.Name)': untagged rows point at it via $($k.Reasons -join ', ')" -ForegroundColor Yellow
-        }
-        foreach ($row in $plan.Deletable) {
-            if ($PSCmdlet.ShouldProcess("$($spec.Logical) '$($row.Name)' ($($row.Id))", "Delete tagged demo row (importsequencenumber = $tag)")) {
-                try {
-                    Invoke-DvWrite -Url $targetUrl -PathAndQuery "$($spec.EntitySet)($($row.Id))" -Method DELETE
-                    $counts.Deleted++
-                    Write-Host "  DELETED '$($row.Name)'" -ForegroundColor Green
-                }
-                catch { $counts.Errors++; Write-Host "  ERROR  '$($row.Name)': $_" -ForegroundColor Red }
-            }
-            else { $counts.WouldDelete++ }
-        }
+        $result = Invoke-DemoResetSection -Spec $spec -Get $reader -Delete $deleter -Approve $confirmer -Gone $gone -Say $say
+        $summary[$spec.Section] = $result.Counts
+        foreach ($k in $result.Kept) { $keptParents.Add($k) }
     }
 }
 
@@ -565,9 +504,7 @@ else {
 
         $existing = @{}
         try {
-            foreach ($r in (Get-DvAll -Url $targetUrl -PathAndQuery (ConvertTo-Query -Set $spec.EntitySet -Select "$($spec.IdColumn),$($spec.NaturalKey)" -Filter (Get-DemoTaggedFilter)))) {
-                $existing["$($r.($spec.NaturalKey))".ToLowerInvariant()] = $r.($spec.IdColumn)
-            }
+            foreach ($r in (Get-DemoTaggedRows -Get $reader -Spec $spec)) { $existing[$r.Name.ToLowerInvariant()] = $r.Id }
         }
         catch { Write-Host "  Could not read existing tagged rows ($_)" -ForegroundColor Red; $counts.Errors++; continue }
 
@@ -630,7 +567,20 @@ foreach ($name in $summary.Keys) {
     Write-Host ("  {0,-15} {1}" -f $name, $line)
 }
 Write-Host ("  {0,-15} {1}" -f 'TOTAL', (($totals.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join '  '))
-if ($WhatIfPreference) { Write-Host '  (WhatIf: Planned = would be created; nothing was written.)' -ForegroundColor Yellow }
+if ($WhatIfPreference) {
+    if ($Reset) { Write-Host '  (WhatIf: WouldDelete = would be deleted; nothing was deleted.)' -ForegroundColor Yellow }
+    else { Write-Host '  (WhatIf: Planned = would be created; nothing was written.)' -ForegroundColor Yellow }
+}
+if ($Reset) {
+    # Kept parents: tagged rows the reset did not delete, and why. Does not change the exit code (a kept row is the safe outcome).
+    Write-Host ''
+    if ($keptParents.Count -eq 0) { Write-Host '  Kept: 0 tagged rows (nothing outside this reset points at a demo row).' }
+    else {
+        Write-Host "  KEPT: $($keptParents.Count) tagged row(s) were NOT deleted, because rows this reset does not delete still reference them (or a relationship could not be read):" -ForegroundColor Yellow
+        foreach ($k in $keptParents) { Write-Host ("    {0,-15} '{1}' <- {2}" -f $k.Section, $k.Name, (@($k.Reasons | Select-Object -Unique) -join ', ')) -ForegroundColor Yellow }
+        Write-Host '  Remove or re-file those rows (or fix the unreadable relationship), then run -Reset again.' -ForegroundColor Yellow
+    }
+}
 
 if ($problemsFound -or $totals['Errors'] -gt 0) { exit 1 }
 exit 0
