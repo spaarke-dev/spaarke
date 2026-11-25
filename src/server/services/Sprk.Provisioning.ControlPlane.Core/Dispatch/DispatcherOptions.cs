@@ -89,8 +89,10 @@ public sealed class DispatcherOptions
     /// (10 min) and the new app user's Dataverse propagation (10 min) before its
     /// 60-minute import, so 65 minutes could expire the lock mid-import and let a
     /// redelivery start a second import. Guarded by DispatcherOptionsBudgetTests.
+    /// ISS-032: 150 minutes. H6's import wait is now 120 minutes (a real SpaarkeMaster
+    /// upgrade of a stamp took 73), so 90 would expire the lock mid-import.
     /// </summary>
-    public TimeSpan MaxHandlerDuration { get; set; } = TimeSpan.FromMinutes(90);
+    public TimeSpan MaxHandlerDuration { get; set; } = TimeSpan.FromMinutes(150);
 
     /// <summary>
     /// Bound to <c>ServiceBusSessionProcessorOptions.SessionIdleTimeout</c>.

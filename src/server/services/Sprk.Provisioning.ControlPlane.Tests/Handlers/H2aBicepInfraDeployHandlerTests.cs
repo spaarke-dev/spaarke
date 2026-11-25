@@ -750,6 +750,71 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.LastRequest!.SignalREnabled.Should().Be(expected);
     }
 
+    // ---------- ISS-022: the SignalR host name H4b needs for the keyless managed-identity string ----------
+
+    [Fact]
+    public async Task Iss022_SignalRDeployed_PersistsTheHostName_ToInterStepState()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-iss022-a");
+        var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: true)),
+            FakeArmKeyVaultRefProbe.Match(), new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        repo.LastWrittenRun!.InterStepState.SignalRHostName.Should().Be("sprk-acme-prod-signalr.service.signalr.net");
+    }
+
+    [Fact]
+    public async Task Iss022_SignalRNotDeployed_LeavesTheHostNameNull()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-iss022-b");
+        var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: false)),
+            FakeArmKeyVaultRefProbe.Match(), new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        repo.LastWrittenRun!.InterStepState.SignalRHostName.Should().BeNull("H4b writes no SignalR setting unless SignalR was deployed");
+    }
+
+    [Fact]
+    public async Task Iss022_SignalRDeployedButHostNameBlank_FailsQuarantineRequired_NamingTheField()
+    {
+        var complete = BuildOutputs(signalRDeployed: true);
+        var outputs = new BicepDeployOutputs
+        {
+            ResourceGroupName = complete.ResourceGroupName,
+            UserAssignedIdentityResourceId = complete.UserAssignedIdentityResourceId,
+            UserAssignedIdentityObjectId = complete.UserAssignedIdentityObjectId,
+            UserAssignedIdentityClientId = complete.UserAssignedIdentityClientId,
+            AppServiceName = complete.AppServiceName,
+            AppServiceStagingSlotName = complete.AppServiceStagingSlotName,
+            OpenAiEndpoint = complete.OpenAiEndpoint,
+            AiSearchEndpoint = complete.AiSearchEndpoint,
+            CosmosEndpoint = complete.CosmosEndpoint,
+            KeyVaultName = complete.KeyVaultName,
+            KeyVaultUri = complete.KeyVaultUri,
+            ServiceBusFullyQualifiedNamespace = complete.ServiceBusFullyQualifiedNamespace,
+            RedisEndpoint = complete.RedisEndpoint,
+            ContentSafetyEndpoint = complete.ContentSafetyEndpoint,
+            StorageBlobEndpoint = complete.StorageBlobEndpoint,
+            OntologyWriterClientId = complete.OntologyWriterClientId,
+            OntologyWriterObjectId = complete.OntologyWriterObjectId,
+            SignalRDeployed = true,
+            SignalRHostName = "",
+        };
+        var handler = BuildHandler(new FakeRepository(BuildRun(), etag: "etag-iss022-c"), FakeBicepDeployRunner.Success(outputs),
+            FakeArmKeyVaultRefProbe.Match(), new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.BicepDeployOutputsIncomplete);
+        failure.Diagnostic.Should().Contain(nameof(BicepDeployOutputs.SignalRHostName));
+    }
+
     // ---------- A38b requireSecretFreeIdentity gate — retired by task 225b ----------
     // customer.bicep's `requireSecretFreeIdentity` parameter had no effect after T226 and was removed together
     // with the intake key, the H2a read and the runner payload entry. Secret-free is now the H4 default
@@ -992,6 +1057,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         OntologyWriterClientId = "ontology-writer-client-id",
         OntologyWriterObjectId = "ontology-writer-object-id",
         SignalRDeployed = signalRDeployed,
+        SignalRHostName = signalRDeployed ? "sprk-acme-prod-signalr.service.signalr.net" : string.Empty,
     };
 
     /// <summary>Repository fake — records last written run.</summary>
