@@ -5,19 +5,30 @@
  * `src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx` into
  * `@spaarke/smart-todo-components`.
  *
- * HOST-AGNOSTIC REDESIGN (ADR-012 / NFR-05 — zero `src/solutions/...` reach-in):
- * the LegalWorkspace-local data layer is no longer imported here. Instead the
- * host shim (task 003) runs its own `useTodoItems` / `useUserPreferences`
- * (Dataverse-bound) and passes the results + mutation callbacks in as props —
- * mirroring the established `SmartTodoWidget` "host brokers coupling" pattern
- * (`IFeedSyncBridge`, `IKanbanDataverseService`). Specifically:
- *   - `useTodoItems`         → `items` / `isLoading` / `error` / `onRefetch` props
- *   - `useUserPreferences`   → `preferences` / `onUpdatePreferences` / `prefsLoading` props
- *   - `DataverseService`     → `onCreateTodo` / `onDismissTodo` / `onRestoreTodo` callbacks
- *   - `useFeedTodoSync`      → optional `feedSync: IFeedSyncBridge` prop
- *   - LW `useKanbanColumns`  → the package's host-agnostic `useKanbanColumns`
- *                              (column/pin persistence via optional `dataverseService`)
- *   - `Xrm.Navigation`       → optional `onOpenTodo` callback (host owns navigation)
+ * #2907 (DEF-007) — this is now the ONE Smart To Do board. The SmartTodo code
+ * page used to keep a divergent fork of it; the fork's features are optional
+ * props here, and both hosts are thin:
+ *   - search            → `searchQuery`
+ *   - card affordances  → `cardAppearance="compact"` + `selectedIds` /
+ *                         `onToggleSelect` (multi-select), `selectedTodoId` /
+ *                         `onSelectTodo` (single-select highlight), `onOpenTodo`
+ *                         (Open icon + double-click)
+ *   - orientation       → `orientation` (the host owns the toggle)
+ *   - host-owned chrome → `hideHeader`, `onSettingsOpenerReady`
+ *   - column layout     → `defaultCollapsedColumns`, `persistColumnOrder`,
+ *                         `fillContainer`
+ * Every new prop's default keeps the LegalWorkspace behaviour it had before.
+ *
+ * HOST-AGNOSTIC (ADR-012 / NFR-05 — zero `src/solutions/...` reach-in): the
+ * host runs the data hooks (`useTodoItems` / `useTodoKanbanPreferences` from
+ * this package, over its `TodoDataverseService`) and passes the results +
+ * mutation callbacks in as props:
+ *   - `useTodoItems`             → `items` / `isLoading` / `error` / `onRefetch`
+ *   - `useTodoKanbanPreferences` → `preferences` / `onUpdatePreferences` / `prefsLoading`
+ *   - `TodoDataverseService`     → `onCreateTodo` / `onDismissTodo` / `onRestoreTodo`
+ *                                  and `dataverseService` (column / pin persistence)
+ *   - feed sync                  → optional `feedSync: IFeedSyncBridge`
+ *   - `Xrm.Navigation`           → optional `onOpenTodo` (host owns navigation)
  *
  * Layout:
  *   - KanbanHeader: title, AddTodoBar, recalculate button, settings gear
@@ -33,6 +44,7 @@
 import * as React from 'react';
 import {
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
   Button,
@@ -40,16 +52,28 @@ import {
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
-import { KanbanBoard, EmptyState } from '@spaarke/ui-components';
+import {
+  KanbanBoard,
+  EmptyState,
+  // smart-todo-r5 task 011 (FR-02/FR-03): quick-add has no Priority/Effort
+  // input, so its optimistic card uses the shared mapping's null-defaults —
+  // the same table CreateTodoWizard and the sprk_todo form resolve through.
+  NULL_DEFAULT_PRIORITY_SCORE,
+  NULL_DEFAULT_EFFORT_SCORE,
+} from '@spaarke/ui-components';
 import type { DropResult } from '@hello-pangea/dnd';
 import { KanbanCard } from './KanbanCard';
+// The compact card (checkbox / Open icon / double-click) — what the SmartTodo
+// code page renders (`cardAppearance="compact"`).
+import { KanbanCard as CompactKanbanCard } from '../KanbanCard';
 import { KanbanHeader } from './KanbanHeader';
 import { ThresholdSettingsPopover } from './ThresholdSettings';
 import { DismissedSection } from './DismissedSection';
 import { useKanbanColumns } from '../../hooks/useKanbanColumns';
-import { computeTodoScore } from '../../utils/todoScoring';
+import { sortTodoItems } from '../../hooks/useTodoItems';
+import { matchesTodoSearchQuery } from '../../utils/todoSearchUtils';
 import type { ITodo, ITodoKanbanPreferences, ITodoMutationResult } from '../../types/entities';
-import type { TodoColumn, IKanbanDataverseService } from '../../types/kanban';
+import type { TodoColumn, IKanbanDataverseService, KanbanOrientation } from '../../types/kanban';
 import type { IFeedSyncBridge } from '../../types/todo';
 
 // ---------------------------------------------------------------------------
@@ -85,25 +109,6 @@ const TodoAISummaryFallback: React.FC = () => (
 export { LazyTodoAISummaryDialog, TodoAISummaryFallback };
 
 // ---------------------------------------------------------------------------
-// Sort helper (mirrors host useTodoItems.ts — used when inserting new items)
-// ---------------------------------------------------------------------------
-
-function sortTodoItems(items: ITodo[]): ITodo[] {
-  return [...items].sort((a, b) => {
-    // Primary: To Do Score DESC (higher is more important)
-    const scoreA = computeTodoScore(a).todoScore;
-    const scoreB = computeTodoScore(b).todoScore;
-    const scoreDiff = scoreB - scoreA;
-    if (scoreDiff !== 0) return scoreDiff;
-
-    // Tiebreaker: duedate ASC (earlier is more urgent)
-    const dueDateA = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
-    const dueDateB = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
-    return dueDateA - dueDateB;
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
 
@@ -119,6 +124,12 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     flex: '1 1 0',
     minHeight: '400px',
+  },
+  /** `fillContainer`: the card takes its parent's full height (the code page's page panel). */
+  cardFill: {
+    height: '100%',
+    boxSizing: 'border-box',
+    minHeight: 'auto',
   },
   /** Borderless, height-flexible root for use inside a tabbed container. */
   embeddedRoot: {
@@ -219,12 +230,15 @@ const COLUMN_ID_MAP: Record<string, TodoColumn> = {
   Future: 'Future',
 };
 
+/** The workspace's long-standing default: the Future column starts collapsed. */
+const DEFAULT_COLLAPSED_COLUMNS: readonly string[] = ['Future'];
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface ISmartToDoProps {
-  // ── Data (host runs useTodoItems in the shim and passes results in) ──────
+  // ── Data (host runs useTodoItems and passes results in) ──────────────────
   /** Sorted active to-do items (host sorts by score desc + duedate asc). */
   items: ITodo[];
   /** True while the host's initial fetch is in progress. */
@@ -234,10 +248,10 @@ export interface ISmartToDoProps {
   /** Trigger a fresh fetch from the host's data source. */
   onRefetch: () => void;
 
-  // ── Threshold preferences (host runs useUserPreferences in the shim) ─────
-  /** Current threshold preferences. */
+  // ── Kanban preferences (host runs useTodoKanbanPreferences) ──────────────
+  /** Current preferences (thresholds; column order when `persistColumnOrder`). */
   preferences: ITodoKanbanPreferences;
-  /** Persist new threshold preferences (host writes to Dataverse). */
+  /** Persist updated preferences (host writes to Dataverse). */
   onUpdatePreferences: (prefs: Partial<ITodoKanbanPreferences>) => void;
   /** True while the host's preferences fetch is in progress. */
   prefsLoading?: boolean;
@@ -254,7 +268,7 @@ export interface ISmartToDoProps {
   /**
    * Optional Dataverse service for column-move / pin persistence. When
    * omitted, drag-drop + pin toggles are local-only (the hook logs a warning).
-   * A host-side `Xrm.WebApi` adapter satisfies this interface.
+   * `TodoDataverseService` satisfies this interface.
    */
   dataverseService?: IKanbanDataverseService;
 
@@ -268,10 +282,12 @@ export interface ISmartToDoProps {
 
   // ── Navigation (host owns Xrm.Navigation) ────────────────────────────────
   /**
-   * Called when the user opens a card (or "show more"). Passes the clicked
-   * `sprk_todoid` (or `undefined` for the general "open full view"). The host
-   * wires this to `Xrm.Navigation` / its surface-launch registry. When
-   * omitted, open actions are inert.
+   * Opens a to-do (the host wires `Xrm.Navigation` / its surface-launch
+   * registry). With `cardAppearance="record"` a card click opens it, and
+   * "Show more" calls it with `undefined` (open the full view). With
+   * `cardAppearance="compact"` the card's Open icon and a double-click open
+   * it, and the icon is shown only when this prop is set. Omitted: open
+   * actions are inert.
    */
   onOpenTodo?: (todoId?: string) => void;
 
@@ -289,6 +305,54 @@ export interface ISmartToDoProps {
   onShowMore?: () => void;
   /** When true, disables card click behavior (used for workspace glance mode). */
   disableSidePane?: boolean;
+
+  // ── #2907 — features of the former SmartTodo code-page fork ──────────────
+  /**
+   * Free-text filter applied client-side before the items are bucketed
+   * (title, description, regarding record name / number, assignee, due date —
+   * `matchesTodoSearchQuery`). Omitted or blank: no filter.
+   */
+  searchQuery?: string;
+  /**
+   * Which card to render. `record` (default) is the workspace card
+   * (RecordCardShell). `compact` is the code page's card, which adds the
+   * multi-select checkbox, the single-select highlight and the Open icon.
+   */
+  cardAppearance?: 'record' | 'compact';
+  /**
+   * Multi-select set (R4 task 060 / FR-27). With `onToggleSelect`, each
+   * compact card renders a selection checkbox bound to it. Compact cards only.
+   */
+  selectedIds?: ReadonlySet<string>;
+  /** Called when a compact card's selection checkbox is toggled. */
+  onToggleSelect?: (todoId: string) => void;
+  /** The highlighted (single-selected) to-do. Compact cards only. */
+  selectedTodoId?: string | null;
+  /** Called on a compact card body click (not on its pin / Open / checkbox). */
+  onSelectTodo?: (todoId: string) => void;
+  /**
+   * When true, the inner header (title, add bar, recalculate, settings) is
+   * not rendered — for a host that renders its own chrome. The settings
+   * popover stays mounted; open it through `onSettingsOpenerReady`.
+   */
+  hideHeader?: boolean;
+  /** Receives a function that opens the threshold-settings popover (for host chrome). */
+  onSettingsOpenerReady?: (open: () => void) => void;
+  /** Board orientation (the host owns the toggle and its persistence). Omitted: the board's default (horizontal). */
+  orientation?: KanbanOrientation;
+  /** Column ids collapsed on first render. Default: `['Future']`. */
+  defaultCollapsedColumns?: readonly string[];
+  /**
+   * When true, the manual card order within each column is read from
+   * `preferences.columnOrders` and saved through `onUpdatePreferences`, so it
+   * survives a reload. Default false: the order is kept for the session only.
+   */
+  persistColumnOrder?: boolean;
+  /**
+   * When true (and not `embedded`), the bordered card takes its parent's full
+   * height instead of growing as a flex child with a 400px minimum.
+   */
+  fillContainer?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +378,18 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onRefetchReady,
   onShowMore,
   disableSidePane = false,
+  searchQuery,
+  cardAppearance = 'record',
+  selectedIds,
+  onToggleSelect,
+  selectedTodoId = null,
+  onSelectTodo,
+  hideHeader = false,
+  onSettingsOpenerReady,
+  orientation,
+  defaultCollapsedColumns = DEFAULT_COLLAPSED_COLUMNS,
+  persistColumnOrder = false,
+  fillContainer = false,
 }) => {
   const styles = useStyles();
 
@@ -354,8 +430,16 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   /** Settings popover state */
   const [settingsOpen, setSettingsOpen] = React.useState(false);
 
-  /** Collapsed Kanban columns — Future is collapsed by default */
-  const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(new Set(['Future']));
+  // Hand the settings opener to host chrome (R4-104). The popover is anchored
+  // to a hidden trigger inside this component, so opening it from outside is safe.
+  React.useEffect(() => {
+    onSettingsOpenerReady?.(() => setSettingsOpen(true));
+  }, [onSettingsOpenerReady]);
+
+  /** Collapsed Kanban columns — `defaultCollapsedColumns` on first render. */
+  const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
+    () => new Set(defaultCollapsedColumns)
+  );
 
   const handleToggleCollapse = React.useCallback((columnId: string) => {
     setCollapsedColumns(prev => {
@@ -391,12 +475,19 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [items, dismissedItems, statusOverrides]);
 
   // Merge addedItems into the display list
-  const displayItems = React.useMemo(() => {
+  const mergedItems = React.useMemo(() => {
     if (addedItems.length === 0) return activeItems;
     const addedIds = new Set(addedItems.map(a => a.sprk_todoid));
     const dedupedActive = activeItems.filter(i => !addedIds.has(i.sprk_todoid));
     return sortTodoItems([...dedupedActive, ...addedItems]);
   }, [activeItems, addedItems]);
+
+  // `searchQuery` — the shared predicate the widget uses too (§11).
+  const displayItems = React.useMemo(() => {
+    const q = searchQuery ?? '';
+    if (!q.trim()) return mergedItems;
+    return mergedItems.filter(item => matchesTodoSearchQuery(item, q));
+  }, [mergedItems, searchQuery]);
 
   const totalCount = displayItems.length;
   const isEmpty = !isLoading && !error && totalCount === 0 && dismissedItems.length === 0;
@@ -406,11 +497,20 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // flows through the optional injected `dataverseService`)
   // -------------------------------------------------------------------------
 
+  const handleColumnOrdersChange = React.useCallback(
+    (next: Record<string, string[]>) => {
+      onUpdatePreferences({ columnOrders: next });
+    },
+    [onUpdatePreferences]
+  );
+
   const { columns, moveItem, reorderInColumn, togglePin, recalculate, isRecalculating } = useKanbanColumns<ITodo>({
     items: displayItems,
     todayThreshold: preferences.todayThreshold,
     tomorrowThreshold: preferences.tomorrowThreshold,
     dataverseService,
+    initialColumnOrders: persistColumnOrder ? preferences.columnOrders : undefined,
+    onColumnOrdersChange: persistColumnOrder ? handleColumnOrdersChange : undefined,
   });
 
   // -------------------------------------------------------------------------
@@ -428,8 +528,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         sprk_name: title,
         statecode: 0, // Active
         statuscode: 1, // Open (per task 009)
-        sprk_priorityscore: 50,
-        sprk_effortscore: 10,
+        sprk_priorityscore: NULL_DEFAULT_PRIORITY_SCORE,
+        sprk_effortscore: NULL_DEFAULT_EFFORT_SCORE,
         createdon: new Date().toISOString(),
         modifiedon: new Date().toISOString(),
       };
@@ -593,7 +693,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Xrm.Navigation / surface-launch). Inert when the prop is omitted.
   // -------------------------------------------------------------------------
 
-  /** Card click handler — opens the host surface with the clicked item's ID. */
+  /** Record-card click handler — opens the host surface with the clicked item's ID. */
   const handleCardClick = React.useCallback(
     (todoId: string) => {
       if (!disableSidePane) {
@@ -620,6 +720,20 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     (item: ITodo, _index: number, columnId: string) => {
       // Get column accent colour from the columns array
       const col = columns.find(c => c.id === columnId);
+      if (cardAppearance === 'compact') {
+        return (
+          <CompactKanbanCard
+            todo={item}
+            onPinToggle={handlePinToggle}
+            onClick={!disableSidePane ? onSelectTodo : undefined}
+            accentColor={col?.accentColor}
+            isSelected={item.sprk_todoid === selectedTodoId}
+            onOpen={!disableSidePane && onOpenTodo ? (todoId: string) => onOpenTodo(todoId) : undefined}
+            isMultiSelected={selectedIds?.has(item.sprk_todoid) ?? false}
+            onToggleSelect={onToggleSelect}
+          />
+        );
+      }
       return (
         <KanbanCard
           todo={item}
@@ -629,7 +743,18 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         />
       );
     },
-    [columns, handlePinToggle, disableSidePane, handleCardClick]
+    [
+      columns,
+      cardAppearance,
+      handlePinToggle,
+      disableSidePane,
+      handleCardClick,
+      onSelectTodo,
+      selectedTodoId,
+      onOpenTodo,
+      selectedIds,
+      onToggleSelect,
+    ]
   );
 
   const getItemId = React.useCallback((item: ITodo) => item.sprk_todoid, []);
@@ -646,14 +771,17 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Render
   // -------------------------------------------------------------------------
 
+  const rootClassName = embedded ? styles.embeddedRoot : mergeClasses(styles.card, fillContainer && styles.cardFill);
+
   return (
     <div
-      className={embedded ? styles.embeddedRoot : styles.card}
+      className={rootClassName}
       role="region"
       aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? '' : 's'}`}
     >
-      {/* ── KanbanHeader — hidden in workspace preview (disableSidePane) ── */}
-      {!disableSidePane && (
+      {/* ── KanbanHeader — hidden in workspace preview (disableSidePane) and
+            when the host renders its own chrome (hideHeader) ── */}
+      {!disableSidePane && !hideHeader && (
         <KanbanHeader
           totalCount={totalCount}
           onRecalculate={recalculate}
@@ -732,6 +860,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
                 ariaLabel="Smart To Do Kanban board"
                 collapsedColumns={collapsedColumns}
                 onToggleCollapse={handleToggleCollapse}
+                orientation={orientation}
               />
             </div>
           )}

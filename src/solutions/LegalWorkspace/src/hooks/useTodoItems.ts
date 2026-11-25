@@ -1,59 +1,20 @@
 /**
- * useTodoItems — React hook for fetching and managing Smart To Do list items.
+ * useTodoItems — the workspace's Smart To Do list.
  *
- * Per R3 FR-09 / FR-11 / FR-29 / OS-1, queries `sprk_todo` records (statecode=0,
- * statuscode in (Open, In Progress)). The legacy `sprk_event` + `sprk_todoflag`
- * path is removed (no compat shim).
- *
- * Subscribes to FeedTodoSyncContext for cross-block lifecycle updates using
- * the R3 todoId-based payload (FR-14): listeners receive `(todoId, isActive)`.
- *
- * Sort order (FR-07):
- *   1. To Do Score DESC (priority/effort/urgency composite)
- *   2. sprk_duedate ASC (earliest due date first within same score)
+ * #2972: a thin adapter over the shared `useTodoItems` in `@spaarke/smart-todo-components` (the SmartTodo code page
+ * uses the same hook). This file only supplies the workspace's pieces: its `DataverseService`, the owner scope
+ * (`my` / `all` + business unit) and the FeedTodoSyncContext bus (R3 FR-14).
  *
  * Usage:
  *   const { items, isLoading, error, refetch } = useTodoItems({ webApi, userId });
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useMemo } from 'react';
+import { useTodoItems as useSharedTodoItems, type TodoListScope } from '@spaarke/smart-todo-components';
 import { DataverseService } from '../services/DataverseService';
-import { ITodo } from '../types/entities';
-import { useFeedTodoSync } from './useFeedTodoSync';
-import { computeTodoScore } from '../utils/todoScoreUtils';
+import type { ITodo } from '../types/entities';
 import type { IWebApi } from '../types/xrm';
-
-// ---------------------------------------------------------------------------
-// Sort helper
-// ---------------------------------------------------------------------------
-
-/**
- * Sort todo items by To Do Score DESC, then due date ASC as tiebreaker.
- *
- * To Do Score combines priority (50%), inverted effort (20%), and due-date
- * urgency (30%) into a single 0-100 composite. Higher scores surface the
- * most important, time-sensitive, and achievable items first.
- *
- * Returns a NEW array — does not mutate the original.
- */
-function sortTodoItems(items: ITodo[]): ITodo[] {
-  return [...items].sort((a, b) => {
-    // Primary: To Do Score DESC (higher is more important)
-    const scoreA = computeTodoScore(a).todoScore;
-    const scoreB = computeTodoScore(b).todoScore;
-    const scoreDiff = scoreB - scoreA;
-    if (scoreDiff !== 0) return scoreDiff;
-
-    // Tiebreaker: duedate ASC (earlier is more urgent)
-    const dueDateA = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
-    const dueDateB = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
-    return dueDateA - dueDateB;
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Hook options and result types
-// ---------------------------------------------------------------------------
+import { useFeedTodoSync } from './useFeedTodoSync';
 
 export interface IUseTodoItemsOptions {
   /** Xrm.WebApi reference from the PCF framework context */
@@ -82,152 +43,14 @@ export interface IUseTodoItemsResult {
   refetch: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Hook implementation
-// ---------------------------------------------------------------------------
-
 export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult {
-  const { webApi, userId, mockItems } = options;
-
-  const [items, setItems] = useState<ITodo[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [fetchKey, setFetchKey] = useState<number>(0);
-
-  // Stable service reference — only recreates when webApi changes
-  const serviceRef = useRef<DataverseService>(new DataverseService(webApi));
-  useEffect(() => {
-    serviceRef.current = new DataverseService(webApi);
-  }, [webApi]);
-
-  // Keep items ref for synchronous reads inside the subscribe callback
-  const itemsRef = useRef<ITodo[]>([]);
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  const refetch = useCallback(() => {
-    setFetchKey((k) => k + 1);
-  }, []);
-
-  // -------------------------------------------------------------------------
-  // Initial / refresh data fetch
-  // -------------------------------------------------------------------------
-
-  useEffect(() => {
-    // Mock data path for development
-    if (mockItems) {
-      const sorted = sortTodoItems(mockItems);
-      setItems(sorted);
-      itemsRef.current = sorted;
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
-
-    // Guard: userId must be present
-    if (!userId) {
-      setIsLoading(false);
-      setError(null);
-      setItems([]);
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoading(true);
-    setError(null);
-
-    serviceRef.current
-      .getActiveTodos(userId, { scope: options.scope, businessUnitId: options.businessUnitId })
-      .then((result) => {
-        if (cancelled) return;
-
-        if (!result.success) {
-          setError(
-            result.error?.message ?? 'Unable to load to-do items. Please try again.'
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        const sorted = sortTodoItems(result.data);
-        setItems(sorted);
-        itemsRef.current = sorted;
-        setIsLoading(false);
-        setError(null);
-      })
-      .catch((err: Error) => {
-        if (cancelled) return;
-        setError(err.message ?? 'An unexpected error occurred loading to-do items.');
-        setIsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, mockItems, fetchKey, options.scope, options.businessUnitId]);
-
-  // -------------------------------------------------------------------------
-  // FeedTodoSyncContext subscription — react to cross-block todo lifecycle
-  // changes (R3 FR-14: payload is `(todoId, isActive)`).
-  //
-  // R3 contract (task 023): listeners receive a `sprk_todoid` GUID. Since this
-  // hook now queries `sprk_todo` directly, we can resolve the todoId against
-  // our in-memory list for surgical updates:
-  //   - isActive=true  → add the new todo if not already present (fetch the
-  //                       authoritative list to pick it up)
-  //   - isActive=false → remove the todo from the list immediately
-  // -------------------------------------------------------------------------
-
-  const { subscribe } = useFeedTodoSync();
-
-  useEffect(() => {
-    const unsubscribe = subscribe(async (todoId: string, isActive: boolean) => {
-      if (isActive) {
-        // Todo became active externally — check for duplicates, then re-fetch.
-        const alreadyInList = itemsRef.current.some((item) => item.sprk_todoid === todoId);
-        if (alreadyInList) return;
-
-        if (!userId) return;
-
-        try {
-          const result = await serviceRef.current.getActiveTodos(userId, {
-            scope: options.scope,
-            businessUnitId: options.businessUnitId,
-          });
-          if (!result.success) return;
-
-          // Find the newly active todo in the refreshed list
-          const newItem = result.data.find((t) => t.sprk_todoid === todoId);
-          if (!newItem) return;
-
-          setItems((prev) => {
-            // Guard against races: item might already have been added.
-            if (prev.some((item) => item.sprk_todoid === todoId)) return prev;
-            return sortTodoItems([...prev, newItem]);
-          });
-        } catch {
-          // Silently ignore — the item will appear on next manual refetch.
-        }
-      } else {
-        // Todo became inactive (dismissed/completed/deleted) — remove now.
-        setItems((prev) => {
-          const filtered = prev.filter((item) => item.sprk_todoid !== todoId);
-          // Only update if something actually changed (avoid re-render churn).
-          if (filtered.length === prev.length) return prev;
-          return filtered;
-        });
-      }
-    });
-
-    return unsubscribe;
-  }, [subscribe, userId, options.scope, options.businessUnitId]);
-
-  // Memoize the returned items so that consumers receive a stable reference
-  // when neither the list contents nor the loading/error state has changed.
-  // This prevents cascading re-renders in SmartToDo when parent components
-  // update for unrelated reasons (NFR-01: page load < 3s).
-  const memoizedItems = useMemo(() => items, [items]);
-
-  return { items: memoizedItems, isLoading, error, refetch };
+  const { webApi, userId, mockItems, scope, businessUnitId } = options;
+  const service = useMemo(() => new DataverseService(webApi), [webApi]);
+  const listScope = useMemo<TodoListScope | null>(
+    () => (userId ? { kind: 'owner', userId, scope, businessUnitId } : null),
+    [userId, scope, businessUnitId]
+  );
+  const feedSync = useFeedTodoSync();
+  // The shared ITodo makes createdon/modifiedon optional; the rows always carry them.
+  return useSharedTodoItems({ service, scope: listScope, mockItems, feedSync }) as IUseTodoItemsResult;
 }

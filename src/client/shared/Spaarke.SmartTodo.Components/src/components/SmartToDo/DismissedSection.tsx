@@ -316,9 +316,11 @@ const DismissedItem: React.FC<IDismissedItemProps> = React.memo(({ todo, onResto
         <Text as="span" size={300} className={styles.title}>
           {todo.sprk_name}
         </Text>
-        {todo.sprk_notes && (
+        {/* The to-do's description, else its notes (#2907: the code page showed the description, the
+            workspace the notes). */}
+        {(todo.sprk_description || todo.sprk_notes) && (
           <Text as="span" size={200} className={styles.context}>
-            {todo.sprk_notes}
+            {todo.sprk_description || todo.sprk_notes}
           </Text>
         )}
       </div>
