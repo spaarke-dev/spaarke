@@ -23,7 +23,7 @@ The add-in on dev came from master at the time (package 1.1.4, deploy run for 08
 | Word and Outlook desktop parity: Save, Find, To Do, Open in Spaarke | SC-11 | **PASS** (the remaining host-specific rows were already owner-checked in UAT rounds 1–12 and tasks 133/134) |
 | "Save as new version" on a name clash lands on the right document | SC-6 live re-check of #1005 | **PASS** |
 
-**Final tally: 12 PASS · 1 FAIL.** The one FAIL is SC-12: no CI job typechecks `office-addins`. It is filed as [#996](https://github.com/spaarke-dev/spaarke/issues/996) / ISS-004 and is still open. Production code is at 0 type errors, and the test-file errors are at the accepted 68 baseline. The fix needs a CI workflow change, which wrap-up 090 must not make, so it stays a filed follow-up. Everything below is the historical record.
+**Final tally: 13 PASS.** SC-12 passes on its criterion as amended on 2026-10-02 (task 079): `npm run typecheck` reports 0 production errors, and CI reports it through the "Production typecheck (office-addins)" job in `office-addins-tests.yml` (task 056; success on master b005279c4d, 2026-11-25). Correction 2026-11-25: this section first recorded SC-12 as a FAIL, reading the original 2026-09-17 wording. What [#996](https://github.com/spaarke-dev/spaarke/issues/996) still asks is to make that job merge-blocking. That is a branch-ruleset decision for the owner, not a spec gap. Everything below is the historical record.
 
 ---
 

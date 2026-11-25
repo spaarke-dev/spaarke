@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="136" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>#1571: Office sign-in reliability. Auth refusals are not 500s, no popup without a click, and the right cached account</title>
+    <phase>Phase 7: fixes before close (from task 090's escalation, owner go 2026-11-25)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth code in the shared @spaarke/auth Office strategy and a BFF route; .ts/.cs changes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive auth behaviour shared by every Office surface; a wrong account pick or a silent failure is a cross-account exposure or an outage.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>auth, office-addins, bff-api, react</tags>
+  </metadata>
+
+  <prompt>Owner 2026-11-25: "Fix them here first". The fix for GitHub #1571 was routed to this project by spaarke-auth-system-of-record-r1 (their ISS-015) and was never logged here until task 090. Four defects, all still on master 9211656b6e:
+(1) `/api/office/communications/*` turns a delegated 401/403 into a 500 "Lookup Failed": `QueryCommunicationByMessageIdAsync` throws `InvalidOperationException`, and the handler's catch-all answers 500 `OFFICE_INTERNAL`.
+(2) `OfficeNaaStrategy` ignores `requireSilentOnly`.
+(3) The eager startup acquire can open a popup with no user gesture on Office on the web, where the popup is blocked.
+(4) `OfficeNaaStrategy.ts:435-436` picks `accounts[0]` with no tenant filter, so a multi-account guest can get the wrong cached account.
+In addition, two raw fetch sites in the pane lack a 401 retry (`office-addins/shared/taskpane/App.tsx`, around the lines cited in #1571).</prompt>
+
+  <goal>An auth failure on the Office communications routes reaches the pane as an auth failure (401 or 403 with an Office error code), never as a 500, and the pane recovers or tells the user to sign in. The NAA strategy never opens an interactive prompt when the caller asked for silent-only, and never opens one without a user gesture. When several accounts are cached, it chooses the account whose tenant matches the configured authority tenant, and it never falls back to an arbitrary account.</goal>
+
+  <constraints>
+    <constraint source="ADR-028">There is no MSAL construction in the add-in package, and no `.WithClientSecret`. The add-in stays on the Spaarke-tenant single-tenant client (A8). A9 forbids moving it to an `organizations`/`common` authority.</constraint>
+    <constraint source="task 127 / #1020">Keep the existence-oracle rule. A communication the caller cannot read stays an ordinary 404, never a 403 that reveals the row exists. Only a BROKEN delegated context (the token exchange or Dataverse refusing the caller at table or identity level) becomes 401/403.</constraint>
+    <constraint source="ADR-019">Error responses are ProblemDetails with an `errorCode` from `OfficeErrorCodes`. Reuse an existing code where one fits, and justify any new one under CLAUDE.md §11.</constraint>
+    <constraint source="project">The `@spaarke/auth` change must keep every other strategy and consumer unchanged. Run the Spaarke.Auth suite plus the office-addins suite. Do not change the popup fallback that d1c875a6f1 and 174bddf3a4 shipped, except where it violates silent-only or gesture rules.</constraint>
+    <constraint source="project">Fail-before: every new test fails on the old code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs</file>
+      <file>src/client/office-addins/shared/services/AuthService.ts</file>
+      <file>src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file>projects/spaarke-auth-system-of-record-r1/notes/defer-issues.md (ISS-015)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>BFF: in the three communications handlers, answer a broken delegated context (an OBO exchange failure, or Dataverse 401/403 at query level) as 401 or 403 ProblemDetails with an Office error code. Contract tests cover 401, 403, the 404 non-oracle case, and a genuine fault still being 500.</step>
+    <step>@spaarke/auth: `OfficeNaaStrategy` honours `requireSilentOnly`, so no interactive call is made. The startup acquire is silent-only, and an interactive acquire happens only from a user gesture path. Account selection matches the authority tenant id; with no match, the user is asked to sign in, never given an arbitrary account. Unit tests cover each case.</step>
+    <step>Pane: the two raw fetch sites retry once on 401 through the auth service, like the other calls, and a final 401/403 shows the sign-in prompt rather than a server error.</step>
+    <step>Gates: Spaarke.Auth tests, office-addins tests, tsc baseline (production 0), ESLint/Prettier, webpack, BFF build and the Office contract tests, publish-size delta against fresh master, and two adversarial reviews (auth).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A delegated 401 on any of the three communications routes answers 401 (not 500), with an Office errorCode.</criterion>
+    <criterion testable="true">A delegated table- or identity-level 403 answers 403 (not 500). A communication the caller cannot read still answers 404.</criterion>
+    <criterion testable="true">An unexpected exception still answers 500 `OFFICE_INTERNAL`.</criterion>
+    <criterion testable="true">With `requireSilentOnly`, `OfficeNaaStrategy.acquire` makes no interactive call and returns a typed failure.</criterion>
+    <criterion testable="true">The startup acquire never calls `acquireTokenPopup` or another interactive API.</criterion>
+    <criterion testable="true">With two cached accounts whose tenants are T1 and T2 and an authority tenant of T2, the T2 account is used. With no matching account, no other account is used.</criterion>
+    <criterion testable="true">Negative: a single-account, same-tenant user signs in exactly as before; the existing NAA and popup-fallback tests pass unchanged.</criterion>
+    <criterion testable="true">The two pane fetch sites retry once on 401.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>Modifies existing handlers, strategy and fetch sites. Any new error code reuses `OfficeErrorCodes`.</existing>
+    <extension>Extends the existing strategy; no new strategy and no new service.</extension>
+    <cost-of-doing-nothing>Users on Office on the web see intermittent sign-in failures, and auth problems show as server errors. A multi-account guest can be signed in as the wrong account.</cost-of-doing-nothing>
+  </justification>
+
+  <notes></notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

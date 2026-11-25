@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="137" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>#1090: after Generate Profile the pane follows the job to its end instead of reading once</title>
+    <phase>Phase 7: fixes before close (from task 090's escalation, owner go 2026-11-25)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a .ts hook and a small BFF write; tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified change with a reference (task 068's queue and status writes).</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>office-addins, react, bff-api</tags>
+  </metadata>
+
+  <prompt>Owner 2026-11-25: "Fix them here first". The defect is GitHub #1090 (ISS-021). After Generate Profile answers 202, `useDocumentProfile.generateProfile` shows Pending and then re-reads the document ONCE, immediately. That read lands before the queued job has started, so the pane shows the status from before the click (for example Failed) and never reads again.</prompt>
+
+  <goal>After a 202, the pane shows Pending and keeps re-reading every few seconds until the status leaves Pending/In progress or a cap is reached. A read taken before the job starts cannot show the old terminal status as the result.</goal>
+
+  <constraints>
+    <constraint source="decision (main session, 2026-11-25)">Close the start race on the SERVER. `OfficeProfileQueue` (task 068) writes `sprk_filesummarystatus` = Pending before answering 202, so the status has one owner and the pane needs no timestamp heuristics. If that write fails, the request still queues and answers 202, and the pane's cap ends the wait. Check the job handler's existing Pending write first; if one exists, reuse it rather than writing twice.</constraint>
+    <constraint source="project">Poll at about 3 s, with a cap of about 60 s (a profile takes 8–12 s, p90 12.3 s). Stop on unmount or document change. At the cap, show the last status with no false "Completed".</constraint>
+    <constraint source="ADR-008 / 068">The queue route's authorization, idempotency key and job contract are unchanged.</constraint>
+    <constraint source="project">Fail-before tests on both sides. Do not touch fm-owned paths (`OfficeService.CreateTodoAsync`, `OfficeDocumentPersistence`, `UploadFinalizationWorker`, `RecordTableRules`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/taskpane/hooks/useDocumentProfile.ts</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/068-durability-siblings.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Find where the profile queue answers 202, and where the job handler writes Pending and its terminal statuses.</step>
+    <step>Server: make the status Pending before the 202, using an existing write if there is one. Add a contract test that the status reads Pending straight after the 202.</step>
+    <step>Pane: poll after a 202 until the status is terminal or the cap is reached. Jest tests (fake timers) cover these cases: an old status of Failed and a new one of Completed; the cap; unmount; a document change.</step>
+    <step>Gates: office-addins jest, tsc baseline, ESLint/Prettier, webpack, BFF build and tests, publish-size delta against fresh master, and one adversarial review.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">After a 202, the pane reads the document again until the status is Completed or Failed, then shows it.</criterion>
+    <criterion testable="true">If the status was Failed before the click, the pane does not show "Failed" from a read taken before the job wrote its result. The read straight after the 202 returns Pending.</criterion>
+    <criterion testable="true">The pane stops polling at the cap, on unmount and on a document change, and never shows Completed without a Completed read.</criterion>
+    <criterion testable="true">Negative: a refused Generate Profile (4xx) does not start polling.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>Modifies the existing hook and the existing queue route.</existing>
+    <extension>Extends both; no new route, field or service.</extension>
+    <cost-of-doing-nothing>A user who clicks Generate Profile on a Failed document sees "Failed" again while the new profile is running or after it has succeeded.</cost-of-doing-nothing>
+  </justification>
+
+  <notes></notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

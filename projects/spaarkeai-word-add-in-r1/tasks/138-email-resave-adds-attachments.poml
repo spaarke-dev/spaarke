@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="138" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>#2209: re-saving an email to the same record adds the attachments that were not saved the first time</title>
+    <phase>Phase 7: fixes before close (from task 090's escalation, owner go 2026-11-25)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF save path and worker (.cs), contract and integration tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes the idempotent duplicate path of the Office save, which is shared with fm's W3 guards and ebilling's from-email route; a mistake creates duplicate documents or a second .eml.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none (server change waits for field-mapping-r1's answer, asked 2026-11-25)</deps>
+    <tags>bff-api, office-addins</tags>
+  </metadata>
+
+  <prompt>Owner 2026-11-25: "Fix them here first". The defect is GitHub #2209 (ISS-022). The Outlook email save's idempotency key (`OfficeService.GenerateIdempotencyKey`, Email leg) is made of content type, target type, target id and stored Message-ID. It leaves out the attachment selection. A user saves an email to Matter M with one of its three attachments ticked, then ticks a second attachment and saves to M again. The server answers the second save as a duplicate, and no attachment document is created.</prompt>
+
+  <goal>A re-save of the same email to the same record whose selection names attachments not yet saved under that email's `.eml` document creates exactly those missing attachment documents under the existing `.eml`, linked as task 130 links them. It creates no second `.eml` and no duplicate child. A re-save with nothing new stays an "already saved" duplicate, exactly as today.</goal>
+
+  <constraints>
+    <constraint source="fm W3 (CLAUDE.md)">`OfficeService`, `OfficeDocumentPersistence` and `UploadFinalizationWorker` are fm-coordinated. Do not merge the server change before field-mapping-r1 answers (the main session asked on 2026-11-25). Each child's association, parent link and SPE pointer go in the create call (030b guards G1–G6 stay green). Add no new create path and no owner, stamp or mapping logic of our own: reuse the worker's existing child-create code.</constraint>
+    <constraint source="project">The idempotency key itself is unchanged. Adding the selection to the key would create a second `.eml`.</constraint>
+    <constraint source="ebilling-r1">The from-email route forces `SelectedAttachmentFileNames = []`. That path must be unchanged: empty means none, so there is never an "add" operation.</constraint>
+    <constraint source="project">"Already saved" is determined by the existing child documents under the `.eml` (by attachment name or the stored attachment identity the worker already uses), not by trusting the client. `null` selection means all attachments.</constraint>
+    <constraint source="project">Concurrency: two identical add re-saves create each missing child at most once. Reuse the existing job and idempotency mechanism (task 039/047 patterns); do not add a new lock type.</constraint>
+    <constraint source="project">Pane: when the server answers that attachments were added, the pane says so rather than "already saved". Keep the change minimal and reuse the existing save result shapes.</constraint>
+    <constraint source="project">Fail-before tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (SaveAsync duplicate path; GenerateIdempotencyKey)</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs (SelectedAttachmentFileNames, child loop)</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/defer-issues.md (ISS-022)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Trace the duplicate path and the worker's attachment child loop, and how a child records which attachment it came from. Write the design in `notes/138-email-resave-add-attachments.md` before coding.</step>
+    <step>Server: on an Email duplicate whose selection includes attachments with no existing child, queue an attachments-only finalization for those names under the existing `.eml` document. The answer tells the pane which attachments were added.</step>
+    <step>Pane: show "Added N attachments to the saved email" for that answer; the existing "already saved" text is unchanged otherwise.</step>
+    <step>Gates: BFF build, Office contract, integration and data-mutation tests including fm's 030b guards; office-addins jest; publish-size delta against fresh master; one adversarial review.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Saving an email to M with attachment A, then re-saving to M with A and B, creates exactly one new attachment document (B) under the same `.eml`, linked to the communication, and no second `.eml`.</criterion>
+    <criterion testable="true">A re-save to M with only A answers "already saved" and creates nothing.</criterion>
+    <criterion testable="true">A re-save with `null` (all) creates every attachment not yet saved, and only those.</criterion>
+    <criterion testable="true">Negative: the from-email route (`[]`) behaves exactly as before.</criterion>
+    <criterion testable="true">Two concurrent add re-saves create B once.</criterion>
+    <criterion testable="true">fm's 030b guards (G1–G6) and the existing Office save tests pass unchanged.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>Overlaps the worker's existing attachment child creation, which it reuses.</existing>
+    <extension>Extends the duplicate path to queue the missing children; there is no new route.</extension>
+    <cost-of-doing-nothing>A user cannot add a missed attachment to an email already saved to a record; the second save silently adds nothing.</cost-of-doing-nothing>
+  </justification>
+
+  <notes></notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

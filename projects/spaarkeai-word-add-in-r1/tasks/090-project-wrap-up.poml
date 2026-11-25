@@ -124,6 +124,7 @@
     - defer-issues.md reconciled both ways (2026-11-24 register): #1005 closed after the live re-check; 17 project-filed issues that were missing from the log were added; ISS-029 #1571 (routed to us, never logged) found.
     - lessons-learned.md written (F-a..F-g verdicts, spikes, tiering).
     - Drift check: 2 docs stale, filed #3123 (ISS-039).
+    2026-11-25 correction: SC-12 passes as amended (CI reports); 042 is 13 PASS. Owner go "Fix them here first": tasks 136 (#1571), 137 (#1090) and 138 (#2209) were created; 090 closes after them.
     STOPPED at escalation trigger 2: project-owned open items touch spec requirements (SC-12 #996, FR-08 #1090, #2209, sign-in #1571), and tasks 125/135 still await owner checks. Not marked complete; awaiting the owner's decision.
   </notes>
 

@@ -5,7 +5,7 @@ Drafted by task 090 on 2026-11-24. Every claim below was checked against the cit
 ## Summary
 
 - Shipped: document identity in the pane (cloud URL, invisible stamp), version-aware save, a collision prompt, server-side record creation with ownership, a Find tab, To Do and Email tabs, Outlook parity, and a long run of authorization hardening on the Office routes.
-- Final owner UAT on the live dev build, 2026-11-24: **12 PASS, 1 FAIL.** The FAIL is SC-12: no CI job typechecks `office-addins` (#996 / ISS-004, still open). It needs a CI workflow change, which wrap-up must not make.
+- Final owner UAT on the live dev build, 2026-11-24: **13 PASS** (SC-12 passes on its amended criterion: CI reports production type errors; making that job blocking, #996, is an owner ruleset choice). Earlier drafts said 1 FAIL: no CI job typechecks `office-addins` (#996 / ISS-004, still open). It needs a CI workflow change, which wrap-up must not make.
 - Size: **135 task rows** in `tasks/TASK-INDEX.md`, against 34 planned on 2026-09-04. The growth came from 12 owner UAT rounds, a pre-wrap-up security review (tasks 058-070), the guest sign-in work (tasks 113-127) and the ebilling and fm coordination.
 - Dev BFF at the final UAT was 996928732e. The add-in was package 1.1.4.
 
@@ -61,7 +61,8 @@ Index tally of rows that state a rigor and tier: 100 FULL (29 opus/high, 8 opus/
 ## 5. Open at close
 
 See the register at the top of `notes/defer-issues.md` (reconciled 2026-11-24). Do not copy it; read it there. In short:
-- **SC-12 / #996** is the one failing criterion, and a project-spec gap. The fix is a CI workflow change.
+- **#996** asks only to make the reporting typecheck job merge-blocking (an owner ruleset choice; SC-12 already passes as amended).
+- **Fixed before close (owner go 2026-11-25):** #1571 (task 136), #1090 (task 137), #2209 (task 138).
 - **Possible spec gaps** the register flags: ISS-021 / #1090 (no polling after Generate Profile; FR-08), ISS-022 / #2209 (re-saving an email to add attachments; FR-11/12 for email), ISS-029 / #1571 (communications 401/403 turned into 500; sign-in reliability).
 - **Filed here, owned elsewhere:** the ISS-007 to ISS-009, ISS-012, ISS-015 and ISS-019 to ISS-020 groups, D-063-1 / D-063-2, and ISS-032 to ISS-037.
 - **ISS-001 (F-g)** has no GitHub issue by operator decision; whether it is fully closed on master is unclear (see F-g above).
