@@ -14,7 +14,7 @@ export {};
 
 const mockApiPost = jest.fn();
 jest.mock('@shared/services', () => ({
-  authService: { initialize: jest.fn() },
+  authService: { initialize: jest.fn(), getAccessToken: async () => 'token', signIn: async () => undefined },
   apiClient: { configure: jest.fn(), post: (...args: unknown[]) => mockApiPost(...args) },
 }));
 
