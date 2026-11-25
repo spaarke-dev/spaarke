@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-25 ~18:40Z (checkpoint: #3155 merged; issue batch 5 agents running)
+> **Last Updated:** 2026-11-25 ~22:30Z (checkpoint: batch 5 merged into work; master PR prep)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,7 +10,13 @@
 
 ## Quick recovery
 
-- **NOW (2026-11-25 ~18:40Z): issue batch 5 running** — four implementer agents (Sonnet, own worktrees, base 2f8031633c), branches `task/ebilling-def064` (#2643 ArchTest: invoice core-lookup writers call InvoiceFamilyCoreRecordGuard), `task/ebilling-iss016` (#2755 WizardShell blocks nav/close while saving; drop 084b's local guard if redundant), `task/ebilling-2965` (#2965 one copy of the e-billing pages' bootstrap / API-error mapping / vite config), `task/ebilling-def046` (#2312 Deploy-EbillingFormsViews navigation anchor; live full run needs the owner's go). Next: review each (one review pass per change set; reviewer briefs forbid checkout here), merge into work, then a batch 5 master PR on the owner's go.
+- **NOW (2026-11-25 ~22:30Z): issue batch 5 merged into work; master PR prep** (master merged in at e590e2bf31; build, filtered tests, CVE check and publish-size delta running from fresh worktrees C:\wt5m / C:\wt5w — remove both with Remove-WorktreeSafe after). Then open the batch 5 master PR; merge needs the owner's go.
+  - **DEF-046 #2312** (caac9a518d): Deploy-EbillingFormsViews navigation anchors inside the Invoice group, read-only preflight of both sitemaps before any form write, early refusal; Pester 5.7.1 49/0; -WhatIf on dev wrote nothing. A live full run needs the owner's go.
+  - **DEF-064 #2643** (2d8aa1d59b): ArchTest `InvoiceFamilyCoreLookupWriterGuardTests` + `InvoiceFamilyWriterScan` — per-method roster of deciding guard calls, delegate pins, locked-write seam caller pin, lambda attribution; review + 2 fix rounds + re-check; four production mutations each fail; 6/6.
+  - **ISS-016 #2755** (6444b25adb): WizardShell holds ‹ ›, ×/Escape/backdrop/Cancel and footerLeftExtra while onFinish runs; run token / re-entry refusal / stale run dropped; new optional `SprkModalNav.disabled`; RecordProcedures 084b local guard removed; jest 381/0.
+  - **#2965** (5eedd7ac8e): `src/solutions/_ebilling-shared/` (apiFailure, codePageBootstrap, codePageChrome) + `vite.ebilling.shared.ts`; `tsc-surface-gate.mjs --owned _ebilling-shared`; client-lint + its workflow path filters include the folder; duplication-accepted list updated. No auth change (reviewed per page). Pages reach dev only with their next deploys (owner go); no browser check yet.
+  - Found and left: RuleReview `assignmentPanelFirmPicker.test.ts` fails to load = ISS-033 #2885 (ontology-r1). Stray python.exe processes 41460/84288/43772 (days of CPU, not this session's) reported to the owner.
+  - Peers: ontology-r1 #3167 test + comment wording OK'd (no rename of `record_not_writer_created`). provisioning-r1: hold below.
 - **Batch 4 DONE: #3155 MERGED** 18:12:39Z at 6a968b2a00 (owner "Yes, merge on green"). #3106, #2730, #2642, #2553 closed by hand (no auto-close); defer-issues set Done. word-add-in-r1 and uac-r2 told. Its BFF part (DEF-052) is NOT on dev: dev BFF stays a1b7db1def until the owner names an exact SHA in uac-r2's session; the ISS-014 Invoice Review change reaches dev with the next page deploy (owner go). provisioning-r1 checked ACME read-only: all 7 queues duplicate detection false; no per-run check (recorded in ISS-053).
 - **HOLD (provisioning-r1, 2026-11-25):** do not export or publish SpaarkeMaster 1.3.3.0 until provisioning-r1 confirms the ISS-043 dev apply (PR #3169: Core User gains AppendTo sprk_contacttype_ref at Global; owner ruled it ships in 1.3.3.0 with ISS-042).
 - **Earlier (2026-11-25 ~17:20Z): batch 4 master PR #3155 opened** (publish +756 B; filtered tests 2,011/0 + ArchTests 176/0).
