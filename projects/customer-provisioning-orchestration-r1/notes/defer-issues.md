@@ -10,6 +10,37 @@
 
 ## Open (in priority order)
 
+### ISS-043 — Users cannot set a contact's Contact Type (no role holds AppendTo on `sprk_contacttype_ref`)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — needs owner ruling (role change) |
+| **Urgency** | next-round (before the demo uses typed contacts interactively) |
+| **Filed** | 2026-11-25 |
+| **Source** | PR #3108 (data plan D4) implementation; confirmed on master role XML 2026-11-25 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3109 |
+
+**Description**
+
+Spaarke Basic and Core User hold only Read (Global) on `sprk_contacttype_ref`; Office Add In User holds nothing. `contact`
+and `sprk_contactorganization` look it up, and setting a lookup needs AppendTo on the target, so a user setting Contact
+Type is refused. Gap G17 fixed the same for `sprk_agreementtype`, `sprk_organizationtype_ref`, `sprk_documenttype_ref`.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Core User.xml` (search `sprk_ContactType_Ref`)
+- `config/feature-role-privileges.json` (G17 entries)
+
+**Suggested fix**
+
+Core User gets `prvAppendTosprk_ContactType_Ref` at Global (as G17); Basic User stays read-only. Same release as ISS-042.
+
+**Estimated effort**: 1 h + the release
+**Blockers**: owner ruling
+**Related**: PR #3108, ISS-042 #3105, G17
+
+---
+
 ### ISS-042 — Stamp users cannot read seeded event types (user-owned table, Deep read)
 
 | Field | Value |
