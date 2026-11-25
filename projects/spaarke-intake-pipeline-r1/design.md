@@ -114,7 +114,14 @@ Every request also files its content, so it reuses the filing level. Most filing
 | Console upload | Existing upload; new "submit as a request" action | The run's outputs on the request |
 | Invoice routes | Existing SPA / internal / from-document / from-email routes | Existing firm notices and SPA status (§7) |
 
-**Sending identity:** the shared legal mailbox, app-only, for every door (recommended). The alternative, the attorney's own mailbox, needs their sign-in at approval.
+**Sending identity. Decision (owner, 2026-11-25): the shared legal mailbox, app-only.**
+- The send is the run's queued Return stage (`SendMode.SharedMailbox` + `AttachmentDocumentIds`, 35 MB cap at `CommunicationService.cs:4611`).
+- The approving attorney is named in the signature and Cc'd.
+- Counterparty replies come back to the shared mailbox, which is the email door, so a revised draft becomes the next run on the same request.
+
+**Why not the attorney's mailbox.** `SendMode.User` is OBO and needs the attorney's live request (`CommunicationService.cs:2874`), and the token can't leave that request (`ADR-052:56`). So it could only send synchronously inside the Approve click. That send couldn't be retried or resumed, and couldn't follow the marker-before-send and notify-once rules. Replies would also land outside the pipeline.
+
+**Setup, per stamp:** Exchange RBAC for Applications scoping of `Mail.Send`/`Mail.Read` to the shared mailbox (`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §4.2.1).
 
 ### 3.6 Approval
 
@@ -313,6 +320,6 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 2. ~~Orchestration host~~ **Decided 2026-11-25: A**, BFF ADR-004 jobs + `sprk_processingjob` as the state machine, with the written reason (§4).
 3. ~~NDA engines~~ **Decided 2026-11-25: A**, the Python engines in a Container Apps Job, with conditions and a Phase 0 hosting spike (§5). Owner approval under ADR-052:77 given.
 4. ~~Invoice timing~~ **Decided 2026-11-25:** Phase 3, after eBilling UAT (task 163) and before customer rollout; no edits to eBilling code until then (§7).
-5. Sending identity: the shared legal mailbox (recommended)?
+5. ~~Sending identity~~ **Decided 2026-11-25:** the shared legal mailbox, app-only, as the queued Return stage; attorney named and Cc'd (§3.5).
 6. NDA standard master: the accelerator's playbook (recommended)? Carried from the NDA note.
 7. Email door: an intake mailbox only, or also classify mail arriving at existing mailboxes?
