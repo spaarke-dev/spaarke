@@ -1,3 +1,4 @@
+using System.Data.SqlTypes;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
@@ -91,7 +92,7 @@ public partial class SignalReevaluationJobTests
         OrdinaryMatterBesideSecureX(h, secureProject);
         var ordered = Enumerable.Range(1, SignalEvaluator.MaxPages + 1)
             .Select(i => SeedEvidenceSignal(h, GoneEarly, policyId: null, EvidenceAlreadyRedacted(), episode: i))
-            .OrderBy(id => id).ToList();
+            .OrderBy(id => new SqlGuid(id)).ToList(); // Dataverse's (SQL Server's) uniqueidentifier order, as the fake pages
         h.Org.Rows[ordered[0]]["sprk_evidencerefs"] = StoredEvidenceQuotingTheWitness();
         h.Org.Rows[ordered[^1]]["sprk_dedupekey"] = Key(GoneLate, "sprk_matter", MatterId, 1);
         h.Org.Rows[ordered[^1]]["sprk_evidencerefs"] = StoredEvidenceQuotingTheWitness();

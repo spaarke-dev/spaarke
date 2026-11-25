@@ -110,6 +110,7 @@ After restoring the branch's files, every new and changed test passes.
 | The cursor is read but not passed to the read (`after` replaced with null) | 4 (must-fire, stale cursor, clear-fails, read-fault) |
 | The cursor is never cleared at the end of a pass | 3 (must-fire, stale cursor, clear-fails) |
 | A cursor-save failure does not count a policy failure | 1 (`…CannotBeSaved…`) |
+| The cursor computed as the .NET maximum of the ids read (in `SignalClosureService`; review follow-up, with the SqlGuid fake) | 2 (must-fire, service level) |
 
 ## Placement and §11
 - Placement: existing `SignalClosureService` (one optional parameter, two init properties on an existing internal record) and
@@ -131,11 +132,29 @@ After restoring the branch's files, every new and changed test passes.
   write it, and it never skips a row.
 - K4: real Dataverse cost of the `gt` condition on the primary key is not measured; it is the clustered-index seek the other id cursors
   already use.
+- K2 (review): a deleted code whose Signals all sit in one window is re-checked once per pass (every ceil(N / 100,000) nights), not nightly.
+  That delays task 217 K4's re-file case (a witness moved into a secure family after the code's last check). Still strictly better than
+  master, where codes past the first window were never checked.
+- K2 (review): if the cache loses the key every night (eviction or flush), each run starts over and codes past the first window are never
+  reached. The run still succeeds; the only sign is the bound Warning saying "from the start" every night. Redis is required outside Dev/Test,
+  where this does not happen.
+- K3 (review): no test pins that the cursor is saved AFTER the sweep. Saved first, a run cancelled mid-sweep would push that window's codes to
+  the next pass: a delay, never a loss.
+- Pre-existing, out of scope (review): `ReadPolicySignalsAsync` (~`SignalReevaluationJob.cs:1535`) still throws when one deleted code has more
+  than `MaxPages` pages of Signals (a policy failure for that code each time it is swept). The main session is filing it as a deferred issue.
+- Test fake (review follow-up): the job harness's read of Signals with no policy (the only read the deleted-policy cursor pages) now sorts,
+  and its `GreaterThan` on the primary id compares, in SQL Server `uniqueidentifier` order (`SqlGuid`, as `StampWorld.cs` does). The
+  must-fire test seeds in that order too. A cursor computed in .NET order (mutation: the cursor as the .NET maximum of the ids read) now fails 2
+  tests (the must-fire and the service-level test) instead of passing while it would skip rows in Dataverse. Scoped, not repo-wide in the
+  fake: switching the shared `Paged` and the #2982 policy cursor to `SqlGuid` failed 6 task 204/209 tests, which seed and assert in the .NET
+  order. Changing them is outside this task. Those reads take their cursor from the last row returned, so the order does not change what they
+  prove.
 
 ## Results
 - BFF build (`-warnaserror`): 0 warnings, 0 errors.
 - `--filter "FullyQualifiedName~SignalReevaluationJobTests"`: 332 pass / 0 fail.
 - `--filter "FullyQualifiedName~Signals"` (includes the contract baselines): 5,530 pass / 0 fail / 6 skipped (pre-existing).
+  Review follow-up (SqlGuid fake): re-run 5,530 pass / 0 fail / 6 skipped; no non-test code changed, so ArchTests were not re-run.
 - `tests/Spaarke.ArchTests` (built explicitly, full): 2,831 pass / 0 fail.
 - Publish size (Release, short paths: `C:\wt224m` = fresh origin/master 1b89025736, `C:\wt224` = this branch; `Compress-Archive`; 194 files
   each): master 43,619,662 bytes, branch 43,623,242 bytes, **+3,580 bytes**.
