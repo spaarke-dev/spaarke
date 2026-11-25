@@ -36,6 +36,7 @@ public class OfficeGenerateProfilePendingContractTests : IClassFixture<OfficeGen
     private const int Pending = 100000001;
     private const int None = 100000000;
     private const int Failed = 100000004;
+    private const int Completed = 100000002;
 
     private readonly OfficeGenerateProfilePendingWebAppFactory _factory;
 
@@ -119,6 +120,51 @@ public class OfficeGenerateProfilePendingContractTests : IClassFixture<OfficeGen
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         _factory.Status.Should().Be(None, "a column that was never set reads as None");
+    }
+
+    [Fact]
+    public async Task Post_GenerateProfile_WhenTheSubmitFailsForAnyOtherReason_PutsTheEarlierStatusBack_AndAnswers500()
+    {
+        // A missing Service Bus role is an UnauthorizedAccessException, not a ServiceBusException: still not queued.
+        _factory.GrantWrite(DocumentId);
+        _factory.SetStatus(Failed);
+        _factory.OnSubmit = _ => throw new UnauthorizedAccessException("No Send claim.");
+
+        var response = await AuthorizedClient().PostAsync(Route, content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        _factory.QueuedJobs.Should().BeEmpty();
+        _factory.Status.Should().Be(Failed, "nothing was queued, so nothing would ever move the status on from Pending");
+    }
+
+    [Fact]
+    public async Task Post_GenerateProfile_WhenTheQueueRefusesAfterAJobWroteAStatus_LeavesThatNewerStatusAlone()
+    {
+        // The send is retried for a while; a job from an earlier click finishes in that time. Putting the earlier status
+        // back over its result would leave the row wrong for good.
+        _factory.GrantWrite(DocumentId);
+        _factory.SetStatus(Failed);
+        _factory.RefuseNextSubmit();
+        _factory.OnSubmit = _ => _factory.SetStatus(Completed);
+
+        var response = await AuthorizedClient().PostAsync(Route, content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        _factory.Status.Should().Be(Completed);
+    }
+
+    [Fact]
+    public async Task Post_GenerateProfile_WhenTheQueueRefusesAndTheDocumentWasAlreadyPending_WritesNothingBack()
+    {
+        _factory.GrantWrite(DocumentId);
+        _factory.SetStatus(Pending);
+        _factory.RefuseNextSubmit();
+
+        var response = await AuthorizedClient().PostAsync(Route, content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        _factory.StatusWrites.Should().ContainSingle("the Pending write; there is nothing to put back");
+        _factory.Status.Should().Be(Pending);
     }
 
     [Fact]

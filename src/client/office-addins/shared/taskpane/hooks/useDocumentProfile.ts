@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, ApiClientError } from '@shared/services';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { summaryStatusFromCode, type DocumentSummaryStatusName } from '../services/documentProfileChoices';
@@ -128,6 +128,8 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
   // The document whose profile job the pane is following after a 202; `run` counts the clicks so a second Generate
   // Profile restarts the wait. Undefined until a request is accepted.
   const [followed, setFollowed] = useState<{ documentId: string; run: number } | undefined>(undefined);
+  // The document the pane shows right now, for a Generate Profile request that returns after the user moved on.
+  const shownDocumentId = useRef(documentId);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   // task 033: undefined until the FIRST successful read returns (or documentId is absent) — kept
@@ -212,6 +214,7 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
 
   // A different document ends the wait for the previous one for good (coming back to it does not resume it).
   useEffect(() => {
+    shownDocumentId.current = documentId;
     setFollowed(undefined);
   }, [documentId]);
 
@@ -274,9 +277,13 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
 
       // Task 021 semantics: no second status table. Move the DISPLAYED state to Pending immediately
       // (the 202 confirms dispatch, not completion), then follow the job: the effect above re-reads until the
-      // status leaves Pending, so the pane shows what the background profile actually lands on (#1090).
-      setOutcome({ kind: 'status', status: 'Pending' });
-      setFollowed(previous => ({ documentId, run: (previous?.run ?? 0) + 1 }));
+      // status leaves Pending, so the pane shows what the background profile actually lands on (#1090). Only for the
+      // document the pane still shows: the user may have moved to another item while the request was in flight, and
+      // that item's own read is what its screen must keep.
+      if (shownDocumentId.current === documentId) {
+        setOutcome({ kind: 'status', status: 'Pending' });
+        setFollowed(previous => ({ documentId, run: (previous?.run ?? 0) + 1 }));
+      }
       return true;
     } catch (err) {
       const message =

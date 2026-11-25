@@ -249,4 +249,37 @@ describe('useDocumentProfile — following a Generate Profile job (task 137, #10
 
     expect(mockGet.mock.calls.length).toBeGreaterThan(5); // still reading, well past where the first wait would have ended
   });
+
+  it('a 202 that arrives after the user moved to another document changes nothing on screen and starts no wait', async () => {
+    const view = await renderOnAFailedDocument();
+    let resolvePost: (value: unknown) => void = () => {
+      throw new Error('resolvePost called before it was assigned');
+    };
+    mockPost.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          resolvePost = resolve;
+        })
+    );
+
+    let request: Promise<boolean> = Promise.resolve(false);
+    act(() => {
+      request = view.result.current.generateProfile(); // the request for DOC is in flight
+    });
+
+    mockGet.mockResolvedValueOnce(completedRead()); // the other document's own first read
+    view.rerender({ id: OTHER_DOC });
+    await settle();
+    expect(view.result.current.outcome.kind).toBe('completed');
+
+    await act(async () => {
+      resolvePost({ documentId: DOC });
+      await request;
+    });
+
+    expect(view.result.current.outcome.kind).toBe('completed'); // not "Pending": that is DOC's job, not this document's
+    mockGet.mockClear();
+    await advance(PROFILE_POLL_CAP_MS);
+    expect(mockGet).not.toHaveBeenCalled();
+  });
 });

@@ -120,6 +120,14 @@ public class OfficeProfileQueue
             await RestoreStatusAsync(documentId, pending);
             return new GenerateProfileResult(GenerateProfileDispatchOutcome.QueueUnavailable);
         }
+        catch
+        {
+            // Any other submit failure (a missing Service Bus role is an UnauthorizedAccessException, not a
+            // ServiceBusException) is still a request that was not queued: same restore, and the failure goes on to the
+            // global handler as before.
+            await RestoreStatusAsync(documentId, pending);
+            throw;
+        }
 
         _logger.LogInformation(
             "Office Generate Profile: document {DocumentId} queued as job {JobId} for {RequestedBy} (key {IdempotencyKey}, correlation {CorrelationId}).",
@@ -167,15 +175,26 @@ public class OfficeProfileQueue
     /// Undoes <see cref="MarkPendingAsync"/> after the queue refused the request. A row that never had a status goes back
     /// to None, which the pane reads exactly as it reads a missing one. Best effort: a failure here is logged.
     /// </summary>
+    /// <remarks>
+    /// A send that Service Bus retries can take a minute, and a job from an earlier click may finish in that time. So the
+    /// row is read again and put back only while it still says Pending: a status a job wrote since is newer than the one
+    /// this request saw, and is left alone. A row that was Pending before needs no restore at all.
+    /// </remarks>
     private async Task RestoreStatusAsync(Guid documentId, PendingMark pending)
     {
-        if (!pending.Written)
+        if (!pending.Written || pending.Previous == AppOnlyAnalysisService.SummaryStatusPending)
         {
             return;
         }
 
         try
         {
+            var current = (await _documents.GetDocumentAsync(documentId.ToString(), CancellationToken.None))?.SummaryStatus;
+            if (current != AppOnlyAnalysisService.SummaryStatusPending)
+            {
+                return;
+            }
+
             await _documents.UpdateDocumentAsync(
                 documentId.ToString(),
                 new UpdateDocumentRequest { SummaryStatus = pending.Previous ?? SummaryStatusNone },
