@@ -453,3 +453,11 @@ This under-lists, which fails closed.
 **Why it matters.** A user sorts by amount, exports, and gets a file in another order, so the export no longer matches what they saw.
 
 **Fix.** Pass the records sorted with the same `compare` the column uses (the active sort column and direction) to the command bar, or let the export take a sorted list. Add a test: the menu sort followed by export gives the sorted order. Needs the dataset-grid owners' OK (the shared export API). Effort: about half a day. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3129 (board Type=Bug).
+
+## D-38 — External SPA: three low-priority browser checks not run in task 038 (#3149)
+
+**What.** Three task 038 ui-test checks were not run on dev (2026-11-25). Each needs an owner-side change: (1) FR-19 with browser storage blocked (a Chrome site-data block for the portal; `services/gridSettingsStore.ts`, `widgets/useGridSettings.ts`); (2) FR-22, a thread message with a remote image does not load it (needs an internal email with a remote image filed to a portal thread; `components/detail/RecordMessages.tsx`); (3) the high-contrast theme (Windows contrast mode). The behaviour is covered by unit tests; only the live browser check is missing. The owner rated them low priority and closed 038 with them filed ("we can close these three issues (and these are really low priority)").
+
+**Why it matters.** A real-browser regression would not show in the unit tests: a grid that fails to load for a user who blocks site data, or a remote image loading in a portal thread.
+
+**Fix.** Run the three at the next SPA E2E or the R4 closing task, with the owner's OK for the storage block, the test email and contrast mode; file a Bug for any failure. Effort: about an hour. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3149 (board Type=Idea).

@@ -41,7 +41,7 @@
 | 033 | DataGrid Money sort + formatted export (FR-20) | 3 | ✅ [done] | 028, 032 | Group D | sonnet / high |
 | 035 | Message threads (FR-22) | 3 | ✅ [done] | 028, 034 | Group D | sonnet / high |
 | 036 | Matter events: task type + assignee (FR-23) — superseded by 014/015 (owner 2026-11-15) | 3 | 🚫 [cancelled] | 028 | — | sonnet / high |
-| 038 | P3 deploy (BFF allow-list via uac-r2, SPA dev) + E2E | 3 | 🔲 [open] | 028, 031, 032, 033, 034, 035, 036 | — (live) | sonnet / high |
+| 038 | P3 deploy (BFF allow-list via uac-r2, SPA dev) + E2E | 3 | ✅ [done] | 028, 031, 032, 033, 034, 035, 036 | — (live) | sonnet / high |
 | 040 | Workforce-contact tabs scoped by grants (FR-24) | 4 | 🔲 [open] | 038 | Group E | opus / high |
 | 041 | Licensed user's first sign-in skips the profile form (FR-25) | 4 | 🔲 [open] | 038 | — (may edit `CallerPrincipalResolver.cs` with 043) | opus / high |
 | 043 | Binder faults → 503 + SPA retry; ProjectPage 404 fold (FR-28) | 4 | 🔲 [open] | 038 | Group E | opus / high |
