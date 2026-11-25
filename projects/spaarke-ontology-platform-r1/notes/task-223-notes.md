@@ -65,6 +65,17 @@ Deviation from "existing tests pass unmodified" (each is a test that pinned the 
 - Publish size (`dotnet publish -c Release`, `Compress-Archive`, short paths): base 43,619,644 bytes / 194 files; branch 43,619,566 bytes /
   194 files; delta -78 bytes. No package, DI registration, endpoint or new type.
 
-## Noticed, not in scope
-- `Services/Finance/RuleSetService.cs` `CreatedByBefore` / `CreatedByAndNeverModified` compare a row's `createdby` in memory with an
-  `identity` (ebilling's rule-set compensation, not a "server-written" trust check). Not a DI-144 site; not changed or verified here.
+## Review fix (independent review of #3167, F2)
+`Services/Finance/InvoiceApprovalService.cs` (ebilling's): the K3 comments on `CompletionRecordNotWriterCreated`, on `FinishAsync` and at
+the refusal branch said the writer's "already recorded" record is one "not created under the completion's filter". With both reads on
+`WriterCreatedRecord`, the only way in is a concurrent approve (a writer record landing after the completion's read), so a double-click logs
+`record_not_writer_created` for the writer's own record. Comments reworded to describe that race; the log message text is generic and was
+not changed; the code name and value are kept (logs and tests key on them). The name now overstates; renaming is ebilling's call. No
+behaviour change.
+
+## Known limits
+- K1: the read-route test fake (`SignalReadRouteTests.cs` ~2989) matches the `createdonbehalfby` condition with `Descendants("condition")`
+  and the new string pin uses `Contains`, so a later move of `FetchXmlFilter` under an `or` or into the link-entity would not be caught;
+  production nests it correctly (`SignalReadService.cs` ~1535).
+- K2: `RuleSetService.CreatedByBefore` / `CreatedByAndNeverModified` compare `createdby` with the BFF identity to pick drafts for cleanup.
+  That is not writer trust, so it is out of scope.
