@@ -19,6 +19,7 @@ import {
   type EmailFilingOutcome,
   type EmailFilingProblem,
 } from '../services/emailFilingNotice';
+import { readAttachmentsAddedCount } from '../services/attachmentsAddedNotice';
 
 /** A canonical (bare-lowercase, ADR-044) Dataverse GUID. */
 const CANONICAL_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -134,6 +135,11 @@ export interface SaveResponse {
    * is ignored — see {@link readEmailFilingProblem}.
    */
   emailFiling?: EmailFilingOutcome;
+  /**
+   * Task 138 (#2209): the file names of the attachments this save ADDED under an email already saved to the same record.
+   * OMITTED on every other answer. Read through {@link readAttachmentsAddedCount}, so a malformed value counts as none.
+   */
+  attachmentsAdded?: string[];
 }
 
 /**
@@ -271,8 +277,15 @@ export interface UseSaveFlowOptions {
   /**
    * Callback when save is complete. The third argument is passed ONLY when the save succeeded but the email it reconciled
    * to could not be filed to the chosen record (task 131) — otherwise the call has exactly two arguments, as before.
+   * The fourth is passed ONLY when the save added attachments to an email already saved to the record (task 138): how
+   * many it added (the third is then the filing problem or `undefined`).
    */
-  onComplete?: (documentId: string, documentUrl: string, emailFilingProblem?: EmailFilingProblem) => void;
+  onComplete?: (
+    documentId: string,
+    documentUrl: string,
+    emailFilingProblem?: EmailFilingProblem,
+    attachmentsAdded?: number
+  ) => void;
   /** Callback on error */
   onError?: (error: ErrorMessage) => void;
   /** Callback on duplicate detected */
@@ -578,10 +591,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // Task 131 (#2171): the refused / failed email filing the CURRENT save's 202 reported, handed to onComplete when the job
   // completes. Null = nothing to tell the user. Cleared when a save starts and on reset.
   const emailFilingProblemRef = useRef<EmailFilingProblem | null>(null);
+  // Task 138 (#2209): how many attachments the CURRENT save's 202 says it added to the already-saved email. 0 = none.
+  // Cleared with emailFilingProblemRef.
+  const attachmentsAddedRef = useRef(0);
   const notifyComplete = useCallback(
     (documentId: string, documentUrl: string) => {
       const problem = emailFilingProblemRef.current;
-      if (problem) onComplete?.(documentId, documentUrl, problem);
+      const added = attachmentsAddedRef.current;
+      if (added > 0) onComplete?.(documentId, documentUrl, problem ?? undefined, added);
+      else if (problem) onComplete?.(documentId, documentUrl, problem);
       else onComplete?.(documentId, documentUrl);
     },
     [onComplete]
@@ -649,6 +667,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     setSavedDocumentId(null);
     setSavedDocumentUrl(null);
     emailFilingProblemRef.current = null;
+    attachmentsAddedRef.current = 0;
     savedContextRef.current = null;
   }, [cleanup]);
 
@@ -1004,6 +1023,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       activeVersionSaveRef.current = false;
       activeVersionDocumentIdRef.current = null;
       emailFilingProblemRef.current = null;
+      attachmentsAddedRef.current = 0;
 
       try {
         // Auth v2 (D-AUTH-7 / task 082): no top-level token snapshot.
@@ -1323,6 +1343,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         const saveResponse = responseData as SaveResponse;
         // Task 131 (#2171): the save worked, but its email may not have been filed to the record — kept for onComplete.
         emailFilingProblemRef.current = readEmailFilingProblem(saveResponse?.emailFiling);
+        // Task 138 (#2209): a re-save that added attachments to the already-saved email — counted for onComplete.
+        attachmentsAddedRef.current = readAttachmentsAddedCount(saveResponse?.attachmentsAdded);
         await startJobTracking(saveResponse.jobId, saveResponse.streamUrl);
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {

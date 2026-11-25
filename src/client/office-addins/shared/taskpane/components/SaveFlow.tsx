@@ -45,6 +45,7 @@ import type { DocumentIdentityState, ResolvedRelatedRecord } from '../services/d
 import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
+import { describeAttachmentsAdded } from '../services/attachmentsAddedNotice';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
   clearReferenceListCache,
@@ -385,6 +386,11 @@ export interface SavedDocumentState {
    * document, so the notice survives a tab switch like the confirmation bar does.
    */
   emailFilingProblem?: EmailFilingProblem;
+  /**
+   * Task 138 (#2209): set when the save added attachments to an email already saved to the record — how many. The
+   * confirmation then reads "Added N attachments to the saved email". Absent otherwise.
+   */
+  attachmentsAdded?: number;
 }
 
 /**
@@ -705,7 +711,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     () => ({
       apiBaseUrl,
       getAccessToken,
-      onComplete: (docId, docUrl, emailFilingProblem) => {
+      onComplete: (docId, docUrl, emailFilingProblem, attachmentsAdded) => {
         const pending = pendingSaveRef.current;
         updateSavedState(prev => ({
           savedDocument: {
@@ -715,6 +721,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             ...(pending?.filedRecord ? { filedRecord: pending.filedRecord } : {}),
             lastSave: pending?.mode ?? 'create',
             ...(emailFilingProblem ? { emailFilingProblem } : {}),
+            ...(attachmentsAdded ? { attachmentsAdded } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
           // task 094: a fresh save always clears the re-enable trigger — this save IS the content as
@@ -1826,7 +1833,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // The box for a save this pane just made.
   const savedBarOf = (saved: SavedDocumentState): SavedBarModel => ({
     documentId: saved.documentId,
-    title: saved.lastSave === 'version' ? 'New version saved to Spaarke' : 'Saved to Spaarke',
+    title:
+      saved.lastSave === 'version'
+        ? 'New version saved to Spaarke'
+        : (describeAttachmentsAdded(saved.attachmentsAdded) ?? 'Saved to Spaarke'),
     filedTo: saved.filedTo,
     filedRecord: saved.filedRecord ?? null,
     notFiledText: 'Not filed to a record.',
