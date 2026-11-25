@@ -1,6 +1,6 @@
 # Field Mapping Admin Guide
 
-> **Last Updated**: 2026-07-09
+> **Last Updated**: 2026-11-25
 > **Purpose**: How a maker authors field-mapping profiles and rules in the native Dataverse form — no code, no custom PCF — so fields auto-populate when a wizard creates a new Event, Invoice, Report Card, or other child record from a Matter or Project.
 > **Audience**: Admin / maker (no developer involvement required for authoring new mappings)
 
@@ -157,6 +157,22 @@ Every rule is `sprk_isactive = true`, and both the Matter → Event profile and 
 
 ---
 
+## Email subject and body from an analysis (filled when the email is sent)
+
+A profile from **Analysis** to **Communication** fills an email's subject and body when the email is sent, not when a record is created:
+- The email must be one a user sends, filed under exactly one analysis. The Analysis wizard's "Send email" step lets the user leave the subject and message empty for this.
+- Only an **empty** subject or body is filled. A value the user typed is never replaced.
+- The server reads the analysis as the sending user. If that user cannot read the analysis, nothing is filled; a mapped column they cannot read is not used.
+- If the subject or body is still empty after the fill, the email is not sent, and the wizard tells the user.
+
+To configure it, create a profile with Source Record Type **Analysis** and Target Record Type **Communication**. Add Copy rules whose Target Field is `sprk_subject` (Text) or `sprk_body` (Memo), for example `sprk_name` → `sprk_subject` and `sprk_description` → `sprk_body`.
+
+A mapped subject longer than 2,000 characters, or a body longer than 100,000, is not used.
+
+**Communication needs a `sprk_recordtype_ref` row.** Provisioning seeds one in new environments: logical name `sprk_communication`, type code `COMM`, display-name field `sprk_name`, regarding field `sprk_regardingcommunication`, and no record-number field. An environment provisioned before 2026-11-25 may not have it; add it with those values before creating the profile. Dev got its row on 2026-11-25.
+
+---
+
 ## How this relates to "set regarding" (RegardingResolver)
 
 Field mapping only fires when the wizard already knows the **parent** record — that parent is the mapping's *source*. That linkage comes from the **RegardingResolver** control (the "set-regarding" picker), not from this framework:
@@ -226,6 +242,7 @@ A **Default** rule sets `"sprk_mapping_type": 1` + `"sprk_defaultvalue": "…"`.
 |---|---|---|
 | A new child record doesn't inherit any mapped fields | The profile isn't active | Open the profile, confirm `sprk_isactive` is checked. |
 | A new child record doesn't inherit any mapped fields | No `sprk_recordtype_ref` row exists for the source and/or target entity | Ask a developer to check the full `sprk_recordtype_ref` table (not a filtered query — a missing row won't show up in a search) and add the missing registry row if the entity is genuinely new. This happened for Report Card during initial seeding and required a developer-added registry row before a profile could reference it at all. |
+| Communication cannot be picked as a profile's Target Record Type | The environment has no `sprk_communication` row in `sprk_recordtype_ref` (provisioned before 2026-11-25) | Add the row with the values in "Email subject and body from an analysis", then create the profile. |
 | A specific field doesn't inherit, but others on the same profile do | That rule is inactive, or its `sprk_executionorder`/config is wrong | Open the individual rule; confirm `sprk_isactive` is checked and the mapping-type-specific fields (Source/Target Field for Copy, Default Value for Default, Expression for Concat/Template) are populated. |
 | A lookup field is left blank on the new record, but the source clearly had a value | `sprk_sourcefieldtype` and/or `sprk_targetfieldtype` aren't set to **Lookup** | Edit the rule and set both field-type columns to Lookup — a Copy rule between two lookup fields needs the type flags set correctly for the engine to build the `@odata.bind` binding instead of attempting a plain scalar copy. |
 | A Copy rule targets a field that doesn't exist on the target entity | Field names copied from another target's rule set without checking the actual target schema (see the field-name divergence note above) | Verify the target entity's real logical field name before saving the rule; correct the Target Field value. |

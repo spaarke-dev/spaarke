@@ -125,3 +125,23 @@ Filed: DI-040 / #3126. A TYPED subject over 2000 characters is sent and then has
 - Test Matter: PAT-176903 "Targeted Protein Degradation Patent Issuance" (`232852f8-a263-f111-ab0c-000d3a582930`), team-owned (Spaarke Business Unit 1). Attorney 1 is Ralph Schroeder, Internal is Jake Schroeder, and it has a description. The 027 Matter `3fa0d616…` no longer exists on dev.
 - The BFF on dev (ef0c566d2c) already serves `POST /api/v1/child-records/sprk_analysis` with a mapping source; 028 did not change that route. So the create half of the check can run before the BFF deploy.
 - **Blocked: the Analysis → Communication profile.** `sprk_recordtype_ref` has no `sprk_communication` row on dev. The provisioning `DataverseWebApiRecordTypeSeeder` does not seed one either, so no environment has it. A profile's target is a lookup to that catalog, so FR-17's profile cannot be configured anywhere. The catalog is also the regarding-parent list that `PolymorphicResolverService`, `OwnedChildWrite` and the regarding pickers read, so adding a row is a product change, not test setup. Waiting on the owner's decision. Not created.
+
+## Communication record type (fix, 2026-11-25, owner: "check and fix")
+
+**Impact check (read-only).** No reader lists the catalog into a picker; the picker catalogs are written in code. Two readers list every row:
+- the core-ancestor reconciliation job's id-to-table map, which skips Communication because it is not in `CoreAncestorResolver.CoreRecordEntities`;
+- the identifier reverse-lookup roster (Rung 0), which takes only the seven core types that have a number column, so Communication (no number column) never joins it.
+
+Every other reader looks up a row by name or id. `OwnedChildWrite.RegardingPairTables` already lists `sprk_communication`, and the client `PolymorphicResolverService` looks up by name. The one behaviour change is that a record filed under a communication (`TodoRegardingBuilder`, `OfficeSearchService`, `ExternalDataService`, `EventEndpoints`) now gets its pair type; until now that was skipped silently. The `sprk_billingevent` row is seeded by the eBilling schema scripts, not by this seeder, so it is not a gap.
+
+**Fix.**
+- `DataverseWebApiRecordTypeSeeder` seeds `sprk_communication` (Communication, `COMM`, `sprk_name`, `sprk_regardingcommunication`, no number field).
+- Test `Task028_EmptyTable_CreatesTheCommunicationRecordType_…` fails without the seeder line; the 15 seeder tests pass.
+- The admin guide gains "Email subject and body from an analysis" and a troubleshooting row for environments provisioned before this change.
+
+**Dev (owner's go):**
+- catalog row `6b59ba77-dee8-f111-84e8-7ced8d1d8f6b`. It is permanent: it is product reference data, not test data.
+- "FMSWP-028 live check: Analysis to Communication (temporary)" `4e88e776-dee8-f111-84ea-00224820fd20`, with rules:
+  - `sprk_name` → `sprk_subject` (`7059ba77-dee8-f111-84e8-7ced8d1d8f6b`);
+  - `sprk_description` → `sprk_body` (`b14beb75-dee8-f111-84ea-7ced8ddb6f85`).
+  - Deactivate the profile after the check.
