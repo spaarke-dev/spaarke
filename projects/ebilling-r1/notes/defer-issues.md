@@ -791,7 +791,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (fixed by task 015, e0df773395: the resolver reads sprk_totalamount and statuscode; closed 2026-11-25) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-15 |
 | **Source** | `/project-pipeline` task authoring (POML 015 discovery) |
