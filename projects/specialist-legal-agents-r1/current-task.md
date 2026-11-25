@@ -33,7 +33,7 @@
 
 ## Open owner decisions
 - **Gate A0 CLEAR (2026-11-24):** D-A11 split by layer, D-A16 one roadmap, Q7 shared catalogue (accelerator refreshes first); Q2 resolved from the ontology model: the positions master is a **Playbook** (D-209), not "Policy versions". Still to do: tell accelerator r1 about D-A11/Q7/D-A16.
-- **Next step (owner go needed):** split off the Phase 0 child folder (design.md from §7–§8) and run `/design-to-spec` on it. Do NOT start without the owner saying go.
+- **Phase 0 runs HERE** (OD-3 amended 2026-11-24, no child project). **Open owner question first:** is more NDA capability needed at all, given Microsoft review-contract + Word Run Review, the accelerator nda-review skill and the BFF NDA-REVIEW Action? This may reshape G1 and Phase 1 (OD-2). Do NOT start the Phase 0 spec until that is answered.
 - **Still open, not A0 blockers:** D-A12 framing; D-A13 Microsoft-first; D-A1 front door (G8-P2 now done); D-A7 (at G1); D-A5 pricing; BR-5 (dynamic discovery as default); the R1 change (with coordination).
 
 ## Standing directives

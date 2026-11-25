@@ -120,7 +120,7 @@ Word sits beside these. There, Spaarke supplies the attorney's positions as the 
 |---|---|---|
 | OD-1 | Project name | `specialist-legal-agents-r1` |
 | OD-2 | First archetype (Phase 1 vertical slice) | **NDA reviewer.** This replaces the synopsis's biotech patent claim-drafting associate. Reasons: the accelerator projects already ship an NDA agent, playbook, positions, eval corpus and Cowork skills; the BFF already runs a deployed NDA-REVIEW Action (§9); and the synopsis's autonomous-run example is the NDA. The patent associate moves to Phase 4 as the second archetype, together with the supervision protocol it exercises. |
-| OD-3 | Shape | **Umbrella program with phased child projects** (§4). This folder holds the program design, decisions and coordination; each phase runs as its own child project. |
+| OD-3 | Shape | **Umbrella program with phased child projects** (§4). This folder holds the program design, decisions and coordination; each phase from **Phase 1** runs as its own child project. **Amended 2026-11-24 (owner): Phase 0 runs here in the umbrella**, where G8, G8-P2 and G9 already ran; its spec and tasks live in this folder. |
 
 Still open from the parent session's recommendations: whether deterministic gates and profile application live server-side (D-A7, §12) and the NDA-first choice's knock-on for the supervision protocol (D-A8). OD-2 settles the archetype only.
 
@@ -486,7 +486,7 @@ This folder is the umbrella. It holds this design, the decision log, the coordin
 
 | Phase | Child project (proposed slug) | Scope | Gate to next |
 |---|---|---|---|
-| 0 | `specialist-legal-agents-phase0-r1` | Spikes and inventory follow-ups in §8 only | **G1 go/no-go** decides the runtime shape (D-A7) |
+| 0 | **This umbrella** (OD-3 amended 2026-11-24; no child) | Spikes and inventory follow-ups in §8 only | **G1 go/no-go** decides the runtime shape (D-A7) |
 | 1 | `specialist-legal-agents-nda-r1` | Role Profile schema, layer compiler with ratchet, Agent Instance, NDA archetype end to end (Chat + Cowork), run ledger binding | NDA golden set passes for two owner profiles; ratchet tests pass |
 | 2 | `specialist-legal-agents-tuning-r1` | Profile diff review, golden-set gate, versioning and rollback, then correction harvesting and the Coach | Diff-gate eval; no silent change path |
 | 3 | `specialist-legal-agents-governance-r1` | Agent 365 plugin governance, background identity (after T-2), per-archetype budgets (ADR-016), dashboards, autonomous NDA intake (after T-1) | Owner and counsel sign-off on autonomy |
@@ -494,7 +494,7 @@ This folder is the umbrella. It holds this design, the decision log, the coordin
 
 Slugs are proposals, to be confirmed when each child is created. Phase 0's design is §7–§8 of this document.
 
-**Gate A0, before any child starts:** alignment with spaarke-legal-ai-accelerator-r1 (§10.1, D-A14). Then create the Phase 0 child folder with a `design.md` drawn from §7–§8 and run `/design-to-spec` on it.
+**Gate A0, before any child starts:** alignment with spaarke-legal-ai-accelerator-r1 (§10.1, D-A14). Phase 0 then runs in this folder (OD-3 amended 2026-11-24): its spec is drawn from §7–§8.
 
 ## 5. Scope boundaries
 
