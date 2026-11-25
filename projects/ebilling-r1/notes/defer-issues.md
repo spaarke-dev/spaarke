@@ -260,7 +260,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-def063 32a5f8a388: -AllowNothingToPublish on the import paths; exit 0 'Nothing to publish; import complete'; app-settings-only plans still throw; Pester 96/0). Closes when the next master PR merges. |
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed). Was: fixed on work (merged 2026-11-25 from task/ebilling-def063 32a5f8a388: -AllowNothingToPublish on the import paths; exit 0 'Nothing to publish; import complete'; app-settings-only plans still throw; Pester 96/0). |
 | **Urgency** | someday |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 DEF-059 dev apply (a role-only solution import) |
@@ -452,7 +452,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on `task/ebilling-def052` (2026-11-25; pending merge). Job: over-limit source document is Failed `ebilling.submission.too_large` (permanent, refused before download when `sprk_filesize` is over). From-email: a marked file over the limit is 413 `too_large` at step 1 (`FromEmailMarkRules.Check`), before the `.eml`, its `sprk_document` row or its Communication row is written (the reader check stays as a backstop). Regression: `tests/integration/regression/Ebilling/Issue2553_SubmissionFileSizeLimitTests.cs` |
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed; BFF part reaches dev with the next dev BFF deploy). Job: over-limit source document is Failed `ebilling.submission.too_large` (permanent, refused before download when `sprk_filesize` is over). From-email: a marked file over the limit is 413 `too_large` at step 1 (`FromEmailMarkRules.Check`), before the `.eml`, its `sprk_document` row or its Communication row is written (the reader check stays as a backstop). Regression: `tests/integration/regression/Ebilling/Issue2553_SubmissionFileSizeLimitTests.cs` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-03 |
 | **Source** | 118b adversarial review (finding 2, parity) |
@@ -770,7 +770,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-iss014 aa80d83b99: approval re-read every pollIntervalMs while firmNeeded, one review re-read when it clears; jest 667/0). Closes when the next master PR merges; reaches dev with the next Invoice Review page deploy. |
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed). Was: fixed on work (merged 2026-11-25 from task/ebilling-iss014 aa80d83b99: approval re-read every pollIntervalMs while firmNeeded, one review re-read when it clears; jest 667/0).; reaches dev with the next Invoice Review page deploy. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 095d0 review (Codex P2 fix `546296be5c` covers only the re-read case) |
@@ -2708,7 +2708,7 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-iss053 8b9d8c0aa6: ArchTest JobQueueDuplicateDetectionOffGuardTests, 8/0; jobs.md names it). Closes when the next master PR merges. Stamp-side live check suggested to customer-provisioning-orchestration-r1. |
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed). Was: fixed on work (merged 2026-11-25 from task/ebilling-iss053 8b9d8c0aa6: ArchTest JobQueueDuplicateDetectionOffGuardTests, 8/0; jobs.md names it). Live stamps checked 2026-11-25 by customer-provisioning-orchestration-r1: ACME (the only live stamp) is false on all 7 queues; new stamps are covered by the Bicep guard (create-time property), so no per-run check. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 |
 | **Source** | uac-r2 review of master PR #3084 (ISS-025), 2026-11-25 |
