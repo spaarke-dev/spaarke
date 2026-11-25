@@ -56,16 +56,24 @@ $ctx = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
 if ($PlanOnly) {
     $plan = Get-SolutionPublishPlan -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows
     if (@($plan.Unmapped).Count -gt 0) { Write-Warning "Unmapped component(s): $(@($plan.Unmapped) -join ', ')" }
+    if (Test-PublishPlanEmpty -Plan $plan) {
+        # DEF-063: nothing to publish is not an error. The ParameterXml builder still refuses an empty set; we just do not call it.
+        Write-Host "Nothing to publish for $SolutionUniqueName; no publish request would be sent."
+        return
+    }
     New-PublishParameterXmlFromPlan -Plan $plan
     return
 }
 if ($PublishOnly) {
-    Publish-SolutionComponents -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -AllowPendingCollateral:$AllowPendingCollateral | Out-Null
-    Write-Host "Scoped-published $SolutionUniqueName (no import). No tenant-wide publish was run."
+    $published = Publish-SolutionComponents -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -AllowPendingCollateral:$AllowPendingCollateral -AllowNothingToPublish
+    if ($published.NothingToPublish) { Write-Host "Nothing to publish; $SolutionUniqueName needs no publish step. No tenant-wide publish was run." }
+    else { Write-Host "Scoped-published $SolutionUniqueName (no import). No tenant-wide publish was run." }
     return
 }
 if (-not $ZipPath -or -not (Test-Path -LiteralPath $ZipPath)) { throw "-ZipPath is required and must exist (got '$ZipPath')." }
-Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName `
+$imported = Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName `
     -ImportArgs $ImportArgs -Context $ctx -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows `
-    -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -AllowPendingCollateral:$AllowPendingCollateral | Out-Null
-Write-Host "Imported and scoped-published $SolutionUniqueName. No tenant-wide publish was run."
+    -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -AllowPendingCollateral:$AllowPendingCollateral
+# DEF-063: a solution with nothing publishable (for example only a security role) is a successful import, not a failure.
+if (@($imported)[-1].NothingToPublish) { Write-Host "Nothing to publish; import complete. $SolutionUniqueName needs no publish step. No tenant-wide publish was run." }
+else { Write-Host "Imported and scoped-published $SolutionUniqueName. No tenant-wide publish was run." }
