@@ -63,7 +63,7 @@ BFF API entry point: `src/server/api/Sprk.Bff.Api/Program.cs` (all endpoint regi
 
 ### Solutions (`src/solutions/`)
 
-Dataverse solution projects (each may include React 18 SPAs bundled as web resources). Current solutions include: `AllDocuments`, `CalendarSidePane`, `CopilotAgent`, `CreateEventWizard`, `CreateMatterWizard`, `CreateProjectWizard`, `CreateTodoWizard`, `CreateWorkAssignmentWizard`, `DailyBriefing`, `DocumentUploadWizard`, `EventsPage`, `FindSimilarCodePage`, `LegalWorkspace`, `PlaybookLibrary`, `Reporting`, `SmartTodo`, `SpaarkeCore`, `SpeAdminApp`, `SummarizeFilesWizard`, `WorkspaceLayoutWizard`, plus side panes and supporting wizards.
+Dataverse solution projects (each may include React 18 SPAs bundled as web resources). Current solutions include: `AllDocuments`, `CalendarSidePane`, `CreateEventWizard`, `CreateMatterWizard`, `CreateProjectWizard`, `CreateTodoWizard`, `CreateWorkAssignmentWizard`, `DailyBriefing`, `DocumentUploadWizard`, `EventsPage`, `FindSimilarCodePage`, `LegalWorkspace`, `PlaybookLibrary`, `Reporting`, `SmartTodo`, `SpaarkeCore`, `SpeAdminApp`, `SummarizeFilesWizard`, `WorkspaceLayoutWizard`, plus side panes and supporting wizards.
 
 Run `ls src/solutions/` for the authoritative list.
 

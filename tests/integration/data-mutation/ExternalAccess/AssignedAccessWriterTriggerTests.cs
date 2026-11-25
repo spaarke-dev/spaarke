@@ -645,7 +645,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             .ReturnsAsync(DataverseUserResponse.Ok(201, Json($$"""{ "sprk_projectid": "{{createdId:D}}" }""")));
         var handler = new DataverseCreateRecordHandler(
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Services.Ai.Handoff.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<IFieldMappingDataverseService>().Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes()), Scopes());
 
@@ -669,7 +669,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             .ReturnsAsync(DataverseUserResponse.Ok(201, Json($$"""{ "sprk_eventid": "{{createdId:D}}" }""")));
         var handler = new DataverseCreateRecordHandler(
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Services.Ai.Handoff.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<IFieldMappingDataverseService>().Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes()), Scopes());
 
@@ -721,7 +721,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             .Returns(Task.CompletedTask);
         var handler = new DataverseCreateRecordHandler(
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Services.Ai.Handoff.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), appOnly.Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes()), Scopes());
 

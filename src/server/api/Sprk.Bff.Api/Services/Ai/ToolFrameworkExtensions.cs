@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai.Handoff;
 using Sprk.Bff.Api.Services.Dataverse.Extensions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
@@ -74,6 +75,8 @@ public static class ToolFrameworkExtensions
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
 
+        AddHandoffUrlBuilder(services, configuration);
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -82,6 +85,24 @@ public static class ToolFrameworkExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Registers <see cref="HandoffUrlBuilder"/>, the deep-link composer the chat create-record tool
+    /// (<c>DataverseCreateRecordHandler</c>) injects. spaarkeai-mcp-bff-api-r2 task 001 moved this registration from the
+    /// removed legacy agent module and kept its Dataverse URL fallback chain. It is registered HERE because the
+    /// assembly scan in this method registers its consumer (CLAUDE.md §10 F.1). It is an idempotent singleton.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The configuration root; when null, the host's <see cref="IConfiguration"/> is used.</param>
+    private static void AddHandoffUrlBuilder(IServiceCollection services, IConfiguration? configuration) =>
+        services.TryAddSingleton(sp =>
+        {
+            var config = configuration ?? sp.GetService<IConfiguration>();
+            return new HandoffUrlBuilder(
+                config?["Dataverse:EnvironmentUrl"]
+                ?? config?["DataverseServiceClient:Url"]
+                ?? "https://spaarkedev1.crm.dynamics.com");
+        });
 
     /// <summary>
     /// Adds the AI Tool Framework with custom options.
@@ -134,6 +155,8 @@ public static class ToolFrameworkExtensions
         services.AddHttpContextAccessor();
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
+
+        AddHandoffUrlBuilder(services, configuration: null);
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Events capability extraction and must-not-leak proofs</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api, auth and tenant-isolation; refactors EventEndpoints statics (.cs) into a capability with frozen REST bytes</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive extraction (caller-scoped reads, per-route record-access filters, Create/AppendTo checks) across a 1,485-line endpoint file with byte-for-byte REST preservation</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Events/EventEndpoints.cs, new Services/Events/** and the events tests; registers in WorkspaceModule.cs (no other Group A task edits it); does not edit Program.cs or EndpointMappingExtensions.cs (task 001)</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, refactoring, auth, tenant-isolation, integration-test</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extract the get, list, create and complete logic from the Api/Events/EventEndpoints.cs statics into an events capability that takes the request context (the IDecisionCapability pattern), keep every REST response byte-for-byte unchanged (frozen-bytes tests first), and add must-not-leak tests proving a caller never sees another user's private event through list or get.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Minimal API refactoring, Dataverse impersonation and caller-scoped authorization.</role>
+  <goal>IEventsCapability / EventsCapability own list, get, create and complete with their authorization; EventEndpoints' four handlers delegate to it; frozen-bytes tests recorded before the change pass after it; must-not-leak tests pass; tasks 025 and 036 can call the capability from MCP tools without copying checks.</goal>
+
+  <context>
+    <background>Spec FR-07 part 1 and FR-15. EventEndpoints.cs holds the logic in statics: list GetEventsAsync :437 (route :105), get GetEventByIdAsync :651 (:117), create CreateEventAsync :710 (:129, filter ValidateCreateEventRequestAsync :296), complete CompleteEventAsync :1318 (:170). The header (:29-40) documents the authorization: the list query runs impersonated as the caller; get and complete carry RecordRouteAccessAuthorizationFilter on sprk_events({id}) (no Read → uniform 404; Read without the right → 403); create checks the caller's Create privilege on sprk_event and AppendTo on the regarding record, then writes app-only. IEventDataverseService (src/server/shared/Spaarke.Dataverse/IEventDataverseService.cs) authenticates as the BFF identity. Reviews: unified-access-control-r2 (auth diff), ontology-platform-r1 (capability extraction).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Events/IEventsCapability.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Events/EventsCapability.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkspaceModule.cs (AddScoped&lt;IEventsCapability, EventsCapability&gt;)</file>
+      <file role="new">tests/integration/contract/Api/Events/EventRoutesContractBaselineTests.cs (frozen bytes, recorded before the refactor)</file>
+      <file role="new">tests/integration/auth/Events/EventCallerScopeTests.cs (must-not-leak)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs and DecisionCapability.cs (capability taking HttpContext/ClaimsPrincipal; registered SignalsModule.cs:138)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Signals/SignalRoutesContractBaselineTests.cs (frozen-bytes model)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Events/EventEndpointsAuthorizationContractTests.cs (existing authorization contract; must pass unchanged)</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">Record the frozen-bytes baselines (status code, headers that matter, and body bytes for success, 400, 403 and 404 cases of list, get, create and complete) BEFORE changing EventEndpoints.cs, commit them, and keep them unchanged afterwards (spec MUST: REST bytes unchanged).</constraint>
+    <constraint source="ADR-002">The capability is the single owner of event list/get/create/complete rules; EventEndpoints' four handlers become thin adapters that bind the request, call the capability with the request HttpContext, and map the result. Refile and due-assignee routes stay as they are (out of scope).</constraint>
+    <constraint source="ADR-008">The per-route checks (RecordRouteAccessAuthorizationFilter on get/complete, ValidateCreateEventRequestAsync on create, the impersonated list query) are reachable from the capability so an MCP tool gets them without a copy: either the capability enforces them and the REST filter calls the same shared method, or the filter stays and the capability calls the same method; never two implementations. Choose the option that keeps REST Dataverse call counts and bytes unchanged and record the choice.</constraint>
+    <constraint source="ADR-028">Every capability method takes the request HttpContext (or ClaimsPrincipal) from its caller and fails closed with UserContextRequired when it is null or unauthenticated; nothing falls back to an app-only read.</constraint>
+    <constraint source="project">Must-not-leak (FR-15): with two callers A and B and an event private to A, B's list never contains it (all pages, and the count) and B's get returns the uniform 404. If either proof fails, do not ship the extraction on top of a leak: change the read to run as the caller (spec Assumptions) and escalate for uac-r2 review before merging.</constraint>
+    <constraint source="project">Register only in WorkspaceModule.cs (or, if events services are registered elsewhere, that module; record which); do not edit Program.cs, EndpointMappingExtensions.cs, SignalsModule.cs or AuthorizationModule.cs.</constraint>
+    <constraint source="ADR-015">Logs added carry event id, caller-resolution outcome, row count, timing and reason codes only; no subject, description or regarding names.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master and /conflict-check. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/reuse-scan.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Write EventRoutesContractBaselineTests recording the current bytes for list, get, create and complete (success, 400, 403, 404); run them green against the unchanged code; commit.</step>
+    <step order="2">Write EventCallerScopeTests (must-not-leak for list incl. paging and count, and get) against the unchanged code; if they fail, stop and follow the must-not-leak constraint.</step>
+    <step order="3">Add IEventsCapability / EventsCapability; move the four handlers' logic into it per the ADR-008 constraint; register it.</step>
+    <step order="4">Turn the four handlers into thin adapters; run the baselines, the caller-scope tests, EventEndpointsAuthorizationContractTests and the existing events tests.</step>
+    <step order="5">Measure the publish-size delta; run the CVE check; write the proposed CAPABILITY-INDEX row in projects/spaarkeai-mcp-bff-api-r2/notes/capability-index-pending.md.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a must-not-leak proof fails on the unchanged code, STOP before refactoring: report the leak (it is a live defect), propose the run-as-caller change, and wait for uac-r2 / owner direction.</trigger>
+    <trigger>If keeping the REST bytes requires behaviour in the adapter beyond binding and mapping (a check, a retry, a write), STOP and escalate: the capability must be the single owner.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row "Tasks (events)": logic in EventEndpoints statics (:437, :651, :710, :1318) with 8 dependencies; verdict "Extend by extraction" (r1 B-1 style). CAPABILITY-INDEX: no events-capability row (grep "Event" .claude/patterns/CAPABILITY-INDEX.md).</existing>
+    <extension>The capability is the extension: the same rules move out of endpoint statics so REST and MCP call one owner; the statics cannot be called by an MCP tool without an HttpRequest binding and endpoint filters.</extension>
+    <cost-of-doing-nothing>Tasks 025 and 036 would copy endpoint logic and its authorization into tools, giving task create/complete two owners (ADR-002) and a second place for the caller-scope rule to drift.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/, dotnet test, dotnet publish</tool>
+    <tool name="terminal">bash scripts/quality/check-changed-cs-format.sh origin/master</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Events/IEventsCapability.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Events/EventsCapability.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</output>
+    <output type="test">tests/integration/contract/Api/Events/EventRoutesContractBaselineTests.cs</output>
+    <output type="test">tests/integration/auth/Events/EventCallerScopeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EventRoutesContractBaselineTests, committed before the refactor, pass unchanged after it for list, get, create and complete (success, 400, 403, 404).</criterion>
+    <criterion testable="true">EventEndpointsAuthorizationContractTests and the existing events tests pass unchanged.</criterion>
+    <criterion testable="true">Negative (must-not-leak): caller B's list (every page and the total count) never contains caller A's private event, and B's get on it returns the uniform 404.</criterion>
+    <criterion testable="true">Negative: a capability call with a null HttpContext or an unauthenticated principal returns UserContextRequired and makes no Dataverse call.</criterion>
+    <criterion testable="true">Negative: a create without Create privilege on sprk_event, or without AppendTo on the regarding record, is refused through the capability with the same reason as REST and writes nothing.</criterion>
+    <criterion testable="true">grep shows each of the four checks implemented once (no duplicated RecordRouteAccess or Create/AppendTo logic between EventEndpoints.cs and EventsCapability.cs).</criterion>
+    <criterion testable="true">The PR records the publish-size delta (total at or under 60 MB), no new HIGH CVE, and the uac-r2 and ontology-r1 reviews.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07, FR-15; plan risk R2. Two adversarial-verifier passes (auth, tenant-isolation). Seeding proof requested for the must-not-leak list test only: break the caller filter, confirm the test fails, restore.
+
+  Completion (2026-11-25):
+  - ADR-008 option: the filter stays and the capability calls the same decision methods (RecordRouteAccessAuthorizationFilter.DecideRouteRecordAsync / DecideDeclaredTargetAsync). Deviation: the REST handlers call the static *CoreAsync cores, not the IEventsCapability instance, so REST asks Dataverse exactly what it asked before; an ArchTest (EventsCapabilityCoreCallerGuardTests) keeps the ungated cores callable only from EventEndpoints.cs and EventsCapability.cs. Details: notes/decisions.md "2026-11-25 — Task 006".
+  - Frozen-bytes baselines 30/30 unchanged after the extraction. Must-not-leak: REST and capability (EventCallerScopeTests). Seeding proofs: list (caller filter broken → fails) and capability complete (Read asked instead of Write → fails).
+  - Test scope: capability Read-only complete test added per adversarial auth-pass F2 #1.
+  - Root CLAUDE.md §10: placement = existing Services/Events, no new project or package; publish size 41.61 MB → 41.62 MB (+11,232 bytes); no new HIGH CVE (no packages added). §11: IEventsCapability is the POML-mandated seam for MCP tools (precedent IDecisionCapability); without it a tool would copy the checks.
+  - Review pending: uac-r2, ontology-r1 (not messaged from this session).
+  - Filed in notes/defer-issues.md (GitHub issues not yet opened): DEF-006-01 pre-existing create regarding-name disclosure (AppendTo without Read; needs an owner decision; must land before the events create tool ships); DEF-006-02 pre-existing EventStatusDeprecationTests failure from scripts/demo-data.
+  - CAPABILITY-INDEX row proposed in notes/capability-index-pending.md (main session applies).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

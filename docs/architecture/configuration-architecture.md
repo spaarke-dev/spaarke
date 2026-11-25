@@ -27,8 +27,6 @@ The design follows ADR-010 (DI Minimalism) by using `ValidateOnStart()` with cus
 | DataverseOptions | `src/server/api/Sprk.Bff.Api/Configuration/DataverseOptions.cs` | Dataverse Web API credentials |
 | RedisOptions | `src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs` | Redis connection and instance naming |
 | ServiceBusOptions | `src/server/api/Sprk.Bff.Api/Configuration/ServiceBusOptions.cs` | Azure Service Bus queue names and concurrency |
-| AgentTokenOptions | `src/server/api/Sprk.Bff.Api/Configuration/AgentTokenOptions.cs` | M365 Copilot agent OBO token exchange settings |
-| AgentTokenOptionsValidator | `src/server/api/Sprk.Bff.Api/Configuration/AgentTokenOptions.cs` | Cross-property validation (trailing slash on Dataverse URL) |
 | AiSearchResilienceOptions | `src/server/api/Sprk.Bff.Api/Configuration/AiSearchResilienceOptions.cs` | Azure AI Search retry, circuit breaker, and timeout tuning |
 | CommunicationOptions | `src/server/api/Sprk.Bff.Api/Configuration/CommunicationOptions.cs` | Approved senders, webhook URL, archive container |
 | EmailProcessingOptions | `src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs` | Email-to-document processing: polling, webhooks, filtering, attachment rules |
@@ -85,7 +83,6 @@ Configuration resolution follows this sequence at startup and runtime:
 
 ## Known Pitfalls
 
-- **AgentToken trailing slash**: `DataverseEnvironmentUrl` must not end with `/` — the validator catches this but it causes silent scope construction failures if missed
 - **DocumentIntelligence conditional validation**: When `Enabled=false`, OpenAI endpoint/key validation is skipped. Toggling `Enabled` to `true` at runtime without setting credentials will fail
 - **Email attachment patterns**: `SignatureImagePatterns` and `TrackingPixelPatterns` use regex — invalid patterns cause runtime exceptions during email processing, not at startup
 - **Redis fallback**: When `Redis:Enabled=false`, the system uses in-memory cache. This is fine for dev but breaks distributed scenarios in production with multiple App Service instances

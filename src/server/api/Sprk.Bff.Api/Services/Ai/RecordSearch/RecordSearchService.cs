@@ -52,8 +52,8 @@ public sealed class RecordSearchService : IRecordSearchService
 
     // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
     // spaarke:tenant:{tenantId}:record-search:{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:v1
-    // NOTE: records-index has no tenantId field; tenant scoping here is for cache-key isolation
-    // (avoids cross-tenant cache poisoning) — security continues to be enforced at the Dataverse layer.
+    // Tenant scoping in the cache key avoids cross-tenant cache poisoning. It is separate from the
+    // tenantId search filter (class remarks), which is the search-layer tenant boundary.
     private const string CacheResource = "record-search";
     private const int CacheVersion = 1;
     private readonly DocumentIntelligenceOptions _docIntelOptions;
@@ -64,9 +64,8 @@ public sealed class RecordSearchService : IRecordSearchService
     // Required for the explicit-index path; the existing direct path never touches this field
     // (NFR-02 backward-compat).
     private readonly IKnowledgeDeploymentService _deploymentService;
-    // Consumed ONLY on the explicit-index path to derive tenantId for the resolver's cache key.
-    // The records-index does NOT have a tenantId field (per the class-level remarks above), so
-    // tenant isolation continues to be enforced at the Dataverse layer; tenantId here is purely
+    // On the explicit-index path, also used to derive tenantId for the resolver's cache key.
+    // This is separate from the tenantId search filter (class remarks): here tenantId is
     // a resolver cache-key isolator per (tenant, indexName) — see KnowledgeDeploymentService
     // GetOrCreateExplicitIndexClient. Optional so existing direct-path tests need not stand up
     // an HttpContext mock.
@@ -125,8 +124,8 @@ public sealed class RecordSearchService : IRecordSearchService
     /// is the 8th parameter and is consumed ONLY when <c>SearchIndexName</c> is non-empty,
     /// to derive the tenantId required by
     /// <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, CancellationToken)"/>
-    /// for per-(tenant, index) cache-key isolation. The records-index itself has no tenantId
-    /// field; tenant isolation is enforced at the Dataverse layer, not at the search layer.
+    /// for per-(tenant, index) cache-key isolation. (Separately, the records-index has a tenantId
+    /// field, and every search applies the tenantId filter described in the class remarks.)
     /// </para>
     /// <para>
     /// NFR-02 backward-compat: the existing direct path (when <c>SearchIndexName</c> is null
@@ -185,8 +184,8 @@ public sealed class RecordSearchService : IRecordSearchService
         try
         {
             // Step 1: Check Redis cache (FR-05 + ADR-014)
-            // Derive tenantId for cache-key isolation. Records-index has no tenantId field so
-            // this is purely cache-side scoping; security is enforced at Dataverse.
+            // Derive tenantId for cache-key isolation (cache-side scoping; the search-layer
+            // tenant boundary is the tenantId filter applied below).
             var tenantIdForCache = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
                 ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
                 ?? _noUserTenantFallback;
@@ -235,9 +234,9 @@ public sealed class RecordSearchService : IRecordSearchService
             if (!string.IsNullOrWhiteSpace(request.SearchIndexName))
             {
                 // Derive tenantId from the current HttpContext for resolver cache-key isolation.
-                // The records-index has no tenantId field; this string is NEVER applied as an
-                // OData filter — it is consumed only by KnowledgeDeploymentService for its
-                // {tenantId}:explicit:{indexName} cache key.
+                // This value is consumed only by KnowledgeDeploymentService for its
+                // {tenantId}:explicit:{indexName} cache key; the tenantId search filter is built
+                // separately.
                 var tenantId = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
                     ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
                     ?? "anonymous";

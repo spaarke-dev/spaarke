@@ -66,20 +66,23 @@ internal static class GoldenContract
         });
     }
 
-    internal static string BaselineDirectory
-    {
-        get
-        {
-            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            {
-                if (File.Exists(Path.Combine(dir.FullName, "config", "worklist.gridconfiguration.json")))
-                {
-                    return Path.Combine(dir.FullName, "tests", "integration", "contract", "Api", "Signals", "Baselines");
-                }
-            }
+    internal static string BaselineDirectory => BaselineDirectoryOf("Signals");
 
-            throw new InvalidOperationException("Repository root (config/worklist.gridconfiguration.json) not found.");
+    /// <summary>
+    /// <c>tests/integration/contract/Api/{area}/Baselines</c>: each route family keeps its golden files beside its own tests
+    /// (spaarkeai-mcp-bff-api-r2 task 006 added <c>Events</c>; the signal routes stay the default).
+    /// </summary>
+    internal static string BaselineDirectoryOf(string area)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "config", "worklist.gridconfiguration.json")))
+            {
+                return Path.Combine(dir.FullName, "tests", "integration", "contract", "Api", area, "Baselines");
+            }
         }
+
+        throw new InvalidOperationException("Repository root (config/worklist.gridconfiguration.json) not found.");
     }
 
     private static bool Recording =>
@@ -90,14 +93,19 @@ internal static class GoldenContract
     /// Compares <paramref name="observed"/> with <c>Baselines/{caseName}.json</c>: status, Content-Type and the normalised body, exactly.
     /// A missing file fails (unless a developer is recording).
     /// </summary>
-    internal static void AssertMatches(string caseName, Observed observed, bool generatedGuids = false)
+    /// <param name="caseName">The golden file's name, without extension.</param>
+    /// <param name="observed">What the route answered.</param>
+    /// <param name="generatedGuids">Replace every GUID by its order of first appearance (see the class remarks).</param>
+    /// <param name="area">The route family whose <c>Baselines/</c> folder holds the file (<see cref="BaselineDirectoryOf"/>).</param>
+    internal static void AssertMatches(string caseName, Observed observed, bool generatedGuids = false, string area = "Signals")
     {
         var body = Normalize(observed.Body, generatedGuids);
-        var path = Path.Combine(BaselineDirectory, caseName + ".json");
+        var directory = BaselineDirectoryOf(area);
+        var path = Path.Combine(directory, caseName + ".json");
 
         if (Recording)
         {
-            Directory.CreateDirectory(BaselineDirectory);
+            Directory.CreateDirectory(directory);
             File.WriteAllText(path, Envelope(caseName, observed.Status, observed.ContentType, body), new UTF8Encoding(false));
             return;
         }
