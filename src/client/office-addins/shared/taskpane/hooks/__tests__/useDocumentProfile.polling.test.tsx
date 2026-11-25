@@ -250,6 +250,51 @@ describe('useDocumentProfile — following a Generate Profile job (task 137, #10
     expect(mockGet.mock.calls.length).toBeGreaterThan(5); // still reading, well past where the first wait would have ended
   });
 
+  it('flags waitTimedOut only at the cap while Pending, and a re-read, a new request or a document change clears it', async () => {
+    const view = await renderOnAFailedDocument();
+    expect(view.result.current.waitTimedOut).toBe(false);
+    mockPost.mockResolvedValue({ documentId: DOC });
+    mockGet.mockResolvedValue(read(PENDING));
+
+    await act(async () => {
+      await view.result.current.generateProfile();
+    });
+    await advance(PROFILE_POLL_CAP_MS - PROFILE_POLL_INTERVAL_MS * 2);
+    expect(view.result.current.waitTimedOut).toBe(false);
+
+    await advance(PROFILE_POLL_INTERVAL_MS * 3);
+    expect(view.result.current.waitTimedOut).toBe(true);
+    expect(view.result.current.outcome).toEqual({ kind: 'status', status: 'Pending' });
+
+    act(() => view.result.current.refetch()); // Refresh
+    await settle();
+    expect(view.result.current.waitTimedOut).toBe(false);
+
+    await act(async () => {
+      await view.result.current.generateProfile(); // a new request starts a new wait
+    });
+    await advance(PROFILE_POLL_CAP_MS + PROFILE_POLL_INTERVAL_MS);
+    expect(view.result.current.waitTimedOut).toBe(true);
+
+    view.rerender({ id: OTHER_DOC });
+    await settle();
+    expect(view.result.current.waitTimedOut).toBe(false);
+  });
+
+  it('never flags waitTimedOut when the job finishes before the cap', async () => {
+    const view = await renderOnAFailedDocument();
+    mockPost.mockResolvedValueOnce({ documentId: DOC });
+    mockGet.mockResolvedValueOnce(completedRead());
+
+    await act(async () => {
+      await view.result.current.generateProfile();
+    });
+    await advance(PROFILE_POLL_CAP_MS * 2);
+
+    expect(view.result.current.outcome.kind).toBe('completed');
+    expect(view.result.current.waitTimedOut).toBe(false);
+  });
+
   it('a 202 that arrives after the user moved to another document changes nothing on screen and starts no wait', async () => {
     const view = await renderOnAFailedDocument();
     let resolvePost: (value: unknown) => void = () => {

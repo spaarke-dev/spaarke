@@ -114,6 +114,12 @@ export interface UseDocumentProfileResult {
    * `sprk_searchindexed` — the add-in never writes that field itself; it reads and re-polls.
    */
   refetch: () => void;
+  /**
+   * task 137: true when the wait for a Generate Profile job reached PROFILE_POLL_CAP_MS and the status is still
+   * Pending, so the job may never have started. Cleared by a new request, a document change, or a re-read
+   * (`refetch`). The pane shows a short non-error hint; it is never a Completed.
+   */
+  waitTimedOut: boolean;
 }
 
 /**
@@ -128,6 +134,8 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
   // The document whose profile job the pane is following after a 202; `run` counts the clicks so a second Generate
   // Profile restarts the wait. Undefined until a request is accepted.
   const [followed, setFollowed] = useState<{ documentId: string; run: number } | undefined>(undefined);
+  // True once the wait for a profile job reached its cap with the status still Pending (task 137 follow-up).
+  const [waitTimedOut, setWaitTimedOut] = useState(false);
   // The document the pane shows right now, for a Generate Profile request that returns after the user moved on.
   const shownDocumentId = useRef(documentId);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -187,6 +195,7 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
 
     let cancelled = false;
     setOutcome({ kind: 'loading' });
+    setWaitTimedOut(false); // a re-read (Refresh) answers the "taking longer" hint with a fresh status
 
     (async () => {
       try {
@@ -223,6 +232,7 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
   // at PROFILE_POLL_CAP_MS, on unmount, or when the document changes (the cleanup below; `followed` no longer matches).
   // The server writes Pending before it answers 202, so a read here never returns the status from before the click.
   useEffect(() => {
+    setWaitTimedOut(false); // a new wait, or none: no "taking longer" hint
     if (!documentId || !followed || followed.documentId !== documentId) {
       return;
     }
@@ -246,7 +256,10 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
       }
 
       if (Date.now() - startedAt >= PROFILE_POLL_CAP_MS) {
-        return; // the cap: the last status stays, which is Pending, never a made-up Completed
+        // The cap: the last status stays, which is Pending, never a made-up Completed. The job may never have started
+        // (dead-lettered, expired), so the pane says it is taking longer than expected.
+        setWaitTimedOut(true);
+        return;
       }
       timer = setTimeout(poll, PROFILE_POLL_INTERVAL_MS);
     };
@@ -309,5 +322,14 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
     setRefreshToken(token => token + 1);
   }, [documentId]);
 
-  return { outcome, generateProfile, isGenerating, generateError, searchIndexed, searchIndexName, refetch };
+  return {
+    outcome,
+    generateProfile,
+    isGenerating,
+    generateError,
+    searchIndexed,
+    searchIndexName,
+    refetch,
+    waitTimedOut,
+  };
 }
