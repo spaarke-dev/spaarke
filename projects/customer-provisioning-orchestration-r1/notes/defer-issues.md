@@ -10,6 +10,36 @@
 
 ## Open (in priority order)
 
+### ISS-044 — PRQ-C-03 ownership check fails on Windows (`curl -o /dev/null` under `MSYS_NO_PATHCONV`)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (every upgrade run from a Windows operator machine) |
+| **Filed** | 2026-11-25 |
+| **Source** | ACME upgrade run `85561c4a` prechecks (Step 1e-ter), 2026-11-25 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3183 |
+
+**Description**
+
+PRQ-C-03 (`scripts/provisioning-prereqs/prereqs.yaml:827`) checks whether an unavailable global name already belongs to the stamp with `curl -sS -o /dev/null -D - ...`. The skill runs recipes in Git Bash with `MSYS_NO_PATHCONV=1` (Step 0.5b), so `/dev/null` reaches the native `curl.exe` as a literal path it cannot write: curl exits 23 and the recipe reports each owned name as `UNAVAILABLE ... ownership GET ... failed (curl)`. The ISS-030 fix (PR #3015) therefore never takes effect on Windows. On the 2026-11-25 ACME run all three names (`sprkacmeprodsa`, `sprk-acme-prod-docintel`, `sprk-acme-prod-contentsafety`) were confirmed by hand in `rg-spaarke-acme-prod`.
+
+**Entry-points**
+
+- `scripts/provisioning-prereqs/prereqs.yaml:827`
+- `.claude/skills/provision-environment/SKILL.md` Step 0.5b (`$env:MSYS_NO_PATHCONV = '1'`)
+- Other `/dev/null` uses in the manifest are bash redirects and are not affected.
+
+**Suggested fix** (if known)
+
+Write the body to a `mktemp` file (removed afterwards) instead of passing `/dev/null` to a native exe; add a validate.ps1 lint for `-o /dev/null` in recipes.
+
+**Estimated effort**: 1 hour
+**Blockers**: none
+**Related**: ISS-030 (#2925, PR #3015)
+
+---
+
 ### ISS-043 — Users cannot set a contact's Contact Type (no role holds AppendTo on `sprk_contacttype_ref`)
 
 | Field | Value |
