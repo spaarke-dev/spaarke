@@ -86,18 +86,24 @@ The r2 tools could all go on `/mcp/legal-operations`, giving about 22 tools on o
 
 ### 4.5 Retiring the legacy agent
 
-> **Earlier owner direction (2026-11-24, recorded in `specialist-legal-agents-r1` current-task):** remove the "Spaarke AI" agent (tenant item D1) and its bot backend (A3); copilot-platform-coordination writes the removal steps. If that removal goes ahead now, the tenant registration is gone before parity, which is fine if no one relies on it outside the dev tenant. Steps 1–2 below then reduce to code removal after parity (Q6).
+**Decided (owner, 2026-11-25): remove it now, not after parity.** It isn't needed in the interim, and running it beside the new MCP tools risks the same request being answered twice. Order:
 
-1. All parity tools are live in dev and pass the routing eval.
-2. The owner removes the "Spaarke AI" tenant registration (an owner/admin action).
-3. One release later, remove `src/solutions/CopilotAgent/`, the `/api/agent/*` gateway and `AgentModule` registrations, closing #2575.
-4. Check whether `AgentTokenService` (#1523) and the Bot resource (`spaarke-bot-dev`) are still needed by anything (`specialist-legal-agents-r1` G9 may want a Bot front door later). Keep or remove by decision, not by default.
+1. **Tenant, now (owner/admin actions).** These are steps E1 and E2 of copilot-platform-coordination's removal runbook (`projects/copilot-platform-coordination/notes/removal-runbook.md` on `work/copilot-platform-coordination`):
+   - E1: uninstall and delete both "Spaarke AI" Registry rows;
+   - E2: after E1, delete the Azure Bot `spaarke-bot-dev`, its OAuth connection and Entra app `f257a0a9…`. Any Key Vault secret for that app is a separate step under CLAUDE.md §9.
+2. **Code, as Phase 0's first task.** Remove:
+   - `src/solutions/CopilotAgent/`;
+   - the `/api/agent/*` gateway (`Api/Agent/`) and `AgentModule` registrations;
+   - `infrastructure/bot-service/`.
+
+   This closes #2575, and #1523 (`AgentTokenService`) is decided with it. The 28-function checklist is preserved in `notes/legacy-agent-inventory-2026-11-25.md`, so the code is no longer needed as a reference. If `specialist-legal-agents-r1` later builds a Spaarke runtime agent (its G9), it needs a new Agents SDK front door anyway: the April handler was never a live Bot endpoint.
+3. Users get the MCP tools as each phase ships; there is no parallel period.
 
 ## 5. Component justification (CLAUDE.md §11), summary
 
 | New surface | Existing | Extension? | Cost of doing nothing |
 |---|---|---|---|
-| ~17 MCP tools | The REST routes and services above; r1's MCP host | Yes: each tool is an adapter on the existing host and service, with no new service where one exists | Copilot users without `@Spaarke AI` can't reach Spaarke data; the legacy agent can't be retired |
+| ~17 MCP tools | The REST routes and services above; r1's MCP host | Yes: each tool is an adapter on the existing host and service, with no new service where one exists | With the legacy agent removed (§4.5), Copilot users can't reach Spaarke data beyond decisions |
 | Long-running pattern (§4.2) | REST start + status pair | Reuse the pair | Playbook and analysis tools time out in Copilot |
 | Caller-scope fixes (§4.3) | `IEventDataverseService` filters | Extend the service | A tool could return rows the caller may not see |
 
@@ -115,7 +121,8 @@ BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the exis
 
 ## 7. Phasing (proposal)
 
-- **Phase 0, spikes:**
+- **Phase 0, legacy removal and spikes:**
+  - remove the legacy agent code, gateway and bot infrastructure (§4.5 step 2; BFF change: tests, publish-size delta, auth review);
   - long-running pattern (§4.2);
   - routing eval at increasing tool counts (§4.4);
   - events caller-scope proof (§4.3);
@@ -123,7 +130,6 @@ BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the exis
 - **Phase 1, read tools:** search, documents, records, playbook list, tasks (read), portfolio, briefing.
 - **Phase 2, long-running and AI:** playbook run and status, analysis start and status, matter summary, matter finance.
 - **Phase 3, writes:** create and complete task; email per Q4.
-- **Phase 4, retirement:** tenant registration removed, then code removal (§4.5).
 
 ## 8. ADR tensions
 
@@ -138,5 +144,5 @@ BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the exis
 3. **Long-running pattern:** A, start and poll (recommended), or spike B first?
 4. **Email:** expose `sendCommunication` as an app-only widget write, draft-only, or defer?
 5. **Widgets:** which tools get one in r2: briefing, search results, task list?
-6. **Agent removal order:** remove the tenant registration now, per the 2026-11-24 direction, or keep it until the parity tools are live?
+6. ~~**Agent removal order**~~ **Decided 2026-11-25: remove now** (§4.5).
 7. **Timing:** start the design-to-spec now and execution after r1's wrap-up (recommended), or wait for r1 to merge first?
