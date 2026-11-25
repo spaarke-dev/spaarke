@@ -1,17 +1,17 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-25 (project-pipeline Step 2 Part 2 + Step 3 artifacts written; not yet committed)
-> **Phase**: planning complete; execution not started.
+> **Last Updated**: 2026-11-25 (project-pipeline Step 5: Phase 0 wave 1 dispatched)
+> **Phase**: Phase 0 executing.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
-| **Active task** | none (no task in progress) |
-| **Status** | none |
-| **Active work** | `/project-pipeline` for this project, owner said "Yes, run it". Step 2 Part 2 (plan.md, CLAUDE.md, README.md, this file) and Step 3 (35 POMLs, `tasks/TASK-INDEX.md`, lint PASS) are written by the planning agent |
-| **Next** | Main session: review artifacts; Step 4: commit + push, add `projects/INDEX.md` row; Step 4.2: sync #3150 (already registered, Epic #421), `gh label create spaarkeai-mcp-bff-api-r2 --force`, `python scripts/ai-cost/backfill-tasks-planned.py spaarkeai-mcp-bff-api-r2 --apply`, VERIFY; Step 5: Phase 0 Wave 1 = 001, 002, 005, 006, 008, 009 (Wave 2 = 004, 007, 010, 011, 012; 003 in the main session after 001 + 002); build between waves; deploys wait for owner go + runbook E1 |
-| **Uncommitted** | `README.md`, `plan.md`, `CLAUDE.md`, `current-task.md`, `notes/decisions.md`, `notes/*/.gitkeep`, `tasks/*.poml`, `tasks/TASK-INDEX.md` |
-| **Branch state** | master merged in (7879ff3eff), pushed; baseline BFF build 0/0 |
+| **Active task** | Phase 0 wave 1 (parallel sub-agents, each in its own isolated agent worktree under `C:\code_files\spaarke\.claude\worktrees\agent-*`, committing to its own branch; not pushed) |
+| **Status** | 001, 002, 005, 006 running (🔄 in TASK-INDEX). 008, 009 queued: the session cap is 4 concurrent sub-agents |
+| **Active work** | `/project-pipeline` Step 5. Steps 2–4.2 done: artifacts committed (cd7cf78b70) and pushed; INDEX.md row added; #3150 synced (Task Count 35, Tasks Planned 35); label created |
+| **Next** | As each agent finishes: review its result, merge its branch into `work/spaarkeai-mcp-bff-api-r2` (merge, never rebase), mark the task in TASK-INDEX, dispatch 008 then 009 into the free slots. After wave 1: `dotnet build src/server/api/Sprk.Bff.Api/`, run missing adversarial-verifier passes, then wave 2 (004, 007, 010, 011, 012), and 003 in the main session after 001 + 002. 005 + 012 dev schema steps need the owner's go; 019 needs runbook E1 + per-SHA go via uac-r2 |
+| **Uncommitted** | `tasks/TASK-INDEX.md` (🔄 marks), this file |
+| **Branch state** | `cd7cf78b70` pushed; master merged in at 7879ff3eff |
 
 ## Task outline (final: `tasks/TASK-INDEX.md`)
 - Phase 0 (now, parallel with r1, no r1 files): 001–012, deploy 019.
