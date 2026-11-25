@@ -74,7 +74,7 @@ public partial class RouteAuthorizationGuardTests
         new McpTool("GetDecisionPlanTool", "", "IDecisionCapability",
             "FR-06, app-only and read-only: the Signal's decision plan, suppression and full row as the caller through IDecisionCapability "
             + "(GetPlanAndSuppressionAsync: the REST plan and suppression routes' answers with one Signal access check, NFR-01; it also writes "
-            + "the plan-read stamp). Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
+            + "the plan-read stamp), then the row through GetWorkItemAsync (the caller's lanes read narrowed to that Signal). Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
         new McpTool("SearchDecisionLookupTool", "", "IDecisionLookupSearch",
             "FR-07, app-only and read-only: the wizard's person, budget and firm search as the caller through IDecisionLookupSearch (the REST "
             + "lookup route's service); the plan names the table and scope. Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
