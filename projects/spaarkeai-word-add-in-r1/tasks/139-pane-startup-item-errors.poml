@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="139" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Pane start-up: show the real reason, offer Retry instead of Sign in, and follow the selected email</title>
+    <phase>Phase 7: fixes before close (owner dev check of 136–138, owner go 2026-11-25)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in both panes' start-up; tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only, well-specified, with the defect located to the line.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>office-addins, react, frontend</tags>
+  </metadata>
+
+  <prompt>The owner's dev check, 2026-11-25. In Outlook on the web, the owner opened the pane on a newly arrived email and got the Welcome / Sign in screen with "Failed to initialize". About 2 minutes later the pane reloaded and worked. The owner's go was "Yes proceed" to the recommendation: fix it here.
+
+Found in code at master aa933c09e6:
+- `App.tsx` `initializeApp` catches with `err instanceof Error ? err.message : 'Failed to initialize'`.
+- `OutlookAdapter` throws PLAIN OBJECTS: `createHostAdapterError` returns `{ code, message, innerError }`. Every adapter failure (`NO_ITEM_SELECTED`, `NOT_INITIALIZED`, `CONTENT_RETRIEVAL_FAILED`, `UNKNOWN_ERROR`) therefore loses its message, and the pane shows the Sign in screen although sign-in was not the problem.
+- The Outlook manifest sets SupportsPinning, but nothing in the add-in handles `Office.EventType.ItemChanged`. A pinned pane is not reloaded when the user selects another email, and `mailbox.item` can be null (no item, or several selected) when the pane starts.
+
+Neither the start-up block nor the adapter changed in tasks 136–138; this defect predates them.</prompt>
+
+  <goal>A start-up failure says what went wrong and offers Retry, never a misleading Sign in. With no email selected, the pane says to select one. When the user selects a different email, the Outlook pane starts again on that email, as if freshly opened, with no sign-in prompt.</goal>
+
+  <constraints>
+    <constraint source="project">Keep the error's own text. Read `message` from any thrown value that carries a string `message` (Error or the adapter's `HostAdapterError` shape); use a generic sentence only when there is none. Prefer one small helper (for example in `utils/errorMessages.ts`, which already has `describeFetchFailure`) over ad-hoc checks. Do not change `createHostAdapterError`'s shape: other callers and tests read `code`.</constraint>
+    <constraint source="project">A start-up failure that is not a sign-in failure shows the reason with a Retry action that re-runs `initializeApp`. The Sign in screen is for an unauthenticated user only. `NO_ITEM_SELECTED` shows a plain "Select an email to use Spaarke." style message with Retry, not an error about the add-in.</constraint>
+    <constraint source="project">Outlook only: register an `ItemChanged` handler once (`Office.context.mailbox.addHandlerAsync`) where the Outlook pane boots (`outlook/taskpane/index.tsx`). On an item change, start the pane fresh on the new item: remount `App` (for example a changing React `key`), so every per-email state (save state, document identity, saved context, To Do seed) resets exactly as on a fresh open. Sign-in state lives in `authService` and must survive: no sign-in prompt, no re-initialize of auth. A null new item shows the select-an-email message. If `addHandlerAsync` is unavailable or fails, log and carry on (the pane works as today). Word is unchanged except for the shared error-text and Retry fix.</constraint>
+    <constraint source="project">An item change while a save or a To Do create is in flight must not corrupt it: remounting cancels the UI only; the server call that is already sent completes on its own. Do not add new cancellation to in-flight requests.</constraint>
+    <constraint source="ADR-012 / ADR-021">Fluent v9 components only (`MessageBar` with `MessageBarActions`, as App.tsx already uses for the sign-in banner). No new shared-library imports.</constraint>
+    <constraint source="project">Fail-before tests (jest, new files). Do not touch fm-owned server paths; this task changes no server code. Do not edit TASK-INDEX.md, current-task.md, the project CLAUDE.md or ci-gated-suites.txt.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file>src/client/office-addins/shared/adapters/OutlookAdapter.ts</file>
+      <file>src/client/office-addins/outlook/taskpane/index.tsx</file>
+      <file>src/client/office-addins/shared/taskpane/utils/errorMessages.ts</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>src/client/office-addins/shared/__mocks__/office-js.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read the start-up path in App.tsx (`initializeApp` and the render branches for `error` and `isAuthenticated`) and the Outlook boot in outlook/taskpane/index.tsx.</step>
+    <step>Reproduce first: a jest test where the adapter's `getItemId` throws `{ code: 'NO_ITEM_SELECTED', message: '…' }` shows "Failed to initialize" and the Sign in screen today (red), then the select-an-email message with Retry after the fix (green). Add one for a non-sign-in adapter failure that shows its own message with Retry.</step>
+    <step>Fix the message extraction and the render branch; wire Retry to `initializeApp`.</step>
+    <step>Outlook: register the ItemChanged handler and remount App on change. Tests: the handler is registered once; an item change remounts App (per-email state reset, for example a saved-state banner disappears); `authService.signIn` and auth initialize are not called again; a failing `addHandlerAsync` leaves the pane working.</step>
+    <step>Gates: office-addins jest (all suites), typecheck (0 production errors; no new errors in changed files), ESLint + Prettier, webpack production build with the CI env, one adversarial review of the diff.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">An adapter failure thrown as `{ code, message }` during start-up shows its own message, not "Failed to initialize".</criterion>
+    <criterion testable="true">`NO_ITEM_SELECTED` at start-up shows a select-an-email message with Retry; Retry re-runs start-up and, with an item now present, the pane opens normally.</criterion>
+    <criterion testable="true">A non-sign-in start-up failure offers Retry and does not offer Sign in as the remedy. An unauthenticated user with no start-up failure still sees the Sign in screen exactly as before.</criterion>
+    <criterion testable="true">Outlook: an ItemChanged event remounts the pane on the new item; per-email state from the previous email is gone; no sign-in or auth initialize call is made.</criterion>
+    <criterion testable="true">Outlook: an ItemChanged event with no new item shows the select-an-email message.</criterion>
+    <criterion testable="true">Negative: if `addHandlerAsync` is missing or fails, the pane starts and works as today. Word's start-up behaviour is unchanged apart from the error text and Retry.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>Modifies App.tsx start-up, the Outlook boot and the existing error-message helper.</existing>
+    <extension>Extends them; the one new surface is an ItemChanged registration in the Outlook boot, which the pinning the manifest already declares requires.</extension>
+    <cost-of-doing-nothing>A user who opens the pane while Outlook has no email ready sees "Failed to initialize" and a Sign in button that does not help; a pinned pane keeps the previous email's state when the user moves to another email.</cost-of-doing-nothing>
+  </justification>
+
+  <notes></notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
