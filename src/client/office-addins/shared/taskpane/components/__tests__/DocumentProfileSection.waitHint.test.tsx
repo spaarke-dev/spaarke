@@ -37,7 +37,7 @@ const FAILED = 100000004;
 const PENDING = 100000001;
 const COMPLETED = 100000002;
 
-const HINT = /taking longer than expected\. Check again later or press Refresh\./i;
+const HINT = /taking longer than expected. Check back in a few minutes./i;
 
 const renderSection = (ui: React.ReactElement) => render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
 

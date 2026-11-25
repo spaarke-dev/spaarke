@@ -334,7 +334,7 @@ export function DocumentProfileSection({
                 may still finish, so the status stays and Generate Profile stays enabled. */}
             {waitTimedOut && outcome.status === 'Pending' && (
               <Text size={200} className={styles.disabledReason} role="status">
-                This is taking longer than expected. Check again later or press Refresh.
+                This is taking longer than expected. Check back in a few minutes.
               </Text>
             )}
           </>
