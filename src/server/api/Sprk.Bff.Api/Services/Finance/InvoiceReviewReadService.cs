@@ -7,6 +7,8 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -117,7 +119,9 @@ public sealed record ReviewTimekeeperDto(Guid Id, string? Name, int? Classificat
 /// <param name="Code">The resolved code the AI chose from the line's code set; null when none.</param>
 /// <param name="FirmCode">The code the firm supplied, when present.</param>
 /// <param name="Mismatch">The AI code and the firm's code differ.</param>
-public sealed record ReviewCodeDto(string? AsBilled, string? Code, string? FirmCode, bool Mismatch);
+/// <param name="Description">The description of <paramref name="Code"/> in the code set the line was coded with; null when the set, the code or its description is not known.</param>
+/// <param name="FirmDescription">The same for <paramref name="FirmCode"/>.</param>
+public sealed record ReviewCodeDto(string? AsBilled, string? Code, string? FirmCode, bool Mismatch, string? Description = null, string? FirmDescription = null);
 
 /// <param name="Confidence">The coding confidence (<c>sprk_codingconfidence</c>), 0 to 1.</param>
 /// <param name="CodeSetNeedsReview">The code set was an AI suggestion (FR-22).</param>
@@ -225,7 +229,9 @@ internal sealed record LineExtraction(
     (string? Code, string? FirmCode, bool Mismatch) Task,
     (string? Code, string? FirmCode, bool Mismatch) Activity,
     (string? Code, string? FirmCode, bool Mismatch) Expense,
-    IReadOnlyList<string> Refused)
+    IReadOnlyList<string> Refused,
+    Guid? CodeSetId = null,
+    CodeSetSource CodeSetSource = CodeSetSource.SettingsDefault)
 {
     public static LineExtraction Empty { get; } = new(
         new Dictionary<string, ReviewFieldDto>(), null, false, false, null, default, default, default, []);
@@ -295,7 +301,9 @@ internal sealed record LineExtraction(
                 Code(coding, "task"),
                 Code(coding, "activity"),
                 Code(coding, "expense"),
-                refused);
+                refused,
+                Text(coding, "codeSetId") is { } setText && System.Guid.TryParse(setText, CultureInfo.InvariantCulture, out var setId) ? setId : null,
+                Enum.TryParse<CodeSetSource>(Text(coding, "codeSetSource"), out var setSource) ? setSource : CodeSetSource.SettingsDefault);
         }
         catch (JsonException)
         {
@@ -410,10 +418,12 @@ public sealed class InvoiceReviewReadService
     private readonly IDataverseUserClient _user;
     private readonly EarlierInvoiceReadability _earlierInvoices;
     private readonly ProcedureChangeBanner _procedureChange;
+    private readonly CodeSetResolver _codeSets;
     private readonly ILogger<InvoiceReviewReadService> _logger;
 
     /// <param name="user">The CALLER's Dataverse client (OBO): the D-176 earlier-invoice check reads with it, never app-only (ADR-028).</param>
     /// <param name="procedureChange">Task 113: the read-time Procedure-change banner, computed app-only for an internal caller of an open invoice.</param>
+    /// <param name="codeSets">Loads the code set a line was coded with, so the review can show each code with its description.</param>
     public InvoiceReviewReadService(
         IGenericEntityService entities,
         AuthorizationService authorization,
@@ -421,6 +431,7 @@ public sealed class InvoiceReviewReadService
         IDataverseUserClient user,
         EarlierInvoiceReadability earlierInvoices,
         ProcedureChangeBanner procedureChange,
+        CodeSetResolver codeSets,
         ILogger<InvoiceReviewReadService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -429,6 +440,7 @@ public sealed class InvoiceReviewReadService
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _earlierInvoices = earlierInvoices ?? throw new ArgumentNullException(nameof(earlierInvoices));
         _procedureChange = procedureChange ?? throw new ArgumentNullException(nameof(procedureChange));
+        _codeSets = codeSets ?? throw new ArgumentNullException(nameof(codeSets));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -483,6 +495,9 @@ public sealed class InvoiceReviewReadService
         var parsed = submission?.Findings;
         var withheld = await DuplicateGroupsWithheldAsync(parsed, invoiceId, ct).ConfigureAwait(false);
         var bySequence = lineRows.ToDictionary(l => l.Id, l => l.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0);
+        var extractions = lineRows.ToDictionary(
+            l => l.Id, l => LineExtraction.Parse(l.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence), threshold));
+        var descriptions = await LoadCodeDescriptionsAsync(extractions.Values, ct).ConfigureAwait(false);
         var lines = new List<ReviewLineDto>(lineRows.Count);
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
         {
@@ -490,7 +505,7 @@ public sealed class InvoiceReviewReadService
             // The plan and the findings are both keyed on the line INDEX (D-176 K4): a row whose sequence differs from the findings' index cannot pair one index's findings with another's plan sentence.
             var planSubject = submission is null ? row.Id : InvoiceSubmissionPersister.LineIdFor(submission.Dto.SubmissionId, sequence - 1);
             var findings = FindingsFor(parsed, "Line", sequence - 1, planSubject, overridden, withheld);
-            lines.Add(ToLine(row, sequence, findings, LineFindingsFor(parsed, sequence - 1), roster: rosterTask.Result, threshold));
+            lines.Add(ToLine(row, sequence, findings, LineFindingsFor(parsed, sequence - 1), roster: rosterTask.Result, extractions[row.Id], descriptions));
         }
 
         var invoiceFindings = FindingsFor(parsed, "Invoice", null, invoiceId, overridden, withheld);
@@ -749,6 +764,55 @@ public sealed class InvoiceReviewReadService
         return rows.ToDictionary(r => r.Id, r => ((string?)r.GetAttributeValue<string>("sprk_name"), (int?)r.GetAttributeValue<OptionSetValue>("sprk_classification")?.Value));
     }
 
+    /// <summary>
+    /// The descriptions of the codes the lines were coded with: each DISTINCT recorded code set is loaded once through
+    /// <see cref="CodeSetResolver.LoadRecordedAsync"/> (the set the coding recorded, no second resolution order). A set that is missing, inactive or
+    /// unreadable leaves its lines with no descriptions (a warning, once per set): the page still loads.
+    /// </summary>
+    private async Task<CodeDescriptions> LoadCodeDescriptionsAsync(IEnumerable<LineExtraction> extractions, CancellationToken ct)
+    {
+        var sets = new Dictionary<(Guid, CodeSetSource), SetDescriptions?>();
+        foreach (var key in extractions.Where(e => e.CodeSetId is { } id && id != Guid.Empty).Select(e => (e.CodeSetId!.Value, e.CodeSetSource)).Distinct())
+        {
+            try
+            {
+                var set = await _codeSets.LoadRecordedAsync(key.Item1, key.Item2, ct).ConfigureAwait(false);
+                sets[key] = set is null ? null : new SetDescriptions(Index(set.TaskCodes), Index(set.ActivityCodes), Index(set.ExpenseCodes));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice review: the code set {CodeSetId} could not be read ({ExceptionType}); its codes are shown without descriptions.", key.Item1, ex.GetType().Name);
+                sets[key] = null;
+            }
+        }
+
+        return new CodeDescriptions(sets);
+    }
+
+    private static Dictionary<string, string> Index(IReadOnlyList<InvoiceCodeOption> options)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in options)
+        {
+            if (!string.IsNullOrWhiteSpace(option.Description))
+            {
+                map.TryAdd(option.Code.Trim(), option.Description.Trim());
+            }
+        }
+
+        return map;
+    }
+
+    /// <summary>One code set's descriptions by code (case-insensitive), per kind.</summary>
+    private sealed record SetDescriptions(IReadOnlyDictionary<string, string> Task, IReadOnlyDictionary<string, string> Activity, IReadOnlyDictionary<string, string> Expense);
+
+    /// <summary>The loaded sets of one review, by the (set, source) a line recorded; null where the set could not be loaded.</summary>
+    private sealed class CodeDescriptions(Dictionary<(Guid, CodeSetSource), SetDescriptions?> sets)
+    {
+        public SetDescriptions? For(LineExtraction extraction) =>
+            extraction.CodeSetId is { } id && sets.TryGetValue((id, extraction.CodeSetSource), out var set) ? set : null;
+    }
+
     /// <summary>The reliability threshold of the eBilling settings (a cached read). A fault yields null: the low-confidence marker is then off, the page still loads.</summary>
     private async Task<decimal?> ReadThresholdAsync(CancellationToken ct)
     {
@@ -812,18 +876,25 @@ public sealed class InvoiceReviewReadService
             held);
     }
 
+    private static ReviewCodeDto CodeOf(string? asBilled, (string? Code, string? FirmCode, bool Mismatch) coded, IReadOnlyDictionary<string, string>? descriptions) =>
+        new(asBilled, coded.Code, coded.FirmCode, coded.Mismatch, DescriptionOf(descriptions, coded.Code), DescriptionOf(descriptions, coded.FirmCode));
+
+    private static string? DescriptionOf(IReadOnlyDictionary<string, string>? descriptions, string? code) =>
+        descriptions is not null && code?.Trim() is { Length: > 0 } key && descriptions.TryGetValue(key, out var text) ? text : null;
+
     private static ReviewLineDto ToLine(
         Entity row,
         int sequence,
         IReadOnlyList<ReviewFindingDto> findings,
         IReadOnlyList<ReviewLineFindingDto> lineFindings,
         Dictionary<Guid, (string? Name, int? Classification)> roster,
-        decimal? threshold)
+        LineExtraction extraction,
+        CodeDescriptions descriptions)
     {
         var type = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value;
         var status = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;
         var statusName = status is { } s && Enum.IsDefined(typeof(InvoiceLineStatus), s) ? ((InvoiceLineStatus)s).ToString() : "Unknown";
-        var extraction = LineExtraction.Parse(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence), threshold);
+        var catalog = descriptions.For(extraction);
         var timekeeperId = row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id;
         var by = row.GetAttributeValue<EntityReference>(LineReviewedBy);
         var severity = findings.Select(f => f.Severity).Where(v => v is not null).OrderByDescending(SeverityRank).FirstOrDefault();
@@ -843,9 +914,9 @@ public sealed class InvoiceReviewReadService
             Money(row, InvoiceTotalsService.LineAmount) ?? 0m,
             row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription),
             new ReviewCodesDto(
-                new ReviewCodeDto(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled), extraction.Task.Code, extraction.Task.FirmCode, extraction.Task.Mismatch),
-                new ReviewCodeDto(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled), extraction.Activity.Code, extraction.Activity.FirmCode, extraction.Activity.Mismatch),
-                new ReviewCodeDto(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled), extraction.Expense.Code, extraction.Expense.FirmCode, extraction.Expense.Mismatch),
+                CodeOf(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled), extraction.Task, catalog?.Task),
+                CodeOf(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled), extraction.Activity, catalog?.Activity),
+                CodeOf(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled), extraction.Expense, catalog?.Expense),
                 DecimalOf(row, InvoiceSubmissionPersister.LineCodingConfidence) ?? extraction.CodingConfidence,
                 extraction.CodeSetNeedsReview,
                 extraction.NotCoded,
