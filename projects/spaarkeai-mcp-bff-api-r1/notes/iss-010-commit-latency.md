@@ -78,3 +78,16 @@
   - C: access memo, designed with uac-r2 first; two auth review passes.
   - D: repeats inside create, scoped from A's numbers.
   - E: verify and deliver.
+
+## uac-r2's design for C (2026-11-25): build it here; uac-r2 reviews the design note, then the diff as an access gate; plus one Opus adversarial review here
+
+- **No cross-cutting "a write happened" signal.** A writer that forgets to raise it leaves a stale allow, which is a security bug.
+- **(a) Privilege-set asks** (`RetrieveUserSetOfPrivilegesByNames`, `CallerHoldsPrivilegeAsync`): memo per request. A commit never edits roles or team membership.
+- **(b) `sprk_recordtype_refs` and other config or metadata reads:** memo per request. These are not access.
+- **(c) Record access** (`RetrievePrincipalAccess` and the probe): a memo OWNED BY THE COMMIT ORCHESTRATOR, keyed (caller, table, record, right). The orchestrator clears it after every step that performs any write, whoever the writer is. Preflight answers carry into execute up to the first writing step. This covers the execute recheck and the four AppendTo asks before the first create.
+- **(d) Never cache a fault.** A denial is reused only inside the same no-write window.
+- **(e) Tests:**
+  - must-fire: an earlier step's write removes access (restamp to Secure or Restricted), and the later step re-asks and is refused;
+  - must-not-fire: two steps with no write between them make one call;
+  - fault path: a fault is not cached.
+- **Sequence:** part 2 PR after part 1 (A+B). The design note goes to uac-r2 first.
