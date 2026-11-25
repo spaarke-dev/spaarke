@@ -1,7 +1,7 @@
 # sprk_billingexport (Billing Export)
 
 > **Project**: ebilling-r1, task 023 (FR-13, FR-41, D-21, D-56)
-> **Last Updated**: 2026-11-02 (task 151c-2: `sprk_communication.sprk_billingexport`)
+> **Last Updated**: 2026-11-25 (task 189: export files are Stored Files); 2026-11-02 (task 151c-2: `sprk_communication.sprk_billingexport`)
 > **Script**: `scripts/ebilling/Deploy-EbillingExportSchema.ps1` (idempotent, additive; a second run changes nothing)
 > **Solution**: `SpaarkeMaster` (unmanaged, in dev). Solution source, forms and views are synced by task 029.
 
@@ -30,12 +30,14 @@ All use delete = RemoveLink and NoCascade for assign, merge, reparent, share and
 
 | On | Logical name | Target | Relationship | Notes |
 |---|---|---|---|---|
-| `sprk_billingexport` | `sprk_csvdocument` | `sprk_document` | `sprk_billingexport_csvdocument_document` | The CSV file, stored as a Document in the E-Billing Output Files container (D-44, D-55). |
-| `sprk_billingexport` | `sprk_jsondocument` | `sprk_document` | `sprk_billingexport_jsondocument_document` | The JSON file, same container. |
+| `sprk_billingexport` | `sprk_csvdocument` | `sprk_document` | `sprk_billingexport_csvdocument_document` | **Retired and unused (EB-D-148).** It held the CSV file as a Document in a SharePoint Embedded container. The BFF no longer reads or writes it; the file is a Stored File (below). Still deployed; removal is owner-gated. |
+| `sprk_billingexport` | `sprk_jsondocument` | `sprk_document` | `sprk_billingexport_jsondocument_document` | **Retired and unused (EB-D-148).** As above, for the JSON file. |
 | `sprk_invoice` | `sprk_billingexport` ("Export Batch") | `sprk_billingexport` | `sprk_invoice_billingexport_billingexport` | See "Invoice in one batch" below. |
 | `sprk_communication` | `sprk_billingexport` ("Export Batch") | `sprk_billingexport` | `sprk_communication_billingexport_billingexport` | Task 151c-2 (EB-D-182): the AP email sent for the batch. See "Email to batch reference" below. |
 
-FR-13 says "file document" (singular); FR-41 produces a CSV and a JSON file, so there is one document lookup per format and `sprk_formats` records which files a batch produced.
+## Export files (EB-D-148)
+
+The CSV and JSON files of a batch are [Stored File](sprk_storedfile.md) rows: purpose Export file, parent `sprk_billingexport`, Firm-visible No, bytes in the `billing-exports` blob container. `ApExportService` (`src/server/api/Sprk.Bff.Api/Services/Finance/ApExportService.cs`) creates them through `StoredFileService.CreateForAppAsync` when the batch is generated. They are internal only: the download is the internal route `GET /api/finance/files/{fileId}/content` and no firm route serves them. `sprk_formats` records which files a batch produced. See [EBILLING-FILE-STORE.md](../architecture/EBILLING-FILE-STORE.md).
 
 ## Email to batch reference (task 151c-2)
 
@@ -52,5 +54,5 @@ The script stops with exit 2 before any write if `sprk_invoice` already carries 
 ## Notes for later tasks
 
 - A `Failed` batch holds no moved invoices; task 150 owns that rule.
-- Not in the secure-record family (task 013): its only lookups are the export documents, and a batch spans many core records, so no single secure root owns it and the Secure Record team never owns a row. Whether a batch of secure invoices needs its own read restriction is an open owner / unified-access-control-r2 question (task 013 notes, defer-issues). It does not carry `sprk_createdbyperson`.
+- Not in the secure-record family (task 013): it holds no lookup to a core record (the retired document lookups aside), and a batch spans many core records, so no single secure root owns it and the Secure Record team never owns a row. Whether a batch of secure invoices needs its own read restriction is an open owner / unified-access-control-r2 question (task 013 notes, defer-issues). It does not carry `sprk_createdbyperson`.
 - The AP mapping default is the D-56 column set; the mapping itself is configuration (the settings record, D-59), and this table stores only the snapshot used.

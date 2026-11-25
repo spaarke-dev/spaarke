@@ -37,8 +37,9 @@ export interface InvoiceReviewWithDecisionsProps extends Pick<InvoiceReviewPageP
  * while the invoice needs its firm. The state is read inside the provider, so this sits between the provider and the page.
  */
 function ReviewPageWithApproval(props: InvoiceReviewPageProps) {
-  const { state } = useApproval();
-  return <InvoiceReviewPage {...props} firmNeeded={state?.firmNeeded === true} />;
+  const { state, refresh } = useApproval();
+  // ISS-014: `refresh` lets the page re-read the approval state while the firm is needed (a firm set elsewhere opens the actions).
+  return <InvoiceReviewPage {...props} firmNeeded={state?.firmNeeded === true} refreshApproval={refresh} />;
 }
 
 export function InvoiceReviewWithDecisions({ invoiceId, initialLineId, api, decisionApi, openRecord, pollIntervalMs, openCorrectionWizard }: InvoiceReviewWithDecisionsProps) {
