@@ -384,6 +384,69 @@ public class ScheduledJobHostTests
         fake.LastContext.Parameters["jobId"].Should().Be("trigger-target");
     }
 
+    // #3125 / DI-175: a manual run started inside the trigger request must not inherit the request's Activity,
+    // or the exporter's trace sampling drops every log line of a run that can last minutes.
+    [Fact]
+    public async Task TriggerNowAsync_WithAmbientRequestActivity_RunsHandlerWithNoInheritedActivity_3125()
+    {
+        // Arrange — an ambient Activity stands in for the POST /trigger request's server activity.
+        var observed = new TaskCompletionSource<(bool Captured, Activity? Current)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registry = new ScheduledJobRegistry();
+        registry.Register(new FakeScheduledJob("activity-job", (_, _) =>
+        {
+            observed.TrySetResult((true, Activity.Current));
+            return Task.FromResult(new JobRunResult(true, null, 1, TimeSpan.FromMilliseconds(1)));
+        }));
+        var store = new InMemoryBackgroundJobStore();
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+
+        using var request = new Activity("test.trigger-request").Start();
+        Activity.Current.Should().BeSameAs(request, "precondition: the request activity is ambient");
+
+        // Act
+        var result = await host.TriggerNowAsync("activity-job", parameters: null, CancellationToken.None);
+        var seen = await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert — the handler observed no inherited parent: no Activity at all, so its logs carry no trace id
+        // that the trigger request's sampling decision could drop.
+        seen.Current.Should().BeNull("the run must not be parented to the trigger request's trace (#3125)");
+
+        // Must-not-fire: the caller's ambient Activity is untouched, and the trigger response and run record are unchanged.
+        Activity.Current.Should().BeSameAs(request, "the trigger request keeps its own activity after the call returns");
+        result.Status.Should().Be("Running");
+        await WaitUntilAsync(
+            () => store.RunRecords.Any(r => r.RunId == result.RunId && r.CompletedAtUtc is not null),
+            TimeSpan.FromSeconds(5));
+        var run = store.RunRecords.Single(r => r.JobId == "activity-job");
+        run.RunId.Should().Be(result.RunId);
+        run.Trigger.Should().Be(JobRunTrigger.ManualAdmin);
+        run.Result!.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TriggerNowAsync_WithNoAmbientActivity_StillRunsAndLeavesActivityNull_3125()
+    {
+        // Must-not-fire control: with no request activity the fix is a no-op.
+        var observed = new TaskCompletionSource<Activity?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registry = new ScheduledJobRegistry();
+        registry.Register(new FakeScheduledJob("no-activity-job", (_, _) =>
+        {
+            observed.TrySetResult(Activity.Current);
+            return Task.FromResult(new JobRunResult(true, null, 1, TimeSpan.FromMilliseconds(1)));
+        }));
+        var store = new InMemoryBackgroundJobStore();
+        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        Activity.Current = null;
+
+        var result = await host.TriggerNowAsync("no-activity-job", parameters: null, CancellationToken.None);
+
+        (await observed.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull();
+        Activity.Current.Should().BeNull();
+        await WaitUntilAsync(
+            () => store.RunRecords.Any(r => r.RunId == result.RunId && r.CompletedAtUtc is not null),
+            TimeSpan.FromSeconds(5));
+    }
+
     [Fact]
     public async Task TriggerNowAsync_UnknownJobId_ThrowsJobNotFoundException()
     {
