@@ -4,7 +4,7 @@
     <title>After a send, the Sent Items lookup finds the message instead of returning 400, so the Internet-Message-Id reaches reply matching and the archive (#2774, DI-150)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -56,4 +56,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt214); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3116 squash-merged to master (96eb90403f, Closes #2774) after a main-session review. The Sent Items lookup filters sentDateTime ge (send start minus 2 min) and subject, ordered by sentDateTime desc, top 3, on both the Me and Users paths, so Graph no longer answers 400 and the Internet-Message-Id reaches reply matching and the archive. 15 new tests (6 failed on master); publish +620 B. Dev check after the next uac-r2 dev BFF build: the sentitems GET returns 2xx.</completion>
 </task>

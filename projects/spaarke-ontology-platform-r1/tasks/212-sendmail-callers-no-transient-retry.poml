@@ -4,7 +4,7 @@
     <title>The two remaining sendMail callers do not retry a send on 5xx/408, so a message Graph accepted is not delivered twice (#2779, DI-153)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -55,4 +55,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt212); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3114 squash-merged to master (743ffe7454, Closes #2779) after a main-session review. The playbook Send Email node and the mailbox verification send pass NoTransientRetryOption, so the Graph handler retries only a 429 and a 5xx/408 cannot deliver a message twice; the node's error says the message may have been delivered when the outcome is unknown. 12 new tests drive the real handler (7 failed on master). Reaches dev with the next uac-r2 dev BFF build.</completion>
 </task>

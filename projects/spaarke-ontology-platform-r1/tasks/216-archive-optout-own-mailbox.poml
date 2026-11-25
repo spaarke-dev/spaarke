@@ -4,7 +4,7 @@
     <title>A user who opted out of archiving outgoing mail is not archived when sending from their own mailbox (#2672, DI-149)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -55,4 +55,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt216); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3117 squash-merged to master (6edbd0d369, Closes #2672) after a main-session review. A send-as-user request reads the archive opt-in from FromMailbox or, when absent, the caller's own mailbox (token email), so a user who opted out is not archived when sending from their own mailbox; publish +88 B. Follow-up DI-173 #3119 (opt-in read from the client-supplied FromMailbox) is an owner decision. Reaches dev with the next uac-r2 dev BFF build.</completion>
 </task>

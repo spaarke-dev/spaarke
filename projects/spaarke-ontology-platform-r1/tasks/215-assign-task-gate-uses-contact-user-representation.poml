@@ -4,7 +4,7 @@
     <title>Assign Task recipient gate uses the shared ContactUserRepresentation instead of its copied logic (#2457)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -60,4 +60,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt215); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3118 squash-merged to master (c0715b09c3, Closes #2457) after two independent Opus adversarial reviews, uac-r2's review (PASS) and one fix round. AssignTaskRecipientGate decides on the shared ContactUserRepresentation result (only Eligible users represent a contact) instead of its copied logic. A 26-row representation table test pins the routing against the shared resolver; a misroute mutant fails 4 rows (the old table passed it). AssignTask 197/197, Signals 5,509 pass. Reaches dev with the next uac-r2 dev BFF build.</completion>
 </task>

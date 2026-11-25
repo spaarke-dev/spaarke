@@ -4,7 +4,7 @@
     <title>Arrival notifications read only columns the thread has, so they fan out and deep-link instead of falling back to private (#2775, DI-151)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -56,4 +56,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt213); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3115 squash-merged to master (926e3f83db, Closes #2775 and DI-151) after a main-session review. RegardingFieldMap exposes ThreadRegardingFields/ThreadRegardingColumns (every regarding column except sprk_regardingreportcard, which the thread table lacks); CommunicationArrivedProducer, CommunicationThreadReadService and ThreadResolver use them, so arrival notifications fan out and deep-link instead of falling back to private. Schema guard test pairs the list with Entity.xml. Reaches dev with the next uac-r2 dev BFF build.</completion>
 </task>
