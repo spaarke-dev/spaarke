@@ -28,6 +28,8 @@ GitHub states were read live on 2026-11-24. "Ours" means this project owns the f
 | D-043-1 | [#1039](https://github.com/spaarke-dev/spaarke/issues/1039) | The `deploy-office-addins.yml` path filter misses `provenance.ts`. A change there alone does not redeploy the add-in. One line. | No |
 | D-043-2 | [#1040](https://github.com/spaarke-dev/spaarke/issues/1040) | jest maps CSS to `identity-obj-proxy`, which is not a dependency, so a clean install fails CSS imports. One line. | No |
 | ISS-039 | [#3123](https://github.com/spaarke-dev/spaarke/issues/3123) | Found by task 090's drift check. `docs/architecture/office-outlook-teams-integration-architecture.md` still says a To Do is owned by its caller (it is owned by the team since task 080), still lists Invoice as a save target (refused since 096), and does not describe the Invoice or Email tabs. `src/client/office-addins/CLAUDE.md` says package 1.1.1 is installed; it is 1.1.4. Engineers routed there get wrong facts. | No (docs) |
+| ISS-040 | [#3135](https://github.com/spaarke-dev/spaarke/issues/3135) | Found by task 138's review (2026-11-25). Two attachments with the same name in one saved email overwrite each other's bytes: the second child upload replaces the first's file, then its create is refused. The upload path is also the redelivery idempotency key, so the fix must stay deterministic. Office save path; field-mapping-r1 declined ownership (it only touched owner/stamp). | No |
+| ISS-041 | [#3136](https://github.com/spaarke-dev/spaarke/issues/3136) | Task 137 known limits: an earlier action's profile job can end the Generate Profile wait early (newer fields need Refresh); a late in-flight refetch can show Pending again. Never a false Completed. | No |
 | ISS-031 | [#1505](https://github.com/spaarke-dev/spaarke/issues/1505) | The Office email save's Graph fallback sends an EWS-format item id without `convertToRestId`, so the fallback fetch fails. Found by task 121; pre-existing. | No (a fallback; the pane sends the body, task 116) |
 
 ### Open, filed by this project, owned elsewhere (tracked there)
@@ -50,6 +52,7 @@ GitHub states were read live on 2026-11-24. "Ours" means this project owns the f
 | ISS-036 | [#1016](https://github.com/spaarke-dev/spaarke/issues/1016) | Whoever retires `sdap-ci.yml` | A guard test would then run in no blocking job. |
 | ISS-037 | [#2172](https://github.com/spaarke-dev/spaarke/issues/2172) | Communication owner | AI task-candidate subjects derived from email text are logged. |
 | ISS-038 | [#2421](https://github.com/spaarke-dev/spaarke/issues/2421) | Communication owner | Suggestions ignore an existing filing when re-evaluating. |
+| ISS-042 | [#3137](https://github.com/spaarke-dev/spaarke/issues/3137) | Owners of `ChildRecordEndpoints` and `OntologyAdminCapabilityProbe` | Every MSAL OBO failure there is treated alike, so consent / policy blocks answer "sign in again" (a loop) and server faults look like caller faults. Office routes fixed in task 136. |
 
 Not ours, and not filed by this project, though they mention it: #1564, #2178, #2226 (UAC-r2), #1102 and #1105 (UAC-r2 route sweeps).
 
