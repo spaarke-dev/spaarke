@@ -1,5 +1,9 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-25 05:00Z — POL-MATTER-NOBUDGET switched back On (read-only check)
+
+Owner chose to switch it back On for mcp-r1's task 042 live E2E. Read back at 05:00Z: `sprk_enabled` true, statecode Active, modified 04:51:17Z from the owner's account (already On when the main session went to switch it, so the main session wrote nothing). Its Work Items return at the next re-evaluation (02:30Z nightly or an owner-approved `POST /api/admin/jobs/{jobId}/trigger`). Also checked 04:42Z dev BFF ef0c566d2c (uac-r2): healthz 200, no Signals/ontology errors; `RoutingConsumerTypeHealthCheck` AI catalog drift is pre-existing since 2026-11-23 12:29Z, not ontology.
+
 ## 2026-11-25 04:10Z — read-only check: nightly close of the switched-off POL-MATTER-NOBUDGET (spaarkedev1)
 
 - Main session, Web API GETs only (az CLI token; nothing written). Dev BFF at the time: `20129e985c` (contains task 204's paged policy read; not yet 208-210).
