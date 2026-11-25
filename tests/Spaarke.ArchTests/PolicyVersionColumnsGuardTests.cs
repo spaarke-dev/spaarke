@@ -32,13 +32,8 @@ public class PolicyVersionColumnsGuardTests
     /// <summary>Columns selected by the BFF that a deploy script adds and the solution source does not carry yet: column, then the script and the reason.</summary>
     internal static readonly IReadOnlyDictionary<string, string> PendingSchema = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["sprk_firmdescription"] =
-            "scripts/ebilling/Deploy-EbillingFirmDescriptionColumn.ps1 (task 130e-1, DEF-060): the per-rule firm description. Run -Apply and -Verify "
-            + "before the BFF build that selects it; the solution export (task 079) then carries it.",
-        ["sprk_rejectionreason"] =
-            "scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1 (task 077 follow-up, D-113): the reason a drafted rule was rejected. "
-            + "NOT yet applied: dev does not have the column (read-only check 2026-11-16) and SpaarkeMaster does not carry it; tracked as ISS-024 "
-            + "(#2858). Run the script with -Apply on each environment before a BFF build that selects it is deployed there.",
+        // Empty since task 079 (2026-11-25): its SpaarkeMaster sync carries sprk_firmdescription (130e-1) and sprk_rejectionreason
+        // (D-113, ISS-024) in Entity.xml. A new column a deploy script adds before the next export gets an entry here again.
     };
 
     /// <summary>Platform attributes every table has that a solution export does not list.</summary>
@@ -127,12 +122,16 @@ public class PolicyVersionColumnsGuardTests
         var attributes = SourceAttributes();
 
         Assert.Equal(["sprk_nosuchcolumn"], Missing([.. RuleSetService.VersionColumns, "sprk_NoSuchColumn"], attributes, PendingSchema));
-        Assert.Equal(["sprk_firmdescription"], Missing(BillingFirmReasonReplay.VersionColumns, attributes, new Dictionary<string, string>()));
+        // A selected column the source lacks is reported (must fire): the real attributes minus one the replay selects.
+        var withoutFirmDescription = attributes.Where(a => a != "sprk_firmdescription").ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(["sprk_firmdescription"], Missing(BillingFirmReasonReplay.VersionColumns, withoutFirmDescription, new Dictionary<string, string>()));
+        // ...and a pending entry for it hides the gap (the ratchet's purpose).
+        Assert.Empty(Missing(BillingFirmReasonReplay.VersionColumns, withoutFirmDescription, new Dictionary<string, string> { ["sprk_firmdescription"] = "scripts/x.ps1" }));
         foreach (var (_, columns) in Selected())
         {
             Assert.Empty(Missing(columns, attributes, PendingSchema));
         }
 
-        Assert.Equal(["sprk_ruletype"], Stale(new Dictionary<string, string> { ["sprk_ruletype"] = "x", ["sprk_firmdescription"] = "y" }, attributes));
+        Assert.Equal(["sprk_ruletype"], Stale(new Dictionary<string, string> { ["sprk_ruletype"] = "x", ["sprk_nosuchcolumn"] = "y" }, attributes));
     }
 }

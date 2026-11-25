@@ -441,6 +441,7 @@
       <RootComponent type="61" schemaName="sprk_playbooklibrary" behavior="0" />
       <RootComponent type="61" schemaName="sprk_regardingrecordnumber_hyperlink" behavior="0" />
       <RootComponent type="61" schemaName="sprk_reporting" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_rulereviewpage" behavior="0" />
       <RootComponent type="61" schemaName="sprk_semanticsearch" behavior="0" />
       <RootComponent type="61" schemaName="sprk_SidePaneManager" behavior="0" />
       <RootComponent type="61" schemaName="sprk_sidepanespike.html" behavior="0" />
