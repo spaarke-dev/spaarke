@@ -230,8 +230,18 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * provider's cache is then filled with the token the user just signed in for, not with a second silent request.
    */
   private _handoff: TokenResult | null = null;
-  /** Set by `requestFreshToken()`: the next silent step asks Entra for a new token, not MSAL's cached one. */
+  /** Set by `requestFreshToken()`: the next silent step passes `forceRefresh` (honoured by the standard client only). */
   private _forceNextRefresh = false;
+  /** The access token this strategy last returned: the one a caller's request used. */
+  private _lastIssued: string | null = null;
+  /**
+   * The token the server refused, recorded by `requestFreshToken()`. A silent result equal to it counts as a failed
+   * silent step (#1571 fix round 2): under NAA, msal-browser 3.30.0 drops `forceRefresh` (the NAA silent path reads only
+   * `claims` and `cacheLookupPolicy`, and `NestedAppAuthAdapter.toNaaTokenRequest` does not map it), so the host answers
+   * with its cached copy of the refused token. Cleared when a different token is accepted, on sign-out and on
+   * `clearCache()` (which also runs on a logout broadcast).
+   */
+  private _refusedToken: string | null = null;
 
   /**
    * @param config Standard @spaarke/auth resolved config (clientId, authority,
@@ -256,7 +266,10 @@ export class OfficeNaaStrategy implements AuthStrategy {
   async acquire(): Promise<TokenResult> {
     const handoff = this._handoff;
     this._handoff = null;
-    if (handoff && handoff.expiresOn > Date.now() + EXPIRY_BUFFER_MS) return handoff;
+    if (handoff && handoff.expiresOn > Date.now() + EXPIRY_BUFFER_MS) {
+      this._lastIssued = handoff.accessToken;
+      return handoff;
+    }
     const forceRefresh = this._forceNextRefresh;
     this._forceNextRefresh = false;
     return this._acquire(!this._requireSilentOnly, forceRefresh);
@@ -267,9 +280,12 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * on Sign in): it may open a popup, which a browser blocks outside a gesture. This is the one interactive path when
    * the strategy was built with `requireSilentOnly`; the NAA-to-popup fallback below runs here unchanged.
    *
-   * Its silent step asks Entra for a NEW token (`forceRefresh`): a user who clicks Sign in after the server refused
-   * the session must not be handed MSAL's cached copy of the refused token (#1571 review F1). The token it returns is
-   * also what the next `acquire()` answers with, so the caller's cache is filled without a second request.
+   * A user who clicks Sign in after the server refused the session must not be handed the refused token again
+   * (#1571 review F1). The silent step passes `forceRefresh`, but only the standard client honours it: under NAA,
+   * msal-browser 3.30.0 drops it and the Office host answers with its cached copy. So a silent result equal to the
+   * token recorded by `requestFreshToken()` counts as a failed silent step, and the click goes on to
+   * `acquireTokenPopup` (the broker's interactive call under NAA). The token it returns is also what the next
+   * `acquire()` answers with, so the caller's cache is filled without a second request.
    */
   async acquireInteractive(): Promise<TokenResult> {
     this._handoff = null;
@@ -280,12 +296,15 @@ export class OfficeNaaStrategy implements AuthStrategy {
   }
 
   /**
-   * Make the next `acquire()` ask Entra for a new token rather than MSAL's cached one, still silently. Call it before
-   * retrying a request the server answered 401: the cached token is the one it refused (#1571 review F1).
+   * Call it before retrying a request the server answered 401 (#1571 review F1). The token this strategy last returned
+   * is recorded as refused, and the next `acquire()` asks for a new one, still silently. A silent answer equal to the
+   * refused token is not used: a silent-only acquire then returns no token (the host shows its sign-in prompt; nothing
+   * opens without a click), and only `acquireInteractive()` goes on to the interactive step.
    */
   requestFreshToken(): void {
     this._handoff = null;
     this._forceNextRefresh = true;
+    if (this._lastIssued) this._refusedToken = this._lastIssued;
   }
 
   private async _acquire(interactive: boolean, forceRefresh: boolean): Promise<TokenResult> {
@@ -314,8 +333,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * Run the silent→popup acquisition ladder against a given MSAL instance. Shared by the primary
    * (NAA or fallback) attempt and the NAA-failure fallback retry so both paths validate/expire tokens
    * identically. Returns a validated TokenResult or null if both steps fail. With `interactive` false
-   * the ladder stops after the silent step: no interactive API is called. With `forceRefresh` the silent step asks
-   * Entra for a new token instead of returning MSAL's cached one.
+   * the ladder stops after the silent step: no interactive API is called. `forceRefresh` is passed to the silent
+   * step (the standard client honours it; NAA drops it). A silent result equal to the refused token is not used.
    */
   private async _tryAcquireWith(
     msal: IPublicClientApplication,
@@ -335,8 +354,13 @@ export class OfficeNaaStrategy implements AuthStrategy {
             (forceRefresh ? ' (force refresh)' : '')
         );
         const result = await msal.acquireTokenSilent({ scopes, account: account ?? undefined, forceRefresh });
-        const token = this._accept(result);
-        if (token) return token;
+        if (this._refusedToken && result?.accessToken === this._refusedToken) {
+          // Under NAA `forceRefresh` is dropped, and the host hands back its cached copy of the token the server refused.
+          console.warn('[OfficeNaaStrategy] acquireTokenSilent returned the refused token; the silent step failed');
+        } else {
+          const token = this._accept(result);
+          if (token) return token;
+        }
       } catch (err) {
         console.warn('[OfficeNaaStrategy] acquireTokenSilent failed:', err);
       }
@@ -400,6 +424,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
     this._pageAccount = null;
     this._handoff = null;
     this._forceNextRefresh = false;
+    this._refusedToken = null;
+    this._lastIssued = null;
     if (!this._instance) return;
     // Under NAA, MSAL's clearCache() is unsupported (it throws), so the local cache is cleared directly.
     if (this._isNaaActive) {
@@ -426,6 +452,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
   async logout(): Promise<void> {
     this._handoff = null;
     this._forceNextRefresh = false;
+    this._refusedToken = null;
+    this._lastIssued = null;
     const msal = await this._ensureInitialized();
     if (!msal) return;
 
@@ -582,9 +610,16 @@ export class OfficeNaaStrategy implements AuthStrategy {
     return this._instance ? this._pickAccount(this._instance) : null;
   }
 
-  /** Validate a result and, when it is usable, remember its account as this page's account. */
+  /**
+   * Validate a result and, when it is usable, remember its account as this page's account and the token as the last
+   * one returned. A usable token other than the refused one clears the refused record.
+   */
   private _accept(result: AuthenticationResult | null): TokenResult | null {
     const token = this._validate(result);
+    if (token) {
+      this._lastIssued = token.accessToken;
+      if (token.accessToken !== this._refusedToken) this._refusedToken = null;
+    }
     if (token && result?.account?.homeAccountId) {
       this._pageAccount = { homeAccountId: result.account.homeAccountId, tenantId: accountTenant(result.account) };
     }

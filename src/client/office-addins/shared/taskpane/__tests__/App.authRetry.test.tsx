@@ -6,15 +6,20 @@
  * of the request itself and keeps the server's reason (owner decision on To Do refusals): no retry, no sign-in prompt.
  *
  * Review fix round 1:
- * - the auth double hands back the SAME token until a refresh is forced (`clearCache()`, which makes the real
- *   AuthService ask Entra for a new token), so the retry tests prove the retry gets a new token, not that the double
- *   happened to return one (F1);
+ * - the auth double hands back the SAME token until the code under test clears the cache (`clearCache()`, which
+ *   records the token as refused in the real stack), so the retry tests prove the retry asked again, not that the
+ *   double happened to return a new token (F1);
  * - the sign-in prompt after a lasting 401 is a banner above the tabs: the To Do form stays mounted, so what the user
  *   typed survives (F1, #2607);
  * - the auth service's "sign-in required" signal shows the same banner (F2);
  * - a Sign in click that fails says so, and a second click while one runs does nothing (F2);
  * - a contact search the server refused (403) or failed (5xx) rejects with "Could not search contacts", never an empty
  *   list (F3).
+ *
+ * Review fix round 2: under NAA a forced refresh does NOT yield a new token (msal-browser 3.30.0 drops
+ * `forceRefresh`; the host hands back the refused token, which the strategy then declines to use). The NAA case below
+ * doubles that: after `clearCache()` there is no token at all, and the pane must show its prompt and make no sign-in
+ * call of its own. The real stack is pinned in shared/services/__tests__/AuthService.naaRefusedToken.test.ts.
  *
  * Views are doubled to capture their props; `fetch` is the network boundary.
  */
@@ -200,8 +205,8 @@ beforeEach(() => {
   mockAuth.listeners.clear();
   mockTodoMounts.mounted = 0;
   mockTodoMounts.unmounted = 0;
-  // Like MSAL: the same token until a refresh is forced. `clearCache()` is what forces it (the real AuthService then
-  // asks Entra for a new token), so a retry gets 'fresh-token' only if the code under test forced the refresh.
+  // The standard client: the same token until `clearCache()` (the real AuthService then records it as refused and asks
+  // again), so a retry gets 'fresh-token' only if the code under test cleared the cache. The NAA case overrides this.
   let forced = false;
   getAccessToken.mockImplementation(async () => (forced ? 'fresh-token' : 'token'));
   clearCache.mockImplementation(() => {
@@ -248,6 +253,30 @@ describe('App — Create To Do retries once on 401 (#1571)', () => {
     // The user's half-filled To Do is still there (#2607): the form was never unmounted.
     expect(mockTodoMounts.unmounted).toBe(0);
     expect(SignInView).not.toHaveBeenCalled();
+  });
+
+  it('under NAA (no new token after clearCache): the retry does not resend the refused token; only the click signs in', async () => {
+    getAccessToken.mockImplementation(async () => (clearCache.mock.calls.length > 0 ? null : 'token'));
+    const view = await openCreateTodo();
+    fetchMock.mockResolvedValue(respond(401));
+
+    let result: Awaited<ReturnType<typeof view.onCreateTodo>> | undefined;
+    await act(async () => {
+      result = await view.onCreateTodo(TODO_INPUT);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(authorizationOf(fetchMock.mock.calls[1]!)).not.toBe('Bearer token');
+    expect(result?.ok).toBe(false);
+    expect(await screen.findByText(SIGN_IN_EXPIRED)).toBeTruthy();
+    expect(signIn).not.toHaveBeenCalled();
+    expect(mockTodoMounts.unmounted).toBe(0);
+
+    signIn.mockResolvedValue(undefined);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
+    });
+    expect(signIn).toHaveBeenCalledTimes(1);
   });
 
   it('signing in from the prompt keeps the form and removes the prompt', async () => {
