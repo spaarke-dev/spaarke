@@ -106,12 +106,16 @@ public partial class RouteAuthorizationGuardTests
     // spaarkeai-mcp-bff-api-r1 task 014: the decision capability (B-1, spec FR-10) sits between the commit route and
     // DecisionCommitService, the single owner of completion, so that route alone needs a third hop:
     // handler -> DecisionCapability.CommitAsync -> DecisionCommitService.CommitAsync -> SignalCoreRecordAccess.AuthorizeAsync.
+    // spaarkeai-mcp-bff-api-r2 task 006: the events capability (spec FR-07) sits between the event list route and its impersonated
+    // query for the same reason: handler -> EventsCapability.ListCoreAsync -> DataverseWebApiService.QueryEventsAsCallerAsync ->
+    // QueryEventsCoreAsync (the DataverseImpersonation seam).
     // Every other route keeps the two-hop limit (must-fire: a three-hop chain on any other route fails).
     private const int MaxCapabilityHandlerDecisionHops = 3;
 
     private static readonly IReadOnlySet<string> ThreeHopHandlerDecisionRoutes = new HashSet<string>(StringComparer.Ordinal)
     {
         "POST /api/v1/signals/{signalId:guid}/decision",
+        "GET /api/v1/events",
     };
 
     private static readonly IReadOnlySet<string> PendingOwners = new HashSet<string>(StringComparer.Ordinal)
@@ -6577,8 +6581,11 @@ public partial class RouteAuthorizationGuardTests
         Assert.Contains("1 of 2", Problem(new HandlerDecision(route.Key, "Handle", "AuthorizationService", new[] { "FakeService.LoadAsync" }, "x")));
         // Too many hops.
         Assert.Contains("at most", Problem(new HandlerDecision(route.Key, "Handle", "AuthorizationService", new[] { "A.B", "C.D", "E.F" }, "x")));
-        // Task 014: the one three-hop route (ThreeHopHandlerDecisionRoutes) still has a limit: a fourth hop fails.
+        // Task 014: a three-hop route (ThreeHopHandlerDecisionRoutes) still has a limit: a fourth hop fails.
         Assert.Contains("at most 3", Problem(new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "Handle", "AuthorizationService",
+            new[] { "A.B", "C.D", "E.F", "G.H" }, "x")));
+        // r2 task 006: the events list joined the set with the same limit.
+        Assert.Contains("at most 3", Problem(new HandlerDecision("GET /api/v1/events", "Handle", "AuthorizationService",
             new[] { "A.B", "C.D", "E.F", "G.H" }, "x")));
 
         // Task 167 integration (2026-10-05): a hop method whose return type is a generic over a TUPLE is parsed (it was
