@@ -10,6 +10,41 @@
 
 ## Open (in priority order)
 
+### ISS-042 — Stamp users cannot read seeded event types (user-owned table, Deep read)
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress — owner ruled Global read 2026-11-25; implementer PR pending |
+| **Urgency** | now (blocks the event-type picker on every stamp once ISS-039 seeds rows) |
+| **Filed** | 2026-11-25 |
+| **Source** | Adversarial review of PR #3088; confirmed read-only on ACME 2026-11-25 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3105 |
+
+**Description**
+
+`sprk_eventtype_ref` is user-owned; Spaarke Basic, Core and Office Add In User read it at Deep. Rows seeded by H12b are
+owned by the control-plane app user (`sprk-controlplane-dev-uami`), which on ACME sits in the root unit `spaarkedemo`;
+ACME's licensed users sit in the child unit "ACME Corporation". Deep never reaches a parent unit, so the Create Event
+wizard's event-type picker comes back empty with no error. Record types, agreement types and triage categories are
+org-owned and read at Global, so they are unaffected.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke {Basic,Core,Office Add In} User.xml` (`prvReadsprk_EventType_Ref`)
+- `config/feature-role-privileges.json`, `config/core-user-wizard-linking-role.json`
+
+**Fix (owner ruling 2026-11-25)**
+
+Raise the read to Global on the three roles (precedent #2474). Ships in the next SpaarkeMaster release; dev gets it via
+`Set-FeatureRolePrivileges.ps1 -Gap ISS-042` before the next export (owner OK); a stamp gets it at its next upgrade run
+(Remove-EbillingRateCardCoreLookups.ps1 report mode first, past 1.3.2.1).
+
+**Estimated effort**: 1–2 h code + the release
+**Blockers**: next SpaarkeMaster release
+**Related**: ISS-039 #3075, PR #3088, #2474, #2401
+
+---
+
 ### ISS-040 — EventsPage config names a "Communication" event type id that exists on no environment
 
 | Field | Value |

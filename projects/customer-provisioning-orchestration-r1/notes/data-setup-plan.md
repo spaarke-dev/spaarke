@@ -89,6 +89,8 @@ content) is the largest single piece.
 
 ## 5. Owner decisions needed
 
+> **Decided 2026-11-25** (owner "proceed with the feed of test records"; the recommendations below were taken): A report only · B `legal-standard` by default, `none` opt-out · C the §6 draft as written · D operator script on demo stamps only · E refresh `demo-records.json` · F eBilling demo records deferred until D5. In flight: D1+D2 PR #3088 (review fixes pushed), D4 and D6 implementers, ISS-042 #3105 (event-type read Global).
+
 | # | Question | Recommendation |
 |---|---|---|
 | A | Tier 1 drift: when a stamp's event type or triage category differs from source, report it or overwrite it? | **Report only.** Customers may tune classifier thresholds; overwriting would silently undo it. |
