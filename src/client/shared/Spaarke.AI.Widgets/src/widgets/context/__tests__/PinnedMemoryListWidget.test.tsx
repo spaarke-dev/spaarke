@@ -72,6 +72,19 @@ function renderWithTheme(ui: React.ReactElement, dark = false): void {
   render(<FluentProvider theme={dark ? webDarkTheme : webLightTheme}>{ui}</FluentProvider>);
 }
 
+/**
+ * A footer button of the one open dialog. In jsdom a Fluent v9 `DialogSurface` is sometimes left
+ * `aria-hidden` (tabster's modalizer loses a race; which dialog loses it varies run to run), and a
+ * default role query skips that subtree — nightly #1906 failed on "Save changes" this way. So the
+ * query includes hidden elements but is scoped to the dialog, so it cannot match background
+ * content. See .claude/FAILURE-MODES.md G-21.
+ */
+function dialogButton(name: string): HTMLElement {
+  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]');
+  expect(dialogs).toHaveLength(1);
+  return within(dialogs[0]).getByRole('button', { name, hidden: true });
+}
+
 function makePin(overrides: Partial<PinDto> & { pinId: string; pinType: PinDto['pinType']; title: string }): PinDto {
   return {
     pinId: overrides.pinId,
@@ -258,16 +271,9 @@ describe('PinnedMemoryListWidget — create flow (POML test #4)', () => {
     fireEvent.change(screen.getByTestId('pinned-memory-edit-content'), {
       target: { value: newPin.content },
     });
-    // task 050 re-base: Save is now FormModal's own footer button (no data-testid
-    // exposed by the shared preset) — query by its accessible name instead.
-    // `hidden: true` — the FIRST Fluent modal opened in a jsdom window renders its
-    // DialogSurface `aria-hidden="true"` (tabster's modalizer API initialises after
-    // jsdom has already focused the surface, so it is never activated; any later
-    // dialog in the same file is fine). Testing Library's default role query skips
-    // an aria-hidden subtree, so the button is "not accessible" to it (nightly
-    // #1906). The button is present and clickable. jsdom-only: in a real browser the
-    // surface is not aria-hidden (verified 2026-10-15). See .claude/FAILURE-MODES.md G-21.
-    await user.click(screen.getByRole('button', { name: 'Create pin', hidden: true }));
+    // task 050 re-base: Save is FormModal's own footer button (no data-testid exposed by the
+    // shared preset) — query it by accessible name, inside the dialog (G-21: `dialogButton`).
+    await user.click(dialogButton('Create pin'));
 
     // Wait for the new pin to appear in the list.
     await screen.findByText(newPin.title);
@@ -313,7 +319,7 @@ describe('PinnedMemoryListWidget — edit flow (POML test #5)', () => {
     const title = screen.getByTestId('pinned-memory-edit-title') as HTMLInputElement;
     fireEvent.change(title, { target: { value: updated.title } });
     // task 050 re-base: Save is now FormModal's own footer button — query by role/name.
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await user.click(dialogButton('Save changes'));
 
     await screen.findByText(updated.title);
 
@@ -348,7 +354,7 @@ describe('PinnedMemoryListWidget — delete flow (POML test #6)', () => {
     mockAuthenticatedFetch.mockResolvedValueOnce(noContentResponse());
 
     // ConfirmModal preset owns the buttons (P2 re-point) — accessible-name query.
-    await user.click(screen.getByRole('button', { name: 'Delete pin' }));
+    await user.click(dialogButton('Delete pin'));
 
     // The deleted pin disappears.
     await waitFor(() => {
@@ -384,8 +390,7 @@ describe('PinnedMemoryListWidget — server detail on a thrown failure', () => {
     await user.click(screen.getByTestId('pinned-memory-create-button'));
     fireEvent.change(screen.getByTestId('pinned-memory-edit-title'), { target: { value: 'A title' } });
     fireEvent.change(screen.getByTestId('pinned-memory-edit-content'), { target: { value: 'Some content' } });
-    // `hidden: true` — see the create-flow test above (first-modal aria-hidden surface).
-    await user.click(screen.getByRole('button', { name: 'Create pin', hidden: true }));
+    await user.click(dialogButton('Create pin'));
 
     expect(await screen.findByText(lengthCap)).toBeInTheDocument();
     expect(screen.queryByText('Could not save the pin. Please try again.')).not.toBeInTheDocument();
@@ -398,16 +403,20 @@ describe('PinnedMemoryListWidget — server detail on a thrown failure', () => {
     await screen.findByText(SIX_PINS[0].title);
 
     const denied = 'You can only delete pins you created.';
-    mockAuthenticatedFetch.mockRejectedValueOnce(new ApiError(denied, 403, { title: 'Forbidden', status: 403, detail: denied }));
+    mockAuthenticatedFetch.mockRejectedValueOnce(
+      new ApiError(denied, 403, { title: 'Forbidden', status: 403, detail: denied })
+    );
     await user.click(within(screen.getAllByTestId('pinned-memory-item')[0]).getByTestId('pinned-memory-delete-button'));
     await screen.findByTestId('pinned-memory-delete-confirmation');
-    await user.click(screen.getByRole('button', { name: 'Delete pin' }));
+    await user.click(dialogButton('Delete pin'));
 
     expect(await screen.findByText(denied)).toBeInTheDocument();
   });
 
   it('Load: shows the ProblemDetails title when there is no detail', async () => {
-    mockAuthenticatedFetch.mockRejectedValueOnce(new ApiError('Memory store unavailable', 503, { title: 'Memory store unavailable', status: 503 }));
+    mockAuthenticatedFetch.mockRejectedValueOnce(
+      new ApiError('Memory store unavailable', 503, { title: 'Memory store unavailable', status: 503 })
+    );
     renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
     expect(await screen.findByText('Memory store unavailable')).toBeInTheDocument();
@@ -426,7 +435,9 @@ describe('PinnedMemoryListWidget — server detail on a thrown failure', () => {
     );
     renderWithTheme(<PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />);
 
-    expect(await screen.findByText('Your sign-in has expired. Refresh the page and sign in again.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Your sign-in has expired. Refresh the page and sign in again.')
+    ).toBeInTheDocument();
     expect(screen.queryByText('Could not load pinned memory. Please try again.')).not.toBeInTheDocument();
   });
 });

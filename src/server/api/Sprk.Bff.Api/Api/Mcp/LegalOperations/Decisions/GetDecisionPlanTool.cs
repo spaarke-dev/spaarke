@@ -17,8 +17,9 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 /// <para><b>One caller (FR-10, option C).</b> The tool reads the request's <see cref="HttpContext"/> from <see cref="IHttpContextAccessor"/>
 /// and passes exactly that instance to <see cref="IDecisionCapability"/> (and its <c>User</c> to the list read), never a context it built
 /// or cached. A null context or an unauthenticated caller is <c>UserContextRequired</c> before any capability call.</para>
-/// <para><b>The plan is the REST plan.</b> <see cref="IDecisionCapability.GetPlanAsync"/> is the call
-/// <c>GET /api/v1/signals/{id}/decision-plan</c> makes, so a refusal carries the REST route's <c>reasonCode</c> and writes no stamp
+/// <para><b>The plan is the REST plan.</b> <see cref="IDecisionCapability.GetPlanAndSuppressionAsync"/> answers exactly what
+/// <c>GET /api/v1/signals/{id}/decision-plan</c> and then <c>…/suppression</c> answer, asking the Signal access question once for both
+/// (NFR-01), so a refusal carries the REST route's <c>reasonCode</c> and writes no stamp
 /// (ADR-019: <see cref="DecisionResultMapper.ToToolError(DecisionPlanReadResult)"/> through <see cref="McpToolResults.FromError"/>).
 /// Suppression and the row are read after the plan, and a failure of either leaves the plan and its stamp standing: the wizard already
 /// opens without the dismissal count (<c>suppressionFailed</c>).</para>
@@ -85,8 +86,8 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         }
 
         // The plan first: a refusal (not readable by the caller, plan does not resolve, access unavailable) is the REST route's answer and
-        // nothing else is read or stamped.
-        var plan = await decisions.GetPlanAsync(http, signalId, cancellationToken);
+        // nothing else is read or stamped. Plan and suppression share one Signal access check (NFR-01, 2026-11-25).
+        var (plan, suppression) = await decisions.GetPlanAndSuppressionAsync(http, signalId, cancellationToken);
         var planError = DecisionResultMapper.ToToolError(plan);
         if (planError != null)
         {
@@ -101,8 +102,8 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
             return McpToolResults.FromError(PlanAndLookupToolSupport.PlanTooLarge, http!.TraceIdentifier);
         }
 
-        var suppression = await decisions.GetSuppressionAsync(http, signalId, cancellationToken);
-        var suppressionError = DecisionResultMapper.ToToolError(suppression);
+        // Read whenever the plan was returned (never null then); kept non-null for the mapper.
+        var suppressionError = DecisionResultMapper.ToToolError(suppression!);
 
         var lanes = await decisions.ListDecideAsync(http!.User, cancellationToken);
         var rowError = DecisionResultMapper.ToToolError(lanes);
@@ -112,7 +113,7 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         var row = PlanAndLookupToolSupport.BoundRow(rowError == null ? FindRow(lanes, signalId) : null, evidenceBudget);
         var body = new PlanAndLookupToolSupport.PlanBody(
             plan.Plan!,
-            suppressionError == null ? suppression.Suppression : null,
+            suppressionError == null ? suppression!.Suppression : null,
             row.Row,
             suppressionError == null ? null : PlanAndLookupToolSupport.PartError.From(suppressionError),
             rowError == null ? null : PlanAndLookupToolSupport.PartError.From(rowError),

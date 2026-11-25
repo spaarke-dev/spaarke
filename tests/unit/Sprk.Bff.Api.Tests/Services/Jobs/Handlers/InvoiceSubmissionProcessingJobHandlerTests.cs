@@ -330,6 +330,12 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         public string AllowedContainer { get; set; } = "drive-1";
         public string? MimeType { get; set; } = "application/pdf";
         public byte[] Bytes { get; set; } = [1, 2, 3];
+
+        /// <summary>DEF-052: the per-file limit in MB the job reads from <c>Ebilling:MaxSubmissionFileSizeMb</c> (the option default is 25).</summary>
+        public int MaxFileSizeMb { get; set; } = 25;
+
+        /// <summary>DEF-052: the <c>sprk_filesize</c> the source document row records (null: the row records none).</summary>
+        public int? RecordedFileSize { get; set; }
         public List<string> Downloads { get; } = [];
 
         /// <summary>Task 094: the source document's <c>versionnumber</c> as the job reads it.</summary>
@@ -421,6 +427,11 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                         ["versionnumber"] = DocumentVersion,
                         ["sprk_isemailarchive"] = IsEmailArchive,
                     };
+                    if (RecordedFileSize is { } recordedSize)
+                    {
+                        document["sprk_filesize"] = recordedSize;
+                    }
+
                     if (MimeType is not null)
                     {
                         document["sprk_mimetype"] = MimeType;
@@ -456,7 +467,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 sink.Object,
                 Bell.Build(),
                 Locks,
-                Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
+                Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled, MaxSubmissionFileSizeMb = MaxFileSizeMb }),
                 Files.Service,
                 Gate,
                 Log)

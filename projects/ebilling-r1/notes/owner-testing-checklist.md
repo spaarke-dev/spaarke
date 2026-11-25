@@ -195,13 +195,13 @@ Deployed with the owner's go: web resource `sprk_invoicereviewpage` built from m
 - [ ] Dark mode: the page follows it and the PDF page stays light.
 - Optional, changes data (only if you want to try it): decide one line (Accept or Reduce with a reason), then Approve. Approve needs you to be an eligible approver on MAT-000113.
 
-## T. Resolved codes on invoice lines (ISS-051): after the next dev BFF deploy that carries iss051
+## T. Resolved codes on invoice lines (ISS-051): the dev BFF carries iss051 since 2026-11-25 15:58:53Z (a1b7db1def); the backfill waits for your typed OK
 Once a dev BFF with iss051 is live, new and corrected lines carry the resolved UTBMS code in their task / activity / expense code fields. Existing lines need a one-off backfill, which is a live dev write that needs your typed OK. Run it only after that BFF is live, because today's dev BFF does not update the fields when a reviewer corrects a code. Report run on 2026-11-24: 80 lines on open (In Review) invoices, 139 fields to set; lines of Sent to AP and Superseded invoices are skipped so they keep matching what AP received.
 - [ ] Owner OK, then `-Apply` and the re-index sweep the script prints.
 - [ ] Open INV-123.1's lines in Spaarke: the Task / Activity / Expense code columns show codes.
 - [ ] After the next AP export of a coded invoice, the export file carries the resolved code, not the firm's own text.
 
-## U. Links on the portal's "Invoice received" screen (ISS-052): after the next dev BFF and external portal deploys from master
+## U. Links on the portal's "Invoice received" screen (ISS-052): dev BFF done (a1b7db1def, 2026-11-25 15:58:53Z); test after spa-r4 deploys the external portal from master
 - [ ] Submit an invoice in the portal. When it is Accepted, the result screen shows **Open invoice** and **Open matter** (or project / work assignment). Each opens that record.
 - [ ] Open the resume link (`/invoices/submit?submissionId=…`) of the same submission: the same two links show.
 - [ ] From a matter's record view, use **Submit invoice**; on the result, **Open invoice** opens the invoice over the matter, and closing it returns you to the matter with focus on the Submit invoice button. **Open matter** just closes back to the matter.
@@ -218,3 +218,10 @@ Live on dev since ~02:20Z. The billing-rule-draft Action and Binding, the Billin
   - As a flagged-external test user, `/review` answers 403, and `/invoice-submissions/{id}` answers the same 404 for a real id and a made-up id.
   - The four retired `/documents` routes answer 404.
 - [ ] 079 step 12: 077's UI tests against dev, including dark mode. This runs after the step 10 data exists.
+
+## W. Invoice Review review points 2-4 (#3130, merged 2026-11-25 at 6e04bc024e): READY, all three checks (page live 14:19:37Z, dev BFF a1b7db1def live 15:58:53Z)
+uac-r2 deployed `sprk_invoicereviewpage` from a fresh worktree at 6e04bc024e: 2,002,832 B, sha256 fc4b9ec2…231095, read back identical (it replaced the 2026-11-24 build, 08b373e0…43ee). The first two checks can run now; the descriptions check waits for the dev BFF.
+Your review points: (2) UTBMS code without its description, (3) the highlight covering two invoice lines, (4) By rule showing nothing. Point 1 (no `<` `>` to the next invoice) is filed as DEF-070, #3124.
+- [ ] Open INV-123.1 (MAT-000113) and click a line that shares its timekeeper and rate with the line above or below it: the yellow row box covers only that line on the PDF, not its neighbour. Click a value (Hours, Amount): the value box sits inside the row box.
+- [ ] Switch to **By rule**. Rule findings show first (if any). Then the heading "Other checks (not billing rules)" lists groups such as "UTBMS code differs from the firm's", "Codes not checked by the AI" or "Timekeeper not on the firm's roster", each with a line count. Clicking **Line n** selects that line in the grid. An invoice with nothing flagged shows "No rule findings or other checks on these lines."
+- [ ] UTBMS descriptions (point 2): the dev BFF carries #3130 since 2026-11-25 15:58:53Z (a1b7db1def, uac-r2). Reload the page; the pane shows the code with its description from the matter's code set (for example "L190 · …"), and a line whose code differs from the firm's shows a "Firm billed" line with the firm's code and its description.

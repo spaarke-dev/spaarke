@@ -53,6 +53,10 @@ export interface IAuthConfig {
    * state (BFF calls may 401 once until the silent path succeeds) in
    * exchange for no involuntary sign-in popups.
    *
+   * `OfficeNaaStrategy.acquire()` honours it the same way (#1571): no
+   * `acquireTokenPopup` (and no broker prompt under NAA); its interactive path is
+   * then only `acquireInteractive()`, called from a user's click.
+   *
    * Default: false (existing behavior — popup fallback is enabled).
    */
   requireSilentOnly?: boolean;

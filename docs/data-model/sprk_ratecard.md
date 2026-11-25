@@ -1,7 +1,7 @@
 # sprk_ratecard and sprk_ratecardrate (rate cards); timekeeper roster additions
 
 > **Project**: ebilling-r1, task 017 (FR-08)
-> **Last Updated**: 2026-11-23 (task 193: core-record lookups retired); 2026-10-15 (classification and stub-lookup decisions applied; D-84: `sprk_timekeeperrole` is LEDES-only, user-profile role has its own choice)
+> **Last Updated**: 2026-11-25 (task 189: source document column marked retired); 2026-11-23 (task 193: core-record lookups retired); 2026-10-15 (classification and stub-lookup decisions applied; D-84: `sprk_timekeeperrole` is LEDES-only, user-profile role has its own choice)
 > **Script**: `scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1` (idempotent; `-WhatIf`; `-RemoveStubInvoiceLookup` for the owner-approved delete); D-84 follow-up: `scripts/ebilling/Deploy-EbillingUserProfileRoleChoice.ps1`
 > **Notes**: `projects/ebilling-r1/notes/017-timekeeper-ratecard-schema.md`
 > **Task 080 (2026-10-21)**: adds `sprk_procedureversion` to `sprk_ratecard` (script `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1`; run on dev 2026-10-21 and verified).
@@ -17,7 +17,7 @@ Entity set `sprk_ratecards`. **User / team owned.** Primary name `sprk_name` (Te
 |---|---|---|
 | `sprk_name` | Text (200), primary name | Required. |
 | `sprk_firm` | Lookup -> `sprk_organization` (delete **Restrict**) | The firm the rates apply to. Relationship `sprk_organization_ratecard_firm`. |
-| `sprk_sourcedocument` | Lookup -> `sprk_document` | The rate card document (Procedure Library). Relationship `sprk_document_ratecard_sourcedocument`. |
+| `sprk_sourcedocument` | Lookup -> `sprk_document`, not field-secured | **Retired and unused (EB-D-148, model 12).** The card's source document is now its Procedure Version's Stored File ([sprk_procedure.md](sprk_procedure.md)); the rate import no longer writes this column. Still deployed: removal is owner-gated (`scripts/ebilling/Remove-EbillingSourceDocumentColumns.ps1 -Delete`; the task 116 census found no values). Relationship `sprk_document_ratecard_sourcedocument`. |
 | `sprk_procedureversion` | Lookup -> `sprk_procedureversion` (delete **Restrict**, optional) | Task 080 (EB-D-148, model 7.2): the Procedure Version whose published rate card this is; replaces the core-record lookups as the card's link (rate cards are no longer tied to a core record, D-120). Restrict: a Procedure Version with a rate card cannot be deleted. Relationship `sprk_ratecard_procedureversion_procedureversion`. **Field-secured (BFF-only writes).** `sprk_firm` is unchanged; the card's three core-record lookups (matter, project, work assignment) are retired (task 193, below); no `sprk_scope` column is added, and no `sprk_createdbyperson` is added to `sprk_ratecard` or `sprk_ratecardrate` (ontology F4-1 limits it to the policy and its version). |
 | `sprk_effectivefrom` | Date only | First day the card is in force. |
 | `sprk_effectiveto` | Date only | Last day; empty = open ended. |

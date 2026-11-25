@@ -65,8 +65,8 @@
  * Visual reference:
  *   src/client/code-pages/SemanticSearch/src/components/SearchFilterPane.tsx
  *   src/client/code-pages/SemanticSearch/src/components/SearchIndexSelector.tsx
- *   src/client/code-pages/SemanticSearch/src/components/FilterDropdown.tsx
- *   src/client/code-pages/SemanticSearch/src/components/DateRangeFilter.tsx
+ *   src/client/shared/Spaarke.UI.Components/src/components/SearchFilters/ (FilterDropdown,
+ *   DateRangeFilter — moved there from the code page by #3093; this file still has its own copy)
  *   These files are READ for shape/UX but NOT imported — the SemanticSearch
  *   types live in a separate code-page that isn't a published npm package
  *   consumed by SpaarkeAi, and importing would defeat the SpaarkeAi bundle

@@ -3,7 +3,8 @@
  *
  * Tests:
  * - Empty state rendering
- * - Hook calls and configuration
+ * - The shared layout hook's inputs and options (#3093: the PCF uses the code page's synchronous
+ *   `useForceSimulation`, so positions exist on the first render and there is no layout spinner)
  * - Props handling
  *
  * Note: React Flow rendering is mocked to avoid memory issues in tests.
@@ -12,42 +13,59 @@
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import type { DocumentNode, DocumentEdge } from '../types/graph';
+import type {
+  DocumentGraphNode as DocumentNode,
+  DocumentGraphEdge as DocumentEdge,
+} from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
 
-// Mock react-flow-renderer to avoid heavy rendering
+interface MockFlowNode {
+  id: string;
+  position: { x: number; y: number };
+  data: { compactMode?: boolean };
+}
+
+// Mock react-flow-renderer to avoid heavy rendering; expose the nodes React Flow receives.
 jest.mock('react-flow-renderer', () => ({
   __esModule: true,
-  default: ({ children }: { children: React.ReactNode }) => <div data-testid="react-flow-mock">{children}</div>,
+  default: ({ children, nodes }: { children: React.ReactNode; nodes: MockFlowNode[] }) => (
+    <div data-testid="react-flow-mock">
+      {nodes.map(n => (
+        <span
+          key={n.id}
+          data-testid={`node-${n.id}`}
+          data-x={n.position.x}
+          data-y={n.position.y}
+          data-compact={String(!!n.data.compactMode)}
+        />
+      ))}
+      {children}
+    </div>
+  ),
   Background: () => <div data-testid="background" />,
   Controls: () => <div data-testid="controls" />,
   MiniMap: () => <div data-testid="minimap" />,
+  Handle: () => null,
+  Position: { Left: 'left', Right: 'right' },
   useNodesState: jest.fn((initial: unknown[]) => [initial, jest.fn(), jest.fn()]),
   useEdgesState: jest.fn((initial: unknown[]) => [initial, jest.fn(), jest.fn()]),
   BackgroundVariant: { Dots: 'dots' },
 }));
 
-// Mock the useForceLayout hook
-jest.mock('../hooks/useForceLayout', () => ({
-  useForceLayout: jest.fn(() => ({
-    layoutNodes: [],
-    layoutEdges: [],
-    isSimulating: false,
-    recalculate: jest.fn(),
-  })),
+// Mock the shared layout hook (d3-force is covered by the shared library's own tests).
+jest.mock('@spaarke/ui-components/dist/hooks/useForceSimulation', () => ({
+  useForceSimulation: jest.fn(),
 }));
 
-import { useForceLayout } from '../hooks/useForceLayout';
-const mockUseForceLayout = useForceLayout as jest.MockedFunction<typeof useForceLayout>;
+import { useForceSimulation } from '@spaarke/ui-components/dist/hooks/useForceSimulation';
+const mockUseForceSimulation = useForceSimulation as jest.MockedFunction<typeof useForceSimulation>;
 
 // Import component after mocks are set up
 import { DocumentGraph } from '../components/DocumentGraph';
 
-// Wrapper to provide Fluent UI context
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <FluentProvider theme={webLightTheme}>{children}</FluentProvider>
 );
 
-// Sample test data
 const createTestNode = (id: string, isSource = false): DocumentNode => ({
   id,
   type: 'document',
@@ -64,13 +82,11 @@ const createTestNode = (id: string, isSource = false): DocumentNode => ({
   },
 });
 
-const createTestEdge = (source: string, target: string): DocumentEdge => ({
+const createTestEdge = (source: string, target: string, similarity = 0.85): DocumentEdge => ({
   id: `${source}-${target}`,
   source,
   target,
-  data: {
-    similarity: 0.85,
-  },
+  data: { similarity, relationshipType: 'semantic', relationshipLabel: 'Semantic' },
 });
 
 const sampleNodes: DocumentNode[] = [
@@ -79,226 +95,103 @@ const sampleNodes: DocumentNode[] = [
   createTestNode('related-2', false),
 ];
 
-const sampleEdges: DocumentEdge[] = [createTestEdge('source-1', 'related-1'), createTestEdge('source-1', 'related-2')];
+const sampleEdges: DocumentEdge[] = [
+  createTestEdge('source-1', 'related-1'),
+  createTestEdge('source-1', 'related-2', 0.6),
+];
+
+const positioned = (nodes: DocumentNode[]) => ({
+  nodes: nodes.map((n, i) => ({
+    id: n.id,
+    label: n.data.name,
+    isSource: n.data.isSource,
+    x: i * 100 + 10,
+    y: i * 50 + 5,
+  })),
+  edges: [],
+});
 
 describe('DocumentGraph', () => {
   beforeEach(() => {
-    // Reset mock to default behavior
-    mockUseForceLayout.mockReturnValue({
-      layoutNodes: sampleNodes.map((n, i) => ({
-        ...n,
-        position: { x: i * 100, y: i * 50 },
-      })),
-      layoutEdges: sampleEdges,
-      isSimulating: false,
-      recalculate: jest.fn(),
-    });
+    mockUseForceSimulation.mockReset();
+    mockUseForceSimulation.mockImplementation(
+      nodes =>
+        positioned(sampleNodes.filter(s => nodes.some(n => n.id === s.id))) as unknown as ReturnType<
+          typeof useForceSimulation
+        >
+    );
   });
+
+  const renderGraph = (props: Partial<React.ComponentProps<typeof DocumentGraph>> = {}) =>
+    render(
+      <TestWrapper>
+        <DocumentGraph nodes={sampleNodes} edges={sampleEdges} {...props} />
+      </TestWrapper>
+    );
 
   describe('Empty State', () => {
     it('renders empty state message when no nodes provided', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={[]} edges={[]} />
-        </TestWrapper>
-      );
+      renderGraph({ nodes: [], edges: [] });
 
       expect(screen.getByText('No document relationships to display')).toBeInTheDocument();
       expect(screen.getByText('Select a document to view its relationships')).toBeInTheDocument();
-    });
-
-    it('does not render React Flow when nodes array is empty', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={[]} edges={[]} />
-        </TestWrapper>
-      );
-
-      // React Flow mock should not be rendered
       expect(screen.queryByTestId('react-flow-mock')).not.toBeInTheDocument();
     });
   });
 
-  describe('Graph Rendering', () => {
-    it('renders React Flow when nodes are provided', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
+  describe('Layout', () => {
+    it('gives React Flow the laid-out positions on the first render, with no layout spinner', () => {
+      renderGraph();
 
-      // React Flow mock should be rendered
-      expect(screen.getByTestId('react-flow-mock')).toBeInTheDocument();
-    });
-
-    it('calls useForceLayout with nodes and edges', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} width={800} height={600} />
-        </TestWrapper>
-      );
-
-      expect(mockUseForceLayout).toHaveBeenCalledWith(
-        sampleNodes,
-        sampleEdges,
-        expect.objectContaining({
-          // Layout is always centred on the origin; React Flow's fitView positions the viewport.
-          // width/height must NOT shift the centre (container-centre caused issues on wide viewports).
-          centerX: 0,
-          centerY: 0,
-        })
-      );
-    });
-
-    it('centres the layout on the origin when no dimensions are provided', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
-
-      expect(mockUseForceLayout).toHaveBeenCalledWith(
-        sampleNodes,
-        sampleEdges,
-        expect.objectContaining({
-          centerX: 0,
-          centerY: 0,
-        })
-      );
-    });
-  });
-
-  describe('Loading State', () => {
-    it('shows loading spinner when simulation is in progress', () => {
-      mockUseForceLayout.mockReturnValue({
-        layoutNodes: sampleNodes,
-        layoutEdges: sampleEdges,
-        isSimulating: true,
-        recalculate: jest.fn(),
-      });
-
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText('Calculating layout...')).toBeInTheDocument();
-    });
-
-    it('hides loading spinner when simulation completes', () => {
-      mockUseForceLayout.mockReturnValue({
-        layoutNodes: sampleNodes,
-        layoutEdges: sampleEdges,
-        isSimulating: false,
-        recalculate: jest.fn(),
-      });
-
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
-
+      expect(screen.getByTestId('node-source-1')).toHaveAttribute('data-x', '10');
+      expect(screen.getByTestId('node-related-2')).toHaveAttribute('data-x', '210');
+      expect(screen.getByTestId('node-related-2')).toHaveAttribute('data-y', '105');
       expect(screen.queryByText('Calculating layout...')).not.toBeInTheDocument();
     });
-  });
 
-  describe('Layout Options', () => {
-    it('passes custom layout options to useForceLayout', () => {
-      const customOptions = {
-        distanceMultiplier: 300,
-        collisionRadius: 75,
+    it('feeds the hub-spoke layout the nodes (source pinned) and similarity-weighted links, centred on the origin', () => {
+      renderGraph({ width: 1000, height: 800 });
+
+      expect(mockUseForceSimulation).toHaveBeenCalledWith(
+        [
+          { id: 'source-1', label: 'Document source-1.pdf', isSource: true },
+          { id: 'related-1', label: 'Document related-1.pdf', isSource: false },
+          { id: 'related-2', label: 'Document related-2.pdf', isSource: false },
+        ],
+        [
+          { source: 'source-1', target: 'related-1', weight: 0.85 },
+          { source: 'source-1', target: 'related-2', weight: 0.6 },
+        ],
+        // width/height do not move the centre: fitView positions the viewport.
+        {
+          mode: 'hub-spoke',
+          chargeStrength: -1000,
+          linkDistanceMultiplier: 400,
+          collisionRadius: 100,
+          center: { x: 0, y: 0 },
+        }
+      );
+    });
+
+    it('passes custom layout options through', () => {
+      renderGraph({ layoutOptions: { distanceMultiplier: 300, collisionRadius: 75, chargeStrength: -500 } });
+
+      expect(mockUseForceSimulation).toHaveBeenLastCalledWith(expect.any(Array), expect.any(Array), {
+        mode: 'hub-spoke',
         chargeStrength: -500,
-      };
-
-      render(
-        <TestWrapper>
-          <DocumentGraph
-            nodes={sampleNodes}
-            edges={sampleEdges}
-            layoutOptions={customOptions}
-            width={1000}
-            height={800}
-          />
-        </TestWrapper>
-      );
-
-      expect(mockUseForceLayout).toHaveBeenCalledWith(
-        sampleNodes,
-        sampleEdges,
-        expect.objectContaining({
-          ...customOptions,
-          centerX: 0, // width/height (1000x800) do not move the centre
-          centerY: 0,
-        })
-      );
-    });
-  });
-
-  describe('Subcomponents', () => {
-    it('renders Background component', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByTestId('background')).toBeInTheDocument();
+        linkDistanceMultiplier: 300,
+        collisionRadius: 75,
+        center: { x: 0, y: 0 },
+      });
     });
 
-    it('renders Controls component', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByTestId('controls')).toBeInTheDocument();
+    it('stamps compactMode onto every node', () => {
+      renderGraph({ compactMode: true });
+      expect(screen.getByTestId('node-related-1')).toHaveAttribute('data-compact', 'true');
     });
 
-    it('does not render MiniMap by default', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
-
-      expect(screen.queryByTestId('minimap')).not.toBeInTheDocument();
-    });
-
-    it('renders MiniMap component when showMinimap is true', () => {
-      render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} showMinimap />
-        </TestWrapper>
-      );
-
-      expect(screen.getByTestId('minimap')).toBeInTheDocument();
-    });
-  });
-
-  describe('Dark Mode', () => {
-    it('accepts isDarkMode prop', () => {
-      // Component should render without errors with dark mode enabled
-      const { container } = render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} isDarkMode />
-        </TestWrapper>
-      );
-
-      expect(container.firstChild).toBeInTheDocument();
-    });
-  });
-
-  describe('Nodes and Edges Updates', () => {
-    it('calls useForceLayout with updated nodes', () => {
-      const { rerender } = render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
-
+    it('lays out again with the new nodes', () => {
+      const { rerender } = renderGraph();
       const newNodes = [...sampleNodes, createTestNode('related-3', false)];
 
       rerender(
@@ -307,26 +200,29 @@ describe('DocumentGraph', () => {
         </TestWrapper>
       );
 
-      // useForceLayout should be called with new nodes
-      expect(mockUseForceLayout).toHaveBeenLastCalledWith(newNodes, sampleEdges, expect.any(Object));
+      expect(mockUseForceSimulation.mock.calls[mockUseForceSimulation.mock.calls.length - 1][0]).toHaveLength(4);
+    });
+  });
+
+  describe('Subcomponents', () => {
+    it('renders Background and Controls, and no MiniMap by default', () => {
+      renderGraph();
+
+      expect(screen.getByTestId('background')).toBeInTheDocument();
+      expect(screen.getByTestId('controls')).toBeInTheDocument();
+      expect(screen.queryByTestId('minimap')).not.toBeInTheDocument();
     });
 
-    it('calls useForceLayout with updated edges', () => {
-      const { rerender } = render(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={sampleEdges} />
-        </TestWrapper>
-      );
+    it('renders MiniMap component when showMinimap is true', () => {
+      renderGraph({ showMinimap: true });
+      expect(screen.getByTestId('minimap')).toBeInTheDocument();
+    });
+  });
 
-      const newEdges = [...sampleEdges, createTestEdge('related-1', 'related-2')];
-
-      rerender(
-        <TestWrapper>
-          <DocumentGraph nodes={sampleNodes} edges={newEdges} />
-        </TestWrapper>
-      );
-
-      expect(mockUseForceLayout).toHaveBeenLastCalledWith(sampleNodes, newEdges, expect.any(Object));
+  describe('Dark Mode', () => {
+    it('accepts isDarkMode prop', () => {
+      const { container } = renderGraph({ isDarkMode: true });
+      expect(container.firstChild).toBeInTheDocument();
     });
   });
 });

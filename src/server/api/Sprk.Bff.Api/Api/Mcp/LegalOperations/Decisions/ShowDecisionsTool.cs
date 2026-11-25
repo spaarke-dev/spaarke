@@ -33,10 +33,12 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 /// non-privileged items with links, the privileged count line. <c>structuredContent</c> is page 1 of the slim rows with privileged rows
 /// taken out (FR-04), the next cursor, the per-category counts and <c>consoleBaseUrl</c>; <c>_meta.ui</c> on the tool points at the widget.
 /// The widget fetches full detail, page 1 included, through the app-only <see cref="ListDecisionPageTool"/>.</para>
-/// <para><b>Reads.</b> As the caller, through <see cref="IDecisionCapability"/>: the whole lane (<c>ListDecideAsync</c>) for the counts,
-/// which must equal the Console's cards over every item, and page 1 (<c>ListDecidePageAsync</c>), whose privilege flags the capability
-/// derives (task 018). Two reads of the lane; a failure of either is an <c>isError</c> result through <see cref="DecisionResultMapper"/>,
-/// never a partial answer (the worklist's 503, <c>too_many_signals</c> included, is <c>ontology.signal.worklist_unavailable</c>).</para>
+/// <para><b>Reads.</b> As the caller, through <see cref="IDecisionCapability"/>: ONE read of the lane (<c>ListDecidePageAsync</c>, page 1,
+/// whose privilege flags the capability derives, task 018). The counts come from the whole lanes response that page was cut from
+/// (<see cref="DecidePageResult.Lane"/>, the same response <c>ListDecideAsync</c> returns), so they equal the Console's cards over every item
+/// (NFR-01, 2026-11-25: the lane was read twice before, ~2 s each). A failure is an <c>isError</c> result through
+/// <see cref="DecisionResultMapper"/>, never a partial answer (the worklist's 503, <c>too_many_signals</c> included, is
+/// <c>ontology.signal.worklist_unavailable</c>); a page without its lane is the same 503, never counts of zero.</para>
 /// <para><b>Caller (FR-10).</b> The request context is <c>IHttpContextAccessor.HttpContext</c>, passed through unchanged; a null context or an
 /// unauthenticated caller is <c>UserContextRequired</c> before any capability call, and nothing falls back to app-only.</para>
 /// </remarks>
@@ -162,22 +164,18 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
             return (McpToolResults.FromError(DecisionResultMapper.ToToolError(DecidePageResult.UserContextRequired)!, http?.TraceIdentifier), 0);
         }
 
-        var lane = await decisions.ListDecideAsync(http.User, cancellationToken);
-        var laneError = DecisionResultMapper.ToToolError(lane);
-        if (laneError != null)
-        {
-            return (McpToolResults.FromError(laneError, http?.TraceIdentifier), 0);
-        }
-
+        // One read of the lane (NFR-01): page 1 carries the whole lanes response it was cut from, and the counts come from that.
         var page = await decisions.ListDecidePageAsync(http.User, null, cancellationToken);
-        var pageError = DecisionResultMapper.ToToolError(page);
+        var pageError = DecisionResultMapper.ToToolError(page)
+            // An Ok page without its lane cannot give the counts; it is the worklist's 503, never counts of zero.
+            ?? (page.Lane == null ? DecisionResultMapper.ToToolError(DecidePageResult.ReadFailed(SignalReadResult.Unavailable("fault"))) : null);
         if (pageError != null)
         {
             return (McpToolResults.FromError(pageError, http?.TraceIdentifier), 0);
         }
 
         var cards = DecideLaneCategories.Partition(
-            lane.Response!.Lanes.SelectMany(l => l.Groups).SelectMany(g => g.Items).Select(DecideLaneMember.From));
+            page.Lane!.Lanes.SelectMany(l => l.Groups).SelectMany(g => g.Items).Select(DecideLaneMember.From));
         var resolved = DecideLaneCategories.Resolve(cards, category);
         var (visible, cores, privileged) = DecisionsTextSummary.Reduce(page.Items, page.Cores);
         var baseUrl = DecisionsTextSummary.ConsoleBaseUrl(environmentUrl);

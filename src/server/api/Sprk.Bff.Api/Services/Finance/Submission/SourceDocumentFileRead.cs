@@ -39,7 +39,8 @@ internal enum SourceDocumentFileOutcome
 
     /// <summary>
     /// Only when the caller passed <c>maxBytes</c> (task 118b review, F1-b): the row's <c>sprk_filesize</c> is over it (nothing was
-    /// downloaded), or the stream delivered more than it (the copy stopped there). The job passes none and never sees this.
+    /// downloaded), or the stream delivered more than it (the copy stopped there). Both callers pass the per-file limit (the intake for supporting documents; since DEF-052 the job, which ends the
+    /// submission permanently with <see cref="SubmissionReasonCodes.FileTooLarge"/>).
     /// </summary>
     TooLarge,
 }

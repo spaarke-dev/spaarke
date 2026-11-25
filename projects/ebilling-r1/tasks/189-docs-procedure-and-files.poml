@@ -4,7 +4,7 @@
     <title>Docs: retire "Procedure Library"; data-model docs for the Procedure and Stored File tables; file-store architecture note</title>
     <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-G</phase>
     <gate>blocked until 079 (WP3 deploy to dev) is done</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation only, but it creates new doc files (task-create Step 3.5.5: new files → STANDARD); no code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -88,7 +88,9 @@
     <criterion testable="true">No file under src/, scripts/ or src/dataverse/ is changed (git diff --stat).</criterion>
   </acceptance-criteria>
 
-  <notes>Runs after 079 so the docs describe deployed schema. The dev SPE containers (D-55) stay for the owner to remove (O-13); the project CLAUDE.md line 177 says so instead of listing them as current.</notes>
+  <notes>Runs after 079 so the docs describe deployed schema. The dev SPE containers (D-55) stay for the owner to remove (O-13); the project CLAUDE.md line 177 says so instead of listing them as current.
+Completed 2026-11-25 on branch task/ebilling-189. The gate (079) was moot: its schema writes and source sync were already in master. Details, the model-vs-schema differences, the spot-check list and the remaining code mentions are in notes/189-docs.md.
+rework: none task 189</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

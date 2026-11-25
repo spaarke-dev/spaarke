@@ -14,6 +14,7 @@
 
 import React, { useCallback, useMemo } from 'react';
 import { makeStyles, tokens, Dropdown, Option, OptionGroup, Label, Spinner } from '@fluentui/react-components';
+import { calculatePresetRange } from '@spaarke/ui-components/components/SearchFilters';
 import type { SavedSearch, SearchDomain, SearchFilters } from '../types';
 
 // =============================================
@@ -59,8 +60,10 @@ const DEFAULT_SEARCHES: SavedSearch[] = [
     query: '',
     filters: {
       ...DEFAULT_FILTERS,
+      // The LOCAL day 30 days ago, as the "Last 30 days" preset computes it (#3093: the UTC date
+      // was a day ahead late in the evening west of UTC).
       dateRange: {
-        from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        from: calculatePresetRange('last30').from,
         to: null,
       },
     },

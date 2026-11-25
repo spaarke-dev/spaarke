@@ -123,7 +123,8 @@ internal sealed class FromEmailSubmissionService
         ArgumentNullException.ThrowIfNull(http);
 
         // ── 1. Marks (400) and bytes (422): nothing is read or written for a request that breaks them ──
-        var (marksRefusal, saved) = FromEmailMarkRules.Check(input.Email.Attachments ?? new List<AttachmentReference>(), input.Marks);
+        var (marksRefusal, saved) = FromEmailMarkRules.Check(
+            input.Email.Attachments ?? new List<AttachmentReference>(), input.Marks, _submissions.MaxFileBytes);
         if (marksRefusal is not null)
         {
             var extensions = new Dictionary<string, object?>();

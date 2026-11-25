@@ -5,7 +5,7 @@
  * a browser download via a hidden anchor element.
  */
 
-import type { DocumentNodeData } from '../types/graph';
+import type { DocumentNodeData } from '@spaarke/ui-components';
 
 interface ExportableRow {
   id: string;

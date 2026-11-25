@@ -616,6 +616,7 @@ if ($BatchIntakeFile) {
   $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # T229 — REQUIRED: projected monthly Azure spend of the stamp (USD); Step 2 + Step 4.0 + H0 cost-envelope gate
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
+  $referenceDataPack = $intake.referenceDataPack  # D4 — OPTIONAL: legal-standard (default) | none (customer brings its own taxonomy) (Step 1b-quinquies-bis)
   $secureRecordSetupDryRun = $intake.secureRecordSetupDryRun  # T256 — OPTIONAL: true = H7b dry run (plan only; the run stops at H7b); absent/false = apply (Step 1b-sexies)
   $buildId        = $intake.buildId             # ISS-036 — OPTIONAL: pin the BFF CI build H9 deploys (e.g. 2026.10.16-2); absent = latest.json. H9 refuses the run when it is not latest.json's buildId — set it on an upgrade that must not change the BFF
   $notes          = $intake.notes               # optional
@@ -897,6 +898,20 @@ environment that already holds the other type, so on an UPGRADE run send the typ
 ```powershell
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType") -and "$solutionPackageType" -cnotin @('managed','unmanaged')) {
   Write-Error "❌ solutionPackageType must be managed or unmanaged (exact case), or omitted for managed."; exit 1
+}
+```
+
+#### 1b-quinquies-bis. `referenceDataPack` (OPTIONAL — data-setup plan D4, owner decision B)
+
+H12b seeds the standard legal starter taxonomy (matter, matter subtype, practice-area, project, document, contact and
+organization types) into the stamp. Existing rows (matched by id, code or name, active or inactive) are never touched, but
+a pack row the customer DELETED is created again on every run. On a fresh run do not ask: send `none` only when the owner
+says the customer brings its own taxonomy. On an UPGRADE run (Step 1a) ask the operator whether the customer owns its
+taxonomy; if yes, send `none` (in batch mode the intake's value decides; absent = `legal-standard`).
+
+```powershell
+if (-not [string]::IsNullOrWhiteSpace("$referenceDataPack") -and "$referenceDataPack" -cnotin @('legal-standard','none')) {
+  Write-Error "❌ referenceDataPack must be legal-standard or none (exact case), or omitted for legal-standard."; exit 1
 }
 ```
 
@@ -1692,6 +1707,10 @@ if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
 # T218b — the package type (Step 1b-quinquies): sent only when the owner instructed unmanaged; absent = managed.
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
   $runRequest.nonSecretParameters.solutionPackageType = "$solutionPackageType"
+}
+# D4 — the starter taxonomy pack (Step 1b-quinquies-bis): absent = legal-standard (L2 stores it); none = the customer's own.
+if (-not [string]::IsNullOrWhiteSpace("$referenceDataPack")) {
+  $runRequest.nonSecretParameters.referenceDataPack = "$referenceDataPack"
 }
 # ISS-031 — an UPGRADE run (Step 1a) sends the row's sprk_provisionedon as L2's existing-stamp acknowledgement. A fresh run
 # never sends it (L2 refuses it on a never-provisioned row). Never send it as `provisionedOn` (handler upgrade mode, ISS-038).

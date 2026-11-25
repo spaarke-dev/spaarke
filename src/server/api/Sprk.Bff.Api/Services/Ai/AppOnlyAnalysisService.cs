@@ -52,7 +52,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
     // Summary status values (Dataverse OptionSet)
-    private const int SummaryStatusPending = 100000001;
+    // Pending is internal: OfficeProfileQueue writes it when it queues a Generate Profile request (task 137, #1090), so
+    // the value has one definition.
+    internal const int SummaryStatusPending = 100000001;
     private const int SummaryStatusCompleted = 100000002;
     private const int SummaryStatusFailed = 100000004;
     private const int SummaryStatusNotSupported = 100000005;

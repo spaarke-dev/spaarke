@@ -857,7 +857,9 @@ public class AssignedAccessStore
     /// <summary>
     /// The systemusers that may be represented by <paramref name="contactId"/>: those whose task-141 link
     /// (<c>sprk_primarycontact</c>) names it, and those whose Entra oid the contact's binding carries. The caller decides
-    /// which of them the contact really represents. Exceptions propagate.
+    /// which of them the contact really represents, so the answer is the COMPLETE set: at most <see cref="MaxScanRows"/>
+    /// users; one more throws <see cref="InvalidOperationException"/> (never a silent prefix, on which a caller's "exactly one
+    /// eligible user" could be wrong — #3120; the caller reports "could not tell" and fails closed). Exceptions propagate.
     /// </summary>
     internal virtual async Task<IReadOnlyList<AssignedLinkCandidate>> ReadLinkCandidatesAsync(
         Guid contactId, Guid? boundOid, CancellationToken ct)
@@ -867,7 +869,12 @@ public class AssignedAccessStore
             filter += $" or azureactivedirectoryobjectid eq {oid:D}";
 
         var rows = await _dataverse.QueryAsync<LinkCandidateRow>(
-            "systemusers", filter: filter, select: LinkCandidateSelect, top: 10, cancellationToken: ct).ConfigureAwait(false);
+            "systemusers", filter: filter, select: LinkCandidateSelect, top: MaxScanRows + 1, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (rows.Count > MaxScanRows)
+            throw new InvalidOperationException(
+                $"Contact {contactId:D} may represent more than {MaxScanRows} systemusers; the rest were not read, so who it " +
+                "represents is not known.");
 
         return rows
             .Where(r => r.SystemUserId != Guid.Empty)

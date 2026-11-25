@@ -48,7 +48,7 @@ import { AppsList20Regular, Grid20Regular, ChevronDownRegular } from '@fluentui/
 // documented in ResultCard.tsx. TagFilter ships as its own deep-path entry.
 import { TagFilter } from '@spaarke/ui-components/dist/components/TagFilter';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
-import { DateRangeFilter } from './DateRangeFilter';
+import { DateRangeFilter } from '@spaarke/ui-components/dist/components/SearchFilters';
 import type { DateRange, FilterOption, SearchFilters, SearchMode } from '../types';
 import type { DocumentListView } from '../hooks/useDocumentListPrefs';
 
@@ -56,7 +56,7 @@ import type { DocumentListView } from '../hooks/useDocumentListPrefs';
 // Static option sets (matches FilterPanel.tsx — relocation, not redesign)
 // ---------------------------------------------------------------------------
 
-const THRESHOLD_OPTIONS: ReadonlyArray<{ key: string; label: string }> = [
+const THRESHOLD_OPTIONS: readonly { key: string; label: string }[] = [
   { key: '0', label: 'Off' },
   { key: '25', label: '25%' },
   { key: '50', label: '50%' },
@@ -64,7 +64,7 @@ const THRESHOLD_OPTIONS: ReadonlyArray<{ key: string; label: string }> = [
   { key: '100', label: '100%' },
 ];
 
-const MODE_OPTIONS: ReadonlyArray<{ key: SearchMode; label: string }> = [
+const MODE_OPTIONS: readonly { key: SearchMode; label: string }[] = [
   { key: 'hybrid', label: 'Hybrid' },
   { key: 'vectorOnly', label: 'Concept Only' },
   { key: 'keywordOnly', label: 'Keyword Only' },
@@ -196,8 +196,8 @@ export interface ICommandBarProps {
   showAssociatedOnly: boolean;
 
   /** Loaded option sets from Dataverse (memoized in parent). */
-  fileTypeOptions: ReadonlyArray<FilterOption>;
-  tagOptions: ReadonlyArray<TagFilterOption>;
+  fileTypeOptions: readonly FilterOption[];
+  tagOptions: readonly TagFilterOption[];
   optionsLoading: boolean;
 
   /** Selected tags (FR-DOC-05) — owned by parent. */
@@ -239,7 +239,7 @@ export interface ICommandBarProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatFileTypeLabel(selected: string[], options: ReadonlyArray<FilterOption>): string {
+function formatFileTypeLabel(selected: string[], options: readonly FilterOption[]): string {
   if (selected.length === 0) return 'File Type';
   if (selected.length === 1) {
     const found = options.find(o => o.key === selected[0]);

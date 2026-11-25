@@ -1269,6 +1269,63 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         factory.Enqueuer.Enqueued.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task PostRuns_ReferenceDataPackAbsent_StoresLegalStandardOnTheRun()
+    {
+        // Data-setup plan D4, owner decision B: the starter taxonomy is seeded by default; the run records it.
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildValidCreateRunRequest("testcust"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Single().Parameters.NonSecret
+            .Should().Contain(IntakeParameterCatalog.ReferenceDataPack, "legal-standard");
+    }
+
+    [Fact]
+    public async Task PostRuns_ReferenceDataPackNone_IsStoredAsGiven()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            ["dataverseEnvUrl"] = "https://spaarke-testcust.crm.dynamics.com/",
+            [IntakeParameterCatalog.ReferenceDataPack] = "none",
+        });
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Single().Parameters.NonSecret
+            .Should().Contain(IntakeParameterCatalog.ReferenceDataPack, "none", "the customer brings its own taxonomy");
+    }
+
+    [Theory]
+    [InlineData("Legal-Standard")]   // exact case
+    [InlineData("enterprise")]
+    [InlineData("")]
+    public async Task PostRuns_ReferenceDataPackNotAllowed_Returns400_BeforeCosmosOrEnqueue(string value)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            [IntakeParameterCatalog.ReferenceDataPack] = value,
+        };
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemErrorCode(body).Should().Be("intake-invalid-reference-data-pack");
+        ReadProblemDetail(body).Should().Contain("legal-standard | none");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("TRUE")]   // exact case
     [InlineData("yes")]

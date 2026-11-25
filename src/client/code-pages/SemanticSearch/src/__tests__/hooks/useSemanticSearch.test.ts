@@ -222,9 +222,10 @@ describe('useSemanticSearch', () => {
           documentTypes: ['Contract'],
           fileTypes: ['pdf'],
           entityTypes: ['matter'],
+          // #3093: the local day '2025-01-01' is sent as the UTC instant of local midnight.
           dateRange: {
             field: 'createdAt',
-            from: '2025-01-01',
+            from: new Date(2025, 0, 1).toISOString(),
             to: undefined,
           },
         },

@@ -7,6 +7,10 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-25 — Root CLAUDE.md §17: Copilot surfaces pointer
+
+The §17 row "Wire a new AI capability …" now also covers exposing a capability to Copilot (tool, skill, agent) and points at the new `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (what Spaarke builds for each AI surface, why MCP, when to create an agent). The row was extended rather than added, so the line count is unchanged. **Budget:** 219 lines (unchanged), 22,340 → 22,451 bytes (**+111 bytes**), under the 30 KB ceiling. Owner request (2026-11-25: "yes we need to do this now").
+
 ###### 2026-11-25 — ADR-026: ribbon/command scripts live in `src/client/webresources/js/`
 
 #3074 (2026-11-24) removed the last files under `src/dataverse/webresources/`, so ADR-026's surface matrix named a folder that no longer exists (`Test-InstructionPaths` new miss). Both copies (`.claude/adr/` and `docs/adr/`) now name `src/client/webresources/js/`, where the ribbon and command scripts are. Wording fix only; no rule changed. Found and fixed by spaarkeai-mcp-bff-api-r1 (owner: "Fix it here").

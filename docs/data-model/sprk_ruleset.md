@@ -1,9 +1,9 @@
 # sprk_ruleset and the billing columns on the policy store
 
 > **Project**: ebilling-r1, task 019 (FR-09, FR-27, FR-28, D-26, D-66, D-79)
-> **Last Updated**: 2026-10-21 (task 080 additions below; run on dev 2026-10-21 and verified against live metadata: projects/ebilling-r1/notes/080-dev-run-2026-10-21.md)
+> **Last Updated**: 2026-11-25 (task 189: checked against the SpaarkeMaster source; field security, the source document column and the Procedure link brought up to date. Task 080 additions run on dev 2026-10-21: projects/ebilling-r1/notes/080-dev-run-2026-10-21.md)
 > **Scripts**: `scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1` and, for `sprk_rejectionreason` (task 077, D-113), `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1` (both idempotent, additive; a second run changes nothing)
-> **Task 080 script**: `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1` (EB-D-148: the Procedure, Procedure Version and Procedure Assignment tables, the record scope and links below, the billing columns on the core records). Table docs for the three new tables are task 189's.
+> **Task 080 script**: `scripts/ebilling/Deploy-EbillingProcedureSchema.ps1` (EB-D-148: the Procedure, Procedure Version and Procedure Assignment tables, the record scope and links below, the billing columns on the core records). The three new tables are documented in [sprk_procedure.md](sprk_procedure.md), the file table in [sprk_storedfile.md](sprk_storedfile.md).
 > **Owner of the policy tables**: spaarke-ontology-platform-r1 (`Services/Signals/**`). This task only adds columns to them.
 
 Billing rules share the ontology policy store (D-23, D-30): one rules system, two strategies. A **policy** (`sprk_policy`) holds what is stable across versions, a **policy version** (`sprk_policyversion`) holds one immutable published rule body, and the new **rule set** (`sprk_ruleset`) groups the policies drafted from one guideline, rate card or procedure document so that they can be published, scoped to a client default or a firm, cited and shown to firms as a unit (FR-28). Created additively in dev on 2026-10-15; no plugin, business rule or calculated column (ADR-002). Admin forms and views are task 029's.
@@ -26,13 +26,13 @@ User-owned (like `sprk_policy`), entity set `sprk_rulesets`, primary name `sprk_
 |---|---|---|
 | `sprk_name` | Text (200), primary name, application-required | Shown to firms when the rule set is visible to firms (D-66). Required by the BFF write path (task 076), not enforced on API writes: Dataverse enforces ApplicationRequired on forms only. |
 | `sprk_domain` | Choice, global `sprk_policydomain` | Billing in R1. |
-| `sprk_sourcedocument` | Lookup -> `sprk_document` (delete RemoveLink) | The Procedure Library document the rules were drafted from. Internal only (D-63): never exposed to firm users. Relationship `sprk_document_ruleset_sourcedocument`. |
+| `sprk_sourcedocument` | Lookup -> `sprk_document` (delete RemoveLink), not field-secured | **Retired and unused (EB-D-148, model 12).** It held the document a rule set was drafted from; the source is now the Procedure Version's Stored File ([sprk_procedure.md](sprk_procedure.md)). Nothing in the BFF reads or writes it. The column is still deployed: removing it is owner-gated (`scripts/ebilling/Remove-EbillingSourceDocumentColumns.ps1 -Delete`; the task 116 census found no values). Relationship `sprk_document_ruleset_sourcedocument`. |
 | `sprk_scope` | Choice (local) | Client default = 100000000, Firm = 100000001, **Record = 100000002, Firm record = 100000003** (task 080). A **record-scoped** rule set (Record / Firm record) holds one record's rule changes (model 6.3). **A Record / Firm record set with no record lookup applies to nothing**: the loader requires the scope value *and* a non-null record lookup, so a set unlinked by a record delete can never read as firm-wide. **Field-secured (BFF-only writes)**: Read for every user, Create / Update for the BFF application user only. |
-| `sprk_firm` | Lookup -> `sprk_organization` (delete RemoveLink) | Set only when the scope is Firm. **Enforced by task 076, not by schema.** Relationship `sprk_organization_ruleset_firm`. |
+| `sprk_firm` | Lookup -> `sprk_organization` (delete RemoveLink) | Set only when the scope is Firm. **Enforced by task 076, not by schema.** Relationship `sprk_organization_ruleset_firm`. **Field-secured (BFF-only writes).** |
 | `sprk_visibletofirms` | Two-option, default **No** | See "Firm visibility" below. **Field-secured (BFF-only writes)**: read for every internal user through the Readers profile, create/update for the BFF through the Writers profile. Set by `scripts/ebilling/Set-EbillingRuleSetVisibilityFieldSecurity.ps1`. |
 | `sprk_matter`, `sprk_project`, `sprk_workassignment` | Lookup -> the core table (delete **RemoveLink**, optional) | Task 080: one record lookup per core table in `InvoiceFamilyCoreRecordGuard.FilingCores` (read from that source by the script; a core record added there gets its lookup on the next run). Exactly one is set on a Record / Firm record rule set (BFF-enforced). Deleting the record clears the lookup and the set then applies to nothing (D-172). Relationships `sprk_matter_ruleset_matter`, `sprk_project_ruleset_project`, `sprk_workassignment_ruleset_workassignment`. **Field-secured (BFF-only writes).** |
 | `sprk_procedure` | Lookup -> `sprk_procedure` (delete **Restrict**, optional) | Task 080: the Procedure this rule set belongs to. Restrict: a Procedure with a rule set cannot be deleted (retire it), because Signals cite its rules. Relationship `sprk_ruleset_procedure_procedure`. **Field-secured (BFF-only writes).** |
-| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (O-23, S9): the person who asked for the record; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_ruleset_createdbyperson`. |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (O-23, S9): the person who asked for the record; the BFF stamps it. **Field-secured (BFF-only writes)** by `Set-ChildRecordCreatorPersonSchema.ps1` (task 081). Relationship `sprk_systemuser_sprk_ruleset_createdbyperson`. |
 | `sprk_effectivefrom` / `sprk_effectiveto` | Date only | In-force window (D-74: the rules applied to an invoice are those of rule sets in force on the invoice date). `sprk_effectiveto` empty = open ended. |
 | `sprk_notconverted` | Multiline text (100,000) | JSON list of guideline text the drafting Action (`billing-rule-draft`, task 075) could not convert into a supported rule. |
 
@@ -51,7 +51,7 @@ A new rule set reads statecode 0 / statuscode 1 = Draft.
 `sprk_visibletofirms` decides whether a firm sees the **content** of a rule set: the clause quote and section reference on a finding, and the SPA Billing Guidelines view. Firms never see the guideline document itself.
 
 - Flag **on**: the firm-visible output carries the rule set name and version, the section reference and the quoted clause text.
-- Flag **off**: the firm sees only the reason and the rule set name. No clause text, no section reference, no Procedure Library link (D-79).
+- Flag **off**: the firm sees only the reason and the rule set name. No clause text, no section reference, no Procedure document link (D-79).
 - The column default is **No** (fail closed): a rule set created without the flag set reads No (checked live: create with a name only reads `sprk_visibletofirms = false`). The initial value for billing guidelines and rate cards (on) and internal procedures (off) is set by task 076 from the source kind when it creates the rule set.
 - The admin sees "clause quotes will be visible to firms" at publish when the flag is on (FR-28).
 
@@ -63,7 +63,7 @@ Existing columns are unchanged. Added:
 |---|---|---|
 | `sprk_domain` | Choice, global `sprk_policydomain` | Empty = Ontology. Billing policies set Billing. |
 | `sprk_ruleset` | Lookup -> `sprk_ruleset` (delete RemoveLink) | The rule set the policy belongs to. Stable across versions. Relationship `sprk_ruleset_policy_ruleset`. |
-| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the policy; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_policy_createdbyperson`. |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the policy; the BFF stamps it. **Field-secured (BFF-only writes)** (task 081). Relationship `sprk_systemuser_sprk_policy_createdbyperson`. |
 
 ## sprk_policyversion (additive)
 
@@ -90,7 +90,7 @@ Added by task 080 (EB-D-148, model 7.2):
 | `sprk_procedureversion` | Lookup -> `sprk_procedureversion` (delete **Restrict**, optional) | The Procedure Version this policy version belongs to. Restrict: a Procedure Version with policy versions cannot be deleted. Relationship `sprk_policyversion_procedureversion_procedureversion`. **Field-secured (BFF-only writes).** |
 | `sprk_publishstate` | Choice, global `sprk_publishstate` (Draft 100000000, Published 100000001), optional, **no default** | Only Published versions are loaded by the resolver. Existing rows stay empty (dev data is recreated, O-13). **Field-secured (BFF-only writes).** |
 | `sprk_basedonversion` | Lookup -> `sprk_policyversion` (delete **RemoveLink**) | For a record rule: the base rule's policy version it was copied from. Never Restrict (ontology F2-a). Relationship `sprk_policyversion_basedonversion_policyversion`. |
-| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the version; the BFF stamps it. Created unsecured; task 081 secures it. Relationship `sprk_systemuser_sprk_policyversion_createdbyperson`. |
+| `sprk_createdbyperson` | Lookup -> `systemuser` (delete RemoveLink) | Task 080 (D-173, ontology F4-1): the person who asked for the version; the BFF stamps it. **Field-secured (BFF-only writes)** (task 081). Relationship `sprk_systemuser_sprk_policyversion_createdbyperson`. |
 
 The predecessor of a version is its sibling under the same `sprk_policy` with the next-lower `sprk_versionnumber`; there is no extra link column.
 

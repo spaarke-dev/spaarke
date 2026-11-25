@@ -51,6 +51,28 @@ public sealed class DataverseWebApiRecordTypeSeederTests
     }
 
     [Fact]
+    public async Task Task028_EmptyTable_CreatesTheCommunicationRecordType_SoAnAnalysisToCommunicationProfileCanBeConfigured()
+    {
+        var fake = new FakeDataverseHandler(existing: new HashSet<string>());
+        var seeder = BuildSeeder(fake);
+
+        var result = await seeder.SeedAsync(new AppConfigSeedInput("acme", TenantId, EnvUrl), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        var communication = fake.PostBodies.Select(b => JsonDocument.Parse(b).RootElement)
+            .Single(e => e.GetProperty("sprk_recordlogicalname").GetString() == "sprk_communication");
+        communication.GetProperty("sprk_recordtypename").GetString().Should().Be("Communication");
+        communication.GetProperty("sprk_recorddisplayname").GetString().Should().Be("Communication");
+        communication.GetProperty("sprk_recordtypecode").GetString().Should().Be("COMM");
+        communication.GetProperty("sprk_recorddisplaynamefield").GetString().Should().Be("sprk_name", "the table's primary name column");
+        communication.GetProperty("sprk_regardingfield").GetString().Should().Be("sprk_regardingcommunication");
+        communication.TryGetProperty("sprk_regardingrecordnumberfield", out _).Should().BeFalse(
+            "Communication has no record-number column, so it never joins the identifier reverse-lookup roster");
+
+        DataverseWebApiRecordTypeSeeder.SeedRecordTypes.Select(r => r.TypeCode).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public async Task T186_L54_RowsAlreadyPresent_AreSkipped_NeverRewritten()
     {
         var all = DataverseWebApiRecordTypeSeeder.SeedRecordTypes.Select(r => r.LogicalName).ToHashSet();
