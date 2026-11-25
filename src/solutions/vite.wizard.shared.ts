@@ -11,7 +11,11 @@
  * Output shape is unchanged from the per-page copies this replaced: a single-file
  * HTML (`dist/index.html`, JS/CSS inlined) for Dataverse web-resource deployment.
  *
+ * The e-billing pages use the same factory through `src/solutions/vite.ebilling.shared.ts` with the options below (#2965). With no options the
+ * config is exactly what it was before them, so the wizard pages are unchanged.
+ *
  * @param pageDir absolute path of the page folder (its `node_modules` and `src` are used).
+ * @param options optional extras; see {@link CodePageViteOptions}.
  */
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -21,16 +25,30 @@ import fs from "fs";
 
 const sharedRoot = path.resolve(__dirname, "../client/shared");
 
+/** Optional extras for a family of pages that share source or need a stricter dedupe than the wizards. */
+export interface CodePageViteOptions {
+  /**
+   * Absolute folders of source shared by a family of pages, outside the page itself. Their bare imports resolve from the page's
+   * `node_modules` (like the shared libraries) and their JSX goes through the React plugin.
+   */
+  extraSourceDirs?: string[];
+  /** `resolve.dedupe`: packages forced onto the page's single copy. */
+  dedupe?: string[];
+  /** Transform CommonJS modules that also use ES module syntax (`build.commonjsOptions`). */
+  commonjsMixedEsModules?: boolean;
+}
+
 /**
  * Resolves bare module imports from shared library source files to THIS page's
  * node_modules. Required because @spaarke/auth and @spaarke/ui-components are
  * aliased to source directories outside the page root, so their bare imports
  * (e.g. "@azure/msal-browser") must be resolved from the page's node_modules.
  */
-function resolveSharedLibDeps(pageDir: string): import("vite").Plugin {
+function resolveSharedLibDeps(pageDir: string, extraSourceDirs: string[] = []): import("vite").Plugin {
   const sharedLibPaths = [
     path.resolve(sharedRoot, "Spaarke.UI.Components/src"),
     path.resolve(sharedRoot, "Spaarke.Auth/src"),
+    ...extraSourceDirs,
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(pageDir, "node_modules");
@@ -63,14 +81,16 @@ function resolveSharedLibDeps(pageDir: string): import("vite").Plugin {
   };
 }
 
-export function createWizardViteConfig(pageDir: string) {
+export function createWizardViteConfig(pageDir: string, options: CodePageViteOptions = {}) {
+  const extraSourceDirs = options.extraSourceDirs ?? [];
   return defineConfig({
     plugins: [
-      resolveSharedLibDeps(pageDir),
+      resolveSharedLibDeps(pageDir, extraSourceDirs),
       react({
         include: [
           "src/**/*.tsx",
           "src/**/*.ts",
+          ...extraSourceDirs.flatMap((dir) => [path.resolve(dir, "**/*.tsx"), path.resolve(dir, "**/*.ts")]),
           path.resolve(sharedRoot, "Spaarke.UI.Components/src/**/*.tsx"),
           path.resolve(sharedRoot, "Spaarke.UI.Components/src/**/*.ts"),
           path.resolve(sharedRoot, "Spaarke.Auth/src/**/*.tsx"),
@@ -88,8 +108,12 @@ export function createWizardViteConfig(pageDir: string) {
         "@fluentui/react-components": path.resolve(pageDir, "node_modules/@fluentui/react-components"),
         "@fluentui/react-icons": path.resolve(pageDir, "node_modules/@fluentui/react-icons"),
       },
+      ...(options.dedupe ? { dedupe: options.dedupe } : {}),
     },
     build: {
+      ...(options.commonjsMixedEsModules
+        ? { commonjsOptions: { include: [/node_modules/], transformMixedEsModules: true } }
+        : {}),
       outDir: "dist",
       // Disable sourcemaps for inline build (not useful when inlined)
       sourcemap: false,

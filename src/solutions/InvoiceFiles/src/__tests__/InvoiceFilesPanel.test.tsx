@@ -216,6 +216,8 @@ describe('InvoiceFilesPanel dark mode', () => {
 
     expect(colour.test(read('components/InvoiceFilesPanel.tsx'))).toBe(false);
     expect(colour.test(read('main.tsx'))).toBe(false);
+    // The surface and the message states now live in the e-billing pages' shared chrome (issue 2965).
+    expect(colour.test(read('../../_ebilling-shared/codePageChrome.tsx'))).toBe(false);
     expect(colour.test('color: #fff;')).toBe(true);
     expect(colour.test('background: rgb(0, 0, 0)')).toBe(true);
     expect(colour.test('color: tokens.colorNeutralForeground1')).toBe(false);
