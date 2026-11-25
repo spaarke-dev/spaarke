@@ -22,6 +22,9 @@ interface DocumentNodeCardR16Props {
   data: DocumentNodeData;
   selected?: boolean;
   renderHandle?: (spec: DocumentNodeHandleSpec) => React.ReactNode;
+  showPreviewLink?: boolean;
+  showDetails?: boolean;
+  onOpenRecord?: (data: DocumentNodeData) => void;
 }
 const DocumentNodeCardR16 = DocumentNodeCard as unknown as React.ComponentType<DocumentNodeCardR16Props>;
 
@@ -29,8 +32,26 @@ const renderHandle = (spec: DocumentNodeHandleSpec): React.ReactNode => (
   <Handle type={spec.type} position={spec.side === 'left' ? Position.Left : Position.Right} style={spec.style} />
 );
 
+/** Opens the node's Dataverse record in a new tab. */
+const openRecord = (data: DocumentNodeData): void => {
+  if (data.recordUrl) {
+    window.open(data.recordUrl, '_blank', 'noopener,noreferrer');
+  }
+};
+
+/**
+ * In this PCF a node click only selects the node, so the card's preview link (which relies on the
+ * node click) is off; the details tooltip and the open-record link are on, as before #3093.
+ */
 export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({ data, selected }) => (
-  <DocumentNodeCardR16 data={data} selected={selected} renderHandle={renderHandle} />
+  <DocumentNodeCardR16
+    data={data}
+    selected={selected}
+    renderHandle={renderHandle}
+    showPreviewLink={false}
+    showDetails
+    onOpenRecord={openRecord}
+  />
 );
 
 export default DocumentNode;

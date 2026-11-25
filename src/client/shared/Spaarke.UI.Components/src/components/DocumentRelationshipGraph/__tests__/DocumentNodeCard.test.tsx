@@ -90,6 +90,65 @@ describe('DocumentNodeCard', () => {
     });
   });
 
+  describe('host-chosen footer affordances (the PCF turns preview off, details and open-record on)', () => {
+    const withRecord = (overrides: Partial<DocumentNodeData> = {}) =>
+      data({ recordUrl: 'https://org.example/main.aspx?id=1', ...overrides });
+
+    it('hides the preview link when showPreviewLink is false', () => {
+      renderCard({ data: withRecord(), showPreviewLink: false });
+      expect(screen.queryByLabelText('Preview document')).toBeNull();
+    });
+
+    it.each([
+      ['source', withRecord({ isSource: true, nodeType: 'source' })],
+      ['related', withRecord()],
+    ])('on the %s node, the open-record link calls the host and does not reach the node click', (_kind, nodeData) => {
+      const onOpenRecord = jest.fn();
+      const onNodeClick = jest.fn();
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <div onClick={onNodeClick}>
+            <DocumentNodeCard data={nodeData} onOpenRecord={onOpenRecord} />
+          </div>
+        </FluentProvider>
+      );
+      fireEvent.click(screen.getByLabelText('Open record'));
+      expect(onOpenRecord).toHaveBeenCalledWith(nodeData);
+      expect(onNodeClick).not.toHaveBeenCalled();
+    });
+
+    it('shows no open-record link without a recordUrl or without a handler', () => {
+      const { unmount } = renderCard({ data: data(), onOpenRecord: jest.fn() });
+      expect(screen.queryByLabelText('Open record')).toBeNull();
+      unmount();
+      renderCard({ data: withRecord() });
+      expect(screen.queryByLabelText('Open record')).toBeNull();
+    });
+
+    it('shows the details tooltip, with similarity and shared keywords, when showDetails is set', async () => {
+      renderCard({
+        data: withRecord({
+          similarity: 0.82,
+          relationshipLabel: 'Semantic',
+          parentEntityName: 'Acme v Beta',
+          size: 1536,
+          sharedKeywords: ['indemnity', 'term', 'notice', 'venue'],
+        }),
+        showDetails: true,
+      });
+      fireEvent.focus(screen.getByLabelText('Document details'));
+      expect(await screen.findByText('82%')).toBeInTheDocument();
+      expect(screen.getByText('Acme v Beta')).toBeInTheDocument();
+      expect(screen.getByText('1.5 KB')).toBeInTheDocument();
+      expect(screen.getByText('indemnity, term, notice...')).toBeInTheDocument();
+    });
+
+    it('has no details icon by default', () => {
+      renderCard({ data: withRecord() });
+      expect(screen.queryByLabelText('Document details')).toBeNull();
+    });
+  });
+
   describe('preview icon', () => {
     it.each([
       ['source', data({ isSource: true, nodeType: 'source' })],

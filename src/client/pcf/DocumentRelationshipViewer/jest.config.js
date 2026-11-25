@@ -17,6 +17,9 @@ module.exports = {
         '^react$': '<rootDir>/node_modules/react',
         '^react-dom$': '<rootDir>/node_modules/react-dom',
         '^react/jsx-runtime$': '<rootDir>/node_modules/react/jsx-runtime',
+        // Likewise one Fluent: at runtime Fluent is the platform library (a single instance); unmapped,
+        // shared source would load the shared lib's own copy beside this PCF's FluentProvider.
+        '^@fluentui/react-components$': '<rootDir>/node_modules/@fluentui/react-components',
     },
     setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
     transform: {

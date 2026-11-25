@@ -7,3 +7,5 @@ export { FilterDropdown, formatFilterSelection } from './FilterDropdown';
 export type { FilterDropdownProps, FilterDropdownOption } from './FilterDropdown';
 export { DateRangeFilter, calculatePresetRange, detectActivePreset } from './DateRangeFilter';
 export type { DateRangeFilterProps, DateRangeFilterValue, DateRangePresetId } from './DateRangeFilter';
+export { toUtcDateRangeBounds } from './dateRangeBounds';
+export type { DateRangeUtcBounds } from './dateRangeBounds';

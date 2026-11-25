@@ -11,8 +11,14 @@
  * - parent hub (matter / project / invoice / email): a green card
  * - document: a card with the name, relationship indicators and a preview affordance
  *
- * The preview link has no handler of its own: a click on it bubbles to the host's node click,
- * which is what opens the preview (code page) or the action bar (PCF).
+ * Footer affordances, chosen by the host:
+ * - the Eye preview link (`showPreviewLink`, default on) has no handler of its own: a click on it
+ *   bubbles to the host's node click, which opens the preview in the code page;
+ * - the details tooltip (`showDetails`) lists type, format, size, similarity, relation, parent,
+ *   dates and shared keywords;
+ * - the open-record link (`onOpenRecord`, shown when the node has a `recordUrl`) calls the host and
+ *   does not reach the node click.
+ * The PCF, whose node click only selects, turns the preview link off and the other two on.
  *
  * ADR-021 (Fluent v9, tokens), ADR-022 (React 16-safe: no React 18 APIs).
  */
@@ -28,6 +34,7 @@ import {
   Body1Strong,
   mergeClasses,
   Link,
+  Tooltip,
 } from '@fluentui/react-components';
 import {
   Document20Regular,
@@ -47,6 +54,8 @@ import {
   Receipt24Regular,
   MailInbox24Regular,
   Eye16Regular,
+  Info16Regular,
+  Open16Regular,
 } from '@fluentui/react-icons';
 import { isParentHubNode } from './types';
 import type { DocumentNodeData, DocumentRelationship, NodeType } from './types';
@@ -74,6 +83,36 @@ export interface DocumentNodeCardProps {
    * Omit it to render the card without handles (tests, static previews).
    */
   renderHandle?: (spec: DocumentNodeHandleSpec) => React.ReactNode;
+  /**
+   * Show the Eye "Preview document" link (default true). It has no handler: its click reaches the
+   * host's node click. Turn it off when the node click does not open a preview.
+   */
+  showPreviewLink?: boolean;
+  /** Show an info icon whose tooltip lists the document's details (default false). */
+  showDetails?: boolean;
+  /**
+   * Opens the node's record. When set, a node with a `recordUrl` shows an "Open record" link that
+   * calls it; the click does not reach the host's node click.
+   */
+  onOpenRecord?: (data: DocumentNodeData) => void;
+}
+
+/**
+ * File size for display ("1.5 MB"). Local on purpose: FilePreview's `formatFileSize` lives in
+ * RichFilePreview, whose module would pull the preview stack into the PCF bundle.
+ */
+function formatNodeFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Date for display ("10 Mar 2026"), or null when absent or unparseable. */
+function formatDisplayDate(isoDate: string | undefined): string | null {
+  if (!isoDate) return null;
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 /** Icon for a file extension. */
@@ -316,10 +355,44 @@ const useStyles = makeStyles({
     textDecoration: 'none',
     color: tokens.colorBrandForegroundLink,
     cursor: 'pointer',
-    marginLeft: 'auto',
     '&:hover': { textDecoration: 'underline' },
   },
   sourceOpenLink: { color: tokens.colorNeutralForegroundOnBrand, opacity: 0.9 },
+  footerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+    marginLeft: 'auto',
+  },
+  infoIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: tokens.spacingHorizontalXXS,
+    borderRadius: tokens.borderRadiusSmall,
+    color: tokens.colorNeutralForeground3,
+    '&:hover': { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground1 },
+  },
+  sourceInfoIcon: {
+    color: tokens.colorNeutralForegroundOnBrand,
+    opacity: 0.7,
+    '&:hover': { backgroundColor: tokens.colorBrandBackgroundPressed, opacity: 1 },
+  },
+  detailsContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    maxWidth: '250px',
+  },
+  detailsTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase200,
+    wordBreak: 'break-word',
+  },
+  detailsRow: { display: 'flex', fontSize: tokens.fontSizeBase100, gap: tokens.spacingHorizontalXS },
+  detailsLabel: { color: tokens.colorNeutralForeground3, minWidth: '60px' },
+  detailsValue: { color: tokens.colorNeutralForeground1, wordBreak: 'break-word' },
   footerRow: {
     display: 'flex',
     alignItems: 'center',
@@ -344,7 +417,48 @@ const handleStyle = (size: string, color: string): React.CSSProperties => ({
   border: `1px solid ${tokens.colorNeutralBackground1}`,
 });
 
-export const DocumentNodeCard: React.FC<DocumentNodeCardProps> = ({ data, selected, renderHandle }) => {
+/** The details tooltip body: one row per field the node has. */
+const DocumentNodeDetails: React.FC<{ data: DocumentNodeData }> = ({ data }) => {
+  const styles = useStyles();
+  const similarity = data.similarity ?? 0;
+  const id = data.documentId ?? data.speFileId;
+  const created = formatDisplayDate(data.createdOn);
+  const modified = formatDisplayDate(data.modifiedOn);
+  const keywords = data.sharedKeywords ?? [];
+  const rows: [string, string][] = [];
+  if (data.documentType) rows.push(['Doc Type:', data.documentType]);
+  if (data.fileType) rows.push(['Format:', data.fileType.toUpperCase()]);
+  if (data.size != null && data.size > 0) rows.push(['Size:', formatNodeFileSize(data.size)]);
+  if (!data.isSource && similarity > 0) rows.push(['Similarity:', `${Math.round(similarity * 100)}%`]);
+  if (data.relationshipLabel) rows.push(['Relation:', data.relationshipLabel]);
+  if (data.parentEntityName) rows.push(['Parent:', data.parentEntityName]);
+  if (created) rows.push(['Created:', created]);
+  if (modified) rows.push(['Modified:', modified]);
+  if (id) rows.push(['ID:', `${id.substring(0, 8)}...`]);
+  if (keywords.length > 0)
+    rows.push(['Keywords:', keywords.slice(0, 3).join(', ') + (keywords.length > 3 ? '...' : '')]);
+
+  return (
+    <div className={styles.detailsContent}>
+      <div className={styles.detailsTitle}>{data.name}</div>
+      {rows.map(([label, value]) => (
+        <div key={label} className={styles.detailsRow}>
+          <span className={styles.detailsLabel}>{label}</span>
+          <span className={styles.detailsValue}>{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export const DocumentNodeCard: React.FC<DocumentNodeCardProps> = ({
+  data,
+  selected,
+  renderHandle,
+  showPreviewLink = true,
+  showDetails = false,
+  onOpenRecord,
+}) => {
   const styles = useStyles();
   const isSource = data.isSource ?? false;
   const isOrphanFile = data.isOrphanFile ?? false;
@@ -428,6 +542,54 @@ export const DocumentNodeCard: React.FC<DocumentNodeCardProps> = ({ data, select
     );
   };
 
+  /** Footer affordances; `onBrand` styles them for the source node's brand background. */
+  const renderFooterActions = (onBrand: boolean) => {
+    const recordUrl = data.recordUrl;
+    return (
+      <div className={styles.footerActions}>
+        {showDetails && (
+          <Tooltip
+            content={<DocumentNodeDetails data={data} />}
+            relationship="description"
+            positioning="above"
+            withArrow
+          >
+            <span
+              className={mergeClasses(styles.infoIcon, onBrand && styles.sourceInfoIcon)}
+              tabIndex={0}
+              aria-label="Document details"
+            >
+              <Info16Regular />
+            </span>
+          </Tooltip>
+        )}
+        {/* No handler and no stopPropagation: the click reaches the host's node click. */}
+        {showPreviewLink && (
+          <Link
+            className={mergeClasses(styles.openLink, onBrand && styles.sourceOpenLink)}
+            title="Preview document"
+            aria-label="Preview document"
+          >
+            <Eye16Regular />
+          </Link>
+        )}
+        {onOpenRecord && recordUrl && (
+          <Link
+            className={mergeClasses(styles.openLink, onBrand && styles.sourceOpenLink)}
+            title="Open record"
+            aria-label="Open record"
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation(); // opening the record must not also select the node
+              onOpenRecord(data);
+            }}
+          >
+            <Open16Regular />
+          </Link>
+        )}
+      </div>
+    );
+  };
+
   const h = handles('6px', tokens.colorBrandBackground);
   return (
     <>
@@ -464,9 +626,7 @@ export const DocumentNodeCard: React.FC<DocumentNodeCardProps> = ({ data, select
               ) : (
                 <span />
               )}
-              <Link className={styles.openLink} title="Preview document" aria-label="Preview document">
-                <Eye16Regular />
-              </Link>
+              {renderFooterActions(false)}
             </div>
           </div>
         )}
@@ -476,14 +636,7 @@ export const DocumentNodeCard: React.FC<DocumentNodeCardProps> = ({ data, select
               <Badge appearance="filled" color="brand" size="small">
                 Source
               </Badge>
-              {/* No stopPropagation: the click reaches the host's node click, as on related nodes. */}
-              <Link
-                className={mergeClasses(styles.openLink, styles.sourceOpenLink)}
-                title="Preview document"
-                aria-label="Preview document"
-              >
-                <Eye16Regular />
-              </Link>
+              {renderFooterActions(true)}
             </div>
           </div>
         )}
