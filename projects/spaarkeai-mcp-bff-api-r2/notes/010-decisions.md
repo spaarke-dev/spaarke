@@ -43,3 +43,11 @@ Paths are relative to the package `src/`; lines are as of the pre-change file.
 
 ## Consumer type-check (task 010)
 `tsc --noEmit` for `src/solutions/DailyBriefing` and `src/solutions/LegalWorkspace` not run locally (no node_modules/dist in the worktrees); CI on the PR covers it. Change is additive/loosening only.
+
+## Verifier pass (2026-11-25, opus) and fix round (6a8d5ab3b4, merged f194a80b7e)
+- Default path unchanged for both consumers; injected path never reaches authenticatedFetch / getXrm / window.Xrm / window.open.
+- F1 fixed: failed preferences save showed "Saved" (injected save rejection, and pre-existing default-path `success:false` / no webApi) — now rolls back + rethrows so PreferencesDropdown shows its error state.
+- F1 fixed: malformed injected result (undefined, no wrapper, success without channelNarratives, unknown status) left the spinner forever — now reaches the existing error state.
+- K3 fixed: fake-timer test for the Xrm poll guard (fails with the guard removed). K4 fixed: browsePlaybooks keeps `this`. K2 documented: dataService must be supplied on first render.
+- Seeding: reverting the two hooks fails 8 tests; removing the poll guard fails 1. Jest 193/193 in 27/29 suites (the 2 not run import LegalWorkspace, no node_modules in the agent worktree — consumer tsc stays a CI check).
+- K1/K4 for task 034: the module still statically imports @spaarke/auth and the ui-components barrel; verify widget bundle side effects there.
