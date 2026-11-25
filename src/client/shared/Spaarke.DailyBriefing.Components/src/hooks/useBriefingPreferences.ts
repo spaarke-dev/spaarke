@@ -40,7 +40,7 @@ export interface UseBriefingPreferencesResult {
   preferences: DailyDigestPreferences;
   /**
    * Apply a partial update to preferences and persist to Dataverse.
-   * Optimistically updates local state; logs and reverts if save fails.
+   * Optimistically updates local state; if the save fails it rolls back and rejects, so callers can show an error.
    */
   updatePreferences: (update: Partial<DailyDigestPreferences>) => Promise<void>;
   /** Whether the initial preferences load is in flight. */
@@ -139,24 +139,33 @@ export function useBriefingPreferences(
   const updatePreferences = useCallback(
     async (update: Partial<DailyDigestPreferences>) => {
       const injected = serviceRef.current;
+      const previous = preferences;
       if (injected) {
         // A host with no `save` has nothing to persist to; the Preferences menu is not rendered for it.
         if (!injected.save) return;
-        const next: DailyDigestPreferences = { ...preferences, ...update };
+        const next: DailyDigestPreferences = { ...previous, ...update };
         setPreferences(next);
         try {
           await injected.save(next);
         } catch (err) {
+          // Roll back the optimistic update and rethrow so the caller (PreferencesDropdown) shows its error state.
           console.error('[DailyBriefing] Failed to save preferences:', err);
+          setPreferences(previous);
           setError(err instanceof Error && err.message ? err.message : 'Failed to save preferences.');
+          throw err;
         }
         return;
       }
 
-      if (!webApi || !userId) return;
+      if (!webApi || !userId) {
+        // Nothing to persist to: reject rather than let the caller show "Saved".
+        const message = 'Preferences could not be saved: no data connection is available.';
+        setError(message);
+        throw new Error(message);
+      }
 
       const merged: DailyDigestPreferences = {
-        ...preferences,
+        ...previous,
         ...update,
       };
 
@@ -169,7 +178,9 @@ export function useBriefingPreferences(
         preferenceRecordIdRef.current = result.data;
       } else {
         console.error('[DailyBriefing] Failed to save preferences:', result.error.message);
+        setPreferences(previous);
         setError(result.error.message);
+        throw new Error(result.error.message);
       }
     },
     [webApi, userId, preferences]

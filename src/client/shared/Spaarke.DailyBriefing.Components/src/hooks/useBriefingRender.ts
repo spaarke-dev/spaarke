@@ -72,6 +72,8 @@ export function isEmptyResponse(response: NarrateResponse): boolean {
   return !hasFailures;
 }
 
+const MALFORMED_RESULT_MESSAGE = 'Could not load the daily briefing.';
+
 // ---------------------------------------------------------------------------
 // Hook implementation
 // ---------------------------------------------------------------------------
@@ -120,30 +122,54 @@ export function useBriefingRender(
           )
       : fetchBriefingLive(windows);
 
-    load.then(result => {
-      if (cancelled) return;
+    const showError = (message: string) => {
+      setData(null);
+      setError(message);
+      setStatus('error');
+    };
 
-      switch (result.status) {
-        case 'success': {
-          setData(result.data);
-          setLastFetchedAt(new Date());
-          setStatus(isEmptyResponse(result.data) ? 'empty' : 'success');
-          break;
+    // Every failure ends in the existing error state: a throw in the handler, an unrecognised status or a
+    // malformed payload from an injected service must never leave the spinner up.
+    load
+      .then(result => {
+        if (cancelled) return;
+
+        const raw = result as unknown as {
+          status?: unknown;
+          data?: unknown;
+          reason?: unknown;
+          message?: unknown;
+        } | null;
+        switch (raw?.status) {
+          case 'success': {
+            const payload = raw.data as NarrateResponse | null | undefined;
+            if (!payload || !Array.isArray(payload.channelNarratives)) {
+              showError(MALFORMED_RESULT_MESSAGE);
+              break;
+            }
+            setData(payload);
+            setLastFetchedAt(new Date());
+            setStatus(isEmptyResponse(payload) ? 'empty' : 'success');
+            break;
+          }
+          case 'unavailable': {
+            setData(null);
+            setUnavailableReason(typeof raw.reason === 'string' ? raw.reason : '');
+            setStatus('unavailable');
+            break;
+          }
+          case 'error': {
+            showError(typeof raw.message === 'string' && raw.message ? raw.message : MALFORMED_RESULT_MESSAGE);
+            break;
+          }
+          default:
+            showError(MALFORMED_RESULT_MESSAGE);
         }
-        case 'unavailable': {
-          setData(null);
-          setUnavailableReason(result.reason);
-          setStatus('unavailable');
-          break;
-        }
-        case 'error': {
-          setData(null);
-          setError(result.message);
-          setStatus('error');
-          break;
-        }
-      }
-    });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        showError(err instanceof Error && err.message ? err.message : MALFORMED_RESULT_MESSAGE);
+      });
 
     return () => {
       cancelled = true;

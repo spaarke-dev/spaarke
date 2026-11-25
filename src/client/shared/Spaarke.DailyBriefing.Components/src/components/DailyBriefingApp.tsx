@@ -155,6 +155,9 @@ export interface DailyBriefingAppProps {
    * share, document preview, preferences save (no `preferences.save`), and record links (no
    * `navigation.openRecord`). Omitted (the Console, the standalone page, the SpaarkeAi host) →
    * today's BFF calls and Xrm navigation, unchanged.
+   *
+   * Supply the service on the FIRST render. The component decides its mode (injected vs Xrm) when it
+   * mounts; a service that arrives later is used from the next refresh, not retroactively.
    */
   dataService?: BriefingDataService;
   /**
@@ -353,7 +356,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({
   // Data seam (task 010): an injected service means a host with no BFF client, MSAL or Xrm (a sandboxed
   // MCP widget). In that mode Xrm is never resolved, and every action that needs it or the BFF is hidden.
   const injected = dataService !== undefined;
-  const onBrowsePlaybooks = navigation?.browsePlaybooks ?? onBrowsePlaybooksProp;
+  // Call through `navigation` (not a detached reference) so a host whose handler uses `this` keeps it.
+  const onBrowsePlaybooks = navigation?.browsePlaybooks ? () => navigation.browsePlaybooks?.() : onBrowsePlaybooksProp;
   // Record links need a way to open the record: the host's handler, or Xrm on the default path.
   const canOpenRecords = !injected || navigation?.openRecord !== undefined;
 
