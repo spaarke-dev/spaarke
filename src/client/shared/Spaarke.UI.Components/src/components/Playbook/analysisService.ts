@@ -30,6 +30,19 @@ interface ICreateAnalysisRequest {
 
 interface ICreateAnalysisResponse {
   analysisId: string;
+  /**
+   * Optional non-fatal notes from the server (field-mapping-server-write-path-r1, task 043): e.g. no fields were copied
+   * from the document. The analysis exists; the user is told. A body with no `warnings` member means there is nothing
+   * to tell.
+   */
+  warnings?: unknown;
+}
+
+/** What {@link createAndAssociateWithWarnings} returns: the new analysis and the server's non-fatal notes. */
+export interface ICreateAnalysisResult {
+  analysisId: string;
+  /** The server's `warnings` (strings only, empty ones dropped); empty when the 201 body carried none. */
+  warnings: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +64,18 @@ export async function createAndAssociate(
   bffBaseUrl: string,
   config: IAnalysisConfig
 ): Promise<string> {
+  return (await createAndAssociateWithWarnings(authenticatedFetch, bffBaseUrl, config)).analysisId;
+}
+
+/**
+ * {@link createAndAssociate}, also returning the optional `warnings` array of the 201 body, so the caller can show the
+ * user what the server could not do (task 043: no fields were copied from the document). Same request, same failures.
+ */
+export async function createAndAssociateWithWarnings(
+  authenticatedFetch: AuthenticatedFetchFn,
+  bffBaseUrl: string,
+  config: IAnalysisConfig
+): Promise<ICreateAnalysisResult> {
   const { documentId, documentName, actionId, playbookId, skillIds, knowledgeIds, toolIds } = config;
 
   const body: ICreateAnalysisRequest = {
@@ -90,7 +115,12 @@ export async function createAndAssociate(
     throw new Error('BFF response missing analysisId');
   }
 
-  return data.analysisId;
+  const serverWarnings = data.warnings;
+  const warnings = Array.isArray(serverWarnings)
+    ? serverWarnings.filter((w): w is string => typeof w === 'string' && w.trim().length > 0)
+    : [];
+
+  return { analysisId: data.analysisId, warnings };
 }
 
 // ---------------------------------------------------------------------------

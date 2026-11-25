@@ -334,7 +334,7 @@ public class MappingSourceReadProbeTests
     // ── Task 043 AC7 (must not fire): every other table resolves and is decided exactly as before ─────────────────
 
     [Fact]
-    public void TryResolveSourceEntitySet_AgreesWithTheAssociationMapOnEveryEntry_AndAddsOnlyTheDocument()
+    public void TryResolveSourceEntitySet_AgreesWithTheAssociationMapOnEveryEntry_AndAddsOnlyTheDocumentAndTheAnalysis()
     {
         foreach (var type in Sprk.Bff.Api.Api.Filters.EntityAccessFilter.SupportedEntityTypes)
         {
@@ -345,6 +345,12 @@ public class MappingSourceReadProbeTests
 
         MappingSourceReadProbe.TryResolveSourceEntitySet(" SPRK_Document ", out var documents).Should().BeTrue();
         documents.Should().Be(Sprk.Bff.Api.Api.Filters.FinanceAuthorizationFilter.DocumentEntitySet);
+        // Field-mapping task 028: the analysis is the second source outside that map (live-verified set name), logical name only.
+        MappingSourceReadProbe.TryResolveSourceEntitySet(" SPRK_Analysis ", out var analyses).Should().BeTrue();
+        analyses.Should().Be("sprk_analysises");
+        MappingSourceReadProbe.TryResolveSourceEntitySet("analysis", out _).Should().BeFalse("only the logical name, no alias");
+        Sprk.Bff.Api.Api.Filters.EntityAccessFilter.TryResolveEntitySet("sprk_analysis", out _).Should().BeFalse(
+            "the association lockstep map itself is unchanged");
         MappingSourceReadProbe.TryResolveSourceEntitySet("sprk_unmappedtable", out var none).Should().BeFalse();
         none.Should().BeEmpty();
         MappingSourceReadProbe.TryResolveSourceEntitySet("document", out _).Should().BeFalse("only the logical name, no alias");

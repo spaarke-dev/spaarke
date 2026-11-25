@@ -4,6 +4,7 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
@@ -146,13 +147,19 @@ internal static class MappingSourceReadProbe
     internal static bool IsDocumentSource(string? entityLogicalName) =>
         string.Equals(entityLogicalName?.Trim(), DocumentLogicalName, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>The Analysis table's logical name: a mapping source outside <see cref="EntityAccessFilter"/>'s map
+    /// (field-mapping-server-write-path-r1 task 028: the send path fills an email's subject and body from it).</summary>
+    internal const string AnalysisLogicalName = "sprk_analysis";
+
     /// <summary>
     /// Task 043 (owner 2026-11-04): THE entity set of a field-mapping source, shared by the three mapping-source readers
     /// (<see cref="CheckCallerReadOfSourceAsync"/>, <see cref="MappingSourceCallerMask.ApplyAsync"/> and the push's source
     /// check). <see cref="EntityAccessFilter.TryResolveEntitySet"/> first, so every table in that map resolves exactly as
-    /// before; then <c>sprk_document</c> to the Document access path's set (<see cref="FinanceAuthorizationFilter.DocumentEntitySet"/>).
+    /// before; then <c>sprk_document</c> to the Document access path's set (<see cref="FinanceAuthorizationFilter.DocumentEntitySet"/>),
+    /// and (task 028) <c>sprk_analysis</c> to its live-verified set (<see cref="RegardingNameFields.EntitySetName"/>).
     /// Any other table is a miss. The association lockstep map itself is unchanged: upload, record-route and Compose
-    /// authorization still find no document entry in it.
+    /// authorization still find no document or analysis entry in it. The caller's Read is asked of the set found here, so an
+    /// analysis is mapped from only when the caller holds Read on it.
     /// </summary>
     internal static bool TryResolveSourceEntitySet(string? entityLogicalName, out string entitySet)
     {
@@ -164,6 +171,13 @@ internal static class MappingSourceReadProbe
         if (IsDocumentSource(entityLogicalName))
         {
             entitySet = FinanceAuthorizationFilter.DocumentEntitySet;
+            return true;
+        }
+
+        if (string.Equals(entityLogicalName?.Trim(), AnalysisLogicalName, StringComparison.OrdinalIgnoreCase)
+            && RegardingNameFields.EntitySetName(AnalysisLogicalName) is { } analysisSet)
+        {
+            entitySet = analysisSet;
             return true;
         }
 
