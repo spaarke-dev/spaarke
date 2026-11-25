@@ -346,6 +346,24 @@ public sealed class IntakeSchemaProfileParityTests
             .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedSolutionPackageTypes);
     }
 
+    /// <summary>
+    /// Data-setup plan D4: referenceDataPack is OPTIONAL (legal-standard is the default, owner decision B) and the schema's enum is
+    /// exactly the set POST /api/runs and H12b accept (IntakeParameterCatalog.AllowedReferenceDataPacks).
+    /// </summary>
+    [Fact]
+    public void D4_ReferenceDataPack_IsOptional_WithTheIntakeValues_AndTheDefaultIsLegalStandard()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties")
+            .GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.ReferenceDataPack);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("referenceDataPack", "legal-standard is the default");
+        property.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedReferenceDataPacks);
+        property.GetProperty("default").GetString()
+            .Should().Be(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.LegalStandardReferenceDataPack);
+    }
+
     // -------------------------------------------------------------------------
     // ISS-036 (#2987): every IntakeParameterCatalog key an operator may set must be in the schema.
     // The catalog accepted `buildId` (H9 pin) but intake.schema.json (additionalProperties:false) did not list it,

@@ -315,6 +315,17 @@ public sealed record InvoiceSubmissionView
     public Guid? InvoiceId { get; init; }
 
     /// <summary>
+    /// ebilling-r1 iss052 (#3082): the invoice an external caller may open from the result screen, serialized as <c>invoiceId</c>. Set ONLY by
+    /// the external single read (<c>ExternalInvoiceSubmissionEndpoints.ExternalReadView</c>), and there only for an Accepted submission whose
+    /// invoice the route's own (a') decision already kept; null (and then absent from the JSON) on every other answer: the internal route, the
+    /// external list, a submission that is not Accepted, and one with no invoice. Opening it still goes through the external record read and
+    /// its own checks. <see cref="InvoiceId"/> stays server-side only.
+    /// </summary>
+    [JsonPropertyName("invoiceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? OpenableInvoiceId { get; init; }
+
+    /// <summary>
     /// ebilling-r1 task 097b: the earlier submission a Correction replaces (<c>sprk_resubmissionof</c>), read so a retry of the
     /// from-document route is answered with the earlier submission only when it names the same target. Server-side only: never
     /// serialized, so the response contract is unchanged.

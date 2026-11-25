@@ -43,9 +43,9 @@ internal static class LineCodingGuard
         {
             LineKey = line.LineKey,
             Status = LineCodingStatus.Coded,
-            Task = Slot(task, line.BilledTaskCode),
-            Activity = Slot(activity, line.BilledActivityCode),
-            Expense = Slot(expense, line.BilledExpenseCode),
+            Task = Slot(task, line.BilledTaskCode, set.CodeIdOf(BillingCodeKind.Task, task)),
+            Activity = Slot(activity, line.BilledActivityCode, set.CodeIdOf(BillingCodeKind.Activity, activity)),
+            Expense = Slot(expense, line.BilledExpenseCode, set.CodeIdOf(BillingCodeKind.Expense, expense)),
             Confidence = refused.Count > 0 ? 0m : returned.Confidence,
             Observations = observations,
             RefusedCodes = refused,
@@ -107,14 +107,15 @@ internal static class LineCodingGuard
         return canonical;
     }
 
-    /// <summary>The AI code next to the firm's. A mismatch needs both and a real difference (case and padding do not count).</summary>
-    private static LineCodeValue Slot(string? aiCode, string? firmCode)
+    /// <summary>The AI code next to the firm's. A mismatch needs both and a real difference (case and padding do not count). <paramref name="codeId"/> is the
+    /// AI code's row in the set (ISS-051), never set without a code: a refused code has none, so its lookup stays empty (FR-22).</summary>
+    private static LineCodeValue Slot(string? aiCode, string? firmCode, Guid? codeId = null)
     {
         var firm = Normalize(firmCode);
         var mismatch = aiCode is not null
             && firm is not null
             && !string.Equals(aiCode, firm, StringComparison.OrdinalIgnoreCase);
-        return new LineCodeValue(aiCode, firm, mismatch);
+        return new LineCodeValue(aiCode, firm, mismatch, aiCode is null ? null : codeId);
     }
 
     private static (List<InvoiceLineObservation> Kept, int Dropped) GroundObservations(

@@ -236,6 +236,12 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   exclusions) — runbook `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`.
 - **Managed by default; unmanaged only on explicit instruction** — intake `solutionPackageType` (`managed` | `unmanaged`,
   exact case; absent → `managed` stored at CreateRun). Never add an environment- or server-level default that flips it.
+- **Starter taxonomy pack** — intake `referenceDataPack` (`legal-standard` | `none`, exact case; absent → `legal-standard`
+  stored at CreateRun; refused at POST /api/runs with `intake-invalid-reference-data-pack`, and by H12b with
+  `appconfig-invalid-reference-data-pack`). H12b creates a pack row only when no row matches by id, code or name (active or
+  inactive); it never updates one. A deleted pack row is created again on the next run, so send `none` for a customer who
+  owns its taxonomy, upgrade runs included. Pack files: `scripts/seed-data/reference/packs/{pack}/`, embedded in L2 and
+  checked against Entity.xml by `ReferencePackContentTests`.
 - H6 **refuses** (Resumable, nothing imported) a managed↔unmanaged switch (`package-type-mismatch`) and a downgrade
   (`downgrade-refused`); a failed read of the installed solution is a failure, never "assume a fresh install". It never
   falls back to the other package type's blob.

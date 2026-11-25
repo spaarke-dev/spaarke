@@ -111,7 +111,7 @@
     <criterion testable="true">Evidence recorded in notes/112-wp4-deploy.md.</criterion>
   </acceptance-criteria>
 
-  <notes>Shared dev environment: coordinate timing with other projects deploying spaarke-bff-dev. 052's notes name Deploy-WizardCodePages.ps1 for its page; this task deploys only sprk_createinvoicewizard with Deploy-WebResourceInline.ps1 (see constraint). Publish-size was measured per task; record the deployed size here for the cumulative NFR-12 view.</notes>
+  <notes>2026-11-24 22:48Z: sprk_invoicereviewpage was created on dev ahead of this task (owner go; master fa96792811; Default solution only). Step 4 updates it from this task's build; step 6 must also add it to SpaarkeMaster (AddSolutionComponent, component type 61) so the export carries it (uac-r2 gotcha #1492). Shared dev environment: coordinate timing with other projects deploying spaarke-bff-dev. 052's notes name Deploy-WizardCodePages.ps1 for its page; this task deploys only sprk_createinvoicewizard with Deploy-WebResourceInline.ps1 (see constraint). Publish-size was measured per task; record the deployed size here for the cumulative NFR-12 view.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

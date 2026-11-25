@@ -290,8 +290,10 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     prevOpenRef.current = open;
 
     if (open && !wasOpen) {
-      // Reset to the first step; a fresh session has nothing skipped yet.
-      dispatch({ type: 'GO_TO_STEP', stepIndex: 0, clearSkipped: true });
+      // Start over on the first step with only the static steps: a fresh session has nothing skipped and none of the
+      // follow-on steps picked last time (DI-155). RESET rebuilds the state a fresh mount would have; no initialStepId, so
+      // a reopen still lands on step 1.
+      dispatch({ type: 'RESET', steps: stepConfigs });
 
       // Clear finishing state
       setSuccessConfig(null);

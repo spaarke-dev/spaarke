@@ -1631,6 +1631,91 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         body.Should().NotContain(invoice.ToString(), "the invoice link is read for the predicate only");
     }
 
+    // ── ebilling-r1 iss052 (#3082): the external single read names the invoice of an Accepted submission the caller may see ──
+
+    /// <summary>A stored submission of the caller's firm with <paramref name="status"/>, on an invoice whose own source is visible (D-70: no other firm).</summary>
+    private (Entity Row, Guid Invoice) VisibleSubmissionWith(InvoiceSubmissionStatus status)
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+        var row = SubmissionRow("INV-ISS052", Spa, invoice: invoice, status: status, id: id);
+        _h.Submission = row;
+        return (row, invoice);
+    }
+
+    [Fact(DisplayName = "iss052 (must fire): the external single read of an Accepted submission whose invoice the caller may see carries invoiceId, beside coreRecord")]
+    public async Task Iss052_get_of_an_accepted_visible_submission_carries_the_invoice_id()
+    {
+        var (row, invoice) = VisibleSubmissionWith(InvoiceSubmissionStatus.Accepted);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("status").GetString().Should().Be("Accepted");
+        body.RootElement.GetProperty("invoiceId").GetGuid().Should().Be(invoice);
+        body.RootElement.GetProperty("coreRecord").GetProperty("recordId").GetGuid().Should().Be(MatterId);
+        _invoiceDecisions.Should().ContainSingle("the route's own invoice decision, no second check")
+            .Which.Should().Equal(invoice);
+    }
+
+    [Theory(DisplayName = "iss052 (must not fire): a Received, Processing, Rejected or Failed submission carries no invoiceId, even when its invoice is visible")]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Rejected)]
+    [InlineData(InvoiceSubmissionStatus.Failed)]
+    public async Task Iss052_get_of_a_submission_that_is_not_accepted_carries_no_invoice_id(InvoiceSubmissionStatus status)
+    {
+        var (row, invoice) = VisibleSubmissionWith(status);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "control: the submission itself is served");
+        var text = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.TryGetProperty("invoiceId", out _).Should().BeFalse();
+        text.Should().NotContain(invoice.ToString());
+        body.RootElement.GetProperty("coreRecord").GetProperty("recordId").GetGuid().Should().Be(MatterId, "the record link does not depend on the status");
+    }
+
+    [Fact(DisplayName = "iss052 (must not fire): an Accepted submission whose invoice is another firm's is the uniform 404 and names no invoice")]
+    public async Task Iss052_get_of_an_accepted_submission_whose_invoice_is_hidden_names_no_invoice()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(OtherFirmId);
+        _h.Submission = SubmissionRow("INV-ISS052", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(invoice.ToString()).And.NotContain("invoiceId");
+    }
+
+    [Fact(DisplayName = "iss052 (must not fire): an Accepted submission whose invoice decision read faults is the retryable 503 and names no invoice")]
+    public async Task Iss052_get_of_an_accepted_submission_whose_decision_faults_names_no_invoice()
+    {
+        _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
+        var (row, invoice) = VisibleSubmissionWith(InvoiceSubmissionStatus.Accepted);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}");
+
+        await ShouldBeRetryable503Async(response, invoice.ToString(), "invoiceId");
+    }
+
+    [Fact(DisplayName = "iss052 (scope): the internal single read and the external list of the same Accepted submission carry no invoiceId (contracts unchanged)")]
+    public async Task Iss052_the_internal_read_and_the_external_list_carry_no_invoice_id()
+    {
+        var (row, invoice) = VisibleSubmissionWith(InvoiceSubmissionStatus.Accepted);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, row.Id, AccessRights.Read);
+
+        var internalResponse = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{row.Id}");
+        var list = await ListBodyAsync(row);
+
+        internalResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var internalText = await internalResponse.Content.ReadAsStringAsync();
+        internalText.Should().Contain("INV-ISS052", "control: the row is answered").And.NotContain("invoiceId").And.NotContain(invoice.ToString());
+        list.Should().Contain("INV-ISS052", "control: the row is listed").And.NotContain("invoiceId").And.NotContain(invoice.ToString());
+    }
+
     [Fact]
     public async Task Task098_list_omits_a_submission_whose_invoice_is_hidden_and_keeps_the_others_in_one_decision()
     {

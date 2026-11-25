@@ -11,6 +11,9 @@ import { fetchEnginePreSelection } from '@shared/taskpane/services/communication
 import {
   buildEmailSaveRequest,
   computeQuickSaveIdempotencyKey,
+  ensureQuickSaveSignedIn,
+  isQuickSaveSignInFailure,
+  QUICK_SAVE_SIGN_IN_MESSAGE,
   type QuickSaveEmailContext,
   type QuickSaveRecipient,
 } from '@shared/taskpane/services/quickSaveHelpers';
@@ -167,6 +170,8 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
   });
   try {
     await ensureBootstrapped();
+    // #1571 review F1: the ribbon click is a user gesture — with no silent token, sign in once before saving.
+    await ensureQuickSaveSignedIn(authService);
 
     const context = readEmailContext();
     if (!context) {
@@ -230,7 +235,13 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
     });
   } catch (error) {
     console.error('Quick save failed:', error);
-    await dialog.show({ message: 'Failed to save email. Open Spaarke to try manually.', status: 'error' });
+    await dialog.show({
+      // #1571 review F1: a sign-in failure says how to sign in, not "try manually".
+      message: isQuickSaveSignInFailure(error)
+        ? QUICK_SAVE_SIGN_IN_MESSAGE
+        : 'Failed to save email. Open Spaarke to try manually.',
+      status: 'error',
+    });
   } finally {
     dialog.finish();
   }

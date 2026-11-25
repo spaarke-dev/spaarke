@@ -42,6 +42,7 @@ An enterprise AI-directed legal operations platform on Power Apps/Dataverse, Sha
 | Spaarke Matter Management | The model-driven app | — |
 | Spaarke External Access | The external SPA | — |
 | Spaarke Connect (SKU) / Connection Engine | Third-party data binding | `Sprk.Connect.*` |
+| Spaarke for Microsoft 365 Copilot (Copilot connector "Spaarke MCP") | Decide lane and Decision wizard in Copilot Chat and Cowork; terms: `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §1.1 | `/mcp/legal-operations`, `Api/Mcp/`, `spaarke_*` tools, `ui://spaarke/decisions.html`, `src/client/widgets/spaarke-decisions/`, `src/solutions/CopilotPlugins/spaarke/` |
 | Decision Record | The append-only record of decisions | "ledger" stays correct in engineering docs |
 
 Product names and engineering identifiers deliberately differ. Read "SpaarkeAi" in code and older docs as the Console, and do not sweep-rename it (tracked as #1095). Terminology changes originate only in `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3.
@@ -195,7 +196,7 @@ When about to do the thing on the left, read the document on the right first. �
 | Add background work | `.claude/adr/ADR-052-workload-placement.md`. In the BFF: queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`; no new hand-rolled timer `BackgroundService` |
 | Add a create/update path or a rule a record must satisfy on save | `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, `.claude/adr/ADR-002-thin-plugins.md`. 🔒 No Dataverse plugins; one server-side owner per invariant; wizards preview only; security fails closed |
 | Change the document create → profile → index pipeline | `docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md` |
-| Wire a new AI capability or narrative-output consumer, or author an AI executor or playbook | `docs/guides/ai-guide-consumer-wiring.md`, `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`, `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` |
+| Wire a new AI capability or narrative-output consumer, or author an AI executor or playbook; expose one to Copilot (tool, skill, agent) | `docs/guides/ai-guide-consumer-wiring.md`, `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`, `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`; Copilot: `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` |
 | Add a capability that opens an Assistant surface; choose bubble/chip/card/tab | `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`, `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md` |
 | Build a workspace widget; embed `LegalWorkspaceApp` | `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`, `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`; embedding: `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` |
 | Change Compose save or read/reference | `.claude/adr/ADR-049-compose-shadow-document.md`, `docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`, `docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`. 🔒 "Every save ends in a defined outcome" and "untouched blocks are preserved" are a pair — never trade one for the other; no text search in the write path. A new citation shape needs a case in `tests/fixtures/compose-citation-parity/cases.json` |

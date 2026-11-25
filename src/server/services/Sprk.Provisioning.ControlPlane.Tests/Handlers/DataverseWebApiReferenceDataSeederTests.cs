@@ -327,15 +327,287 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         seeders.Should().ContainSingle(s => s is DataverseWebApiReferenceDataSeeder);
     }
 
+    // ---- data-setup plan D4: the starter taxonomy pack (create-if-missing by natural key, never an update) --------------------
+
+    private const string PackName = "legal-standard";
+    private const string WidgetIdA = "11111111-0000-4000-8000-00000000000a";
+    private const string WidgetIdB = "11111111-0000-4000-8000-00000000000b";
+    private const string WidgetIdC = "11111111-0000-4000-8000-00000000000c";
+
+    /// <summary>A code + name table (like the matter-type tables) and a name-only one (like project types).</summary>
+    private const string WidgetPackJson = """
+        {
+          "table": "sprk_widget_ref",
+          "entitySet": "sprk_widget_refs",
+          "primaryKey": "sprk_widget_refid",
+          "match": "naturalKey",
+          "naturalKey": "sprk_widgetcode",
+          "nameColumn": "sprk_widgetname",
+          "columns": ["sprk_widgetcode", "sprk_widgetname"],
+          "rows": [
+            { "sprk_widget_refid": "11111111-0000-4000-8000-00000000000a", "sprk_widgetcode": "AAA", "sprk_widgetname": "Alpha" },
+            { "sprk_widget_refid": "11111111-0000-4000-8000-00000000000b", "sprk_widgetcode": "BBB", "sprk_widgetname": "Beta" },
+            { "sprk_widget_refid": "11111111-0000-4000-8000-00000000000c", "sprk_widgetcode": "CCC", "sprk_widgetname": "Gamma" }
+          ]
+        }
+        """;
+
+    private const string GadgetPackJson = """
+        {
+          "table": "sprk_gadget_ref",
+          "entitySet": "sprk_gadget_refs",
+          "primaryKey": "sprk_gadget_refid",
+          "match": "naturalKey",
+          "nameColumn": "sprk_name",
+          "columns": ["sprk_name"],
+          "rows": [
+            { "sprk_gadget_refid": "22222222-0000-4000-8000-00000000000a", "sprk_name": "Litigation" },
+            { "sprk_gadget_refid": "22222222-0000-4000-8000-00000000000b", "sprk_name": "Due Diligence" }
+          ]
+        }
+        """;
+
+    private static IReadOnlyList<ReferenceTable> WidgetPack { get; } = [ReferenceDataSet.Parse(WidgetPackJson), ReferenceDataSet.Parse(GadgetPackJson)];
+
+    private static Func<string, IReadOnlyList<ReferenceTable>> PackLookup(IReadOnlyList<ReferenceTable> pack)
+        => name => name == PackName ? pack : name == "none" ? [] : ReferenceDataSet.Pack(name);
+
+    [Fact]
+    public async Task D4_AbsentPackRows_AreCreated_WithThePacksIds_AndOnlyNonNullColumns()
+    {
+        var fake = new FakeDataverseHandler();
+
+        var result = await BuildSeeder(fake, [], PackLookup(WidgetPack)).SeedAsync(PackInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain($"starter taxonomy pack '{PackName}'")
+            .And.Contain("5 row(s) across 2 table(s)").And.Contain("5 created").And.Contain("0 already present");
+        fake.Posts.Should().HaveCount(5);
+        fake.Posts.Select(p => p.Uri.AbsolutePath).Distinct().Should()
+            .BeEquivalentTo("/api/data/v9.2/sprk_widget_refs", "/api/data/v9.2/sprk_gadget_refs");
+        var alpha = fake.Posts.Select(p => JsonDocument.Parse(p.Body).RootElement)
+            .Single(e => e.TryGetProperty("sprk_widget_refid", out var id) && id.GetString() == WidgetIdA);
+        alpha.GetProperty("sprk_widgetcode").GetString().Should().Be("AAA");
+        alpha.GetProperty("sprk_widgetname").GetString().Should().Be("Alpha");
+        result.Evidence!.Value.GetProperty("pack").GetProperty("created").GetArrayLength().Should().Be(5);
+    }
+
+    [Fact]
+    public async Task D4_AnExistingRow_MatchedByCode_ByName_OrById_IsNotCreated_AndNeverWritten()
+    {
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_widget_refs"] =
+        [
+            // A: the customer's own id and name, the pack's code (padded, other case) -> present by CODE.
+            "{\"sprk_widget_refid\":\"99999999-0000-4000-8000-000000000001\",\"sprk_widgetcode\":\" aaa \",\"sprk_widgetname\":\"Alpha (ours)\",\"statecode\":0}",
+            // B: no code, same name as the pack's Beta in other case -> present by NAME.
+            "{\"sprk_widget_refid\":\"99999999-0000-4000-8000-000000000002\",\"sprk_widgetcode\":null,\"sprk_widgetname\":\"BETA\",\"statecode\":0}",
+            // C: the pack's own id, renamed and re-coded by the customer -> present by ID.
+            "{\"sprk_widget_refid\":\"" + WidgetIdC + "\",\"sprk_widgetcode\":\"MINE\",\"sprk_widgetname\":\"Ours\",\"statecode\":0}",
+        ];
+        fake.Existing["sprk_gadget_refs"] = ["{\"sprk_gadget_refid\":\"99999999-0000-4000-8000-000000000003\",\"sprk_name\":\"  litigation \",\"statecode\":0}"];
+
+        var result = await BuildSeeder(fake, [], PackLookup(WidgetPack)).SeedAsync(PackInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("4 already present").And.Contain("1 created");
+        fake.Posts.Should().ContainSingle("only 'Due Diligence' is absent").Which.Body.Should().Contain("Due Diligence");
+        fake.Methods.Should().NotContain(m => m == HttpMethod.Patch || m == HttpMethod.Put || m == HttpMethod.Delete,
+            "the customer owns a pack row once it exists: it is never updated");
+    }
+
+    [Fact]
+    public async Task D4_AnInactiveMatchingRow_CountsAsPresent_NotCreated_AndNotReported()
+    {
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_widget_refs"] =
+        [
+            "{\"sprk_widget_refid\":\"" + WidgetIdA + "\",\"sprk_widgetcode\":\"AAA\",\"sprk_widgetname\":\"Alpha\",\"statecode\":1}",
+            "{\"sprk_widget_refid\":\"" + WidgetIdB + "\",\"sprk_widgetcode\":\"BBB\",\"sprk_widgetname\":\"Beta\",\"statecode\":1}",
+            "{\"sprk_widget_refid\":\"" + WidgetIdC + "\",\"sprk_widgetcode\":\"CCC\",\"sprk_widgetname\":\"Gamma\",\"statecode\":1}",
+        ];
+        fake.Existing["sprk_gadget_refs"] =
+        [
+            "{\"sprk_gadget_refid\":\"22222222-0000-4000-8000-00000000000a\",\"sprk_name\":\"Litigation\",\"statecode\":1}",
+            "{\"sprk_gadget_refid\":\"22222222-0000-4000-8000-00000000000b\",\"sprk_name\":\"Due Diligence\",\"statecode\":1}",
+        ];
+
+        var result = await BuildSeeder(fake, [], PackLookup(WidgetPack)).SeedAsync(PackInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("5 already present").And.Contain("0 created")
+            .And.NotContain("INACTIVE").And.NotContain("DIFFER", "a retired row is the customer's decision, not a finding");
+        fake.Methods.Should().OnlyContain(m => m == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task D4_APresentRowThatDiffersFromThePack_IsReportedInTheDiagnosticOnly()
+    {
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_widget_refs"] =
+        [
+            // Beta: present by name but the customer gave it another code (like dev's code-less contact types).
+            "{\"sprk_widget_refid\":\"99999999-0000-4000-8000-000000000002\",\"sprk_widgetcode\":null,\"sprk_widgetname\":\"Beta\",\"statecode\":0}",
+        ];
+
+        var result = await BuildSeeder(fake, [], PackLookup(WidgetPack)).SeedAsync(PackInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, "a difference is reported, it does not fail the step");
+        result.Diagnostic.Should().Contain("1 present row(s) DIFFER from the pack").And.Contain("sprk_widget_ref 'Beta' differs in sprk_widgetcode")
+            .And.Contain("report only");
+        fake.Posts.Should().NotContain(p => p.Body.Contains("Beta"), "Beta is present, so it is not created again");
+        fake.Methods.Should().NotContain(m => m == HttpMethod.Patch || m == HttpMethod.Put || m == HttpMethod.Delete);
+        result.Evidence!.Value.GetProperty("pack").GetProperty("differs").GetArrayLength().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task D4_PackNone_SeedsNothing_AndReadsNothingOfThePack()
+    {
+        var fake = new FakeDataverseHandler();
+
+        var result = await BuildSeeder(fake, [], PackLookup(WidgetPack)).SeedAsync(PackInput("none"), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("starter taxonomy pack 'none': nothing seeded");
+        fake.Methods.Should().BeEmpty("`none` means the customer brings its own taxonomy: no read, no write");
+    }
+
+    [Fact]
+    public async Task D4_ThePackIsSeeded_AlongsideTier1_AndTier1WordingIsUnchanged()
+    {
+        var fake = new FakeDataverseHandler();
+
+        var result = await BuildSeeder(fake, SmallTables, PackLookup(WidgetPack)).SeedAsync(PackInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("2 source row(s) across 1 table(s): 2 created")
+            .And.Contain("5 row(s) across 2 table(s)", "the pack is counted apart from the Tier 1 tables");
+        fake.Posts.Should().HaveCount(7);
+    }
+
+    [Fact]
+    public async Task D4_AnUnknownPack_FailsTheStep_BeforeAnyWrite()
+    {
+        var fake = new FakeDataverseHandler();
+        var seeder = new DataverseWebApiReferenceDataSeeder(
+            new HttpClient(fake), Options.Create(new AppConfigSeedOptions()), NullLogger<DataverseWebApiReferenceDataSeeder>.Instance,
+            _ => new StaticTokenCredential(), () => SmallTables);
+
+        var result = await seeder.SeedAsync(PackInput("enterprise-plus"), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Failed);
+        result.Diagnostic.Should().Contain("Unknown reference-data pack 'enterprise-plus'");
+        fake.Methods.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task D4_ARefusedPackCreate_FailsTheStep_NamingThePack_AndAReRunSkipsTheRowsAlreadyCreated()
+    {
+        var failing = new FakeDataverseHandler { PostStatus = HttpStatusCode.BadRequest };
+
+        var failed = await BuildSeeder(failing, [], PackLookup(WidgetPack)).SeedAsync(PackInput(), CancellationToken.None);
+
+        failed.Status.Should().Be(AppConfigSeederStatus.Failed);
+        failed.Diagnostic.Should().Contain($"starter taxonomy pack '{PackName}'").And.Contain("POST sprk_widget_refs");
+
+        // The resume: Alpha now exists (created before the failure), the rest are absent.
+        var resumed = new FakeDataverseHandler();
+        resumed.Existing["sprk_widget_refs"] = ["{\"sprk_widget_refid\":\"" + WidgetIdA + "\",\"sprk_widgetcode\":\"AAA\",\"sprk_widgetname\":\"Alpha\",\"statecode\":0}"];
+        var result = await BuildSeeder(resumed, [], PackLookup(WidgetPack)).SeedAsync(PackInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        resumed.Posts.Should().HaveCount(4).And.NotContain(p => p.Body.Contains(WidgetIdA));
+    }
+
+    [Fact]
+    public void D4_ThePackTableParser_RejectsAFileWhoseMatchRuleIsUnknownOrWhoseNameColumnIsMissing()
+    {
+        var unknownMatch = WidgetPackJson.Replace("\"match\": \"naturalKey\"", "\"match\": \"fuzzy\"", StringComparison.Ordinal);
+        var noNameColumn = WidgetPackJson.Replace("\"nameColumn\": \"sprk_widgetname\",", string.Empty, StringComparison.Ordinal);
+        var nameNotAColumn = WidgetPackJson.Replace("\"nameColumn\": \"sprk_widgetname\"", "\"nameColumn\": \"sprk_nope\"", StringComparison.Ordinal);
+
+        foreach (var json in new[] { unknownMatch, noNameColumn, nameNotAColumn })
+        {
+            var parse = () => ReferenceDataSet.Parse(json);
+            parse.Should().Throw<InvalidOperationException>();
+        }
+
+        ReferenceDataSet.Parse(SmallTableJson).Match.Should().Be(ReferenceMatch.FixedId, "a Tier 1 file carries no match rule and keeps fixed-id semantics");
+    }
+
+    // ---- the real legal-standard pack ------------------------------------------------------------------------------
+
+    [Fact]
+    public void D4_TheEmbeddedLegalStandardPack_LoadsSevenTables_WithUniqueIdsCodesAndNames()
+    {
+        var tables = ReferenceDataSet.Pack(PackName);
+
+        tables.Select(t => t.Table).Should().Equal(ReferenceDataSet.PackTableNames[PackName]);
+        tables.Select(t => t.Rows.Count).Should().Equal(14, 16, 14, 8, 18, 9, 8);
+        foreach (var table in tables)
+        {
+            table.Match.Should().Be(ReferenceMatch.NaturalKey, table.Table);
+            table.NameColumn.Should().NotBeNull(table.Table);
+            table.Rows.Select(r => r.Id).Should().OnlyHaveUniqueItems($"{table.Table} ids").And.NotContain(Guid.Empty);
+            string?[] names = table.Rows.Select(r => r.Values[table.NameColumn!].GetString()?.Trim().ToUpperInvariant()).ToArray();
+            names.Should().OnlyHaveUniqueItems($"{table.Table} names").And.NotContainNulls();
+            if (table.NaturalKey is not null)
+            {
+                string?[] codes = table.Rows.Select(r => r.Values[table.NaturalKey].GetString()?.Trim().ToUpperInvariant()).ToArray();
+                codes.Should().OnlyHaveUniqueItems($"{table.Table} codes").And.NotContainNulls();
+            }
+        }
+
+        tables.Single(t => t.Table == "sprk_projecttype_ref").NaturalKey.Should().BeNull("project types have no code column");
+        ReferenceDataSet.Pack("none").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task D4_TheLegalStandardPack_OnAnEnvironmentHoldingDevsRows_KeepsDevsCodesAndNames_AndCreatesTheRest()
+    {
+        // spaarkedev1's own rows (2026-11-24): the dev values keep their codes and names exactly, so the pack matches them.
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_mattertype_refs"] =
+        [
+            "{\"sprk_mattertype_refid\":\"11aed095-30da-f011-8406-7ced8d1dc988\",\"sprk_mattertypecode\":\"LITG\",\"sprk_mattertypename\":\"Litigation\",\"statecode\":0}",
+            "{\"sprk_mattertype_refid\":\"46c35aa2-30da-f011-8406-7ced8d1dc988\",\"sprk_mattertypecode\":\"PAT\",\"sprk_mattertypename\":\"Patent\",\"statecode\":0}",
+        ];
+        fake.Existing["sprk_contacttype_refs"] =
+        [
+            // dev's contact types have no code: matched by name, reported as differing in the code.
+            "{\"sprk_contacttype_refid\":\"a59066e4-8f96-f111-b8db-0022482fb5a7\",\"sprk_contacttypecode\":null,\"sprk_contacttypename\":\"Outside Counsel\",\"statecode\":0}",
+        ];
+        fake.Existing["sprk_projecttype_refs"] =
+        [
+            "{\"sprk_projecttype_refid\":\"0ed9d8ac-b018-f111-8343-7ced8d1dc988\",\"sprk_name\":\"Litigation\",\"statecode\":0}",
+        ];
+
+        var result = await BuildSeeder(fake, [], ReferenceDataSet.Pack).SeedAsync(PackInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        fake.Posts.Should().HaveCount(87 - 4);
+        var created = fake.Posts.Select(p => p.Body).ToList();
+        created.Should().NotContain(b => b.Contains("\"LITG\"") || b.Contains("\"PAT\""));
+        created.Should().Contain(b => b.Contains("\"CORPMA\""));
+        result.Diagnostic.Should().Contain("sprk_contacttype_ref 'Outside Counsel' differs in sprk_contacttypecode");
+        fake.Methods.Should().NotContain(m => m == HttpMethod.Patch || m == HttpMethod.Put || m == HttpMethod.Delete);
+    }
+
     private static AppConfigSeedInput Input() => new("acme", TenantId, EnvUrl);
 
-    private static DataverseWebApiReferenceDataSeeder BuildSeeder(FakeDataverseHandler fake, IReadOnlyList<ReferenceTable> tables)
+    private static AppConfigSeedInput PackInput(string pack = PackName) => new("acme", TenantId, EnvUrl, pack);
+
+    private static DataverseWebApiReferenceDataSeeder BuildSeeder(
+        FakeDataverseHandler fake,
+        IReadOnlyList<ReferenceTable> tables,
+        Func<string, IReadOnlyList<ReferenceTable>>? packTables = null)
         => new(
             new HttpClient(fake),
             Options.Create(new AppConfigSeedOptions()),
             NullLogger<DataverseWebApiReferenceDataSeeder>.Instance,
             _ => new StaticTokenCredential(),
-            () => tables);
+            () => tables,
+            packTables);
 
     private sealed class StaticTokenCredential : TokenCredential
     {

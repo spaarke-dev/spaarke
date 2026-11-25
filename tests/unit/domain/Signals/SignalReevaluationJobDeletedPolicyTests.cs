@@ -225,7 +225,8 @@ public partial class SignalReevaluationJobTests
         // there names that sweep, not "was deleted".
         var h = new Harness();
         h.Sysadmin.AddPolicy("POL-OFF", SignalWriter.LaneDecide, false, PathBBody, PathBTemplate);
-        SeedPolicyless(h, "POL-OFF", MatterId, null, SignalWriter.SignalStatusResolved);
+        // Task 217: the Off policy's Signal still carries stored detail, so the not-in-force sweep reads it (one with none is not read at all).
+        h.Org.Rows[SeedPolicyless(h, "POL-OFF", MatterId, null, SignalWriter.SignalStatusResolved)]["sprk_evidencerefs"] = StoredEvidenceQuotingTheWitness();
         SeedPolicyless(h, DeletedPolicyCode, OtherMatterId, null, SignalWriter.SignalStatusResolved);
         var offReads = 0;
         var deletedReads = 0;

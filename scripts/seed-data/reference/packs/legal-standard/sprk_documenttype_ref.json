@@ -1,0 +1,137 @@
+{
+  "table": "sprk_documenttype_ref",
+  "entitySet": "sprk_documenttype_refs",
+  "primaryKey": "sprk_documenttype_refid",
+  "match": "naturalKey",
+  "naturalKey": "sprk_documenttypecode",
+  "nameColumn": "sprk_documenttypename",
+  "columns": ["sprk_documenttypecode", "sprk_documenttypedescription", "sprk_documenttypename", "sprk_sortorder"],
+  "rows": [
+    {
+      "sprk_documenttype_refid": "bcf1ab75-495f-f111-a825-70a8a59455f4",
+      "sprk_documenttypecode": "CTRNS_CLOSING_STATEMENT",
+      "sprk_documenttypedescription": "Closing statement for a commercial transaction or M&A deal: buyer and seller, parties, purchase-price tabulation and closing-date facts.",
+      "sprk_documenttypename": "Closing Statement",
+      "sprk_sortorder": 10
+    },
+    {
+      "sprk_documenttype_refid": "d2f1ab75-495f-f111-a825-70a8a59455f4",
+      "sprk_documenttypecode": "CTRNS_ASSET_PURCHASE_AGREEMENT",
+      "sprk_documenttypedescription": "Asset purchase agreement covering the acquired and excluded assets, purchase price, allocations, representations and warranties.",
+      "sprk_documenttypename": "Asset Purchase Agreement",
+      "sprk_sortorder": 20
+    },
+    {
+      "sprk_documenttype_refid": "7be7be7b-495f-f111-a825-70a8a59455f4",
+      "sprk_documenttypecode": "IPPAT_PATENT_APPLICATION",
+      "sprk_documenttypedescription": "USPTO or PCT patent application: title, inventors, claims, specification, abstract and priority dates.",
+      "sprk_documenttypename": "Patent Application",
+      "sprk_sortorder": 10
+    },
+    {
+      "sprk_documenttype_refid": "a1e7be7b-495f-f111-a825-70a8a59455f4",
+      "sprk_documenttypecode": "IPPAT_OFFICE_ACTION",
+      "sprk_documenttypedescription": "USPTO Office Action correspondence — application number, mailing date, response due date, examiner name, rejection types, cited references. Time-sensitive; drives docketing.",
+      "sprk_documenttypename": "Office Action",
+      "sprk_sortorder": 20
+    },
+    {
+      "sprk_documenttype_refid": "cbe7be7b-495f-f111-a825-70a8a59455f4",
+      "sprk_documenttypecode": "BNKF_LOAN_AGREEMENT",
+      "sprk_documenttypedescription": "Banking and finance loan agreement: borrower, lender, principal amount, interest rate, maturity date, security description and covenants.",
+      "sprk_documenttypename": "Loan Agreement",
+      "sprk_sortorder": 10
+    },
+    {
+      "sprk_documenttype_refid": "48a7e481-495f-f111-a825-70a8a59455f4",
+      "sprk_documenttypecode": "CTRNS_NDA",
+      "sprk_documenttypedescription": "Non-disclosure agreement: effective date, parties, term and confidentiality scope.",
+      "sprk_documenttypename": "Non-Disclosure Agreement",
+      "sprk_sortorder": 90
+    },
+    {
+      "sprk_documenttype_refid": "e9422e32-9513-4709-bd3c-2d81c84baa0c",
+      "sprk_documenttypecode": "CONTRACT",
+      "sprk_documenttypedescription": "General commercial contract: parties, effective date, term, obligations, payment terms, termination and governing law.",
+      "sprk_documenttypename": "Contract",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_documenttype_refid": "4a922652-235f-4d8d-951e-db3ecda431a0",
+      "sprk_documenttypecode": "AMENDMENT",
+      "sprk_documenttypedescription": "Amendment to an existing agreement: the agreement amended, the clauses changed and the effective date of the change.",
+      "sprk_documenttypename": "Amendment",
+      "sprk_sortorder": 110
+    },
+    {
+      "sprk_documenttype_refid": "df6127c9-edca-43ca-96a6-08a5a5a17ef3",
+      "sprk_documenttypecode": "ENGAGEMENT_LETTER",
+      "sprk_documenttypedescription": "Letter engaging a law firm or advisor: client, scope of work, fee arrangement, staffing and conflicts terms.",
+      "sprk_documenttypename": "Engagement Letter",
+      "sprk_sortorder": 120
+    },
+    {
+      "sprk_documenttype_refid": "f1f731cb-af41-4173-ac5f-73d2277f9a4a",
+      "sprk_documenttypecode": "PLEADING",
+      "sprk_documenttypedescription": "Court pleading such as a complaint, answer or counterclaim: court, case number, parties, claims and relief sought.",
+      "sprk_documenttypename": "Pleading",
+      "sprk_sortorder": 130
+    },
+    {
+      "sprk_documenttype_refid": "569ba7f7-0b83-4fc5-9cac-6c1a4a24d86d",
+      "sprk_documenttypecode": "MOTION",
+      "sprk_documenttypedescription": "Motion filed with a court: the relief requested, the grounds, the movant and the filing and hearing dates.",
+      "sprk_documenttypename": "Motion",
+      "sprk_sortorder": 140
+    },
+    {
+      "sprk_documenttype_refid": "4e969b39-e7bf-4862-af47-1c933742c42e",
+      "sprk_documenttypecode": "BRIEF",
+      "sprk_documenttypedescription": "Legal brief or memorandum of law filed in a proceeding: the issues, the argument and the authorities cited.",
+      "sprk_documenttypename": "Brief",
+      "sprk_sortorder": 150
+    },
+    {
+      "sprk_documenttype_refid": "b32a4209-6bbc-450f-98e4-476b1e21d49c",
+      "sprk_documenttypecode": "CORRESPONDENCE",
+      "sprk_documenttypedescription": "Letter or other formal correspondence: sender, recipient, date and subject, with any deadlines or demands it states.",
+      "sprk_documenttypename": "Correspondence",
+      "sprk_sortorder": 160
+    },
+    {
+      "sprk_documenttype_refid": "df09d849-e3c5-4a79-b830-c7d42a9ee654",
+      "sprk_documenttypecode": "MEMORANDUM",
+      "sprk_documenttypedescription": "Internal or advisory legal memorandum: the question presented, analysis and conclusion or recommendation.",
+      "sprk_documenttypename": "Memorandum",
+      "sprk_sortorder": 170
+    },
+    {
+      "sprk_documenttype_refid": "ebe03f55-053a-4f2a-8235-cf2f21b2c2b8",
+      "sprk_documenttypecode": "BOARD_RESOLUTION",
+      "sprk_documenttypedescription": "Resolution of a board or committee: the body, the date, the matters resolved and the authorisations given.",
+      "sprk_documenttypename": "Board Resolution",
+      "sprk_sortorder": 180
+    },
+    {
+      "sprk_documenttype_refid": "d555f370-703a-4db7-9aac-1c2b3ce13ec8",
+      "sprk_documenttypecode": "INVOICE",
+      "sprk_documenttypedescription": "Invoice or statement of fees: billing party, invoice number and date, billed period, line items and total amount.",
+      "sprk_documenttypename": "Invoice",
+      "sprk_sortorder": 190
+    },
+    {
+      "sprk_documenttype_refid": "7c0ba14c-cbf6-4f01-9e5b-25219270a9e2",
+      "sprk_documenttypecode": "EVIDENCE_EXHIBIT",
+      "sprk_documenttypedescription": "Evidence or exhibit in a matter: what it is, who produced it, its date and the proceeding it relates to.",
+      "sprk_documenttypename": "Evidence / Exhibit",
+      "sprk_sortorder": 200
+    },
+    {
+      "sprk_documenttype_refid": "d524d929-de85-461d-93c9-3cfd805469ce",
+      "sprk_documenttypecode": "COURT_ORDER",
+      "sprk_documenttypedescription": "Order or judgment issued by a court or tribunal: the court, case number, date, the ruling and any deadlines it sets.",
+      "sprk_documenttypename": "Court Order",
+      "sprk_sortorder": 210
+    }
+  ]
+}

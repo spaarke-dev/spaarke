@@ -19,6 +19,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 
@@ -33,7 +34,26 @@ internal sealed record ReferenceTable(
     string PrimaryKey,
     IReadOnlyList<string> Columns,
     IReadOnlyList<ReferenceRow> Rows,
-    string? NaturalKey = null);
+    string? NaturalKey = null,
+    ReferenceMatch Match = ReferenceMatch.FixedId,
+    string? NameColumn = null);
+
+/// <summary>How the seeder decides that a source row is already in the environment.</summary>
+internal enum ReferenceMatch
+{
+    /// <summary>
+    /// Tier 1 product configuration (the default): the row's fixed primary key. Product code references the id, so a row under
+    /// another id does not satisfy it; drift, inactive rows and natural-key collisions are reported.
+    /// </summary>
+    FixedId = 0,
+
+    /// <summary>
+    /// Tier 2 starter taxonomy (data-setup plan D4): the customer owns the rows after seeding, so a row counts as present when it
+    /// matches by id, by code (<see cref="ReferenceTable.NaturalKey"/>) or by name (<see cref="ReferenceTable.NameColumn"/>) —
+    /// trimmed, case-insensitive; active or not. Present rows are never written; absent rows are created with the pack's id.
+    /// </summary>
+    NaturalKey = 1,
+}
 
 /// <summary>One source row: its primary key and its column values (null values are kept as JSON null).</summary>
 internal sealed record ReferenceRow(Guid Id, IReadOnlyDictionary<string, JsonElement> Values)
@@ -72,7 +92,53 @@ internal static class ReferenceDataSet
             ["sprk_triagecategory"] = "sprk_name",
         };
 
+    /// <summary>
+    /// Embedded-resource prefix of the starter taxonomy packs: <c>…ReferenceData.packs.{pack}.{table}.json</c>
+    /// (<c>scripts/seed-data/reference/packs/{pack}/{table}.json</c>).
+    /// </summary>
+    internal const string PackResourcePrefix = ResourcePrefix + "packs.";
+
+    /// <summary>
+    /// The starter taxonomy packs and their tables (data-setup plan D4). Every key is an
+    /// <c>IntakeParameterCatalog.AllowedReferenceDataPacks</c> value other than <c>none</c>, and the reverse
+    /// (<c>ReferenceDataPackTests</c>). Adding a pack or a table is: files + csproj items + a name here.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> PackTableNames =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
+        {
+            ["legal-standard"] =
+            [
+                "sprk_mattertype_ref",
+                "sprk_mattersubtype_ref",
+                "sprk_practicearea_ref",
+                "sprk_projecttype_ref",
+                "sprk_documenttype_ref",
+                "sprk_contacttype_ref",
+                "sprk_organizationtype_ref",
+            ],
+        };
+
     private static readonly Lazy<IReadOnlyList<ReferenceTable>> Loaded = new(LoadEmbedded);
+
+    private static readonly Lazy<IReadOnlyDictionary<string, IReadOnlyList<ReferenceTable>>> LoadedPacks = new(LoadPacks);
+
+    /// <summary>
+    /// The tables of the named starter taxonomy pack; empty for <c>none</c>. An unknown name throws
+    /// <see cref="InvalidOperationException"/> (the handler and POST /api/runs refuse it first).
+    /// </summary>
+    internal static IReadOnlyList<ReferenceTable> Pack(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (string.Equals(name, IntakeParameterCatalog.NoReferenceDataPack, StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        return LoadedPacks.Value.TryGetValue(name, out var tables)
+            ? tables
+            : throw new InvalidOperationException(
+                $"Unknown reference-data pack '{name}'; packs are {string.Join(" | ", PackTableNames.Keys.Order(StringComparer.Ordinal))}.");
+    }
 
     /// <summary>The parsed tables (throws <see cref="InvalidOperationException"/> if an embedded file is missing — a build defect).</summary>
     internal static IReadOnlyList<ReferenceTable> Tables => Loaded.Value;
@@ -99,30 +165,90 @@ internal static class ReferenceDataSet
         }
 
         var table = root.GetProperty("table").GetString()!;
+        var entitySet = root.GetProperty("entitySet").GetString()!;
+
+        // Starter taxonomy files (data-setup plan D4) say so: "match": "naturalKey" with an optional "naturalKey" (the code
+        // column; absent when the table has none) and a required "nameColumn". Tier 1 files carry none of these.
+        if (root.TryGetProperty("match", out var matchElement))
+        {
+            var match = matchElement.GetString();
+            if (!string.Equals(match, "naturalKey", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Reference-data file for '{table}' has unknown \"match\" value '{match}'; only \"naturalKey\" is supported.");
+            }
+
+            var code = root.TryGetProperty("naturalKey", out var codeElement) ? codeElement.GetString() : null;
+            var nameColumn = root.TryGetProperty("nameColumn", out var nameElement) ? nameElement.GetString() : null;
+            if (string.IsNullOrWhiteSpace(nameColumn) || !columns.Contains(nameColumn, StringComparer.Ordinal)
+                || (code is not null && !columns.Contains(code, StringComparer.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    $"Reference-data file for '{table}' must name a \"nameColumn\" (and a \"naturalKey\" when it has a code) that is one of its columns.");
+            }
+
+            return new ReferenceTable(table, entitySet, primaryKey, columns, rows, code, ReferenceMatch.NaturalKey, nameColumn);
+        }
+
         var naturalKey = NaturalKeyColumns.TryGetValue(table, out var configured) ? configured : "sprk_name";
         return new ReferenceTable(
             table,
-            root.GetProperty("entitySet").GetString()!,
+            entitySet,
             primaryKey,
             columns,
             rows,
             columns.Contains(naturalKey, StringComparer.Ordinal) ? naturalKey : null);
     }
 
+    private static IReadOnlyDictionary<string, IReadOnlyList<ReferenceTable>> LoadPacks()
+    {
+        var packs = new Dictionary<string, IReadOnlyList<ReferenceTable>>(PackTableNames.Count, StringComparer.Ordinal);
+        foreach (var (pack, names) in PackTableNames)
+        {
+            var tables = new List<ReferenceTable>(names.Count);
+            foreach (var name in names)
+            {
+                tables.Add(RequireNaturalKeyTable(pack, Parse(ReadEmbedded($"{PackResourcePrefix}{pack}.{name}.json"))));
+            }
+
+            packs[pack] = tables;
+        }
+
+        return packs;
+    }
+
+    /// <summary>
+    /// A starter-pack table must be Tier 2 (<see cref="ReferenceMatch.NaturalKey"/>) with a name column. A pack file that omits
+    /// <c>"match"</c> would otherwise load as Tier 1 (fixed-id), with name matching silently off, and H12b would create duplicates of
+    /// rows a customer already renamed or re-keyed. Throws <see cref="InvalidOperationException"/> (a build defect, not a runtime input).
+    /// </summary>
+    internal static ReferenceTable RequireNaturalKeyTable(string pack, ReferenceTable table)
+    {
+        if (table.Match != ReferenceMatch.NaturalKey || string.IsNullOrWhiteSpace(table.NameColumn))
+        {
+            throw new InvalidOperationException(
+                $"Starter pack '{pack}' table '{table.Table}' must declare \"match\": \"naturalKey\" and a \"nameColumn\" " +
+                "(a pack file without them would seed as fixed-id Tier 1 data with name matching off).");
+        }
+
+        return table;
+    }
+
+    private static string ReadEmbedded(string resource)
+    {
+        using var stream = typeof(ReferenceDataSet).Assembly.GetManifestResourceStream(resource)
+            ?? throw new InvalidOperationException(
+                $"Embedded reference-data resource '{resource}' is missing from the L2 assembly — restore its " +
+                "<EmbeddedResource> item in Sprk.Provisioning.ControlPlane.Core.csproj.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     private static IReadOnlyList<ReferenceTable> LoadEmbedded()
     {
-        var assembly = typeof(ReferenceDataSet).Assembly;
         var tables = new List<ReferenceTable>(TableNames.Count);
         foreach (var name in TableNames)
         {
-            var resource = $"{ResourcePrefix}{name}.json";
-            using var stream = assembly.GetManifestResourceStream(resource)
-                ?? throw new InvalidOperationException(
-                    $"Embedded reference-data resource '{resource}' is missing from the L2 assembly — restore its " +
-                    "<EmbeddedResource> item in Sprk.Provisioning.ControlPlane.Core.csproj.");
-            using var reader = new StreamReader(stream);
-            var text = reader.ReadToEnd();
-            tables.Add(Parse(text));
+            tables.Add(Parse(ReadEmbedded($"{ResourcePrefix}{name}.json")));
         }
 
         return tables;

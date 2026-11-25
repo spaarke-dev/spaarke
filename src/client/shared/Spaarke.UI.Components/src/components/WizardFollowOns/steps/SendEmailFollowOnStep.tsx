@@ -61,6 +61,11 @@ export interface ISendEmailFollowOnStepProps {
   subtitle?: string;
   /** Extra content above the composer, e.g. a "short summary" toggle. */
   headerContent?: React.ReactNode;
+  /**
+   * The body is not marked required, because the server fills an empty subject or body at send (task 028, FR-17). Pair it
+   * with `isComposedEmailReady(email, { allowEmptySubjectAndBody: true })` in the wizard's step gate. Default `false`.
+   */
+  allowEmptySubjectAndBody?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +159,7 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
   title = 'Send Notification Email',
   subtitle = DEFAULT_SEND_EMAIL_SUBTITLE,
   headerContent,
+  allowEmptySubjectAndBody = false,
 }) => {
   const styles = useStyles();
 
@@ -279,6 +285,7 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
         fromMailbox={initial.fromMailbox}
         initialAttachments={initial.attachments}
         showAssociations={false}
+        allowEmptyBody={allowEmptySubjectAndBody}
         onStateChange={onStateChange}
         onSearchRecipients={onSearchRecipients}
         onLookupRecipients={handlers.onLookupRecipients}

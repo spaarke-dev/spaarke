@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: issue batch 2 merged into work, master PR #3073 open; checklist Q re-run pending with the owner) running in agents; checklist Q re-run pending with the owner)
+> **Last Updated:** 2026-11-25 ~01:00Z (checkpoint: batch 3 merged into work and synced with master; master PR next)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,12 +10,22 @@
 
 ## Quick recovery
 
-- **Master PR #3073 OPEN (2026-11-24):** issue batch 2, all merged into work and reviewed.
+- **NOW (2026-11-25 ~06:00Z): Invoice Review owner-review fixes on branch `task/ebilling-ir-review` (local, NOT pushed; based on work 0477803ce5).** Commits: 7688e21bfa (highlight leaves timekeeper heading/title/rate out of the row box; By rule "Other checks" groups: code mismatch, line findings, roster), fefc1ecad9 (BFF ReviewCodeDto Description/FirmDescription via CodeSetResolver.LoadRecordedAsync + pane "code · description" + Firm billed line), 654d9ca847 (DEF-070 #3124 next/prev invoice filed). Review round 1 (adversarial, Sonnet) fixes IN PROGRESS, uncommitted: InvoiceReviewReadService loads code sets in parallel inside the WhenAll (F3), new contract test for a task-only set + shared UTBMS Activity set (181/181 pass); STILL TO DO: RuleGroups render test (F2) in src/solutions/InvoiceReview/src/__tests__/ruleGroups.test.tsx + "Other checks" heading role=heading aria-level + singular "1 line" aria-labels (K), run jest/typecheck/lint, commit. Then: reply to uac-r2 (it asked: current item, what ships = web resource sprk_invoicereviewpage + BFF InvoiceReviewReadService change, no schema; PR number; whether #3084 is in it; it deploys only from master after merge), open the PR to master, owner go "Yes deploy when available" (dev deploys by uac-r2 from master; BFF needs owner exact-SHA go in uac-r2). #3084: auto-merge ON (merge commit), head 0477803ce5, waiting on CI; SpaarkeMaster bumped to 1.3.3.0 (owner "Bump in 079"). 079 still open: step 10/11 data go + step 9 signed-in half (checklist V). uac-r2 asked about 151 deleted roots on dev 04:53-05:01Z: replied not ours.
+- **NOW (2026-11-25 ~01:00Z): issue batch 3 is merged into work and synced with master (907fff43c6); preparing the master PR.**
+  - **Batch 3 on work:** iss049 7affeb4768 (#3057), iss025 6e9054434c (#2876, DEF-055 #2600; re-check PASS), iss015 dbbad24b09 (#2743, #2877), iss051 be99e31311 (#3080), iss052 45e2db2bb8 (#3082; uac-r2 PASS on the route, "include the route in the master PR's authorization note"). `.claude/constraints/jobs.md` updated (db3cee05b0). Master 3067fb3bdc merged in at 907fff43c6; BFF build 0/0.
+  - **Master PR #3084 OPEN** (work 20c63201b2; combined filtered tests 2,249/0; publish 41.563 vs master 41.555 MB, +0.008, 194 files each; no vulnerable packages). Waiting for the owner's merge go. spa-r4 copied (no conflict); tell spa-r4 when it merges.
+  - **After the PR merges:** iss051 backfill `-Apply` + re-index sweep need the owner's typed OK, and run only after a dev BFF carrying iss051 is live (checklist T). ISS-052 needs the next BFF + external SPA deploy (checklist U; copy spa-r4 on the SPA change).
+  - **Invoice Review page on dev** since 22:48Z (see below); owner check = checklist S. uac-r2 is preparing a dev BFF candidate from master 3067fb3bdc (has #3073), owner names the SHA there.
+  - **Open, not started:** 079 live steps (owner OK); the 095d parent stays 🔄 (095d-3 Set firm UI is in the Office add-in InvoiceView pane, unverified).
+  - **Agent worktrees to remove later** (Remove-WorktreeSafe, all pushed): agent-a38ba0b796285b0ce (iss049), agent-a81991fa0126f70aa (iss025), agent-ab8be5f18e499ec7d (iss015), agent-af1fc20670038b2c3 (iss051), agent-ad31105130a993f0c (iss052), plus the older locked three below.
+- **Dev BFF 3067fb3bdc** live since 2026-11-25 00:09:50Z (uac-r2's deploy, owner's go): carries #3073 (ISS-050 lock renewal, ISS-041). Read-only checks ~01:30Z: healthz 200; unauthenticated lines/decisions and approve 401. Batch 3 (#3084) is NOT on dev. Dev SPA is 3067fb3bdc (spa-r4 run 45506591396); spa-r4 asks to be told when #3084 merges, before its next SPA go.
+- **Dev BFF 20129e985c** live since 2026-11-24 21:36Z (uac-r2's deploy, owner's go). It carries #3038, #3051 and #3065 (ISS-029, -042, -043/035), but not #3073 (ISS-050). Read-only checks at about 21:45Z: `/healthz` 200; unauthenticated `POST .../invoice-review/confirm` and `.../lines/decisions` both 401. The ISS-029 and ISS-050 behaviour shows only in the Invoice Review page (task 112). The firm labels (ISS-042) show in the portal after the external SPA deploy (checklist O).
+- **Invoice Review page deployed to dev 2026-11-24 22:48Z** (owner go "Yes, deploy it" in this session; uac-r2 BEFORE/AFTER sent, its read-back matches): `sprk_invoicereviewpage` id d1f2a11a-59e8-f111-84ea-7ced8dda31f8, from master fa96792811, sha256 08b373e03de91a0738b0e2b3193b1b188f31484b4455d197899d409ccaae43ee. Default solution only: task 112 must still AddSolutionComponent (type 61, SpaarkeMaster). Owner checks it via checklist S.
+- **Master PR #3073 MERGED** 2026-11-24 21:32Z at fa96792811 (owner: "Yes, auto-merge"; required checks passed; the advisory Tier 2 api-office shard shows "fail" because its job was cancelled after its tests ran: verdict artifact = pass, 583/0). #3059, #2930, #3042 closed. Work fast-forwarded to master. Batch 2:
   - iss050 (#3059): lock renewal; merged 7da8f29320 after an Opus review, fix rounds 1-2 and a Sonnet re-check.
   - iss041 (#2930): finish-decision notice after a reload; merged efab4736b6 after a Sonnet review, fix round 1 and a re-check PASS.
   - iss047 (#3042): drift-check id grammar; merged 219c0c6207 after a Sonnet review and fix round 1.
   - Work tip: build 0 warnings; filtered InvoiceLineDecision|InvoiceApproval tests 439/0; no overlap with open PRs.
-  - Not bound and no auto-merge. Merge as a merge commit once CI passes and the owner says go. Do not push new work to work/ebilling-r1 while #3073 is open, unless it should join that PR.
 - **Index after the fixed drift check:**
   - 0 status drifts. The 8 POMLs it exposed (084h-1, 095c-5, 130-0, 130-0b, 130e-1, 151c-1a/1b/2) were set to completed; each merge sha was verified as an ancestor.
   - 27 unpaired entries remain: 25 index sub-rows without a POML, plus 095d-1 and 095d-2. The POMLs say not-started, but the 095d row says 1a/1b/1c and 2b-* are merged. Resolve them from evidence.

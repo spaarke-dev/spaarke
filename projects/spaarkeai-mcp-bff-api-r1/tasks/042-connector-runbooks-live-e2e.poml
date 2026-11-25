@@ -4,7 +4,7 @@
     <title>Connector, runbooks and live E2E in Cowork and Chat</title>
     <phase>D Registration, deploy and live E2E</phase>
     <gate>after 040, 041 and 043 (043 done or cancelled)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Live end-to-end testing and runbook finalisation in the deployment phase; no code files</rigor-reason>
     <model-tier>sonnet</model-tier>

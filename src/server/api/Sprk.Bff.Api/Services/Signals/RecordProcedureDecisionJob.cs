@@ -23,7 +23,8 @@ public static class RecordProcedureDecisionJobEvents
     public static readonly EventId EnqueueTimedOut = new(50324, nameof(EnqueueTimedOut));
 
     /// <summary>Warning (or Error on the last delivery): the job did not finish for a reason a retry may clear, or the decision's processing
-    /// lock is held. It is abandoned and redelivered, and dead-lettered after the last delivery by <c>ServiceBusJobProcessor</c>.</summary>
+    /// lock is held. <c>ServiceBusJobProcessor</c> retries it after a back-off (<see cref="JobContract.RetryDelay"/>) and dead-letters
+    /// it after the last delivery.</summary>
     public static readonly EventId HandlerRetrying = new(50325, nameof(HandlerRetrying));
 
     /// <summary>Error: the writer refused the repair for a reason a retry cannot change. Nothing was written; the job is poisoned

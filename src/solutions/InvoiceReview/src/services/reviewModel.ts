@@ -239,6 +239,58 @@ export function groupByRule(lines: readonly ReviewLine[]): RuleGroup[] {
   );
 }
 
+/**
+ * A line check that is not a policy finding, shown in By rule beside the rule groups (owner review 2026-11-25: a line can be To decide with no
+ * policy finding, and By rule then read "No rule findings"). It has no suggestion to apply.
+ */
+export interface CheckGroup {
+  key: string;
+  label: string;
+  severity: Severity;
+  /** What the check means, in one sentence. */
+  text: string;
+  lines: ReviewLine[];
+}
+
+const LINE_FINDING_LABEL: Readonly<Record<string, string>> = {
+  'coding.not_returned': 'Codes not checked by the AI',
+  'line.no_description': 'No line description',
+  'rules.not_checked': 'Billing rules not checked',
+};
+
+const CODE_MISMATCH_TEXT ="The AI's UTBMS code differs from the code the firm billed. Open the line to see both codes.";
+const ROSTER_TEXT = "The timekeeper's name did not match anyone on the firm's roster, so roster rates and roles were not applied.";
+
+/** The non-rule checks on the lines, most severe first, then count: code mismatches, line findings (by code) and unmatched timekeepers. */
+export function groupChecks(lines: readonly ReviewLine[]): CheckGroup[] {
+  const groups = new Map<string, CheckGroup>();
+  const add = (key: string, make: () => Omit<CheckGroup, 'lines'>, line: ReviewLine) => {
+    let g = groups.get(key);
+    if (!g) {
+      g = { ...make(), lines: [] };
+      groups.set(key, g);
+    }
+    if (!g.lines.includes(line)) g.lines.push(line);
+  };
+  for (const line of lines) {
+    const c = line.codes;
+    if (c.task.mismatch || c.activity.mismatch || c.expense.mismatch) {
+      add('code-mismatch', () => ({ key: 'code-mismatch', label: "UTBMS code differs from the firm's", severity: 'Warning', text: CODE_MISMATCH_TEXT }), line);
+    }
+    for (const lf of line.lineFindings) {
+      const text = lineFindingText(lf);
+      const label = LINE_FINDING_LABEL[lf.code] ?? 'Line needs a review';
+      add(`line|${lf.code}`, () => ({ key: `line|${lf.code}`, label, severity: 'Warning', text }), line);
+    }
+    if (line.type === 'Fee' && !line.timekeeper) {
+      add('roster', () => ({ key: 'roster', label: "Timekeeper not on the firm's roster", severity: 'Info', text: ROSTER_TEXT }), line);
+    }
+  }
+  return [...groups.values()].sort(
+    (a, b) => severityRank(b.severity) - severityRank(a.severity) || b.lines.length - a.lines.length || a.label.localeCompare(b.label)
+  );
+}
+
 /** One line's part of "Apply suggestion to n lines": the server's per-line amount (Reduce) or a Disallow. */
 export interface SuggestionPlan {
   action: 'reduce' | 'disallow';
@@ -345,13 +397,23 @@ function boxPage(f: { page: number | null; box: { page: number | null } | null }
 }
 
 /**
- * Where the line (and one of its fields) sits on the PDF. The row box is the union of the line's field boxes on the field's page (or, with
- * no field chosen, on the page most of its boxes are on). Null when the line has no boxes at all.
+ * Values a firm prints once for a group of lines rather than on each line's row: the timekeeper heading above a timekeeper's entries and
+ * the rate table. Their boxes sit outside the row, so a row drawn around them swallows the neighbouring lines of the same timekeeper.
+ */
+const SHARED_FIELDS: ReadonlySet<string> = new Set(['TimekeeperAsBilled', 'TitleAsBilled', 'Rate']);
+
+/**
+ * Where the line (and one of its fields) sits on the PDF. The row box is the union of the line's own row boxes (every boxed field except
+ * the shared ones) on the field's page, or, with no field chosen, on the page most of those boxes are on. A line whose only boxes are shared
+ * ones falls back to them. A chosen shared value is boxed as the field; the row is null when no row box is on its page. Null when the line
+ * has no boxes at all.
  */
 export function highlightFor(line: ReviewLine | null, field: string | null): IPdfHighlight | null {
   if (!line) return null;
   const boxed = Object.entries(line.fields).filter(([, f]) => f.box && boxPage(f) !== null);
   if (boxed.length === 0) return null;
+  const own = boxed.filter(([name]) => !SHARED_FIELDS.has(name));
+  const rowBoxes = own.length > 0 ? own : boxed;
 
   const chosen = field ? line.fields[field] : undefined;
   let page: number;
@@ -359,16 +421,19 @@ export function highlightFor(line: ReviewLine | null, field: string | null): IPd
     page = boxPage(chosen)!;
   } else {
     const byPage = new Map<number, number>();
-    for (const [, f] of boxed) byPage.set(boxPage(f)!, (byPage.get(boxPage(f)!) ?? 0) + 1);
+    for (const [, f] of rowBoxes) byPage.set(boxPage(f)!, (byPage.get(boxPage(f)!) ?? 0) + 1);
     page = [...byPage.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
   }
 
-  const onPage = boxed.filter(([, f]) => boxPage(f) === page).map(([, f]) => f.box!);
-  const x1 = Math.min(...onPage.map(b => b.x));
-  const y1 = Math.min(...onPage.map(b => b.y));
-  const x2 = Math.max(...onPage.map(b => b.x + b.w));
-  const y2 = Math.max(...onPage.map(b => b.y + b.h));
-  const row: IPdfNormalisedBox = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+  const onPage = rowBoxes.filter(([, f]) => boxPage(f) === page).map(([, f]) => f.box!);
+  let row: IPdfNormalisedBox | null = null;
+  if (onPage.length > 0) {
+    const x1 = Math.min(...onPage.map(b => b.x));
+    const y1 = Math.min(...onPage.map(b => b.y));
+    const x2 = Math.max(...onPage.map(b => b.x + b.w));
+    const y2 = Math.max(...onPage.map(b => b.y + b.h));
+    row = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+  }
 
   const fieldBox: IPdfNormalisedBox | null =
     chosen?.box && boxPage(chosen) === page ? { x: chosen.box.x, y: chosen.box.y, w: chosen.box.w, h: chosen.box.h } : null;

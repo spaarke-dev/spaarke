@@ -22,6 +22,8 @@
  * D-AUTH-7 exception site.
  */
 
+import { authService } from '@shared/services/AuthService';
+
 /**
  * Function that resolves to a fresh BFF access token.
  *
@@ -151,15 +153,25 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
       // Auth v2 (D-AUTH-7): on 401, close current stream, re-fetch fresh token,
       // and reopen. Capped at `maxAuthRetries` to avoid infinite loops if the
       // user's account is genuinely revoked.
-      if (response.status === 401 && authRetries < maxAuthRetries && abortController) {
+      // An empty token means nothing can be had silently: no further retry (#1571 fix round 3).
+      if (response.status === 401 && authRetries < maxAuthRetries && abortController && accessToken) {
         authRetries += 1;
         // Drain the body to release the underlying connection before reconnecting.
         // (Failing to consume the body of a 401 can leak the socket on some hosts.)
         await response.body?.cancel().catch(() => {
           /* best-effort drain */
         });
+        // #1571 review F1: the refused token is what the auth service's caches hold, so the re-acquire asks Entra
+        // for a new one (still silently). The token this request sent is the one recorded as refused (fix round 3).
+        authService.clearCache(accessToken);
         // Re-enter connect — `getAccessToken()` at the top will fetch a new token.
         return connect();
+      }
+
+      if (response.status === 401) {
+        // #1571 review F2: still refused after the retries — the session cannot be renewed silently. The pane shows
+        // its sign-in prompt (the same signal every other request raises).
+        authService.notifySignInRequired?.();
       }
 
       if (!response.ok) {

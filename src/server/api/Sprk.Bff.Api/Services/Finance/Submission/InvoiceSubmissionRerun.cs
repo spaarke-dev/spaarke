@@ -547,9 +547,12 @@ public sealed partial class InvoiceSubmissionRerun
 
         var lineRequests = new List<OrganizationRequest>(derived.Count);
         var reset = new JsonArray();
+        var codedByKey = outcome.Coding?.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
         for (var index = 0; index < derived.Count; index++)
         {
-            var (request, resetEntry) = LineUpdate(index, derived[index], stored[index]);
+            LineCodingResult? coding = null;
+            codedByKey?.TryGetValue(index.ToString(CultureInfo.InvariantCulture), out coding);
+            var (request, resetEntry) = LineUpdate(index, derived[index], stored[index], coding);
             lineRequests.Add(request);
             if (resetEntry is not null)
             {
@@ -628,12 +631,19 @@ public sealed partial class InvoiceSubmissionRerun
     /// (with the exact numbers intake stored kept), and, for a line a reviewer decided, the decision columns cleared (EB-D-187 / Q4). Conditioned
     /// on the version read.
     /// </summary>
-    private static (OrganizationRequest Request, JsonObject? Reset) LineUpdate(int index, Entity derived, Entity stored)
+    private static (OrganizationRequest Request, JsonObject? Reset) LineUpdate(int index, Entity derived, Entity stored, LineCodingResult? coding)
     {
         var update = new Entity(InvoiceSubmissionPersister.LineEntity, stored.Id) { RowVersion = VersionOf(stored) };
         foreach (var column in DerivedLineColumns)
         {
             update[column] = derived.Attributes.TryGetValue(column, out var value) ? value : null;
+        }
+
+        // ISS-051: the code lookups follow the new derivation's codes, as its JSON does: a code with its row sets it, no code clears it; a code
+        // stored before ISS-051 (no row recorded) leaves the column as it is.
+        foreach (var (column, value) in InvoiceSubmissionPersister.CodeLookupsFor(coding))
+        {
+            update[column] = value;
         }
 
         // BuildLines leaves the column out when the JSON is over its 100,000 characters; then the stored copy is not replaced either.

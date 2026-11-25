@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss051" project="ebilling-r1">
+  <metadata>
+    <title>ISS-051 (#3080): the resolved UTBMS codes reach the Invoice Line code lookups, so the AP export and the invoice index carry the resolved code</title>
+    <phase>Issue fix; filed 2026-11-24 from owner checklist Q</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the invoice submission write path and/or the AP export (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Write path with FR-22 code-set rules (out-of-set codes never stored) and two readers that must agree.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, api, dataverse, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-051. FR-04 gives sprk_billingevent UTBMS code lookups (sprk_taskcode, sprk_activitycode, sprk_expensecode) next to the as-billed text. FR-22's coding resolves a code per line and stores it only in the `coding` member of sprk_extractionconfidence (InvoiceSubmissionPersister ~2109). No BFF code writes the lookups (0 lines on dev have one). ApExportService.CodeAsync (~1287) then falls back to the firm's as-billed text, so the AP export sends the firm's code, not the resolved one; InvoiceIndexDocument (Services/Jobs/Handlers, ~42-44) indexes the empty lookups. The Invoice Review page reads the JSON and is unaffected.
+Read spec.md FR-04, FR-22, FR-30 (AP export) and D-56 first. Find: how sprk_billingcode rows are keyed (code + code set), how the coding step resolves codes (grep CodeLinesAsync and the code-set resolver), every writer of the coding JSON (persist, re-run after Set firm, a reviewer's code correction in InvoiceLineDecisionService ~1486 and the correction service), and every reader of the three lookups (git grep "sprk_taskcode" etc.).</prompt>
+
+  <constraints>
+    <constraint>Pick one source of truth and make every reader agree, and justify the choice in the notes: either (A) every writer of a resolved code also sets the matching lookup to the sprk_billingcode row of that code in that code set (in the same write), or (B) the AP export and the index read the resolved code from the coding JSON and the lookups stay a documented derived field. Prefer (A) if the lookups are in the spec's data model and other surfaces (views, forms, reports) can read them; say what you found.</constraint>
+    <constraint>FR-22 holds: a code that is not in the line's resolved code set is never stored (no lookup set), and a line with no resolved code leaves the lookup empty. A reviewer's correction of a code updates the same source of truth. The export's fallback to as-billed text applies only when no resolved code exists, and that behaviour is stated in the notes.</constraint>
+    <constraint>Existing invoices on dev have no lookups: if you choose (A), add an idempotent backfill script under scripts/ebilling/ that reads the coding JSON and sets the lookups, with -WhatIf / report mode by default and -Apply only on explicit use, sending `Consistency: Strong` on every Web API call (route through EbillingSchema.psm1 or set the header; the ArchTest ScriptMetadataStrongConsistencyGuardTests enforces it). Do NOT run -Apply (a live dev write needs the owner's typed OK in the main session); you may run the report mode read-only against dev if you can authenticate, and record the counts.</constraint>
+    <constraint>No new endpoint, service, DI registration, package or Dataverse column. Tests, failing before and passing after, in the existing test classes for the persister, the decision/correction path and ApExportService (grep them): a coded line persists the lookup (or export reads the JSON); an out-of-set or uncoded line leaves it empty; a reviewer's code correction updates it; export emits the resolved code and falls back to as-billed only with no resolved code; the index document carries the resolved code. Run only the affected classes with --filter and -- xUnit.MaxParallelThreads=4. Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests (you may run the one ScriptMetadataStrongConsistencyGuardTests class by filter if you add a script).</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings. Never use --no-verify or git stash. Never run python. Never kill processes. Do not edit anything under .claude/. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss051-line-code-lookups.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A coded line's resolved task / activity / expense code is what the AP export and the invoice index carry.</criterion>
+    <criterion testable="true">Out-of-set and uncoded lines store no code; a reviewer's code correction is reflected.</criterion>
+    <criterion testable="true">If lookups are the source of truth, a report-mode backfill script exists for existing lines and was not applied.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
