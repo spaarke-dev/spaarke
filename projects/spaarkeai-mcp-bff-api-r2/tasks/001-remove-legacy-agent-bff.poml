@@ -4,7 +4,7 @@
     <title>Remove the legacy agent from the BFF</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and deletion; modifies and deletes .cs files and tests across the BFF, ArchTests and contract suites</rigor-reason>
     <model-tier>opus</model-tier>

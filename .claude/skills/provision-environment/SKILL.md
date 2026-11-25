@@ -2463,7 +2463,7 @@ If manual recovery fails repeatedly, file a GitHub Issue with:
     [ ] Verify first user can sign in and load workspace
     [ ] Confirm cost drift alerts configured in Azure
     [ ] Update project #2 (portfolio board) with the new customer entry
-    [ ] Copilot agent gate (6f): auth config recorded, package rendered and sent to customer IT
+    [ ] Copilot agent gate (6f): Retired 2026-11-25 — skip; record "6f retired" (#3173)
 ```
 
 **Bucket B HIGH#10 SESSION 18**: When `$script:RegistryStale = $true`, replace the final summary above with the WARNING variant:
@@ -2510,7 +2510,9 @@ record each item's result in `runs/{runId}.md`. Any item not passing → report 
 creates each secure record's container when the record is made secure, and H7 has already linked the root business unit
 to H8's container.
 
-#### 6f. Per-customer Copilot agent (MANUAL GATE after Ready — T257; one delegated step per customer)
+#### 6f. Per-customer Copilot agent — Retired 2026-11-25 (do not run)
+
+> **Retired 2026-11-25.** The per-customer "Spaarke AI" Copilot agent was removed by spaarkeai-mcp-bff-api-r2 (tasks 001–002): the template workflow, `scripts/copilot-agent/` and the package are deleted, so step 5 cannot run. Skip this gate and record "6f retired" in the run. Copilot access is now the "Spaarke MCP" connector (`docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md`). Removing the T257 control-plane plumbing (client pre-authorization, `sprk_copilotauthconfigid`) is tracked in #3173. The steps below are kept as history until #3173 closes.
 
 Each customer gets its own Microsoft Copilot agent. The customer's IT installs it in THEIR tenant; never install it in
 Spaarke's catalog. The full procedure, with the one-time platform setup, is
