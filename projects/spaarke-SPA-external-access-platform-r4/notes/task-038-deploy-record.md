@@ -127,3 +127,42 @@ Sent to uac-r2 to look for in the logs. **uac-r2 then confirmed (b) PASS.** Only
 - Sorting works only through a click on the header cell outside that button.
 - Present since datagrid-framework-r1 (`c1c428e92b`, 2026-06-05); not introduced by R4.
 - R4's jsdom tests click the header cell itself, so they pass.
+
+## Step 7: sort fix and SPA redeploy
+
+- Owner go "Yes fix here". The fix is PR #3113, squash-merged as `0267ee64a2` (32 checks passing).
+  - DataGrid holds the sort and always passes Fluent a controlled `sortState`.
+  - The column menu sorts only when the config enables sorting.
+  - HeaderCellContent stops Enter (key down) and Space (key up) on the menu trigger. This was found in review: opening the menu from the keyboard toggled the sort.
+  - Test: `DataGrid.headerMenuSort.test.tsx`, 5 tests.
+- Dev BFF in the meantime (uac-r2, owner go given in uac-r2's session): `ef0c566d2c` live since 04:42:34Z; **GATE PASS** at 05:13Z.
+  - 197 requests, none external.
+  - The only 5xx is the known catalog drift.
+- uac-r2 FYI: about 151 core records (matters and others) were deleted on dev around 04:50Z by someone outside this project, and the reconcile job revoked 650 grant rows. Some of the records used in Step 6 may be gone.
+- **SPA plan:**
+  - SHA `0267ee64a2` (master HEAD). Since `3067fb3bdc` it adds:
+    - #3113;
+    - #3071 (sdap-client folded into ui-components);
+    - #3086 (LookupField secondary text);
+    - small shared-lib wizard fixes.
+  - No BFF dependency. Rollback `3067fb3bdc`.
+  - Owner go: "Yes, deploy 0267ee64a2". HEAD re-checked unchanged before dispatch; uac-r2 told before and at dispatch.
+- Run 45552869227 (dev, ref master, head `0267ee64a2`) dispatched 05:20:17Z: **success**, done 05:43:01Z.
+- **Served build check:**
+  - `/` answers 200;
+  - `/assets/app.js` is 1,621,782 bytes, SHA-256 starts `AF0C295524F8EE0B`;
+  - the 031/032/034/035 markers are still present.
+- Live now: SPA `0267ee64a2`, BFF `ef0c566d2c`. Rollback: SPA `3067fb3bdc`.
+
+**Re-test (2026-11-25 ~05:45Z, owner's Chrome, same partner account):**
+
+| Check | Result | Evidence |
+|---|---|---|
+| Menu "Z to A" on a text column | Pass | Projects grid (7 rows): a click on the "Project Name" label opens the menu; Z to A gives `aria-sort` descending, names Z…A. |
+| Menu "A to Z" | Pass | Ascending; names A…Z. |
+| Enter on the column name | Pass | Opens the menu; sort stays ascending, row order unchanged. |
+| Menu sort persisted | Pass | Ascending restored after reload. |
+| Menu sort on a Money column (FR-20) | Pass | Invoices (8 rows, 10 at the Step 6 run; the dev deletions are the likely cause): A to Z gives ($0.03) < $77.25 < $234.80 < $306.00 < $7,763.31 < $7,920.00 < $18,463.59 < $28,784.99. Z to A is the reverse. |
+
+- Clean-up: Invoices left on Total Amount (Local) descending, as found. Projects "Clear all" applied, back to no sort, as found.
+- FR-19/FR-20 sort is now **Pass** through the column menu, not only through the edge of the header cell.

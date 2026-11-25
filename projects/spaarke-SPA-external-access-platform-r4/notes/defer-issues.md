@@ -445,3 +445,11 @@ This under-lists, which fails closed.
 **Why it matters.** Model-driven grid users may see numbers instead of labels, in the cell and the export.
 
 **Fix.** Verify on a dev model-driven grid; if confirmed, read the annotation forms in `formattedLabelOf` with tests for both row shapes. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3050 (board Type=Bug).
+
+## D-37 — Shared DataGrid: Export to Excel ignores the on-screen sort (#3129)
+
+**What.** Found in the task 038 E2E (2026-11-25). The export writes rows in the order they were loaded, not the order the user sorted them on screen. On dev, Invoices sorted by Total Amount (Local) exported 10 rows in served order. The grid passes its loaded `records` to the command bar (`DataGrid.tsx` ~:1999). The export (`commandBar/CommandBar.tsx` `records`, ~:163 and ~:447, then `csvExport.ts` `exportCsv`) never sees the sort, which lives in DataGrid's `userSort` and Fluent's `sortState`.
+
+**Why it matters.** A user sorts by amount, exports, and gets a file in another order, so the export no longer matches what they saw.
+
+**Fix.** Pass the records sorted with the same `compare` the column uses (the active sort column and direction) to the command bar, or let the export take a sorted list. Add a test: the menu sort followed by export gives the sorted order. Needs the dataset-grid owners' OK (the shared export API). Effort: about half a day. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3129 (board Type=Bug).
