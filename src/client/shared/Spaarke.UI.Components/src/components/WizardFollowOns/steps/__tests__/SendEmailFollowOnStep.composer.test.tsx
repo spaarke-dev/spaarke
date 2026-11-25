@@ -249,6 +249,25 @@ describe('SendEmailFollowOnStep: the shared EmailComposer, compose-only (task 18
     expect(isComposedEmailReady({ ...COMPOSED, bcc: [{ email: 'not-an-address' }] })).toBe(false);
     expect(isComposedEmailReady({ ...COMPOSED, bodyFormat: 'HTML', body: '<p></p>' })).toBe(false);
   });
+
+  it('task 028: allowEmptySubjectAndBody lets an empty subject and body through, and nothing else', () => {
+    const empty: IComposedEmail = { ...COMPOSED, subject: '  ', bodyFormat: 'HTML', body: '<p></p>' };
+    const allow = { allowEmptySubjectAndBody: true };
+    // Default: both still required (every other wizard).
+    expect(isComposedEmailReady(empty)).toBe(false);
+    expect(isComposedEmailReady({ ...COMPOSED, subject: '' })).toBe(false);
+    // Allowed: an empty subject and body pass.
+    expect(isComposedEmailReady(empty, allow)).toBe(true);
+    // Negative: recipients, addresses and uploads are still checked.
+    expect(isComposedEmailReady({ ...empty, to: [] }, allow)).toBe(false);
+    expect(isComposedEmailReady({ ...empty, cc: [{ email: 'not-an-address' }] }, allow)).toBe(false);
+    expect(
+      isComposedEmailReady(
+        { ...empty, attachments: [{ id: 'local:x', source: 'local', fileName: 'notes.docx', sizeBytes: 5 }] },
+        allow
+      )
+    ).toBe(false);
+  });
 });
 
 describe('sendComposedEmail: the Finish send through the composer request path (task 182)', () => {
@@ -282,6 +301,34 @@ describe('sendComposedEmail: the Finish send through the composer request path (
     expect(body.associations).toEqual([{ entityType: 'sprk_project', entityId: 'p-1', entityName: 'Acme' }]);
     expect(body.bodyFormat).toBe('PlainText');
     expect(body.body).toBe('Dear Client,\n\nThe project is set up.\n\nKind regards');
+  });
+
+  it('task 028: allowEmptySubjectAndBody sends an empty subject and body for the server to fill; the flag itself is never sent', async () => {
+    const fetch = okFetch();
+    const analysis = [{ entityType: 'sprk_analysis', entityId: 'a-1', entityName: 'MSA Review' }];
+    const result = await sendComposedEmail(
+      { ...COMPOSED, subject: '', body: '' },
+      {
+        associations: analysis,
+        authenticatedFetch: fetch as unknown as AuthenticatedFetchFn,
+        allowEmptySubjectAndBody: true,
+      }
+    );
+    expect(result).toEqual({ success: true, communicationId: 'comm-1' });
+    const body = bodyOf(fetch);
+    expect(body.subject).toBe('');
+    expect(body.body).toBe('');
+    expect(body).not.toHaveProperty('serverFillsEmptySubject');
+  });
+
+  it('task 028 negative: without the option an empty subject is refused here and nothing is sent', async () => {
+    const fetch = okFetch();
+    const result = await sendComposedEmail(
+      { ...COMPOSED, subject: ' ' },
+      { associations: association, authenticatedFetch: fetch as unknown as AuthenticatedFetchFn }
+    );
+    expect(result.success).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('negative: Bcc is never dropped, even with no Cc', async () => {

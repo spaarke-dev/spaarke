@@ -302,17 +302,21 @@ public sealed class InvoiceCorrectionServiceTests
     // Codes (FR-22)
     // =========================================================================================
 
-    [Fact]
-    public async Task ACodeInTheSet_IsStoredInTheCodingJson_NotInTheCodeLookups_AndTheMismatchFollowsIt()
+    [Fact(DisplayName = "101 / ISS-051: a code in the set is stored in the coding JSON AND the code lookup (its row in the set), in one update; the firm's billed code is not written; the mismatch follows it")]
+    public async Task ACodeInTheSet_IsStoredInTheCodingJson_AndTheCodeLookup_AndTheMismatchFollowsIt()
     {
         var world = new CorrectionWorld();
+        var l100 = world.Codes.Single(c => c.GetAttributeValue<string>("sprk_code") == "L100").Id;
 
         var result = await world.Service().CorrectAsync(Line("TaskCode", " l100 "), CancellationToken.None);
 
         result.IsApplied.Should().BeTrue();
         var written = world.ValueWrites.Should().ContainSingle().Subject;
-        written.Fields.Keys.Should().BeEquivalentTo(["sprk_extractionconfidence"]); // the firm's billed code and the code lookups are not written
+        written.Fields.Keys.Should().BeEquivalentTo(["sprk_extractionconfidence", "sprk_taskcode"]); // the firm's billed code is not written
+        written.Fields["sprk_taskcode"].Should().BeEquivalentTo(new EntityReference("sprk_billingcode", l100),
+            "ISS-051: the AP export and the invoice index read the lookup, so they carry the corrected code");
         var task = JsonNode.Parse(world.Line().GetAttributeValue<string>("sprk_extractionconfidence"))!["coding"]!["task"]!;
+        task["codeId"]!.GetValue<string>().Should().Be(l100.ToString("D"), "the JSON and the lookup name the same row");
         task["code"]!.GetValue<string>().Should().Be("L100", "stored as the set spells it");
         task["mismatch"]!.GetValue<bool>().Should().BeFalse("the firm billed L100");
         JsonNode.Parse(world.Line().GetAttributeValue<string>("sprk_extractionconfidence"))!["coding"]!["firmCodeMismatch"]!.GetValue<bool>().Should().BeFalse();
@@ -348,6 +352,9 @@ public sealed class InvoiceCorrectionServiceTests
 
         var right = await world.Service().CorrectAsync(Line("ActivityCode", "A102"), CancellationToken.None);
         right.IsApplied.Should().BeTrue();
+        world.Line().GetAttributeValue<EntityReference>("sprk_activitycode")!.Id.Should().Be(
+            world.Codes.Single(c => c.GetAttributeValue<string>("sprk_code") == "A102").Id, "ISS-051: the activity lookup follows the corrected activity code");
+        world.Line().Contains("sprk_taskcode").Should().BeFalse("only the corrected slot's lookup is written");
     }
 
     [Fact]

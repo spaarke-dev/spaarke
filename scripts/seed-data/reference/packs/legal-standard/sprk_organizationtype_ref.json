@@ -1,0 +1,51 @@
+{
+  "table": "sprk_organizationtype_ref",
+  "entitySet": "sprk_organizationtype_refs",
+  "primaryKey": "sprk_organizationtype_refid",
+  "match": "naturalKey",
+  "naturalKey": "sprk_organizationtypecode",
+  "nameColumn": "sprk_name",
+  "columns": ["sprk_name", "sprk_organizationtypecode"],
+  "rows": [
+    {
+      "sprk_organizationtype_refid": "11aad4fa-8f96-f111-b8db-0022482fb5a7",
+      "sprk_name": "Law Firm",
+      "sprk_organizationtypecode": "LAWFIRM"
+    },
+    {
+      "sprk_organizationtype_refid": "86047eca-8aa5-4716-8241-78886181224e",
+      "sprk_name": "Client",
+      "sprk_organizationtypecode": "CLIENT"
+    },
+    {
+      "sprk_organizationtype_refid": "5e3d75a4-6bc9-4926-a908-bde2fcc5f99e",
+      "sprk_name": "Vendor",
+      "sprk_organizationtypecode": "VENDOR"
+    },
+    {
+      "sprk_organizationtype_refid": "61ff8731-ff3f-4f2f-8ac3-47c9345640b5",
+      "sprk_name": "Court",
+      "sprk_organizationtypecode": "COURT"
+    },
+    {
+      "sprk_organizationtype_refid": "591eb58d-8ee9-422a-84c8-33bcbb7bb9d8",
+      "sprk_name": "Government Agency",
+      "sprk_organizationtypecode": "GOVAGCY"
+    },
+    {
+      "sprk_organizationtype_refid": "15989b0c-84cf-4253-8b46-35aea2e49b37",
+      "sprk_name": "Opposing Party",
+      "sprk_organizationtypecode": "OPPPARTY"
+    },
+    {
+      "sprk_organizationtype_refid": "3b407bb5-8603-4c95-a54f-76aba5e3f6f4",
+      "sprk_name": "Expert Firm",
+      "sprk_organizationtypecode": "EXPFIRM"
+    },
+    {
+      "sprk_organizationtype_refid": "5e03871c-4363-435f-8780-c04fae9f9cd7",
+      "sprk_name": "Insurer",
+      "sprk_organizationtypecode": "INSURER"
+    }
+  ]
+}

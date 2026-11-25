@@ -225,8 +225,13 @@ public sealed class LineCodingSeamTests
         result.CodeSet.Source.Should().Be(CodeSetSource.FirmCodes);
         result.Lines.Should().OnlyContain(l => l.CodeSetSource == CodeSetSource.FirmCodes && l.CodeSetId == h.Utbms.Litigation);
         // The default fake model answers L110 for every Fee line.
-        result.Lines[0].Task.Should().Be(new LineCodeValue("L110", "L110", Mismatch: false));
-        result.Lines[1].Task.Should().Be(new LineCodeValue("L110", "L120", Mismatch: true), "the firm's code is kept next to the AI's");
+        result.Lines[0].Task.Should().Be(new LineCodeValue("L110", "L110", Mismatch: false, CodeId: result.CodeSet.CodeIdOf(BillingCodeKind.Task, "L110")));
+        result.Lines[1].Task.Should().Be(new LineCodeValue("L110", "L120", Mismatch: true, CodeId: result.CodeSet.CodeIdOf(BillingCodeKind.Task, "L110")),
+            "the firm's code is kept next to the AI's");
+
+        // ISS-051: the stored code names its row in the resolved set (Litigation's L110, not the firm's L120), which becomes the line's task lookup.
+        result.Lines[0].Task.CodeId.Should().NotBeNull().And.NotBe(Guid.Empty);
+        result.Lines[0].Activity.CodeId.Should().Be(result.CodeSet.CodeIdOf(BillingCodeKind.Activity, result.Lines[0].Activity.Code));
         result.Lines[1].HasFirmCodeMismatch.Should().BeTrue();
         InputSection(h.Prompts[0]).GetProperty("lines")[1].GetProperty("billedTaskCode").GetString().Should().Be("L120",
             "the firm's code is context for the model, not an instruction");

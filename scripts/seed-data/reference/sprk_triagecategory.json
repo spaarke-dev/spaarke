@@ -1,0 +1,83 @@
+{
+  "table": "sprk_triagecategory",
+  "entitySet": "sprk_triagecategories",
+  "primaryKey": "sprk_triagecategoryid",
+  "columns": [
+    "sprk_classifierguidance",
+    "sprk_enabled",
+    "sprk_name",
+    "sprk_priorityweight"
+  ],
+  "rows": [
+    {
+      "sprk_triagecategoryid": "5ac90050-598b-f111-8077-7ced8ddc4cc6",
+      "sprk_classifierguidance": "The client directs, authorises, or changes the mandate: instructions to proceed, hold, settle, escalate, or change strategy. Use this for direction the firm is expected to act on. If the direction is specifically about the cost or quantity of work, prefer Scope / budget change; if about rates or billing terms, prefer Fee / rate change.",
+      "sprk_enabled": true,
+      "sprk_name": "Client instruction",
+      "sprk_priorityweight": 80
+    },
+    {
+      "sprk_triagecategoryid": "65310056-598b-f111-8077-7ced8ddc4cc6",
+      "sprk_classifierguidance": "Correspondence from or about a court, tribunal, arbitrator, or regulator: orders, notices, filings, service of process, hearing dates, and procedural deadlines. Choose this whenever a court-imposed date or requirement is present, even when other topics also appear in the message, because the externally imposed deadline dominates.",
+      "sprk_enabled": true,
+      "sprk_name": "Court / Filing",
+      "sprk_priorityweight": 100
+    },
+    {
+      "sprk_triagecategoryid": "71310056-598b-f111-8077-7ced8ddc4cc6",
+      "sprk_classifierguidance": "A bill or billing record already exists: an invoice is attached or referenced, a payment or remittance is discussed, or a specific billing entry is queried, disputed, or corrected. This category is about money ALREADY billed. If the email instead proposes future cost that has not been billed yet, use Fee / rate change (price) or Scope / budget change (quantity).",
+      "sprk_enabled": true,
+      "sprk_name": "Invoice / Billing",
+      "sprk_priorityweight": 60
+    },
+    {
+      "sprk_triagecategoryid": "73310056-598b-f111-8077-7ced8ddc4cc6",
+      "sprk_classifierguidance": "Arranging or changing the timing of meetings, calls, depositions, interviews, or availability, with no substantive legal content of its own. If the date being discussed was set by a court or tribunal, use Court / Filing instead.",
+      "sprk_enabled": true,
+      "sprk_name": "Scheduling",
+      "sprk_priorityweight": 50
+    },
+    {
+      "sprk_triagecategoryid": "7d310056-598b-f111-8077-7ced8ddc4cc6",
+      "sprk_classifierguidance": "Correspondence from or with the opposing party's counsel: negotiation, demands, settlement positions, discovery disputes, and adversarial positions taken. This category identifies the source and the adversarial posture of the message. If the message carries a court-imposed deadline, prefer Court / Filing.",
+      "sprk_enabled": true,
+      "sprk_name": "Opposing counsel",
+      "sprk_priorityweight": 70
+    },
+    {
+      "sprk_triagecategoryid": "80310056-598b-f111-8077-7ced8ddc4cc6",
+      "sprk_classifierguidance": "Routine operational correspondence with no legal substance and no financial or deadline consequence: confirmations, acknowledgements, receipt notices, contact or address changes, access requests, and system messages. If the message asserts an obligation, a deadline, or a cost, choose a more specific category.",
+      "sprk_enabled": true,
+      "sprk_name": "Administrative",
+      "sprk_priorityweight": 30
+    },
+    {
+      "sprk_triagecategoryid": "8b310056-598b-f111-8077-7ced8ddc4cc6",
+      "sprk_classifierguidance": "Unsolicited or bulk correspondence with no bearing on any matter: vendor pitches, newsletters, event and webinar invitations, automated promotions, and mailing-list traffic. Nothing is required of the recipient. Do not use this for unsolicited mail that nonetheless concerns a live matter.",
+      "sprk_enabled": true,
+      "sprk_name": "Marketing / Noise",
+      "sprk_priorityweight": 10
+    },
+    {
+      "sprk_triagecategoryid": "8b62dd84-1fbc-f111-aaaf-3833c5e9614d",
+      "sprk_classifierguidance": "The PRICE of work is being changed or proposed: hourly rate increases, new or substituted timekeepers billing at different rates, changes to discounts, fee arrangements, or billing terms. This is about the rate per unit of work, not the quantity of work. If the quantity or scope of work is what is changing, use Scope / budget change. If an invoice already reflects the amount, use Invoice / Billing.",
+      "sprk_enabled": true,
+      "sprk_name": "Fee / rate change",
+      "sprk_priorityweight": 75
+    },
+    {
+      "sprk_triagecategoryid": "8d62dd84-1fbc-f111-aaaf-3833c5e9614d",
+      "sprk_classifierguidance": "The AMOUNT of work is being changed or proposed, or a budget revision is requested: additional depositions, experts, workstreams or phases; an estimate of cost beyond the current budget; a request to increase or re-baseline a budget. Use this for a commitment about FUTURE cost that the budget does not yet reflect, whether or not a dollar figure is given. If a bill already exists for the work, use Invoice / Billing instead. If the rate per hour is what is changing rather than the quantity of work, use Fee / rate change.",
+      "sprk_enabled": true,
+      "sprk_name": "Scope / budget change",
+      "sprk_priorityweight": 85
+    },
+    {
+      "sprk_triagecategoryid": "92066a73-2abc-f111-aaaf-3833c5e9614d",
+      "sprk_classifierguidance": "Use this ONLY when no other category fits the message, or when the message is too ambiguous to classify with confidence. This is an explicit abstention, not a default: choosing it is a signal that a human should look and that the taxonomy may need a new row. Never choose Unclassified merely because a message spans two categories -- pick the dominant one using the tie-breakers in the other rows.",
+      "sprk_enabled": true,
+      "sprk_name": "Unclassified",
+      "sprk_priorityweight": 40
+    }
+  ]
+}

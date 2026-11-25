@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss025" project="ebilling-r1">
+  <metadata>
+    <title>ISS-025 (#2876) + DEF-055 (#2600): a failed job is retried with back-off, so a short outage no longer spends every delivery within seconds</title>
+    <phase>Issue fix; filed 2026-11-06 (095d-2b-1) and 2026-11-17 (084h-3)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared BFF job processor (every IJobHandler) on the ADR-004 path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared platform behaviour: delivery counting, the final-delivery rule, duplicate sends and idempotency across all handlers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, job, background, testing</tags>
+  </metadata>
+
+  <prompt>Full entries: projects/ebilling-r1/notes/defer-issues.md, DEF-055 and ISS-025. src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs abandons a message whose handler returned a retryable Failure (~235-262, AbandonMessageAsync(args.Message, null, ...)); the broker redelivers it at once, so all JobContract.MaxDeliveryCount deliveries happen within seconds and a dependency outage of a minute dead-letters the job (MaxRetriesExceeded). This hits every IJobHandler, including repair jobs (084h-3 RecordProcedureDecisionJob, ontology GateDecisionRecordJob, the eBilling Set-firm re-run).
+Read first: .claude/adr/ADR-004* (job contract), .claude/constraints/jobs.md, Services/Jobs/JobContract.cs (DeliveryCount, IsFinalDelivery), JobSubmissionService.cs, and how handlers read the delivery count (grep DeliveryCount and IsFinalDelivery across Services/). Check the queue's MaxDeliveryCount in infra (grep the Bicep) against JobContract.MaxDeliveryCount.</prompt>
+
+  <constraints>
+    <constraint>On a retryable failure that is not the final attempt, the job is retried after a back-off that grows with the attempt (e.g. exponential with a cap, stated in the notes with the total window it gives), not redelivered at once. Use Service Bus scheduling (send a copy with ScheduledEnqueueTime, then complete the original), or another mechanism if you show it is better; justify it in the notes.</constraint>
+    <constraint>The logical attempt count survives the re-send: a re-sent copy carries it (application property), JobContract.DeliveryCount / IsFinalDelivery report the logical attempt for every handler, and the final attempt still dead-letters with MaxRetriesExceeded exactly as today. Poison (non-retryable) failures, the existing dead-letter reasons, the message body, correlation/idempotency keys, session ids and any other application properties are preserved on the copy.</constraint>
+    <constraint>Ordering: send the scheduled copy first, then complete the original. If the send fails, fall back to today's abandon (log it); if the complete fails after a successful send, a duplicate may run: confirm in the notes that handlers are idempotent per ADR-004 (name the idempotency mechanism) and test that path.</constraint>
+    <constraint>No new queue, topic, package, job type or DI registration beyond what the processor already has (the sender may already be registered: reuse it). Do not build the operator resubmit tool (ISS-025 also suggests it): file nothing; record it as out of scope in the notes. Update docs that describe retry timing (grep "abandon" and "MaxDeliveryCount" under docs/ and .claude/patterns/; edits under .claude/ are not allowed for you: list them in the notes for the main session instead).</constraint>
+    <constraint>Tests, failing before and passing after, in the existing ServiceBusJobProcessor test class(es) (grep them): a retryable failure schedules a copy with the expected delay and attempt+1 and completes the original; the final attempt dead-letters as today; a poison failure dead-letters as today; properties are preserved; send failure falls back to abandon; complete failure after send is logged and does not throw out of the processor; a handler sees the logical attempt on the copy. Run only those classes: dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~ServiceBusJobProcessor|FullyQualifiedName~JobContract" -- xUnit.MaxParallelThreads=4 (adjust to the real names). Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests.</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings. Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss025-job-retry-backoff.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A retryable failure is retried after a growing delay; the attempt count is logical and survives the re-send.</criterion>
+    <criterion testable="true">Final-attempt and poison dead-lettering are unchanged.</criterion>
+    <criterion testable="true">A failed send falls back to abandon; a failed complete after send is safe.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

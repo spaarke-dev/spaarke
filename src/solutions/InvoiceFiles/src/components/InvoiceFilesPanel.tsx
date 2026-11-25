@@ -119,6 +119,19 @@ export const InvoiceFilesPanel: React.FC<InvoiceFilesPanelProps> = ({ invoiceId,
     [actionDeps]
   );
 
+  const openSourceEmail = React.useCallback(
+    async (documentId: string) => {
+      setActionError(null);
+      try {
+        await openDocument(documentId);
+      } catch {
+        // The host's error text is for developers; the user gets a plain sentence.
+        setActionError('The source email could not be opened.');
+      }
+    },
+    [openDocument]
+  );
+
   if (load.state === 'loading') {
     return (
       <div className={s.root} data-testid="invoicefiles-loading">
@@ -212,7 +225,7 @@ export const InvoiceFilesPanel: React.FC<InvoiceFilesPanelProps> = ({ invoiceId,
                       <Link
                         as="button"
                         data-testid={`invoicefile-source-${file.fileId}`}
-                        onClick={() => void openDocument(file.sourceEmail!.documentId)}
+                        onClick={() => void openSourceEmail(file.sourceEmail!.documentId)}
                       >
                         <MailRegular /> {file.sourceEmail.name || 'Email'}
                       </Link>

@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Tracking;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
@@ -2485,6 +2486,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             return await SendMessageAsync(request, httpContext, correlationId, cancellationToken);
         }
 
+        // field-mapping-server-write-path-r1 task 028 (FR-17): an email filed under one sprk_analysis whose subject or body is empty
+        // gets it from the analysis -> communication mapping profile (fill-only; the source is read as the caller; a denied, missing
+        // or faulted source leaves the request as it is). Before both email paths so a mapped subject/body is what is validated and sent.
+        request = await SendTimeFieldMapping.FillEmptySubjectAndBodyAsync(
+            request, httpContext, _genericEntityService, _logger, correlationId, cancellationToken);
+
         // Branch: User mode sends via OBO as the authenticated user
         if (request.SendMode == SendMode.User)
         {
@@ -2986,16 +2993,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
 
             // Step 6: Archive to SPE when requested or when the created row is filed to a record (D-217; best-effort)
-            // For user mode, check ArchiveOutgoingOptIn via FromMailbox account if available (default true)
+            // For user mode, check ArchiveOutgoingOptIn on the sender's account (default true). The sender is the FromMailbox account when the
+            // request names one (unchanged), otherwise the signed-in user's own mailbox: the address resolved from the caller's token claims
+            // above (userEmail), never a request value (#2672). One account read per send, and only when the send will be archived.
             var archive = ShouldArchiveOutgoing(request, communicationId.HasValue ? preparedRecord : null);
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
             bool archiveOutgoingOptIn = true;
-            if (archive && request.FromMailbox is not null)
+            if (archive)
             {
+                var optInMailbox = request.FromMailbox ?? userEmail;
                 try
                 {
-                    var senderAccount = await _accountService.GetSendAccountByEmailAsync(request.FromMailbox, ct);
+                    var senderAccount = await _accountService.GetSendAccountByEmailAsync(optInMailbox, ct);
                     if (senderAccount is not null)
                     {
                         archiveOutgoingOptIn = senderAccount.ArchiveOutgoingOptIn ?? true;
@@ -3006,7 +3016,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     _logger.LogWarning(
                         optInEx,
                         "Failed to check ArchiveOutgoingOptIn for user sender {FromMailbox} (defaulting to true) | CorrelationId: {CorrelationId}",
-                        request.FromMailbox, correlationId);
+                        optInMailbox, correlationId);
                 }
             }
 

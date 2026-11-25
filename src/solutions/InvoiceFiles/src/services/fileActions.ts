@@ -85,6 +85,7 @@ export function browserDeps(api: Pick<InvoiceFilesApi, 'fetchFile'>, saveBlob: (
       try {
         // The tab must not reach back into the form (it will show a file the user uploaded, or one a firm sent).
         tab.opener = null;
+        // eslint-disable-next-line no-restricted-syntax -- some hosts refuse the assignment; the blob is same-origin content either way
       } catch {
         // Some hosts refuse the assignment; the blob is same-origin content either way.
       }

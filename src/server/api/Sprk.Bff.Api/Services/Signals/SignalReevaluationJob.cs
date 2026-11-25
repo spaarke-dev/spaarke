@@ -1369,7 +1369,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
             return;
         }
 
-        await SweepStoredEvidenceAsync(policies.Values, "is not in force", counts, ct).ConfigureAwait(false);
+        // Task 217 (#3091, DI-172): only the policies that still have a Signal whose stored evidence may carry detail are read, so the sweep's
+        // Signal reads grow with what is left to redact, not with every Off or Retired policy (a Signal whose detail is gone never changes
+        // again). The policies are swept in the same order, by the same per-policy read and rule. When that read is incomplete (logged), every
+        // policy is swept, as before, so a fault or the bound never leaves evidence unredacted.
+        var withDetail = await _closure.PoliciesNotInForceWithStoredDetailAsync(policies, ct).ConfigureAwait(false);
+        var codes = withDetail.IsComplete ? policies.Values.Where(withDetail.Codes.Contains) : policies.Values;
+        await SweepStoredEvidenceAsync(codes, "is not in force", counts, ct).ConfigureAwait(false);
     }
 
     /// <summary>

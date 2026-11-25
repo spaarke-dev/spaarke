@@ -179,6 +179,19 @@ describe('InvoiceFilesPanel source email', () => {
     expect(openDocument).toHaveBeenCalledWith(DOC_ID);
   });
 
+  it('shows a plain message when the source email cannot be opened', async () => {
+    const openDocument = jest.fn().mockRejectedValue(new Error('Xrm.Navigation.openForm failed: 0x80040217'));
+    renderPanel(ok(files()), { openDocument });
+    await screen.findByTestId('invoicefiles-list');
+    expect(screen.queryByTestId('invoicefiles-action-error')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId(`invoicefile-source-${PDF_ID}`));
+
+    const bar = await screen.findByTestId('invoicefiles-action-error');
+    expect(bar).toHaveTextContent('The source email could not be opened.');
+    expect(bar).not.toHaveTextContent('0x80040217');
+  });
+
   it('a file with no source email shows no link', async () => {
     renderPanel(ok(files()));
     await screen.findByTestId('invoicefiles-list');

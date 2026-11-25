@@ -331,6 +331,33 @@ public sealed class CodeSetResolverSeamTests
         resolved.TryGetCode(BillingCodeKind.Activity, "A199", out _).Should().BeFalse();
     }
 
+    [Fact(DisplayName = "ISS-051: a resolved set names the sprk_billingcode row of each allowed code (the line's code lookup), from the set that holds it; none for an inactive or unknown code")]
+    public async Task ResolvedSet_NamesTheRowOfEachAllowedCode_FromTheSetThatHoldsIt()
+    {
+        var utbms = _data.SeedUtbms();
+        _data.AddCode(utbms.Litigation, "L999", BillingCodeKind.Task, "Retired task code", active: false);
+        var core = _data.AddCoreRecord("sprk_matter", matterTypeId: _data.AddMatterType(utbms.Litigation));
+
+        var resolved = await Sut.ResolveAsync(core, [Line("1")]);
+
+        async Task<Guid> RowOf(Guid setId, string code)
+        {
+            var query = new QueryExpression(CodeSetResolver.CodeEntity) { ColumnSet = new ColumnSet("sprk_code") };
+            query.Criteria.AddCondition("sprk_codeset", ConditionOperator.Equal, setId);
+            query.Criteria.AddCondition("sprk_code", ConditionOperator.Equal, code);
+            return (await _data.Entities.Object.RetrieveMultipleAsync(query, CancellationToken.None)).Entities.Single().Id;
+        }
+
+        resolved.CodeIdOf(BillingCodeKind.Task, "L110").Should().Be(await RowOf(utbms.Litigation, "L110"));
+        resolved.CodeIdOf(BillingCodeKind.Task, " l120 ").Should().Be(await RowOf(utbms.Litigation, "L120"),
+            "L120 is also in UTBMS Counseling; the row is the one in the resolved set");
+        resolved.CodeIdOf(BillingCodeKind.Activity, "A103").Should().Be(await RowOf(utbms.Activity, "A103"), "activity codes come from the shared set");
+        resolved.CodeIdOf(BillingCodeKind.Expense, "E101").Should().Be(await RowOf(utbms.Expense, "E101"));
+        resolved.CodeIdOf(BillingCodeKind.Task, "L999").Should().BeNull("an inactive code is not allowed, so it has no row");
+        resolved.CodeIdOf(BillingCodeKind.Task, "C100").Should().BeNull("a code of another set is not in this one");
+        resolved.CodeIdOf(BillingCodeKind.Activity, "L110").Should().BeNull("a row is per kind");
+    }
+
     [Fact]
     public async Task ASetThatHoldsItsOwnActivityAndExpenseCodes_UsesThemInsteadOfTheSharedSets()
     {

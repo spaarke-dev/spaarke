@@ -1,7 +1,7 @@
 /**
  * Shared Vite config for the standalone wizard Code Pages
  * (CreateEvent / CreateInvoice / CreateMatter / CreateProject / CreateReportCard /
- * CreateWorkAssignment wizards and RecordFamily).
+ * CreateWorkAssignment / CreateTodo / SummarizeFiles wizards and RecordFamily).
  *
  * Each page's `vite.config.ts` is one line:
  *
