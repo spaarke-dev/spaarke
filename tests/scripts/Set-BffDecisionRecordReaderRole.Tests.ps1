@@ -1,8 +1,9 @@
 # Pester 5.7.1 (6.x does not load the containers here). Run: Invoke-Pester tests/scripts/Set-BffDecisionRecordReaderRole.Tests.ps1
 # ebilling-r1 DEF-059: scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 over a mocked Dataverse. Pins: -Verify exits 0 only when
 # every BFF application user present holds the role copy of its own business unit, the role holds exactly prvReadsprk_DecisionRecord
-# at Global, and nobody else holds it; -Apply first strips privileges outside the declared one (removal only, root role), then assigns
-# only what is missing (idempotent), and refuses (exit 2, writes nothing) when the role or the declared privilege is wrong.
+# at Global plus only the 9 platform-added privileges (the same list as provisioning H7b S29; owner 2026-11-25), and nobody else
+# holds it; -Apply first strips privileges outside the declared one and that set (removal only, root role), then assigns only what
+# is missing (idempotent), and refuses (exit 2, writes nothing) when the role or the declared privilege is wrong.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
@@ -26,6 +27,16 @@ BeforeAll {
     function Priv([string]$Name, [string]$Depth, [string]$Id) { [pscustomobject]@{ PrivilegeName = $Name; Depth = $Depth; PrivilegeId = $Id } }
     $global:DrrTest_DeclaredId = '00000000-0000-4000-8000-0000000000e0'
     $global:DrrTest_ExtraIds = @('00000000-0000-4000-8000-0000000000e1', '00000000-0000-4000-8000-0000000000e2', '00000000-0000-4000-8000-0000000000e3')
+    $global:DrrTest_PlatformId = '00000000-0000-4000-8000-0000000000e4'
+    $script:PlatformNine = 'prvReadPluginAssembly', 'prvReadPluginType', 'prvReadSdkMessage', 'prvReadSdkMessageProcessingStep',
+    'prvReadSdkMessageProcessingStepImage', 'prvCreateSharePointData', 'prvReadSharePointData', 'prvWriteSharePointData', 'prvReadSharePointDocument'
+    # The value a script assigns to $Name, read from its AST (nothing is executed).
+    function Get-ScriptListValue([string]$Path, [string]$Name) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+        $a = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq $Name }, $true))
+        $a.Count | Should -Be 1
+        @($a[0].Right.Expression.SafeGetValue())
+    }
     function Base([switch]$Apply, [switch]$Verify) {
         $a = @{ EnvironmentUrl = $script:Url; BffApplicationIds = @("$global:DrrTest_AppA,$global:DrrTest_AppB") }
         if ($Apply) { $a.Apply = $true }
@@ -124,7 +135,9 @@ Describe 'Set-BffDecisionRecordReaderRole.ps1 (mocked Dataverse)' {
         foreach ($set in @(
                 @([pscustomobject]@{ PrivilegeName = 'prvReadsprk_DecisionRecord'; Depth = 'Global' }, [pscustomobject]@{ PrivilegeName = 'prvReadUser'; Depth = 'Basic' }),
                 @([pscustomobject]@{ PrivilegeName = 'prvReadsprk_DecisionRecord'; Depth = 'Deep' }),
-                @([pscustomobject]@{ PrivilegeName = 'prvReadsprk_Signal'; Depth = 'Global' }))) {
+                @([pscustomobject]@{ PrivilegeName = 'prvReadsprk_Signal'; Depth = 'Global' }),
+                # A SharePoint privilege NOT in the platform-added set (Delete) is still drift.
+                @([pscustomobject]@{ PrivilegeName = 'prvReadsprk_DecisionRecord'; Depth = 'Global' }, [pscustomobject]@{ PrivilegeName = 'prvDeleteSharePointData'; Depth = 'Global' }))) {
             $global:DrrTest_Privileges = $set
             $r = Invoke-Script (Base -Verify)
             $r.ExitCode | Should -Be 1
@@ -182,36 +195,67 @@ Describe 'Set-BffDecisionRecordReaderRole.ps1 (mocked Dataverse)' {
         $global:DrrTest_Posts.Count | Should -Be 0
     }
 
-    It 'there is no allow-list switch: -AllowPlatformDefaults is not a parameter, and an extra privilege fails -Verify' {
-        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
-        (Invoke-Script (Base -Verify)).ExitCode | Should -Be 1
+    It 'must-not-fire: the 9 platform-added privileges, at any depth, pass -Verify and are reported; there is still no allow-list switch' {
+        $i = 0
+        foreach ($name in $script:PlatformNine) {
+            $global:DrrTest_Privileges += Priv $name @('Basic', 'Local', 'Deep', 'Global')[$i % 4] ('00000000-0000-4000-8000-0000000001{0:d2}' -f $i); $i++
+        }
+        $r = Invoke-Script (Base -Verify)
+        $r.ExitCode | Should -Be 0
+        $r.Output | Should -Match 'VERIFY PASS'
+        foreach ($name in $script:PlatformNine) { $r.Output | Should -Match ([regex]::Escape("role holds $name at ") + '\w+: platform-added, accepted') }
         $a = Base -Verify; $a.AllowPlatformDefaults = $true
         { & $script:Script @a 6>&1 2>&1 | Out-Null } | Should -Throw
     }
 
-    It 'must-fire: -Apply strips each extra privilege (naming exactly the extras, never the declared one, on the root role), then assigns' {
+    It 'the platform-added list is the same in this script, in Deploy-EbillingBillingAdminRole.ps1 and in provisioning H7b S29' {
+        $mine = Get-ScriptListValue $script:Script '$PlatformAdded'
+        @($mine | Sort-Object) | Should -Be @($script:PlatformNine | Sort-Object)
+        $admin = Get-ScriptListValue (Join-Path $script:RepoRoot 'scripts' 'ebilling' 'Deploy-EbillingBillingAdminRole.ps1') '$PlatformDefaults'
+        @($admin | Sort-Object) | Should -Be @($mine | Sort-Object)
+        $cs = Get-Content -Raw (Join-Path $script:RepoRoot 'src' 'server' 'services' 'Sprk.Provisioning.ControlPlane.Core' 'Handlers' 'SecureRecordSetup' 'SecureRecordSetupProcedure.cs')
+        $block = [regex]::Match($cs, 'DecisionRecordReaderPlatformAddedPrivileges\s*=\s*\[(?<b>[^\]]*)\]')
+        $block.Success | Should -BeTrue
+        $s29 = @([regex]::Matches($block.Groups['b'].Value, '"(prv\w+)"') | ForEach-Object { $_.Groups[1].Value })
+        @($s29 | Sort-Object) | Should -Be @($mine | Sort-Object)
+    }
+
+    It 'must-fire: -Apply strips each extra privilege (naming exactly the extras, never the declared one or a platform-added one, on the root role), then assigns' {
         $global:DrrTest_Assigned = @{ $global:DrrTest_UserA = $true }
-        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
-        $global:DrrTest_Privileges += Priv 'prvReadSharePointData' 'Basic' $global:DrrTest_ExtraIds[1]
-        $global:DrrTest_Privileges += Priv 'prvCreateSharePointData' 'Global' $global:DrrTest_ExtraIds[2]
+        $global:DrrTest_Privileges += Priv 'prvReadUser' 'Global' $global:DrrTest_ExtraIds[0]
+        $global:DrrTest_Privileges += Priv 'prvReadsprk_Signal' 'Basic' $global:DrrTest_ExtraIds[1]
+        $global:DrrTest_Privileges += Priv 'prvDeleteSharePointData' 'Global' $global:DrrTest_ExtraIds[2]
+        $global:DrrTest_Privileges += Priv 'prvReadSharePointData' 'Global' $global:DrrTest_PlatformId
         $r = Invoke-Script (Base -Apply)
         $r.ExitCode | Should -Be 0
         @($global:DrrTest_Removes | Sort-Object) | Should -Be @($global:DrrTest_ExtraIds | Sort-Object)
         $global:DrrTest_Removes | Should -Not -Contain $global:DrrTest_DeclaredId
+        $global:DrrTest_Removes | Should -Not -Contain $global:DrrTest_PlatformId
         @($global:DrrTest_RemoveRoles | Select-Object -Unique) | Should -Be @($global:DrrTest_RootRole)
         $global:DrrTest_Posts.Count | Should -Be 1
         $global:DrrTest_Posts[0] | Should -Be "$global:DrrTest_UserB <- $script:Url/api/data/v9.2/roles($global:DrrTest_CustomerCopy)"
-        @($global:DrrTest_Privileges).Count | Should -Be 1
+        @($global:DrrTest_Privileges.PrivilegeName | Sort-Object) | Should -Be @('prvReadSharePointData', 'prvReadsprk_DecisionRecord')
         (Invoke-Script (Base -Verify)).ExitCode | Should -Be 0
+    }
+
+    It 'must-not-fire: -Apply on a role holding only the declared privilege and platform-added ones strips nothing' {
+        $global:DrrTest_Assigned = @{ $global:DrrTest_UserA = $true; $global:DrrTest_UserB = $true }
+        $global:DrrTest_Privileges += Priv 'prvCreateSharePointData' 'Global' $global:DrrTest_PlatformId
+        $r = Invoke-Script (Base -Apply)
+        $r.ExitCode | Should -Be 0
+        $r.Output | Should -Match 'nothing to strip'
+        $global:DrrTest_Removes.Count | Should -Be 0
+        $global:DrrTest_Posts.Count | Should -Be 0
     }
 
     It 'must-fire: -Apply on a role the platform keeps re-adding to exits 2 after the strip and assigns nothing' {
         $global:DrrTest_Assigned = @{}
         $global:DrrTest_StripSticks = $false
-        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
+        $global:DrrTest_Privileges += Priv 'prvReadUser' 'Global' $global:DrrTest_ExtraIds[0]
         $r = Invoke-Script (Base -Apply)
         $r.ExitCode | Should -Be 2
         $r.Output | Should -Match 'REFUSED: after the strip'
+        $r.Output | Should -Match ([regex]::Escape('(still held: prvReadUser)'))
         $global:DrrTest_Removes.Count | Should -Be 1
         $global:DrrTest_Posts.Count | Should -Be 0
     }
@@ -251,11 +295,13 @@ Describe 'Set-BffDecisionRecordReaderRole.ps1 (mocked Dataverse)' {
         $global:DrrTest_Posts.Count | Should -Be 1
     }
 
-    It 'the dry run reports the extras -Apply would strip and writes nothing' {
-        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_ExtraIds[0]
+    It 'the dry run reports the extras -Apply would strip (never a platform-added one) and writes nothing' {
+        $global:DrrTest_Privileges += Priv 'prvReadUser' 'Global' $global:DrrTest_ExtraIds[0]
+        $global:DrrTest_Privileges += Priv 'prvReadPluginAssembly' 'Global' $global:DrrTest_PlatformId
         $r = Invoke-Script (Base)
         $r.ExitCode | Should -Be 0
-        $r.Output | Should -Match 'would strip prvReadPluginAssembly'
+        $r.Output | Should -Match 'would strip prvReadUser'
+        $r.Output | Should -Not -Match 'would strip prvReadPluginAssembly'
         $global:DrrTest_Removes.Count | Should -Be 0
         $global:DrrTest_Posts.Count | Should -Be 0
     }
