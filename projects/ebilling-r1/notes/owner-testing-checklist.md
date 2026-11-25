@@ -206,3 +206,15 @@ Once a dev BFF with iss051 is live, new and corrected lines carry the resolved U
 - [ ] Open the resume link (`/invoices/submit?submissionId=…`) of the same submission: the same two links show.
 - [ ] From a matter's record view, use **Submit invoice**; on the result, **Open invoice** opens the invoice over the matter, and closing it returns you to the matter with focus on the Submit invoice button. **Open matter** just closes back to the matter.
 - [ ] A Rejected submission shows no **Open invoice**, and its red bar says "The invoice was rejected." with no code like `invoice.read.unreadable` (the report below still lists rule findings with their descriptions).
+
+## V. Task 079 on dev: Billing tab, Rule Review page (2026-11-25, by script; owner plan A)
+Live on dev since ~02:20Z. The billing-rule-draft Action and Binding, the Billing-tab firm fields, the Rule Review page (`sprk_rulereviewpage`, built from master 2146b8fdaf) and its menu entry. There is no command on the rule-set form yet (DEF-069, #3112): open Rule Review from the menu.
+- [ ] Open a matter's main form: the **Billing** tab has a "Billing firm" section with **Billing firm** and **Billing responsible**. Do the same on a project, and on a work assignment, which now has a Billing tab of its own.
+- [ ] The forms still load as before: no script error, and the header and other tabs are unchanged.
+- [ ] In the Spaarke Administration app, the eBilling group lists **Rule Review** after Rule Sets. It opens the page, which lists rule sets, in light and dark mode.
+- [ ] Signed-in route checks (079 step 9, second half). I need a token for each user, so I do these with you:
+  - As a billing admin, the WP3 reads answer 2xx.
+  - As a non-admin, a write answers 403.
+  - As a flagged-external test user, `/review` answers 403, and `/invoice-submissions/{id}` answers the same 404 for a real id and a made-up id.
+  - The four retired `/documents` routes answer 404.
+- [ ] 079 step 12: 077's UI tests against dev, including dark mode. This runs after the step 10 data exists.
