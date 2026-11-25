@@ -122,3 +122,32 @@ edit it) and `SendEmailFollowOnStep.tsx` (I do not edit it); #1293 edits two Ema
 2. Close after a successful send asked "Discard this email? ... will not be sent": now it just closes, deleting nothing.
 3. "Abandoned" was a persistent flag: a host that keeps the composer mounted after Cancel would have had every later
    upload deleted on arrival. Now only uploads in flight at abandon are marked.
+
+## Fix round 1 (coordinator, 2026-11-25): the create wizards' Send Email step
+
+The wizards were the residual: the step's composer unmounts on Next, so its own upload map was lost, and the wizard
+closed without telling anyone. Conflict check first: no open PR other than #3145 touches `composeOnlySend.ts`,
+`SendEmailFollowOnStep.tsx` or the wizard hosts (#1293 touches two unrelated EmailComposer tests).
+
+- **Provenance travels with the item.** `IAttachmentItem.discard` is set from the upload result
+  (`RESOLVE_ATTACHMENT_DOCUMENT`), lifted into the wizard's `IComposedEmail`, and restored when the step reopens. The
+  engine's own session map is replaced by it (same rule: only an item that carries a delete is ever deleted; picked and
+  host-passed items never carry one).
+- **One gate, `EmailComposer/uploadDiscard.ts`.** Keyed on the `discard` function: `keepUploads` / `releaseUploads`
+  (a send that carried it and went out or may have keeps it for good) and once-only `discardUpload`. §11: Existing —
+  none (the engine's per-instance set does not survive the step unmounting); Extension — `composeOnlySend.ts` imports
+  `EmailComposer.tsx`, so the engine cannot import a gate from there without a cycle; Cost of doing nothing — a Finish
+  send's documents would be deleted when the wizard closes, or every closed wizard leaves its uploads behind.
+- **`sendComposedEmail`** keeps what it carries before the request and releases it only when nothing was sent (a
+  refused link, a 4xx, a failure before the request). It classifies what the request threw with `toSendRequestError`,
+  so a host fetch's own error is a possible send (kept), not "on this page".
+- **Close, not reopen.** `useDiscardComposedEmailUploadsOnClose(open, emailRef)` runs when `open` turns false or the
+  wizard unmounts while open. Wired into every host that holds the step's email: CreateRecordWizard (Matter, Project,
+  Event, To Do, and the Analysis / Report Card shells), CreateReportCardWizard, WorkAssignmentWizardDialog,
+  SummarizeFilesDialog, DocumentEmailWizard, CreateAnalysisWizardWidget. The hook lives in `uploadDiscard.ts`, not the
+  `WizardFollowOns` barrel, because host tests mock that barrel.
+- **Step re-upload.** A re-uploaded stranded file carries its `discard`; a re-upload result the step drops (closed, or
+  the file removed meanwhile) is deleted instead of left behind (it was before).
+- **Every Finish sends the same items.** Matter (`followOnActions.sendEmail.email`), Project, Event, To Do
+  (`context.followOn.email`), Work Assignment (`service.sendEmail(..., email)`), Summarize, Document Email, Analysis and
+  Report Card (`emailRef.current`) all pass the composed email itself, so a sent document is always kept.
