@@ -7,6 +7,16 @@
 
 ---
 
+## IN PROGRESS 2026-11-25: Claude runs the Cowork + Agent Builder tests in Chrome (owner said "Yes, start")
+
+- Package rebuilt (engine fix e5c90f34b4) and uploaded to OneDrive via the browser (SharePoint REST, zip parsed in JS). **OneDrive gotcha:** the user's `Documents/` is a FOLDER inside the drive root (server path `/personal/ralph_schroeder_spaarke_com/Documents/Documents/...`). Old Cowork/Skills, Cowork/Playbooks and Spaarke Test Documents moved to `Spaarke test archive (not current)/2026-11-25 before Cowork tests/`.
+- **C-1 PASS:** `/` lists the 4 skills without a plugin, plus `/spaarke-visual-probe` (still registered, though not in `Cowork/Skills`). Env check OK; profile saved `Documents/Cowork/Profile/legal-profile.md`; playbook folder `Cowork/Playbooks/NDA/Playbook master/`.
+- **C-2 PASS:** provenance `Spaarke NDA – Mutual v1.2 (customer playbook)`, read from `Playbook master/`; 12 changes; 5 files, checks pass; No email. Finding: outputs went to the Cowork task output folder, not next to the original (our notes say next to it). Profile said baseline but the saved playbook took priority (by design).
+- **C-3 PASS with a defect:** the approval card appeared WITHOUT the review table ("8 changes listed above" with nothing above). After asking, it showed 13 rows (5 Meets / 1 fallback / 1 Does not meet / 6 Escalate) + 8-change plan. Redline next to the original: 8 comments all `lh.*`, 7 ins / 7 del, 13-row summary, `[CONFIRM DATE]` placeholders. → fix legal-hold-review SKILL.md (print the review before the card).
+- **Owner Qs answered:** agents carried **v0.1** (`NDAR-1109-A`), not v0.3; DA packages appear uploaded (`spaarke-legal-g8p2-dd/-org-learn/-sl-learn` in the Agents list); visual probe still registered.
+- **A-2 in progress:** editing the EXISTING "Spaarke NDA Review" agent (Agent Builder edit page). v0.3 text set in the instructions textarea via JS (NDAR-1112-A, 5,927 chars) — NOT yet saved (click **Update**, then verify). Knowledge is currently SharePoint `Spaarke NDA – Mutual v1.2.docx` (four-column copy); A-1 wants OneDrive `Cowork/Playbooks/NDA/Spaarke NDA – Mutual v1.2 (agent knowledge).docx`. Then same for "Spaarke Legal Hold Review", then A-2 chat tests, then WP-0 (send copilot-platform-coordination a row BEFORE the probe upload).
+- Then record all of this as "Tier tests round 2 (Cowork, run by Claude)" in `notes/poc-e2e/results.md`.
+
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
