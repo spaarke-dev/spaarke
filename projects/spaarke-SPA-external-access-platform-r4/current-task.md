@@ -1,31 +1,28 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-25 ~18:40Z (task 040 completed; PR being opened)
+> **Last Updated**: 2026-11-25 ~21:30Z (task 041 completed locally; not pushed)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Active** | **Task 041**: a licensed user's first sign-in skips the profile form (FR-25, #2192). FULL rigor, opus @ high, directional. POML `tasks/041-licensed-first-signin.poml`. Status: in-progress since 2026-11-25 ~19:00Z. |
-| **In flight** | PR #3160 (task 040) has auto-merge on, by the owner's go. After it merges, the dev deploy: the BFF through uac-r2 (owner go on the exact merged SHA, in uac-r2's session) and the SPA (owner go). |
-| **Done (041)** | Step 0.5: conflict check clean (32 open PRs, none on 041's files). Step 1 trace done (below). No files changed yet. |
-| **Next action** | Step 2, BFF part. In `CallerPrincipalResolver.cs` `WorkforcePrincipalStrategy` (registration_required branch ~:792-811), add extension `licensedUser` (bool). True only when `ContactBindingDecision.DecideLicensedUserEmail(store.FindEnabledSystemUsersByEmailAsync(email), email) == LicensedUser`, with email = `ExternalRegistrationEndpoints.TokenEmail(home)` (the strict email-claim rule the registration POST uses, NOT `WorkforceCallerClaims.TokenEmail`). If there is no email, the outcome is Unknown/NotLicensed, or the read throws: false, and the throw is logged by code only. Inject `IContactIdentityStore` as an OPTIONAL last ctor param (`= null`; ~15 test sites build the strategy with 3 args; the store is already a registered singleton, `ExternalAccessModule.cs:250`). Then the SPA: `parseRegistrationRequired` returns `licensedUser`; the gate's `afterSilentLinkFailure` and the `no_systemuser` branch pass it; `RegistrationPage` opens in `linkRequired` when the hint is true; NO auto-popup. Tests: `tests/unit/.../CallerPrincipalResolverTests.cs` holds the registration_required cases (extend them, or add a KEEP-path test under `tests/integration/auth/ExternalAccess/`); SPA `tests/workforce-home-auth.test.ts`, `registration-refusals.test.ts`. Then step 3: find the 60 s popup timeout (msal-auth.ts `acquireTokenPopup` ~:1449, likely the MSAL default) and request the auth/UAC review from uac-r2. |
+| **Active** | None. Task 041 is ✅ completed (FR-25, #2192); details in `notes/task-041-notes.md`. The next 🔲 in `TASK-INDEX.md` is the next task. |
+| **Unpushed on purpose** | The 041 commits (`026ff0396f`, `f3da9c8f7a`, close commit) are LOCAL ONLY. PR #3160 (task 040) is open on this same branch with auto-merge on, by the owner's go for 040 only. Pushing now would fold 041 into it. **After #3160 merges:** merge origin/master here (keep the branch's `projects/spaarke-SPA-external-access-platform-r4/**`), push, and open a separate 041 PR (Placement Justification, publish-size delta, the UAC review and the timeout decision in the body). Merge only on the owner's go. |
+| **In flight** | PR #3160 (040): auto-merge on. After it merges, the dev deploy: the BFF through uac-r2 (owner go on the exact merged SHA, in uac-r2's session) and the SPA (owner go). |
+| **Next action** | Wait for #3160 to merge (do not poll; use `mcp__ccd_pr__get_status`). Then push 041 and open its PR. Then continue with the next task via task-execute. |
 
-## Task 041 trace (step 1)
-- Gate (`WorkforceHomeGate.tsx`): `/me` 403 `registration_required` → silent guest token → `POST /workforce/link`. With no token (`afterSilentLinkFailure`) or `no_systemuser` it shows `RegistrationPage` (form). The form POST → 403 `licensed_user_link_required` → `linkRequired` view ("Link my account", popup on click only).
-- BFF: the licensed check runs only inside `ContactIdentityBinder.RegisterHomeContactAsync` (~:1040), after the readability probes. Email = `ExternalRegistrationEndpoints.TokenEmail` (email claim only, exactly one value). The prefill email uses `WorkforceCallerClaims.TokenEmail` (with upn fallbacks), which is different.
-- Precedent for Infrastructure calling an Api static: `WorkforcePrincipalResolver` uses `MembershipEndpoints.ExtractAadObjectId`.
+## Task 041 outcome
+- BFF: the workforce 403 `registration_required` carries a `licensedUser` boolean (the caller's own token email, the registration route's rule, read and decision; any doubt → false). SPA: `RegistrationPage` opens on "Link my account" when it is true; the popup opens only on the click.
+- Popup timeout: uac-r2 decided (a), keep msal's 60 s default (`popupBridgeTimeout`); no change. UAC review: no objection (recorded in the notes).
+- Two adversarial passes: no F-class. One comment fix and one test added. K-limits recorded (an extra Dataverse read per unregistered request; probes skipped; an unverified email gives the same answer as the POST).
+- Publish size +1,401 bytes (≈ 43.6 MB). No CVE. ArchTests 2831/2831. The conflict check is clean.
 
 ## Task 040 outcome (details in notes/task-040-notes.md)
-- Server: `ModuleEntitlementResolver.IsGrantedWorkforceContact` adds `assigned-work` for a workforce contact that can read ≥ 1 project, matter or WA. The code is stripped from role-map extras, so a systemuser never gets it. No new endpoint, field, DI or package.
-- SPA: the five record tabs share `RECORD_TAB_GATE` (ciam + workforce).
-- Review F1 (owner 2026-11-25: hide it for now): Submit invoice is hidden on the workforce plane (`callerMaySubmitInvoices` in `recordAccess.ts`, plane from `activePlaneOrNull()`). The question went to ebilling as D-41 #3159.
-- Known limits filed: D-39 #3153 (the ceiling maps one table to five tabs), D-40 #3154 (K3). K2 is unchanged.
-- uac-r2 review: no objection (quoted in the notes).
+- `assigned-work` for a workforce contact with ≥ 1 readable project/matter/WA. The SPA's record tabs use `RECORD_TAB_GATE`. Submit invoice is hidden on the workforce plane (F1, owner 2026-11-25); the question went to ebilling as D-41 #3159.
 
 ## Live on dev
-SPA `0267ee64a2` (rollback `3067fb3bdc`); BFF `a1b7db1def` since 2026-11-25 15:58:53Z (rollback `ef0c566d2c`; uac-r2 deploys; owner go per SHA). Task 040 is not in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal.
+SPA `0267ee64a2` (rollback `3067fb3bdc`); BFF `a1b7db1def` since 2026-11-25 15:58:53Z (rollback `ef0c566d2c`; uac-r2 deploys; owner go per SHA). Tasks 040 and 041 are not in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal.
 
 ## Owner questions open
 - Track the raw filing-reference footer seen in an older PRJ-000046 system email? (Told to the owner; not filed. The repo is public.)

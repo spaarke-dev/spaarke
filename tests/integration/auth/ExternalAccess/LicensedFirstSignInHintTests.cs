@@ -66,6 +66,19 @@ public sealed class LicensedFirstSignInHintTests
         json.GetRawText().Should().NotContain(licensedUser.ToString("D"), "the licensed user is never named");
     }
 
+    [Fact]
+    public async Task RegistrationRequired_TheSameEmailAsBothClaimTypesDifferingInCase_IsOneEmail_HintIsTrue()
+    {
+        // TokenEmail de-duplicates `email` and ClaimTypes.Email case-insensitively: one mailbox, not "two emails".
+        _store.AddSystemUser(Guid.NewGuid(), Guid.NewGuid(), Email);
+        var user = HomeUser(email: "Mike@Customer.example");
+        ((ClaimsIdentity)user.Identity!).AddClaim(new Claim(ClaimTypes.Email, Email));
+
+        var (_, json) = await ResolveThroughTheStrategyAsync(user);
+
+        json.GetProperty("licensedUser").GetBoolean().Should().BeTrue();
+    }
+
     // ── must not fire ────────────────────────────────────────────────────────────────────────────
 
     [Theory]
