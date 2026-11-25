@@ -4,7 +4,7 @@
     <title>Finance summary authorization into one shared method</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and auth; refactors FinanceAuthorizationFilter (.cs) with REST behaviour unchanged</rigor-reason>
     <model-tier>opus</model-tier>
@@ -108,7 +108,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-11 prerequisite. Two adversarial-verifier passes (auth).</notes>
+  <notes>Spec FR-11 prerequisite. Two adversarial-verifier passes (auth).
+    Completed 2026-11-25: FinanceAuthorizationFilter.AuthorizeMatterFinanceReadAsync(HttpContext?, Guid, CancellationToken) returns MatterFinanceReadAuthorization (Outcome + REST reasonCode); the filter and the method share one private DecideAsync. Deviation: an internal non-reader gets 403 sdap.access.deny.insufficient_rights on the route (FinanceDenial.Forbidden), not the uniform 404 this POML assumed; the method matches the route. Details, placement justification and known limits: notes/008-decisions.md. Verifier passes: main session. Reviews pending: ebilling-r1, unified-access-control-r2, ontology-platform-r1.
+    rework: none task 008</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
