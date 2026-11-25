@@ -40,3 +40,15 @@ Read-only steps, ~01:20-02:00Z. No live write yet.
 | D-114 sitemap | same forms script, re-run after the page existed (`-WhatIf` first: 1 change) | `subarea_eb_rulereview` ("Rule Review", `$webresource:sprk_rulereviewpage`) after `subarea_eb_ruleset` in the eBilling group of `sprk_SpaarkeAdministration` (b3e6c66f-f1c3-f111-a05c-0022482913fc); sitemap and the two app modules published. |
 
 Completeness before the source sync (`Test-SolutionCompleteness.ps1 -FailOnDrift:$false`): the only eBilling gap was `sprk_invoicereviewpage` (task 112); the other 7 missing components (contact / systemuser identity columns and key, `sprk_recordfamily`) are other projects', as at 053.
+
+## 2026-11-25: Step 9.5 review of the 079 change set (a5025d77c6~1..626a1d1097)
+
+One adversarial-reviewer pass (Sonnet), read-only, scoped to the forms script, `PolicyVersionColumnsGuardTests` and the SpaarkeMaster files. adr-check: no plugin (ADR-002), no Rule Set subgrid on a core-record form, the SpaarkeMaster edits are additive only, and there is no form or view for the procedure or stored-file tables. Findings and triage:
+
+| # | Finding | Class | Outcome |
+|---|---|---|---|
+| 1 | `-Tables ''` (or a list that trims to nothing) ran the full spec, which rebuilds the rate card, rule set and submission forms that differ on dev | F1 | Fixed. The script refuses a bound `-Tables` that names no table, before any Dataverse call. Must-fire: `''`, `','` and `' , '`, in process and under `-File`, each throw. Must-not-fire: the 3-table `-WhatIf` run exits 0 with 0 changed and 5 unchanged (idempotent). |
+| 2 | A `-Tables` run still runs both sitemaps and their app-module publish, and the collateral check reads entities only | K2 | Documented in `.PARAMETER Tables`. No fix: the sitemap edits are idempotent and the live run published only the intended entries. |
+| 3 | SpaarkeMaster stays at 1.3.2.1, which the publish on 2026-11-22 already shipped; a version publishes once | Owner call | Master already carries post-publish edits at 1.3.2.1 (#3074). The version bump and release-log row are asked of the owner (bump in 079, or leave it to the release owner). |
+| 4 | Criterion 3 evidence | K1 | Recorded here: (a) completeness after the sync gives the same 8 gaps as before, none of them eBilling except `sprk_invoicereviewpage` (task 112); `sprk_rulereviewpage` is packaged (session scratchpad `r079-completeness-after.txt`); (b) the import half is a deviation, not met: plan A ran `Import-SolutionScoped.ps1 -PlanOnly` only (exit 0), no import into dev; (c) the four procedure and stored-file tables carry only the platform-default forms and views of their table export (#2584). None is custom and none is in a sitemap or on another form. |
+| 5 | `PendingSchema_EachEntryNamesAnExistingScript` looped over an empty list with no must-fire control | K3 then fixed | Its check is now a pure `WithoutExistingScript` with seeded controls: a real script passes; a missing script, a non-script path and a reason with no path are reported. 5/5 by filter. |

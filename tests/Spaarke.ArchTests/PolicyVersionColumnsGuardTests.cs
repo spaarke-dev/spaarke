@@ -91,16 +91,29 @@ public class PolicyVersionColumnsGuardTests
         Assert.True(stale.Count == 0, $"Remove these PendingSchema entries; Entity.xml carries them now: {string.Join(", ", stale)}.");
     }
 
+    /// <summary>Pending entries whose reason does not start with the path of an existing deploy script (pure, given the repo root).</summary>
+    internal static IReadOnlyList<string> WithoutExistingScript(IReadOnlyDictionary<string, string> pending, string repoRoot) =>
+        pending.Where(p =>
+            {
+                var script = p.Value.Split(' ')[0].TrimEnd(':');
+                return !(script.StartsWith("scripts/", StringComparison.Ordinal) && script.EndsWith(".ps1", StringComparison.Ordinal)
+                    && File.Exists(Path.Combine(repoRoot, script)));
+            })
+            .Select(p => p.Key).OrderBy(c => c, StringComparer.Ordinal).ToList();
+
     [Fact(DisplayName = "130e-1 F2a: each pending entry names its deploy script, and that script exists")]
     public void PendingSchema_EachEntryNamesAnExistingScript()
     {
-        foreach (var (column, reason) in PendingSchema)
+        Assert.Empty(WithoutExistingScript(PendingSchema, SourceScan.RepoRoot));
+        // Controls (PendingSchema is empty since task 079, so the line above checks nothing on its own): a real script passes; a missing
+        // script, a non-script path and a reason with no path are reported.
+        Assert.Equal(["b", "c", "d"], WithoutExistingScript(new Dictionary<string, string>
         {
-            var script = reason.Split(' ')[0];
-            Assert.True(script.StartsWith("scripts/", StringComparison.Ordinal) && script.EndsWith(".ps1", StringComparison.Ordinal),
-                $"{column}: the entry must start with its deploy script path.");
-            Assert.True(File.Exists(Path.Combine(SourceScan.RepoRoot, script)), $"{column}: {script} does not exist.");
-        }
+            ["a"] = "scripts/ebilling/Deploy-EbillingFormsViews.ps1 adds it.",
+            ["b"] = "scripts/ebilling/Deploy-NoSuchScript.ps1 adds it.",
+            ["c"] = "docs/x.md adds it.",
+            ["d"] = "Added by hand.",
+        }, SourceScan.RepoRoot));
     }
 
     /// <summary>An entry that says its column is deployed (pure). A pending entry is a column this repo cannot show exists anywhere, so the

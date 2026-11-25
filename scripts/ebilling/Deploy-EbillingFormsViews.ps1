@@ -74,6 +74,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 if ($EnvironmentUrl -notmatch 'spaarkedev1') { throw "Dev only in R1: $EnvironmentUrl" }
+# 'a,b' arrives as one string under pwsh -File: split, trim, drop empties.
+$Tables = @($Tables | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# A caller that passes -Tables with nothing in it meant a narrow run: refuse, never widen it to the whole spec.
+if ($PSBoundParameters.ContainsKey('Tables') -and $Tables.Count -eq 0) { throw '-Tables was given but names no table; omit it for a full run.' }
 $State = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniqueName $SolutionUniqueName -DryRun:$WhatIfPreference
 . (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
 $Ctx = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
@@ -221,8 +225,6 @@ $Spec = [ordered]@{
         Sections = @(@{ Name = 'ebilling'; Label = 'Billing firm'; Cols = 'sprk_billingfirm', 'sprk_billingresponsible' })
     }
 }
-# 'a,b' arrives as one string under pwsh -File: split, trim, drop empties.
-$Tables = @($Tables | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Tables.Count -gt 0) {
     # Task 079: touch only the named tables' forms and views; the sitemaps still run (their edits are idempotent), app tables do not.
     $unknown = @($Tables | Where-Object { -not $Spec.Contains($_) })
