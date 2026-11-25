@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="224" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Deleted-rule evidence redaction covers every empty-lookup Signal over successive nights instead of re-reading the same first 100,000 (#2085, DI-116)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes which rows a nightly privacy sweep reads and how a bounded read reports: a wrong cursor leaves evidence of deleted rules unredacted for good; task 204/209 truncation rules and the job's health signal must stay honest.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25d</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SignalClosureService.DeletedPolicyCodesWithSignalsAsync and SignalReevaluationJob.RedactSignalsOfDeletedPoliciesAsync and their tests; task 223 edits a different site (~962) of SignalReevaluationJob.cs: merge master before merging if 223 lands first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, background, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Yes let me know when done and continue with next tasks" (repeated). Issue #2085 (read it in full: gh issue view 2085) and DI-116 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md; background in notes/102b-rule-matter-scope.md "Fix round 4". The nightly Signal re-evaluation job redacts the stored evidence of Signals whose rule (`sprk_policy`) was deleted. It finds them by reading every Signal with an empty `sprk_policy` lookup, in any status, ordered by id, bounded at 200 pages of 500 (`src/server/api/Sprk.Bff.Api/Services/Signals/SignalClosureService.cs` `DeletedPolicyCodesWithSignalsAsync` ~634; `SignalReevaluationJob.cs` `RedactSignalsOfDeletedPoliciesAsync`, called ~147). Nothing deletes Signals, so past 100,000 empty-lookup Signals each run re-reads the same first rows, codes sorting later are never redacted, and the run fails every night (turning /healthz/catalog Unhealthy after 26 h). Task 217 (PR #3142) changed the not-in-force redaction sweep: read tasks/217-*.poml and notes/task-217-notes.md first; the deleted-policy sweep shares `SweepStoredEvidenceAsync`. Line numbers at origin/master 1b89025736; search by name.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse SDK paging, IDistributedCache, the ontology nightly re-evaluation job.</role>
+  <goal>Over successive nights the deleted-rule discovery covers every empty-lookup Signal (a rotating sprk_signalid cursor, or a selection that only reads rows still needing redaction), and reaching the per-run bound no longer fails the run when the rest of the space is covered by later runs; which evidence is redacted, and how, is unchanged.</goal>
+  <context>
+    <background>Options from the issue (check them; pick and justify in notes): (a) a rotating cursor (sprk_signalid greater-than) kept between runs, wrapping to the start when a pass reaches the end; (b) if task 217 gave a filterable "evidence already redacted" marker, read only empty-lookup Signals that still carry unredacted evidence, which may make the space shrink and the bound unreachable in practice. Where the cursor is kept matters: the BFF has IDistributedCache (Redis; ADR-009) and the job run store; a lost cursor must restart from the beginning, never skip rows. Reaching the bound must still be reported (a Warning with counts) but should fail the run only if the sweep cannot make progress; keep D-61 (never stamp an unchanged Signal), the one-failure-per-policy accounting and the job outcome shape. Read `git log -5` on both files and run /conflict-check (ebilling-r1 merges into Signals code).</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes the contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first).</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-224-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #2085"; notes in notes/task-224-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: with more empty-lookup Signals than one run's bound, two (or N) successive runs together read and redact every deleted code's Signals, including codes that sort past the first run's bound.</criterion>
+    <criterion testable="true">Must-not-fire: a cursor that is missing or unreadable restarts from the beginning (no rows skipped); a run under the bound behaves exactly as today; Signals of existing policies are untouched; already-redacted evidence is not rewritten; existing SignalClosure, SignalReevaluation and redaction tests pass unmodified (or a changed assertion is justified in the PR).</criterion>
+    <criterion testable="true">Reaching the bound is reported with counts and no longer marks a progressing run failed (test); build, filtered tests (Signals) and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a schema change, a new service or DI registration beyond an existing cache/store, changes which evidence is redacted, or would skip rows when the cursor is lost: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt224); PR to master; do not merge.</protocol>
+  </execution>
+</task>

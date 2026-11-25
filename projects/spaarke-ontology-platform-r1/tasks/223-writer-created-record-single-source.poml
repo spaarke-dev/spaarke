@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="223" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Every Signals lookup that trusts a Decision Record as the writer's uses WriterCreatedRecord (createdby the writer AND createdonbehalfby empty); the guard baseline goes to zero (#2632, DI-144)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches the conditions that decide whether a Decision Record counts as server-written (idempotent replay, gate records, condition-cleared records, billing reads, the read route): a wrong condition replays a forged record or misses a real one.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25d</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>DecisionRecordWriter.cs, DecisionCommitService.cs, SignalReadService.cs, GateDecisionRecordSharing.cs, one site in SignalReevaluationJob.cs (~962) and the ArchTest baseline; task 224 edits a different method of SignalReevaluationJob.cs (deleted-rule redaction): merge master before merging if 224 lands first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Yes let me know when done and continue with next tasks" (repeated). Issue #2632 (read it in full: gh issue view 2632) and DI-144 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. ebilling-r1 task 165b-3 (EB-D-208) added the one helper for this rule on master: `src/server/api/Sprk.Bff.Api/Services/Signals/WriterCreatedRecord.cs` (`AddConditions(FilterExpression, Guid)`, `AddConditions(LinkEntity, Guid)`, `FetchXmlFilter`; refuses Guid.Empty). Its guard `tests/Spaarke.ArchTests/WriterCreatedRecordSingleSourceGuardTests.cs` baselines the ontology's remaining createdby-only sites: DecisionCommitService.cs 1 (~2245, the review-id lookup), DecisionRecordWriter.cs 3 (~899, ~1205, ~1983 `AddBillingWriterFilterAsync`), SignalReadService.cs 1 (FetchXML condition), SignalReevaluationJob.cs 1 (~962). A seventh site, `GateDecisionRecordSharing.cs` (~507/~521), compares a read row's createdby in memory and is invisible to the scan. Line numbers are at origin/master 1b89025736; search by name.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse SDK QueryExpression / FetchXML, the ontology Decision Record writer and read path.</role>
+  <goal>Every one of those lookups uses WriterCreatedRecord (QueryExpression, link or FetchXML form), the in-memory gate check also requires createdonbehalfby empty, and the guard's Baseline dictionary is empty; rows the writer created (createdonbehalfby empty) are still found exactly as today.</goal>
+  <context>
+    <background>This is defence-in-depth, not a reachable defect: the writer never impersonates (96 of 96 dev Decision Records have createdonbehalfby empty). Keep each site's other conditions, ordering, TopCount and error handling (a writer-id fault still fails the caller closed, never reads as "no record"). For the in-memory site add createdonbehalfby to the ColumnSet and require it empty; if a shared in-memory predicate on WriterCreatedRecord is the cleanest single owner, add it there (answer the three §11 questions in the PR), otherwise keep it local with a comment citing WriterCreatedRecord. Lower the guard's Baseline entries as sites move (TheBaseline_IsTight enforces it) and remove the dictionary entries at zero; do not weaken the guard. ebilling owns WriterCreatedRecord.cs: a change to it needs their review (tell the main session). Read `git log -5` on each file and run /conflict-check (ebilling-r1 merges into Signals code).</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes the contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first).</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-223-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #2632"; notes in notes/task-223-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">For each lookup family (commit review-id lookup, gate record lookup, condition-cleared record lookup, billing writer filter, re-evaluation lookup, read-route FetchXML, gate sharing in-memory check) a test shows a row with the writer as createdby and a non-empty createdonbehalfby is NOT trusted; each test fails with the new condition removed (state how you proved it).</criterion>
+    <criterion testable="true">Must-not-fire: rows with the writer as createdby and createdonbehalfby empty are still found by every lookup; existing DecisionRecordWriter, DecisionCommit, SignalRead, SignalReevaluation and GateDecisionRecordSharing tests pass unmodified; the Signals contract baselines are unchanged.</criterion>
+    <criterion testable="true">WriterCreatedRecordSingleSourceGuardTests passes with an empty Baseline (no createdby/createdonbehalfby condition outside WriterCreatedRecord in Services/Signals or Services/Finance); build, filtered tests (Signals, WriterCreatedRecord, Finance) and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>A site cannot use the helper without changing what it finds for writer-created rows, the fix needs a change to WriterCreatedRecord's contract, or a schema change: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt223); PR to master; do not merge.</protocol>
+  </execution>
+</task>
