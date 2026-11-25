@@ -238,7 +238,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on task/ebilling-def064 (4960c615bc, fix round 1 over 0fc02f9f7c; pending merge). Enforced by: `InvoiceFamilyCoreLookupWriterGuardTests` |
+| **Status** | Fixed on task/ebilling-def064 (b27b743f22, fix rounds 1-2 over 0fc02f9f7c; pending merge). Enforced by: `InvoiceFamilyCoreLookupWriterGuardTests` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 task 130b fix round 4, review question Q1 (uac-r2 ruling (ii)) |
