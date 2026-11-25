@@ -307,8 +307,12 @@ def expected_package_files(stems):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Build the individual-base package and the test-documents zip.")
     ap.add_argument("--out", default=os.path.join(BUILD, "out"))
-    ap.add_argument("--kit", default=DEFAULT_KIT, help="the poc-e2e folder holding kit/ and kit-src/ (test documents)")
+    ap.add_argument("--kit", default=None, help="the poc-e2e folder holding kit/ and kit-src/ (test documents). "
+                    "Default: the project's notes folder; when it is not in this checkout (master carries only "
+                    "src/accelerators), the test-documents zip is skipped. A --kit that does not exist fails.")
     a = ap.parse_args(argv)
+    kit = a.kit or (DEFAULT_KIT if os.path.isdir(DEFAULT_KIT) else None)
+    test_zip = test_parent = None
     work = os.path.join(a.out, "package", "_work")
     try:
         if os.path.exists(work):
@@ -320,9 +324,13 @@ def main(argv=None):
         log("[5/5] zips")
         zip_path = ba.zip_dir(root, os.path.join(pkg, PACKAGE_ZIP))
         verify_zip(zip_path, {"Cowork"}, expected_package_files(stems))
-        test_parent = build_test_documents(a.out, a.kit, read(REVIEW_METHOD_SRC))
-        test_zip = ba.zip_dir(test_parent, os.path.join(pkg, TEST_ZIP))
-        verify_zip(test_zip, {"Spaarke Test Documents"}, [
+        if kit is None:
+            log("  test documents skipped: the project's poc-e2e kit is not in this checkout (pass --kit to build them)")
+        else:
+            test_parent = build_test_documents(a.out, kit, read(REVIEW_METHOD_SRC))
+            test_zip = ba.zip_dir(test_parent, os.path.join(pkg, TEST_ZIP))
+        if test_zip:
+            verify_zip(test_zip, {"Spaarke Test Documents"}, [
             "Spaarke Test Documents/Harbor Point – Legal Hold Notice (draft A).docx",
             "Spaarke Test Documents/Harbor Point – Legal Hold Notice (draft B).docx",
             "Spaarke Test Documents/Decoy/Spaarke Review Method.docx", "Spaarke Test Documents/Screens/.keep",
@@ -341,13 +349,14 @@ def main(argv=None):
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git_commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                                      cwd=ROOT).stdout.strip() or None,
-        "zips": {os.path.basename(z): {"bytes": os.path.getsize(z), "sha256": sha256(z)} for z in (zip_path, test_zip)},
+        "zips": {os.path.basename(z): {"bytes": os.path.getsize(z), "sha256": sha256(z)}
+                 for z in (zip_path, test_zip) if z},
         "documents": file_list(root),
-        "test_documents": file_list(os.path.join(test_parent, "Spaarke Test Documents")),
+        "test_documents": file_list(os.path.join(test_parent, "Spaarke Test Documents")) if test_parent else None,
     }
     ba.write(os.path.join(pkg, "manifest.json"), json.dumps(manifest, indent=2, ensure_ascii=False))
     log("\nPACKAGE BUILD OK")
-    for z in (zip_path, test_zip):
+    for z in (zip_path, test_zip) if test_zip else (zip_path,):
         log(f"  {os.path.relpath(z, a.out)}  ({os.path.getsize(z):,} bytes)")
     for rel, size in manifest["documents"].items():
         if rel.startswith(gates.KNOWLEDGE_TREE + "/"):
