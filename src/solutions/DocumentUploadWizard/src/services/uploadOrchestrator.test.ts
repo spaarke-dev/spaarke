@@ -12,9 +12,21 @@
  * Classification (ADR-038 §7): MAINTAIN — the wizard's per-file outcome contract.
  */
 
-type Scripted = { uploads: { source: string; stored: string }[]; failedUploads?: string[]; failedCreates?: string[] };
+type Scripted = {
+    uploads: { source: string; stored: string }[];
+    failedUploads?: string[];
+    failedCreates?: string[];
+    /** Server warnings on a file's create, by STORED name; a file not listed gets no `warnings` key. */
+    warningsFor?: Record<string, string[]>;
+};
 
 let script: Scripted = { uploads: [] };
+
+/** What the orchestrator handed the shared document pipeline (field-mapping-server-write-path-r1 task 029). */
+const seen: {
+    createDocumentsArgs: unknown[][];
+    withBffChildCreatesArgs: unknown[][];
+} = { createDocumentsArgs: [], withBffChildCreatesArgs: [] };
 
 jest.mock(
     "@spaarke/ui-components/services/document-upload",
@@ -37,11 +49,20 @@ jest.mock(
             }
         }
         class DocumentRecordService {
-            async createDocuments(files: { id: string; name: string; driveId?: string }[]) {
+            async createDocuments(files: { id: string; name: string; driveId?: string }[], ...rest: unknown[]) {
+                seen.createDocumentsArgs.push([files, ...rest]);
                 return files.map((f, i) =>
                     (script.failedCreates ?? []).includes(f.name)
                         ? { success: false, fileName: f.name, error: "Create failed" }
-                        : { success: true, fileName: f.name, recordId: `doc-${i}`, documentId: `doc-${i}`, driveId: f.driveId, itemId: f.id },
+                        : {
+                              success: true,
+                              fileName: f.name,
+                              recordId: `doc-${i}`,
+                              documentId: `doc-${i}`,
+                              driveId: f.driveId,
+                              itemId: f.id,
+                              ...(script.warningsFor?.[f.name] ? { warnings: script.warningsFor[f.name] } : {}),
+                          },
                 );
             }
         }
@@ -50,21 +71,36 @@ jest.mock(
             MultiFileUploadService,
             NavMapClient: class {},
             DocumentRecordService,
-            withBffChildCreates: (client: unknown) => client,
+            withBffChildCreates: (client: unknown, ...rest: unknown[]) => {
+                seen.withBffChildCreatesArgs.push([client, ...rest]);
+                return client;
+            },
             consoleLogger: { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined },
         };
     },
     { virtual: true },
 );
 // SdapApiClient comes from the main barrel since DEF-001 (2026-11-24) — it was @spaarke/sdap-client.
-jest.mock("@spaarke/ui-components", () => ({ cleanGuid: (s: string) => s, getXrm: () => undefined, SdapApiClient: class {} }), {
-    virtual: true,
-});
+// `getXrm` hands back a host whose parent record NAMES a search index: a wizard that still resolved one on the client would
+// read it and send it. The wizard no longer reads it (field-mapping-server-write-path-r1 task 029, FR-40).
+jest.mock(
+    "@spaarke/ui-components",
+    () => ({
+        cleanGuid: (s: string) => s,
+        // Both shapes a resolver could read the parent through: `xrm.WebApi.retrieveRecord` and `xrm.WebApi.WebApi.retrieveRecord`.
+        getXrm: () => {
+            const webApi = { retrieveRecord: async () => ({ sprk_searchindexname: "client-resolved-index" }) };
+            return { WebApi: { ...webApi, WebApi: webApi } };
+        },
+        SdapApiClient: class {},
+    }),
+    { virtual: true },
+);
 jest.mock("@spaarke/auth", () => ({ authenticatedFetch: jest.fn(async () => ({ ok: true, json: async () => ({}) })) }), {
     virtual: true,
 });
-jest.mock("../components/AssociateToStep", () => ({ resolveSearchIndexNameForRecord: async () => "" }));
 
+import { authenticatedFetch } from "@spaarke/auth";
 import { orchestrateUpload, type OrchestratorFileProgress } from "./uploadOrchestrator";
 
 const CONFIG = {
@@ -155,5 +191,98 @@ describe("orchestrateUpload — results belong to the picked file, not the store
             ["a.docx", false, undefined],
             ["b.docx", true, "doc-1"],
         ]);
+    });
+});
+
+describe('orchestrateUpload — the document create carries no value the server derives (field-mapping-server-write-path-r1 task 029)', () => {
+    const fetchMock = authenticatedFetch as unknown as jest.Mock;
+
+    beforeEach(() => {
+        seen.createDocumentsArgs.length = 0;
+        seen.withBffChildCreatesArgs.length = 0;
+        fetchMock.mockClear();
+    });
+
+    /** The orchestrator's background index-file call (fire-and-forget) has started once the pipeline returns. */
+    const indexFileBodies = async (): Promise<Record<string, unknown>[]> => {
+        await new Promise((resolve) => setImmediate(resolve));
+        return fetchMock.mock.calls
+            .filter(([url]) => url === '/api/ai/rag/index-file')
+            .map(([, init]) => JSON.parse((init as { body: string }).body) as Record<string, unknown>);
+    };
+
+    it('hands createDocuments only the uploaded files, the filing parent and the form: no search index, no mapped value', async () => {
+        await run(['a.docx'], { uploads: [{ source: 'a.docx', stored: 'a.docx' }] });
+
+        expect(seen.createDocumentsArgs).toHaveLength(1);
+        const [files, parentContext, formData, ...extra] = seen.createDocumentsArgs[0];
+        expect(files).toHaveLength(1);
+        expect(parentContext).toMatchObject({ parentEntityName: 'sprk_matter', parentRecordId: 'rec-1' });
+        // The user entered no name or description: the form is only the (empty) document name.
+        expect(formData).toEqual({ documentName: '' });
+        // Negative: no fourth or fifth argument (the removed searchIndexName / searchIndexId).
+        expect(extra).toEqual([]);
+    });
+
+    it('names the filing parent as the mapping source on the BFF create, so the server maps from it', async () => {
+        await run(['a.docx'], { uploads: [{ source: 'a.docx', stored: 'a.docx' }] });
+
+        expect(seen.withBffChildCreatesArgs).toHaveLength(1);
+        const [, , bffBaseUrl, mappingSource] = seen.withBffChildCreatesArgs[0];
+        expect(bffBaseUrl).toBe('https://bff.example');
+        expect(mappingSource).toEqual({ entity: 'sprk_matter', id: 'rec-1' });
+    });
+
+    it('names no mapping source for an unfiled upload', async () => {
+        const unfiled = {
+            ...CONFIG,
+            parentContext: { parentEntityName: '', parentRecordId: '' },
+        } as unknown as Parameters<typeof orchestrateUpload>[1];
+        script = { uploads: [{ source: 'a.docx', stored: 'a.docx' }] };
+
+        await orchestrateUpload([file('a.docx')], unfiled, undefined, 'rename');
+
+        expect(seen.withBffChildCreatesArgs).toHaveLength(1);
+        expect(seen.withBffChildCreatesArgs[0][3]).toBeUndefined();
+    });
+
+    it('sends no searchIndexName in the rag/index-file body (the server ignores it, FR-40)', async () => {
+        await run(['a.docx'], { uploads: [{ source: 'a.docx', stored: 'a.docx' }] });
+
+        const bodies = await indexFileBodies();
+        expect(bodies).toHaveLength(1);
+        expect(Object.keys(bodies[0]).sort()).toEqual(
+            ['documentId', 'driveId', 'fileName', 'itemId', 'parentEntity', 'tenantId'].sort(),
+        );
+        expect(bodies[0]).not.toHaveProperty('searchIndexName');
+    });
+});
+
+describe("orchestrateUpload — the server's create warnings reach the per-file result (field-mapping-server-write-path-r1 task 029 review F1)", () => {
+    it("carries a created document's warnings on its file result, and the file still succeeds", async () => {
+        const { result } = await run(["a.docx", "b.docx"], {
+            uploads: [
+                { source: "a.docx", stored: "a.docx" },
+                { source: "b.docx", stored: "b.docx" },
+            ],
+            warningsFor: { "a.docx": ["Mapped values were not copied because the source is secure."] },
+        });
+
+        expect(result.successCount).toBe(2);
+        expect(result.fileResults[0].success).toBe(true);
+        expect(result.fileResults[0].warnings).toEqual(["Mapped values were not copied because the source is secure."]);
+        // Negative: a file whose create had no warnings has no warnings key at all.
+        expect("warnings" in result.fileResults[1]).toBe(false);
+    });
+
+    it("attaches no warnings to a file whose create failed", async () => {
+        const { result } = await run(["a.docx"], {
+            uploads: [{ source: "a.docx", stored: "a.docx" }],
+            failedCreates: ["a.docx"],
+            warningsFor: { "a.docx": ["ignored"] },
+        });
+
+        expect(result.fileResults[0].success).toBe(false);
+        expect("warnings" in result.fileResults[0]).toBe(false);
     });
 });

@@ -147,23 +147,11 @@ export function resolveXrm(): XrmHandle | null {
 // server's and at worst — exactly in the secure-record case — wrong in the unsafe direction.
 
 // ---------------------------------------------------------------------------
-// Search index name resolution (FR-WIZ-06)
+// Search index name resolution — REMOVED (field-mapping-server-write-path-r1 task 029, FR-40)
 // ---------------------------------------------------------------------------
 //
-// `resolveSearchIndexNameForRecord` lives in a standalone module
-// (`./searchIndexResolver.ts`) because it pulls in no JSX / Fluent /
-// Xrm-full-handle dependencies — keeping it pure-TS makes the FR-WIZ-06 unit
-// tests (3-step chain) trivially runnable without a DOM. Re-exported here so
-// the public symbol surface stays at `AssociateToStep.tsx` as the task
-// contract requires, and task 027 has a single canonical import location.
-//
-// It falls back to the PARENT RECORD's owning BU and never throws — empty
-// string is a legitimate result that defers to the server-side BFF tenant
-// default (FR-BFF-04). It is NOT an authorization decision: an index name
-// scopes a search, it does not grant access to anything.
-//
-export { resolveSearchIndexNameForRecord } from "./searchIndexResolver";
-export type { IXrmWebApiLike } from "./searchIndexResolver";
+// The wizard no longer resolves or sends a search index: the index follows the content type and the server owns it
+// (neither the document create nor the rag/index-file body carries one). Do not reintroduce a client resolver.
 
 // ---------------------------------------------------------------------------
 // Styles
