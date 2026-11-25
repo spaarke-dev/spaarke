@@ -1,5 +1,9 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-25 05:40Z — manual signal-reevaluation run 7f929ff2 (mcp-r1, owner go in their session): Failed refused=39, cause found
+
+mcp-r1 switched POL-MATTER-NOBUDGET On (04:51:17Z) and triggered the job once (04:51:23–04:54:01Z): hits 316, reraised 147, unchanged 122, noDatedEvidence 8, refused 39, written 0. Cause (read-only investigation, verified): 154 `sprk_matter` rows were deleted 04:52:22–04:56:39Z from the owner's account (interactive, not a BFF identity) while the run wrote; the 39 refusals are matters deleted before the run reached them (38 owner_refused: parent unresolved; 1 write_failed). Fail-closed as designed (D-38), not a regression in ef0c566d2c (only DecisionCommitService changed). After the deletes: 144 open NOBUDGET Signals, of which 30 on existing matters and 114 with the matter lookup cleared by the delete cascade (expected to close ConditionCleared at the next nightly: check the 02:30Z heartbeat). No secure-child item. The run's logs were missing: filed DI-175 #3125 (manual trigger inherits the request trace; rate-limited sampler drops it).
+
 ## 2026-11-25 05:00Z — POL-MATTER-NOBUDGET switched back On (read-only check)
 
 Owner chose to switch it back On for mcp-r1's task 042 live E2E. Read back at 05:00Z: `sprk_enabled` true, statecode Active, modified 04:51:17Z from the owner's account (already On when the main session went to switch it, so the main session wrote nothing). Its Work Items return at the next re-evaluation (02:30Z nightly or an owner-approved `POST /api/admin/jobs/{jobId}/trigger`). Also checked 04:42Z dev BFF ef0c566d2c (uac-r2): healthz 200, no Signals/ontology errors; `RoutingConsumerTypeHealthCheck` AI catalog drift is pre-existing since 2026-11-23 12:29Z, not ontology.
