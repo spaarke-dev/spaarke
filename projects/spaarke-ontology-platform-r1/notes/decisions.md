@@ -838,3 +838,15 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Finding:** the Do lane's Reschedule (`DecisionActionCatalog.cs` `reschedule`; `RescheduleExecutor.PreflightAsync`) checks only that the new due date is a valid date. A date in the past is accepted with no message; the item stays overdue and the rule may raise it again.
 - **Decision (owner, typed in this session: "No, allow them"):** keep allowing past dates. No validation added in the wizard or the BFF. Use case: correcting a due date that was entered wrong.
 - **Effect:** none in code. Testers and reviewers should not re-raise it as a defect.
+
+## D-227 — The finding leads on every decision surface; the Assign Task email failure always reaches the assigner (owner, 2026-11-25; given in mcp-r1's session, row layout confirmed in this session)
+
+- **Heading (owner, typed in this session: "Apply to both"):** the Decision wizard drops the "What was found" heading, and the finding becomes its top line. Each worklist row (`IssueLine`) shows the finding on line 1 and the subject name on line 2. This amends the binding v4 row layout (prototype HANDOFF §1.2) and D-23's headline-is-the-subject rule for the row display only.
+  - The finding is the policy's authored short name (`ruleShortName`), falling back to the Signal's stored title, then the subject name. Never `sprk_sentence`, never an interpolated value (spec §0.3).
+  - `composeIssueLine().headline` keeps its meaning. The wizard title, Also-resolve labels and templated email drafts are unchanged.
+  - No per-item record number: the core record's name and number stay on the card header.
+  - Built by mcp-r1, branched from master, with an ontology review.
+- **Email (owner, relayed by mcp-r1, their notes/decisions.md 2026-11-25):** "If the email is not sent the user needs to know no matter the surface; if send after save then still must surface an error message."
+  - The send stays in the commit request, so its `assignee_email_not_sent_*` warnings stay in the response.
+  - Only the sent-items read, the .eml archive and the analysis move to a queued job (#3184).
+  - A system-mailbox fallback that finally fails sends the assigner a bell (extends D-199). Scoped with the ISS-010 email part.
