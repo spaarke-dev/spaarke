@@ -1,5 +1,6 @@
 # Spaarke Intake Pipeline R1 (`spaarke-intake-pipeline-r1`)
 
+> **Portfolio**: [Project #3128](https://github.com/spaarke-dev/spaarke/issues/3128) · Epic: [#421](https://github.com/spaarke-dev/spaarke/issues/421) · [Portfolio board view](https://github.com/users/spaarke-dev/projects/2)
 > **Status:** Design draft (v0.1, 2026-11-25). No spec or tasks yet. Next: owner resolves `design.md` §13, then `/design-to-spec`.
 > **Branch:** `work/spaarke-intake-pipeline-r1` · **Worktree:** `C:/code_files/spaarke-wt-spaarke-intake-pipeline-r1`
 > **Origin:** split out of `specialist-legal-agents-r1` (owner, 2026-11-25).
