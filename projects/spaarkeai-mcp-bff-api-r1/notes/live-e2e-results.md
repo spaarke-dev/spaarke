@@ -20,4 +20,13 @@
 - 183 open `POL-MATTER-NOBUDGET` Decide Signals were resolved "Policy Retired" by `mi-ontology-writer-dev` between about 02:00 and 02:31Z 2026-11-25. The policy row is still Active.
 - Asked ontology-r1 (a) why, and (b) the supported way to bring back non-billing Decide items.
 
+**ontology-r1 answer (~05:00Z):**
+- The owner's account switched the "No active budget" rule (`POL-MATTER-NOBUDGET`) Off at 2026-11-24 02:58:50Z. The 02:30Z nightly then closed its open Signals as designed (D-170). The rule being "Active" does not mean it is in force.
+- **Way back:** the owner switches the rule On in the Ontology admin tab. The next 02:30Z nightly re-raises a Work Item for every qualifying matter, for all users.
+- **Action coverage once the rule is on:**
+  - "No active budget" covers Assign Task, Assign Work and Create/Revise budget.
+  - Send budget inquiry needs a "Classified fee or scope change" item, raised by a classified inbound email.
+  - **Set firm is an Invoice Review action, not a Decide-lane one, so it is not testable in Copilot.** The 042 list of five is corrected to four, with Send budget inquiry depending on an email.
+  - A privileged item comes only from a Secure matter that qualifies.
+
 Open: (1) non-billing seed for the test user; (2) whether the run was signed in as the non-admin test user (the model's reply greets the user by first name).
