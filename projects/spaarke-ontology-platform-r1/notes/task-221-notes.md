@@ -75,3 +75,24 @@ shows nothing. The PCF preview and the legacy regarding-mode timeline are not ch
 - K-221-3 (pre-existing, unchanged): the anchored message scan is oldest first, so a cut there drops the newest anchored
   messages; now flagged, not reordered (the issue scopes the reorder to the filed union).
 - The filed query's `ne` filter is up to ~16 KB of URL at 199 anchored threads, the same scale as the existing anchored OR filter.
+
+## Verification (step 4)
+
+- Before-state: with the new DTO and the origin/master service, `CommunicationByRegardingFiledMessagesTests` 10 failed / 20 passed
+  (the failures are the flag, newest-kept and scan-exclusion tests; the must-not-fire controls passed). Against pure origin/master
+  the new tests do not compile (`Truncated` does not exist). Client: with the origin client sources, 1 jest test failed / 45 passed
+  (the "shows the line" test; the three controls passed).
+- After (committed code): BFF build 0 warnings; `~Communication` 3545 passed / 0 failed / 2 skipped; `~Signals` 5509 / 0 / 6;
+  ArchTests (built explicitly) 2816 / 0 / 0; jest (`src/services`, `ConversationWorkspace`, `CommunicationTimeline`) 54 suites,
+  870 tests passed; `tsc --noEmit` no errors in changed files (6 errors elsewhere, `@spaarke/auth` not resolved locally,
+  untouched files); client-lint check exit 0, all 14 packages ok.
+- Publish size (fresh short-path worktrees, `dotnet publish -c Release … -o deploy/api-publish/`, framework-dependent
+  linux-x64, `Compress-Archive -CompressionLevel Optimal`, PDBs included): master `2ac250cae4` 43,591,994 bytes / 194 files;
+  branch 43,595,274 bytes / 194 files; delta +3,280 bytes. No package change.
+- Review (Step 9.5, inline): no F-class findings. ADR check: ADR-002 (read path, no writes), ADR-010 (no new interface or DI),
+  ADR-012 (shared component extended in place), ADR-021 (tokens only), ADR-022 (React 16-safe: `useState` only), ADR-028
+  (injected `authenticatedFetch`, unchanged), ADR-034 (impersonation and the shared filter unchanged on every read), ADR-038
+  (real filter, in-memory Dataverse world, must-not-fire controls). Clean.
+- Not verified visually in a browser.
+
+rework: none task 221
