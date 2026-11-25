@@ -145,6 +145,59 @@ export interface InvoiceSubmissionStatusView {
    * the green Accepted bar.
    */
   warning?: InvoiceSubmissionWarning | null;
+  /**
+   * ebilling-r1 iss052: the invoice of an Accepted submission, sent only by the external single read and only when the caller may see
+   * that invoice. Absent for every other status, a hidden invoice, the internal route and the list. The result screen offers
+   * "Open invoice" only when this is a GUID, the status is Accepted and the host passed `onOpenInvoice`.
+   */
+  invoiceId?: string | null;
+  /** The core record the submission is filed against, as the BFF sends it; absent or null when the row names none. */
+  coreRecord?: InvoiceSubmissionStatusCoreRecord | null;
+}
+
+/**
+ * The status view's `coreRecord` on the wire. The BFF writes `kind` as its enum's number (0 matter, 1 project, 2 work assignment);
+ * a name (`'matter'`, `'Project'`, `'workassignment'`, ...) is read too. Read it through {@link invoiceSubmissionRecordOf}.
+ */
+export interface InvoiceSubmissionStatusCoreRecord {
+  kind: number | string;
+  recordId: string;
+}
+
+/** The core record a result screen offers to open (`onOpenRecord`): a known kind and a GUID. */
+export interface InvoiceSubmissionRecordRef {
+  kind: InvoiceCoreRecordKind;
+  recordId: string;
+}
+
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True for a GUID string (the wire is untrusted: anything else is not offered as a link). */
+export function isInvoiceSubmissionGuid(value: unknown): value is string {
+  return typeof value === 'string' && GUID_PATTERN.test(value);
+}
+
+const KIND_BY_NUMBER: readonly InvoiceCoreRecordKind[] = ['matter', 'project', 'workassignment'];
+
+/** The status view's core record as a known kind and a GUID; null when it is absent or not understood. */
+export function invoiceSubmissionRecordOf(
+  view: Pick<InvoiceSubmissionStatusView, 'coreRecord'> | null | undefined
+): InvoiceSubmissionRecordRef | null {
+  const core = view?.coreRecord;
+  if (!core || typeof core !== 'object' || !isInvoiceSubmissionGuid(core.recordId)) return null;
+  let kind: InvoiceCoreRecordKind | undefined;
+  if (typeof core.kind === 'number') {
+    kind = Number.isInteger(core.kind) ? KIND_BY_NUMBER[core.kind] : undefined;
+  } else if (typeof core.kind === 'string') {
+    const name = core.kind.toLowerCase();
+    kind = KIND_BY_NUMBER.find(k => k === name);
+  }
+  return kind ? { kind, recordId: core.recordId } : null;
+}
+
+/** The invoice the result screen may offer to open: an Accepted view's GUID `invoiceId`; null otherwise. */
+export function invoiceSubmissionInvoiceIdOf(view: InvoiceSubmissionStatusView | null | undefined): string | null {
+  return view?.status === 'Accepted' && isInvoiceSubmissionGuid(view.invoiceId) ? view.invoiceId : null;
 }
 
 /** The data callbacks a host provides (`loadFirms` is optional). */

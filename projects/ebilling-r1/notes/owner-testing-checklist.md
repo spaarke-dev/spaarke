@@ -172,12 +172,13 @@ Merged into the work branch 2026-11-22 (18b02cbdcf). Nothing visible changes; th
 - [ ] The BFF starts with no warnings about `Finance:InvoiceExtractionPlaybookId` or `Finance:ExtractionDeploymentName` (both keys are gone).
 - Owner choice, no test: the old **FinanceExtraction** (PB-013) playbook rows in dev Dataverse are now unused. Leave them, or tell me to deactivate them (a live change).
 
-## Q. A firm submits through the external portal (task 053): ready to test on dev now
+## Q. A firm submits through the external portal (task 053): PASSED 2026-11-24 (053 closed)
 This closes task 053. After it, task 079 has no open dependency. The dev BFF and the external portal both run master (the portal was deployed 2026-11-23).
 - 2026-11-24, first run: **Failed** on matter MAT-000113. The cause is that matter's dev setup, not the invoice: MAT-000113 and MAT-000065 cannot take invoices on dev. Re-run on another of the firm's matters, e.g. PAT-792345. In the form, type the invoice number as `2026024892` (the portal stores exactly what is typed in Invoice number and PO number) and leave PO number blank.
 - 2026-11-24 ~16:10Z: the dev setup that blocked MAT-000113 was fixed (owner-approved, done by uac-r2), so MAT-000113 can take invoices again; PAT-792345 is still fine. Use a matter, project or work assignment that already exists; one newly created with no parent may still hit the same block (#3047).
-- [ ] Sign in to the external portal as a firm user who has access to a matter. Submit the sample `Accepted-sample-B-0050-INV-2026024892.pdf` (sent in the session; evaluation-set B-0050, invoice 2026024892) on that matter. The portal shows **Processing**, then **Accepted**, with a tracking number such as `INV-123.1`.
-- [ ] In Spaarke, that invoice is **In Review** on the matter. Its lines are filled in with codes, and it has an approval portion.
+- 2026-11-24 ~22:05Z, second run: **Passed** on MAT-000113. The invoice was accepted with tracking number INV-123.1.1, and in Spaarke it is In Review with 42 lines (1 Flagged) and an approval portion (checked read-only). Found: the lines carry no resolved UTBMS code in their code columns; ISS-051 #3080 is filed. The Invoice Review page was blank on dev because it had not been deployed; it was deployed ahead of task 112 at 22:48Z (section S).
+- [x] Sign in to the external portal as a firm user who has access to a matter. Submit the sample `Accepted-sample-B-0050-INV-2026024892.pdf` (sent in the session; evaluation-set B-0050, invoice 2026024892) on that matter. The portal shows **Processing**, then **Accepted**, with a tracking number such as `INV-123.1`.
+- [x] In Spaarke, that invoice is **In Review** on the matter. Its lines are filled in with codes, and it has an approval portion.
 - Moved to task 079 (2026-11-24): the **Rejected** check. Dev has no published Reject rule yet; 079 step 10 publishes the first rules. Once it does, you submit `Rejected-sample-B-0082-INV-2025-34586-dated-2025-04-01.pdf` (sent in the session), which breaks a 180-day invoice-age rule, and the portal should show **Rejected**.
 - [ ] The portal's submission screens look right in dark mode too.
 - [ ] After the next portal deploy from master (iss048): the result screen's title follows the outcome ("Invoice accepted", "Invoice rejected", "Invoice not processed"). A failure caused by the record's setup no longer says "Submit it again".
@@ -185,3 +186,35 @@ This closes task 053. After it, task 079 has no open dependency. The dev BFF and
 ## R. Office add-in no longer files to an invoice (task 096): live on dev since 2026-11-24 (BFF 996928732e)
 - [ ] In the Outlook add-in, open Save and search for an invoice. It appears in the search results, but it cannot be chosen as the place to save the email.
 - [ ] Saving an email to a matter or a project still works, and so does quick-create of a matter or a project.
+
+## S. Invoice Review page on dev (deployed ahead of task 112, 2026-11-24 22:48Z)
+Deployed with the owner's go: web resource `sprk_invoicereviewpage` built from master fa96792811 (sha256 08b373e0…ae43ee, read back from dev). Dev's BFF is 20129e985c, so the ISS-050 lock renewal (#3073) is not live yet; the ISS-041 Finish-step change is in the page. The web resource is in the Default solution only; task 112 adds it to SpaarkeMaster (AddSolutionComponent, type 61) so the next export carries it.
+- [ ] In the Console, open the review worklist and open the invoice "Morrison Foerster LLP - INV-123.1" (MAT-000113). The dialog is no longer blank: the lines grid shows 42 lines (38 Fee, 4 Expense), one Flagged, with the PDF on the right.
+- [ ] Click the Flagged line: the pane shows the finding (rule, severity) and the line's values on the PDF.
+- [ ] The resolved UTBMS codes show on the lines (the page reads them from the coding result; ISS-051 is about other readers, not this page).
+- [ ] Dark mode: the page follows it and the PDF page stays light.
+- Optional, changes data (only if you want to try it): decide one line (Accept or Reduce with a reason), then Approve. Approve needs you to be an eligible approver on MAT-000113.
+
+## T. Resolved codes on invoice lines (ISS-051): after the next dev BFF deploy that carries iss051
+Once a dev BFF with iss051 is live, new and corrected lines carry the resolved UTBMS code in their task / activity / expense code fields. Existing lines need a one-off backfill, which is a live dev write that needs your typed OK. Run it only after that BFF is live, because today's dev BFF does not update the fields when a reviewer corrects a code. Report run on 2026-11-24: 80 lines on open (In Review) invoices, 139 fields to set; lines of Sent to AP and Superseded invoices are skipped so they keep matching what AP received.
+- [ ] Owner OK, then `-Apply` and the re-index sweep the script prints.
+- [ ] Open INV-123.1's lines in Spaarke: the Task / Activity / Expense code columns show codes.
+- [ ] After the next AP export of a coded invoice, the export file carries the resolved code, not the firm's own text.
+
+## U. Links on the portal's "Invoice received" screen (ISS-052): after the next dev BFF and external portal deploys from master
+- [ ] Submit an invoice in the portal. When it is Accepted, the result screen shows **Open invoice** and **Open matter** (or project / work assignment). Each opens that record.
+- [ ] Open the resume link (`/invoices/submit?submissionId=…`) of the same submission: the same two links show.
+- [ ] From a matter's record view, use **Submit invoice**; on the result, **Open invoice** opens the invoice over the matter, and closing it returns you to the matter with focus on the Submit invoice button. **Open matter** just closes back to the matter.
+- [ ] A Rejected submission shows no **Open invoice**, and its red bar says "The invoice was rejected." with no code like `invoice.read.unreadable` (the report below still lists rule findings with their descriptions).
+
+## V. Task 079 on dev: Billing tab, Rule Review page (2026-11-25, by script; owner plan A)
+Live on dev since ~02:20Z. The billing-rule-draft Action and Binding, the Billing-tab firm fields, the Rule Review page (`sprk_rulereviewpage`, built from master 2146b8fdaf) and its menu entry. There is no command on the rule-set form yet (DEF-069, #3112): open Rule Review from the menu.
+- [ ] Open a matter's main form: the **Billing** tab has a "Billing firm" section with **Billing firm** and **Billing responsible**. Do the same on a project, and on a work assignment, which now has a Billing tab of its own.
+- [ ] The forms still load as before: no script error, and the header and other tabs are unchanged.
+- [ ] In the Spaarke Administration app, the eBilling group lists **Rule Review** after Rule Sets. It opens the page, which lists rule sets, in light and dark mode.
+- [ ] Signed-in route checks (079 step 9, second half). I need a token for each user, so I do these with you:
+  - As a billing admin, the WP3 reads answer 2xx.
+  - As a non-admin, a write answers 403.
+  - As a flagged-external test user, `/review` answers 403, and `/invoice-submissions/{id}` answers the same 404 for a real id and a made-up id.
+  - The four retired `/documents` routes answer 404.
+- [ ] 079 step 12: 077's UI tests against dev, including dark mode. This runs after the step 10 data exists.

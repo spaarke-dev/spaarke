@@ -76,6 +76,8 @@ This directory contains practical guides for deploying, configuring, administeri
 | [M365-COPILOT-ADMIN-GUIDE.md](M365-COPILOT-ADMIN-GUIDE.md) | Deployment, configuration, monitoring, troubleshooting for the M365 Copilot integration | 2026-03-26 | — | — |
 | [M365-COPILOT-DEPLOYMENT-GUIDE.md](M365-COPILOT-DEPLOYMENT-GUIDE.md) | M365 Copilot deployment procedures | 2026-03-26 | — | — |
 | [M365-COPILOT-USER-GUIDE.md](M365-COPILOT-USER-GUIDE.md) | Using Spaarke AI capabilities from M365 Copilot in model-driven apps | 2026-03-26 | — | — |
+| [SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md](SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md) | Register, verify, rotate the secret of and roll back the "Spaarke MCP" Copilot connector and the "Spaarke" plugin package | 2026-11-24 | 2026-11-24 | New |
+| [HOW-TO-ADD-AN-MCP-TOOL.md](HOW-TO-ADD-AN-MCP-TOOL.md) | Add a tool to `legal-operations` or a new `/mcp/{area}`, with the tests each needs | 2026-11-24 | 2026-11-24 | New |
 | [COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md](COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md) | Configuring M365 Copilot with Spaarke's data model and vocabulary | 2026-03-27 | — | — |
 
 ### Communication & Email

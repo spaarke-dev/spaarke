@@ -2986,16 +2986,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
 
             // Step 6: Archive to SPE when requested or when the created row is filed to a record (D-217; best-effort)
-            // For user mode, check ArchiveOutgoingOptIn via FromMailbox account if available (default true)
+            // For user mode, check ArchiveOutgoingOptIn on the sender's account (default true). The sender is the FromMailbox account when the
+            // request names one (unchanged), otherwise the signed-in user's own mailbox: the address resolved from the caller's token claims
+            // above (userEmail), never a request value (#2672). One account read per send, and only when the send will be archived.
             var archive = ShouldArchiveOutgoing(request, communicationId.HasValue ? preparedRecord : null);
             Guid? archivedDocumentId = null;
             string? archivalWarning = null;
             bool archiveOutgoingOptIn = true;
-            if (archive && request.FromMailbox is not null)
+            if (archive)
             {
+                var optInMailbox = request.FromMailbox ?? userEmail;
                 try
                 {
-                    var senderAccount = await _accountService.GetSendAccountByEmailAsync(request.FromMailbox, ct);
+                    var senderAccount = await _accountService.GetSendAccountByEmailAsync(optInMailbox, ct);
                     if (senderAccount is not null)
                     {
                         archiveOutgoingOptIn = senderAccount.ArchiveOutgoingOptIn ?? true;
@@ -3006,7 +3009,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     _logger.LogWarning(
                         optInEx,
                         "Failed to check ArchiveOutgoingOptIn for user sender {FromMailbox} (defaulting to true) | CorrelationId: {CorrelationId}",
-                        request.FromMailbox, correlationId);
+                        optInMailbox, correlationId);
                 }
             }
 

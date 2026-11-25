@@ -36,6 +36,11 @@ export const PACKAGES = [
   { id: "spaarkeai", dir: "src/solutions/SpaarkeAi" },
   { id: "legal-workspace-app", dir: "src/solutions/LegalWorkspace" },
   { id: "reporting", dir: "src/solutions/Reporting" },
+  { id: "invoice-files", dir: "src/solutions/InvoiceFiles" },
+  { id: "invoice-review", dir: "src/solutions/InvoiceReview" },
+  { id: "create-invoice-wizard", dir: "src/solutions/CreateInvoiceWizard" },
+  { id: "rule-review", dir: "src/solutions/RuleReview" },
+  { id: "record-procedures", dir: "src/solutions/RecordProcedures" },
   { id: "semantic-search", dir: "src/client/code-pages/SemanticSearch" },
 ];
 

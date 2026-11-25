@@ -1202,6 +1202,9 @@ public class InvoiceSubmissionProcessorTests
         /// <see cref="LineCodingStatus.NoNarrative"/>, as in the real service.</summary>
         public IReadOnlySet<string> NotReturnedKeys { get; set; } = new HashSet<string>();
 
+        /// <summary>ISS-051: the sprk_billingcode rows the coded slots carry (the real guard takes them from the resolved set); null = none.</summary>
+        public (Guid Task, Guid Activity)? CodeRows { get; set; }
+
         public Task<InvoiceCodingResult> CodeLinesAsync(LineCodingRequest request, CancellationToken cancellationToken = default)
         {
             Request = request;
@@ -1221,8 +1224,8 @@ public class InvoiceSubmissionProcessorTests
                     Status = string.IsNullOrWhiteSpace(line.Narrative) ? LineCodingStatus.NoNarrative
                         : NotReturnedKeys.Contains(line.LineKey) ? LineCodingStatus.NotReturned
                         : LineCodingStatus.Coded,
-                    Task = new LineCodeValue(Coded(line) ? "L110" : null, line.BilledTaskCode, false),
-                    Activity = new LineCodeValue(Coded(line) ? "A103" : null, line.BilledActivityCode, false),
+                    Task = new LineCodeValue(Coded(line) ? "L110" : null, line.BilledTaskCode, false, Coded(line) ? CodeRows?.Task : null),
+                    Activity = new LineCodeValue(Coded(line) ? "A103" : null, line.BilledActivityCode, false, Coded(line) ? CodeRows?.Activity : null),
                     Expense = new LineCodeValue(null, null, false),
                     Confidence = Coded(line) ? 0.95m : 0m,
                     Observations = Coded(line) ? Observations : [],

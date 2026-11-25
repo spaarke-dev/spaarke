@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Http;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -182,13 +183,17 @@ public sealed class MailboxVerificationService
                 }
             };
 
+            // Ontology task 212 (#2779): sendMail is not idempotent, so the Graph handler must not send the test message again
+            // after a 5xx, a 408 or a transport fault (Graph may already have delivered it, and a mailbox would receive it up to
+            // four times); only after a 429, which Graph did not process. A failed send fails the verification, as before.
             await graphClient.Users[email].SendMail.PostAsync(
                 new SendMailPostRequestBody
                 {
                     Message = message,
                     SaveToSentItems = false
                 },
-                cancellationToken: ct);
+                rc => rc.Options.Add(new NoTransientRetryOption()),
+                ct);
 
             _logger.LogDebug("Send verification succeeded for {Email}", email);
             return (true, null);
