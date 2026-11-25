@@ -10,11 +10,45 @@
 
 ## Open (in priority order)
 
-### ISS-044 — PRQ-C-03 ownership check fails on Windows (`curl -o /dev/null` under `MSYS_NO_PATHCONV`)
+### ISS-045 — Stamps lack the grid configurations, workspace layouts and playbook that product code hard-codes by dev id
 
 | Field | Value |
 |---|---|
 | **Status** | Open |
+| **Urgency** | next-round (external widgets fail closed on every stamp) |
+| **Filed** | 2026-11-25 |
+| **Source** | ISS-041 classification (PR #3188): `notes/iss-041-reference-row-classification.md` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3189 |
+
+**Description**
+
+The widened guard shows three groups of hard-coded dev ids that no provisioning step seeds: 17 `sprk_gridconfiguration` rows
+(External Access SPA widgets; `ExternalAccessModule` uses six as its external-widget allow-list, so widgets are refused on a stamp;
+`GridOverviewHandler` names eight in a model-facing tool description), 2 `sprk_workspacelayout` ids passed by `surfaceLaunchRegistry.ts`
+(the H12b layout seeder generates fresh ids per stamp), and 1 `sprk_analysisplaybook` id used by `DocumentEmailWizard.tsx` (also in the
+checked-in SemanticSearchControl PCF `bundle.js`).
+
+**Entry-points**
+
+- `tests/Spaarke.ArchTests/ReferenceRowIdLiteral.baseline.txt` (ISS-041 section)
+- `src/client/external-spa/src/widgets/*Widget.tsx`, `ExternalAccessModule`, `GridOverviewHandler`, `surfaceLaunchRegistry.ts`, `DocumentEmailWizard.tsx`
+
+**Suggested fix**
+
+Seed the 17 grid configurations with their dev ids in H12b (fixed ids supported; deletes 40 baseline lines); seed layouts with fixed ids or
+look them up by name; resolve the playbook by code / alternate key and rebuild the PCF.
+
+**Estimated effort**: 1–2 days
+**Blockers**: PR #3188 first
+**Related**: ISS-039 #3075, ISS-041 #3090
+
+---
+
+### ISS-044 — PRQ-C-03 ownership check fails on Windows (`curl -o /dev/null` under `MSYS_NO_PATHCONV`)
+
+| Field | Value |
+|---|---|
+| **Status** | Fix PR #3187 open (2026-11-25; Pester 91/0, live ACME check OWNED ×4) |
 | **Urgency** | next-round (every upgrade run from a Windows operator machine) |
 | **Filed** | 2026-11-25 |
 | **Source** | ACME upgrade run `85561c4a` prechecks (Step 1e-ter), 2026-11-25 |
@@ -142,7 +176,7 @@ Owner decision: retire the entry (and map the five communication types), or add 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fix PR #3188 open (2026-11-25; guard widened, 35 ids baselined with table; ArchTests 2833/0); stamp-breaking ids → ISS-045 #3189 |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | PR #3088 (ISS-039 D1+D2): widening the guard's pattern from `-f011-8406-` to `-f011-`/`-f111-` |
