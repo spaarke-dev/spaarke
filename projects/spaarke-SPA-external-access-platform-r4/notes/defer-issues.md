@@ -428,7 +428,7 @@ This under-lists, which fails closed.
 
 **Why it matters.** An exported status or type column holds JSON instead of the label the user sees.
 
-**Fix.** Extend the grid's `exportCellText` (added in task 033) to return the `@formattedValues` label, else the lookup name, for every column with one; update the pinned test. Needs the dataset-grid owners' OK. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3045 (board Type=Bug).
+**Fix.** Extend the grid's `exportCellText` (added in task 033) to return the `@formattedValues` label, else the lookup name, for every column with one; update the pinned test. Needs the dataset-grid owners' OK. Status: **Done** (PR #3055, merged 2026-11-24 `8dd44cf528`: every cell exports the text it shows, dates as shown, export text hardening). Issue: https://github.com/spaarke-dev/spaarke/issues/3045 (board Type=Bug).
 
 ## D-35 — Shared DataGrid: currency cells without a server label are always shown as USD (#3046)
 
