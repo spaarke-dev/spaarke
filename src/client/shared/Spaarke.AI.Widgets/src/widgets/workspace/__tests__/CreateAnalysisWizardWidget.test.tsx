@@ -471,6 +471,66 @@ describe('CreateAnalysisWizardWidget', () => {
       const allUrls = [...requestedUrls, ...authenticatedFetch.mock.calls.map(([url]: [string]) => String(url))];
       expect(allUrls.filter(u => u.includes('/field-mappings'))).toEqual([]);
     });
+
+    it('Send Email next-step: an empty subject and body do not block Finish and are sent empty, for the server to fill (owner 2026-11-25)', async () => {
+      const dataService = buildDataService();
+      const authenticatedFetch = jest
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
+      const searchUsers = jest
+        .fn()
+        .mockResolvedValue([{ id: 'user-1', name: 'Jordan Lee', email: 'jordan.lee@firm.example' }]);
+      renderWidget(buildData({ dataService, authenticatedFetch, searchUsers }));
+
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+      clickPrimary('Next');
+      fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
+      clickPrimary('Next');
+
+      // A recipient only: no subject, no body.
+      const toInput = await screen.findByRole('textbox', { name: 'To' });
+      fireEvent.change(toInput, { target: { value: 'jo' } });
+      fireEvent.click(await screen.findByText(/Jordan Lee/));
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled());
+      await finish();
+
+      await waitFor(() =>
+        expect(authenticatedFetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/communications/send'),
+          expect.objectContaining({ method: 'POST' })
+        )
+      );
+      const sendCall = authenticatedFetch.mock.calls.find(([url]: [string]) =>
+        url.includes('/api/communications/send')
+      );
+      const sentBody = JSON.parse(sendCall[1].body as string);
+      expect(String(sentBody.subject ?? '').trim()).toBe('');
+      expect(sentBody.associations).toEqual([expect.objectContaining({ entityType: 'sprk_analysis' })]);
+    });
+
+    it('Send Email next-step: with no recipient, Finish stays disabled (negative)', async () => {
+      const dataService = buildDataService();
+      const authenticatedFetch = jest
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
+      renderWidget(buildData({ dataService, authenticatedFetch }));
+
+      skipAssociateTo();
+      await selectExistingDocument();
+      clickPrimary('Next');
+      fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+      clickPrimary('Next');
+      fireEvent.click(screen.getByRole('checkbox', { name: /Send Notification Email/i }));
+      clickPrimary('Next');
+
+      await screen.findByRole('textbox', { name: 'To' });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Subject' }), { target: { value: 'A subject' } });
+      expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
+    });
   });
 
   it('Create To Do follow-on: Assigned To opens the Dataverse side pane over active contacts (ontology 180, D-219)', async () => {

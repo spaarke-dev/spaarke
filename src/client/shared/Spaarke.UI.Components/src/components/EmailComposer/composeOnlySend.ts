@@ -105,16 +105,27 @@ export function invalidRecipients(email: IComposedEmail): IRecipient[] {
   return [...email.to, ...email.cc, ...email.bcc].filter(r => !EMAIL_RE.test(r.email.trim()));
 }
 
+/** Options for {@link isComposedEmailReady}. */
+export interface IComposedEmailReadyOptions {
+  /**
+   * The subject and body may be left empty, because the server fills an empty one at send (field-mapping-server-write-path-r1
+   * task 028, FR-17: an email filed under an analysis gets them from the analysis mapping). The send still refuses one that
+   * nothing filled. Default `false`: both are required.
+   */
+  allowEmptySubjectAndBody?: boolean;
+}
+
 /**
- * True when the email can be sent at Finish: at least one To, every address valid, a subject and a body, and every kept
- * attachment uploaded (otherwise the send would leave it out without saying so).
+ * True when the email can be sent at Finish: at least one To, every address valid, a subject and a body (unless
+ * `allowEmptySubjectAndBody`), and every kept attachment uploaded (otherwise the send would leave it out without saying so).
  */
-export function isComposedEmailReady(email: IComposedEmail): boolean {
+export function isComposedEmailReady(email: IComposedEmail, options?: IComposedEmailReadyOptions): boolean {
+  const allowEmpty = options?.allowEmptySubjectAndBody === true;
   return (
     email.to.length > 0 &&
     invalidRecipients(email).length === 0 &&
-    email.subject.trim() !== '' &&
-    toPlainText(email.body, email.bodyFormat).trim() !== '' &&
+    (allowEmpty || email.subject.trim() !== '') &&
+    (allowEmpty || toPlainText(email.body, email.bodyFormat).trim() !== '') &&
     pendingAttachments(email).length === 0
   );
 }
@@ -155,6 +166,12 @@ export interface ISendComposedEmailOptions {
    * Whether there is a record follows `associations` (none: the email is filed under no record).
    */
   retryLabel?: string;
+  /**
+   * The subject and body may be empty: the server fills an empty one (task 028, FR-17: an email filed under one analysis
+   * gets them from the analysis mapping) and refuses the send when nothing filled it, which comes back as the usual
+   * warning. Pair with `isComposedEmailReady(email, { allowEmptySubjectAndBody: true })`. Default `false`.
+   */
+  allowEmptySubjectAndBody?: boolean;
 }
 
 export interface ISendComposedEmailResult {
@@ -261,10 +278,14 @@ export async function sendComposedEmail(
         warning: `The email was not sent: the Spaarke record link for ${unresolved.map(a => a.fileName).join(', ')} could not be built here.`,
       };
     }
-    const result = await sendCommunication(mapStateToSendRequest({ ...state, attachments }), {
-      authenticatedFetch: options.authenticatedFetch,
-      bffBaseUrl: options.bffBaseUrl,
-    });
+    const request = mapStateToSendRequest({ ...state, attachments });
+    const result = await sendCommunication(
+      options.allowEmptySubjectAndBody === true ? { ...request, serverFillsEmptySubject: true } : request,
+      {
+        authenticatedFetch: options.authenticatedFetch,
+        bffBaseUrl: options.bffBaseUrl,
+      }
+    );
     return { success: true, communicationId: result.communicationId };
   } catch (err) {
     return {

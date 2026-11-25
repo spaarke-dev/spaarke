@@ -554,14 +554,17 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         icon: <MailRegular fontSize={28} />,
         description: 'Compose and queue an introductory email about this analysis.',
         // Task 182 (D-219): the shared EmailComposer, compose-only; sent at Finish, filed under the analysis.
-        canAdvance: () => isComposedEmailReady(emailRef.current),
+        // Task 028 (FR-17, owner 2026-11-25): the subject and message may be left empty; the server fills an empty one
+        // from the analysis mapping at send, and refuses the send when nothing filled it (the analysis is kept).
+        canAdvance: () => isComposedEmailReady(emailRef.current, { allowEmptySubjectAndBody: true }),
         renderStep: () => (
           <SendEmailFollowOnStep
             value={emailRef.current}
             onChange={setEmail}
+            allowEmptySubjectAndBody
             composeHandlers={emailComposeHandlers}
             onSearchRecipients={searchUsers}
-            subtitle="The email is sent when you finish the wizard, from the mailbox chosen in From, and is filed under the new analysis. A configured Field Mapping profile fills a subject or message you leave empty."
+            subtitle="The email is sent when you finish the wizard, from the mailbox chosen in From, and is filed under the new analysis. Leave the subject or message empty to have a configured Field Mapping profile fill it from the analysis; if nothing fills it, the email is not sent."
           />
         ),
       },
@@ -969,6 +972,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             authenticatedFetch: authFetch,
             bffBaseUrl,
             onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
+            allowEmptySubjectAndBody: true,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
