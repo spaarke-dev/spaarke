@@ -56,6 +56,9 @@ $ctx = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
 if ($PlanOnly) {
     $plan = Get-SolutionPublishPlan -Context $ctx -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows
     if (@($plan.Unmapped).Count -gt 0) { Write-Warning "Unmapped component(s): $(@($plan.Unmapped) -join ', ')" }
+    # The real publish path adds -ExtraEntities / -ExtraWebResources to the plan's lists, so the plan shown here does too.
+    $plan.Entities = @(@($plan.Entities) + $ExtraEntities | Where-Object { $_ } | Select-Object -Unique)
+    $plan.WebResources = @(@($plan.WebResources) + $ExtraWebResources | Where-Object { $_ } | Select-Object -Unique)
     if (Test-PublishPlanEmpty -Plan $plan) {
         # DEF-063: nothing to publish is not an error. The ParameterXml builder still refuses an empty set; we just do not call it.
         Write-Host "Nothing to publish for $SolutionUniqueName; no publish request would be sent."

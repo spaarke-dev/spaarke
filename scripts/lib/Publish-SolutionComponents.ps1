@@ -167,6 +167,8 @@ function Test-PublishPlanEmpty {
         $count += @(@($Plan.$k) | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") }).Count
     }
     if ($Plan.ApplicationRibbon) { $count++ }
+    # App settings are published through the request too (they ride on the last chunk), so a plan holding only app settings is NOT empty.
+    $count += @(@($Plan.AppSettings) | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") }).Count
     return ($count -eq 0)
 }
 
@@ -712,8 +714,10 @@ function Publish-SolutionComponents {
     $allWebs = @(@($plan.WebResources) + $ExtraWebResources | Where-Object { $_ } | Select-Object -Unique)
     $chunks = @(Split-PublishPlan -Entities $allEntities -WebResources $allWebs -OptionSets $plan.OptionSets -SiteMaps $plan.SiteMaps `
         -Dashboards $plan.Dashboards -AppModules $plan.AppModules -AppSettings $plan.AppSettings -ApplicationRibbon:([bool]$plan.ApplicationRibbon) -ChunkSize $ChunkSize)
-    $nothingToPublish = ($chunks.Count -eq 0)
-    if ($nothingToPublish -and -not $AllowNothingToPublish) { throw 'Nothing to publish: refusing to build an empty ParameterXml (an empty publish must never widen into a publish-all).' }
+    # "Nothing to publish" means no chunk item AND no app setting. App settings ride on the last chunk, so a plan holding only app
+    # settings has 0 chunks but IS something to publish: it keeps the old loud throw even with -AllowNothingToPublish.
+    $nothingToPublish = ($chunks.Count -eq 0 -and @($plan.AppSettings | Where-Object { $_ }).Count -eq 0)
+    if ($chunks.Count -eq 0 -and -not ($nothingToPublish -and $AllowNothingToPublish)) { throw 'Nothing to publish: refusing to build an empty ParameterXml (an empty publish must never widen into a publish-all).' }
     if ($nothingToPublish) { Write-Host "Nothing to publish for ${SolutionUniqueName}: none of its components needs a publish request, so no publish request is sent." }
     else { Write-Host "Scoped publish of ${SolutionUniqueName}: $($allEntities.Count) entities, $($allWebs.Count) web resources, $(@($plan.OptionSets).Count) option sets, $(@($plan.SiteMaps).Count) site maps, $(@($plan.Dashboards).Count) dashboards, $(@($plan.AppModules).Count) app modules, $(@($plan.AppSettings).Count) app settings, application ribbon: $([bool]$plan.ApplicationRibbon), in $($chunks.Count) request(s)." }
     $envUrl = $Context.Api -replace '/api/data/v[0-9.]+$', ''
