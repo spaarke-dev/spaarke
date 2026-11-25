@@ -956,12 +956,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         }
 
         // -- Follow-on: Send Email (the server fills an empty subject/body from the mapping at send) --
-        if (
-          context.selectedActions.includes('send-email') &&
-          emailRef.current.to.length > 0 &&
-          authFetch &&
-          bffBaseUrl
-        ) {
+        if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
           // field-mapping-server-write-path-r1 task 028 (FR-17): the user-typed subject and body go as they are (empty
           // allowed). The send path fills an EMPTY one from the sprk_analysis -> sprk_communication mapping; a typed
           // value is never replaced. The client computes no mapped text.
@@ -1013,7 +1008,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         // started manually — no silent partial success, no orphan (the Analysis is already
         // consistent and durable at this point).
         let composeSessionId: string | undefined;
-        if (analysisActiveWorkType && speDriveItemId && speDriveId && authFetch && bffBaseUrl) {
+        if (analysisActiveWorkType && speDriveItemId && speDriveId) {
           // ADR-044: bare-lowercase GUIDs. The session's DocumentId must ORDINAL-match the
           // server's resume bindingId (`DocumentRecordId.Value.ToString()` — "D" lowercase).
           const cleanDocumentId = cleanGuid(documentId);
@@ -1084,14 +1079,12 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           // Incomplete SPE pointer → read-only preview fallback (correct shape so it
           // doesn't render "Unknown file"). Reuse the shared resolver by treating the
           // document id as the analysis's `sprk_documentid` value.
-          // No injected authenticated fetch → the preview is unavailable (never an unauthenticated
-          // `globalThis.fetch` fallback).
-          const createdFilePreview: AnalysisFilePreviewResolution = authFetch
-            ? resolveAnalysisFilePreview(
-                { _sprk_documentid_value: documentId, sprk_name: documentName },
-                { bffBaseUrl: bffBaseUrl ?? '', authenticatedFetch: authFetch }
-              )
-            : { status: 'no-document' };
+          // The authenticated fetch is always present here (the create above requires it), so the preview never
+          // falls back to an unauthenticated `globalThis.fetch`.
+          const createdFilePreview: AnalysisFilePreviewResolution = resolveAnalysisFilePreview(
+            { _sprk_documentid_value: documentId, sprk_name: documentName },
+            { bffBaseUrl, authenticatedFetch: authFetch }
+          );
           dispatch('workspace', {
             type: 'widget_load',
             widgetType: 'document-viewer',
