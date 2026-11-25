@@ -58,3 +58,7 @@ so fix round 1 added three optional engine props (D8).
 - CAPABILITY-INDEX row (not edited here): "Email compose host for a Copilot widget: `createMcpEmailComposeHandlers` / `useMcpEmailHostProps` / `McpToolCaller` in `@spaarke/ui-components` EmailComposer".
 - No defects found outside scope; no issues to file.
 - rework: task 011 review fix round 1 (F1 x4, F2 x2, K2): D1, D3, D4, D5, D8, D9 above
+
+## Verifier pass and fix round (2026-11-25)
+- Pass (opus) found 4 F1 + 2 F2; all fixed in 274656b517 (merged c47eeb0194): hidden Bcc/From/Internal Only via new optional EmailComposer props (showBcc, showInternalOnly, associationsRemovable; defaults unchanged) + adapter backstop; real McpToolResults error shape (status/reasonCode/correlationId; no structured result = 0/NETWORK); picker error outcome; non-removable matter chip + backstop; key in a ref, rotated only after a confirmed communicationId; exact-label harness assertions. Jest 39 suites / 441 tests pass; 20/33 new tests fail on the old source.
+- Scoped re-check (sonnet) of the fix diff: clean. K2 residuals moved into task 040's constraints: server binds key to payload + atomic reservation; status kept to integer 400-599 server-side. K1: callTool timeout belongs to task 021's transport.
