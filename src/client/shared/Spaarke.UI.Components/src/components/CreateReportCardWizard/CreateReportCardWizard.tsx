@@ -76,6 +76,7 @@ import {
   AddTodoFollowOnStep,
   SendEmailFollowOnStep,
 } from '../WizardFollowOns';
+import { useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import { createTodoRegardingChild } from '../WizardFollowOns';
 import { EMPTY_TODO_FORM } from '../CreateTodoWizard/formTypes';
 import type { ICreateTodoFormState } from '../CreateTodoWizard/formTypes';
@@ -272,6 +273,9 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   todoFormRef.current = todoForm;
   const emailRef = React.useRef(email);
   emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
 
   // -- Search callbacks --------------------------------------------------
   const handleSearchContacts = React.useCallback(

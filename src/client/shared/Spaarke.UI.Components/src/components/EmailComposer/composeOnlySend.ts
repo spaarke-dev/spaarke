@@ -23,9 +23,12 @@ import { toPlainText } from './composeOnlyText';
 import {
   SEND_FAILURE_NETWORK_CODE,
   SEND_FAILURE_UNCONFIRMED_CODE,
+  mayHaveBeenSent,
   meaningfulDetail,
   toSendCommunicationError,
+  toSendRequestError,
 } from './describeSendFailure';
+import { discardUpload, keepUploads, releaseUploads } from './uploadDiscard';
 import type {
   EmailComposerBodyFormat,
   EmailComposerState,
@@ -128,6 +131,16 @@ export function isComposedEmailReady(email: IComposedEmail, options?: IComposedE
     (allowEmpty || toPlainText(email.body, email.bodyFormat).trim() !== '') &&
     pendingAttachments(email).length === 0
   );
+}
+
+/**
+ * The email will not be sent from here (the wizard closed, with or without Finish): remove every document this email's
+ * composer uploaded (task 220, #2813). Picked and host-passed documents have no `discard` and are untouched; a document a
+ * Finish send carried that went out, or may have, was kept by {@link sendComposedEmail} and is untouched; each delete
+ * runs at most once. Call it when the wizard closes — not when it reopens. Never throws.
+ */
+export function discardComposedEmailUploads(email: IComposedEmail): void {
+  for (const a of email.attachments) discardUpload(a.discard);
 }
 
 /** Addresses joined with "; " (the shape the wizards' older string fields used). */
@@ -268,26 +281,40 @@ export async function sendComposedEmail(
     fromMailbox: email.fromMailbox,
   };
 
+  // Task 220: what this send carries is kept from cleanup until the outcome is known, and for good when it went out or
+  // may have (no response, 5xx, success without an id). A send that provably sent nothing releases it again.
+  const carried = email.attachments.filter(a => a.selected !== false && !!a.documentId).map(a => a.discard);
+  keepUploads(carried);
+  let requestSent = false;
   try {
     // Same order as EmailComposer.send(): resolve linked documents' record links, refuse a link that cannot be built.
     const attachments = await resolveAttachmentShareLinks(state.attachments, options.onResolveShareLink);
     const unresolved = findUnresolvedLinks(attachments);
     if (unresolved.length > 0) {
+      releaseUploads(carried);
       return {
         success: false,
         warning: `The email was not sent: the Spaarke record link for ${unresolved.map(a => a.fileName).join(', ')} could not be built here.`,
       };
     }
     const request = mapStateToSendRequest({ ...state, attachments });
-    const result = await sendCommunication(
-      options.allowEmptySubjectAndBody === true ? { ...request, serverFillsEmptySubject: true } : request,
-      {
-        authenticatedFetch: options.authenticatedFetch,
-        bffBaseUrl: options.bffBaseUrl,
-      }
-    );
+    requestSent = true;
+    let result: Awaited<ReturnType<typeof sendCommunication>>;
+    try {
+      result = await sendCommunication(
+        options.allowEmptySubjectAndBody === true ? { ...request, serverFillsEmptySubject: true } : request,
+        {
+          authenticatedFetch: options.authenticatedFetch,
+          bffBaseUrl: options.bffBaseUrl,
+        }
+      );
+    } catch (requestErr) {
+      // What the request itself threw without a response is a connection failure, whatever the browser called it.
+      throw toSendRequestError(requestErr);
+    }
     return { success: true, communicationId: result.communicationId };
   } catch (err) {
+    if (!requestSent || !mayHaveBeenSent(toSendCommunicationError(err))) releaseUploads(carried);
     return {
       success: false,
       warning: failureWarning(err, {

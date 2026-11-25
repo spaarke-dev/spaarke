@@ -35,6 +35,7 @@ import { searchUsersAsLookup } from '../CreateMatterWizard/matterService';
 
 import { SummaryResultsStep } from './SummaryResultsStep';
 import { FollowOnGrid, SendEmailFollowOnStep } from '../WizardFollowOns';
+import { useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
 import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
@@ -280,6 +281,9 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   fileStateRef.current = fileState;
   const emailRef = React.useRef(email);
   emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
   const projectFormValuesRef = React.useRef(projectFormValues);
   projectFormValuesRef.current = projectFormValues;
   const projectFormValidRef = React.useRef(projectFormValid);

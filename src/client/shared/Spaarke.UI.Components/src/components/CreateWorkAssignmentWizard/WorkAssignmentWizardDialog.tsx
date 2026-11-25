@@ -54,6 +54,7 @@ import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
 // contracts differ from the shared AssignWork/CreateEvent follow-on steps
 // (those create *child* records for CreateRecordWizard). See task 023 notes.
 import { FollowOnGrid, SendEmailFollowOnStep, followOnStepId } from '../WizardFollowOns';
+import { useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
@@ -198,6 +199,9 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   followOnEventStateRef.current = followOnEventState;
   const emailRef = React.useRef(email);
   emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
 
   // Refs for pre-fill state (stale closure prevention in renderContent)
   const isPrefillRef = React.useRef(isPrefilling);

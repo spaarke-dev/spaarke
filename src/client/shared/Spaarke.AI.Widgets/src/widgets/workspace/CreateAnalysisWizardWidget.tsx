@@ -120,6 +120,7 @@ import {
   cleanGuid,
   createRecordViaBffWithWarnings,
   createTodoRegardingChild,
+  useDiscardComposedEmailUploadsOnClose,
   createWebApiFromDataService,
   discoverNavProps,
   isComposedEmailReady,
@@ -460,6 +461,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
   // ── Completion state ─────────────────────────────────────────────────────
   const [isOpen, setIsOpen] = useState(true);
   const [isCompleted, setIsCompleted] = useState(false);
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references.
+  useDiscardComposedEmailUploadsOnClose(isOpen, emailRef);
   const [completedName, setCompletedName] = useState('');
 
   const embedded = data?.embedded ?? true;

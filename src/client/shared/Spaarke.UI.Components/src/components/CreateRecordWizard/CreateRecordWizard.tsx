@@ -63,6 +63,7 @@ import {
   CreateEventFollowOnStep,
   SendEmailFollowOnStep,
 } from '../WizardFollowOns';
+import { useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import type { FollowOnCardConfig, WorkAssignmentPriorityValue } from '../WizardFollowOns';
 import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady, joinRecipientAddresses } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
@@ -327,6 +328,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   createEventAssignedToNameRef.current = createEventAssignedToName;
   const emailRef = React.useRef(email);
   emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
   const selectedActionsRef = React.useRef(selectedActions);
   selectedActionsRef.current = selectedActions;
   const fileStateRef = React.useRef(fileState);

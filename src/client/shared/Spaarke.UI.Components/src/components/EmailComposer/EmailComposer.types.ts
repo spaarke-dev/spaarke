@@ -121,6 +121,13 @@ export interface IAttachmentItem {
    * to the `sprk_document`). Absent → the "link" toggle is not offered for the item.
    */
   linkUrl?: string;
+  /**
+   * Set only on a local file THIS composer (or the compose-only step that restored it) uploaded: deletes that one
+   * `sprk_document` row again (task 220, #2813; from `IUploadedLocalAttachment.discard`). Picked and host-passed
+   * documents never have it. Called only through `uploadDiscard.ts` (never after a send that carried it may have gone
+   * out). Not sent and not persisted.
+   */
+  discard?: () => Promise<void>;
 }
 
 /**
@@ -369,7 +376,14 @@ export type EmailComposerAction =
   | { type: 'SET_MODE'; mode: EmailComposerMode; patch?: Partial<EmailComposerState> }
   | { type: 'ADD_ATTACHMENT'; item: IAttachmentItem }
   | { type: 'REMOVE_ATTACHMENT'; id: string }
-  | { type: 'RESOLVE_ATTACHMENT_DOCUMENT'; id: string; documentId: string; driveItemId?: string; linkUrl?: string }
+  | {
+      type: 'RESOLVE_ATTACHMENT_DOCUMENT';
+      id: string;
+      documentId: string;
+      driveItemId?: string;
+      linkUrl?: string;
+      discard?: () => Promise<void>;
+    }
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
   | { type: 'ADD_ASSOCIATION'; association: ICommunicationAssociation }

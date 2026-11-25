@@ -82,6 +82,7 @@ import {
   toSendRequestError,
   type ISendFailureDescription,
 } from './describeSendFailure';
+import { discardUpload } from './uploadDiscard';
 
 import {
   emailComposerReducer,
@@ -751,10 +752,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   }, []);
 
   // ── Session uploads (task 220, #2813) ──────────────────────────────────────
-  // The documents THIS composer instance uploaded, by attachment id, with the delete the upload handed back. Only
-  // these are ever deleted: a document picked from existing records (or carried in by the host) is not in here and
-  // has no delete. A document leaves the map when it is deleted; it stays put after a successful send.
-  const sessionUploadsRef = React.useRef(new Map<string, { documentId: string; discard?: () => Promise<void> }>());
+  // A document this composer uploaded carries the delete the upload handed back on its item (`discard`, also kept when
+  // a compose-only step restores the item). Only those are ever deleted: a document picked from existing records (or
+  // passed in by the host) has no delete. Every delete goes through `uploadDiscard.ts` (at most once; never one a
+  // Finish send kept).
   // Documents a send attempt carried while its outcome was unknown or may have delivered the email: never deleted
   // (a sent email's `sprk_communicationattachment` row is RemoveLink on document delete — it would be silently
   // unlinked, not refused). An attempt that provably sent nothing releases its documents again. A draft save keeps
@@ -766,23 +767,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // an upload creates is deleted when it arrives (its id never reached the draft, the host or a send).
   const removedWhileUploadingRef = React.useRef(new Set<string>());
 
-  const runDiscard = React.useCallback((documentId: string, discard: (() => Promise<void>) | undefined) => {
-    if (!discard || sentOrMaybeSentRef.current.has(documentId)) return;
-    // Best effort: a delete that fails leaves the document in place, exactly as before this cleanup existed.
-    void Promise.resolve()
-      .then(discard)
-      .catch((err: unknown) => console.warn('[EmailComposer] could not remove an uploaded attachment document:', err));
+  const runDiscard = React.useCallback((documentId: string | undefined, discard: (() => Promise<void>) | undefined) => {
+    if (!discard || (documentId && sentOrMaybeSentRef.current.has(documentId))) return;
+    discardUpload(discard);
   }, []);
-
-  const discardSessionUpload = React.useCallback(
-    (itemId: string) => {
-      const upload = sessionUploadsRef.current.get(itemId);
-      if (!upload) return;
-      sessionUploadsRef.current.delete(itemId);
-      runDiscard(upload.documentId, upload.discard);
-    },
-    [runDiscard]
-  );
 
   const onUploadLocalAttachment = props.onUploadLocalAttachment;
   const handleAddAttachment = React.useCallback(
@@ -801,13 +789,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             runDiscard(res.documentId, res.discard);
             return;
           }
-          sessionUploadsRef.current.set(item.id, { documentId: res.documentId, discard: res.discard });
           dispatch({
             type: 'RESOLVE_ATTACHMENT_DOCUMENT',
             id: item.id,
             documentId: res.documentId,
             driveItemId: res.driveItemId,
             linkUrl: res.linkUrl,
+            discard: res.discard,
           });
         })
         .catch((err: unknown) => {
@@ -835,15 +823,15 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const handleRemoveAttachment = React.useCallback(
     (id: string) => {
       const item = stateRef.current.attachments.find(a => a.id === id);
-      if (sessionUploadsRef.current.has(id)) {
-        discardSessionUpload(id);
+      if (item?.discard) {
+        runDiscard(item.documentId, item.discard);
       } else if (item?.source === 'local' && !item.documentId) {
         // Its upload may still be running: the document it creates is deleted when it arrives.
         removedWhileUploadingRef.current.add(id);
       }
       dispatch({ type: 'REMOVE_ATTACHMENT', id });
     },
-    [discardSessionUpload]
+    [runDiscard]
   );
 
   // ── RTF toolbar slot (owner UAT 2026-07-24) ────────────────────────────────
@@ -1391,9 +1379,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     for (const a of stateRef.current.attachments) {
       if (a.source === 'local' && !a.documentId) removedWhileUploadingRef.current.add(a.id);
     }
-    for (const id of Array.from(sessionUploadsRef.current.keys())) discardSessionUpload(id);
+    for (const a of stateRef.current.attachments) runDiscard(a.documentId, a.discard);
     onCancel?.();
-  }, [onCancel, discardSessionUpload]);
+  }, [onCancel, runDiscard]);
   const requestCancel = React.useCallback(() => {
     // No host close wired: Cancel does nothing, as before.
     if (!onCancel) return;
