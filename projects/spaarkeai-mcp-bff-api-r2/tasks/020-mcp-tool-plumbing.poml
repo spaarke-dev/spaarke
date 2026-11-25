@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Shared tool plumbing: general McpToolResults, start/status helper, per-area MCP ledger files</title>
+    <phase>1 Read tools</phase>
+    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared MCP host code and the ArchTest ledger (tests/**); every later tool depends on it</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New shared abstraction (long-running start/status contract) and a restructure of an auth guard ledger that every later task edits; mistakes propagate to ~17 tools</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/McpToolResults.cs, the new Api/Mcp/McpLongRunning.cs and the ledger files; 021 is client-only, so the two run together</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, refactoring, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prepare r1's MCP host for ~17 more tools: generalise McpToolResults beyond DecisionToolError (any reasonCode/status/message), add the shared FR-14 start/status helper ({runId, status, consoleLink} within 30 s), split the McpTools ledger in RouteAuthorizationGuardTests.Mcp.cs into per-area partial files so parallel tool tasks never edit one array, clear the "Api/Agent" comment in DecisionsTextSummary.cs, and update HOW-TO-ADD-AN-MCP-TOOL.md. No decision-tool behaviour changes.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the ModelContextProtocol C# SDK and the Spaarke route-authorization guard.</role>
+  <goal>McpToolResults.FromError works for any tool error type with byte-identical output for decision tools; McpLongRunning returns the FR-14 start result and status result shapes; the ledger is one partial file per area (Decisions plus empty Search, Documents, Playbooks, Analysis, Tasks, Portfolio, Briefing, MatterSummary, Finance, Email) and the guard still sees every tool; all r1 MCP tests pass unchanged.</goal>
+
+  <context>
+    <background>Spec FR-14 (shared long-running code), FR "Tools" (errors through the generalised McpToolResults). Today McpToolResults.FromError (Api/Mcp/McpToolResults.cs, 43 lines at 37f0864afe) takes DecisionToolError only. The MCP tool ledger is the McpTools array in tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs; uac-r2 reviews its restructure. The legacy agent's start/poll shape (deleted by 001) is readable with git show 37f0864afe:src/server/api/Sprk.Bff.Api/Api/Agent/AgentEndpoints.cs (:461-481) and PlaybookStatusEndpoints.cs. r1 may change these files before #3161 merges: re-read them after the master merge; the line numbers here are from 37f0864afe.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolResults.cs (add a general McpToolError record (ReasonCode, Message, Status, Partial?) and FromError overload; DecisionToolError maps onto it)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/McpLongRunning.cs (static helper: Started(runId, status, consoleLink, summary) and Status(runId, state, progress?, result?) CallToolResult builders plus the 30 s budget constant)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/DecisionsTextSummary.cs (comment only: remove the "Api/Agent" mention)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs (keep the guard logic; McpTools becomes the concatenation of per-area partial arrays)</file>
+      <file role="new">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Decisions.cs (r1's rows moved verbatim)</file>
+      <file role="new">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.{Search,Documents,Playbooks,Analysis,Tasks,Portfolio,Briefing,MatterSummary,Finance,Email}.cs (empty arrays, one per later tool task)</file>
+      <file role="new">tests/integration/contract/Api/Mcp/McpToolResultsGeneralTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/McpLongRunningTests.cs</file>
+      <file role="modify">docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md (general error type, long-running helper, per-area ledger file)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Mcp/ShowDecisionsToolTests.cs (decision error bytes to keep)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/DecisionToolCall.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Agent code removed (the old start/poll shape is read from history)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase). Re-read every r1 file before editing; if r1 has already generalised McpToolResults or split the ledger, adopt r1's shape and record it.</constraint>
+    <constraint source="ADR-019">Decision-tool error results stay byte-identical (content text and structuredContent { reasonCode, message, status, correlationId?, partial? }); existing ShowDecisionsToolTests, PlanAndLookupToolTests and McpHostContractTests pass unchanged. Errors stay isError tool results, never transport errors.</constraint>
+    <constraint source="project">McpLongRunning's start result is structuredContent { runId, status, consoleLink } plus a one-line text summary; the status result is { runId, status (queued|running|completed|failed), progress?, result? }; the consoleLink is built from an existing deep-link helper (HandoffUrlBuilder, relocated by 001 to Services/Ai/Handoff/, or Services/Todo/IDeepLinkBuilder), not a hand-built URL; no polling loop or background work in the helper (ADR-052).</constraint>
+    <constraint source="project">The ledger split is mechanical: the guard's assertion set is unchanged, the concatenated array equals r1's rows, and a test proves a tool class missing from every partial still fails the guard (must-fire) while all r1 tools pass (must-not-fire). uac-r2 reviews the diff.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**) or is an ArchTest, mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Decision error mapping" location="src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolResults.cs">Extend, do not fork: the general error record is the base, DecisionToolError maps to it</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm the r1 gate (gh pr view 3161 --json state; r1 TASK-INDEX 042 done); merge origin/master into this branch; build.</step>
+    <step order="2">Generalise McpToolResults; run the r1 MCP contract and auth suites unchanged.</step>
+    <step order="3">Add McpLongRunning and McpLongRunningTests (start shape, status shapes, link built by the helper).</step>
+    <step order="4">Split the ledger into per-area partial files; add the must-fire/must-not-fire guard proof; run Spaarke.ArchTests.</step>
+    <step order="5">Clear the DecisionsTextSummary.cs comment; update HOW-TO-ADD-AN-MCP-TOOL.md; measure the publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the r1 gate is not met, STOP; do not start.</trigger>
+    <trigger>If keeping decision-tool error bytes identical is impossible with a general type, STOP and escalate (r1 contract).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>McpToolResults.FromError (r1) handles DecisionToolError only; the legacy agent's start/poll (AgentEndpoints.cs:461-481, PlaybookStatusEndpoints.cs, deleted by 001) is the only prior start/status shape; CAPABILITY-INDEX has no MCP long-running row.</existing>
+    <extension>McpToolResults is extended in place. The start/status helper is new because no live code builds an MCP start/status result; it is a static builder of two result shapes, not a service, so no DI registration.</extension>
+    <cost-of-doing-nothing>Each long-running tool (030, 032, 034) would invent its own start/status shape and error mapping, breaking FR-14's "the pattern is shared code" acceptance; without the ledger split, parallel tool tasks conflict on one array.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/; dotnet test tests/Spaarke.ArchTests; MCP contract and auth suites</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolResults.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpLongRunning.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.*.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/McpToolResultsGeneralTests.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/McpLongRunningTests.cs</output>
+    <output type="docs">docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All r1 MCP tests (contract/Api/Mcp, auth/Mcp, Mcp.Conformance.Host) pass unchanged.</criterion>
+    <criterion testable="true">McpToolResultsGeneralTests: a general error produces isError with structuredContent { reasonCode, message, status, correlationId }; a decision error produces the same bytes as before.</criterion>
+    <criterion testable="true">McpLongRunningTests: Started returns { runId, status, consoleLink } with the helper-built link; Status returns each of queued/running/completed/failed with optional progress/result.</criterion>
+    <criterion testable="true">Negative (must-fire): a tool class absent from every ledger partial fails the guard; must-not-fire: every r1 tool passes.</criterion>
+    <criterion testable="true">git grep -i "api/agent" -- src/server/api/Sprk.Bff.Api/Api/Mcp returns nothing.</criterion>
+    <criterion testable="true">Build 0 warnings; publish-size delta recorded; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-14, Tools. uac-r2 reviews the ledger restructure. Later tool tasks each own one ledger partial.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

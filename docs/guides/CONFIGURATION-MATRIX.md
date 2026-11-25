@@ -325,8 +325,6 @@ Options class: `LlamaParseOptions` (`Options/LlamaParseOptions.cs`)
 | `EmbeddingMigration:Enabled` | `false` (deprecated) | appsettings |
 | `ScheduledRagIndexing:Enabled` | `false` | appsettings |
 | `ScheduledRagIndexing:IntervalMinutes` | `60` | appsettings |
-| `CopilotAgent:EnableDocumentSearch` | `true` | appsettings |
-| `CopilotAgent:EnablePlaybookInvocation` | `true` | appsettings |
 | `DemoProvisioning:DefaultEnvironment` | `Dev` | appsettings |
 
 ---

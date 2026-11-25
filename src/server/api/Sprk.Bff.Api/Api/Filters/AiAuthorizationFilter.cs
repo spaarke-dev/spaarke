@@ -1,6 +1,5 @@
 using System.Reflection;
 using Spaarke.Core.Auth;
-using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -52,12 +51,11 @@ public static class AiAuthorizationFilterExtensions
 /// <remarks>
 /// <para>Follows ADR-008: Use endpoint filters for resource-level authorization.
 /// Uses IAiAuthorizationService for FullUAC authorization via RetrievePrincipalAccess.</para>
-/// <para><b>The chat-context evaluation</b> (unified-access-control-r2 task 164; owner rounds 9 and 16): on the five
+/// <para><b>The chat-context evaluation</b> (unified-access-control-r2 task 164; owner rounds 9 and 16): on the four
 /// routes that bind a chat request DTO — <c>POST /api/ai/chat/sessions</c> (<see cref="ChatCreateSessionRequest"/>),
 /// <c>PATCH /api/ai/chat/sessions/{sessionId}/context</c> (<see cref="ChatSwitchContextRequest"/>),
-/// <c>POST /api/ai/chat/sessions/{sessionId}/messages</c> (<see cref="ChatSendMessageRequest"/>),
-/// <c>POST /api/ai/chat/sessions/{sessionId}/dispatch</c> (<see cref="DispatchSessionRequest"/>) and
-/// <c>POST /api/agent/message</c> (<see cref="AgentMessageRequest"/>) — every record the session is, or is about to be,
+/// <c>POST /api/ai/chat/sessions/{sessionId}/messages</c> (<see cref="ChatSendMessageRequest"/>) and
+/// <c>POST /api/ai/chat/sessions/{sessionId}/dispatch</c> (<see cref="DispatchSessionRequest"/>) — every record the session is, or is about to be,
 /// pointed at is authorized AS THE CALLER before the handler runs, because the turn reads it app-only afterwards (the
 /// document summary, the playbook definition, record memory and pinned context). The ids come from the BODY (create,
 /// PATCH, the per-turn document) and from the STORED session (every turn re-authorizes what the session carries, so a
@@ -103,7 +101,6 @@ public class AiAuthorizationFilter : IEndpointFilter
         typeof(ChatSwitchContextRequest),
         typeof(ChatSendMessageRequest),
         typeof(DispatchSessionRequest),
-        typeof(AgentMessageRequest),
     ];
 
     public AiAuthorizationFilter(IAiAuthorizationService authorizationService, ILogger<AiAuthorizationFilter>? logger = null)
@@ -427,24 +424,6 @@ public class AiAuthorizationFilter : IEndpointFilter
                     rejection = null;
                     break;
 
-                case AgentMessageRequest agent:
-                    if (agent.DocumentId is { } agentDocument && agentDocument != Guid.Empty)
-                    {
-                        checks.Documents.Add(agentDocument);
-                    }
-
-                    storedSession = await ReadResumedAgentSessionAsync(httpContext, agent.ConversationReference, userId);
-                    if (storedSession is not null)
-                    {
-                        AddStoredContext(
-                            storedSession, checks,
-                            includeDocument: agent.DocumentId is not { } supplied || supplied == Guid.Empty,
-                            includePlaybook: true);
-                    }
-
-                    rejection = null;
-                    break;
-
                 case null when dtoType == typeof(DispatchSessionRequest):
                     // The handler's own 400 (same errorCode and detail), answered here so a null body is never passed
                     // through unchecked.
@@ -688,23 +667,6 @@ public class AiAuthorizationFilter : IEndpointFilter
 
         var sessionManager = httpContext.RequestServices.GetRequiredService<ChatSessionManager>();
         return await sessionManager.GetSessionAsync(tenantId, sessionId, httpContext.RequestAborted);
-    }
-
-    /// <summary>
-    /// The session an agent turn RESUMES: the one the conversation reference names, when the caller owns it (the handler
-    /// resumes only then; any other reference mints a fresh session that carries only the body document).
-    /// </summary>
-    private static async Task<ChatSession?> ReadResumedAgentSessionAsync(HttpContext httpContext, string? conversationReference, string callerOid)
-    {
-        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
-        if (string.IsNullOrWhiteSpace(conversationReference) || string.IsNullOrEmpty(tenantId))
-        {
-            return null;
-        }
-
-        var sessionManager = httpContext.RequestServices.GetRequiredService<ChatSessionManager>();
-        var session = await sessionManager.GetSessionAsync(tenantId, conversationReference, httpContext.RequestAborted);
-        return session is not null && string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal) ? session : null;
     }
 
     /// <summary>

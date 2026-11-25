@@ -115,9 +115,9 @@ tools:
       # Create via: az ai connection create --type bing ...
 
   # ── BFF Function Tools ─────────────────────────────────────────────────────
-  # OpenAI function definitions are defined separately in bff-function-tools.yaml
-  # and registered via the --functions-file parameter of az ai agent create.
-  # See agents/README.md for the full deployment command.
+  # Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2): bff-function-tools.yaml and the
+  # /api/agent/tools/* BFF routes it called were removed; Copilot reaches Spaarke
+  # through the Spaarke MCP connector.
 
 # ─── Response Format ─────────────────────────────────────────────────────────
 
