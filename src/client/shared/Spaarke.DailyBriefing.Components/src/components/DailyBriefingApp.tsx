@@ -83,6 +83,7 @@ import {
   type NarrativeBulletResult,
   type HighPriorityItemResult,
 } from '../services/briefingService';
+import type { BriefingDataService, BriefingNavigationHandler } from '../services/briefingDataService';
 
 const useStyles = makeStyles({
   container: {
@@ -146,6 +147,21 @@ export interface DailyBriefingAppProps {
    * for non-Dataverse hosts).
    */
   onBrowsePlaybooks?: () => void;
+  /**
+   * Data seam (spaarkeai-mcp-bff-api-r2 task 010, FR-16). When supplied, the briefing, and the
+   * preferences when `dataService.preferences` is set, come from this service and the component
+   * NEVER calls `authenticatedFetch`, `getXrm` or `window.Xrm` for data or navigation. Actions
+   * that need a capability it does not carry are hidden: inline To Do create, dismiss, email
+   * share, document preview, preferences save (no `preferences.save`), and record links (no
+   * `navigation.openRecord`). Omitted (the Console, the standalone page, the SpaarkeAi host) →
+   * today's BFF calls and Xrm navigation, unchanged.
+   */
+  dataService?: BriefingDataService;
+  /**
+   * Navigation seam. `openRecord` replaces `Xrm.Navigation.navigateTo` for record links;
+   * `browsePlaybooks` wins over `onBrowsePlaybooks`. See {@link BriefingNavigationHandler}.
+   */
+  navigation?: BriefingNavigationHandler;
 }
 
 /**
@@ -326,8 +342,20 @@ function bulletToNotificationItem(bullet: NarrativeBulletResult, generatedAtUtc?
  * Integrates /render-driven data, AI narration, inline to-do creation,
  * and preferences via a narrative digest layout.
  */
-export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _params, onBrowsePlaybooks }) => {
+export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({
+  params: _params,
+  onBrowsePlaybooks: onBrowsePlaybooksProp,
+  dataService,
+  navigation,
+}) => {
   const styles = useStyles();
+
+  // Data seam (task 010): an injected service means a host with no BFF client, MSAL or Xrm (a sandboxed
+  // MCP widget). In that mode Xrm is never resolved, and every action that needs it or the BFF is hidden.
+  const injected = dataService !== undefined;
+  const onBrowsePlaybooks = navigation?.browsePlaybooks ?? onBrowsePlaybooksProp;
+  // Record links need a way to open the record: the host's handler, or Xrm on the default path.
+  const canOpenRecords = !injected || navigation?.openRecord !== undefined;
 
   // Resolve Xrm via the shared cross-frame `getXrm()` walker (task 081 / C-8),
   // polling for welcome-screen timing: Xrm may not be available immediately
@@ -337,10 +365,11 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // cross-origin parent threw before `top` was ever tried; `getXrm()` guards
   // each frame separately.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [xrm, setXrm] = React.useState<any>(() => getXrm(['webApi', 'utility']) ?? null);
+  const [xrm, setXrm] = React.useState<any>(() => (injected ? null : (getXrm(['webApi', 'utility']) ?? null)));
 
   // Poll for Xrm if not available on mount (welcome screen / left nav timing)
   React.useEffect(() => {
+    if (injected) return; // injected host: Xrm is never resolved
     if (xrm?.WebApi) return; // Already available
     let cancelled = false;
     const interval = setInterval(() => {
@@ -359,7 +388,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       clearInterval(interval);
       clearTimeout(timeout);
     };
-  }, [xrm]);
+  }, [xrm, injected]);
 
   const webApi = React.useMemo<IWebApi | null>(() => xrm?.WebApi ?? null, [xrm]);
 
@@ -375,7 +404,13 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // Preferences (sprk_userpreference) — drive BOTH the client-side channel-disabled
   // filter AND (r5 settings-wiring, 2026-07-09) the server-side collector date windows.
   // Loaded first so the render call can pass the user's Display Parameters.
-  const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId);
+  const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId, dataService?.preferences);
+  // The Preferences menu persists a change: offered on the default path, and on an injected host only
+  // when it can save (a read-only host would get a menu whose Save does nothing).
+  const canSavePreferences = injected ? Boolean(dataService?.preferences?.save) : true;
+  const preferencesSlot = canSavePreferences ? (
+    <PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />
+  ) : undefined;
 
   // Translate the user's Display Parameters into the /render window params. Memoized on the
   // primitive fields so a Settings Save re-fetches the briefing with the new windows.
@@ -401,7 +436,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     unavailableReason,
     error: renderError,
     refetch: refreshBriefing,
-  } = useBriefingRender(briefingWindows);
+  } = useBriefingRender(briefingWindows, dataService);
 
   // Inline To Do creation from narrative bullets — writes first-class sprk_todo
   // records per ADR-024 + smart-todo-decoupling-r3 FR-29.
@@ -469,6 +504,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // "does this itemId exist", never "is this channel currently visible".
   const tldrResolvableItems = React.useMemo<Record<string, TldrResolvableItem>>(() => {
     const map: Record<string, TldrResolvableItem> = {};
+    // No way to open a record (injected host without `navigation.openRecord`): no TL;DR anchors.
+    if (!canOpenRecords) return map;
     for (const channel of renderData?.channelNarratives ?? []) {
       for (const bullet of channel.bullets) {
         if (!bullet.primaryEntityType || !bullet.primaryEntityId) continue;
@@ -479,7 +516,20 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       }
     }
     return map;
-  }, [renderData]);
+  }, [renderData, canOpenRecords]);
+
+  // What the activity section draws. With no way to open a record the rows drop their record identity,
+  // which is the existing "no primary entity" shape: plain text, no record link, no "Open record" item.
+  const displayNarratives = React.useMemo<ChannelNarrationResult[]>(
+    () =>
+      canOpenRecords
+        ? filteredNarratives
+        : filteredNarratives.map(cn => ({
+            ...cn,
+            bullets: cn.bullets.map(b => ({ ...b, primaryEntityType: '', primaryEntityId: '' })),
+          })),
+    [filteredNarratives, canOpenRecords]
+  );
 
   const generatedAtIso = React.useMemo<string | null>(() => {
     if (!renderData?.generatedAtUtc) return null;
@@ -589,18 +639,19 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
    * Unchanged from pre-cutover: dispatches Xrm.Navigation.navigateTo with
    * 80%×80% sizing and surfaces a non-blocking Toaster toast on rejection.
    */
+  const dispatchAccessToast = React.useCallback((): void => {
+    dispatchToast(
+      <Toast>
+        <ToastTitle>Cannot open record</ToastTitle>
+        <ToastBody>You may not have access.</ToastBody>
+      </Toast>,
+      { intent: 'warning', timeout: 5000 }
+    );
+  }, [dispatchToast]);
+
   const handleOpenRecord = React.useCallback(
     (entityType: string, entityId: string) => {
       if (!entityType || !entityId) return;
-      const dispatchAccessToast = (): void => {
-        dispatchToast(
-          <Toast>
-            <ToastTitle>Cannot open record</ToastTitle>
-            <ToastBody>You may not have access.</ToastBody>
-          </Toast>,
-          { intent: 'warning', timeout: 5000 }
-        );
-      };
       // R7 W12 fix (2026-07-01): call xrm.Navigation.navigateTo as a method (not
       // destructured) — the platform's implementation relies on `this` to access
       // its internal _clientApiExecutor. Destructuring like
@@ -628,8 +679,32 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           dispatchAccessToast();
         });
     },
-    [xrm, dispatchToast]
+    [xrm, dispatchAccessToast]
   );
+
+  // Injected navigation (task 010): the host opens the record; a throw or rejection shows the same
+  // "Cannot open record" toast. The Xrm path above is not reached.
+  const hostOpenRecord = navigation?.openRecord;
+  const handleOpenRecordViaHost = React.useCallback(
+    (entityType: string, entityId: string) => {
+      if (!entityType || !entityId) return;
+      try {
+        // Called as a method of the host's handler object (it may rely on `this`).
+        Promise.resolve(navigation?.openRecord?.(entityType, entityId)).catch(dispatchAccessToast);
+      } catch {
+        dispatchAccessToast();
+      }
+    },
+    [navigation, dispatchAccessToast]
+  );
+
+  // Which handler record links use: the host's, else Xrm on the default path, else none (an injected
+  // host with no `openRecord`: record links render as plain text and the menu item is not offered).
+  const openRecord: ((entityType: string, entityId: string) => void) | undefined = hostOpenRecord
+    ? handleOpenRecordViaHost
+    : injected
+      ? undefined
+      : handleOpenRecord;
 
   // ---------------------------------------------------------------------------
   // r5 email-share (2026-07-09) — #2 Email Briefing (server-send) + #3 Email Item
@@ -727,7 +802,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       <div className={styles.container}>
         <DigestHeader
           onRefresh={refreshBriefing}
-          preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
+          preferencesSlot={preferencesSlot}
           onBrowsePlaybooks={onBrowsePlaybooks}
         />
         <div className={styles.scrollContent}>
@@ -754,7 +829,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       <div className={styles.container}>
         <DigestHeader
           onRefresh={refreshBriefing}
-          preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
+          preferencesSlot={preferencesSlot}
           onBrowsePlaybooks={onBrowsePlaybooks}
         />
         <div className={styles.scrollContent}>
@@ -776,7 +851,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       <div className={styles.container}>
         <DigestHeader
           onRefresh={refreshBriefing}
-          preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
+          preferencesSlot={preferencesSlot}
           onBrowsePlaybooks={onBrowsePlaybooks}
         />
         <div className={styles.scrollContent}>
@@ -839,9 +914,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       <DigestHeader
         lastUpdated={generatedAtIso}
         onRefresh={refreshBriefing}
-        preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
+        preferencesSlot={preferencesSlot}
         onBrowsePlaybooks={onBrowsePlaybooks}
-        onEmailBriefing={handleEmailBriefing}
+        onEmailBriefing={injected ? undefined : handleEmailBriefing}
       />
       <div className={styles.scrollContent}>
         {failedSectionLabels.length > 0 && (
@@ -862,22 +937,22 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           error={null}
           generatedAt={generatedAtIso}
           resolvableItems={tldrResolvableItems}
-          onOpenRecord={handleOpenRecord}
+          onOpenRecord={openRecord}
         />
         <div className={styles.activitySection}>
           <ActivityNotesSection
-            channelNarratives={filteredNarratives}
-            onAddToTodo={handleAddToTodo}
-            onDismiss={handleDismiss}
-            isTodoCreated={isCreated}
-            isTodoPending={isPending}
-            getTodoError={getTodoError}
+            channelNarratives={displayNarratives}
+            onAddToTodo={injected ? undefined : handleAddToTodo}
+            onDismiss={injected ? undefined : handleDismiss}
+            isTodoCreated={injected ? undefined : isCreated}
+            isTodoPending={injected ? undefined : isPending}
+            getTodoError={injected ? undefined : getTodoError}
             isLoading={false}
             // R4 task 046+047 — single Open record path for both the
             // regarding-name link (FR-19) AND the overflow menu item (FR-18).
-            onOpenRecord={handleOpenRecord}
+            onOpenRecord={openRecord}
             // Item D (2026-07-09): file-preview modal for Documents rows.
-            onPreviewDocument={handlePreviewDocument}
+            onPreviewDocument={injected ? undefined : handlePreviewDocument}
           />
         </div>
         <CaughtUpFooter channelLabels={[]} />

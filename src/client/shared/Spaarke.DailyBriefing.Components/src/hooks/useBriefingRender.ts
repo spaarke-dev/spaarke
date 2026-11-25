@@ -29,9 +29,10 @@
  * identity plumbing.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import type { NarrateResponse, BriefingWindowParams } from '../services/briefingService';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { NarrateResponse, BriefingWindowParams, NarrationResult } from '../services/briefingService';
 import { fetchBriefingLive } from '../services/briefingService';
+import type { BriefingDataService } from '../services/briefingDataService';
 
 // ---------------------------------------------------------------------------
 // Hook types
@@ -79,14 +80,23 @@ export function isEmptyResponse(response: NarrateResponse): boolean {
  * Fetch the Daily Briefing render response. Fires once on mount, again on
  * `refetch()`. The /render call has no request body and authenticates via
  * the OBO token — the BFF resolves the caller's systemuserid server-side.
+ *
+ * `service` (task 010 data seam): an injected `BriefingDataService` supplies the briefing instead of
+ * `fetchBriefingLive`. A rejection from it lands in the `error` state, never an unhandled rejection.
  */
-export function useBriefingRender(windows?: BriefingWindowParams): UseBriefingRenderResult {
+export function useBriefingRender(
+  windows?: BriefingWindowParams,
+  service?: Pick<BriefingDataService, 'renderBriefing'>
+): UseBriefingRenderResult {
   const [status, setStatus] = useState<BriefingRenderStatus>('idle');
   const [data, setData] = useState<NarrateResponse | null>(null);
   const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Read through a ref so a host that passes a fresh service object each render does not refetch.
+  const serviceRef = useRef(service);
+  serviceRef.current = service;
 
   // r5 settings-wiring (2026-07-09): re-fetch when the user's windows change (e.g. after a
   // Settings Save) OR on explicit refetch. Serialize the windows for a stable effect dep.
@@ -98,7 +108,19 @@ export function useBriefingRender(windows?: BriefingWindowParams): UseBriefingRe
     setError(null);
     setUnavailableReason(null);
 
-    fetchBriefingLive(windows).then(result => {
+    const injected = serviceRef.current;
+    const load: Promise<NarrationResult> = injected
+      ? Promise.resolve()
+          .then(() => injected.renderBriefing(windows))
+          .catch(
+            (err: unknown): NarrationResult => ({
+              status: 'error',
+              message: err instanceof Error && err.message ? err.message : 'Could not load the daily briefing.',
+            })
+          )
+      : fetchBriefingLive(windows);
+
+    load.then(result => {
       if (cancelled) return;
 
       switch (result.status) {

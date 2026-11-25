@@ -29,6 +29,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { IWebApi, DailyDigestPreferences } from '../types/notifications';
 import { DEFAULT_DAILY_DIGEST_PREFERENCES } from '../types/notifications';
 import { fetchDigestPreferences, saveDigestPreferences } from '../services/preferencesService';
+import type { BriefingPreferencesService } from '../services/briefingDataService';
 
 // ---------------------------------------------------------------------------
 // Hook return type
@@ -58,8 +59,14 @@ export interface UseBriefingPreferencesResult {
  * @param webApi - Xrm.WebApi reference (from xrmProvider.getWebApi()).
  *                 Null while Xrm is still resolving — hook stays idle.
  * @param userId - The current user's systemuser GUID (stripped of braces).
+ * @param service - Optional injected preferences service (task 010 data seam). When supplied it replaces
+ *                  the Xrm.WebApi read/write entirely: `webApi` and `userId` are not used.
  */
-export function useBriefingPreferences(webApi: IWebApi | null, userId: string): UseBriefingPreferencesResult {
+export function useBriefingPreferences(
+  webApi: IWebApi | null,
+  userId: string,
+  service?: BriefingPreferencesService
+): UseBriefingPreferencesResult {
   const [preferences, setPreferences] = useState<DailyDigestPreferences>(DEFAULT_DAILY_DIGEST_PREFERENCES);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -67,7 +74,34 @@ export function useBriefingPreferences(webApi: IWebApi | null, userId: string): 
   // Track preference record ID for updates without re-querying
   const preferenceRecordIdRef = useRef<string | undefined>(undefined);
 
+  // Injected path: the host loads the preferences; the Xrm.WebApi path below is never reached.
+  const serviceRef = useRef(service);
+  serviceRef.current = service;
+  const hasService = service !== undefined;
+
   useEffect(() => {
+    if (hasService) {
+      let cancelled = false;
+      setIsLoading(true);
+      setError(undefined);
+      Promise.resolve()
+        .then(() => serviceRef.current?.load())
+        .then(loaded => {
+          if (cancelled) return;
+          if (loaded) setPreferences({ ...DEFAULT_DAILY_DIGEST_PREFERENCES, ...loaded });
+          setIsLoading(false);
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          // Non-fatal, like the Xrm path: keep the defaults.
+          setError(err instanceof Error && err.message ? err.message : 'Failed to load preferences.');
+          setIsLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     if (!webApi || !userId) {
       setIsLoading(false);
       return;
@@ -100,10 +134,25 @@ export function useBriefingPreferences(webApi: IWebApi | null, userId: string): 
     return () => {
       cancelled = true;
     };
-  }, [webApi, userId]);
+  }, [webApi, userId, hasService]);
 
   const updatePreferences = useCallback(
     async (update: Partial<DailyDigestPreferences>) => {
+      const injected = serviceRef.current;
+      if (injected) {
+        // A host with no `save` has nothing to persist to; the Preferences menu is not rendered for it.
+        if (!injected.save) return;
+        const next: DailyDigestPreferences = { ...preferences, ...update };
+        setPreferences(next);
+        try {
+          await injected.save(next);
+        } catch (err) {
+          console.error('[DailyBriefing] Failed to save preferences:', err);
+          setError(err instanceof Error && err.message ? err.message : 'Failed to save preferences.');
+        }
+        return;
+      }
+
       if (!webApi || !userId) return;
 
       const merged: DailyDigestPreferences = {
