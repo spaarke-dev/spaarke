@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Deploy Phase 3 to dev; routing-eval run C</title>
+    <phase>3 Email, evaluation and E2E</phase>
+    <gate>BLOCKED until the owner gives a go for the exact SHA in uac-r2's session</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task with live verification</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment through the bff-deploy skill plus scripted probes</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>N</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment to the shared dev BFF; runs alone</parallel-reason>
+    <deps>039, 040</deps>
+    <tags>deploy, azure, app-service, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the merged Phase 3 BFF (email tools and the compose widget) to dev through uac-r2's session after the owner's go for the exact SHA; verify spaarke_send_email is not model-visible, a test send archives to a test matter once, and all widgets still render; prepare routing-eval run C (all model-visible tools).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Azure App Service deployment and MCP probing.</role>
+  <goal>The approved SHA runs on dev; email compose and send work as specified; notes/routing-eval-C.md is ready for the owner.</goal>
+
+  <context>
+    <background>Spec FR-12, FR-16, FR-17. Deploy shape: tasks 019/029/039.</background>
+    <relevant-files>
+      <file role="output">projects/spaarkeai-mcp-bff-api-r2/notes/deploy-dev-049.md</file>
+      <file role="output">projects/spaarkeai-mcp-bff-api-r2/notes/routing-eval-C.md</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r2/tasks/039-deploy-phase2-dev.poml</file>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="039" status="pending">Phase 2 on dev</dependency>
+      <dependency task="040" status="pending">Email merged</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy only after the owner's explicit go for the exact SHA, in uac-r2's session, with the bff-deploy skill; never raw az webapp deploy --clean; dev only; no App Service setting change.</constraint>
+    <constraint source="project">The test send goes only to an owner-approved test recipient on a test matter; record the communication id.</constraint>
+    <constraint source="ADR-029">Record the published size (at or under 60 MB; 55 MB or more triggers architecture review).</constraint>
+    <constraint source="project">Never log or store the test user's token (NFR-05). Run context-handoff after the deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/routing-eval.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Record the owner's go for SHA {sha} in notes/deploy-dev-049.md; if missing, stop. Run /conflict-check.</step>
+    <step order="2">Deploy with the bff-deploy skill in uac-r2's session; record the rollback SHA and publish size.</step>
+    <step order="3">Verify: tools/list (model view) lacks spaarke_send_email; compose widget opens; one test send archives once to the test matter; briefing, search and Decisions widgets still render.</step>
+    <step order="4">Write notes/routing-eval-C.md; hand it to the owner. Run context-handoff.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner has not given a go for this exact SHA, STOP.</trigger>
+    <trigger>If the model can see or call spaarke_send_email on dev, roll back immediately and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">scripts/Deploy-BffApi.ps1 via the bff-deploy skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">dev BFF at the approved SHA</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/deploy-dev-049.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/routing-eval-C.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/deploy-dev-049.md records the owner's go with the exact SHA, deployed and rollback SHAs, publish size (≤ 60 MB) and probe outcomes.</criterion>
+    <criterion testable="true">spaarke_send_email is absent from the model-visible tool list; one widget send archives one communication to the test matter.</criterion>
+    <criterion testable="true">All four widgets render in Copilot Chat.</criterion>
+    <criterion testable="true">Negative: without the recorded go, no deploy happened.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12, FR-16, FR-17.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
