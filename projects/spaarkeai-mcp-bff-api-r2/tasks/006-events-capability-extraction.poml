@@ -4,7 +4,7 @@
     <title>Events capability extraction and must-not-leak proofs</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api, auth and tenant-isolation; refactors EventEndpoints statics (.cs) into a capability with frozen REST bytes</rigor-reason>
     <model-tier>opus</model-tier>
@@ -127,7 +127,16 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-07, FR-15; plan risk R2. Two adversarial-verifier passes (auth, tenant-isolation). Seeding proof requested for the must-not-leak list test only: break the caller filter, confirm the test fails, restore.</notes>
+  <notes>Spec FR-07, FR-15; plan risk R2. Two adversarial-verifier passes (auth, tenant-isolation). Seeding proof requested for the must-not-leak list test only: break the caller filter, confirm the test fails, restore.
+
+  Completion (2026-11-25):
+  - ADR-008 option: the filter stays and the capability calls the same decision methods (RecordRouteAccessAuthorizationFilter.DecideRouteRecordAsync / DecideDeclaredTargetAsync). Deviation: the REST handlers call the static *CoreAsync cores, not the IEventsCapability instance, so REST asks Dataverse exactly what it asked before; an ArchTest (EventsCapabilityCoreCallerGuardTests) keeps the ungated cores callable only from EventEndpoints.cs and EventsCapability.cs. Details: notes/decisions.md "2026-11-25 — Task 006".
+  - Frozen-bytes baselines 30/30 unchanged after the extraction. Must-not-leak: REST and capability (EventCallerScopeTests). Seeding proofs: list (caller filter broken → fails) and capability complete (Read asked instead of Write → fails).
+  - Test scope: capability Read-only complete test added per adversarial auth-pass F2 #1.
+  - Root CLAUDE.md §10: placement = existing Services/Events, no new project or package; publish size 41.61 MB → 41.62 MB (+11,232 bytes); no new HIGH CVE (no packages added). §11: IEventsCapability is the POML-mandated seam for MCP tools (precedent IDecisionCapability); without it a tool would copy the checks.
+  - Review pending: uac-r2, ontology-r1 (not messaged from this session).
+  - Filed in notes/defer-issues.md (GitHub issues not yet opened): DEF-006-01 pre-existing create regarding-name disclosure (AppendTo without Read; needs an owner decision; must land before the events create tool ships); DEF-006-02 pre-existing EventStatusDeprecationTests failure from scripts/demo-data.
+  - CAPABILITY-INDEX row proposed in notes/capability-index-pending.md (main session applies).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
