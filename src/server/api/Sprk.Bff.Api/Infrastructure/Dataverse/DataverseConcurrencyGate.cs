@@ -12,10 +12,19 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 // of a 503. This gate is that bound; the handler below also retries a throttled read briefly before it gives up.
 
 /// <summary>
-/// The ONE process-wide gate on concurrent app-only Dataverse reads of the access evaluator (#2845 F1): a singleton
-/// <see cref="SemaphoreSlim"/> shared by the evaluator's typed Web API clients (through <see cref="DataverseThrottlingHandler"/>)
-/// and the filing walk's <c>RetrieveMultipleAsync</c> reads (<c>SecureRootInheritance</c>, through the request memo).
-/// A permit is held only for the duration of one transport call, never while waiting on another read, so it cannot deadlock.
+/// A bound on concurrent Dataverse reads. It has two uses, which must never share an instance:
+/// <list type="bullet">
+/// <item><b>The process-wide singleton (#2845 F1)</b> bounds the access evaluator's app-only reads: one <see cref="SemaphoreSlim"/>
+/// shared by the evaluator's typed Web API clients (through <see cref="DataverseThrottlingHandler"/>) and the filing walk's
+/// <c>RetrieveMultipleAsync</c> reads (<c>SecureRootInheritance</c>, through the request memo). There a permit is held only for
+/// the duration of one transport call, never while waiting on another read, so it cannot deadlock.</item>
+/// <item><b>Per-read instances (task 222)</b>: <c>SignalReadService.ReadAsync</c> creates a NEW gate for each worklist read and
+/// never shares it. It bounds that read's caller and app-only reads together, and a permit may cover a short serial sequence
+/// (all pages of one saved fetch, the caller resolution, the policy sequence) that takes no other permit of the same gate.</item>
+/// </list>
+/// Do NOT replace a per-read gate with the injected singleton: a permit held across several calls could then wait on clients
+/// that take permits from the same semaphore through <see cref="DataverseThrottlingHandler"/>, starving or deadlocking the
+/// access evaluator.
 /// </summary>
 internal sealed class DataverseConcurrencyGate
 {

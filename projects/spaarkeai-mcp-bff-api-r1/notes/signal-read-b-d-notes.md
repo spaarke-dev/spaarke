@@ -70,6 +70,11 @@ for one Dataverse call, or for one short serial sequence that takes no other per
 read's Dataverse requests are in flight at once, well under the 52-per-user service-protection limit, leaving room for the
 caller's other requests.
 
+Known limit (K1, ontology review 2026-11-25): the bound is per read, not per identity. On the caller side the Console's ~3
+concurrent set reads give about 12 in flight per user, still under 52. On the app side the config/WhoAmI, catalog/pair-check and
+policy/family-placement reads now overlap, so one read makes ~2–3 concurrent app-identity calls where it made 1, and every user
+shares the BFF identity; `ServiceClient` retries a 429, so heavy load is slower, not a failure.
+
 - (3) beside (1)+(2).
 - The saved fetches beside each other (each still pages serially).
 - (6b) beside (5) then (6).
@@ -105,6 +110,12 @@ Differences that are faults or volume limits, not visibility rules:
 - the lane refuses (503) past `MaxPages` pages; a single-row read never pages;
 - a witness-table read fault withholds every witness detail on the lane; a single-row read is withheld only on its own fault;
 - (6b): a no-core Do row the app-only read does not return is dropped from a lane where other rows of its chunk came back; alone in
-  its chunk it is the 503 the lane also gives when every row of a chunk is missing (a delete race, transient).
+  its chunk it is the 503 the lane also gives when every row of a chunk is missing (a delete race, transient);
+- (K2, ontology review 2026-11-25) a duplicate-rule or family-placement fault withholds detail on every lane row, but only on its
+  own row in a single-row read; a line-invoice read fault drops `invoiceReview` lane-wide, but only on its own row in a
+  single-row read.
+
+All of these fail toward showing only what the caller is already entitled to. None is an existence oracle: the 503 needs the
+caller's own Dataverse read to have returned the Signal, and the plan tool authorises the Signal before it reads the row.
 
 The id is never logged.
