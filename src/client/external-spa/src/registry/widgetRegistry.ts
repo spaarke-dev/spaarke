@@ -106,9 +106,32 @@ const serviceRequestsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
 const LEGAL_FRONT_DOOR_PLANES: Plane[] = ['workforce', 'ciam'];
 
 /**
+ * The record-tab module code `/me/entitlements` reports (the server's `ModuleEntitlementResolver.AssignedWorkModule`).
+ */
+export const RECORD_TABS_ENTITLEMENT = 'assigned-work';
+
+/**
+ * The gate of the five record tabs: Projects, Matters, Work Assignments, Documents and Invoices.
+ *
+ * - CIAM partner: unchanged. R2 task 072 (owner Option B) made the partner BLANKET-entitled; the server reports
+ *   `assigned-work` to every CIAM caller, so requiring it changes nothing for a partner.
+ * - Workforce: R4 task 040 (FR-24, #2508). The server reports `assigned-work` only to a workforce CONTACT that can read
+ *   at least one record; a contact with no grants gets none of these tabs (owner 2026-11-09: none, not empty), and a
+ *   licensed systemuser never gets it, so its tabs stay as they were.
+ *
+ * Record visibility within each tab is Tier-2, server-side (the module fetch scopes by the caller's accessible set); this
+ * gate only offers the tabs (UX only, NFR-06). A default tab on both planes.
+ */
+const RECORD_TAB_GATE: Pick<WidgetDefinition, 'planes' | 'requiredEntitlement' | 'defaultForRoles'> = {
+  planes: ['ciam', 'workforce'],
+  requiredEntitlement: RECORD_TABS_ENTITLEMENT,
+  defaultForRoles: ['ciam', 'workforce'],
+};
+
+/**
  * All registered widgets. Role-default coverage (workspace-shell-foundation.md):
- *   - workforce: My Requests · Inventions · Messages · Policy Library
- *   - ciam (outside counsel): Projects · Matters · Work Assignments · Documents · Invoices
+ *   - workforce: Service Requests · Policy Library, plus the five record tabs for a contact with grants (R4 task 040)
+ *   - ciam (outside counsel): Projects · Matters · Work Assignments · Documents · Invoices (`RECORD_TAB_GATE`)
  *   - admin (core-user): Access Admin (+ Messages)
  * There is no `nda` widget: NDA Assessment is the intake WIZARD opened from the Quick Start card (task 052,
  * `src/intake/`), not a tab. The placeholder that used to be registered under that id promised an upload and an AI
@@ -188,18 +211,14 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     defaultForRoles: ['admin'],
     lazyLoader: placeholderLoader,
   },
-  // ── Outside counsel (CIAM) — R1 Outside-Counsel surfaces re-hosted as widgets ──
+  // ── Record tabs — CIAM partners, and workforce contacts with grants (RECORD_TAB_GATE, R4 task 040) ──
   {
     id: 'projects',
     title: 'Projects',
     icon: FolderRegular,
     ariaLabel: 'Open Projects — engagements you are staffed on',
     description: 'Engagements and workstreams you are staffed on.',
-    planes: ['ciam'],
-    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
-    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
-    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
-    defaultForRoles: ['ciam'],
+    ...RECORD_TAB_GATE,
     lazyLoader: projectsLoader,
   },
   {
@@ -208,11 +227,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     icon: GavelRegular,
     ariaLabel: 'Open Matters — legal matters assigned to you',
     description: 'Legal matters assigned to your firm.',
-    planes: ['ciam'],
-    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
-    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
-    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
-    defaultForRoles: ['ciam'],
+    ...RECORD_TAB_GATE,
     lazyLoader: mattersLoader,
   },
   {
@@ -221,11 +236,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     icon: TaskListSquareLtrRegular,
     ariaLabel: 'Open Work Assignments — tasks assigned to you',
     description: 'Tasks the law department has assigned to you.',
-    planes: ['ciam'],
-    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
-    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
-    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
-    defaultForRoles: ['ciam'],
+    ...RECORD_TAB_GATE,
     lazyLoader: workAssignmentsLoader,
   },
   {
@@ -234,11 +245,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     icon: DocumentFolderRegular,
     ariaLabel: 'Open Documents — matter documents shared with you',
     description: 'Matter documents shared with you in the workspace.',
-    planes: ['ciam'],
-    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
-    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
-    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
-    defaultForRoles: ['ciam'],
+    ...RECORD_TAB_GATE,
     lazyLoader: documentsLoader,
   },
   {
@@ -247,11 +254,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     icon: MoneyRegular,
     ariaLabel: 'Open Invoices — invoices you have submitted',
     description: 'Invoices you have submitted and their status.',
-    planes: ['ciam'],
-    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
-    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
-    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
-    defaultForRoles: ['ciam'],
+    ...RECORD_TAB_GATE,
     lazyLoader: invoicesLoader,
   },
   {
