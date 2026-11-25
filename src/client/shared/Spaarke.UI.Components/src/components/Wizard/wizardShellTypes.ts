@@ -62,7 +62,7 @@ export type WizardShellAction =
   | {
       type: 'GO_TO_STEP';
       stepIndex: number;
-      /** When `true`, forget every `'skipped'` mark (used when the wizard is re-opened). */
+      /** When `true`, forget every `'skipped'` mark. The shell no longer uses it on reopen (that is `RESET`, which also drops dynamic steps). */
       clearSkipped?: boolean;
     }
   | {
