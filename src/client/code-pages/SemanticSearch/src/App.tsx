@@ -171,6 +171,8 @@ function buildInitialFilters(urlParams: AppUrlParams | undefined): SearchFilters
   return {
     ...DEFAULT_FILTERS,
     fileTypes: urlParams.fileTypes ?? DEFAULT_FILTERS.fileTypes,
+    documentTypes: urlParams.documentTypes ?? DEFAULT_FILTERS.documentTypes,
+    matterTypes: urlParams.matterTypes ?? DEFAULT_FILTERS.matterTypes,
     dateRange: {
       from: urlParams.dateFrom ?? null,
       to: urlParams.dateTo ?? null,

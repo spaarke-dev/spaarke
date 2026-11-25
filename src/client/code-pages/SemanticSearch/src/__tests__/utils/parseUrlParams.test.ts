@@ -341,6 +341,21 @@ describe('parseUrlParams — envelope unwrap + per-key coverage', () => {
   });
 
   // -------------------------------------------------------------------------
+  // documentTypes / matterTypes (#3131: the Console's search criteria send them)
+  // -------------------------------------------------------------------------
+  describe('documentTypes and matterTypes', () => {
+    it('present — parse CSV into arrays', () => {
+      const result = parseUrlParams(envelope({ documentTypes: '100000001,100000002', matterTypes: 'mt-1' }));
+      expect(result.documentTypes).toEqual(['100000001', '100000002']);
+      expect(result.matterTypes).toEqual(['mt-1']);
+    });
+    it('absent or empty — undefined', () => {
+      expect(parseUrlParams(envelope({})).documentTypes).toBeUndefined();
+      expect(parseUrlParams(envelope({ matterTypes: ',' })).matterTypes).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // dateFrom
   // -------------------------------------------------------------------------
   describe('dateFrom', () => {
@@ -425,6 +440,8 @@ describe('parseUrlParams — envelope unwrap + per-key coverage', () => {
         threshold: undefined,
         searchMode: undefined,
         fileTypes: undefined,
+        documentTypes: undefined,
+        matterTypes: undefined,
         dateFrom: undefined,
         dateTo: undefined,
         tags: undefined,
@@ -451,6 +468,8 @@ describe('parseUrlParams — envelope unwrap + per-key coverage', () => {
           threshold: '75',
           searchMode: 'hybrid',
           fileTypes: 'pdf,docx',
+          documentTypes: '100000001',
+          matterTypes: 'mt-1,mt-2',
           dateFrom: '2026-01-01',
           dateTo: '2026-12-31',
           tags: 'urgent,legal',
@@ -468,6 +487,8 @@ describe('parseUrlParams — envelope unwrap + per-key coverage', () => {
         threshold: 75,
         searchMode: 'hybrid',
         fileTypes: ['pdf', 'docx'],
+        documentTypes: ['100000001'],
+        matterTypes: ['mt-1', 'mt-2'],
         dateFrom: '2026-01-01',
         dateTo: '2026-12-31',
         tags: ['urgent', 'legal'],

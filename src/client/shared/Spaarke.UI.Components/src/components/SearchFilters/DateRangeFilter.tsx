@@ -1,12 +1,12 @@
 /**
  * DateRangeFilter — inline date-range filter with quick-select presets, for search filter panes.
  *
- * Shared by the SemanticSearch code page (filter pane) and the SemanticSearchControl PCF
- * (inside its command-bar popover) (#3093).
+ * Shared by the SemanticSearch code page (filter pane), the SemanticSearchControl PCF (inside its
+ * command-bar popover) (#3093) and the Spaarke Console's Semantic Search criteria (#3131).
  *
  * Layout (stacked, fits a narrow pane):
  *   - label
- *   - preset dropdown: Off, Last 30 days, Last 90 days, This year, Last year (shows "Custom" when
+ *   - preset dropdown: Off, Last 7 / 30 / 90 days, This year, Last year (shows "Custom" when
  *     the dates match no preset)
  *   - From / To date inputs, always shown so a custom range can be typed directly
  *   - Clear, once either date is set
@@ -43,7 +43,17 @@ export interface DateRangeFilterProps {
 }
 
 /** Quick-select preset ids. */
-export type DateRangePresetId = 'off' | 'last30' | 'last90' | 'thisYear' | 'lastYear';
+export type DateRangePresetId = 'off' | 'last7' | 'last30' | 'last90' | 'thisYear' | 'lastYear';
+
+/** Every preset id, in dropdown order (hosts that persist a preset id validate against it). */
+export const DATE_RANGE_PRESET_IDS: readonly DateRangePresetId[] = [
+  'off',
+  'last7',
+  'last30',
+  'last90',
+  'thisYear',
+  'lastYear',
+];
 
 interface DatePreset {
   value: DateRangePresetId;
@@ -52,6 +62,7 @@ interface DatePreset {
 
 const DATE_PRESETS: DatePreset[] = [
   { value: 'off', label: 'Off' },
+  { value: 'last7', label: 'Last 7 days' },
   { value: 'last30', label: 'Last 30 days' },
   { value: 'last90', label: 'Last 90 days' },
   { value: 'thisYear', label: 'This year' },
@@ -76,10 +87,11 @@ export function calculatePresetRange(preset: DateRangePresetId, now: Date = new 
         from: formatDateOnly(new Date(today.getFullYear() - 1, 0, 1)),
         to: formatDateOnly(new Date(today.getFullYear() - 1, 11, 31)),
       };
+    case 'last7':
     case 'last30':
     case 'last90': {
       const from = new Date(today);
-      from.setDate(from.getDate() - (preset === 'last30' ? 30 : 90));
+      from.setDate(from.getDate() - (preset === 'last7' ? 7 : preset === 'last30' ? 30 : 90));
       return { from: formatDateOnly(from), to: formatDateOnly(today) };
     }
   }

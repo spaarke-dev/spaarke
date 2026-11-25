@@ -11,22 +11,23 @@
  *      Projects / Invoices) — replaces the previous single-select Dropdown.
  *      The active type is the primary appearance; the rest are subtle.
  *   3. AI Search query textarea.
- *   4. Per-domain filter dropdowns (placeholder static options + TODO for
- *      the filter-options endpoint wiring):
- *        - Documents domain → Document Type + File Type
+ *   4. Per-domain filters — the shared `FilterDropdown` (multi-select) with
+ *      the same Dataverse option lists the search page uses
+ *      (`useSearchFilterOptions`, #3131):
+ *        - Documents domain → Document Type + File Type + Matter Type
  *        - Matters domain   → Matter Type
- *        - Projects / Invoices → none today
- *   5. Date Range dropdown (Off / Last 7 / Last 30 / Last 90 / Custom).
- *      "Custom range" is acknowledged as a static option today; expanding
- *      to two date inputs is a documented follow-up.
+ *        - Projects / Invoices → none
+ *   5. The shared `DateRangeFilter` (presets + From / To local dates, #3131).
  *   6. Full-width primary Search button. Launches sprk_semanticsearch via
- *      Xrm.Navigation.navigateTo with the criteria as URL params (same shape
- *      as Task 095 but with the new params added).
+ *      Xrm.Navigation.navigateTo with the criteria as the URL params the page
+ *      reads (`parseUrlParams`).
  *
  * Persistence:
  *   Transient criteria state persists in localStorage under
- *   `spaarke:context:semantic-search-criteria` (backwards-compat: missing
- *   fields read as undefined and default to "All" / "Off" on next mount).
+ *   `spaarke:context:semantic-search-criteria` (missing or older fields fall
+ *   back to "All" / "Off"; see `readPersistedCriteria`). A date preset is
+ *   stored as its id and re-resolved against today on load, so "Last 30
+ *   days" stays relative instead of freezing the day it was picked.
  *   This means:
  *     - The criteria survives modal open/close (operator flow: type a query,
  *       click Search, results modal opens, user closes modal — criteria are
@@ -41,19 +42,17 @@
  *   same target:2, same 80% × 80% modal (wider than wizards because the
  *   full SemanticSearch page has its own SearchFilterPane + map/grid views).
  *
- *   data string carries (Task 099 — new params marked NEW):
+ *   data string carries the keys the SemanticSearch code page parses
+ *   (src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts):
  *     query=<encoded>&domain=<documents|matters|projects|invoices>
- *     &dateFrom=<YYYY-MM-DD>&dateTo=<YYYY-MM-DD>   (deprecated — Task 099 replaces with dateRange preset)
- *     &documentType=<encoded>     (NEW — Documents domain)
- *     &fileType=<encoded>         (NEW — Documents domain)
- *     &matterType=<encoded>       (NEW — Matters or Documents domain)
- *     &dateRange=<off|last7|last30|last90|custom>  (NEW — replaces from/to)
+ *     &documentTypes=<csv>   (Documents domain; sprk_documenttype option numbers)
+ *     &fileTypes=<csv>       (Documents domain; extensions)
+ *     &matterTypes=<csv>     (Documents or Matters domain; sprk_mattertype_ref ids)
+ *     &dateFrom=<YYYY-MM-DD>&dateTo=<YYYY-MM-DD>   (local calendar days)
  *
- *   The SemanticSearch Code Page already parses `query` + `domain` from its
- *   data envelope (see src/client/code-pages/SemanticSearch/src/index.tsx).
- *   The new params will be received but are non-breaking if the page ignores
- *   them — the user can still set them via the full filter pane on the page
- *   side.
+ *   Before #3131 this sent `documentType` / `fileType` / `matterType` /
+ *   `dateRange=<preset>`, which the page never read: every filter chosen
+ *   here was dropped.
  *
  * Bug-fix invariant (matches the playbook-modal pane-blank fix in Task 095):
  *   When the user clicks Search, this component does NOT change the
@@ -62,16 +61,12 @@
  *   modal closes — that is the uniform fix for the "pane goes blank after a
  *   modal closes" bug.
  *
- * Visual reference:
- *   src/client/code-pages/SemanticSearch/src/components/SearchFilterPane.tsx
- *   src/client/code-pages/SemanticSearch/src/components/SearchIndexSelector.tsx
- *   src/client/shared/Spaarke.UI.Components/src/components/SearchFilters/ (FilterDropdown,
- *   DateRangeFilter — moved there from the code page by #3093; this file still has its own copy)
- *   These files are READ for shape/UX but NOT imported — the SemanticSearch
- *   types live in a separate code-page that isn't a published npm package
- *   consumed by SpaarkeAi, and importing would defeat the SpaarkeAi bundle
- *   tree-shake. The `SearchDomain` union and filter shapes are replicated
- *   locally in this file.
+ * Shared with the search page (#3131):
+ *   `FilterDropdown`, `DateRangeFilter` and `useSearchFilterOptions` come from
+ *   @spaarke/ui-components (`SearchFilters/`), the same controls and option
+ *   lists as src/client/code-pages/SemanticSearch/src/components/SearchFilterPane.tsx.
+ *   The `SearchDomain` union is replicated here: the code page's types are
+ *   not a package SpaarkeAi consumes.
  *
  * Standards:
  *   - ADR-012: SpaarkeAi-local — the criteria are an in-pane subset of the
@@ -96,8 +91,6 @@ import {
   tokens,
   Button,
   Checkbox,
-  Dropdown,
-  Option,
   Label,
   Textarea,
   Text,
@@ -114,7 +107,16 @@ import {
   SEARCH_CRITERIA_RESULT_WIDGET_TYPE,
 } from '@spaarke/ai-widgets';
 import type { SearchCriteriaResultWidgetData } from '@spaarke/ai-widgets';
-import { getXrm } from '@spaarke/ui-components';
+import {
+  getXrm,
+  FilterDropdown,
+  DateRangeFilter,
+  useSearchFilterOptions,
+  calculatePresetRange,
+  detectActivePreset,
+  DATE_RANGE_PRESET_IDS,
+} from '@spaarke/ui-components';
+import type { DateRangeFilterValue, DateRangePresetId, FilterDropdownOption } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,7 +129,7 @@ import { getXrm } from '@spaarke/ui-components';
  * SemanticSearch types live in a separate code-page that isn't a published
  * npm package consumed by SpaarkeAi).
  */
-type SearchDomain = 'documents' | 'matters' | 'projects' | 'invoices';
+export type SearchDomain = 'documents' | 'matters' | 'projects' | 'invoices';
 
 interface DomainDescriptor {
   id: SearchDomain;
@@ -149,79 +151,37 @@ const VALID_DOMAINS: ReadonlySet<string> = new Set<SearchDomain>([
   'invoices',
 ]);
 
-/**
- * Date Range preset values. Mirrors the operator's screenshot — Off (default),
- * Last 7 days, Last 30 days, Last 90 days, Custom range. "Custom range" is a
- * static option today; expanding to inline date inputs is a documented
- * follow-up (see file header).
- */
-type DateRangePreset = 'off' | 'last7' | 'last30' | 'last90' | 'custom';
+const VALID_DATE_PRESETS: ReadonlySet<string> = new Set<string>([...DATE_RANGE_PRESET_IDS, 'custom']);
 
-interface DateRangeDescriptor {
-  id: DateRangePreset;
-  label: string;
+/** Which filters apply to a domain — the same rule as the page's SearchFilterPane. */
+export function domainFilters(domain: SearchDomain): {
+  documentTypes: boolean;
+  fileTypes: boolean;
+  matterTypes: boolean;
+} {
+  return {
+    documentTypes: domain === 'documents',
+    fileTypes: domain === 'documents',
+    matterTypes: domain === 'documents' || domain === 'matters',
+  };
 }
 
-const DATE_RANGE_OPTIONS: readonly DateRangeDescriptor[] = [
-  { id: 'off', label: 'Off' },
-  { id: 'last7', label: 'Last 7 days' },
-  { id: 'last30', label: 'Last 30 days' },
-  { id: 'last90', label: 'Last 90 days' },
-  { id: 'custom', label: 'Custom range' },
-];
-
-const VALID_DATE_RANGES: ReadonlySet<string> = new Set<DateRangePreset>([
-  'off',
-  'last7',
-  'last30',
-  'last90',
-  'custom',
-]);
-
 /**
- * Static placeholder filter options for Documents / Matters domains.
+ * Shape persisted in localStorage (#3131).
  *
- * TODO (filter-options endpoint wiring): replace these with values fetched
- * from the BFF filter-options endpoint (see `useFilterOptions` hook in the
- * full SemanticSearch Code Page). The Search button passes the chosen
- * values via URL query params to the modal, so the modal will get real data
- * on its own; the in-pane dropdowns just need a placeholder list that
- * matches the most common values until the endpoint is wired here.
+ * `datePreset` is the source of truth for a preset range: `dateRange` is re-derived from it on
+ * load, so a relative preset keeps meaning "relative to today". Only `custom` uses the stored
+ * `dateRange` as typed. Filter values are Dataverse values (option numbers, record ids,
+ * extensions), the ones the search page filters on.
  */
-const DOCUMENT_TYPE_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'contract', label: 'Contract' },
-  { value: 'nda', label: 'NDA' },
-  { value: 'brief', label: 'Brief' },
-  { value: 'agreement', label: 'Agreement' },
-  { value: 'invoice', label: 'Invoice' },
-] as const;
-
-const FILE_TYPE_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'pdf', label: 'PDF' },
-  { value: 'docx', label: 'DOCX' },
-  { value: 'xlsx', label: 'XLSX' },
-  { value: 'pptx', label: 'PPTX' },
-  { value: 'txt', label: 'TXT' },
-] as const;
-
-const MATTER_TYPE_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'litigation', label: 'Litigation' },
-  { value: 'transactional', label: 'Transactional' },
-  { value: 'regulatory', label: 'Regulatory' },
-  { value: 'advisory', label: 'Advisory' },
-] as const;
-
-/** Shape persisted in localStorage (Task 099 extended). */
-interface PersistedCriteria {
+export interface PersistedCriteria {
   query: string;
   domain: SearchDomain;
-  documentType: string;
-  fileType: string;
-  matterType: string;
-  dateRange: DateRangePreset;
+  documentTypes: string[];
+  fileTypes: string[];
+  matterTypes: string[];
+  datePreset: DateRangePresetId | 'custom';
+  dateRange: DateRangeFilterValue | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,10 +193,11 @@ const STORAGE_KEY = 'spaarke:context:semantic-search-criteria';
 const DEFAULT_CRITERIA: PersistedCriteria = {
   query: '',
   domain: 'documents',
-  documentType: 'all',
-  fileType: 'all',
-  matterType: 'all',
-  dateRange: 'off',
+  documentTypes: [],
+  fileTypes: [],
+  matterTypes: [],
+  datePreset: 'off',
+  dateRange: null,
 };
 
 const SEMANTIC_SEARCH_WEBRESOURCE = 'sprk_semanticsearch';
@@ -246,45 +207,68 @@ const SEMANTIC_SEARCH_TITLE = 'Semantic Search Results';
 // localStorage helpers — try/catch-wrapped for private browsing / quota
 // ---------------------------------------------------------------------------
 
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string') ? (value as string[]) : undefined;
+}
+
+function dateOrNull(value: unknown): string | null {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
 /**
- * Read criteria from localStorage. Backwards-compatible with the Task 095
- * shape — missing fields (`documentType`, `fileType`, `matterType`,
- * `dateRange`) read as undefined and default to "All" / "Off" on next mount.
- * The previous `dateFrom` / `dateTo` fields are silently ignored (no
- * migration needed — they were never wired to BFF; the user just re-picks
- * a Date Range preset on their next session).
+ * The criteria from a parsed localStorage value, with the date range resolved against `now`.
+ *
+ * Older shapes (before #3131) stored single values: `documentType` / `matterType` held invented
+ * placeholder ids that match no Dataverse value, so they are dropped; `fileType` held a real
+ * extension and becomes a one-item list; `dateRange` held a preset id (`custom` had no dates, so
+ * it reads as Off).
  */
+export function normalizeCriteria(parsed: unknown, now: Date = new Date()): PersistedCriteria {
+  if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_CRITERIA };
+  const obj = parsed as Record<string, unknown>;
+
+  const legacyFileType =
+    typeof obj.fileType === 'string' && obj.fileType !== 'all' ? [obj.fileType] : undefined;
+
+  let datePreset: DateRangePresetId | 'custom' = 'off';
+  let dateRange: DateRangeFilterValue | null = null;
+  const presetSource = typeof obj.datePreset === 'string' ? obj.datePreset : obj.dateRange;
+  if (typeof presetSource === 'string' && VALID_DATE_PRESETS.has(presetSource)) {
+    datePreset = presetSource as DateRangePresetId | 'custom';
+  }
+  if (datePreset === 'custom') {
+    const stored = obj.dateRange as Record<string, unknown> | null | undefined;
+    const from = dateOrNull(stored?.from);
+    const to = dateOrNull(stored?.to);
+    if (from || to) {
+      dateRange = { from, to };
+    } else {
+      datePreset = 'off';
+    }
+  } else if (datePreset !== 'off') {
+    dateRange = calculatePresetRange(datePreset, now);
+  }
+
+  return {
+    query: typeof obj.query === 'string' ? obj.query : DEFAULT_CRITERIA.query,
+    domain:
+      typeof obj.domain === 'string' && VALID_DOMAINS.has(obj.domain)
+        ? (obj.domain as SearchDomain)
+        : DEFAULT_CRITERIA.domain,
+    documentTypes: stringArray(obj.documentTypes) ?? [],
+    fileTypes: stringArray(obj.fileTypes) ?? legacyFileType ?? [],
+    matterTypes: stringArray(obj.matterTypes) ?? [],
+    datePreset,
+    dateRange,
+  };
+}
+
 function readPersistedCriteria(): PersistedCriteria {
   if (typeof window === 'undefined') return { ...DEFAULT_CRITERIA };
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) return { ...DEFAULT_CRITERIA };
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) {
-      return { ...DEFAULT_CRITERIA };
-    }
-    const obj = parsed as Record<string, unknown>;
-    return {
-      query: typeof obj.query === 'string' ? obj.query : DEFAULT_CRITERIA.query,
-      domain:
-        typeof obj.domain === 'string' && VALID_DOMAINS.has(obj.domain)
-          ? (obj.domain as SearchDomain)
-          : DEFAULT_CRITERIA.domain,
-      documentType:
-        typeof obj.documentType === 'string'
-          ? obj.documentType
-          : DEFAULT_CRITERIA.documentType,
-      fileType:
-        typeof obj.fileType === 'string' ? obj.fileType : DEFAULT_CRITERIA.fileType,
-      matterType:
-        typeof obj.matterType === 'string'
-          ? obj.matterType
-          : DEFAULT_CRITERIA.matterType,
-      dateRange:
-        typeof obj.dateRange === 'string' && VALID_DATE_RANGES.has(obj.dateRange)
-          ? (obj.dateRange as DateRangePreset)
-          : DEFAULT_CRITERIA.dateRange,
-    };
+    return normalizeCriteria(JSON.parse(raw) as unknown);
   } catch {
     return { ...DEFAULT_CRITERIA };
   }
@@ -303,37 +287,38 @@ function writePersistedCriteria(criteria: PersistedCriteria): void {
 // Modal launch — Xrm.Navigation.navigateTo to sprk_semanticsearch
 // ---------------------------------------------------------------------------
 
-function buildSearchDataParams(criteria: PersistedCriteria): string {
+/**
+ * The `data` string for the search page, in the keys its `parseUrlParams` reads. Filters are
+ * sent only for the domains they apply to (the page's own rule) and only when something is
+ * selected; the dates are the filter's local calendar days, which the page turns into UTC bounds
+ * with `toUtcDateRangeBounds`.
+ */
+export function buildSearchDataParams(criteria: PersistedCriteria): string {
   const parts: string[] = [];
+  const csv = (values: string[]): string => encodeURIComponent(values.join(','));
   if (criteria.query) parts.push(`query=${encodeURIComponent(criteria.query)}`);
   if (criteria.domain) parts.push(`domain=${encodeURIComponent(criteria.domain)}`);
 
-  // Task 099 — per-domain filters. Only emit when the user has selected a
-  // non-"all" value AND the filter is relevant for the active domain. The
-  // SemanticSearch Code Page receives these as query params and seeds its
-  // own filter state; if a param is absent the page falls back to "All".
-  if (criteria.domain === 'documents') {
-    if (criteria.documentType && criteria.documentType !== 'all') {
-      parts.push(`documentType=${encodeURIComponent(criteria.documentType)}`);
-    }
-    if (criteria.fileType && criteria.fileType !== 'all') {
-      parts.push(`fileType=${encodeURIComponent(criteria.fileType)}`);
-    }
+  const applies = domainFilters(criteria.domain);
+  if (applies.documentTypes && criteria.documentTypes.length > 0) {
+    parts.push(`documentTypes=${csv(criteria.documentTypes)}`);
   }
-  if (
-    (criteria.domain === 'matters' || criteria.domain === 'documents') &&
-    criteria.matterType &&
-    criteria.matterType !== 'all'
-  ) {
-    parts.push(`matterType=${encodeURIComponent(criteria.matterType)}`);
+  if (applies.fileTypes && criteria.fileTypes.length > 0) {
+    parts.push(`fileTypes=${csv(criteria.fileTypes)}`);
+  }
+  if (applies.matterTypes && criteria.matterTypes.length > 0) {
+    parts.push(`matterTypes=${csv(criteria.matterTypes)}`);
   }
 
-  // Task 099 — date range preset (replaces the Task 095 from/to inputs).
-  if (criteria.dateRange && criteria.dateRange !== 'off') {
-    parts.push(`dateRange=${encodeURIComponent(criteria.dateRange)}`);
-  }
+  if (criteria.dateRange?.from) parts.push(`dateFrom=${encodeURIComponent(criteria.dateRange.from)}`);
+  if (criteria.dateRange?.to) parts.push(`dateTo=${encodeURIComponent(criteria.dateRange.to)}`);
 
   return parts.join('&');
+}
+
+/** The labels of the selected values (a value with no loaded option shows as itself). */
+export function selectedLabels(values: string[], options: readonly FilterDropdownOption[]): string[] {
+  return values.map((v) => options.find((o) => o.value === v)?.label ?? v);
 }
 
 /**
@@ -587,38 +572,29 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
     [updateCriteria],
   );
 
-  const handleDocumentTypeChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      if (typeof data.optionValue === 'string') {
-        updateCriteria({ documentType: data.optionValue });
-      }
-    },
+  // The search page's option lists (Dataverse values), shared with it (#3131).
+  const filterOptions = useSearchFilterOptions();
+
+  const handleDocumentTypesChange = React.useCallback(
+    (selected: string[]) => updateCriteria({ documentTypes: selected }),
     [updateCriteria],
   );
 
-  const handleFileTypeChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      if (typeof data.optionValue === 'string') {
-        updateCriteria({ fileType: data.optionValue });
-      }
-    },
+  const handleFileTypesChange = React.useCallback(
+    (selected: string[]) => updateCriteria({ fileTypes: selected }),
     [updateCriteria],
   );
 
-  const handleMatterTypeChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      if (typeof data.optionValue === 'string') {
-        updateCriteria({ matterType: data.optionValue });
-      }
-    },
+  const handleMatterTypesChange = React.useCallback(
+    (selected: string[]) => updateCriteria({ matterTypes: selected }),
     [updateCriteria],
   );
 
+  // Store which preset the range is (detected today, when it was picked) so a reload re-resolves
+  // it; a typed range is 'custom' and is kept as typed.
   const handleDateRangeChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      if (typeof data.optionValue === 'string' && VALID_DATE_RANGES.has(data.optionValue)) {
-        updateCriteria({ dateRange: data.optionValue as DateRangePreset });
-      }
+    (value: DateRangeFilterValue | null) => {
+      updateCriteria({ dateRange: value, datePreset: detectActivePreset(value) });
     },
     [updateCriteria],
   );
@@ -634,7 +610,8 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
    * <domain>".
    *
    * Per ADR-030: payload is typed end-to-end via `SearchCriteriaResultWidgetData`
-   * (NO `any` cast).
+   * (NO `any` cast). The filters travel as LABELS: the widget only displays
+   * them, and a tab can outlive this session's option lists.
    *
    * Per ADR-028: no auth surface — the criteria are pure user input.
    * `authenticatedFetch` is NOT used at this dispatch site because no BFF
@@ -647,13 +624,19 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
    */
   const dispatchSearchCriteriaWidget = React.useCallback(
     (current: PersistedCriteria): void => {
+      const applies = domainFilters(current.domain);
       const widgetData: SearchCriteriaResultWidgetData = {
         query: current.query,
         domain: current.domain,
-        documentType: current.documentType,
-        fileType: current.fileType,
-        matterType: current.matterType,
-        dateRange: current.dateRange,
+        documentTypes: applies.documentTypes
+          ? selectedLabels(current.documentTypes, filterOptions.documentTypes)
+          : undefined,
+        fileTypes: applies.fileTypes ? selectedLabels(current.fileTypes, filterOptions.fileTypes) : undefined,
+        matterTypes: applies.matterTypes
+          ? selectedLabels(current.matterTypes, filterOptions.matterTypes)
+          : undefined,
+        dateFrom: current.dateRange?.from ?? null,
+        dateTo: current.dateRange?.to ?? null,
         capturedAt: new Date().toISOString(),
       };
       // Tab label: prefer a short, query-derived label so the tab is
@@ -672,7 +655,7 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
         displayName,
       });
     },
-    [dispatch],
+    [dispatch, filterOptions.documentTypes, filterOptions.fileTypes, filterOptions.matterTypes],
   );
 
   const handleAddToWorkspaceChange = React.useCallback(
@@ -695,25 +678,8 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
     launchSemanticSearch(criteria);
   }, [addToWorkspace, criteria, dispatchSearchCriteriaWidget]);
 
-  // Per-domain filter visibility. Mirrors SearchFilterPane.tsx logic:
-  //   - documents → Document Type + File Type + Matter Type
-  //   - matters   → Matter Type
-  //   - projects  → (no per-domain filters today; only date range)
-  //   - invoices  → (no per-domain filters today; only date range)
-  const showDocumentTypeFilter = criteria.domain === 'documents';
-  const showFileTypeFilter = criteria.domain === 'documents';
-  const showMatterTypeFilter =
-    criteria.domain === 'documents' || criteria.domain === 'matters';
-
-  // Display labels for current filter values (used as Dropdown `value`).
-  const documentTypeLabel =
-    DOCUMENT_TYPE_OPTIONS.find((o) => o.value === criteria.documentType)?.label ?? 'All';
-  const fileTypeLabel =
-    FILE_TYPE_OPTIONS.find((o) => o.value === criteria.fileType)?.label ?? 'All';
-  const matterTypeLabel =
-    MATTER_TYPE_OPTIONS.find((o) => o.value === criteria.matterType)?.label ?? 'All';
-  const dateRangeLabel =
-    DATE_RANGE_OPTIONS.find((o) => o.id === criteria.dateRange)?.label ?? 'Off';
+  // Per-domain filter visibility: the page's SearchFilterPane rule.
+  const applies = domainFilters(criteria.domain);
 
   return (
     <div className={styles.root} data-testid="semantic-search-criteria-tool">
@@ -767,94 +733,46 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
         />
       </div>
 
-      {/* Document Type (Documents domain only) ---------------------------- */}
-      {showDocumentTypeFilter && (
-        <div className={styles.field}>
-          <Label className={styles.fieldLabel} htmlFor="ss-criteria-document-type">
-            Document Type
-          </Label>
-          <Dropdown
-            id="ss-criteria-document-type"
-            className={styles.dropdown}
-            value={documentTypeLabel}
-            selectedOptions={[criteria.documentType]}
-            onOptionSelect={handleDocumentTypeChange}
-            data-testid="semantic-search-criteria-document-type"
-          >
-            {DOCUMENT_TYPE_OPTIONS.map((o) => (
-              <Option key={o.value} value={o.value} text={o.label}>
-                {o.label}
-              </Option>
-            ))}
-          </Dropdown>
+      {/* Per-domain filters (shared FilterDropdown, the page's option lists) - */}
+      {applies.documentTypes && (
+        <div data-testid="semantic-search-criteria-document-type">
+          <FilterDropdown
+            label="Document Type"
+            options={filterOptions.documentTypes}
+            selectedValues={criteria.documentTypes}
+            onChange={handleDocumentTypesChange}
+            isLoading={filterOptions.isLoading}
+          />
         </div>
       )}
 
-      {/* File Type (Documents domain only) -------------------------------- */}
-      {showFileTypeFilter && (
-        <div className={styles.field}>
-          <Label className={styles.fieldLabel} htmlFor="ss-criteria-file-type">
-            File Type
-          </Label>
-          <Dropdown
-            id="ss-criteria-file-type"
-            className={styles.dropdown}
-            value={fileTypeLabel}
-            selectedOptions={[criteria.fileType]}
-            onOptionSelect={handleFileTypeChange}
-            data-testid="semantic-search-criteria-file-type"
-          >
-            {FILE_TYPE_OPTIONS.map((o) => (
-              <Option key={o.value} value={o.value} text={o.label}>
-                {o.label}
-              </Option>
-            ))}
-          </Dropdown>
+      {applies.fileTypes && (
+        <div data-testid="semantic-search-criteria-file-type">
+          <FilterDropdown
+            label="File Type"
+            options={filterOptions.fileTypes}
+            selectedValues={criteria.fileTypes}
+            onChange={handleFileTypesChange}
+            isLoading={filterOptions.isLoading}
+          />
         </div>
       )}
 
-      {/* Matter Type (Documents + Matters domains) ------------------------ */}
-      {showMatterTypeFilter && (
-        <div className={styles.field}>
-          <Label className={styles.fieldLabel} htmlFor="ss-criteria-matter-type">
-            Matter Type
-          </Label>
-          <Dropdown
-            id="ss-criteria-matter-type"
-            className={styles.dropdown}
-            value={matterTypeLabel}
-            selectedOptions={[criteria.matterType]}
-            onOptionSelect={handleMatterTypeChange}
-            data-testid="semantic-search-criteria-matter-type"
-          >
-            {MATTER_TYPE_OPTIONS.map((o) => (
-              <Option key={o.value} value={o.value} text={o.label}>
-                {o.label}
-              </Option>
-            ))}
-          </Dropdown>
+      {applies.matterTypes && (
+        <div data-testid="semantic-search-criteria-matter-type">
+          <FilterDropdown
+            label="Matter Type"
+            options={filterOptions.matterTypes}
+            selectedValues={criteria.matterTypes}
+            onChange={handleMatterTypesChange}
+            isLoading={filterOptions.isLoading}
+          />
         </div>
       )}
 
-      {/* Date Range (all domains) ----------------------------------------- */}
-      <div className={styles.field}>
-        <Label className={styles.fieldLabel} htmlFor="ss-criteria-date-range">
-          Date Range
-        </Label>
-        <Dropdown
-          id="ss-criteria-date-range"
-          className={styles.dropdown}
-          value={dateRangeLabel}
-          selectedOptions={[criteria.dateRange]}
-          onOptionSelect={handleDateRangeChange}
-          data-testid="semantic-search-criteria-date-range"
-        >
-          {DATE_RANGE_OPTIONS.map((o) => (
-            <Option key={o.id} value={o.id} text={o.label}>
-              {o.label}
-            </Option>
-          ))}
-        </Dropdown>
+      {/* Date Range (all domains; shared DateRangeFilter) ------------------ */}
+      <div data-testid="semantic-search-criteria-date-range">
+        <DateRangeFilter value={criteria.dateRange} onChange={handleDateRangeChange} />
       </div>
 
       {/* R4 task 043 (W-5) — "Also add to Workspace" opt-in checkbox.
