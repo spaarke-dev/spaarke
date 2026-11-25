@@ -8,8 +8,9 @@
  * ebilling-r1 task 051 (FR-18, FR-45), SPA-r4 task 010: "Submit invoice" is a command in the grid's own toolbar (the
  * shared grid's generic `hostCommands` slot), not a separate button above it. It is passed only when the server's own
  * answer says the caller can submit: `firms` on GET /api/v1/external/me is sent only when eBilling is on, and lists the
- * caller's own firms (none for a workforce/systemuser caller, who is refused on the external routes and submits from the
- * internal workspace). Absent, null or empty: no command. The gate is a convenience only; the server refuses a
+ * caller's own firms: none for a licensed systemuser (refused on the external submission routes; it submits from the
+ * internal workspace), while a contact on either plane, a workforce contact with record tabs included (SPA-r4 task 040),
+ * gets the firms its organization memberships confer. Absent, null or empty: no command. The gate is a convenience only; the server refuses a
  * submission with no firm (EB-D-223). That is one cheap /me read on mount, never a list read. Navigation comes from the
  * `onNavigate` prop the router-owning host hands the body (App.tsx -> WorkspaceHomePage), so this file imports no
  * router API (the arch guard refuses router-named imports outside App.tsx); without the prop (a test, a surface with no

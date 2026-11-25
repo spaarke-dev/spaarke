@@ -79,7 +79,7 @@ export interface WidgetDefinition {
 const placeholderLoader = (): Promise<{ default: WidgetBodyComponent }> =>
   import('./PlaceholderWidgetBody').then(m => ({ default: m.PlaceholderWidgetBody }));
 
-// Outside-counsel (ciam) data widgets (task 016) — each a thin `<DataGrid configId=… />` binding
+// Record data widgets (task 016; CIAM partners and, since R4 task 040, granted workforce contacts) — each a thin `<DataGrid configId=… />` binding
 // (see `widgets/GridWidgetBody.tsx`), swapped in for the task-012 placeholder.
 const projectsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
   import('../widgets/ProjectsWidget').then(m => ({ default: m.ProjectsWidgetBody }));

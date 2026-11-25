@@ -188,7 +188,9 @@ public class ModuleEntitlementResolver
     /// <summary>
     /// Resolves the caller's module entitlement codes by server-resolved principal kind (A8). CIAM → the
     /// outside-counsel set, plus <c>legal-front-door</c> when the partner switch is on; workforce → the
-    /// default set ∪ the extras its App-Role claims map to through active <c>sprk_approlemodulemap</c> rows.
+    /// default set ∪ the extras its App-Role claims map to through active <c>sprk_approlemodulemap</c> rows (never
+    /// <c>assigned-work</c>), ∪ <c>assigned-work</c> for a contact that can read at least one record
+    /// (<see cref="IsGrantedWorkforceContact"/>).
     /// </summary>
     /// <param name="principal">The resolved plane-agnostic caller (its <see cref="CallerPrincipal.Plane"/>
     /// selects the resolution term).</param>
