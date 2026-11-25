@@ -31,3 +31,14 @@ switch. Failure scenario: user opted out sends with `FromMailbox` = an opted-in 
 Suggested fix: always read the switch from `userEmail` in user mode (a behaviour change for callers that pass FromMailbox: needs owner decision).
 
 rework: none task 216
+
+## Verification
+- `dotnet test ... --filter "FullyQualifiedName~Communication"`: 3493 passed, 0 failed, 2 skipped. Before the fix, 2 of the new tests failed on master code.
+- `tests/Spaarke.ArchTests` (full, built first): 2793 passed, 0 failed.
+- BFF build: 0 warnings, 0 errors.
+- Publish size (`dotnet publish -c Release -r linux-x64 --self-contained false`, fresh short-path worktrees, `Compress-Archive -CompressionLevel Optimal`
+  over `deploy/api-publish/*`, PDBs included): master 43,578,743 bytes, branch 43,578,831 bytes, delta +88 bytes; 194 files on both sides.
+- No package added or changed, so no new CVE. Self-review (code-review + adr-check): no F-class finding; the unfixed defect above is filed in the report.
+
+## Section 11 answers
+No new service, interface, endpoint, DI registration, package or column; this edits an existing branch condition in `CommunicationService`.
