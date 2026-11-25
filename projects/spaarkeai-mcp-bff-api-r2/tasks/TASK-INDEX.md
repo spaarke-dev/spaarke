@@ -18,7 +18,7 @@
 | 009 | Record search: no query built from raw query text (proof) | 0 | 🔄 [wip] | none | Group A | opus / high | FULL |
 | 010 | Daily Briefing data seam in `Spaarke.DailyBriefing.Components` | 0 | 🔄 [wip] | none | Group A | sonnet / xhigh | FULL |
 | 011 | EmailComposer MCP host (sibling of the Xrm host) | 0 | 🔄 [wip] | none | Group A | sonnet / high | FULL |
-| 012 | Complete the matter-summary Insights topic (column, registry row) | 0 | 🔲 [open] | none | Group A | sonnet / high | FULL |
+| 012 | Complete the matter-summary Insights topic (column, registry row) | 0 | 🔄 [wip] | none | Group A | sonnet / high | FULL |
 | 007 | Playbook run authorization into one shared method | 0 | 🔄 [wip] | 001 | Group B | opus / high | FULL |
 | 003 | Update `.claude/` references to the legacy agent (main session only) | 0 | ✅ [done] | 001, 002 | Group C (main session) | sonnet / high | STANDARD |
 | 019 | Deploy Phase 0 to dev (runbook E1 + per-SHA go) | 0 | 🔲 [open] | 001, 002, 005, 006, 007, 008, 009 | Group D (alone) | sonnet / high | STANDARD |
