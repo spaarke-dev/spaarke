@@ -78,3 +78,12 @@ uac-r2 had already said (earlier that day) that `b64d988625` will be in its next
   - `/assets/app.js` is 1,621,612 bytes; SHA-256 starts `AF3FAFFCD434C31C`;
   - it contains "Show new messages" (034), `sprk_assignedparalegal1` (031), `threadId` (035), "Clear all" (032) and "No version history" (024, still present).
 - Live now: SPA `3067fb3bdc`, BFF `20129e985c`. Rollback: SPA `9d08576e63`.
+- uac-r2 BEFORE notice: the owner gave the go "BFF deploy 3067fb3bdc". The dev BFF swap from `20129e985c` starts 00:09Z 2026-11-25. Its only server change is ebilling #3073; external routes are unchanged. E2E waits for the LIVE notice, because traffic before it falls in the restart window.
+- uac-r2 LIVE notice: dev BFF `3067fb3bdc` since 00:09:50Z 2026-11-25.
+  - Hashes 4/4, `/healthz` 200.
+  - Signed-in checks as expected (preview-url 403, unknown route 404).
+  - External routes unchanged from `20129e985c`.
+  - Live pair: SPA `3067fb3bdc` + BFF `3067fb3bdc`.
+  - **GATE PASS** (window 00:09:50Z–00:40Z):
+    - 27 requests; the only 5xx is the known `/healthz/catalog` drift.
+    - External: 9 requests, all 2xx; 0 column-not-permitted; 0 exceptions after start.
