@@ -1,6 +1,6 @@
 # AI Chat Strategy: M365 Copilot + SprkChat
 
-> **Note**: This is a strategy/positioning document. For the current SprkChat technical architecture, see [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md). For the current M365 Copilot integration architecture, see [`docs/architecture/M365-COPILOT-INTEGRATION-ARCHITECTURE.md`](../architecture/M365-COPILOT-INTEGRATION-ARCHITECTURE.md).
+> **Note**: This is a strategy/positioning document. For the current SprkChat technical architecture, see [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md). For how Spaarke reaches Microsoft Copilot today, see [`docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md`](../architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md); the April agent this document assumed was retired on 2026-11-25.
 >
 > **Status**: Active — Strategic positioning
 > **Date**: 2026-03-16
