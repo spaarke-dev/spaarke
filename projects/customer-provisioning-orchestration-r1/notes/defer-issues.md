@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open — needs owner ruling (role change) |
+| **Status** | Done — PR #3169 (`cb3c37def0`, 2026-11-25; owner ruling "Yes, include it"); applied on spaarkedev1; ships in SpaarkeMaster 1.3.3.0 |
 | **Urgency** | next-round (before the demo uses typed contacts interactively) |
 | **Filed** | 2026-11-25 |
 | **Source** | PR #3108 (data plan D4) implementation; confirmed on master role XML 2026-11-25 |
