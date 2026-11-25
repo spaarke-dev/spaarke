@@ -175,7 +175,22 @@ The platform's C# engine (`ComposeShadowPatchEngine`) anchors by paragraph id, a
 | B. Port to C# in the BFF (the specialist program's original T2 plan) | No new runtime | Two implementations to keep identical; port effort (about 1,600 lines of engines plus tests) |
 | C. Adapt `ComposeShadowPatchEngine` | Exists in C# | Anchoring model differs; still needs the plan → anchor step and the table and checks |
 
-Lean: **A**, decided after a spike (§9 phase 0).
+**Decision (owner, 2026-11-25): A**, the accelerator's Python engines in a Container Apps Job. Owner approval for the first Container Apps Job is given under ADR-052:76–77.
+
+**Why A over a C# port:**
+- **One engine, no drift.** It is the same code Cowork runs, so the accelerator's 47 engine tests and golden fixtures apply unchanged, and its OOXML fixes reach the server automatically.
+- **Isolation.** Counterparty `.docx` files (untrusted zip/XML) are parsed in a throwaway container, not inside the BFF process (ADR-052 F4).
+- **Speed.** The engines are built and tested (21 adversarial defects fixed), so we skip porting about 1,670 lines plus tests.
+- **ADR-052's usual cost doesn't apply.** The engines need no BFF code, so nothing moves to shared libraries.
+- **The cost is a one-time platform setup.** That means the first Container Apps environment and Job per stamp (Bicep), a registry, an image build with a CVE scan in CI, Python + `lxml` patching, and a provisioning-pipeline step.
+
+**Conditions:**
+1. **A pure engine.** No BFF code, no AI, no secrets, no network beyond blob storage. It runs as the stamp's user-assigned managed identity, app-only, and never calls BFF endpoints (`ADR-052:66`).
+2. **The flow.** The BFF run job stages the source `.docx` and the edit plan in blob storage. A queue message carries ids only, never document content (ADR-004), and the job is triggered by a KEDA Service Bus scaler. The job runs `segment_clauses` / `ooxml_redline` / `summary_table` / `check_outputs` and writes the redline, external and clean `.docx` files plus the check report to blob storage. It then posts a completion message, and the BFF run job resumes at Persist. The engines' JSON-in/JSON-out CLI contract is the interface.
+3. **A Phase 0 spike proves the hosting:** start-up latency, the `lxml` image, the managed-identity blob read and write, a CVE-clean image, and identical output to the accelerator's golden fixtures.
+4. **Coordinate with the accelerator.** Its design §6.3 plans "C# twins in the BFF". That changes to "the server hosts the same Python engines", and Cowork may later call this hosted engine through the connector.
+
+Rejected: **B** (C# port: two implementations to keep identical, slower to a first output, untrusted parsing in-process). Also rejected: **C** (`ComposeShadowPatchEngine`: a different anchoring model, and no plan-to-anchor step, table or checks).
 
 **Review content.** Review against the **one NDA standard** (the accelerator's topic-keyed playbook is recommended as master, still an open owner decision). Today's model step is the `agreement-review` Action, which must become callable app-only: `agreement-classify` and `agreement-review` run only inside a chat session (`SessionDispatchOrchestrator`) today. The step must write an edit plan rather than flagged sections alone. Later, `specialist-legal-agents-r1` supplies the attorney profile layers.
 
@@ -236,13 +251,13 @@ The alternative, migrating before eBilling's UAT, saves one UAT cycle but tests 
 | Harness contract | None (invoice is closed) | — | Each request type would need its own pipeline |
 | Approve-then-resume | Task seam, Decision Record | New action | Nothing can wait for an attorney and continue |
 | MCP submit and status tools | mcp-r1 server | New tools | The Copilot/Teams door doesn't exist |
-| Engine host (if §5 A) | None | — | Server-side marked-up NDA impossible, or a port |
+| Engine host: Container Apps Job (§5 A, decided) | None (no Container Apps Jobs in `infra/`) | The engines themselves are reused unchanged | No server-side marked-up NDA without a port to C# |
 
 ## 9. Phasing (first cut)
 
 | Phase | Scope | Gate |
 |---|---|---|
-| **0 Spikes and cleanup** | (a) Python engines in a Container Apps Job vs a C# port. (b) App-only `agreement-review` writing an edit plan on 3 synthetic NDAs. (c) §10 cleanup items 1–8 | Engine host chosen; edit plan valid on all 3; cleanup PRs merged or filed |
+| **0 Spikes and cleanup** | (a) Container Apps Job hosting spike for the Python engines (§5 conditions 2–3). (b) App-only `agreement-review` writing an edit plan on 3 synthetic NDAs. (c) §10 cleanup items 1–8 | Job runs the engines from blob storage with identical golden-fixture output; edit plan valid on all 3; cleanup PRs merged or filed |
 | **1 Core + NDA via Front Door and Console** | Records, orchestrator, routing key, NDA harness, approval, Front Door return, Decision Record | An NDA submitted on the Front Door comes back marked up after approval, on dev |
 | **2 Email and Copilot doors** | Intake mailbox, classify-to-request, reply with attachments (threading checked), MCP submit/status tools | Same NDA end-to-end through email and through the agent |
 | **3 Invoice harness** | Move invoice orchestration onto the model (§7) | eBilling tests and end-to-end run unchanged |
@@ -267,7 +282,7 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 
 | ADR | Tension | Proposed path |
 |---|---|---|
-| ADR-052 | Hand-rolled orchestration of a human-gated flow; a possible Container Apps Job | **C (comply)** with the written reason (§4, decided 2026-11-25). The engine host needs owner approval if §5 A |
+| ADR-052 | Hand-rolled orchestration of a human-gated flow; the first Container Apps Job | **C (comply)** with the written reason (§4, decided 2026-11-25). Container Apps Job for the engines: owner-approved 2026-11-25 (§5), under the same guardrails as a Function (stamp managed identity, app-only, no BFF calls, per-stamp Bicep) |
 | ADR-028 A5 / ADR-052 identity | The background run acts with no user present | **C:** app-only, attributed to the request and the assigned attorney. The send is from the shared mailbox after a human approval |
 | ADR-049 | Exact-text anchoring in the NDA edit plan | **C** if ADR-049's scope is Compose only; confirm |
 | ADR-039 | Harness AI steps | **C:** closed catalogue; harnesses call cataloged Actions only |
@@ -276,7 +291,8 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 ## 12. Dependencies and coordination
 
 - **specialist-legal-agents-r1:** the NDA specialist and attorney profiles plug into the NDA harness later. That program's design §3.6 "Autonomous runs" is delivered here.
-- **Accelerator r1:** the engines, edit-plan schema and NDA standard (not on master yet; merge or vendor them). It also decides which NDA standard is the master.
+- **Accelerator r1:** the engines, edit-plan schema and NDA standard (not on master yet; merge or vendor them). It also decides which NDA standard is the master. **Its design §6.3 ("C# twins in the BFF") changes:** the server hosts the same Python engines in a Container Apps Job (§5). Tell the accelerator.
+- **Customer provisioning r1:** the per-stamp Container Apps environment, Job and registry need a provisioning step.
 - **Ontology r1:** columns on `sprk_servicerequest`; the request vs Inquiry distinction (owner: different concepts).
 - **eBilling r1:** §7 timing and the regression proof.
 - **External Access (Front Door):** the request record, document upload and the return message.
@@ -287,7 +303,7 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 
 1. ~~Project slug and name~~ **Decided 2026-11-25:** `spaarke-intake-pipeline-r1`.
 2. ~~Orchestration host~~ **Decided 2026-11-25: A**, BFF ADR-004 jobs + `sprk_processingjob` as the state machine, with the written reason (§4).
-3. NDA engines: Python in a Container Apps Job (lean) or a C# port? A spike decides.
+3. ~~NDA engines~~ **Decided 2026-11-25: A**, the Python engines in a Container Apps Job, with conditions and a Phase 0 hosting spike (§5). Owner approval under ADR-052:77 given.
 4. Invoice: move as phase 3, after eBilling UAT and before customer rollout (recommended), or earlier?
 5. Sending identity: the shared legal mailbox (recommended)?
 6. NDA standard master: the accelerator's playbook (recommended)? Carried from the NDA note.
