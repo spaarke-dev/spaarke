@@ -236,6 +236,7 @@ describe('OfficeNaaStrategy — silent only, the user gesture and the account ch
 
       const s = strategy({ requireSilentOnly: true });
       await s.acquireInteractive();
+      await s.acquire(); // the hand-off: the token the click returned (review fix round 1)
       await s.acquire();
 
       expect(pcaInstance.acquireTokenSilent).toHaveBeenLastCalledWith(expect.objectContaining({ account: chosen }));

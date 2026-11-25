@@ -18,6 +18,17 @@ const TENANT_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 /** The failure result of the `AuthStrategy` contract: no token, never a throw. */
 const NO_TOKEN: TokenResult = { accessToken: '', expiresOn: 0 };
 
+/**
+ * The tenant an account signs in to: its ID token's `tid` first, then `tenantId` (#1571 review K4). Under NAA,
+ * msal-browser builds the account from the Office host's account and takes `tenantId` from it, which for a B2B guest
+ * is the HOME tenant; the ID token's `tid` is the tenant the token was issued in. Matching on `tenantId` alone refused
+ * every guest under NAA.
+ */
+function accountTenant(account: AccountInfo): string {
+  const tid = account.idTokenClaims?.tid;
+  return typeof tid === 'string' && tid ? tid : account.tenantId;
+}
+
 /** MSAL `LogLevel.Info` — the level of the line that says whether the NAA bridge came up. */
 const MSAL_LOG_LEVEL_INFO = 2;
 
@@ -214,6 +225,13 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * stable when several accounts of the authority's tenant are cached, e.g. after an interactive sign-in chose one.
    */
   private _pageAccount: { homeAccountId: string; tenantId: string } | null = null;
+  /**
+   * The token the last interactive sign-in returned, handed to the next `acquire()` once (#1571 review F2): the
+   * provider's cache is then filled with the token the user just signed in for, not with a second silent request.
+   */
+  private _handoff: TokenResult | null = null;
+  /** Set by `requestFreshToken()`: the next silent step asks Entra for a new token, not MSAL's cached one. */
+  private _forceNextRefresh = false;
 
   /**
    * @param config Standard @spaarke/auth resolved config (clientId, authority,
@@ -236,22 +254,44 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * (`{ accessToken: '', expiresOn: 0 }`), and the host asks the user to sign in.
    */
   async acquire(): Promise<TokenResult> {
-    return this._acquire(!this._requireSilentOnly);
+    const handoff = this._handoff;
+    this._handoff = null;
+    if (handoff && handoff.expiresOn > Date.now() + EXPIRY_BUFFER_MS) return handoff;
+    const forceRefresh = this._forceNextRefresh;
+    this._forceNextRefresh = false;
+    return this._acquire(!this._requireSilentOnly, forceRefresh);
   }
 
   /**
    * Acquire a token, prompting the user when no token can be had silently. Call it ONLY from a user gesture (a click
    * on Sign in): it may open a popup, which a browser blocks outside a gesture. This is the one interactive path when
    * the strategy was built with `requireSilentOnly`; the NAA-to-popup fallback below runs here unchanged.
+   *
+   * Its silent step asks Entra for a NEW token (`forceRefresh`): a user who clicks Sign in after the server refused
+   * the session must not be handed MSAL's cached copy of the refused token (#1571 review F1). The token it returns is
+   * also what the next `acquire()` answers with, so the caller's cache is filled without a second request.
    */
   async acquireInteractive(): Promise<TokenResult> {
-    return this._acquire(true);
+    this._handoff = null;
+    this._forceNextRefresh = false;
+    const token = await this._acquire(true, true);
+    this._handoff = token.accessToken ? token : null;
+    return token;
   }
 
-  private async _acquire(interactive: boolean): Promise<TokenResult> {
+  /**
+   * Make the next `acquire()` ask Entra for a new token rather than MSAL's cached one, still silently. Call it before
+   * retrying a request the server answered 401: the cached token is the one it refused (#1571 review F1).
+   */
+  requestFreshToken(): void {
+    this._handoff = null;
+    this._forceNextRefresh = true;
+  }
+
+  private async _acquire(interactive: boolean, forceRefresh: boolean): Promise<TokenResult> {
     const msal = await this._ensureInitialized();
     if (!msal) return NO_TOKEN;
-    const token = await this._tryAcquireWith(msal, interactive);
+    const token = await this._tryAcquireWith(msal, interactive, forceRefresh);
     if (token) return token;
 
     // NAA cannot serve this app here (the host disabled the bridge, or Entra refused the brokered request: an app
@@ -263,7 +303,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
     if (interactive && this._isNaaActive && naaCannotServe(this._lastPopupError)) {
       const fallback = await this._switchToFallback();
       if (fallback) {
-        const retried = await this._tryAcquireWith(fallback, true);
+        const retried = await this._tryAcquireWith(fallback, true, forceRefresh);
         if (retried) return retried;
       }
     }
@@ -274,9 +314,14 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * Run the silent→popup acquisition ladder against a given MSAL instance. Shared by the primary
    * (NAA or fallback) attempt and the NAA-failure fallback retry so both paths validate/expire tokens
    * identically. Returns a validated TokenResult or null if both steps fail. With `interactive` false
-   * the ladder stops after the silent step: no interactive API is called.
+   * the ladder stops after the silent step: no interactive API is called. With `forceRefresh` the silent step asks
+   * Entra for a new token instead of returning MSAL's cached one.
    */
-  private async _tryAcquireWith(msal: IPublicClientApplication, interactive: boolean): Promise<TokenResult | null> {
+  private async _tryAcquireWith(
+    msal: IPublicClientApplication,
+    interactive: boolean,
+    forceRefresh: boolean
+  ): Promise<TokenResult | null> {
     const scopes = [this._config.bffApiScope];
     const account = this._pickAccount(msal);
 
@@ -286,9 +331,10 @@ export class OfficeNaaStrategy implements AuthStrategy {
       try {
         console.info(
           `[OfficeNaaStrategy] acquireTokenSilent naa=${this._isNaaActive} scope=${this._config.bffApiScope}` +
-            (account ? '' : ' (host account)')
+            (account ? '' : ' (host account)') +
+            (forceRefresh ? ' (force refresh)' : '')
         );
-        const result = await msal.acquireTokenSilent({ scopes, account: account ?? undefined, forceRefresh: false });
+        const result = await msal.acquireTokenSilent({ scopes, account: account ?? undefined, forceRefresh });
         const token = this._accept(result);
         if (token) return token;
       } catch (err) {
@@ -352,6 +398,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
   clearCache(): void {
     this._pageAccount = null;
+    this._handoff = null;
+    this._forceNextRefresh = false;
     if (!this._instance) return;
     // Under NAA, MSAL's clearCache() is unsupported (it throws), so the local cache is cleared directly.
     if (this._isNaaActive) {
@@ -376,6 +424,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
    * the Entra session may remain alive in that degraded path; the user's next interactive login resyncs.
    */
   async logout(): Promise<void> {
+    this._handoff = null;
+    this._forceNextRefresh = false;
     const msal = await this._ensureInitialized();
     if (!msal) return;
 
@@ -506,15 +556,18 @@ export class OfficeNaaStrategy implements AuthStrategy {
    *      used, not even as a login hint: a B2B guest's home-tenant account, or another user's, is never picked. The
    *      silent step then has no account (under NAA the Office host answers for its own user), and only a user's click
    *      can sign in.
+   * An account's tenant is its ID token's `tid`, else its `tenantId` (`accountTenant`: a guest under NAA).
    * When the authority names no tenant id (not a tenant GUID), there is nothing to match: the only cached account is
    * used, as before, and with several none is.
    */
   private _pickAccount(msal: IPublicClientApplication): AccountInfo | null {
     const accounts = msal.getAllAccounts();
-    const inScope = this._tenant ? accounts.filter(a => sameTenant(a.tenantId, this._tenant)) : accounts;
+    const inScope = this._tenant ? accounts.filter(a => sameTenant(accountTenant(a), this._tenant)) : accounts;
     const page = this._pageAccount;
     if (page) {
-      const same = inScope.find(a => a.homeAccountId === page.homeAccountId && sameTenant(a.tenantId, page.tenantId));
+      const same = inScope.find(
+        a => a.homeAccountId === page.homeAccountId && sameTenant(accountTenant(a), page.tenantId)
+      );
       if (same) return same;
     }
     return inScope.length === 1 ? (inScope[0] ?? null) : null;
@@ -533,7 +586,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
   private _accept(result: AuthenticationResult | null): TokenResult | null {
     const token = this._validate(result);
     if (token && result?.account?.homeAccountId) {
-      this._pageAccount = { homeAccountId: result.account.homeAccountId, tenantId: result.account.tenantId };
+      this._pageAccount = { homeAccountId: result.account.homeAccountId, tenantId: accountTenant(result.account) };
     }
     return token;
   }
