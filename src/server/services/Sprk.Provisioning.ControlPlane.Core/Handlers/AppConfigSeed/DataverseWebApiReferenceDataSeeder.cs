@@ -24,7 +24,14 @@
 //     diagnostic (which H12b records in the run's gate evidence); never written.
 //     A customer may tune classifier thresholds or cues; overwriting would
 //     silently undo that.
-// An inactive row with a source id counts as present (it is not recreated).
+//   - Row present but INACTIVE (statecode != 0) -> also DRIFT ("inactive"); it is
+//     not recreated and not reactivated (a customer may have retired it on purpose).
+//   - Row absent by id but a row with the same NATURAL KEY exists under a different
+//     id (event type code, agreement type key, triage category name) -> COLLISION:
+//     not created (it would duplicate the key, or shadow the customer's row), logged
+//     and returned in the diagnostic + evidence alongside drift. The step still
+//     succeeds; the operator decides. Product code that hard-codes the SOURCE id will
+//     not find the row on such a stamp - that is exactly what the report is for.
 // -----------------------------------------------------------------------------
 
 using System.Globalization;
@@ -134,6 +141,7 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
 
         var created = new List<string>();
         var drift = new List<string>();
+        var collisions = new List<string>();
         var unchanged = 0;
         var rowCount = 0;
 
@@ -142,23 +150,48 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
             try
             {
                 var existing = await ReadExistingAsync(envUri, token.Token, table, cancellationToken).ConfigureAwait(false);
+                var byNaturalKey = IndexByNaturalKey(table, existing);
                 foreach (var row in table.Rows)
                 {
                     rowCount++;
                     if (existing.TryGetValue(row.Id, out var current))
                     {
+                        var findings = new List<string>();
                         var differing = DifferingColumns(table, row, current);
-                        if (differing.Count == 0)
+                        if (differing.Count > 0)
+                        {
+                            findings.Add($"differs in {string.Join(", ", differing)}");
+                        }
+
+                        var state = StateCode(current);
+                        if (state != 0)
+                        {
+                            findings.Add($"is INACTIVE (statecode {state}) and was not reactivated");
+                        }
+
+                        if (findings.Count == 0)
                         {
                             unchanged++;
                             continue;
                         }
 
-                        var entry = $"{table.Table}/{row.Id} '{row.DisplayName}' differs in {string.Join(", ", differing)}";
+                        var entry = $"{table.Table}/{row.Id} '{row.DisplayName}' {string.Join(" and ", findings)}";
                         drift.Add(entry);
                         _logger.LogWarning(
                             "H12b reference-data drift (report only, row NOT overwritten): customer={CustomerId} {Drift}",
                             input.CustomerId, entry);
+                        continue;
+                    }
+
+                    var sourceKey = NaturalKeyOf(table, row.Values);
+                    if (sourceKey is not null && byNaturalKey.TryGetValue(sourceKey, out var occupiedBy))
+                    {
+                        var collision = $"{table.Table} '{row.DisplayName}' ({table.NaturalKey}='{sourceKey}'): a row with this key " +
+                                        $"already exists under id {occupiedBy}; source id {row.Id} was NOT created";
+                        collisions.Add(collision);
+                        _logger.LogWarning(
+                            "H12b reference-data natural-key COLLISION (report only, nothing written): customer={CustomerId} {Collision}",
+                            input.CustomerId, collision);
                         continue;
                     }
 
@@ -175,7 +208,8 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
                 return AppConfigSeederResult.Failed(
                     $"reference-data seed FAILED in table '{table.Table}': {ex.GetType().Name}: {ex.Message} " +
                     $"({created.Count} row(s) created before the failure this invocation.) " +
-                    "Rows are created only when absent, by id, and existing rows are never written, so a full retry is safe.");
+                    "Existing rows are never written. A re-run reads the table again: rows already created are seen and " +
+                    "skipped, and a row that now exists under another id is reported as a collision.");
             }
         }
 
@@ -184,17 +218,27 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
             ? "no drift"
             : $"{drift.Count} row(s) DRIFTED from source and were left unchanged (report only): " +
               string.Join("; ", listed) + (drift.Count > listed.Count ? $"; and {drift.Count - listed.Count} more" : string.Empty);
-        var evidence = JsonDocument.Parse(JsonSerializer.Serialize(new { created, unchanged, drift })).RootElement.Clone();
+        var collisionText = collisions.Count == 0
+            ? string.Empty
+            : $", {collisions.Count} row(s) COLLIDED on a natural key already held by another id and were not created (report only): " +
+              string.Join("; ", collisions.Take(MaxDriftListed)) +
+              (collisions.Count > MaxDriftListed ? $"; and {collisions.Count - MaxDriftListed} more" : string.Empty);
+        var evidence = JsonDocument.Parse(JsonSerializer.Serialize(new { created, unchanged, drift, collisions })).RootElement.Clone();
         return AppConfigSeederResult.Ok(
             $"reference-data seed OK — {rowCount} source row(s) across {tables.Count} table(s): " +
-            $"{created.Count} created, {unchanged} unchanged, {driftText}.",
+            $"{created.Count} created, {unchanged} unchanged, {driftText}{collisionText}.",
             evidence);
     }
 
     private async Task<Dictionary<Guid, JsonElement>> ReadExistingAsync(
         Uri envUri, string bearerToken, ReferenceTable table, CancellationToken cancellationToken)
     {
-        var select = string.Join(",", new[] { table.PrimaryKey }.Concat(table.Columns));
+        // statecode: an inactive row is reported, never silently counted as unchanged. The natural-key column is part of
+        // table.Columns for every shipped table; it is unioned in explicitly so a collision check never reads a column it did not select.
+        var select = string.Join(
+            ",",
+            new[] { table.PrimaryKey }.Concat(table.Columns).Append(table.NaturalKey ?? table.PrimaryKey).Append("statecode")
+                .Distinct(StringComparer.Ordinal));
         Uri? next = new Uri(envUri, $"/api/data/v9.2/{table.EntitySet}?$select={select}");
         var existing = new Dictionary<Guid, JsonElement>();
 
@@ -246,6 +290,37 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
                 $"POST {table.EntitySet} ({row.Id} '{row.DisplayName}') returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 400)}");
         }
     }
+
+    /// <summary>Existing rows indexed by normalised natural key (first wins on a duplicate); empty when the table has none.</summary>
+    private static Dictionary<string, Guid> IndexByNaturalKey(ReferenceTable table, Dictionary<Guid, JsonElement> existing)
+    {
+        var index = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        foreach (var (id, row) in existing)
+        {
+            if (NaturalKeyOf(table, row) is { } key)
+            {
+                index.TryAdd(key, id);
+            }
+        }
+
+        return index;
+    }
+
+    /// <summary>The row's natural key, trimmed and case-folded (Dataverse text keys compare case-insensitively); null when absent or blank.</summary>
+    private static string? NaturalKeyOf(ReferenceTable table, JsonElement row)
+        => table.NaturalKey is { } column && row.TryGetProperty(column, out var value) ? Normalise(value) : null;
+
+    private static string? NaturalKeyOf(ReferenceTable table, IReadOnlyDictionary<string, JsonElement> values)
+        => table.NaturalKey is { } column && values.TryGetValue(column, out var value) ? Normalise(value) : null;
+
+    private static string? Normalise(JsonElement value)
+        => value.ValueKind == JsonValueKind.String && value.GetString()?.Trim() is { Length: > 0 } text
+            ? text.ToUpperInvariant()
+            : null;
+
+    /// <summary>The row's statecode (0 = active); a row that did not return the column is treated as active.</summary>
+    private static int StateCode(JsonElement row)
+        => row.TryGetProperty("statecode", out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt32() : 0;
 
     /// <summary>The source columns whose value differs from the existing row (null and empty text are equal).</summary>
     internal static IReadOnlyList<string> DifferingColumns(ReferenceTable table, ReferenceRow source, JsonElement existing)

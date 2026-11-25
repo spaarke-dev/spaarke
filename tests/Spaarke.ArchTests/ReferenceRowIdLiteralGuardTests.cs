@@ -7,7 +7,8 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// ISS-039 (data-setup plan, work item D2): a Dataverse row id hard-coded in product code must be a row that every
 /// customer stamp receives, i.e. a primary key in <c>scripts/seed-data/reference/*.json</c> (seeded by H12b), or be listed in
-/// the ratchet baseline with a written reason.
+/// the ratchet baseline with a written reason. An id that is a solution component id (a form, view or app module that ships in
+/// <c>src/dataverse/solutions/**</c>) is portable too: component ids are preserved on import, so every stamp has it.
 /// </summary>
 /// <remarks>
 /// <para><b>Why.</b> Product code hard-codes dev row ids of <c>sprk_eventtype_ref</c> (the "Task" type in
@@ -18,14 +19,15 @@ namespace Spaarke.ArchTests;
 /// <c>src/server</c>, <c>src/client</c> and <c>src/solutions/*/src</c>, excluding build output, tests (<c>__tests__</c>, <c>tests</c>,
 /// <c>*.test.*</c>, <c>*.spec.*</c>, <c>*.Tests</c> projects) and the explicit <see cref="HarnessOnly"/> files. A dev-pattern id
 /// (<c>xxxxxxxx-xxxx-f011-8406-xxxxxxxxxxxx</c>) in a scanned file must be a seed-file primary key or in
-/// <c>ReferenceRowIdLiteral.baseline.txt</c> (<c>path | id | reason</c>). The list only shrinks: a baseline entry whose id is no
-/// longer in its file, or whose id is now a seed key, fails until the line is deleted.</para>
+/// <c>ReferenceRowIdLiteral.baseline.txt</c> (<c>path | id | reason</c>), unless it appears in the solution source. The list only shrinks: a
+/// baseline entry whose id is no longer in its file, or whose id is now a seed key or a solution component id, fails until the line is
+/// deleted.</para>
 /// <para><b>Known limit:</b> the pattern is the dev environment's id shape for rows created in its first 2026 generation
 /// (<c>-f011-8406-</c>). Rows created later carry other suffixes (<c>-f111-...</c>) and are not detected; widening the pattern means
 /// baselining dozens of grid-configuration ids in the external SPA, tracked separately. A guard for every id would need the id shape
 /// of every environment, which Dataverse does not promise.</para>
-/// <para><b>Controls:</b> a planted unlisted id fires; a seed key, a baselined id, a harness-only file and a test file do not; a stale
-/// baseline line fires.</para>
+/// <para><b>Controls:</b> a planted unlisted id fires; a seed key, a solution component id, a baselined id, a harness-only file and a test
+/// file do not; a stale baseline line fires.</para>
 /// </remarks>
 public sealed class ReferenceRowIdLiteralGuardTests
 {
@@ -43,6 +45,7 @@ public sealed class ReferenceRowIdLiteralGuardTests
 
     private const string BaselineFile = "tests/Spaarke.ArchTests/ReferenceRowIdLiteral.baseline.txt";
     private const string SeedDirectory = "scripts/seed-data/reference";
+    private const string SolutionDirectory = "src/dataverse/solutions";
 
     /// <summary>
     /// Product-code files that carry dev ids on purpose because they are harness-only (never shipped data), each with its reason.
@@ -117,16 +120,18 @@ public sealed class ReferenceRowIdLiteralGuardTests
         IReadOnlyList<Hit> hits,
         ISet<string> seedIds,
         IReadOnlyDictionary<(string Path, string Id), string> baseline,
-        IReadOnlySet<string> harnessOnlyPaths)
+        IReadOnlySet<string> harnessOnlyPaths,
+        ISet<string>? solutionIds = null)
     {
+        solutionIds ??= new HashSet<string>();
         var problems = new List<string>();
         var scoped = hits.Where(h => !harnessOnlyPaths.Contains(h.Path)).ToList();
 
-        foreach (var group in scoped.Where(h => !seedIds.Contains(h.Id) && !baseline.ContainsKey((h.Path, h.Id)))
+        foreach (var group in scoped.Where(h => !seedIds.Contains(h.Id) && !solutionIds.Contains(h.Id) && !baseline.ContainsKey((h.Path, h.Id)))
                      .GroupBy(h => (h.Path, h.Id)))
         {
             problems.Add($"{group.Key.Path}:{group.First().Line}: hard-codes Dataverse row id {group.Key.Id}, which is not a primary key in " +
-                         $"{SeedDirectory}/*.json, so a customer stamp will not have that row. Add the table to the reference export " +
+                         $"{SeedDirectory}/*.json or a component of the solution source ({SolutionDirectory}), so a customer stamp will not have that row. Add the table to the reference export " +
                          $"(Export-ReferenceData.ps1) and re-export, or stop hard-coding the id; as a last resort add '{group.Key.Path} | {group.Key.Id} | <reason>' " +
                          $"to {BaselineFile} with an owner decision.");
         }
@@ -138,9 +143,9 @@ public sealed class ReferenceRowIdLiteralGuardTests
             {
                 problems.Add($"{BaselineFile}: stale entry '{key.Path} | {key.Id}': the id is no longer in that file. Delete the line (the list only shrinks).");
             }
-            else if (seedIds.Contains(key.Id))
+            else if (seedIds.Contains(key.Id) || solutionIds.Contains(key.Id))
             {
-                problems.Add($"{BaselineFile}: entry '{key.Path} | {key.Id}': the id is now a seed-file primary key. Delete the line.");
+                problems.Add($"{BaselineFile}: entry '{key.Path} | {key.Id}': the id is now a seed-file primary key or a solution component id. Delete the line.");
             }
         }
 
@@ -230,7 +235,33 @@ public sealed class ReferenceRowIdLiteralGuardTests
         return ids;
     }
 
-    [Fact(DisplayName = "ISS-039: every dev row id hard-coded in product code is a seeded reference row or in the ratchet baseline")]
+    /// <summary>
+    /// Every dev-pattern id in the solution source (file names and XML content): forms, views, app modules and the like. These ids
+    /// are preserved when the solution is imported, so product code that references one works on every stamp.
+    /// </summary>
+    internal static HashSet<string> LoadSolutionComponentIds()
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in Walk(Abs(SolutionDirectory)))
+        {
+            foreach (Match m in DevRowId.Matches(Path.GetFileName(file)))
+            {
+                ids.Add(m.Value.ToLowerInvariant());
+            }
+
+            if (string.Equals(Path.GetExtension(file), ".xml", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (Match m in DevRowId.Matches(File.ReadAllText(file)))
+                {
+                    ids.Add(m.Value.ToLowerInvariant());
+                }
+            }
+        }
+
+        return ids;
+    }
+
+    [Fact(DisplayName = "ISS-039: every dev row id hard-coded in product code is a seeded reference row, a solution component or in the ratchet baseline")]
     public void EveryHardCodedDevRowId_IsASeededRow_OrBaselined()
     {
         var seedIds = LoadSeedIds();
@@ -242,8 +273,11 @@ public sealed class ReferenceRowIdLiteralGuardTests
         var hits = FindHits(files.Select(f => (f, File.ReadAllText(Abs(f)))));
         Assert.Contains(hits, h => h.Path.EndsWith("PortfolioService.cs", StringComparison.Ordinal) && seedIds.Contains(h.Id));
 
+        var solutionIds = LoadSolutionComponentIds();
+        Assert.Contains("eaf22dcb-9aff-f011-8406-7c1e525abd8b", solutionIds); // an Event main form: proves the solution scan is not vacuous
+
         var baseline = ParseBaseline(File.ReadAllLines(Abs(BaselineFile)));
-        var problems = FindProblems(hits, seedIds, baseline, HarnessOnly.Keys.ToHashSet(StringComparer.Ordinal));
+        var problems = FindProblems(hits, seedIds, baseline, HarnessOnly.Keys.ToHashSet(StringComparer.Ordinal), solutionIds);
 
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
@@ -302,6 +336,22 @@ public sealed class ReferenceRowIdLiteralGuardTests
         var problems = FindProblems(hits, new HashSet<string> { SeedId }, baseline, new HashSet<string> { "src/client/office-addins/Demo.ts" });
 
         Assert.Empty(problems);
+    }
+
+    [Fact(DisplayName = "ISS-039 control (must not fire): an id that is a solution component (an Event form) is portable, a lookalike is not")]
+    public void Control_SolutionComponentId_DoesNotFire_ButAnUnlistedOneStillDoes()
+    {
+        // eaf22dcb-... is the id of an sprk_event main form that ships in SpaarkeMaster (FormXml/main/{eaf22dcb-...}.xml).
+        const string FormId = "eaf22dcb-9aff-f011-8406-7c1e525abd8b";
+        var hits = FindHits([("src/solutions/EventsPage/src/config/forms.ts", $"formId: '{FormId}'")]);
+
+        Assert.Empty(FindProblems(hits, new HashSet<string> { SeedId }, NoBaseline, NoHarness, new HashSet<string> { FormId }));
+
+        // Same hit without the solution set (the old behaviour) fires, so the pass above is the solution set's doing.
+        Assert.Single(FindProblems(hits, new HashSet<string> { SeedId }, NoBaseline, NoHarness));
+
+        // The set is read from the real solution source and contains that form.
+        Assert.Contains(FormId, LoadSolutionComponentIds());
     }
 
     [Fact(DisplayName = "ISS-039 control (must fire): a stale or now-seeded baseline entry fails, so the list only shrinks")]

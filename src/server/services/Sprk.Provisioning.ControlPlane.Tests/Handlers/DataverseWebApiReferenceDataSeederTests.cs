@@ -4,8 +4,8 @@
 // ISS-039: a new stamp had no rows in sprk_eventtype_ref / sprk_agreementtype /
 // sprk_triagecategory while product code hard-codes dev event-type row ids.
 // DataverseWebApiReferenceDataSeeder creates the rows with their fixed primary
-// keys (create-if-missing) and REPORTS drift on existing rows without ever
-// writing them (owner decision A, data-setup-plan.md). ADR-038: a real HttpClient
+// keys (create-if-missing) and REPORTS drift, inactive rows and natural-key collisions
+// on existing rows without ever writing them (owner decision A, data-setup-plan.md). ADR-038: a real HttpClient
 // over a hand-rolled fake handler (no Mock<HttpMessageHandler>), parity with the
 // sibling seeder tests.
 // -----------------------------------------------------------------------------
@@ -113,6 +113,118 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         fake.Posts.Should().NotContain(p => p.Body.Contains(IdA), "the drifted row is not re-created either");
     }
 
+    // ---- natural-key collisions (review finding 2) --------------------------------------------------------------
+
+    [Fact]
+    public async Task ISS039_ARowThatExistsUnderADifferentId_WithTheSameNaturalKey_IsReportedAsACollision_AndNotCreated()
+    {
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_things"] =
+        [
+            // Same name as source Alpha, different id, different case and padding. Beta is absent and unrelated -> created.
+            "{\"sprk_thingid\":\"cccccccc-0000-f011-8406-000000000003\",\"sprk_cue\":null,\"sprk_enabled\":true,\"sprk_name\":\"  ALPHA \",\"sprk_note\":null,\"sprk_weight\":1}",
+        ];
+
+        var result = await BuildSeeder(fake, SmallTables).SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, "a collision is reported, it does not fail the step");
+        result.Diagnostic.Should().Contain("1 created").And.Contain("COLLIDED")
+            .And.Contain("cccccccc-0000-f011-8406-000000000003").And.Contain(IdA).And.Contain("sprk_thing 'Alpha'");
+        fake.Methods.Should().NotContain(m => m == HttpMethod.Patch || m == HttpMethod.Put || m == HttpMethod.Delete);
+        fake.Posts.Should().ContainSingle("only Beta is created").Which.Body.Should().Contain(IdB);
+        fake.Posts.Should().NotContain(p => p.Body.Contains(IdA), "creating Alpha would duplicate the natural key");
+        result.Evidence!.Value.GetProperty("collisions").GetArrayLength().Should().Be(1);
+        result.Evidence!.Value.GetProperty("drift").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ISS039_AnExistingRowWithADifferentNaturalKey_IsNotACollision_TheSourceRowIsCreated()
+    {
+        // Must-not-fire control: a row under another id whose key differs does not block the create.
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_things"] =
+        [
+            "{\"sprk_thingid\":\"cccccccc-0000-f011-8406-000000000003\",\"sprk_cue\":null,\"sprk_enabled\":true,\"sprk_name\":\"Gamma\",\"sprk_note\":null,\"sprk_weight\":1}",
+        ];
+
+        var result = await BuildSeeder(fake, SmallTables).SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("2 created").And.NotContain("COLLIDED");
+        fake.Posts.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task ISS039_AnEventTypeCodeHeldByAnotherId_IsACollision_OnTheRealEventTypeTable()
+    {
+        // sprk_eventtype_ref.sprk_eventtypecode is a Dataverse alternate key: a POST of the "Task" source id would be
+        // refused (409). The seeder must see the other row and report it instead of failing the step.
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_eventtype_refs"] =
+        [
+            "{\"sprk_eventtype_refid\":\"dddddddd-0000-f011-8406-000000000004\",\"sprk_eventtypecode\":\"task\",\"sprk_name\":\"Task (stamp-made)\"}",
+        ];
+
+        var result = await BuildSeeder(fake, ReferenceDataSet.Tables).SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("COLLIDED").And.Contain("sprk_eventtypecode='TASK'")
+            .And.Contain("dddddddd-0000-f011-8406-000000000004").And.Contain("124f5fc9-98ff-f011-8406-7c1e525abd8b");
+        fake.Posts.Should().NotContain(p => p.Body.Contains("124f5fc9-98ff-f011-8406-7c1e525abd8b"));
+        fake.Posts.Should().HaveCount(ReferenceDataSet.Tables.Sum(t => t.Rows.Count) - 1,
+            "every other row of every table is still created");
+    }
+
+    [Fact]
+    public async Task ISS039_AnAgreementTypeKeyHeldByAnotherId_IsACollision_OnTheRealAgreementTypeTable()
+    {
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_agreementtypes"] =
+        [
+            "{\"sprk_agreementtypeid\":\"eeeeeeee-0000-f011-8406-000000000005\",\"sprk_key\":\"General\",\"sprk_name\":\"General agreement\"}",
+        ];
+
+        var result = await BuildSeeder(fake, ReferenceDataSet.Tables).SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("COLLIDED").And.Contain("sprk_key='GENERAL'")
+            .And.Contain("eeeeeeee-0000-f011-8406-000000000005");
+        fake.Posts.Should().HaveCount(ReferenceDataSet.Tables.Sum(t => t.Rows.Count) - 1);
+    }
+
+    // ---- inactive rows (review finding 3) ------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ISS039_AnInactiveExistingRow_IsReportedAsDrift_NotUnchanged_AndNotReactivated()
+    {
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_things"] =
+        [
+            // Alpha is identical to source but deactivated (statecode 1). Beta is identical and active.
+            "{\"sprk_thingid\":\"" + IdA + "\",\"statecode\":1,\"sprk_cue\":\"line one\\nline two\",\"sprk_enabled\":true,\"sprk_name\":\"Alpha\",\"sprk_note\":null,\"sprk_weight\":1.5}",
+            "{\"sprk_thingid\":\"" + IdB + "\",\"statecode\":0,\"sprk_cue\":null,\"sprk_enabled\":false,\"sprk_name\":\"Beta\",\"sprk_note\":\"n\",\"sprk_weight\":40}",
+        ];
+
+        var result = await BuildSeeder(fake, SmallTables).SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, "an inactive row is reported, it does not fail the step");
+        result.Diagnostic.Should().Contain("1 unchanged").And.Contain("DRIFTED")
+            .And.Contain($"sprk_thing/{IdA} 'Alpha'").And.Contain("INACTIVE").And.Contain("not reactivated");
+        fake.Methods.Should().OnlyContain(m => m == HttpMethod.Get, "an inactive row is neither recreated nor reactivated");
+    }
+
+    [Fact]
+    public async Task ISS039_TheExistingRowRead_SelectsStateCode_AndTheNaturalKeyColumn()
+    {
+        var fake = new FakeDataverseHandler();
+
+        await BuildSeeder(fake, ReferenceDataSet.Tables).SeedAsync(Input(), CancellationToken.None);
+
+        fake.Gets.Should().OnlyContain(u => u.Query.Contains("statecode"));
+        fake.Gets.Single(u => u.AbsolutePath.EndsWith("sprk_eventtype_refs", StringComparison.Ordinal)).Query.Should().Contain("sprk_eventtypecode");
+        fake.Gets.Single(u => u.AbsolutePath.EndsWith("sprk_agreementtypes", StringComparison.Ordinal)).Query.Should().Contain("sprk_key");
+    }
+
     [Fact]
     public async Task ISS039_AFailedCreate_FailsTheScope_WithStatusAndBody_AndStopsAtTheFirstRefusal()
     {
@@ -121,7 +233,8 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         var result = await BuildSeeder(fake, SmallTables).SeedAsync(Input(), CancellationToken.None);
 
         result.Status.Should().Be(AppConfigSeederStatus.Failed);
-        result.Diagnostic.Should().Contain("400").And.Contain("POST sprk_things").And.Contain("full retry is safe");
+        result.Diagnostic.Should().Contain("400").And.Contain("POST sprk_things")
+            .And.Contain("A re-run reads the table again").And.NotContain("full retry is safe");
         fake.Posts.Should().HaveCount(1);
     }
 
@@ -178,7 +291,10 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         tables.Single(t => t.Table == "sprk_triagecategory").Columns
             .Should().NotContain(["sprk_measuredrecall", "sprk_labelledsetsize", "sprk_recallmeasuredon"]);
 
-        ReferenceDataSet.ContentHash.Should().MatchRegex("^[0-9a-f]{64}$");
+        // Natural keys: the two Dataverse alternate keys, and the display name for the table that has none.
+        tables.Single(t => t.Table == "sprk_eventtype_ref").NaturalKey.Should().Be("sprk_eventtypecode");
+        tables.Single(t => t.Table == "sprk_agreementtype").NaturalKey.Should().Be("sprk_key");
+        tables.Single(t => t.Table == "sprk_triagecategory").NaturalKey.Should().Be("sprk_name");
     }
 
     [Fact]
@@ -235,6 +351,7 @@ public sealed class DataverseWebApiReferenceDataSeederTests
     {
         public Dictionary<string, string[]> Existing { get; } = new(StringComparer.Ordinal);
         public List<HttpMethod> Methods { get; } = new();
+        public List<Uri> Gets { get; } = new();
         public List<(Uri Uri, string Body)> Posts { get; } = new();
         public HttpStatusCode PostStatus { get; init; } = HttpStatusCode.NoContent;
         public HttpStatusCode GetStatus { get; init; } = HttpStatusCode.OK;
@@ -247,6 +364,7 @@ public sealed class DataverseWebApiReferenceDataSeederTests
 
             if (request.Method == HttpMethod.Get)
             {
+                Gets.Add(request.RequestUri);
                 if (GetStatus != HttpStatusCode.OK)
                 {
                     return Json(GetStatus, "{\"error\":{\"message\":\"denied\"}}");

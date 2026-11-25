@@ -22,13 +22,18 @@ using System.Text.Json;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 
-/// <summary>One reference table: its Web API entity set, primary-key column, seeded columns and rows.</summary>
+/// <summary>
+/// One reference table: its Web API entity set, primary-key column, seeded columns and rows. <c>NaturalKey</c> is the
+/// column that identifies a row for a human (for event types and agreement types it is an alternate key Dataverse
+/// enforces); the seeder uses it to spot a row that already exists under a DIFFERENT id.
+/// </summary>
 internal sealed record ReferenceTable(
     string Table,
     string EntitySet,
     string PrimaryKey,
     IReadOnlyList<string> Columns,
-    IReadOnlyList<ReferenceRow> Rows);
+    IReadOnlyList<ReferenceRow> Rows,
+    string? NaturalKey = null);
 
 /// <summary>One source row: its primary key and its column values (null values are kept as JSON null).</summary>
 internal sealed record ReferenceRow(Guid Id, IReadOnlyDictionary<string, JsonElement> Values)
@@ -54,16 +59,23 @@ internal static class ReferenceDataSet
         "sprk_triagecategory",
     ];
 
-    private static readonly Lazy<(IReadOnlyList<ReferenceTable> Tables, string Hash)> Loaded = new(LoadEmbedded);
+    /// <summary>
+    /// The natural-key column per table. <c>sprk_eventtypecode</c> and <c>sprk_key</c> are Dataverse alternate keys
+    /// (SpaarkeMaster Entity.xml); <c>sprk_triagecategory</c> has none, so its display name stands in. A table not listed
+    /// here falls back to <c>sprk_name</c> when it has that column.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> NaturalKeyColumns =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["sprk_eventtype_ref"] = "sprk_eventtypecode",
+            ["sprk_agreementtype"] = "sprk_key",
+            ["sprk_triagecategory"] = "sprk_name",
+        };
+
+    private static readonly Lazy<IReadOnlyList<ReferenceTable>> Loaded = new(LoadEmbedded);
 
     /// <summary>The parsed tables (throws <see cref="InvalidOperationException"/> if an embedded file is missing — a build defect).</summary>
-    internal static IReadOnlyList<ReferenceTable> Tables => Loaded.Value.Tables;
-
-    /// <summary>
-    /// Content hash of every embedded file (line endings normalised). Folded into H12b's idempotency key so a change to
-    /// the reference data — new rows, an edited value — makes a completed H12b run re-execute.
-    /// </summary>
-    internal static string ContentHash => Loaded.Value.Hash;
+    internal static IReadOnlyList<ReferenceTable> Tables => Loaded.Value;
 
     /// <summary>Parses one exported file. Exposed for tests.</summary>
     internal static ReferenceTable Parse(string json)
@@ -86,19 +98,21 @@ internal static class ReferenceDataSet
             rows.Add(new ReferenceRow(id, values));
         }
 
+        var table = root.GetProperty("table").GetString()!;
+        var naturalKey = NaturalKeyColumns.TryGetValue(table, out var configured) ? configured : "sprk_name";
         return new ReferenceTable(
-            root.GetProperty("table").GetString()!,
+            table,
             root.GetProperty("entitySet").GetString()!,
             primaryKey,
             columns,
-            rows);
+            rows,
+            columns.Contains(naturalKey, StringComparer.Ordinal) ? naturalKey : null);
     }
 
-    private static (IReadOnlyList<ReferenceTable>, string) LoadEmbedded()
+    private static IReadOnlyList<ReferenceTable> LoadEmbedded()
     {
         var assembly = typeof(ReferenceDataSet).Assembly;
         var tables = new List<ReferenceTable>(TableNames.Count);
-        var combined = new System.Text.StringBuilder();
         foreach (var name in TableNames)
         {
             var resource = $"{ResourcePrefix}{name}.json";
@@ -109,9 +123,8 @@ internal static class ReferenceDataSet
             using var reader = new StreamReader(stream);
             var text = reader.ReadToEnd();
             tables.Add(Parse(text));
-            combined.Append(name).Append('\n').Append(text).Append('\n');
         }
 
-        return (tables, ArtifactVersion.Of(combined.ToString()));
+        return tables;
     }
 }

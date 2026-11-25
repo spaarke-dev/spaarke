@@ -64,11 +64,11 @@
 //                    profiling warrants.
 //   Level 3 (durable): This handler scans ProvisioningRun.CompletedPhases
 //                      for an entry with (Phase == "H12b", IdempotencyKey ==
-//                      h12b-{customerId}-{manifestHash}-{referenceDataHash}) — returns
+//                      h12b-{customerId}-{manifestHash}) — returns
 //                      HandlerResult.Success no-op on hit. Cosmos writes are
 //                      ETag-guarded via ReplaceRunAsync (FR-23 I5).
 //
-//   Idempotency key format: h12b-{customerId}-{manifestHash}-{referenceDataHash}
+//   Idempotency key format: h12b-{customerId}-{manifestHash}
 //     - customerId: partition-key tie so cross-customer runs never collide.
 //     - manifestHash: SHA-256 of scripts/seed-data/manifest.yaml contents.
 //       Same-manifest re-invocation → same key → durable no-op. Manifest
@@ -77,11 +77,6 @@
 //       H12a's ISeedManifestReader (the EMBEDDED manifest — the Worker
 //       publish has no scripts/ folder), so both handlers share ONE
 //       manifest state by construction.
-//     - referenceDataHash (ISS-039): SHA-256 of the embedded Tier 1 reference-data
-//       files (event types, agreement types, triage categories). A change to
-//       them — new rows, an edited value — changes the key, so a run that already
-//       completed H12b re-executes it and the reference-data seeder creates the
-//       missing rows (existing rows are never overwritten; drift is reported).
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
@@ -186,7 +181,7 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
         }
 
         var manifestHash = ((SeedManifestReadResult.Success)manifestRead).ContentHash;
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifestHash, ReferenceDataSet.ContentHash);
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifestHash);
 
         // (2) Load the ProvisioningRun. §4D I3: partition-key predicate
         // required by construction (repository shape enforces it).
@@ -343,12 +338,11 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     /// Convenience helper for tests + code-review greppability: builds the
     /// idempotency key string with the exact H12b format.
     /// </summary>
-    internal static string BuildIdempotencyKey(string customerId, string manifestHash, string referenceDataHash)
+    internal static string BuildIdempotencyKey(string customerId, string manifestHash)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
-        ArgumentException.ThrowIfNullOrWhiteSpace(referenceDataHash);
-        return $"h12b-{customerId}-{manifestHash}-{referenceDataHash}";
+        return $"h12b-{customerId}-{manifestHash}";
     }
 
     private static JsonElement BuildScopeOutcomesEvidence(IReadOnlyList<ScopeOutcome> outcomes)

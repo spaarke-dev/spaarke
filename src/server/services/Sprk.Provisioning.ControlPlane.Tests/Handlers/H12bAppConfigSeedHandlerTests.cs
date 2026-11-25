@@ -72,7 +72,7 @@ public sealed class H12bAppConfigSeedHandlerTests
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        var expectedKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash, ReferenceDataSet.ContentHash);
+        var expectedKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash);
         result.Should().BeOfType<HandlerResult.Success>()
             .Which.IdempotencyKey.Should().Be(expectedKey);
 
@@ -117,7 +117,7 @@ public sealed class H12bAppConfigSeedHandlerTests
     public async Task AC3_Idempotency_SecondCallWithSameKey_IsDurableNoOp()
     {
         var run = BuildRun();
-        var expectedKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash, ReferenceDataSet.ContentHash);
+        var expectedKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = H12bAppConfigSeedHandler.HandlerIdentifier,
@@ -141,47 +141,8 @@ public sealed class H12bAppConfigSeedHandlerTests
     [Fact]
     public void AC3_BuildIdempotencyKey_UsesExpectedFormat()
     {
-        var key = H12bAppConfigSeedHandler.BuildIdempotencyKey("custx", "MANIFESTHASH", "REFHASH");
-        key.Should().Be("h12b-custx-MANIFESTHASH-REFHASH");
-    }
-
-    [Fact]
-    public async Task ISS039_ReferenceDataChange_ReDrivesTheSeeders_ForARunThatAlreadyCompletedH12b()
-    {
-        // ACME completed H12b before the reference-data seeder existed: its completed phase carries a key built
-        // without (or with an older) reference-data hash. The current key must differ, so H12b re-runs and the
-        // reference rows are created. This is the "existing stamps receive the rows" mechanism.
-        var run = BuildRun();
-        run.CompletedPhases.Add(new CompletedPhase
-        {
-            Phase = "H12b",
-            IdempotencyKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash, "an-older-reference-data-hash"),
-            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
-            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
-            JobId = RunId,
-        });
-        var seeder = FakeSeeder.Ok(AppConfigSeedScopes.ReferenceData);
-        var handler = NewHandler(new FakeRepository(run, "etag-ref"), new[] { seeder });
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        seeder.CallCount.Should().Be(1, "a changed reference-data hash is a new idempotency key — the seeders run again");
-
-        // Must-not-fire control: the SAME hash is still a durable no-op.
-        var sameRun = BuildRun();
-        sameRun.CompletedPhases.Add(new CompletedPhase
-        {
-            Phase = "H12b",
-            IdempotencyKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash, ReferenceDataSet.ContentHash),
-            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
-            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
-            JobId = RunId,
-        });
-        var untouched = FakeSeeder.Ok(AppConfigSeedScopes.ReferenceData);
-        await NewHandler(new FakeRepository(sameRun, "etag-same"), new[] { untouched })
-            .HandleAsync(BuildEnvelope(), CancellationToken.None);
-        untouched.CallCount.Should().Be(0);
+        var key = H12bAppConfigSeedHandler.BuildIdempotencyKey("custx", "MANIFESTHASH");
+        key.Should().Be("h12b-custx-MANIFESTHASH");
     }
 
     [Fact]
@@ -236,7 +197,7 @@ public sealed class H12bAppConfigSeedHandlerTests
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H12b",
-            IdempotencyKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash, ReferenceDataSet.ContentHash),
+            IdempotencyKey = H12bAppConfigSeedHandler.BuildIdempotencyKey(CustomerId, _expectedManifestHash),
             StartedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
             CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
             JobId = RunId,
