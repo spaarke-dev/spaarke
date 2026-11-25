@@ -31,4 +31,11 @@
 
 **On-demand run (ontology-r1):** `POST /api/admin/jobs/{jobId}/trigger` (SystemAdmin) runs `SignalReevaluationJob` now. Take the jobId from `GET /api/admin/jobs`. It returns 202 plus a run id, and `GET …/status` gives the outcome. It is the full nightly write run over every enabled policy, so it needs the owner's go. `POST /api/ontology/admin/authoring/dry-run` previews which matters qualify and writes nothing.
 
+**Seed restored (owner go "Yes, On + run now", 2026-11-25):**
+- 04:51:17Z: rule switched On via `PUT /api/v1/ontology/admin/rules/{id}/enabled`, as the owner. Response 200, `enabled: true`.
+- 04:51:23–04:54:01Z: `signal-reevaluation` run `7f929ff2-…` (ManualAdmin).
+  - Status **Failed**, "refused=39". Hits 316, reraised 147, closed 3.
+- Read-only count afterwards: **154 open Decide items**, 144 `POL-MATTER-NOBUDGET` (144 matters, all business-unit-owned, so no secure-child items) and 10 billing.
+- The 39 refusals were asked of ontology-r1. Until they are explained, there may be no privileged Decide item.
+
 Open: (1) non-billing seed for the test user; (2) whether the run was signed in as the non-admin test user (the model's reply greets the user by first name).
