@@ -1570,6 +1570,7 @@ Accepted as a known limit of fm task 056b (approved at 2967cd5bd8). uac-r2 owns 
 | D-2381 | 194b K4: an undetermined Signal or Decision Record (read fault) blocks its root's Unsecure | https://github.com/spaarke-dev/spaarke/issues/2381 |
 | D-2371 | Granting access to an inactive contact: /grant writes a dormant row, the contact-side route refuses (owner to choose one rule) | https://github.com/spaarke-dev/spaarke/issues/2371 |
 | D-2369 | read_query and semantic search: base completeness and labels on the caller-visible result set (tracked with task 191) | https://github.com/spaarke-dev/spaarke/issues/2369 |
+| D-3143 | Cross-ref (owned by ebilling-r1, ISS-054): external-visibility registry has no marker for never-external reference tables outside the lineage (sprk_procedure, sprk_procedureversion); fail closed today (Undecided → Hidden); separate marker, revisit with/after ebilling task 121 | https://github.com/spaarke-dev/spaarke/issues/3143 |
 
 ## Closed
 
