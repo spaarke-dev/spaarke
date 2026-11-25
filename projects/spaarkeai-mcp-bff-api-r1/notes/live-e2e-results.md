@@ -45,4 +45,10 @@
 - No secure-child item was re-raised, so **no privileged Decide item exists today**. FR-04 stays untested live until one exists.
 - Ontology asked that the run not be repeated.
 
+**Cause of refused=39 (ontology-r1, verified read-only):**
+- 154 `sprk_matter` rows were deleted interactively from the owner's account between 04:52:22 and 04:56:39Z, during the run. This session's only writes were the rule switch and the job trigger.
+- Refusals on deleted matters fail closed (D-38); this is not a regression.
+- **Only 30 of the 144 no-budget Work Items are on matters that still exist.** The other 114 should close as Condition Cleared at the next nightly.
+- The missing run logs are a separate defect, #3125 (DI-175, ontology's).
+
 Open: (1) non-billing seed for the test user; (2) whether the run was signed in as the non-admin test user (the model's reply greets the user by first name).
