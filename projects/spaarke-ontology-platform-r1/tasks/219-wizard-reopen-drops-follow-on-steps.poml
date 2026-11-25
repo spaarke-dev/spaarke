@@ -4,7 +4,7 @@
     <title>A reopened wizard's stepper shows only its own steps, not the follow-on steps picked last time (#2814, DI-155)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared UI code (.tsx/.ts) used by many consumers.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -54,4 +54,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt219); PR to master; do not merge.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3141 squash-merged to master (423cfc67f7, Closes #2814) after a main-session review. The open effect now dispatches the existing RESET instead of GO_TO_STEP+clearSkipped, so a reopened wizard starts from its static steps on step 1 with no skipped marks; no new action, prop or component. Every addDynamicStep host checked: DecisionItemWizard re-syncs on [key, steps] (and never reopens), FollowOnGrid hosts clear their selection on close. The shell reopen test fails on master; reducer tests are controls (RESET already worked; deviation recorded). Console auto-deploys from master.</completion>
 </task>
