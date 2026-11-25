@@ -50,10 +50,10 @@ public sealed class CommunicationThreadReadService
     // round-8.4 item 3 (fix): sprk_communicationthread carries the same typed ADR-024 regarding lookups as
     // sprk_communication EXCEPT sprk_regardingreportcard, which does NOT exist on the thread entity. Selecting a
     // non-existent column 400s the whole OData query (surfaced client-side as an HttpRequestException / blank thread
-    // list), so the thread projection uses only the lookups the thread actually has. Verified against the
-    // sprk_communicationthread metadata 2026-08-03.
+    // list), so the thread projection uses only the lookups the thread actually has: the one shared definition,
+    // RegardingFieldMap.ThreadRegardingFields (also used by the arrival producer, DI-151).
     private static readonly IReadOnlyList<(string EntityLogicalName, string RegardingField)> ThreadRegardingFields =
-        RegardingFieldMap.All.Where(x => x.RegardingField != "sprk_regardingreportcard").ToArray();
+        RegardingFieldMap.ThreadRegardingFields;
 
     // sprk_communication columns (as-built, notes/messaging-schema-spec.md).
     private const string ThreadLookupValue = "_sprk_communicationthread_value"; // message → thread lookup

@@ -102,9 +102,11 @@ public sealed class CommunicationArrivedProducer
     // Round-8.4 item 2: the thread carries the ADR-024 regarding lookups + name. Loading them lets the deep-link open
     // the REGARDING record (which hosts the conversation PCF) instead of falling back to the non-navigable
     // sprk_communicationthread record (that fallback was the source of the "Open" → generic MDA error), and lets the
-    // notification name the thread.
+    // notification name the thread. The lookups are the THREAD's (RegardingFieldMap.ThreadRegardingColumns), never
+    // AllRegardingFields: sprk_communicationthread has no sprk_regardingreportcard, so selecting it faulted the read and every
+    // arrival was treated as a private thread (DI-151).
     private static readonly string[] ThreadColumns =
-        new[] { ThreadPrivacyStateField, ThreadNameField }.Concat(RegardingFieldMap.AllRegardingFields).ToArray();
+        new[] { ThreadPrivacyStateField, ThreadNameField }.Concat(RegardingFieldMap.ThreadRegardingColumns).ToArray();
 
     private readonly IGenericEntityService _entityService;
     private readonly CommunicationFanOutTargetingService _targeting;
