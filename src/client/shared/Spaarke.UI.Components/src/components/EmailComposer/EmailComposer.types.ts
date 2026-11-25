@@ -54,6 +54,24 @@ export interface IComposerAttachmentSource {
 }
 
 /**
+ * What `onUploadLocalAttachment` returns: the `sprk_document` it created for a locally picked file.
+ *
+ * `discard` (optional) deletes THAT document again, through the host's existing document delete. The composer calls it
+ * only for a document this composer instance uploaded and that no email can reference: the file was removed from the
+ * draft, the user discarded the email (or cancelled after a send that provably sent nothing), or the upload finished
+ * after the composer was gone, so its id never reached anyone. It is never called after a successful send, nor after a
+ * failed send that may have gone out (no response, 5xx, 2xx without an id): a sent email's attachment row would be
+ * silently unlinked, not refused. A document picked from existing records never has one. A host whose upload returns no
+ * `discard` keeps today's behaviour (the document stays).
+ */
+export interface IUploadedLocalAttachment {
+  documentId: string;
+  driveItemId?: string;
+  linkUrl?: string;
+  discard?: () => Promise<void>;
+}
+
+/**
  * A single attachment tracked by engine state, regardless of source.
  *
  * `documentId` (a `sprk_document` GUID) is what `sendCommunication()`'s
@@ -491,8 +509,12 @@ export interface IEmailComposerProps {
    * can opt into inserting a body link to the doc alongside (or instead of)
    * attaching the bytes (owner UAT 2026-07-30, item 9b). Omit it to offer
    * Attach only.
+   *
+   * An optional `discard` lets the composer remove the document again when the
+   * email is not sent (see {@link IUploadedLocalAttachment}). Omit it and the
+   * uploaded document is left in place, as before.
    */
-  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  onUploadLocalAttachment?: (file: File) => Promise<IUploadedLocalAttachment>;
   /**
    * Resolve the body link for a governed `sprk_document` the author toggled **Link** on. Called AT SEND
    * for every such attachment that has a `documentId`; the returned URL REPLACES the attachment's
@@ -703,6 +725,12 @@ export interface IEmailComposerHandle {
   send(): Promise<{ communicationId: string }>;
   saveDraft(): Promise<{ communicationId: string }>;
   getState(): EmailComposerState;
+  /**
+   * The user asked to close (a host's own close control, e.g. `SendEmailDialog`'s ×). Same path as the composer's
+   * Cancel: a draft with typed content asks "Discard this email?" first; on discard (or when there is nothing to lose)
+   * the documents this composer uploaded are removed (see `IUploadedLocalAttachment.discard`) and `onCancel` runs.
+   */
+  requestCancel(): void;
 }
 
 /** Ref type alias used by wrapper components (task 021). */

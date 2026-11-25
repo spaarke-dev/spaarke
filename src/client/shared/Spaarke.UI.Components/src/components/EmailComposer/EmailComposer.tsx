@@ -73,11 +73,13 @@ import type { CommunicationSendMode } from '../../services/communicationApi';
 import { ModalWindowControls } from '../ModalWindowControls';
 
 import { sendCommunication } from '../../services/communicationApi';
-import { SprkModal } from '../SprkModal';
+import { ConfirmModal, SprkModal } from '../SprkModal';
 import {
   describeDraftSaveFailure,
   describeSendFailure,
+  mayHaveBeenSent,
   toSendCommunicationError,
+  toSendRequestError,
   type ISendFailureDescription,
 } from './describeSendFailure';
 
@@ -135,6 +137,35 @@ function isComposeBodyEmpty(body: string): boolean {
       .replace(/<[^>]*>/g, '')
       .replace(/&nbsp;/g, '')
       .trim().length === 0
+  );
+}
+
+// The words of a body, for "did the user change it": tags, &nbsp; and spacing are ignored, so the editor
+// re-serializing a seeded body (or an empty one as <p><br></p>) never reads as a change.
+function bodyWords(body: string): string {
+  return (body || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function recipientKeys(list: ReadonlyArray<{ email: string }>): string {
+  return list.map(r => r.email.trim().toLowerCase()).join('\n');
+}
+
+// Whether closing now would lose something the user wrote (task 220, #2946): a recipient, the subject, the message
+// text or the attachments differ from what the composer opened with. A host's pre-fill is not the user's work, so an
+// untouched reply or seeded draft closes without asking. Mirrors RuleWizard's `hasWork(draft, initial)`.
+function hasTypedWork(state: EmailComposerState, initial: EmailComposerState): boolean {
+  if (state.readOnly) return false;
+  return (
+    recipientKeys(state.to) !== recipientKeys(initial.to) ||
+    recipientKeys(state.cc) !== recipientKeys(initial.cc) ||
+    recipientKeys(state.bcc) !== recipientKeys(initial.bcc) ||
+    state.subject.trim() !== initial.subject.trim() ||
+    bodyWords(state.body) !== bodyWords(initial.body) ||
+    state.attachments.map(a => a.id).join('\n') !== initial.attachments.map(a => a.id).join('\n')
   );
 }
 
@@ -511,6 +542,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // recreating validate/send/saveDraft/getState on every keystroke.
   const stateRef = React.useRef(state);
   stateRef.current = state;
+  // What the composer opened with (the host's pre-fill), for "would closing lose the user's work" (task 220).
+  const openedWithRef = React.useRef(state);
 
   const showAssociations = props.showAssociations ?? true;
   const attachmentSources = React.useMemo(
@@ -717,6 +750,40 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     }, 0);
   }, []);
 
+  // ── Session uploads (task 220, #2813) ──────────────────────────────────────
+  // The documents THIS composer instance uploaded, by attachment id, with the delete the upload handed back. Only
+  // these are ever deleted: a document picked from existing records (or carried in by the host) is not in here and
+  // has no delete. A document leaves the map when it is deleted; it stays put after a successful send.
+  const sessionUploadsRef = React.useRef(new Map<string, { documentId: string; discard?: () => Promise<void> }>());
+  // Documents a send attempt carried while its outcome was unknown or may have delivered the email: never deleted
+  // (a sent email's `sprk_communicationattachment` row is RemoveLink on document delete — it would be silently
+  // unlinked, not refused). An attempt that provably sent nothing releases its documents again. A draft save keeps
+  // what it carried here too: the saved draft may name them.
+  const sentOrMaybeSentRef = React.useRef(new Set<string>());
+  // Set once a send succeeded: closing afterwards neither asks "Discard this email?" nor deletes anything.
+  const deliveredRef = React.useRef(false);
+  // Attachments whose upload was still running when the user removed them or abandoned the draft: the document such
+  // an upload creates is deleted when it arrives (its id never reached the draft, the host or a send).
+  const removedWhileUploadingRef = React.useRef(new Set<string>());
+
+  const runDiscard = React.useCallback((documentId: string, discard: (() => Promise<void>) | undefined) => {
+    if (!discard || sentOrMaybeSentRef.current.has(documentId)) return;
+    // Best effort: a delete that fails leaves the document in place, exactly as before this cleanup existed.
+    void Promise.resolve()
+      .then(discard)
+      .catch((err: unknown) => console.warn('[EmailComposer] could not remove an uploaded attachment document:', err));
+  }, []);
+
+  const discardSessionUpload = React.useCallback(
+    (itemId: string) => {
+      const upload = sessionUploadsRef.current.get(itemId);
+      if (!upload) return;
+      sessionUploadsRef.current.delete(itemId);
+      runDiscard(upload.documentId, upload.discard);
+    },
+    [runDiscard]
+  );
+
   const onUploadLocalAttachment = props.onUploadLocalAttachment;
   const handleAddAttachment = React.useCallback(
     (item: IAttachmentItem) => {
@@ -727,7 +794,14 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       setResolvingIds(prev => new Set(prev).add(item.id));
       onUploadLocalAttachment(file)
         .then(res => {
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || removedWhileUploadingRef.current.has(item.id)) {
+            // Nobody will ever reference this document: the composer is gone or discarded, or the file was removed
+            // while it uploaded. (A wizard step that unmounts mid-upload uploads the file again itself.)
+            removedWhileUploadingRef.current.delete(item.id);
+            runDiscard(res.documentId, res.discard);
+            return;
+          }
+          sessionUploadsRef.current.set(item.id, { documentId: res.documentId, discard: res.discard });
           dispatch({
             type: 'RESOLVE_ATTACHMENT_DOCUMENT',
             id: item.id,
@@ -752,9 +826,25 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           });
         });
     },
-    [onUploadLocalAttachment]
+    [onUploadLocalAttachment, runDiscard]
   );
   handleAddAttachmentRef.current = handleAddAttachment;
+
+  // Removing a file from the draft deletes the document this composer uploaded for it (remove-then-reattach leaves
+  // nothing behind); a picked or carried document is only taken off the email.
+  const handleRemoveAttachment = React.useCallback(
+    (id: string) => {
+      const item = stateRef.current.attachments.find(a => a.id === id);
+      if (sessionUploadsRef.current.has(id)) {
+        discardSessionUpload(id);
+      } else if (item?.source === 'local' && !item.documentId) {
+        // Its upload may still be running: the document it creates is deleted when it arrives.
+        removedWhileUploadingRef.current.add(id);
+      }
+      dispatch({ type: 'REMOVE_ATTACHMENT', id });
+    },
+    [discardSessionUpload]
+  );
 
   // ── RTF toolbar slot (owner UAT 2026-07-24) ────────────────────────────────
   // The attachment / record-lookup / connector actions live INLINE in the RichTextEditor
@@ -1113,7 +1203,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     const key = `${props.mode}:${props.communicationId ?? ''}`;
     if (key !== initKeyRef.current) {
       initKeyRef.current = key;
-      dispatch({ type: 'RESET', state: initialState(props) });
+      const reset = initialState(props);
+      openedWithRef.current = reset;
+      deliveredRef.current = false;
+      dispatch({ type: 'RESET', state: reset });
       rootRef.current?.focus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1167,6 +1260,14 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     }
 
     dispatch({ type: 'BEGIN_SEND' });
+    // Task 220: from here until the outcome is known, nothing this attempt carries may be deleted (a Close while the
+    // send is in flight must not pull a document out from under it). Released below only when nothing was sent.
+    const carried = stateRef.current.attachments
+      .filter(a => a.selected !== false && !!a.documentId)
+      .map(a => a.documentId as string)
+      .filter(id => !sentOrMaybeSentRef.current.has(id));
+    carried.forEach(id => sentOrMaybeSentRef.current.add(id));
+    const releaseCarried = () => carried.forEach(id => sentOrMaybeSentRef.current.delete(id));
     // An unresolved record link is refused with an inline message (below) — it is already on screen,
     // so it is not reported again through onError or the failure dialog.
     let refusedInline = false;
@@ -1196,24 +1297,37 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         props.threadId,
         props.threadIsPrivate
       );
-      response = await sendCommunication(request, {
-        authenticatedFetch: props.authenticatedFetch,
-        bffBaseUrl: props.bffBaseUrl,
-      });
+      try {
+        response = await sendCommunication(request, {
+          authenticatedFetch: props.authenticatedFetch,
+          bffBaseUrl: props.bffBaseUrl,
+        });
+      } catch (requestErr) {
+        // What the request itself threw without a response is a connection failure, whatever the browser called it
+        // (task 220, #2946) — never "something went wrong on this page".
+        throw toSendRequestError(requestErr);
+      }
       dispatch({ type: 'END_SEND' });
     } catch (err) {
       dispatch({ type: 'END_SEND' });
-      if (refusedInline) throw err;
+      if (refusedInline) {
+        releaseCarried();
+        throw err;
+      }
       // Every other failure — a server refusal, an expired sign-in, a request that never reached the
       // server — is normalized so the host's onError hears about it, and the user is told (owner
       // decision 2026-10-09: a failed send is never silent). See `sendFailureDisplay`.
       const failure = toSendCommunicationError(err);
+      // A send that provably sent nothing frees its documents for cleanup again; one that may have gone out
+      // (no response, 5xx, 2xx without an id) keeps them for good.
+      if (!mayHaveBeenSent(failure)) releaseCarried();
       props.onError?.(failure);
       if (props.sendFailureDisplay !== 'host' && mountedRef.current) {
         setFailureNotice(describeSendFailure(failure));
       }
       throw failure;
     }
+    deliveredRef.current = true;
     // The email is delivered. A host `onSent` that throws is the host's bug, not a failed send: it must never
     // reach the "Email not sent" path (or reject send()), so it is only logged.
     try {
@@ -1247,6 +1361,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           'No BFF draft-persistence endpoint exists yet — wire onSaveDraftRequest once one ships.'
       );
     }
+    // Task 220: a saved draft may name its documents (and a failed save may still have stored them), so none of them
+    // is ever deleted by this composer afterwards.
+    for (const a of stateRef.current.attachments) {
+      if (a.documentId) sentOrMaybeSentRef.current.add(a.documentId);
+    }
     dispatch({ type: 'BEGIN_SAVE_DRAFT' });
     try {
       const response = await props.onSaveDraftRequest(stateRef.current);
@@ -1262,7 +1381,35 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
   const getState = React.useCallback((): EmailComposerState => stateRef.current, []);
 
-  useImperativeHandle(ref, () => ({ validate, send, saveDraft, getState }), [validate, send, saveDraft, getState]);
+  // ── Closing (task 220): ask before a typed draft is lost; clean up this session's uploads ──
+  // "Discard this email?" is RuleWizard's "Discard this rule?" pattern (ConfirmModal, Discard / Keep editing).
+  const [discardAsk, setDiscardAsk] = React.useState(false);
+  const onCancel = props.onCancel;
+  const abandon = React.useCallback(() => {
+    // The email will not be sent: every document this composer uploaded and no attempt may have sent goes, and an
+    // upload still running is deleted when it arrives.
+    for (const a of stateRef.current.attachments) {
+      if (a.source === 'local' && !a.documentId) removedWhileUploadingRef.current.add(a.id);
+    }
+    for (const id of Array.from(sessionUploadsRef.current.keys())) discardSessionUpload(id);
+    onCancel?.();
+  }, [onCancel, discardSessionUpload]);
+  const requestCancel = React.useCallback(() => {
+    // No host close wired: Cancel does nothing, as before.
+    if (!onCancel) return;
+    // After a successful send there is nothing to discard: close as before.
+    if (deliveredRef.current) onCancel();
+    else if (hasTypedWork(stateRef.current, openedWithRef.current)) setDiscardAsk(true);
+    else abandon();
+  }, [onCancel, abandon]);
+
+  useImperativeHandle(ref, () => ({ validate, send, saveDraft, getState, requestCancel }), [
+    validate,
+    send,
+    saveDraft,
+    getState,
+    requestCancel,
+  ]);
 
   // ── Field handlers ──────────────────────────────────────────────────────
   const fieldErrors = React.useMemo(() => {
@@ -1474,7 +1621,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       <div className={styles.section} role="region" aria-label="Attachments">
         <AttachmentList
           items={state.attachments}
-          onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
+          onRemove={handleRemoveAttachment}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
           headerAction={attachMenu}
@@ -1624,7 +1771,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           <ModalWindowControls
             isMaximized={props.isMaximized}
             onToggleMaximize={props.onToggleMaximize}
-            onClose={props.onCancel}
+            onClose={requestCancel}
           />
         </div>
       )}
@@ -1650,10 +1797,27 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             if (mountedRef.current) setFailureNotice(describeDraftSaveFailure(err, !draftSaveAvailable));
           });
         }}
-        onCancel={() => props.onCancel?.()}
+        onCancel={requestCancel}
         onEdit={props.onEdit}
         onReply={props.onReply}
         onForward={props.onForward}
+      />
+
+      {/* Closing a draft with typed content (task 220, #2946): the same question RuleWizard asks. Nested over the
+          composer (and over SendEmailDialog's SprkModal) like the failure dialog below; Keep editing returns to the
+          draft untouched. */}
+      <ConfirmModal
+        open={discardAsk}
+        onClose={() => setDiscardAsk(false)}
+        onConfirm={() => {
+          setDiscardAsk(false);
+          abandon();
+        }}
+        title="Discard this email?"
+        message="What you have written will be lost. The email will not be sent."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        destructive
       />
 
       {/* Failed send / Save Draft (owner decision 2026-10-09). The canonical shell (ADR-050) as a

@@ -155,4 +155,5 @@ export type {
   IEmailComposerProps,
   IEmailComposerHandle,
   EmailComposerRef,
+  IUploadedLocalAttachment,
 } from './EmailComposer.types';
