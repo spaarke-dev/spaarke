@@ -22,6 +22,8 @@ namespace Spaarke.ArchTests;
 /// id, and that id is minted by the server.</item>
 /// <item><b>G6</b> every Office create carries its SPE pointer, and an attachment child carries its parent link, in the create;
 /// <c>CreateDocumentAsync</c> stages both.</item>
+/// <item><b>G7</b> (task 138 condition 1) the email re-save planner <c>EmailAttachmentAddPlanner</c> only reads; a missing
+/// attachment is created only by the finalization worker, which G1, G3 and G6 scan.</item>
 /// </list>
 /// <para><b>Why source scans.</b> Every Office test mocks <c>IDocumentDataverseService</c>, and the real create runs only
 /// against a live org, so moving the association back into the update, or upserting a given id, would pass every behaviour
@@ -765,5 +767,124 @@ public class OfficeDocumentSaveGuardTests
                 return (await _serviceClient.CreateAsync(document, ct)).ToString();
             }
             """));
+    }
+
+    // ── G7: the email re-save planner writes nothing ──────────────────────────────────────────────────────────────
+
+    private const string PlannerFile = "src/server/api/Sprk.Bff.Api/Services/Office/EmailAttachmentAddPlanner.cs";
+
+    /// <summary>The planner's Dataverse fields. Every call on them must be a read.</summary>
+    private static readonly string[] PlannerDataverseFields = ["_documents", "_entities"];
+
+    private static readonly Regex DataverseFieldCall = new(
+        @"\b(?<field>_documents|_entities)\s*\.\s*(?<method>\w+)\s*[(<]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex ReadMethod = new(@"^(Get|Retrieve|List|Query|Exists)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex DataverseFieldPassedOn = new(
+        @"[(,]\s*(?<field>_documents|_entities)\s*[,)]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex WriteCall = new(
+        @"\.\s*(?<method>(?:Create|Update|Upsert|Delete|Associate|Disassociate)(?![a-z])\w*)\s*[(<]",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex WriteShape = new(
+        @"\bUpsert\w*|\bnew\s+(?:[\w.]+\.)?(?:Create|Update)\w*Request\b|\bnew\s+(?:[\w.]+\.)?Entity\s*\(\s*""sprk_document""",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// G7 scan: a call on a Dataverse field that is not a read; a Dataverse field handed to another method (a helper that
+    /// could write through it); any Create/Update/Upsert/Delete/Associate call on any receiver; an upsert, a create or
+    /// update request, or a new <c>sprk_document</c> entity. <c>reads</c> counts the read calls on each Dataverse field.
+    /// </summary>
+    internal static (List<string> Violations, Dictionary<string, int> Reads) PlannerWriteScan(string source, string file)
+    {
+        var code = Code(source);
+        var violations = new List<string>();
+        var reads = PlannerDataverseFields.ToDictionary(f => f, _ => 0);
+
+        foreach (Match call in DataverseFieldCall.Matches(code))
+        {
+            if (ReadMethod.IsMatch(call.Groups["method"].Value))
+                reads[call.Groups["field"].Value]++;
+            else
+                violations.Add($"{file}: {call.Groups["field"].Value}.{call.Groups["method"].Value}(…) is not a read");
+        }
+
+        foreach (Match passed in DataverseFieldPassedOn.Matches(code))
+            violations.Add($"{file}: {passed.Groups["field"].Value} is passed to another method, which could write through it");
+
+        foreach (Match write in WriteCall.Matches(code))
+            violations.Add($"{file}: .{write.Groups["method"].Value}(…) writes");
+
+        foreach (Match shape in WriteShape.Matches(code))
+            violations.Add($"{file}: '{shape.Value}' builds a write");
+
+        return (violations, reads);
+    }
+
+    /// <summary>
+    /// G7 (task 138 condition 1, agreed with spaarkeai-word-add-in-r1 2026-11-25): <c>EmailAttachmentAddPlanner</c> only
+    /// reads. It never creates, updates or upserts a <c>sprk_document</c>, directly or through a helper, so a missing
+    /// attachment is created only by <c>UploadFinalizationWorker.ProcessSingleAttachmentAsync</c>, where G1, G3 and G6 pin the
+    /// association, the owner and the parent link.
+    /// </summary>
+    /// <remarks>Maintenance: a new read on <c>_documents</c> or <c>_entities</c> passes if its name starts with Get, Retrieve,
+    /// List, Query or Exists. If the planner needs another Dataverse field, add it to <see cref="PlannerDataverseFields"/> and
+    /// to <see cref="DataverseFieldCall"/>. A write belongs in the worker, not here.</remarks>
+    [Fact(DisplayName = "Task 138 G7: the email re-save planner reads only; attachment children are created only by the worker")]
+    public void G7_EmailAttachmentAddPlanner_WritesNothing()
+    {
+        var (violations, reads) = PlannerWriteScan(Read(PlannerFile), PlannerFile);
+
+        Assert.True(violations.Count == 0,
+            "EmailAttachmentAddPlanner must only read (task 138 condition 1): a missing attachment is created only by "
+            + "UploadFinalizationWorker.ProcessSingleAttachmentAsync, where the association, owner and parent link are pinned. "
+            + "Move the write to the worker:\n  " + string.Join("\n  ", violations));
+        foreach (var field in PlannerDataverseFields)
+        {
+            Assert.True(reads[field] > 0,
+                $"{PlannerFile}: no read on {field} was found, so the field was renamed or removed and the scan no longer sees "
+                + "the planner's Dataverse calls. Update PlannerDataverseFields.");
+        }
+    }
+
+    [Fact(DisplayName = "Task 138 G7 control: a write call, a helper given the client, an upsert or a new document fires")]
+    public void G7_Control_MustFire()
+    {
+        const string source = """
+            await _documents.CreateDocumentAsync(request, ct);
+            await _entities.UpdateAsync(entity, ct);
+            await DocumentWriter.SaveAsync(_documents, request);
+            await _other.UpsertAsync(entity);
+            var create = new CreateDocumentRequest { Name = "x" };
+            var row = new Entity("sprk_document");
+            """;
+
+        var (violations, _) = PlannerWriteScan(source, "A.cs");
+
+        // CreateDocumentAsync and UpdateAsync each fire as a non-read field call and as a write call; _documents passed on;
+        // UpsertAsync as a write call and an upsert; the create request; the new entity.
+        Assert.Equal(9, violations.Count);
+    }
+
+    [Fact(DisplayName = "Task 138 G7 control: reads, a comment, a collection Add and a CreatedAt-style name do not fire")]
+    public void G7_Control_MustNotFire()
+    {
+        const string source = """
+            var age = time.GetUtcNow() - job.CreatedAt(ct);
+            var eml = await _documents.GetDocumentAsync(id, ct);
+            var children = await _documents.GetDocumentsByParentAsync(id, ct);
+            var row = await _entities.RetrieveAsync("sprk_document", id, columns, ct);
+            // await _documents.CreateDocumentAsync(request, ct);   (a comment)
+            stored.Add(name);
+            var plan = new Plan(id, drive, item, name, size, missing);
+            """;
+
+        var (violations, reads) = PlannerWriteScan(source, "B.cs");
+
+        Assert.Empty(violations);
+        Assert.Equal(2, reads["_documents"]);
+        Assert.Equal(1, reads["_entities"]);
     }
 }
