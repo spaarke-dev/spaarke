@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>Phase 0 deploy to dev + engine-hosting spike report (start latency, golden comparison, A2 checks, Clean-copy-with-prior-markup finding)</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>blocked — tasks 001–006 complete (007 merged); owner OK before any Azure resource creation or Dataverse change</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and integration verification (deploy tag); creates a report file; no new code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment steps through existing skills (azure-deploy, bff-deploy) plus measurement and a written report.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live dev deployment; must run alone after the whole Phase 0 build wave.</parallel-reason>
+    <deps>001, 002, 003, 004, 005, 006</deps>
+    <tags>deploy, azure, bicep, bff-api, worker, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the Phase 0 pieces to dev (Bicep via `/azure-deploy`, engine image via the task 003 workflow, BFF via `/bff-deploy`, the agreement-edit-plan Action/Binding via the documented deploy recipe), run the engine job on dev against the synthetic NDAs, and write `projects/spaarke-intake-pipeline-r1/notes/spikes/phase0-spike-report.md`. The report settles, with the accelerator session, what the Clean copy does for drafts with prior markup (spec Unresolved Q1).</prompt>
+  <role>SPAARKE platform developer. Expert in Azure deployment (Bicep, Container Apps Jobs, Service Bus), the BFF deploy procedure and measurement. Follow ADRs strictly.</role>
+  <goal>On dev: the Container Apps environment, Job, staging container and request queue exist (owner-approved); the engine image from CI runs; the BFF with tasks 004–006 is deployed via `/bff-deploy`; and a spike report records cold/warm start latency, per-NDA run latency, golden byte-comparison results, the A2 checks on dev, the CVE scan result, and the Clean-copy finding with a recommended resolution for the owner.</goal>
+
+  <context>
+    <background>Spec FR-01(a, b, c, e, f), success criterion 1, Unresolved Q1; plan Risk Register R1 and R3; design §5 condition 3 (the Phase 0 spike). Project CLAUDE.md §5: Azure resource creation and Dataverse changes need the owner's explicit OK; BFF deploys go through `/bff-deploy` only. BFF dispatch (task 014) does not exist yet, so the spike hand-sends ids-only Job Contract envelopes (portal Service Bus Explorer) after uploading synthetic inputs to the staging container. The synthetic corpus: `src/accelerators/practices/nda/evals/corpus/nda-01/02/03-*.docx`; nda-02 carries counterparty tracked changes and comments (the Clean-copy case).</background>
+    <relevant-files>
+      <file role="canonical-reference">infrastructure/bicep/modules/intake-engine-job.bicep, infrastructure/bicep/modules/intake-staging-storage.bicep, infrastructure/bicep/customer.bicep (task 002)</file>
+      <file role="canonical-reference">.github/workflows/build-intake-engine-image.yml (task 003)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Intake.EngineJob/ (task 001)</file>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1 (via /bff-deploy only), scripts/Test-BffDevDeployReadback.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Engine image and entrypoint.</dependency>
+      <dependency task="002" status="pending">Bicep modules.</dependency>
+      <dependency task="003" status="pending">CI image build + scan + push.</dependency>
+      <dependency task="004" status="pending">Edit plans for the synthetic NDAs (app-only Action).</dependency>
+      <dependency task="005" status="pending">Cleanup PR part 1 (BFF deploy content).</dependency>
+      <dependency task="006" status="pending">Cleanup PR part 2 (BFF deploy content; the threaded test send may happen here).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: every Azure resource creation and every Dataverse change in this task. Ask the owner in chat and wait for an explicit yes before running the deployment; dev environment only.</constraint>
+    <constraint source="project">Scope: BFF deployment. `/bff-deploy` only; never raw `az webapp deploy --clean`; run the readback check after deploy.</constraint>
+    <constraint source="ADR-004">Scope: test messages sent by hand. Valid Job Contract envelopes carrying ids and blob paths only; no document content in any message.</constraint>
+    <constraint source="project">Scope: inputs. Synthetic NDAs only (`evals/corpus/`); never `answer-key/` or a real NDA (NFR-10); delete nothing manually from staging (the lifecycle rule does it).</constraint>
+    <constraint source="ADR-015">Scope: the spike report. Ids, timings, hashes and outcome codes; no clause or document text quoted.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF deploy" location=".claude/skills/bff-deploy/SKILL.md">The only allowed BFF deploy path, with readback.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Ask the owner for an explicit OK listing the resources to create on dev (managed environment, Job, staging container + lifecycle rule, request queue, role assignments) and the Dataverse Action/Binding rows. Stop until the answer is yes.</step>
+    <step order="2">Deploy Bicep to dev with `/azure-deploy` (`deployIntakeEngine=true` for dev only); record resource ids.</step>
+    <step order="3">Run the task 003 workflow (workflow_dispatch) to push the image; set the Job image; record the Trivy result.</step>
+    <step order="4">Deploy the BFF with `/bff-deploy`; run the readback; deploy the agreement-edit-plan Action and Binding via the documented recipe.</step>
+    <step order="5">Generate edit plans for nda-01/02/03 via the app-only facade on dev (or the task 004 recorded outputs if the facade is not reachable without task 013), upload inputs to staging, hand-send one envelope per NDA, and record cold-start and run latency per execution.</step>
+    <step order="6">Download outputs; byte-compare with a local run of the same engine version and plan; confirm `check_outputs` passed.</step>
+    <step order="7">A2 checks on dev: resend one envelope (marker taken once, same paths); send one malformed envelope (DLQ, no outputs); confirm the job used only MI and touched only Blob and Service Bus.</step>
+    <step order="8">Clean-copy finding: inspect nda-02's Clean output (does it accept the counterparty's revisions?); message the accelerator session "acclerator-r1" with the evidence and the two options (engine accepts only our revisions in Clean, or omit Clean for drafts with prior markup); record its answer.</step>
+    <step order="9">Write `notes/spikes/phase0-spike-report.md`: environment, ids, latency table, golden comparison, A2 checks, CVE result, Clean-copy finding + recommendation, open items.</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="11">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>No Azure resource is created and no Dataverse change is made without the owner's explicit yes in chat (project CLAUDE.md §5).</trigger>
+    <trigger>The Clean-copy resolution (spec Unresolved Q1) is the owner's decision: present the evidence, the accelerator's answer and a recommendation, and STOP for the decision; never ship or recommend an accept-all Clean copy for drafts with prior markup.</trigger>
+    <trigger>If golden outputs differ between dev and local, or p95-relevant latency exceeds the 10-minute job timeout, STOP and report before any Phase 1 work depends on it.</trigger>
+    <trigger>If the accelerator session proposes an engine CLI or behaviour change, record it and escalate; do not edit the engines.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">Deployment through /azure-deploy; Service Bus Explorer in the portal for hand-sent envelopes</tool>
+    <tool name="gh">workflow_dispatch of the image workflow</tool>
+    <tool name="terminal">Byte comparison and timing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/notes/spikes/phase0-spike-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The spike report exists and records: resource ids, cold and warm start latency, per-NDA run latency, the golden byte-comparison result for each of the 3 synthetic NDAs, the Trivy result, and the A2 dev checks (FR-01e, success criterion 1).</criterion>
+    <criterion testable="true">Each synthetic NDA's dev outputs equal the local run of the same engine version and `check_outputs` passes (FR-01a), or the report shows the diff and the task is escalated.</criterion>
+    <criterion testable="true">Negative: a malformed envelope on dev lands in the DLQ with no outputs written; a duplicate envelope produces one marker and one output set (FR-01b, FR-01c).</criterion>
+    <criterion testable="true">The BFF was deployed through `/bff-deploy` and the readback passed; no raw `az webapp deploy` was used.</criterion>
+    <criterion testable="true">The Clean-copy section states the observed behaviour on nda-02, the accelerator's response, and a recommended resolution awaiting the owner's decision.</criterion>
+    <criterion testable="true">Negative: no resource was created and no Dataverse change made before the owner's recorded OK; no real NDA or `answer-key/` content was used.</criterion>
+  </acceptance-criteria>
+
+  <notes>The threaded-reply live test send (task 006 acceptance c) can be done in step 4's deploy window if it was pending, with the same owner OK.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

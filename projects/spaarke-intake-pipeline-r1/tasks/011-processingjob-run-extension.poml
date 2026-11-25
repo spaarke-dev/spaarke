@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-06: Extend sprk_processingjob as the intake run record (request + output lookups, Intake run job type, harness key, engine execution id / blob prefix, re-drive marker) + sprk_backgroundjob description (§10.1 item 8)</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>startable (script authoring); owner OK for the dev schema change</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a schema script and Dataverse columns with explicit constraints; at most a small read-filter fix in the Office status path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema extension with an exact script to copy and named description fix sites; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, fields, solution</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend `sprk_processingjob` so one record holds one intake run: a request lookup to `sprk_servicerequest`, an output-document lookup, a new job-type option "Intake run", harness key, engine execution id and staging blob prefix, a re-drive marker, and the intake stage values. Fix the `sprk_backgroundjob` "Office-scoped" description in its three places, and document `sprk_processingjob` in `docs/data-model/`.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse schema via Web API + PowerShell and the Office/BFF processing-job model. Follow ADRs strictly.</role>
+  <goal>`scripts/Add-ProcessingJobIntakeRunColumns.ps1` (idempotent, -WhatIf) adds on dev: `sprk_servicerequest` lookup, `sprk_outputdocument` lookup (→ sprk_document), `sprk_harnesskey` (string), `sprk_engineexecutionid` (string), `sprk_stagingblobprefix` (string), `sprk_redrivecount` (whole number, default 0) + `sprk_lastredriveon` (datetime), and a new `sprk_jobtype` option "Intake run"; one request can have many runs; Office runs are unaffected; the description fix lands in Entity.xml:13, Create-BackgroundJobEntity.ps1:233 and docs/data-model/sprk_backgroundjob.md:33-35; a new `docs/data-model/sprk_processingjob.md` documents the entity.</goal>
+
+  <context>
+    <background>Spec FR-06 (acceptance a–c) and owner §10.1 item 8 "description" part (Phase 1). Existing columns (solution XML): `sprk_correlationid`, `sprk_currentstage`, `sprk_stages`, `sprk_stagestatus`, `sprk_status`, `sprk_idempotencykey`, `sprk_jobtype` (picklist: Document Save 0, Email Save 1, …), `sprk_payload`, `sprk_result`, `sprk_errorcode`, `sprk_errormessage`, `sprk_retrycount`, dates. Intake stage values (Receive … Record, spec FR-07) are stored in the existing `sprk_currentstage`/`sprk_stages` columns, not new ones — verify their types fit (string/JSON) on dev. The harness key and re-drive marker were added to FR-06 by the plan (tasks 013, 014, 023 need them). No `docs/data-model/sprk_processingjob.md` exists today (confirmed); `sprk_payload` must never carry content (ADR-015).</background>
+    <relevant-files>
+      <file role="new">scripts/Add-ProcessingJobIntakeRunColumns.ps1</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ProcessingJob/Entity.xml (export after deploy; job type options near :808-860)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_backgroundjob/Entity.xml (:13 description)</file>
+      <file role="modify">scripts/Create-BackgroundJobEntity.ps1 (:233 description)</file>
+      <file role="modify">docs/data-model/sprk_backgroundjob.md (:33-35)</file>
+      <file role="modify">docs/data-model/sprk_processingjob.md (created by this task; no file exists today)</file>
+      <file role="canonical-reference">scripts/Add-BindingContextTypeTagsColumn.ps1 (script structure to copy)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Models/ProcessingJob.cs and src/server/api/Sprk.Bff.Api/Services/Office/JobStatusService.cs:42 (Office read path to keep unaffected)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent of 010 (the request lookup targets the existing entity); owner OK for the dev change.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Scope: every column added. Written only by the BFF (orchestrator, admin re-drive); no plugin, no client write path.</constraint>
+    <constraint source="ADR-015">Scope: new string columns. Ids, keys and blob prefixes only; no document content, file names from documents, or plan text.</constraint>
+    <constraint source="ADR-017">Scope: the Office job-status read path. Intake runs (job type "Intake run") are never returned by the Office job-status endpoints and Office runs never by intake status (FR-06b); if `JobStatusService` can return an intake run, add a job-type filter there with a unit test — the only BFF change allowed in this task.</constraint>
+    <constraint source="ADR-036">Scope: the `sprk_backgroundjob` description. Text change only in the three named places; no new scheduled job and no schema change to that entity.</constraint>
+    <constraint source="project">Scope: execution against dev. -WhatIf first; real run only after the owner's explicit OK; dev only.</constraint>
+    <constraint source="bff-extensions">Scope: only if the JobStatusService filter is needed. State the Placement Justification in the PR, measure the publish-size delta against a fresh master build, ≤ 60 MB, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>docs/data-model/sprk_backgroundjob.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/section10-verification-2026-11-25.md</file>
+    </files>
+    <patterns>
+      <pattern name="Add columns to an existing entity" location="scripts/Add-BindingContextTypeTagsColumn.ps1">Idempotent Web API column create with -WhatIf; add a picklist option with an explicit value.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">On dev, read `sprk_processingjob` metadata (job type options and values, `sprk_currentstage`/`sprk_stages` types); choose the next free job-type value.</step>
+    <step order="2">Write `scripts/Add-ProcessingJobIntakeRunColumns.ps1` copying Add-BindingContextTypeTagsColumn.ps1 (lookups, strings, whole number, datetime, job-type option).</step>
+    <step order="3">Run with -WhatIf; ask the owner for OK; run on dev; re-run to prove idempotency.</step>
+    <step order="4">Check FR-06b: read how `JobStatusService` selects records; add a job-type filter + unit test only if an intake run could be returned.</step>
+    <step order="5">Fix the `sprk_backgroundjob` description in Entity.xml:13, Create-BackgroundJobEntity.ps1:233 and sprk_backgroundjob.md:33-35 (not Office-only).</step>
+    <step order="6">Write docs/data-model/sprk_processingjob.md (all columns incl. new ones, job types, writers, "one request → many runs", no-content rule); export the entity XML.</step>
+    <step order="7">Run the Office job-status tests (`dotnet test` filter on Office/JobStatus) unchanged.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `sprk_currentstage`/`sprk_stages` cannot hold the intake stage values without changing their type (which would affect Office runs), STOP and escalate.</trigger>
+    <trigger>The dev schema change needs the owner's explicit OK (project CLAUDE.md §5).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 5 (run record and job status): `Models/ProcessingJob.cs`, `sprk_ProcessingJob/Entity.xml` (job type :839, status :1278), `Services/Office/JobStatusService.cs:42`; verdict "extend sprk_processingjob" (owner decision). Spec §11 row "sprk_processingjob request/output lookups".</existing>
+    <extension>Yes — extends the existing entity with the missing attributes and one job-type option; no new entity.</extension>
+    <cost-of-doing-nothing>A run cannot be linked to its request or outputs, resumed from its engine execution, or re-driven, so FR-07 resume, FR-15 re-drive and FR-16 status fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script (-WhatIf first)</tool>
+    <tool name="dotnet">Office status tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Add-ProcessingJobIntakeRunColumns.ps1</output>
+    <output type="code">scripts/Create-BackgroundJobEntity.ps1</output>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_backgroundjob/Entity.xml</output>
+    <output type="docs">docs/data-model/sprk_processingjob.md</output>
+    <output type="docs">docs/data-model/sprk_backgroundjob.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">On dev, `sprk_processingjob` has the request lookup, output-document lookup, harness key, engine execution id, staging blob prefix, re-drive count and last-re-drive columns, and a job-type option "Intake run"; several runs can reference one request.</criterion>
+    <criterion testable="true">A second script run and a -WhatIf run make no change.</criterion>
+    <criterion testable="true">Office job-status tests pass unchanged (FR-06a).</criterion>
+    <criterion testable="true">Negative: an "Intake run" record is not returned by the Office job-status read (verified by code reading or a unit test) (FR-06b).</criterion>
+    <criterion testable="true">The `sprk_backgroundjob` description no longer says Office-only in all three places (FR-06c).</criterion>
+    <criterion testable="true">docs/data-model/sprk_processingjob.md exists and documents every column, the job types and the BFF-only writer rule.</criterion>
+  </acceptance-criteria>
+
+  <notes>Column names here are proposals; keep the `sprk_` prefix and record the final names for tasks 013, 014 and 023. If the JobStatusService filter is added, this task becomes BFF-touching for §10 purposes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

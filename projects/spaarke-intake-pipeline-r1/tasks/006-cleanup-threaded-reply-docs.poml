@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-03 cleanup PR (part 2): §10.1 item 7 threaded reply via Graph createReply/createReplyAll + item 8 docs (ADR-036:104, sprk_backgroundjobrun note)</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>after 005 (same branch / same PR); the live test send needs owner OK and the shared mailbox</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs on the outbound email send path (tags bff-api); a wrong fallback silently sends unthreaded mail.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component change in EmailChannelSender with a precise contract from spec FR-03(c–e); Graph createReply is a documented API.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>bff-api, backend, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make a server-side email send that carries `InReplyToMessageId` go out as a real threaded reply: locate the parent message in the sending mailbox and use Graph `createReply` (or `createReplyAll`) on it, then send, so `In-Reply-To` and `References` are set by Exchange. Sends without `InReplyToMessageId` are unchanged; a missing parent fails with a ProblemDetails error code and never silently sends unthreaded. Also fix the stale ADR-036:104 text (item 8 docs).</prompt>
+  <role>SPAARKE platform developer. Expert in Microsoft Graph mail (messages, createReply, internetMessageHeaders) and the BFF CommunicationService / channel-sender design. Follow ADRs strictly.</role>
+  <goal>`EmailChannelSender` has a reply branch (createReply → update draft body/recipients/attachments/server-send marker → send) used when `InReplyToMessageId` is set; unit tests cover reply, non-reply and parent-not-found; `docs/adr/ADR-036-background-job-infrastructure.md` line 104 states run history is process-local today (`InMemoryBackgroundJobStore`) with `sprk_backgroundjobrun` as target state; the data-model note is confirmed or corrected.</goal>
+
+  <context>
+    <background>Spec FR-03 item 7 and acceptance (c), (d), (e); item 8 docs. Verification §7: `EmailChannelSender.cs:205-231` builds a new `Message`; the only header is the server-send marker (:229-232); `InReplyToMessageId` is stored (CommunicationService.cs:1208, :3241) and used only for thread joining. Graph rejects custom `internetMessageHeaders` not starting with `x-`, so In-Reply-To cannot be set by header — createReply is the fix. FR-20 (Phase 2 email return) depends on this. Verification §8: `docs/data-model/sprk_backgroundjobrun.md:8` already states "deployed but unused"; `.claude/adr/ADR-036-background-job-infrastructure.md` already says target state, so no `.claude/` edit is needed. This task commits on the task 005 branch: same PR.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs (BuildGraphMessage :201-240 and the send call)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (only if InReplyToMessageId must be passed through to ChannelSendRequest; check :867, :1209, :3248 first)</file>
+      <file role="new">tests/integration/regression/Intake10_1_Item7_EmailChannelSenderThreadedReplyTests.cs</file>
+      <file role="modify">docs/adr/ADR-036-background-job-infrastructure.md (:104)</file>
+      <file role="modify">docs/data-model/sprk_backgroundjobrun.md (:8, only if still inaccurate)</file>
+      <file role="modify">docs/architecture/communication-service-architecture.md (describe the reply branch)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs (existing shared-mailbox vs user-mode addressing and outcome mapping :195-200 to mirror)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs (stable errorCode)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Same PR; both edit CommunicationService.cs (005 at ~:4554).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Scope: the reply branch. It stays inside `CommunicationService` → `EmailChannelSender` (the server side of the canonical send); no new send path, no direct Graph call from another service.</constraint>
+    <constraint source="ADR-019">Scope: parent-not-found and createReply failures. Return a ProblemDetails with a stable `errorCode` (e.g. `communication.reply_parent_not_found`); never fall back to a new unthreaded message.</constraint>
+    <constraint source="project">Scope: sends without `InReplyToMessageId`. Byte-for-byte the same Graph request as today (regression-tested).</constraint>
+    <constraint source="project">Scope: custom headers on the reply. Only `x-`-prefixed `internetMessageHeaders`; the existing server-send marker must still be present on the sent reply.</constraint>
+    <constraint source="ADR-015">Scope: logs on the reply path. Message ids, mailbox id and outcome only; no subject or body text.</constraint>
+    <constraint source="project">Scope: the live test send (acceptance c). Only with the owner's explicit OK, from the dev shared mailbox, to an owner-named test recipient; never to a real external address.</constraint>
+    <constraint source="bff-extensions">Scope: the PR (shared with 005). Placement Justification, publish-size delta vs fresh master, ≤ 60 MB, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-intake-pipeline-r1/notes/section10-verification-2026-11-25.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Channel sender" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs">Shared-mailbox addressing, NoTransientRetryOption outcome mapping, server-send marker header.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Determine what `InReplyToMessageId` holds (Graph id vs RFC internetMessageId) from CommunicationService and the inbound processor; design the parent lookup accordingly (Graph `messages?$filter=internetMessageId eq '…'` in the sending mailbox if it is an RFC id).</step>
+    <step order="2">Add the reply branch to EmailChannelSender: lookup parent → createReply (createReplyAll when the request asks reply-all) → PATCH draft with body, To/Cc/Bcc, attachments, server-send marker → send; map failures to the existing outcome codes; parent not found → typed failure surfaced as ProblemDetails.</step>
+    <step order="3">Pass `InReplyToMessageId` through `ChannelSendRequest` only if it is not already reachable.</step>
+    <step order="4">Write EmailChannelSenderReplyTests (mocked Graph): reply uses createReply on the parent; non-reply unchanged; parent missing → error, no send; marker header present on the reply.</step>
+    <step order="5">Fix ADR-036 full doc :104 and verify the data-model note; describe the reply branch in communication-service-architecture.md.</step>
+    <step order="6">`dotnet build`, `dotnet test`.</step>
+    <step order="7">With owner OK: deploy to dev via `/bff-deploy`, send one test reply from the dev shared mailbox, and record In-Reply-To/References headers and Outlook threading (screenshot path) in notes.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The live test send and the dev deploy need the owner's explicit OK and a mailbox with Exchange RBAC for Applications (plan R8). If either is missing, STOP at step 7, ship the code-level tests, and mark acceptance (c) pending in notes rather than sending from another mailbox.</trigger>
+    <trigger>If the server-send marker cannot be carried on a createReply draft, STOP and escalate — losing it re-files attachments on the inbound path.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 12 (outbound reply): `EmailChannelSender.cs:22`, CAPABILITY-INDEX row 12; verdict "fix in place". New surface: one private reply branch and one test file.</existing>
+    <extension>Yes — extends EmailChannelSender in place; no new service or endpoint.</extension>
+    <cost-of-doing-nothing>Replies arrive as new, unthreaded mail (no In-Reply-To/References), so FR-20's threaded email return and FR-03(c) fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs</output>
+    <output type="test">tests/integration/regression/Intake10_1_Item7_EmailChannelSenderThreadedReplyTests.cs</output>
+    <output type="docs">docs/adr/ADR-036-background-job-infrastructure.md</output>
+    <output type="docs">docs/architecture/communication-service-architecture.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a send with `InReplyToMessageId` whose parent exists in the sending mailbox, the sender calls createReply on that parent and sends the draft; no new-message `sendMail` call is made.</criterion>
+    <criterion testable="true">Given a send without `InReplyToMessageId`, the Graph request is unchanged from today (FR-03d).</criterion>
+    <criterion testable="true">Negative: given a parent that cannot be found, the send fails with a ProblemDetails stable error code and nothing is sent (FR-03e).</criterion>
+    <criterion testable="true">The sent reply carries the server-send marker header and no non-`x-` custom header.</criterion>
+    <criterion testable="true">With owner OK, a dev test send shows In-Reply-To and References and threads under the original in Outlook (FR-03c); otherwise recorded as pending with the reason.</criterion>
+    <criterion testable="true">ADR-036 full text no longer claims a `sprk_backgroundjobrun` row is persisted per invocation today.</criterion>
+    <criterion testable="true">Build and all tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Seeding proof requested for the parent-not-found test (a silent unthreaded fallback is the defect this task removes): make the branch fall back to a new message, confirm the test fails, restore.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

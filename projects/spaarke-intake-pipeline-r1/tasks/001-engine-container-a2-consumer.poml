@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-01: Engine container image + ADR-004 A2 queue-consumer entrypoint + golden-fixture parity test</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>blocked — external PR #3163 (accelerator engines on master) and task 007 (ADR-004 A2 on master, or in the same PR)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates new code (Python entrypoint, Dockerfile) for the first consumer outside the BFF; idempotency and dead-letter guarantees are fail-open/data-loss risks (NFR-01); 6+ steps.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New pattern authoring: the first ADR-004 A2 consumer outside the BFF (no in-repo reference implementation), with an atomic-marker idempotency design and a stdlib-only runtime constraint that needs judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>007, 002</deps>
+    <tags>backend, azure, infrastructure, worker, integration-test</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the engine container: a Dockerfile and a Python 3.11 entrypoint in `src/server/services/Sprk.Intake.EngineJob/` that runs the accelerator's `segment_clauses`, `ooxml_redline`, `summary_table` and `check_outputs` UNCHANGED from `src/accelerators/core/engines/` on master, as an ADR-004 A2 Service Bus consumer reading and writing stamp-private blob storage with the job's managed identity. Prove it with a golden-fixture parity test on synthetic NDAs.</prompt>
+  <role>SPAARKE platform developer. Expert in Python 3.11 (stdlib), Docker, Azure Container Apps Jobs, Service Bus and Blob REST with managed identity. Follow ADRs strictly.</role>
+  <goal>`src/server/services/Sprk.Intake.EngineJob/` contains a Dockerfile (repo-root build context; COPYs the engines from `src/accelerators/core/engines/` at build time, never vendored into this folder), an entrypoint package implementing the five A2 guarantees, and stdlib `unittest` tests: envelope validation, marker idempotency, deterministic paths, outcome reporting, and golden parity (container output byte-identical to a local run of the same engine version on the synthetic corpus).</goal>
+
+  <context>
+    <background>Spec FR-01 (acceptance a–g), NFR-01, NFR-03, NFR-06, NFR-10; design §5 (owner decision A, conditions 2–3); ADR-004 A2 (drafted on this branch, task 007 merges it). The job is a pure engine: no BFF calls, no secrets, network only to Blob and Service Bus. Content travels by claim check (blob), never in the message. The BFF side (dispatch, completion handling) is task 014; infra is task 002; CI image build is task 003. Folder convention: `src/server/services/` already holds the only other container (`Sprk.Provisioning.ControlPlane.Sidecar/`), so it is used instead of the proposed `src/server/workers/intake-engine/` (no `src/server/workers/` exists).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Intake.EngineJob/Dockerfile</file>
+      <file role="new">src/server/services/Sprk.Intake.EngineJob/entrypoint/main.py</file>
+      <file role="new">src/server/services/Sprk.Intake.EngineJob/entrypoint/envelope.py</file>
+      <file role="new">src/server/services/Sprk.Intake.EngineJob/entrypoint/azure_rest.py</file>
+      <file role="new">src/server/services/Sprk.Intake.EngineJob/tests/test_envelope_and_marker.py</file>
+      <file role="new">src/server/services/Sprk.Intake.EngineJob/tests/test_golden_parity.py</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Dockerfile (base-image pinning, non-root user, header rationale)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs (the envelope fields and camelCase wire shape to validate against; MaxDeliveryCount at :65)</file>
+      <file role="canonical-reference">src/accelerators/core/engines/*.py and src/accelerators/core/engines/tests/test_engines.py (on master after #3163; confirmed in the accelerator worktree, NOT yet on this branch)</file>
+      <file role="canonical-reference">src/accelerators/practices/nda/evals/corpus/nda-0{1,2,3}-*.docx, src/accelerators/practices/nda/evals/expected/nda-01-golden-plan.json (synthetic corpus and golden plan; after #3163)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="007" status="pending">ADR-004 A2 merged to master before this code merges, or in the same PR (FR-04).</dependency>
+      <dependency task="002" status="pending">Queue names, staging container name and MI client id used by the entrypoint's configuration.</dependency>
+      <dependency task="external-#3163" status="pending">Engines, schemas and synthetic corpus on master.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Scope: the entrypoint. It MUST satisfy A2 §2 items 1–5: reject a non-envelope message to the DLQ with no outputs; take an atomic marker (conditional blob create with `If-None-Match: *`, keyed by `idempotencyKey`) before writing outputs; write outputs to deterministic paths derived from ids in the payload so a replay overwrites; carry `correlationId` into every log line and the completion message; report Completed / Failed / Poisoned.</constraint>
+    <constraint source="ADR-004">Scope: every message the entrypoint reads or sends. Payloads carry ids, blob paths and flags only — never document bytes, edit-plan text or clause text (A2 §3).</constraint>
+    <constraint source="ADR-015">Scope: all logs, telemetry and completion messages emitted by the entrypoint. Identifiers, outcome codes and durations only; no document text, clause text, file names from the document, or edit-plan content.</constraint>
+    <constraint source="ADR-028">Scope: all Azure calls. Managed identity tokens only (Container Apps `IDENTITY_ENDPOINT`/`IDENTITY_HEADER`, user-assigned client id from config); no keys, connection strings or SAS; no BFF endpoint calls; no reference to `Sprk.Bff.Api`.</constraint>
+    <constraint source="project">Scope: the image and the entrypoint. Python 3.11, standard library + `lxml` only (spec FR-01 "the job uses Python 3.11, the standard library and lxml only"). The engines are COPYed from `src/accelerators/core/engines/` in the Docker build; no engine file is copied into, forked or edited in this project.</constraint>
+    <constraint source="project">Scope: all tests and fixtures. Synthetic NDAs only (the accelerator's `evals/corpus/` synthetic files). Never read the accelerator `answer-key/` or any real NDA (NFR-10).</constraint>
+    <constraint source="ADR-052">Scope: the job. Function-equivalent guardrails: stateless, bounded runtime (10-minute hard timeout from spec Assumptions), retries bounded by MaxDeliveryCount then a monitored DLQ.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Container image header and pinning" location="src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Dockerfile">Pinned base by digest, non-root user, header comment stating purpose and scan posture.</pattern>
+      <pattern name="Job Contract envelope" location="src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs">Field names and required fields the Python validator mirrors (JSON is the contract; no shared types, A2 §2).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm #3163 is merged and `src/accelerators/core/engines/` exists on master; confirm 007 is merged or will ride in the same PR. If not, stop (gate).</step>
+    <step order="2">Write `entrypoint/envelope.py`: parse and validate the Job Contract envelope (required fields per JobContract.cs; `jobType` must equal the engine job type agreed with task 014, e.g. `IntakeEngineRun`); payload schema = ids and blob paths only.</step>
+    <step order="3">Write `entrypoint/azure_rest.py` (stdlib `urllib`): MI token acquisition; Service Bus REST peek-lock receive, complete, abandon; Blob REST get, put, conditional put with `If-None-Match: *`.</step>
+    <step order="4">Write `entrypoint/main.py`: receive one message → validate → atomic marker → download inputs to a temp dir → run the four engines via their documented CLI → upload outputs to deterministic paths → send a Job Contract completion message (ids, outcome, check-report path) → complete the message. Invalid envelope → dead-letter path with no outputs.</step>
+    <step order="5">Write the Dockerfile (python:3.11-slim pinned by digest, `lxml` pinned, non-root, repo-root context, COPY engines + entrypoint only).</step>
+    <step order="6">Write tests: envelope accept/reject, marker taken once on duplicate, deterministic paths, refused edit appears in the check report and is not applied, golden parity (engines run locally vs. inside the built image on the 3 synthetic NDAs with the same plan; byte-compare outputs).</step>
+    <step order="7">Build the image locally and run the tests; run a local Trivy scan and record the result.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations and the CLI contract used in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a required A2 guarantee cannot be met with the standard library alone (for example explicit dead-lettering is unavailable over Service Bus REST, leaving only lock-expiry to MaxDeliveryCount), STOP and escalate per root CLAUDE.md §6 with the options (stdlib + MaxDeliveryCount dead-lettering, or pinned Azure SDK packages in the entrypoint layer only) instead of adding a package.</trigger>
+    <trigger>If the engine CLI contract on master differs from what this task assumes, or an engine change would be needed, STOP and message the accelerator session "acclerator-r1"; never edit or fork the engines.</trigger>
+    <trigger>If container output is not byte-identical to the local run, STOP and record the diff in notes; do not normalise outputs to make the test pass.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 7 (Container Apps / KEDA / server-side Python): none found; CAPABILITY-INDEX row 6 (queue background work) covers only in-BFF `IJobHandler`. Closest container precedent: `src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Dockerfile`.</existing>
+    <extension>No — the BFF cannot host Python + lxml, and ADR-052 forbids the job referencing `Sprk.Bff.Api`, so no existing consumer can be extended (ADR-004 A2 §1).</extension>
+    <cost-of-doing-nothing>No server-side marked-up NDA exists: FR-09 has no engine to call, and the owner-approved option A (design §5) cannot run without a C# port the owner rejected.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="docker">Build and run the image locally</tool>
+    <tool name="python">Python 3.11 `python -m unittest` (use `py -3.11` on Windows; never `python3`)</tool>
+    <tool name="trivy">Local image scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Intake.EngineJob/Dockerfile</output>
+    <output type="code">src/server/services/Sprk.Intake.EngineJob/entrypoint/main.py</output>
+    <output type="code">src/server/services/Sprk.Intake.EngineJob/entrypoint/envelope.py</output>
+    <output type="code">src/server/services/Sprk.Intake.EngineJob/entrypoint/azure_rest.py</output>
+    <output type="test">src/server/services/Sprk.Intake.EngineJob/tests/test_envelope_and_marker.py</output>
+    <output type="test">src/server/services/Sprk.Intake.EngineJob/tests/test_golden_parity.py</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the 3 synthetic NDAs and the golden plan, when the engines run inside the image, then every output (redline, external, clean, check report) is byte-identical to a local run of the same engine version and `check_outputs` passes (FR-01a).</criterion>
+    <criterion testable="true">Negative: a message that is not a valid envelope (missing field, wrong `jobType`, payload carrying content) is dead-lettered and no blob is written (FR-01b).</criterion>
+    <criterion testable="true">Given the same message delivered twice, then the marker is created once and one set of outputs exists at the same deterministic paths (FR-01c).</criterion>
+    <criterion testable="true">An edit whose anchor is not unique or crosses an existing revision is listed in the check report and not applied (FR-01g).</criterion>
+    <criterion testable="true">Every log line and the completion message carry `correlationId`; a grep of captured test logs finds no document or clause text.</criterion>
+    <criterion testable="true">The image contains Python 3.11, the stdlib, `lxml` and the unchanged engine files only; no file under `src/accelerators/` is modified by this task.</criterion>
+    <criterion testable="true">The image has no secrets, and its code calls only the MI token endpoint, Blob and Service Bus hosts (FR-01f); a local Trivy scan reports no fixable HIGH/CRITICAL (FR-01d, enforced in CI by task 003).</criterion>
+    <criterion testable="true">No test reads the accelerator `answer-key/` or a real NDA (NFR-10).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Seeding proof requested for the marker test only (a broken marker is a duplicate-output / data-loss outcome): remove the `If-None-Match` condition, confirm the duplicate test fails, restore. Latency measurement on dev (FR-01e) belongs to task 008. The completion-message destination is decided with task 002/014 (see 002 notes: the BFF's existing jobs queue, since `ServiceBusJobProcessor` is single-queue).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

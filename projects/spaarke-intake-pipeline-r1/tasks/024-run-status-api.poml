@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-16: Authorized run-status read for a request (internal route for Console/MCP, external route for the Front Door), fail-closed</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:013</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, auth and authorization; adds endpoints and a service (.cs) on both the internal and the external plane.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive: record-level read authorization on two planes (internal membership, external requester scope), where a leak exposes another requester's request (NFR-02, ADR-034).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with tasks 017 and 023 on Infrastructure/DI/EndpointMappingExtensions.cs and the intake DI module.</parallel-reason>
+    <deps>013</deps>
+    <tags>bff-api, endpoints, auth, authorization</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add one run-status read service and two routes: internal `GET /api/intake/requests/{requestId:guid}/runs` (Console, MCP status tool) and external `GET /api/v1/external/servicerequests/{id:guid}/runs` (Front Door). Both return the request's stage and its runs with their stages and statuses (ADR-017), read from the persisted run record. Authorization fails closed: an external requester sees only their own requests; internal staff see a request only when they can read it (record membership / Dataverse rights).</prompt>
+  <role>SPAARKE platform developer. Expert in BFF endpoint filters, record-level authorization on the internal and external planes, and ADR-017 status reads. Follow ADRs strictly.</role>
+  <goal>`IntakeRunStatusService` + `IntakeRunStatusEndpoints` (internal) + `ExternalIntakeRunStatusEndpoints` (external), each behind an authorization filter, returning one closed DTO; output document ids appear only for Approved runs; unit and contract tests for every access case.</goal>
+
+  <context>
+    <background>Spec FR-16 (a–c), FR-06 (b), FR-13 (c), NFR-02. Spec New Components row "Run-status API": `JobStatusService` is Office-only, so this is an intake-scoped read of the same record with request authorization. The external plane's requester scope for `sprk_servicerequest` already exists in `ExternalMessageEndpoints.cs` (servicerequests root :84; requester read via `sprk_requestedby`; `GetRecordRightsAsync` :754).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunStatusService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeRunStatusEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeRunStatusEndpoints.cs</file>
+      <file role="new">tests/integration/contract/Api/Intake/IntakeRunStatusEndpointsContractTests.cs (contract) + tests/integration/auth/Intake/IntakeRunStatusAuthorizationTests.cs (auth path)</file>
+      <file role="new">tests/integration/contract/Api/ExternalAccess/ExternalIntakeRunStatusEndpointsContractTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (external group mapping, beside `MapExternalIntakeEndpoints()` :145)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs (requester scope for servicerequests; GetRecordRightsAsync :754)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/JobStatusService.cs (status read shape; Office-only — do not reuse its store)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/ExternalAccess/ExternalIntakeEndpointsTests.cs (external contract-test host)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Run record read model, stage names, terminal states.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">SCOPE = both routes. Authorization is an endpoint filter per route; the handler runs only after the filter allowed the request.</constraint>
+    <constraint source="ADR-034">SCOPE = the internal route. Allowed = the caller can read the `sprk_servicerequest` (Dataverse's own answer via the existing record-rights check, or the canonical membership resolver); any read fault or undecided answer DENIES. Never a new membership mechanism.</constraint>
+    <constraint source="ADR-003">SCOPE = the external route. Allowed = the caller's contact is the request's `sprk_requestedby` (the existing servicerequests requester scope); any other contact, a missing contact, or a read fault → 404 with no data. The route sits in the existing external group (its CIAM/module checks unchanged).</constraint>
+    <constraint source="ADR-017">SCOPE = the read model. Read only intake runs (job type "Intake run") linked to the request; never Office runs; never Office status for intake runs (FR-06 b).</constraint>
+    <constraint source="ADR-015">SCOPE = the DTO and logs. DTO = request id, request stage, and per run: run id, status, current stage, stage list (name, status, timestamp), created/completed times, and output document ids ONLY when the run is Approved or Returned (FR-13 c). No document text, AI output, admin-attention text (admin-only, task 023) or reject reason.</constraint>
+    <constraint source="ADR-019">SCOPE = every non-2xx. ProblemDetails with stable `errorCode` (INTAKE_REQUEST_NOT_FOUND for unknown or unreadable, INTAKE_STATUS_UNAVAILABLE for a read fault on an otherwise allowed call) and the correlation id.</constraint>
+    <constraint source="project">SCOPE = shared files. `ExternalAccessEndpoints.cs` is shared with spaarke-SPA-external-access-platform-r4: run `/conflict-check`; add one map line only.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md (new tests go under KEEP paths: contract/auth/data-mutation)</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Per-route authorization filter.</pattern>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">GET route + ProblemDetails.</pattern>
+      <pattern name="SSO binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Caller identity on both planes.</pattern>
+      <pattern name="OBO" location=".claude/patterns/auth/obo-flow.md">Internal caller's Dataverse read.</pattern>
+      <pattern name="OAuth scopes" location=".claude/patterns/auth/oauth-scopes.md">Token audience per plane.</pattern>
+      <pattern name="Access control" location=".claude/patterns/auth/uac-access-control.md">Fail-closed record reads.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files and 013's run read model; find the existing record-rights check for internal callers and the servicerequests requester scope for external callers; declare RIGOR FULL, tier opus, effort high.</step>
+    <step order="2">Write `IntakeRunStatusService.GetAsync(requestId, includeOutputs)` returning the closed DTO from the run record.</step>
+    <step order="3">Write the internal route + filter and the external route + filter per the constraints; register both (one line each).</step>
+    <step order="4">Tests per the criteria; build and run tests; measure the publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="6">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If neither an existing record-rights check nor the canonical membership resolver can answer "can this internal user read this request" fail-closed, STOP and escalate (root CLAUDE.md §6, security) rather than writing one.</trigger>
+    <trigger>If adding the external route requires changing the external group's filters, CIAM rules or module registry, STOP and coordinate with spaarke-SPA-external-access-platform-r4.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>spec New Components row "Run-status API": `Services/Office/JobStatusService.cs:42` is Office-only; reuse-scan row 5 (extend `sprk_processingjob`, intake-scoped status read beside the Office one). CAPABILITY-INDEX row 6 (jobs). No intake status route exists.</existing>
+    <extension>Partly: the same run record is read, but `JobStatusService` serves Office runs through its own store and SSE, and FR-06(b) forbids crossing the two; the authorization rules are reused from the existing record-rights check and servicerequests requester scope.</extension>
+    <cost-of-doing-nothing>The Console, the Front Door and the MCP status tool (task 044) cannot show where a request is, so requesters only learn status by email, and FR-16 and FR-21(b) fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="conflict-check">Shared ExternalAccess files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunStatusService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Intake/IntakeRunStatusEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeRunStatusEndpoints.cs</output>
+    <output type="test">tests/integration/contract/Api/Intake/IntakeRunStatusEndpointsContractTests.cs (contract) + tests/integration/auth/Intake/IntakeRunStatusAuthorizationTests.cs (auth path)</output>
+    <output type="test">tests/integration/contract/Api/ExternalAccess/ExternalIntakeRunStatusEndpointsContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An internal caller who can read the request gets 200 with the request stage and every intake run's stages and statuses.</criterion>
+    <criterion testable="true">The external requester of the request gets 200 with the same shape for their own request (FR-16 b).</criterion>
+    <criterion testable="true">Output document ids appear only for runs in Approved or Returned; never for AwaitingApproval or earlier.</criterion>
+    <criterion testable="true">Negative: an internal caller without read access, another external contact, or an unknown request id gets 404 INTAKE_REQUEST_NOT_FOUND with no data (FR-16 a); no token → 401.</criterion>
+    <criterion testable="true">Negative: a read fault during authorization denies (404, no data); a read fault after authorization → 503 INTAKE_STATUS_UNAVAILABLE (FR-16 c).</criterion>
+    <criterion testable="true">Office runs never appear in the response, and the Office job-status endpoints never return intake runs (existing Office tests unchanged).</criterion>
+    <criterion testable="true">The DTO contains no admin-attention text, reject reason or document text.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes. One seeding proof each for the external requester check and the internal read check.</criterion>
+  </acceptance-criteria>
+
+  <notes>FR-16. The MCP status tool (task 044) calls `IntakeRunStatusService` with the caller's identity, so keep the authorization decision callable from the service layer as well as the filter. External SPA status UI, if any, is out of scope here (Front Door shows request stage today).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute (FULL rigor; two adversarial-verifier passes because of the auth tag).</protocol>
+  </execution>
+</task>

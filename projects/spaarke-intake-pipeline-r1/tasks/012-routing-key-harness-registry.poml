@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-08: requestType match key on RoutingContext/IRoutingContext + keyed intake harness contract and registry (unknown key → triage)</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after 005 (shared files)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a PublicContracts interface used across the BFF and adds new .cs abstractions and DI registrations (bff-api).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New abstraction authoring (the harness contract every future harness implements) plus a non-breaking change to a cross-cutting routing contract; the Binding-to-harness mapping needs judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>bff-api, ai, di, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a `RequestType` routing dimension to `IRoutingContext`/`RoutingContext` without breaking existing implementers or Bindings, teach `ConsumerRoutingService` to match the `"requestType"` key, and add an intake harness contract plus a DI-keyed harness registry (pattern: ToolHandlerRegistry / NodeExecutorRegistry) that resolves a harness for a request type + document type, returning a "no harness" result (→ manual triage) instead of throwing.</prompt>
+  <role>SPAARKE platform developer. Expert in the AI consumer-routing contract (Bindings, match conditions, ConsumerTypes) and .NET DI registries. Follow ADRs strictly.</role>
+  <goal>`IRoutingContext.RequestType` (default-implemented, returns null) and `RoutingContext.RequestType`; `ConsumerRoutingService.ResolveContextValue` maps `"requestType"`; `IIntakeHarness` (key, CanHandle, Run returning documents, results, approval-required flag, return payload, persist hook) and `IntakeHarnessRegistry` (built from `IEnumerable&lt;IIntakeHarness&gt;`, case-insensitive, duplicate keys fail at startup); a `ConsumerTypes.IntakeHarness` Binding consumer type whose match conditions carry `requestType`; unit tests for all of it. No harness is implemented here (NDA harness = task 015).</goal>
+
+  <context>
+    <background>Spec FR-08 (acceptance a–d), FR-10 (no harness → triage), project CLAUDE.md §2 ("RoutingContext carries only MimeType and DocumentType today"). `IRoutingContext` at `IConsumerRoutingService.cs:341`, `RoutingContext` at `:364`; match-key switch at `ConsumerRoutingService.cs:1201-1213` (unknown key → no match). The harness contract shape is from spec FR-08 ("takes request, run and content, and returns documents, results, an approval-required flag, a return payload and a persist hook"); "content" means references (document ids / staged blob paths), never bytes in memory beyond what a harness reads. Mapping a Binding to a harness: the Binding resolved for `intake-harness` with `{"requestType": "nda"}` must name the harness key using an EXISTING Binding field (candidates in `Binding.cs`: `ConsumerCode`, `WorkflowClass`); record the choice in notes.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs (:341 IRoutingContext, :364 RoutingContext)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs (:1201-1213 ResolveContextValue)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs (IntakeHarness + All)</file>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json (one `intake-harness` Binding row, requestType = nda)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs (register the registry)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IIntakeHarness.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IntakeHarnessContracts.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IntakeHarnessRegistry.cs</file>
+      <file role="new">tests/unit/domain/Intake/IntakeHarnessRegistryTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/ConsumerRoutingServiceContextFilterTests.cs (requestType cases)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs:27 and src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs:29</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs (existing fields; no new Binding column)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">005 edits ConsumerTypes.cs and JobProcessingModule.cs (file overlap). Task 004 also appends to ConsumerTypes.cs and sprk_playbookconsumer-rows.json: rebase on it if it merged first (append-only, different entries). Task 013 consumes the registry; 015 adds the NDA harness.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Scope: IRoutingContext. The new member is a default interface member returning null so no existing implementer or caller changes; every existing routing test passes unchanged (FR-08b).</constraint>
+    <constraint source="ADR-015">Scope: RequestType. A deterministic identifier (e.g. `nda`), never user text, matching the interface's existing ADR-015 remark.</constraint>
+    <constraint source="ADR-039">Scope: the new consumer type. `ConsumerTypes.IntakeHarness`, its `All` entry and its Binding row land in the same change; `/healthz/catalog` reports no drift.</constraint>
+    <constraint source="ADR-010">Scope: DI. Register the registry as a concrete singleton/scoped per the ToolHandlerRegistry precedent; `IIntakeHarness` is a real seam (multiple implementations); no other new interfaces.</constraint>
+    <constraint source="project">Scope: the registry. An unknown or unregistered request type returns an explicit "no harness" result that the orchestrator maps to manual triage (FR-08c, FR-10); it never throws for that case. Duplicate harness keys fail at construction.</constraint>
+    <constraint source="project">Scope: Binding schema. No new Binding/`sprk_playbookconsumer` column; the harness key rides an existing Binding field.</constraint>
+    <constraint source="bff-extensions">Scope: the PR. State the Placement Justification (`.claude/constraints/bff-extensions.md`), measure the publish-size delta against a fresh master build, ≤ 60 MB total, no new HIGH CVE; update the CAPABILITY-INDEX row if the registry becomes a canonical component (main session applies `.claude/` edits).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/architecture/ai-architecture-playbook-consumer-routing.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Keyed handler registry" location="src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs">Constructor takes IEnumerable of handlers, builds a case-insensitive dictionary, logs registered keys.</pattern>
+      <pattern name="Match-key resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs">`ResolveContextValue` switch: add `"requestType" => context.RequestType`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add `RequestType` to IRoutingContext (default member) and RoutingContext; add the `"requestType"` case to ResolveContextValue; extend ConsumerRoutingServiceContextFilterTests.</step>
+    <step order="2">Define the harness contract (IIntakeHarness + request/result records) from spec FR-08; results carry ids and references only.</step>
+    <step order="3">Implement IntakeHarnessRegistry (resolve by harness key from the Binding; "no harness" result for null/unknown); register in JobProcessingModule.</step>
+    <step order="4">Add `ConsumerTypes.IntakeHarness`, its `All` entry and one Binding row (`requestType` = `nda`, harness key `nda` in the chosen existing Binding field).</step>
+    <step order="5">Write IntakeHarnessRegistryTests (resolve, unknown → no-harness, duplicate key → startup failure, case-insensitive) and run RoutingConsumerTypeHealthCheckTests.</step>
+    <step order="6">`dotnet build`, `dotnet test`; measure publish size vs fresh master.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="8">Record the Binding-field choice and any deviation in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If naming the harness key on a Binding needs a new `sprk_playbookconsumer` column or repurposes a field with existing semantics that other code reads, STOP and escalate per root CLAUDE.md §6 with the options.</trigger>
+    <trigger>If adding `RequestType` would break a public contract (an implementer outside the BFF, a serialized shape, an MCP schema), STOP and escalate (breaking API contract, root CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 3 (routing key: `IConsumerRoutingService.cs:364`, extend) and row 2 (keyed registry: `ToolHandlerRegistry.cs:27`, `NodeExecutorRegistry.cs:29` — "new registry, pattern copied"); CAPABILITY-INDEX row 16 (AI analysis / node executors) covers other concepts.</existing>
+    <extension>RequestType: Yes — extends `RoutingContext`/`IRoutingContext`. Registry: No — the existing registries key node executors and tools, not request work; the harness contract has different inputs and outputs (spec §11 row "Harness contract and registry").</extension>
+    <cost-of-doing-nothing>The orchestrator cannot route a request by type, so every request type would need its own pipeline and an unknown type would have no triage path (FR-08a, FR-08c, FR-10 fail).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IIntakeHarness.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IntakeHarnessContracts.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IntakeHarnessRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</output>
+    <output type="code">infra/dataverse/sprk_playbookconsumer-rows.json</output>
+    <output type="test">tests/unit/domain/Intake/IntakeHarnessRegistryTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/ConsumerRoutingServiceContextFilterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Binding with match condition `{"requestType":"nda"}` and a RoutingContext with RequestType `nda`, routing resolves that Binding and the registry returns the harness registered under its key (FR-08a, with a test harness).</criterion>
+    <criterion testable="true">All existing ConsumerRoutingService and routing tests pass unchanged; contexts without RequestType route exactly as before (FR-08b).</criterion>
+    <criterion testable="true">Negative: a request type with no Binding, or a Binding whose key has no registered harness, yields the "no harness" result — no exception (FR-08c).</criterion>
+    <criterion testable="true">Negative: two harnesses with the same key make registry construction fail with a clear message.</criterion>
+    <criterion testable="true">Adding a harness needs only a harness class, one DI line and one Binding row (FR-08d) — demonstrated by the test harness setup.</criterion>
+    <criterion testable="true">`ConsumerTypes.All` includes `intake-harness`; RoutingConsumerTypeHealthCheckTests report no drift; DiGraphValidationTests pass.</criterion>
+    <criterion testable="true">PR states Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>`Services/Intake/` is a proposed new folder for all intake pipeline BFF code (orchestrator 013, dispatch 014, harnesses 015, triage 016); keep it unless the BFF CLAUDE.md names a better home.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

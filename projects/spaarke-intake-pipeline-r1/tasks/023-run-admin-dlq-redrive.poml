@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-15 + §10.1 item 3: Run admin endpoints (list/detail by stage and status, held and dead-lettered runs) and DLQ re-drive wiring the existing DeadLetterQueueService</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:013,011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api and authorization; adds admin endpoints (.cs) that re-drive queue work.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Admin endpoints copied from `Api/Admin/JobsEndpoints.cs` (SystemAdmin policy) over an existing, unused service; closed contract. The safety rule (no re-drive of a terminal run) is explicit.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with tasks 017 and 024 on Infrastructure/DI/EndpointMappingExtensions.cs (one Map line each).</parallel-reason>
+    <deps>013, 011</deps>
+    <tags>bff-api, endpoints, authorization, worker, job</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add an admin-only endpoint group beside `Api/Admin/JobsEndpoints.cs` that lists intake runs by stage and status, shows one run with its admin-attention text, lists dead-lettered intake run messages, and re-drives selected ones through the existing `DeadLetterQueueService` (registered in `WorkersModule.cs:37`, no caller today). A re-drive of a run that is already terminal is refused; a re-driven run resumes from stored state (013) without re-running completed AI stages.</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, Azure Service Bus dead-lettering and ADR-004 job semantics. Follow ADRs strictly.</role>
+  <goal>`IntakeRunsAdminEndpoints` under `/api/admin/intake` (runs list, run detail, DLQ list, DLQ re-drive) behind `RequireAuthorization("SystemAdmin")`, the first production caller of `DeadLetterQueueService`, unit tests, and the admin guide updated.</goal>
+
+  <context>
+    <background>Spec FR-15 (a–c), NFR-06; design §10.1 item 3 (owner: Phase 1). Reuse-scan row 13: extend `Api/Admin` and wire the existing service. `notes/section10-verification-2026-11-25.md` §3: `DeadLetterQueueService.cs` (488 LOC) has `GetSummaryAsync`, `ListMessagesAsync` (:97), `GetMessageAsync` (:153), `RedriveMessagesAsync` (:182); models in `Models/Jobs/DlqModels.cs` (`DlqMessage` carries `RawBody`). Run records and the re-drive marker come from 011; resume and terminal-state semantics from 013.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Admin/IntakeRunsAdminEndpoints.cs</file>
+      <file role="new">tests/integration/contract/Api/Admin/IntakeRunsAdminEndpointsContractTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (beside `app.MapAdminJobsEndpoints()` :515)</file>
+      <file role="modify">docs/guides/BACKGROUND-JOBS-ADMIN-GUIDE.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs (MapGroup :57, RequireAuthorization("SystemAdmin") :58, WithName/ProblemDetails shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/DeadLetterQueueService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Models/Jobs/DlqModels.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Api/Admin/JobsEndpointsTests.cs (grandfathered; copy its cases, put the new file under the KEEP path)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Orchestrator job type name, terminal states, resume-from-stored-state, admin-attention text.</dependency>
+      <dependency task="011" status="pending">sprk_processingjob intake columns (request lookup, stages, re-drive marker).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">SCOPE = every route in the new group. `RequireAuthorization("SystemAdmin")` on the group, as `JobsEndpoints.cs:58`; no per-route override, no anonymous route.</constraint>
+    <constraint source="ADR-004">SCOPE = re-drive. Only messages whose JobType is the intake orchestrator's are listed or re-driven; before re-driving, read the run and refuse (409 INTAKE_RUN_TERMINAL) when it is Completed, Rejected or otherwise terminal; record the re-drive marker on the run (011) before calling `RedriveMessagesAsync`.</constraint>
+    <constraint source="ADR-017">SCOPE = the run list/detail. Read from the persisted run record (`sprk_processingjob`, job type "Intake run"); never from the Office job-status store; never return Office runs (FR-06 b).</constraint>
+    <constraint source="ADR-015">SCOPE = every response and log. Return ids, stages, statuses, timestamps, error codes and admin-attention text only; never `DlqMessage.RawBody`, payload contents or document text.</constraint>
+    <constraint source="ADR-019">SCOPE = every non-2xx. ProblemDetails with stable `errorCode` (INTAKE_RUN_NOT_FOUND, INTAKE_RUN_TERMINAL, INTAKE_DLQ_MESSAGE_NOT_FOUND, INTAKE_DLQ_UNAVAILABLE).</constraint>
+    <constraint source="ADR-010">SCOPE = DI. Use the existing `DeadLetterQueueService` registration; add no new registration for it and no interface.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/jobs-architecture.md</file>
+      <file>docs/guides/BACKGROUND-JOBS-ADMIN-GUIDE.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/section10-verification-2026-11-25.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md (new tests go under KEEP paths: contract/auth/data-mutation)</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Admin route group.</pattern>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Policy on the group.</pattern>
+      <pattern name="Background workers" location=".claude/patterns/api/background-workers.md">DLQ and re-drive semantics.</pattern>
+      <pattern name="Scheduled jobs" location=".claude/patterns/api/scheduled-jobs.md">Not used (no timer); tag-mapped.</pattern>
+      <pattern name="OBO / auth" location=".claude/patterns/auth/obo-flow.md">Admin caller identity.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files and 013/011 outputs; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Write `IntakeRunsAdminEndpoints.MapAdminIntakeRunsEndpoints`: `GET /api/admin/intake/runs?stage=&amp;status=&amp;top=` (paged, newest first), `GET /api/admin/intake/runs/{runId}`, `GET /api/admin/intake/dlq` (intake job types only, RawBody stripped), `POST /api/admin/intake/dlq/redrive` body `{ "sequenceNumbers": [..] }`.</step>
+    <step order="3">Re-drive: for each sequence number, read the message's job info, resolve the run, refuse terminal runs (per-item result `refused: INTAKE_RUN_TERMINAL`), mark the run, then call `RedriveMessagesAsync` for the accepted set; return per-item outcomes.</step>
+    <step order="4">Register the map call beside `MapAdminJobsEndpoints()`; update `BACKGROUND-JOBS-ADMIN-GUIDE.md` with the intake section.</step>
+    <step order="5">Tests per the criteria (copy `JobsEndpointsTests.cs` structure); build and run tests; measure the publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If intake run messages dead-letter on a queue other than the one `DeadLetterQueueService` is bound to, STOP and escalate rather than adding a second service instance or registration.</trigger>
+    <trigger>If the owner expects an admin UI (not only endpoints) for FR-15, STOP and escalate; a UI is not in this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row 13: `Api/Admin/JobsEndpoints.cs:54` covers scheduled jobs only; `DeadLetterQueueService.cs:14` is registered (`WorkersModule.cs:37`) with no caller (section10-verification §3). CAPABILITY-INDEX row 6 (jobs framework).</existing>
+    <extension>Yes, extended: a sibling group in `Api/Admin` with the same policy, and the existing service is wired rather than replaced. It is not added inside `JobsEndpoints.cs` because that group serves `Spaarke.Scheduling` jobs (`/api/admin/jobs/{jobId}`), a different id space.</extension>
+    <cost-of-doing-nothing>Held or dead-lettered intake runs are invisible and can only be recovered by hand in Service Bus, and the registered DLQ service stays dead code (§10.1 item 3).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Admin/IntakeRunsAdminEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</output>
+    <output type="test">tests/integration/contract/Api/Admin/IntakeRunsAdminEndpointsContractTests.cs</output>
+    <output type="docs">docs/guides/BACKGROUND-JOBS-ADMIN-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A SystemAdmin caller can list intake runs filtered by stage and status and open one run with its stages and admin-attention text; Office runs never appear.</criterion>
+    <criterion testable="true">The DLQ list returns only intake orchestrator messages, with job ids, run ids, reason and delivery count, and no RawBody or payload content.</criterion>
+    <criterion testable="true">Re-driving a dead-lettered, non-terminal run calls `RedriveMessagesAsync` for it, marks the run, and the run resumes from stored state without re-running completed AI stages (FR-15 b, verified with 013's resume test double).</criterion>
+    <criterion testable="true">Negative: re-driving a terminal run is refused with INTAKE_RUN_TERMINAL and nothing is re-driven (FR-15 c).</criterion>
+    <criterion testable="true">Negative: a non-admin caller gets 403 and an unauthenticated caller 401 on every route (FR-15 a); an unknown run id → 404 INTAKE_RUN_NOT_FOUND; an unknown sequence number → per-item INTAKE_DLQ_MESSAGE_NOT_FOUND.</criterion>
+    <criterion testable="true">`DeadLetterQueueService` has a production caller and no new DI registration was added for it.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes. One seeding proof for the terminal-run refusal.</criterion>
+  </acceptance-criteria>
+
+  <notes>FR-15; §10.1 item 3. Scope is intake runs; a general DLQ view for every job type is not added (file a follow-up with `/project-defer-issue-tracking` if wanted). Folder `Api/Admin/` per the brief ("extend Api/Admin").</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute.</protocol>
+  </execution>
+</task>

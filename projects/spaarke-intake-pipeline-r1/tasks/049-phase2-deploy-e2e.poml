@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>Phase 2 dev deploy + end-to-end: intake mailbox → threaded reply; accepted Job B suggestion; MCP submit; ordinary mailbox creates no request without confirmation</title>
+    <phase>2 Email and Copilot doors</phase>
+    <gate>after:040,041,042,043,044 + owner OK for live actions</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Depends on 3+ tasks (040–044) and is the Phase 2 deployment + integration gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FULL rigor and depends on 3+ tasks (rubric 3.5.5b); live email round trips across the inbound processor, Job B, the orchestrator and MCP need judgment when one fails.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to the shared dev environment; ordered, irreversible steps; single task in its group.</parallel-reason>
+    <deps>040, 041, 042, 043, 044</deps>
+    <tags>deploy, dataverse, bff-api, e2e-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy Phase 2 to dev (intake-mailbox columns, BFF via `/bff-deploy`, configuration and kill switches), configure one dev intake mailbox, and run the Phase 2 end-to-end checks with synthetic NDAs: intake mailbox → approved → threaded reply; ordinary mailbox → Job B suggestion → Accept → run; MCP submit → run; ordinary mailbox without Accept → no request. Every live action waits for the owner's explicit OK.</prompt>
+  <role>SPAARKE platform developer. Expert in Spaarke deployment skills and live email/MCP verification on dev. Follow ADRs strictly.</role>
+  <goal>Phase 2 runs on dev; `projects/spaarke-intake-pipeline-r1/notes/049-phase2-e2e-report.md` records each deploy step, the BFF publish size, each scenario's evidence and every defect filed.</goal>
+
+  <context>
+    <background>Plan §4 Phase 2 and §7 Phase 2 acceptance; spec success criterion 6; FR-17–FR-21. The shared legal mailbox needs Exchange RBAC for Applications (plan §5, R8); the dev intake mailbox and the test sender/recipient addresses are named by the owner.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file role="canonical-reference">scripts/Add-IntakeMailboxColumns.ps1 (task 040)</file>
+      <file role="canonical-reference">scripts/Test-BffDevDeployReadback.ps1</file>
+      <file role="canonical-reference">projects/spaarke-intake-pipeline-r1/notes/029-phase1-e2e-report.md (report format)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Intake mailbox.</dependency>
+      <dependency task="041" status="pending">Job B Submit-as-request proposal.</dependency>
+      <dependency task="042" status="pending">AttachmentClassification producer.</dependency>
+      <dependency task="043" status="pending">Threaded email return.</dependency>
+      <dependency task="044" status="pending">MCP tools.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = every live action (schema script, solution import, BFF deploy, app setting / kill switch, mailbox configuration, Exchange RBAC, sending any email, any MCP submit). Ask the owner in chat and wait for an explicit yes, one approval per action (project CLAUDE.md §5).</constraint>
+    <constraint source="project">SCOPE = the BFF deploy. `/bff-deploy` only; record the publish size (≤ 60 MB).</constraint>
+    <constraint source="project">SCOPE = documents and addresses. Synthetic NDAs only (NFR-10); mail is sent only from and to owner-named test addresses; never to a real external party.</constraint>
+    <constraint source="ADR-015">SCOPE = the report. Ids, statuses, timings and screenshots; no document or email text pasted.</constraint>
+    <constraint source="ADR-032">SCOPE = kill switches. Enable the email door, Job B suggest and Copilot door switches on dev only with the owner's OK; record final values.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/COMMUNICATION-ADMIN-GUIDE.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/spec.md (FR-17–FR-21, success criterion 6)</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Tag-mapped.</pattern>
+      <pattern name="Control init" location=".claude/patterns/pcf/control-initialization.md">Tag-mapped (e2e-test).</pattern>
+      <pattern name="Theme" location=".claude/patterns/pcf/theme-management.md">Tag-mapped; dark-mode check in ui-tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm 040–044 are ✅ and master is merged; check the dev-deploy coordination doc.</step>
+    <step order="2">Owner OK → run `scripts/Add-IntakeMailboxColumns.ps1` on dev; verify the columns.</step>
+    <step order="3">Owner OK → deploy the BFF via `/bff-deploy`; run the readback script; record the publish size.</step>
+    <step order="4">Owner OK → mark one owner-named dev mailbox as intake (default type NDA); set the email door, Job B suggest and Copilot switches; confirm the shared-mailbox RBAC.</step>
+    <step order="5">E2E-1 (owner OK to send): mail a synthetic NDA from the test sender to the intake mailbox; confirm one request + run, approval, and a reply threaded under the original in the sender's Outlook with the attorney Cc'd and the approved outputs attached.</step>
+    <step order="6">E2E-2: reply on that thread; confirm a second run on the same request, no new request.</step>
+    <step order="7">E2E-3: mail a synthetic NDA to an ordinary receive-enabled mailbox; confirm no request; confirm one "Submit as request" proposal in the review queue; Accept it; confirm one request + run attributed to the accepting user. Dismiss a second one; confirm no request and one Dismissed row.</step>
+    <step order="8">E2E-4: from the Copilot/MCP client (per the 044 visibility decision), submit a synthetic NDA and query its status; confirm one request + run attributed to the caller and status visible only to the caller.</step>
+    <step order="9">E2E-5: send a synthetic invoice-like attachment to the intake mailbox with record matching on; confirm one AttachmentClassification job for it.</step>
+    <step order="10">Write `notes/049-phase2-e2e-report.md`; file defects with `/project-defer-issue-tracking`; run `/context-handoff`.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before EACH live action in steps 2–5 and 7–9 (including every email send and MCP submit), STOP and get the owner's explicit OK (project CLAUDE.md §5).</trigger>
+    <trigger>If any scenario fails, STOP, record it and escalate when the fix belongs to a completed task rather than patching on dev.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Job B suggestion appears and Accept creates a request">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open the review queue (Exceptions Queue surface) after E2E-3's mail is processed.</step>
+        <step>Verify one "Submit as request (NDA review)" item; click Accept; check the console for errors.</step>
+      </steps>
+      <expected>One request and run created; the item leaves the queue; no console errors.</expected>
+    </test>
+    <test name="Request status after the email door">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_servicerequest&amp;id={request-id}</url>
+      <steps>
+        <step>Open the request created by E2E-1; verify channel Email, the stage history and two runs after E2E-2.</step>
+      </steps>
+      <expected>Stage and runs match the scenario.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Repeat the queue view in dark theme.</step>
+      </steps>
+      <expected>The new proposal item renders with theme tokens (no white backgrounds, no black text).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="bff-deploy">BFF deploy (only path)</tool>
+    <tool name="dataverse-deploy">Schema / solution import</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/notes/049-phase2-e2e-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every deploy and configuration step ran only after an owner OK; BFF deployed via `/bff-deploy` with publish size ≤ 60 MB.</criterion>
+    <criterion testable="true">E2E-1: an intake-mailbox NDA returns as a reply threaded under the original, attorney Cc'd, approved outputs attached.</criterion>
+    <criterion testable="true">E2E-2: a reply on the thread creates a second run on the same request.</criterion>
+    <criterion testable="true">E2E-3: an ordinary mailbox creates no request until Accept; Accept creates one request + run; Dismiss creates none and one audit row.</criterion>
+    <criterion testable="true">E2E-4: MCP submit creates one request + run attributed to the caller; status is visible only to the caller.</criterion>
+    <criterion testable="true">E2E-5: one AttachmentClassification job per invoice-like attachment at the intake mailbox.</criterion>
+    <criterion testable="true">Negative: no real NDA, `answer-key/` content or real external address was used; every defect is filed in notes and GitHub.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec success criterion 6. If task 044 shipped only the status tool (owner option C), E2E-4 records "submit deferred" with the issue link.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute; prescriptive steps bind.</protocol>
+  </execution>
+</task>

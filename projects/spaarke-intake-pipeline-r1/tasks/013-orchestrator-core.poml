@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-07: Intake run orchestrator — IJobHandler stage machine (Receive … Record), resume without re-running AI, atomic claim, terminal-last, per-door/per-harness kill switches, correlationId</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>blocked — tasks 004, 010, 011, 012</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF IJobHandler with idempotency and resume guarantees (fail-open and duplicate-output risks, NFR-01); depends on 3+ tasks; tags bff-api, worker.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FULL rigor with 4 dependencies, flagged high-risk in plan (critical path; at-least-once safety); new state-machine pattern copied only by rules from the frozen invoice handler.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004, 010, 011, 012</deps>
+    <tags>bff-api, worker, job, di, config, unit-test</tags>
+    <estimated-effort>8-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the intake run orchestrator: one ADR-004 `IJobHandler` (JobType `IntakeRun`) that drives a `sprk_processingjob` run through stages 1–10 of spec FR-07, applying the invoice pipeline's step-0 rules (payload → lock → re-read → terminal-first → flag → resume from stored state) by COPYING the pattern of `InvoiceSubmissionProcessingJobHandler.cs` without editing it. It must resume at the failed stage without re-running AI, never duplicate outputs on redelivery, write the terminal status last, honour per-door and per-harness kill switches, and carry correlationId end to end.</prompt>
+  <role>SPAARKE platform developer. Expert in the BFF jobs framework (IJobHandler, JobContract, JobOutcome, ServiceBusJobProcessor), atomic idempotency (ADR-004 A1 §4) and Dataverse optimistic concurrency. Follow ADRs strictly.</role>
+  <goal>`Services/Intake/IntakeRunJobHandler.cs` + `Services/Intake/IntakeRunStore.cs` (run/request reads and conditional writes) + `Configuration/IntakePipelineOptions.cs` (kill switches), registered in `JobProcessingModule.cs`; stages persist their results on the run before advancing; Classify uses `IAgreementAi.ClassifyAsync` (task 004); Route uses the task 012 registry (no harness or confidence below 0.85 → hand-off to the triage stage slot, task 016); Analyse/Build/Persist delegate to the harness; Approve sets AwaitingApproval and stops (the approval Work Item is task 017); Return/Record slots exist with markers (door-specific return bodies are later tasks); crash-injection and duplicate-delivery tests prove FR-07(a–e).</goal>
+
+  <context>
+    <background>Spec FR-07 (acceptance a–e), NFR-01, NFR-06, NFR-08, design §3.3 (step-0 rules) and §4 (ADR-052 written reason); MUST rules: atomic receive-side idempotency (`IIdempotencyService` alone is check-then-set and fails open, #984; project CLAUDE.md §6), terminal status last, no content in payloads/logs. The run record is `sprk_processingjob` extended by task 011 (request lookup, harness key, engine execution id, staging prefix, re-drive marker; stages in `sprk_currentstage`/`sprk_stages`); the request is `sprk_servicerequest` (task 010: stage, current run, correlation id). Stage writes to the request are owned here (ADR-002 single writer). Triage threshold 0.85 (spec Assumptions). Engine dispatch/completion is task 014; NDA harness 015; triage body 016.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunJobHandler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunStore.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Configuration/IntakePipelineOptions.cs</file>
+      <file role="new">tests/integration/data-mutation/Intake/IntakeRunJobHandlerTests.cs</file>
+      <file role="new">tests/integration/data-mutation/Intake/IntakeRunResumeTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs:71 (READ ONLY — frozen until eBilling UAT)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/InvoiceSubmissionRerunJobHandler.cs:66 (resume from stored state; READ ONLY)</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandlerTests.cs (test structure to copy)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs (MaxDeliveryCount :65), src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs (lock API; not sufficient alone)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IntakeHarnessRegistry.cs (task 012), src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IAgreementAi.cs (task 004)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">IAgreementAi.ClassifyAsync for the Classify stage.</dependency>
+      <dependency task="010" status="pending">Request columns (stage, current run, correlation id).</dependency>
+      <dependency task="011" status="pending">Run columns (request lookup, harness key, markers, Intake run job type).</dependency>
+      <dependency task="012" status="pending">RequestType routing key and harness registry.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Scope: IntakeRunJobHandler. Implements `IJobHandler` dispatched by `ServiceBusJobProcessor`; receive-side claim is atomic (conditional create/upsert or Dataverse If-Match on the run row, A1 §4) — never `IIdempotencyService` check-then-set alone; payload is ids only (request id, run id, correlationId).</constraint>
+    <constraint source="ADR-017">Scope: every stage transition. Persisted on the run (and the request stage) with idempotent writes; the terminal status (Completed / Failed / held-for-attention) is written last, after every side effect of the run.</constraint>
+    <constraint source="project">Scope: AI stages (Classify, Analyse). A stage whose result is persisted is never re-executed on resume or redelivery; "Processing" is written before any AI call; deterministic ids/keys for every created record and message; a marker is written before any send (FR-07).</constraint>
+    <constraint source="ADR-032">Scope: kill switches. `IntakePipelineOptions` exposes per-door and per-harness enable flags read at run time (config change, no redeploy); a disabled harness holds the run with admin-attention text (not Failed, not Completed); a disabled door is enforced by the door tasks using the same options.</constraint>
+    <constraint source="ADR-015">Scope: logs, telemetry, exceptions and `sprk_payload`/`sprk_result`. Ids, stage names, outcome and error codes only; no document text, classification reasoning text or plan content.</constraint>
+    <constraint source="ADR-002">Scope: request stage, current run and run status. Written only by this orchestrator (and later the approval endpoint), never by clients.</constraint>
+    <constraint source="project">Scope: this task. Do NOT edit `InvoiceSubmissionProcessingJobHandler.cs`, `InvoiceSubmissionRerunJobHandler.cs` or anything under `Services/Finance/Submission/`; no hand-rolled `BackgroundService`; no Durable Task.</constraint>
+    <constraint source="bff-extensions">Scope: the PR. State the Placement Justification (ADR-052 written reason, design §4), measure the publish-size delta against a fresh master build, ≤ 60 MB total, no new package and no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-031-stage-lifecycle.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/architecture/jobs-architecture.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Staged resumable job" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs">Lock, re-read, terminal-first check, resume from stored stage, final-delivery mapping to JobOutcome. Copy the rules, not the invoice types.</pattern>
+      <pattern name="Handler registration" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs">`services.AddScoped&lt;IJobHandler, …&gt;()` with a comment naming ADR-052 placement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the invoice handler and rerun handler (read only) and design §3.3; write the stage table (stage → persisted result → idempotency key → resume rule) into the task notes before coding.</step>
+    <step order="2">Implement IntakeRunStore: read run + request; conditional (If-Match) stage/status writes; atomic claim per message.</step>
+    <step order="3">Implement IntakeRunJobHandler: step-0 rules; stages 1–10 with stored-state resume; Classify via IAgreementAi; Route via the registry (no harness or confidence below 0.85 → triage slot); harness delegation for Analyse/Build/Persist; Approve = AwaitingApproval wait; Return/Record slots with markers; terminal last; final-delivery → admin-attention text and DLQ (never "Completed").</step>
+    <step order="4">Add IntakePipelineOptions (per-door, per-harness flags) and register the handler and options in JobProcessingModule.</step>
+    <step order="5">Write tests: crash injected after each stage resumes at that stage with zero repeat AI calls; duplicate delivery → no duplicate creates/messages; terminal run redelivered → no-op; exhausted run → DLQ outcome with admin text; disabled harness → held; payload/log capture contains no content.</step>
+    <step order="6">`dotnet build`, `dotnet test`; measure publish size vs fresh master.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="8">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an atomic claim cannot be implemented with existing primitives (Dataverse If-Match, BlobGateway.CreateIfNotExistsAsync, Redis SET NX) without a new package or service, STOP and escalate per root CLAUDE.md §6.</trigger>
+    <trigger>If resume-without-re-running-AI requires persisting AI output content on the run row (ADR-015), STOP and escalate with options (outputs stored as sprk_analysis/sprk_document and referenced by id).</trigger>
+    <trigger>If the frozen invoice handler would need a change to share code, STOP — copy the rule instead; never edit it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 1 (multi-stage resumable orchestrator): `InvoiceSubmissionProcessingJobHandler.cs:71`, `InvoiceSubmissionRerunJobHandler.cs:66`, `ServiceBusJobProcessor.cs` (CAPABILITY-INDEX row 6); verdict "new handler on the existing framework; copy the invoice rules".</existing>
+    <extension>No — the invoice handlers are invoice-typed throughout and frozen until eBilling UAT (design §7, Q4); the generic framework (IJobHandler, JobContract) is reused as is.</extension>
+    <cost-of-doing-nothing>Front Door, Console and email requests are never processed: no stage advances, nothing reaches AwaitingApproval (FR-07, success criterion 4).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunStore.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/IntakePipelineOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</output>
+    <output type="test">tests/integration/data-mutation/Intake/IntakeRunJobHandlerTests.cs</output>
+    <output type="test">tests/integration/data-mutation/Intake/IntakeRunResumeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a crash injected after each stage, redelivery resumes at that stage and the AI facade/harness is not called again for any stage whose result was persisted (FR-07a).</criterion>
+    <criterion testable="true">Given the same message delivered twice (including concurrently), exactly one set of documents, analyses, Work Items, messages and emails is created (FR-07b).</criterion>
+    <criterion testable="true">Given a run already in a terminal state, redelivery is a no-op (FR-07c).</criterion>
+    <criterion testable="true">Negative: an exhausted run (final delivery failed) is dead-lettered with admin-attention text and its status is never "Completed" (FR-07d).</criterion>
+    <criterion testable="true">Negative: captured queue payloads and logs contain no document content (FR-07e); every log scope carries the run's correlationId (NFR-06).</criterion>
+    <criterion testable="true">Given no harness for the request type, or classification confidence below 0.85, the run hands off to the triage slot and is not Failed.</criterion>
+    <criterion testable="true">Given a harness disabled in IntakePipelineOptions, the run is held with admin-attention text; re-enabling and re-driving resumes it (NFR-08).</criterion>
+    <criterion testable="true">The terminal status write is the last write of a run (asserted by write-order in tests).</criterion>
+    <criterion testable="true">`InvoiceSubmissionProcessingJobHandler.cs`, `InvoiceSubmissionRerunJobHandler.cs` and `Services/Finance/Submission/**` are unchanged; DiGraphValidationTests pass.</criterion>
+    <criterion testable="true">PR states Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Seeding proofs requested for (1) the atomic claim — replace it with check-then-set, confirm the concurrent-duplicate test fails, restore; (2) resume — drop the persisted-result check for Analyse, confirm the no-repeat-AI test fails, restore. Brief deviation: deps add 004 (Classify stage uses IAgreementAi). Door-specific Return bodies (Front Door 021, email 043) and the approval Work Item (017) plug into the slots defined here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

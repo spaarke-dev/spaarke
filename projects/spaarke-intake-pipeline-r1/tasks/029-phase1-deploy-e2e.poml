@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>Phase 1 dev deploy (Dataverse, BFF, ribbon, Console) + end-to-end Front Door NDA run: approve → returned, reject → Decision Record, opt-in status emails, duplicate delivery safe</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:010,011,012,013,014,015,016,017,018,019,020,021,022,023,024 + owner OK for live actions</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Depends on 3+ tasks (010–024) and is the Phase 1 deployment + integration gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FULL rigor and depends on 3+ tasks (rubric 3.5.5b); diagnosing an end-to-end failure across Dataverse, BFF, queue, container job and two UIs needs judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-H</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to the shared dev environment; ordered, irreversible steps; single task in its group.</parallel-reason>
+    <deps>010, 011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024</deps>
+    <tags>deploy, dataverse, bff-api, e2e-test, azure</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy Phase 1 to dev in order (Dataverse schema and solution, Binding rows, BFF via `/bff-deploy`, ribbon + web resource, Console via code-page-deploy), then run the Phase 1 end-to-end checks with synthetic NDAs through the Front Door and record the results. Every live action waits for the owner's explicit OK.</prompt>
+  <role>SPAARKE platform developer. Expert in Spaarke deployment skills (bff-deploy, dataverse-deploy, code-page-deploy, ribbon-edit) and end-to-end verification on dev. Follow ADRs strictly.</role>
+  <goal>Phase 1 runs on dev; `projects/spaarke-intake-pipeline-r1/notes/029-phase1-e2e-report.md` records each deploy step's outcome, the BFF publish size, each E2E scenario's evidence (ids, screenshots, Decision Record rows, received emails), the measured submission→AwaitingApproval time, and any defect filed.</goal>
+
+  <context>
+    <background>Plan §4 Phase 1 objective and §7 Phase 1 acceptance; spec success criteria 4 and 5; FR-07(b), FR-11, FR-12, FR-13, NFR-05. Phase 0 infrastructure (Container Apps Job, staging storage, queues) is already on dev from task 008. Live sends need the shared-mailbox Exchange RBAC (plan §5, R8).</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md (the only allowed BFF deploy path)</file>
+      <file role="canonical-reference">.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/code-page-deploy/SKILL.md and scripts/Deploy-SpaarkeAi.ps1</file>
+      <file role="canonical-reference">.claude/skills/ribbon-edit/SKILL.md</file>
+      <file role="canonical-reference">scripts/Test-BffDevDeployReadback.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Request columns.</dependency>
+      <dependency task="011" status="pending">Run record extension.</dependency>
+      <dependency task="012" status="pending">Routing key + harness registry + Binding row.</dependency>
+      <dependency task="013" status="pending">Orchestrator.</dependency>
+      <dependency task="014" status="pending">Engine dispatch/completion.</dependency>
+      <dependency task="015" status="pending">NDA harness.</dependency>
+      <dependency task="016" status="pending">Manual triage.</dependency>
+      <dependency task="017" status="pending">Approval endpoint.</dependency>
+      <dependency task="018" status="pending">MDA ribbon.</dependency>
+      <dependency task="019" status="pending">Console card.</dependency>
+      <dependency task="020" status="pending">Status emails.</dependency>
+      <dependency task="021" status="pending">Front Door door.</dependency>
+      <dependency task="022" status="pending">Console submit.</dependency>
+      <dependency task="023" status="pending">Run admin + DLQ re-drive.</dependency>
+      <dependency task="024" status="pending">Run-status API.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = every live action in this task (schema import, solution import, BFF deploy, app-setting/kill-switch change, ribbon import, Console deploy, any email send, any Service Bus message injection). Ask the owner in chat, wait for an explicit yes, then act; one approval per action (project CLAUDE.md §5).</constraint>
+    <constraint source="project">SCOPE = the BFF deploy. Use `/bff-deploy` only; never raw `az webapp deploy --clean`. Record the publish size (≤ 60 MB) in the report.</constraint>
+    <constraint source="project">SCOPE = every document used. Synthetic NDAs only (NFR-10); never real NDAs or the accelerator `answer-key/`.</constraint>
+    <constraint source="project">SCOPE = email. Status and return emails go only to an address the owner names for the test; never a real external party.</constraint>
+    <constraint source="ADR-015">SCOPE = the report and any captured logs. Ids, statuses, timings and screenshots of the UI only; no document text pasted into notes.</constraint>
+    <constraint source="ADR-032">SCOPE = kill switches. Enable each Phase 1 door/harness switch on dev only with the owner's OK; record each switch's final value in the report.</constraint>
+    <constraint source="ADR-004">SCOPE = the duplicate-delivery check. Inject the duplicate by re-sending the same Job Contract envelope (same idempotency key) to the dev queue with an owner-approved method; never by editing records by hand.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/spec.md (FR-07, FR-11–FR-13, NFR-05, success criteria 4–5)</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Tag-mapped; used to read the deployed routes.</pattern>
+      <pattern name="Control init" location=".claude/patterns/pcf/control-initialization.md">Tag-mapped (e2e-test).</pattern>
+      <pattern name="Theme" location=".claude/patterns/pcf/theme-management.md">Tag-mapped; dark-mode check in ui-tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm every dependency is ✅ in TASK-INDEX.md and master is merged into the branch; check `docs/procedures/dev-bff-deploy-coordination.md` for other projects deploying to dev today.</step>
+    <step order="2">Owner OK → import the Dataverse schema/solution changes (010, 011, the sprk_backgroundjob description) via dataverse-deploy; verify columns with `scripts/check-dataverse-columns.ps1`.</step>
+    <step order="3">Owner OK → load the Binding row(s) for `requestType = nda` (012) and confirm `/healthz/catalog` shows no drift.</step>
+    <step order="4">Owner OK → deploy the BFF via `/bff-deploy`; run `scripts/Test-BffDevDeployReadback.ps1`; record the publish size.</step>
+    <step order="5">Owner OK → set the Phase 1 kill switches on dev (Front Door, Console, NDA harness, status emails) and record them.</step>
+    <step order="6">Owner OK → import the ribbon + `sprk_servicerequestribbon.js`; deploy the Console via code-page-deploy.</step>
+    <step order="7">E2E-1: submit a synthetic NDA through the Front Door; confirm AwaitingApproval, record the elapsed time; approve from the Console card; confirm the requester sees the returned documents and a bell notification, and a Decision Record row exists.</step>
+    <step order="8">E2E-2: submit a second synthetic NDA; reject from the MDA form; confirm the Decision Record row, the request back in "In review", and no outputs visible to the requester.</step>
+    <step order="9">E2E-3: with send-email-updates OFF, run E2E-1 again and confirm no status email; turn it ON for a third request (owner-named address, owner OK) and confirm one email per stage transition.</step>
+    <step order="10">E2E-4 (owner OK): re-send one stage's envelope with the same idempotency key; confirm no duplicate document, analysis, Work Item, message or email; confirm a terminal run is a no-op.</step>
+    <step order="11">E2E-5: submit a non-NDA synthetic document; confirm one triage Work Item and a run that is not Failed.</step>
+    <step order="12">Write `notes/029-phase1-e2e-report.md`; file every defect with `/project-defer-issue-tracking` (notes + GitHub issue).</step>
+    <step order="13">Run `/context-handoff` (checkpoint after a deployment, root CLAUDE.md §5).</step>
+    <step order="14">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before EACH live action in steps 2–6, 9 and 10, STOP and get the owner's explicit OK in chat (project CLAUDE.md §5).</trigger>
+    <trigger>If any E2E scenario fails, STOP before redeploying: record the failure, classify it, and escalate when the fix belongs to a completed task rather than patching on dev.</trigger>
+    <trigger>If another project is mid-deploy to the dev BFF (coordination doc), STOP and wait rather than overwrite it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Front Door NDA reaches the requester after approval">
+      <url>https://{external-spa-host}/</url>
+      <steps>
+        <step>Sign in as the synthetic requester; submit a synthetic NDA through the NDA assessment wizard.</step>
+        <step>Verify the request shows "In review" then "Awaiting approval"; no output documents are visible.</step>
+        <step>After the attorney approves, verify the returned documents appear on the request and the bell shows one notification.</step>
+      </steps>
+      <expected>Outputs visible only after approval; one bell notification; no console errors.</expected>
+    </test>
+    <test name="Console approve">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open the approval Work Item card; verify outputs and clause table; click Approve.</step>
+        <step>Check the console for errors.</step>
+      </steps>
+      <expected>Run moves to Approved then Returned; no console errors.</expected>
+    </test>
+    <test name="MDA reject">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_servicerequest&amp;id={request-id}</url>
+      <steps>
+        <step>Click Reject, enter a reason, confirm.</step>
+      </steps>
+      <expected>Decision Record row written; stage "In review"; no output visible externally.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Repeat the Console approve view and the MDA form in dark theme.</step>
+      </steps>
+      <expected>No white backgrounds or black text on the new card or commands.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="bff-deploy">BFF deploy (only path)</tool>
+    <tool name="dataverse-deploy">Solution and schema import</tool>
+    <tool name="code-page-deploy">Console deploy</tool>
+    <tool name="ribbon-edit">Ribbon import</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/notes/029-phase1-e2e-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every deploy step ran only after an owner OK and is recorded with its outcome; the BFF was deployed via `/bff-deploy` with publish size ≤ 60 MB.</criterion>
+    <criterion testable="true">E2E-1: a synthetic Front Door NDA reaches AwaitingApproval, is approved in the Console, and the requester sees the returned documents and one bell notification; one Decision Record row exists.</criterion>
+    <criterion testable="true">E2E-2: a rejection from the MDA form writes a Decision Record, returns the request to "In review" and exposes no output to the requester.</criterion>
+    <criterion testable="true">E2E-3: no status email with the option off; exactly one per transition with it on, only to the owner-named address.</criterion>
+    <criterion testable="true">E2E-4: a duplicate delivery produces no duplicate documents, analyses, Work Items, messages or emails; a terminal run is a no-op.</criterion>
+    <criterion testable="true">E2E-5: a non-NDA document produces one triage Work Item and a run that is not Failed.</criterion>
+    <criterion testable="true">The submission→AwaitingApproval time is recorded against the p95 ≤ 10 min assumption (NFR-05).</criterion>
+    <criterion testable="true">Negative: no real NDA, `answer-key/` content or real external address was used; every defect found is filed in both notes and GitHub.</criterion>
+  </acceptance-criteria>
+
+  <notes>Plan §4 "Deploy and verify"; spec success criteria 4–5. If the Front Door trigger chosen in task 021 needs an SPA change, the SPA is rebuilt and deployed here too (the BFF host is baked in at Vite build time). Checkpoint after deploy per root CLAUDE.md §5.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute; prescriptive steps bind.</protocol>
+  </execution>
+</task>

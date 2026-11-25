@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-03 cleanup PR (part 1): §10.1 items 1b, 2, 4, 5a (+ regression test) and 6 — dead handlers, StartupDiagnostics, profile doc, one profile idempotency key, ConsumerTypes constants</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies and deletes .cs files in the BFF (tags bff-api, refactoring), changes an idempotency key on a live enqueue path, and modifies tests (deletion tag).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Each item has an exact file:line target in notes/section10-verification-2026-11-25.md and a stated smallest fix; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, refactoring, deletion, unit-test, di</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix the design §10.1 Phase 0 BFF items 1b, 2, 4, 5a and 6 exactly as verified in `projects/spaarke-intake-pipeline-r1/notes/section10-verification-2026-11-25.md`, with a regression test for 5a. This task and task 006 ship as ONE PR (owner: no hygiene-only PRs); 006 commits on top of this branch.</prompt>
+  <role>SPAARKE platform developer. Expert in the BFF jobs framework (IJobHandler, JobContract, DI modules) and the AI consumer catalogue. Follow ADRs strictly.</role>
+  <goal>The three dead handlers are gone with their DI lines, tests and diagnostics entries; StartupDiagnostics' expected list equals the registered handler JobTypes; the profile doc describes the direct-Action spine; both `DocAnalysis:{id}` enqueue sites use `AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId)` with MaxAttempts 3 and a regression test proves one profile; ConsumerTypes has `agreement-classify`, `nda-review` and (if its Binding row exists) `nda-standard-summary` in `All`.</goal>
+
+  <context>
+    <background>Spec FR-03 items 1b, 2, 4, 5a, 6 and acceptance (a), (b), (f); owner §10.1 decision (project CLAUDE.md §3). Items 3, 8-description, 1a and 5b are NOT in this task (Phase 1/2/#3162). Item 7 and item 8 docs are task 006 in the same PR. Paths below are confirmed in the worktree.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentProcessingJobHandler.cs (delete; item 1b)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/ProfileSummaryJobHandler.cs (delete; item 1b — NOT Workers/Office/ProfileSummaryWorker.cs)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/EmailAnalysisJobHandler.cs (delete; item 1b)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs (:32, :46, :62 registrations)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/StartupDiagnostics.cs (:84 expected list; item 2)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EmailAnalysisIntegrationTests.cs (delete or trim to surviving surface)</file>
+      <file role="modify">tests/Spaarke.ArchTests/Adr032/AsymmetricRegistrationTests.cs (:60-61 DEF-JOBS rows) and tests/Spaarke.ArchTests/Adr032/GateCombinationConstructibilityTests.cs (:68-69, :98)</file>
+      <file role="modify">docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md (:21, :59, :118, :129, :177, :180, :257, :265, :280; item 4)</file>
+      <file role="modify">docs/architecture/jobs-architecture.md (:36, :38, :41, :66 handler rows)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (:1656 key, MaxAttempts; item 5a)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (~:4554 EnqueueDocumentAnalysisAsync key, MaxAttempts; item 5a)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs (constants + `All` at :416; item 6)</file>
+      <file role="new">tests/integration/regression/Intake10_1_Item5a_DocumentProfileIdempotencyKeyTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/AppOnlyDocumentAnalysisJobHandler.cs:42-45 (ProfileIdempotencyKey), :87-104 (dedup on given key)</file>
+      <file role="canonical-reference">infra/dataverse/sprk_playbookconsumer-rows.json:7-15, :694-703, :716 (agreement-classify, nda-review, nda-standard-summary rows)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent. Task 006 builds on this branch; task 004 waits for the ConsumerTypes constants.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Scope: the two `DocAnalysis:` enqueue sites only. Replace the literal with `AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId)` and set MaxAttempts to 3; no other field of those JobContracts changes, and the handler's dedup logic is not edited.</constraint>
+    <constraint source="ADR-010">Scope: JobProcessingModule. Remove exactly the three handler registrations; every remaining `IJobHandler` still resolves (DiGraphValidationTests pass).</constraint>
+    <constraint source="ADR-039">Scope: ConsumerTypes.cs. Add constants only for consumer types that have a Binding row (`agreement-classify`, `nda-review`; `nda-standard-summary` after confirming its row at :716) and add each to `All`; `ConsumerTypes.EmailAnalysis` stays (still used by AppOnlyAnalysisService.cs:189).</constraint>
+    <constraint source="project">Scope: this task. Do NOT touch items 3 (DeadLetterQueueService), 1a (AttachmentClassification), 5b (#3162), 8-description, or `Workers/Office/ProfileSummaryWorker.cs`; no edits under `Services/Finance/Submission/`.</constraint>
+    <constraint source="project">Scope: the PR. One PR with task 006 that carries real fixes (5a, 7); state it is not hygiene-only.</constraint>
+    <constraint source="bff-extensions">Scope: the PR. State the Placement Justification (deletions + key fix, no new surface beyond constants), measure the publish-size delta against a fresh master build, keep ≤ 60 MB, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-intake-pipeline-r1/notes/section10-verification-2026-11-25.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Profile idempotency key" location="src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/AppOnlyDocumentAnalysisJobHandler.cs">`ProfileIdempotencyKey(documentId)` is the one key every upload path already uses (DocumentOperationsEndpoints.cs:641, OfficeProfileQueue.cs:82).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Item 1b: delete the three handler files, their DI lines, their tests, and their ArchTests DEF-JOBS rows; update the handler table in jobs-architecture.md.</step>
+    <step order="2">Item 2: make StartupDiagnostics' expected list equal the registered handlers' JobTypes (drop ProcessEmailToDocument, BatchProcessEmails and the deleted three); prefer deriving it from the registered `IJobHandler`s if that removes the duplicated list with no new surface.</step>
+    <step order="3">Item 4: rewrite the listed lines of DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md to describe the direct-Action spine (`ProfileViaLinearActionAsync`, #919), with the node path as the null-seam fallback.</step>
+    <step order="4">Item 5a: change both enqueue sites; write DocumentProfileIdempotencyKeyTests proving the email path and the upload path produce the same key and the handler processes one profile for the pair.</step>
+    <step order="5">Item 6: add the ConsumerTypes constants + `All` entries; run RoutingConsumerTypeHealthCheckTests.</step>
+    <step order="6">`dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test` (unit + ArchTests incl. WorkloadPlacementDocDriftTests); start the API locally and confirm no StartupDiagnostics warning names a missing handler.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="8">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the three handlers turns out to have a producer (a `JobType` literal enqueued anywhere in src, scripts or infra), STOP and escalate instead of deleting it.</trigger>
+    <trigger>If `nda-standard-summary` has no Binding row or its constant would change routing behaviour, leave it out and record the finding; do not add a Binding row in this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No new service or endpoint. The only new surface is three `ConsumerTypes` constants for Binding rows that already exist (section10-verification item 6; reuse-scan row 14 context) and one test file.</existing>
+    <extension>Yes — extends the existing `ConsumerTypes` class rather than adding anything new.</extension>
+    <cost-of-doing-nothing>`/healthz/catalog` reports the rows as drift (rows without constants are Unhealthy, ConsumerTypes.cs:360-375), and FR-02(d) fails.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/StartupDiagnostics.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</output>
+    <output type="test">tests/integration/regression/Intake10_1_Item5a_DocumentProfileIdempotencyKeyTests.cs</output>
+    <output type="docs">docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</output>
+    <output type="docs">docs/architecture/jobs-architecture.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DocumentProcessingJobHandler, ProfileSummaryJobHandler and EmailAnalysisJobHandler no longer exist in src or tests, and no DI line, diagnostics entry or ArchTests row names them.</criterion>
+    <criterion testable="true">On startup, StartupDiagnostics logs no warning naming a missing handler (FR-03a).</criterion>
+    <criterion testable="true">Given the same document enqueued by the email path and by the upload path, then both JobContracts carry the identical `ProfileIdempotencyKey(documentId)` key with MaxAttempts 3 and the handler produces one profile (FR-03b regression test).</criterion>
+    <criterion testable="true">Negative: a different document id yields a different key (no false dedup).</criterion>
+    <criterion testable="true">ConsumerTypes.All contains `agreement-classify` and `nda-review` (and `nda-standard-summary` if its row exists); RoutingConsumerTypeHealthCheckTests pass with no drift for them.</criterion>
+    <criterion testable="true">The profile doc no longer describes the node playbook as the primary path at the listed lines.</criterion>
+    <criterion testable="true">Build passes; all unit tests and ArchTests (incl. WorkloadPlacementDocDriftTests) pass (FR-03a, FR-03f).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Seeding proof requested for the 5a regression test only (duplicate profiles are a data-duplication outcome): revert one site to `DocAnalysis:{id}`, confirm the test fails, restore. Run `/conflict-check` before the PR (Communication files are hot paths; open PR #1494 touches IncomingCommunicationJobHandler.cs).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

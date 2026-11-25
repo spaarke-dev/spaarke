@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-22: Invoice harness — invoice orchestration moves onto the pipeline as the second harness; invoice domain code stays; eBilling tests and E2E pass unchanged (HARD GATE: eBilling UAT sign-off)</title>
+    <phase>3 Invoice harness</phase>
+    <gate>after:029 + eBilling owner UAT sign-off (projects/ebilling-r1/tasks/163-uat-dev-rollout.poml)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, worker, job; rewires a production invoice processing path (.cs) owned by another project.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches eBilling's hot path (`InvoiceSubmissionProcessingJobHandler`, rerun handler) and must preserve its invariants ("a linked submission is never Failed", resume-on-link hold) exactly; judgment on where the seam sits.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single task in its group; edits shared eBilling job handlers and the harness registry.</parallel-reason>
+    <deps>029</deps>
+    <tags>bff-api, backend, worker, job, dataverse</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>After eBilling UAT sign-off, register an invoice harness on the intake pipeline: an `IIntakeHarness` for request type Invoice that drives the existing invoice submission work (Content Understanding read, line coding, rules and holds, the invoice transaction and commit gate, tracking and resubmission numbers, reason codes, firm notices, approval lifecycle) as stages under a `sprk_processingjob` run, with `sprk_invoicesubmission` keeping the request role. The domain code stays where it is; only the orchestration moves. eBilling's existing tests and end-to-end run must pass unchanged.</prompt>
+  <role>SPAARKE platform developer. Expert in the eBilling submission pipeline, ADR-004 job handlers and the intake orchestrator from tasks 012–013. Follow ADRs strictly.</role>
+  <goal>An `InvoiceIntakeHarness` registered behind a kill switch under which invoice submissions run as intake runs, with the linked-submission and resume-on-link invariants intact and eBilling's suite green with no test edits.</goal>
+
+  <context>
+    <background>Spec FR-22 (a–c), owner Q4 (invoices in Phase 3, only after eBilling UAT; no eBilling edits until then), success criterion 7, project CLAUDE.md §4 (ebilling-r1 owns `Services/Finance/**`). The orchestrator (013) and harness registry (`Services/Intake/Harnesses/IIntakeHarness.cs`, `IntakeHarnessRegistry.cs`, task 012) exist; the NDA harness (015) is the sibling reference. ebilling-r1 note 049 documents the submission processing job and its invariants.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/Invoice/InvoiceIntakeHarness.cs</file>
+      <file role="new">tests/integration/data-mutation/Intake/InvoiceIntakeHarnessTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs (only if the seam requires it; after sign-off)</file>
+      <file role="modify">the intake DI module / harness registration created by tasks 012–013</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/Nda/NdaIntakeHarness.cs (task 015, harness shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/InvoiceSubmissionRerunJobHandler.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/ (InvoiceSubmissionService, InvoiceSubmissionProcessor, InvoiceSubmissionPersister, InvoiceSubmissionRerun) — domain code, read first</file>
+      <file role="canonical-reference">projects/ebilling-r1/notes/049-submission-processing-job.md</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandlerTests.cs, InvoiceSubmissionProcessingFlowTests.cs — must pass unchanged</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">Phase 1 on dev: orchestrator, run record, harness registry.</dependency>
+      <dependency task="ebilling-r1/163" status="external">eBilling owner UAT sign-off.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = the whole task. HARD GATE: no edit to `Services/Finance/Submission/` (or any eBilling file) before the eBilling owner's UAT sign-off on ebilling-r1 task 163 is confirmed in chat (FR-22 c, owner Q4).</constraint>
+    <constraint source="project">SCOPE = invoice domain logic. Content Understanding read, line coding, rules and holds, the transaction and commit gate, tracking and resubmission numbers, reason codes, firm notices and the approval lifecycle stay in `Services/Finance/**`; the harness calls them, it never re-implements or copies them.</constraint>
+    <constraint source="project">SCOPE = eBilling tests. Every existing eBilling unit, integration, ArchTest and end-to-end test passes with no edit to the test files (FR-22 a).</constraint>
+    <constraint source="project">SCOPE = invariants. "A linked submission is never Failed" and the resume-on-link hold hold under the run record (FR-22 b); `sprk_invoicesubmission` keeps the request role (no `sprk_servicerequest` row for invoices).</constraint>
+    <constraint source="ADR-004">SCOPE = stages. Each stage idempotent with an atomic marker; a resumed run never repeats the Content Understanding read or line coding; the terminal status is written last.</constraint>
+    <constraint source="ADR-032">SCOPE = cutover. Kill switch `Intake:Harnesses:Invoice:Enabled` (default off); off → the existing eBilling path runs exactly as today.</constraint>
+    <constraint source="ADR-015">SCOPE = logs and run records. Ids, statuses and reason codes only; no invoice content.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/jobs-architecture.md</file>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+      <file>projects/ebilling-r1/notes/049-submission-processing-job.md</file>
+      <file>projects/ebilling-r1/tasks/163-uat-dev-rollout.poml</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Background workers" location=".claude/patterns/api/background-workers.md">Job Contract, marker before side effect, terminal last.</pattern>
+      <pattern name="Scheduled jobs" location=".claude/patterns/api/scheduled-jobs.md">Tag-mapped; not used.</pattern>
+      <pattern name="Harness shape" location="src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/Nda/NdaIntakeHarness.cs">Sibling harness from task 015.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">GATE: ask the owner to confirm eBilling UAT sign-off (ebilling-r1 task 163); STOP until confirmed. Then declare RIGOR FULL, tier opus, effort high.</step>
+    <step order="2">Run the eBilling suite on the current branch and record the baseline (pass counts) in task notes.</step>
+    <step order="3">Read the processing and rerun handlers, note 049 and the NDA harness; write the seam design (which stages, where the run record wraps the existing transaction) in notes/050-invoice-harness-seam.md before coding.</step>
+    <step order="4">Implement `InvoiceIntakeHarness` calling the existing Finance services; register it behind the kill switch; touch eBilling handlers only where the seam requires it.</step>
+    <step order="5">Write the harness tests; run the full eBilling suite unchanged plus the new tests; measure the publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before ANY edit to `Services/Finance/Submission/` or another eBilling file: confirm the eBilling UAT sign-off with the owner; if not signed off, STOP and report.</trigger>
+    <trigger>If preserving the invariants needs an existing eBilling test to change, STOP and escalate (FR-22 a) rather than editing the test.</trigger>
+    <trigger>If the seam requires changing eBilling's public behaviour or Dataverse schema, STOP and coordinate with ebilling-r1 by message before proceeding.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>spec New Components and notes/reuse-scan.md (invoice row): `InvoiceSubmissionProcessingJobHandler`, `InvoiceSubmissionRerunJobHandler` and `Services/Finance/Submission/*` already do the invoice work; `IIntakeHarness`/`IntakeHarnessRegistry` (task 012) and the NDA harness (015) give the pipeline shape. CAPABILITY-INDEX was checked for an existing invoice orchestrator.</existing>
+    <extension>Yes for the domain code (called as-is); the new class only adapts it to the harness contract so invoice runs get the run record, DLQ re-drive and status like other requests.</extension>
+    <cost-of-doing-nothing>Invoices keep a separate orchestration with its own state, so Phase 3 success criterion 7 fails and the pipeline has one harness, not the general second-harness proof FR-22 requires.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/Invoice/InvoiceIntakeHarness.cs</output>
+    <output type="test">tests/integration/data-mutation/Intake/InvoiceIntakeHarnessTests.cs</output>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/notes/050-invoice-harness-seam.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The owner's confirmation of eBilling UAT sign-off is recorded in task notes and precedes the first eBilling-file edit in git history (FR-22 c).</criterion>
+    <criterion testable="true">With the switch on, an invoice submission runs as an intake run on `sprk_processingjob` through the existing Finance services; `sprk_invoicesubmission` keeps the request role.</criterion>
+    <criterion testable="true">Negative: a linked submission is never set Failed; an unlinked submission holds and resumes on link (FR-22 b).</criterion>
+    <criterion testable="true">Negative: a resumed or redelivered run does not repeat the Content Understanding read or line coding.</criterion>
+    <criterion testable="true">With the switch off, the existing eBilling path runs unchanged.</criterion>
+    <criterion testable="true">Every existing eBilling test passes with zero diff to its test files; pass counts match the step-2 baseline (FR-22 a).</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-22, success criterion 7. The eBilling end-to-end run and dev deploy are task 051. Synthetic invoices only on dev.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute; step 1 is a hard gate.</protocol>
+  </execution>
+</task>
