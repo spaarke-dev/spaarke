@@ -37,8 +37,8 @@
 | 043 | Spaarke AI agent fallback on MCP (if T1 fails) | D | 🚫 [cancelled] | 003, 041 | Group J (alone) | sonnet / high | STANDARD |
 | 042 | Connector, runbooks and live E2E in Cowork and Chat | D | 🔄 [wip] | 040, 041, 043 | Group K (alone) | sonnet / high | STANDARD |
 | 050 | Root CLAUDE.md §1.1 row and CHANGELOG | E | 🔲 [open] | 042 | Group L (main session) | sonnet / high | STANDARD |
-| 051 | Rewrite mcp-tool-handler; update widget and DA skills | E | 🔲 [open] | 042, 043, 050 | Group L (main session) | sonnet / high | STANDARD |
-| 052 | MCP architecture doc and add-a-tool guide | E | 🔲 [open] | 042 | Group L | sonnet / high | STANDARD |
+| 051 | Rewrite mcp-tool-handler; update widget and DA skills | E | ✅ [done] | 042, 043, 050 | Group L (main session) | sonnet / high | STANDARD |
+| 052 | MCP architecture doc and add-a-tool guide | E | ✅ [done] | 042 | Group L | sonnet / high | STANDARD |
 | 090 | Project wrap-up | Wrap-up | 🔲 [open] | 050, 051, 052 | Group M (alone) | sonnet / high | STANDARD |
 
 Rows are listed in execution order within each phase (017 runs before 013 in Phase A). Task 010 keeps its id but is now a Phase B verification task: it needs the MCP host and tools (020, 021, 023, 024) and must finish before 025. Task 012 is cancelled (owner option C, 2026-11-07) and satisfies no dependency; nothing depends on it any more. Task 043 is conditional: task 003 sets it to 🚫 `[cancelled]` if Phase 0 test T1 shows the widget renders in Copilot Chat through the connector; a cancelled 043 satisfies the dependencies of 042 and 051.

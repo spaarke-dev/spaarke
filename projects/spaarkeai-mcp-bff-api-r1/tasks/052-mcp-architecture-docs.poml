@@ -4,7 +4,7 @@
     <title>MCP architecture doc and add-a-tool guide</title>
     <phase>E Docs and terminology</phase>
     <gate>after 042</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New documentation files with explicit constraints (real paths, doc-drift-audit clean)</rigor-reason>
     <model-tier>sonnet</model-tier>
