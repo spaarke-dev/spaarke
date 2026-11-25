@@ -382,3 +382,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Latent defect. Events are correct today only because Dataverse lists `sprk_assignedto` first among `sprk_event`'s contact lookups. |
 | **Need** | `eventService.ts` (~:191): pass `'sprk_assignedto'` to `findNavProp`, not `'assignedto'`; add a test with another `assignedto` column listed first. |
 | **Status** | Filed. Not fixed here: task 024 must not edit another wizard's files. |
+
+## DI-040 — A typed email subject over the column length is sent with no communication record (found in the 028 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 028 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3126 |
+| **Class** | Pre-existing. The composer's subject has no length limit and `ValidateRequest` checks only for an empty subject. The `sprk_communication` create after the send is best-effort, so an over-long subject is delivered with no row. |
+| **Need** | Refuse a subject longer than `sprk_subject` (2000) before sending, and limit the composer field; tests at and over the limit. |
+| **Status** | Filed. Task 028 covers only the mapped subject (an over-long mapped value is not used); the typed case is the communication path's owner's. |
