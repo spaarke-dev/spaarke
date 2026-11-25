@@ -70,7 +70,7 @@ All cascades other than delete are NoCascade. The Stored File has no parental (C
 
 - **Invoice PDF and Invoice supporting file** are secure children of their invoice: one lineage column, `sprk_invoice` (`Services/Access/SecureChildLineage.cs`). The Source Document and Source Communication lookups are not lineage; they are read as extra parents in the row's own access question.
 - **Procedure source and Export file** are not secure children of anything: a row with no `sprk_invoice` is never reached by a lineage walk.
-- A Procedure source file and an Export file are never externally visible. The firm is served an invoice PDF only through the dedicated firm file route and its gate ([EBILLING-FILE-STORE.md](../architecture/EBILLING-FILE-STORE.md)).
+- **No Stored File row is ever externally readable**, whatever its purpose or Firm-visible value: the external-visibility registry marks the whole table hard-deny (`Services/Access/SecureChildLineage.cs`, entry `sprk_storedfile`). A firm reads its own invoice's file only through the dedicated firm file route and its gate ([EBILLING-FILE-STORE.md](../architecture/EBILLING-FILE-STORE.md)), which lists only Firm-visible Yes files.
 
 ## Other tables that point here
 

@@ -2645,6 +2645,34 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 ---
 
+### ISS-054 — External-visibility registry: no marker for never-external reference tables outside the lineage (sprk_procedure, sprk_procedureversion)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-25 |
+| **Source** | Task 189 (docs) model-vs-code check; option (c) agreed with uac-r2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3143 |
+
+**Description**
+
+`sprk_procedure` and `sprk_procedureversion` sit outside the secure-child lineage, and the external-visibility registry declares no marker for them. Today this fails closed: `SecureChildLineage.ExternalMarkerOf` returns null, `ExternalVisibility` decides the row Undecided (`UnknownTable`), and every consumer treats Undecided as hidden. They cannot be added as `ExternalMarker.Never`, because there "Never" means communication content: the 191b duplicate-list ArchTest flags nine BFF types that name the Procedure tables, three unit tests pin the set, and `ExternalCallerCommunicationGuard.RefusedContentTables` is the same set. The concrete gap: the registry is meant to be the one map of never-external tables, and these two rely on the unknown-table default instead, so a consumer that reads the markers directly would not see them as never-external.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs` (`OutsideLineage`, `ExternalMarkerOf`, `NeverExternalTables`)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalVisibility.cs` (`DecideAsync`)
+- `tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs`; `tests/unit/domain/Access/SecureChildLineageTests.cs`
+
+**Suggested fix**: a separate "outside the lineage, never external, not communication content" marker, kept out of `RefusedContentTables` and the duplicate-list guard; declare both tables with it and test `ExternalMarkerOf` for both. Revisit with or after task 121.
+
+**Estimated effort**: half a day, including the registry decision (uac-r2 reviews).
+**Blockers**: the registry semantics decision (uac-r2).
+**Related**: task 189, task 121. Not a security exposure (fails closed).
+
+---
+
 ### ISS-053 — Nothing checks that duplicate detection stays off on the BFF job queues (ISS-025's retry copy relies on it)
 
 | Field | Value |

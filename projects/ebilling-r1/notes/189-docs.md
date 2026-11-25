@@ -14,7 +14,13 @@ Updated: `sprk_ruleset.md`, `sprk_ratecard.md`, `sprk_billingexport.md`, `sprk_i
 
 ## Points left undocumented (escalation)
 
-Three points where the deployed schema or code and the model differ in a way that touches access were left out of every doc, per the task's escalation rule, and are reported to the owner in the task report rather than here. The pages state only what the model and the schema agree on.
+Three points where the deployed schema or code and the model differ in a way that touches access were left out of every doc, per the task's escalation rule, and reported to the owner and uac-r2 rather than here. None widens access: in each, the code or schema is as strict as the model or stricter.
+
+Resolution (uac-r2, 2026-11-25), applied in `task/ebilling-189b`:
+
+- **Stored File external classification:** the code is the intended design. `sprk_storedfile.md` now says no Stored File row is externally readable; the model note's 5.2 census row is amended to match.
+- **Field security on `sprk_procedure`:** the schema secures `sprk_area` and `sprk_proceduretype` as well; the page documents the deployed schema.
+- **External classification of `sprk_procedure` and `sprk_procedureversion`:** left as it is (it fails closed) and filed as ISS-054, #3143 (option c, agreed with uac-r2): the registry needs a marker kind for never-external reference tables that are not communication content. The page states only that they have no filing lookup and that the BFF routes refuse external callers.
 
 ## Model vs deployed schema or code (no access effect)
 

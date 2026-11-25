@@ -44,7 +44,7 @@ User-owned, entity set `sprk_procedures`, primary name `sprk_name`, auditing on.
 
 `statecode` / `statuscode` keep the platform defaults (Active 1 / Inactive 2) and carry no Procedure meaning; the lifecycle is `sprk_status`.
 
-**Field security.** `sprk_appliesto`, `sprk_firm`, `sprk_status` and `sprk_createdbyperson` are field-secured: read for every user, create and update for the BFF application user only (the "Spaarke BFF-Managed Field Writers" and "Readers" profiles; `Set-ChildRecordCreatorPersonSchema.ps1` for the creator column).
+**Field security.** `sprk_appliesto`, `sprk_firm`, `sprk_area`, `sprk_proceduretype`, `sprk_status` and `sprk_createdbyperson` are field-secured: read for every user, create and update for the BFF application user only (the "Spaarke BFF-Managed Field Writers" and "Readers" profiles; `Set-ChildRecordCreatorPersonSchema.ps1` for the creator column).
 
 ### Relationships
 
