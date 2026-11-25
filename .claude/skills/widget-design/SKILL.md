@@ -9,7 +9,7 @@ alwaysApply: false
 # widget-design
 
 > **Category**: Development
-> **Last Updated**: 2026-05-14
+> **Last Updated**: 2026-11-25 (spaarkeai-mcp-bff-api-r1 task 051: implemented conventions)
 
 ---
 
@@ -28,6 +28,25 @@ This skill complements `mcp-tool-handler` — the tool handler produces structur
 - Wiring widget state via `useMcpApp` (receiving data from the MCP tool, returning user interactions)
 - Choosing between inline summary cards vs deep-link side-by-side review panes
 - **NOT applicable** for: PCF controls (use shared `@spaarke/ui-components`), Code Page React 18 dialogs (different lifecycle), the tool handler itself (use `mcp-tool-handler`)
+
+---
+
+## Spaarke conventions (implemented, binding)
+
+The first shipped widget is `ui://spaarke/decisions.html` (source `src/client/widgets/spaarke-decisions/`), built by spaarkeai-mcp-bff-api-r1. Copy it. Where this section and the Microsoft samples below differ, this section applies; where it differs from the code, the code wins (root CLAUDE.md §2).
+
+| Rule | What the code does |
+|---|---|
+| **URI** `ui://spaarke/{widget}.html` | `DecisionsWidgetResource.Uri` (`src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/DecisionsWidgetResource.cs`); a model-visible tool points at it with `_meta.ui.resourceUri` |
+| **Source folder** `src/client/widgets/{skill-name}/` (folder = the skill name, e.g. `spaarke-decisions`) | One Vite build per widget into a single self-contained `dist/index.html` (no `<script src>`, no stylesheet `<link>`) |
+| **Served by the BFF, not a separate package** | `dist/index.html` is an `EmbeddedResource` of `Sprk.Bff.Api.csproj`, returned by `resources/read` as `text/html;profile=mcp-app`. Build the widget before the BFF publish, or the BFF serves no widget (it logs one startup warning) |
+| **Size: aim < 1 MB, fail > 3 MB** | `scripts/check-bundle-size.mjs` (warns above 1 MiB, fails above 3 MiB) runs in the widget's `npm run build`. Measured in Phase 0 (`projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md`): in-widget init (script start → connected) stays flat at 9–80 ms from 1 to 6 MB, but the visible paint comes later as size grows (Chat: 3 MB drawn by ~15 s after send, 6 MB by ~23 s; Cowork 6 MB by ~28 s). The decisions widget is 1.54 MB (MCP SDK ~524 KB, Fluent ~404 KB, the email composer's editor ~254 KB) |
+| **No network origins** | `_meta.ui.csp` is an empty object; the widget fetches nothing and holds no token |
+| **Host bridge only** | `@modelcontextprotocol/ext-apps` (`useApp`, `app.callServerTool`, `app.openLink`, `app.ontoolresult`, `app.onhostcontextchanged`), wrapped in `src/mcp/mcpHost.ts`. All data comes through **app-only** tools via `callServerTool` |
+| **Shims return a real `Response`** | Shared services that take a `fetch` (`createWorklistService`, `createDecisionWizardService`) get one built on `callServerTool` that wraps the tool result in a `Response` and passes `reasonCode` through (`src/mcp/mcpFetch.ts`). Reuse the shared components and services; never fork them |
+| **Theme from the host only** | `hostContext.theme` (`src/theme/`), Fluent v9 semantic tokens; nothing stored |
+| **No browser storage** | The sandbox blocks `localStorage`/`sessionStorage`/cookies; the build scans `dist` and fails on storage use |
+| **Host differences** | Cowork paints the widget after the text answer, and a later widget in the same task can collapse an earlier frame. Copilot Chat gives this widget no host fullscreen, so the review opens inline, maximized |
 
 ---
 
@@ -110,7 +129,8 @@ Microsoft published a skill for Claude Code and GitHub Copilot CLI that generate
 - [ ] Shared components from `@spaarke/ui-components` reused where applicable
 - [ ] Mode (inline vs side-by-side) matches the skill-to-mode table
 - [ ] Skeleton loading state (not a spinner)
-- [ ] Bundle size reviewed — widgets should be small (no 1+ MB bundles)
+- [ ] Bundle size gate passes (aim < 1 MB, hard fail > 3 MB; see "Spaarke conventions")
+- [ ] `_meta.ui.csp` empty; data only through app-only tools via `callServerTool`
 
 ---
 
@@ -118,8 +138,8 @@ Microsoft published a skill for Claude Code and GitHub Copilot CLI that generate
 
 - Widgets live under `src/client/widgets/<skill-name>/` (parallel to `src/client/pcf/`)
 - Widget bundles: built per-widget, not as a monorepo bundle (smaller, faster)
-- Naming: widget folder matches the skill name (`redline-summary`, `tabular-review-grid`)
-- Each widget is its own MCP App package (manifest + bundle) — not a shared app
+- Naming: widget folder matches the skill name (`spaarke-decisions`); URI `ui://spaarke/{widget}.html`
+- Each widget is served by the BFF's MCP server as a `ui://` resource (embedded in the BFF assembly), not shipped as its own package
 
 ## Resources
 

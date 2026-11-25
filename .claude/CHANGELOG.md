@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-25 — MCP skills describe the server, widget and packages that were built
+
+`spaarkeai-mcp-bff-api-r1` task 051 (spec FR-18), from the live MCP server in the BFF.
+
+- **`mcp-tool-handler`** rewritten. It used to describe the chat-tool `IAiToolHandler` pattern with kebab-case ids. It now states the MCP host's rules: one server, `/mcp/{area}`; tools named `spaarke_{verb}_{object}`, one `McpToolDefinition` subclass tagged `[McpArea]` under `Api/Mcp/{Area}/{Group}/`; caller-only (OBO, stateless); the A10 token plane and allowed policies; explicit title and `ReadOnly` hint; app-only visibility for widget-only and every writing tool; `isError` through `DecisionResultMapper` → `McpToolResults`; minimal model-visible output; size, time, rate and kill-switch limits; the `McpTools` ledger; and the tests a new tool needs (auth, contract, size, data-mutation, conformance).
+- **`widget-design`**: new "Spaarke conventions (implemented)" section: `ui://spaarke/{widget}.html`, `src/client/widgets/{skill-name}/`, embedded in the BFF, aim < 1 MB / fail > 3 MB with Phase 0's measured init and paint times, empty CSP, `callServerTool`-only shims returning `Response`, host theme only. Two checklist items and the conventions list updated.
+- **`declarative-agent`**: new "Spaarke's Copilot packages today" section with the schema versions actually used (Spaarke AI: manifest 1.30, DA v1.8, plugin v2.4; plugin package `spaarke`: manifest 1.30 `agentSkills`, skills only), the register-once rule, OAuth not SSO (ADR-028 A10) and the Cowork switch-on step. Package location and the MCP OAuth wiring corrected.
+
 ###### 2026-11-12 — `adversarial-reviewer` checks capability duplication and traces acceptance criteria
 
 `reuse-governance-tightening-r1` task 021 (FR-07).

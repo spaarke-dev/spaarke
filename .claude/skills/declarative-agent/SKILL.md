@@ -9,7 +9,7 @@ alwaysApply: false
 # declarative-agent
 
 > **Category**: Development
-> **Last Updated**: 2026-05-14
+> **Last Updated**: 2026-11-25 (spaarkeai-mcp-bff-api-r1 task 051: packages and schema versions in use)
 
 ---
 
@@ -29,6 +29,23 @@ Without this skill, generated DAs drift toward training-data patterns that preda
 - Composing knowledge sources (SPE + Dataverse + Foundry IQ + Web)
 - Configuring `OnlyAllowedSources` / `behavior_overrides` to scope retrieval
 - **NOT applicable** for: server-side agent loops (use `foundry-agent` skill), MCP App widget UI (use `widget-design` skill)
+
+---
+
+## Spaarke's Copilot packages today (implemented)
+
+Read the package before changing it; the files are the source of truth (root CLAUDE.md §2).
+
+| Package | Folder | Schemas actually used | What it is |
+|---|---|---|---|
+| **Spaarke AI** (declarative agent; the agent name stays "Spaarke AI") | `src/solutions/CopilotAgent/` | app manifest **1.30**; `declarativeAgent.json` **DA v1.8**; `spaarke-api-plugin.json` **plugin v2.4** (OpenAPI action over `/api/agent/*`, `spaarke-bff-openapi.yaml`) | The April agent. Not changed by the MCP project; its fallback rebuild on MCP (FR-17, task 043) was cancelled because the widget renders in Copilot Chat |
+| **Spaarke** (plugin package, slug `spaarke`) | `src/solutions/CopilotPlugins/spaarke/` | app manifest **1.30** with `agentSkills` (`skills/spaarke-decisions/SKILL.md`); `npm run validate`, then `npm run build` → `dist/spaarke-plugin.zip` | A **skills-only** package: the skill `spaarke-decisions` calls `spaarke_show_decisions` on the Copilot connector **"Spaarke MCP"** (`/mcp/legal-operations`). No `agentConnectors` entry |
+
+Rules learned live (`projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md`, T2 and S-1):
+- **Register the MCP server once per tenant**: the Dev Portal connector or a package `agentConnectors` entry, never both. With both, every prompt runs the tool twice.
+- The connector signs users in with OAuth (Teams Developer Portal OAuth client registration), **not** the connector's Entra SSO option (ADR-028 A10). Setup and secret rotation: `docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md`.
+- Cowork lists an uploaded plugin as added but **off**; each user switches it on once in Cowork › Customize.
+- Skill names: `spaarke-{area}-{capability}` (core drops the area), build-gated `^spaarke(-[a-z0-9]+)+$` ≤ 64 chars. One connector per product area. Never "Spaarke Copilot" as a name.
 
 ---
 
@@ -77,7 +94,7 @@ Default Spaarke DA composition (cite in commit message):
 
 ### Step 5: Auth wiring for MCP servers
 
-Use `OAuthPluginVault` (pattern in `declarative-agent-foodbank-mcp/appPackage/`). For the Spaarke MCP server specifically, use the vault entry tied to the BFF's Entra app registration — do NOT inline secrets.
+Use `OAuthPluginVault` (pattern in `declarative-agent-foodbank-mcp/appPackage/`). For the Spaarke MCP server, the OAuth registration is the Teams Developer Portal OAuth client registration of the confidential connector app "Spaarke Copilot Connector – dev" (ADR-028 A10; `docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md`). Never inline secrets; the secret lives only in that registration.
 
 ### Step 6: Admin approval awareness
 
@@ -88,7 +105,7 @@ Use `OAuthPluginVault` (pattern in `declarative-agent-foodbank-mcp/appPackage/`)
 
 ## Conventions
 
-- DA manifests live under `src/solutions/<workspace>/declarative-agents/` (mirrors PCF/code-page layout per `spaarke-conventions`)
+- Copilot packages live under `src/solutions/`: the DA in `src/solutions/CopilotAgent/`, plugin packages in `src/solutions/CopilotPlugins/{slug}/` (see "Spaarke's Copilot packages today")
 - TypeSpec source (`.tsp`) compiled with `tsp compile` — pattern in `knowledge/m365-copilot/copilot-camp-path-e/RepairServiceAgent/`
 - DA app package built and packaged for upload via the M365 Agents Toolkit (formerly Teams Toolkit — renamed; see `knowledge/declarative-agents/SOURCE.md` for the rename note)
 - Instruction file: `instruction.txt`, plain markdown body, no fenced code blocks
