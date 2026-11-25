@@ -19,8 +19,12 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// after the count, read at most once and only for the one user flagged external.
 /// <para>Real: the gate's decision, <see cref="ContactUserRepresentation"/>, the binder's oid decision and the share eligibility rule.
 /// Doubled: the identity store (contact and oid reads), uac-r2's link-candidate read, the contact-state read, and the gate's
-/// Dataverse seams (No Access wall NotSecure, the task Read granted, the record's Restricted state as the row says). The external
-/// path is never expected here: its first seam throws, so a row that reached it by mistake answers Unverified and fails.</para>
+/// Dataverse seams (No Access wall NotSecure, the task Read granted, the record's Restricted state as the row says, and on the
+/// external path a CIAM composition that holds no grant on the matter, so the external path answers no_access).</para>
+/// <para>The default contact is ONBOARDED (active, a bound portal oid, an email), so a row that reaches the external path gets past
+/// <c>IsOnboardedWithEmail</c> and is seen composing the portal principal (<c>ExternalPathEntered</c>). Only "none" is expected
+/// there: no internal user represents the contact, which is master's external path. Every other row asserts it never got
+/// there, even where its warning would read the same (an internal row misrouted external answers no_access too).</para>
 /// </summary>
 public sealed class AssignTaskRecipientGateRepresentationTableTests
 {
@@ -32,6 +36,7 @@ public sealed class AssignTaskRecipientGateRepresentationTableTests
     private static readonly Guid UserB = Guid.Parse("c2150000-0000-4000-8000-000000000006");
     private static readonly Guid BoundOid = Guid.Parse("c2150000-0000-4000-8000-000000000007");
     private static readonly Guid AssignerOid = Guid.Parse("c2150000-0000-4000-8000-000000000008");
+    private static readonly Guid PortalOid = Guid.Parse("c2150000-0000-4000-8000-000000000009");
     private const string Address = "assignee@firm.example";
 
     private sealed class World
@@ -62,14 +67,24 @@ public sealed class AssignTaskRecipientGateRepresentationTableTests
                     RestrictedReads++;
                     return Restricted;
                 });
+            // The external path: a CIAM contact (no WorkforceHome home-link read), one composition per decision, no grant on the
+            // matter, so it refuses no_access before the portal's events-list rule is asked.
             Gate.Setup(g => g.HomeLinkAsync(It.IsAny<ContactBindingRow>(), It.IsAny<CancellationToken>()))
-                .Returns(() => { ExternalPathEntered = true; throw new InvalidOperationException("external path entered"); });
+                .Returns(() => throw new InvalidOperationException("a CIAM contact never asks the home link"));
             Gate.Setup(g => g.ComposePortalPrincipalAsync(It.IsAny<ContactBindingRow>(), It.IsAny<ExternalContactPlane>(), It.IsAny<CancellationToken>()))
-                .Returns(() => { ExternalPathEntered = true; throw new InvalidOperationException("external path entered"); });
+                .ReturnsAsync((ContactBindingRow contact, ExternalContactPlane _, CancellationToken _) =>
+                {
+                    ExternalPathEntered = true;
+                    return Composition(contact.ContactId);
+                });
+            Gate.Setup(g => g.ContactRights(It.IsAny<ContactPrincipalComposition>(), It.IsAny<string>(), It.IsAny<Guid>()))
+                .Returns(AccessRights.None);
+            Gate.Setup(g => g.PortalListsTaskAsync(It.IsAny<ContactBindingRow>(), It.IsAny<ContactPrincipalComposition>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns(() => throw new InvalidOperationException("no grant, so the events-list rule is never asked"));
 
-            // An active contact with a portal-style binding and an email (onboarded), so a row that wrongly fell through to the
-            // external path would get past the onboarding check and be seen.
-            ContactRead(ContactLookup.Of(Row(Contact, state: 0, oid: null)));
+            // An ONBOARDED contact (active, a bound portal oid that no user carries, an email): a row that wrongly fell through to
+            // the external path gets past the onboarding check and composes the portal principal, which the table sees.
+            ContactRead(ContactLookup.Of(Row(Contact, state: 0, PortalOid)));
         }
 
         public void ContactRead(ContactLookup lookup) =>
@@ -78,9 +93,9 @@ public sealed class AssignTaskRecipientGateRepresentationTableTests
         public void OidRead(ContactLookup lookup) =>
             Identities.Setup(i => i.FindContactsByOidAsync(BoundOid, It.IsAny<CancellationToken>())).ReturnsAsync(lookup);
 
-        public void Link(Guid user, bool disabled = false, bool external = false, Guid? applicationId = null) =>
+        public void Link(Guid user, bool? disabled = false, bool external = false, Guid? applicationId = null, int? accessMode = 0) =>
             Links.UsersByLink.GetOrAdd(Contact, _ => new List<AssignedLinkCandidate>())
-                .Add(new AssignedLinkCandidate(user, Contact, Guid.NewGuid(), disabled, 0, applicationId, external));
+                .Add(new AssignedLinkCandidate(user, Contact, Guid.NewGuid(), disabled, accessMode, applicationId, external));
 
         public void UnlinkedWithOid(Guid user) =>
             Links.UsersByOid.GetOrAdd(BoundOid, _ => new List<AssignedLinkCandidate>())
@@ -92,6 +107,24 @@ public sealed class AssignTaskRecipientGateRepresentationTableTests
 
     private static ContactBindingRow Row(Guid contactId, int state, Guid? oid) =>
         new(contactId, state, oid?.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address);
+
+    /// <summary>A CIAM composition naming <paramref name="contactId"/>, with empty sets (its rights come from the stubbed
+    /// <c>ContactRights</c>).</summary>
+    private static ContactPrincipalComposition Composition(Guid contactId)
+    {
+        AccessibleRecordSet Empty(string entity) => new()
+        {
+            PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+            EntityType = entity,
+            Rights = new Dictionary<Guid, AccessRights>(),
+            Sources = new AccessibleRecordSetSources(false, true, false),
+        };
+
+        return new ContactPrincipalComposition(
+            new CallerPrincipal { Plane = CallerPrincipalPlane.CiamContact, ContactId = contactId, ProjectAccess = [] },
+            Empty(AccessibleRecordSetService.ProjectEntity), Empty(AccessibleRecordSetService.MatterEntity),
+            Empty(AccessibleRecordSetService.WorkAssignmentEntity));
+    }
 
     /// <summary>Each representation outcome, as the world that produces it.</summary>
     private static World Arrange(string outcome)
@@ -109,6 +142,12 @@ public sealed class AssignTaskRecipientGateRepresentationTableTests
                 break;
             case "one-not-a-person":
                 w.Link(UserA, applicationId: Guid.NewGuid());
+                break;
+            case "one-support-user":
+                w.Link(UserA, accessMode: 3);
+                break;
+            case "one-disabled-unknown":
+                w.Link(UserA, disabled: null);
                 break;
             case "several":
                 w.Link(UserA);
@@ -207,36 +246,41 @@ public sealed class AssignTaskRecipientGateRepresentationTableTests
     }
 
     /// <summary>
-    /// The table. Expected: the commit warning (null = emailed), the internal user emailed (Internal only), and how many times the
-    /// record's Restricted state was read. Every row matches the gate on origin/master b005279c4d.
+    /// The table. Expected: the commit warning (null = emailed), the internal user emailed (Internal only), how many times the
+    /// record's Restricted state was read, and whether the external path composed the portal principal (only "none": no internal
+    /// user represents the onboarded contact, and it holds no grant, so no_access). Every row matches the gate on origin/master
+    /// b005279c4d. "one-support-user" is access mode 3 (not a person); "one-disabled-unknown" is an unreadable isdisabled, which
+    /// ClassifyEligibility counts as disabled.
     /// </summary>
     [Theory]
-    [InlineData("none", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("one-active", null, "A", 0)]
-    [InlineData("one-disabled", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("one-not-a-person", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("several", AssignTaskRecipient.SeveralUsersWarning, null, 0)]
-    [InlineData("several-one-disabled", null, "A", 0)]
-    [InlineData("several-one-flagged-external-on-restricted", AssignTaskRecipient.SeveralUsersWarning, null, 0)]
-    [InlineData("one-flagged-external-on-restricted", AssignTaskRecipient.NoAccessWarning, null, 1)]
-    [InlineData("one-flagged-external-on-standard", null, "A", 1)]
-    [InlineData("one-flagged-external-restricted-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 1)]
-    [InlineData("one-not-flagged-on-restricted", null, "A", 0)]
-    [InlineData("contact-inactive", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("contact-missing", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("contact-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0)]
-    [InlineData("links-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0)]
-    [InlineData("column-missing-active", null, "A", 0)]
-    [InlineData("column-missing-active-no-user", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("column-missing-inactive", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("column-missing-state-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0)]
-    [InlineData("bound-oid-resolves-here", null, "A", 0)]
-    [InlineData("bound-oid-resolves-elsewhere", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("bound-oid-on-two-contacts", AssignTaskRecipient.NoAccessWarning, null, 0)]
-    [InlineData("bound-oid-lookup-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0)]
-    [InlineData("bound-oid-and-linked-user", null, "B", 0)]
+    [InlineData("none", AssignTaskRecipient.NoAccessWarning, null, 0, true)]
+    [InlineData("one-active", null, "A", 0, false)]
+    [InlineData("one-disabled", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("one-not-a-person", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("one-support-user", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("one-disabled-unknown", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("several", AssignTaskRecipient.SeveralUsersWarning, null, 0, false)]
+    [InlineData("several-one-disabled", null, "A", 0, false)]
+    [InlineData("several-one-flagged-external-on-restricted", AssignTaskRecipient.SeveralUsersWarning, null, 0, false)]
+    [InlineData("one-flagged-external-on-restricted", AssignTaskRecipient.NoAccessWarning, null, 1, false)]
+    [InlineData("one-flagged-external-on-standard", null, "A", 1, false)]
+    [InlineData("one-flagged-external-restricted-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 1, false)]
+    [InlineData("one-not-flagged-on-restricted", null, "A", 0, false)]
+    [InlineData("contact-inactive", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("contact-missing", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("contact-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0, false)]
+    [InlineData("links-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0, false)]
+    [InlineData("column-missing-active", null, "A", 0, false)]
+    [InlineData("column-missing-active-no-user", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("column-missing-inactive", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("column-missing-state-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0, false)]
+    [InlineData("bound-oid-resolves-here", null, "A", 0, false)]
+    [InlineData("bound-oid-resolves-elsewhere", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("bound-oid-on-two-contacts", AssignTaskRecipient.NoAccessWarning, null, 0, false)]
+    [InlineData("bound-oid-lookup-unreadable", AssignTaskRecipient.UnverifiedWarning, null, 0, false)]
+    [InlineData("bound-oid-and-linked-user", null, "B", 0, false)]
     public async Task DecideAsync_ForEachRepresentationOutcome_GivesTheMasterVerdictAndWarning(
-        string outcome, string? warning, string? emailed, int restrictedReads)
+        string outcome, string? warning, string? emailed, int restrictedReads, bool externalPath)
     {
         var w = Arrange(outcome);
 
@@ -254,6 +298,6 @@ public sealed class AssignTaskRecipientGateRepresentationTableTests
         }
 
         w.RestrictedReads.Should().Be(restrictedReads, "the Restricted state is read only for the one eligible user flagged external");
-        w.ExternalPathEntered.Should().BeFalse("no row here may be decided as an external contact");
+        w.ExternalPathEntered.Should().Be(externalPath, "only a contact no internal user represents is decided as an external contact");
     }
 }
