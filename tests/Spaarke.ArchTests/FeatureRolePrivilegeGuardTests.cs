@@ -2209,11 +2209,11 @@ public class FeatureRolePrivilegeGuardTests
 
     /// <summary>Change gaps that no expectations file carries yet, each with the newest expectations version it was raised against; the same
     /// rule as <see cref="PendingNextReleaseRemovalGaps"/> for the config's <c>changes</c>: the published files are not edited, so the next
-    /// release's expectations file must carry each entry in its role's present list; then the gap leaves this list. ISS-043 (Core User's
-    /// AppendTo on the contact type table, raised against 1.3.3.0). ISS-042 (event types readable at Global, raised against 1.3.2.0) is
-    /// carried by 1.3.3.0 and left the list.</summary>
+    /// release's expectations file must carry each entry in its role's present list; then the gap leaves this list. None now: ISS-042
+    /// (event types readable at Global, raised against 1.3.2.0) and ISS-043 (Core User's AppendTo on the contact type table) are carried
+    /// by 1.3.3.0.</summary>
     internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseChangeGaps =
-        new Dictionary<string, Version>(StringComparer.Ordinal) { ["ISS-043"] = new Version(1, 3, 3, 0) };
+        new Dictionary<string, Version>(StringComparer.Ordinal);
 
     /// <summary>One expectations file: its version and its roles.</summary>
     internal sealed record ExpectationsRelease(Version Version, IReadOnlyDictionary<string, RoleExpectation> Roles);
