@@ -523,4 +523,4 @@ Terms:
 4. Deploys stay separate, each with the owner's per-SHA go.
 5. 042 closes on its own timeline.
 
-Status: **AGREED by mcp-r2 (2026-11-25), terms 1-5 as written.** r2 Phase 1 edits none of the ISS-010 files: task 031 only calls `RecordCreationService.CreateAsync`, and task 030 only reads `CallerRecordAccessProbe`. r2 is confirming the release with its starting session (its brief said "Phase 1 waits for 042"). It was sent the owner's words verbatim and will tell us when Phase 1 starts.
+Status: **AGREED by mcp-r2 (2026-11-25), terms 1-5 as written.** r2 Phase 1 edits none of the ISS-010 files: task 031 only calls `RecordCreationService.CreateAsync`, and task 030 only reads `CallerRecordAccessProbe`. r2 is confirming the release with its starting session (its brief said "Phase 1 waits for 042"). It was sent the owner's words verbatim. **r2 Phase 1 STARTED 2026-11-25** (its D-r1-gate committed, master merged, build 0/0; wave 4 = 020 tool plumbing + ledger split, 021 widget transport). r2 tells us before any PR touching spaarke-decisions opens and when it merges.

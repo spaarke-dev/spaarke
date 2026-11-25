@@ -79,6 +79,7 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 - **spaarke-auth-system-of-record-r1** — its planned ADR-028 amendment must be A11 or higher (A10 is ours); tell at next contact.
 - **agent-framework-fit-assessment** — a proposed `Sprk.Insights.Mcp` becomes a new `/mcp/{area}` on this host, not a second server.
 - This project's session: **`mcp-r1`** (Claude Code desktop, since 2026-11-09).
+- **mcp-r2** (`spaarkeai-mcp-bff-api-r2`) owns, since 2026-11-25, `Api/Mcp/**`, `McpModule`, `McpToolCatalog`, the MCP ledger, the conformance host and the `spaarke-decisions` widget transport and build files. r1 does not edit them; a defect found in 042 is filed and agreed with r2 first. r1 keeps the ISS-010 BFF files and the heading change (`notes/decisions.md` "r2's Phase 1 gate").
 - Peer sessions: `ontology-r1` (ontology r1, Claude Desktop session since 2026-11-09; send all ontology reviews and the PR #2587 merge ping there), `spaarke-wt-ebilling-r1-c7`, `accelerator-claude-r2` (accelerator r2, desktop), `acclerator-r1` (accelerator r1, Claude Desktop session since 2026-11-08; name spelled as given), `uac-r2` (Claude Code desktop session since 2026-11-08; owner approves held messages there).
 - Run `/conflict-check` before each BFF PR (`AuthorizationModule.cs`, `Services/Signals/**` are shared).
 
