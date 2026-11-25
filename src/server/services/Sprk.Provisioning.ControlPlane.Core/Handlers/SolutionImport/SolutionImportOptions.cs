@@ -26,11 +26,29 @@ public sealed class SolutionImportOptions
     // and H6 installs no application (SpaarkeMaster depends on none that a fresh environment lacks).
 
     /// <summary>
-    /// Maximum wall-clock time for one package import (async-operation polling). Defaults to 60 minutes. If exceeded, the
-    /// importer returns Timeout which the handler maps to
-    /// <see cref="SolutionImportRejectionCodes.ImportTimeout"/> (Resumable — a re-run re-reads the installed version).
+    /// Maximum wall-clock time for one package import (completion polling). Defaults to 120 minutes (ISS-032: a real
+    /// SpaarkeMaster upgrade of a stamp took 73 minutes, so 60 was too short). If exceeded, the importer returns Timeout
+    /// which the handler maps to <see cref="SolutionImportRejectionCodes.ImportTimeout"/> (Resumable — the diagnostic
+    /// names the import job and the async operation, and a re-run attaches to that import while it still runs instead
+    /// of starting another). Keep <c>DispatcherOptions.MaxHandlerDuration</c> above this plus H6's propagation waits
+    /// (guarded by DispatcherOptionsBudgetTests).
     /// </summary>
-    public TimeSpan ImportTimeout { get; set; } = TimeSpan.FromMinutes(60);
+    public TimeSpan ImportTimeout { get; set; } = TimeSpan.FromMinutes(120);
+
+    /// <summary>
+    /// How long the importer keeps waiting after the async operation reports Failed or Canceled while the import job
+    /// cannot be read and the (readable) solution history shows no open entry (ISS-032: the async operation is advisory
+    /// — Dataverse can fail a retry of the operation while the first attempt is still importing). Past this, the
+    /// reported failure stands. A readable, not-completed import job, an open solution-history entry, or an unreadable
+    /// history always keeps the importer waiting (only <see cref="ImportTimeout"/> ends that). Defaults to 10 minutes.
+    /// </summary>
+    public TimeSpan AsyncOperationFailureGrace { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// An import job without <c>completedon</c> (or an open solution-history entry) older than this is treated as
+    /// abandoned, not in flight: the importer logs it and starts its own import. Defaults to 6 hours.
+    /// </summary>
+    public TimeSpan InFlightImportMaxAge { get; set; } = TimeSpan.FromHours(6);
 
     /// <summary>
     /// Client secret for the BFF Entra app registration (legacy FR-39 ClientSecret chain only). MUST be null / whitespace
