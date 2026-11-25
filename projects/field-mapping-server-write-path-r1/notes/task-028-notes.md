@@ -103,3 +103,14 @@ Filed: DI-040 / #3126. A TYPED subject over 2000 characters is sent and then has
 - word-add-in-r1 task 138 (#2209, an email re-save adds the attachments it missed) touches `OfficeService.SaveAsync` and `UploadFinalizationWorker`, our W3 paths.
   - Conditions given 2026-11-25: children only through `ProcessSingleAttachmentAsync`; guards G1/G3/G5/G6 hold; full ArchTests; current rights re-checked on the duplicate path, failing closed.
   - Their diff was read against the guards: OK to merge, with two observations (the job is marked Completed before the worker runs; children follow the current record-first owner).
+
+## Merge and code-page deploys (2026-11-25)
+
+- PR #3133 merged to master at 13:39Z as 7f13cf2e26, on the owner's "merge when green". A Client lint fix went in first (2034bc91e2): the new fetch guard made four later checks always true, and two suppression counts were lowered by hand. A full local `prune` also rewrote unrelated entries because some local installs were stale, so it was not used. Every required check passed. The office-scope api-office leg was cancelled at its 20-minute cap again; it is not required, and the Tier 2 api-office leg passed.
+- `sprk_spaarkeai` was deployed to dev by the `Deploy SpaarkeAi` workflow from 7f13cf2e26 (13:43Z). The live bundle has the email-step subtitle, the create guard text and `serverFillsEmptySubject`. A later master run (423cfc67f7, which contains 7f13cf2e26) redeploys it.
+- `sprk_playbooklibrary` was deployed to dev at 13:49Z on the owner's go. It was built in a temporary worktree at 7f13cf2e26.
+  - Bundle: SHA256 B2AA71FB…1387B40, 999,732 bytes. It has the create-warnings bar; the old dev bundle did not.
+  - Read-back: the same SHA.
+  - Rollback: the previous dev bundle (2026-11-24 22:06Z, SHA 6C0C6DBA…46E3866, 1,000,446 bytes), kept outside the repo.
+- `Deploy-WizardCodePages.ps1` always republishes `sprk_wizard_commands` from source. That file is unchanged on master since 2026-10-31, and the earlier wizard deploys used the same script. Read-back SHA 22671FA9…1739D435 equals master's file.
+- BFF: candidates come only from master and are deployed by UAC-r2. The go is given in UAC-r2's session ("BFF deploy <sha>"). The dev checks run after UAC-r2's LIVE notice.
