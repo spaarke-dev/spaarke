@@ -189,6 +189,49 @@ public sealed class H12bAppConfigSeedHandlerTests
             => ValueTask.FromResult(GetToken(requestContext, cancellationToken));
     }
 
+    // ---------- Data-setup plan D4: the starter taxonomy pack comes from the run's intake, through the shared catalog ----------
+
+    [Theory]
+    [InlineData(null, "legal-standard")]    // absent -> the default (owner decision B)
+    [InlineData("legal-standard", "legal-standard")]
+    [InlineData("none", "none")]
+    public async Task D4_ThePackTheRunSelected_IsPassedToEverySeeder(string? stored, string expected)
+    {
+        var run = BuildRun();
+        if (stored is not null)
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.ReferenceDataPack] = stored;
+        }
+
+        var seeder = FakeSeeder.Ok(AppConfigSeedScopes.ReferenceData);
+        var handler = NewHandler(new FakeRepository(run, "etag-1"), new IAppConfigSeeder[] { seeder });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        seeder.LastInput!.ReferenceDataPack.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("Legal-Standard")]   // exact case
+    [InlineData("enterprise")]
+    public async Task D4_AnUnknownPack_FailsResumable_WithItsOwnRejectionCode_BeforeAnySeederRuns(string stored)
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret[IntakeParameterCatalog.ReferenceDataPack] = stored;
+        var seeder = FakeSeeder.Ok(AppConfigSeedScopes.ReferenceData);
+        var repo = new FakeRepository(run, "etag-1");
+        var handler = NewHandler(repo, new IAppConfigSeeder[] { seeder });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(AppConfigSeedRejectionCodes.InvalidReferenceDataPack);
+        failure.Diagnostic.Should().Contain($"'{stored}'").And.Contain("legal-standard | none");
+        seeder.CallCount.Should().Be(0, "nothing is seeded when the pack is not one the catalog accepts");
+    }
+
     [Fact]
     public async Task AC3_ManifestEdit_NewReaderHash_ReDrivesTheSeeders()
     {

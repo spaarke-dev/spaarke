@@ -44,6 +44,7 @@
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;
+using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 
@@ -87,10 +88,16 @@ public interface IAppConfigSeeder
 /// <param name="CustomerId">Cosmos partition key (§4D I3) — copied through to seeder script diagnostics.</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — never a default fallback; handler enforces non-empty).</param>
 /// <param name="TargetDataverseUrl">Target customer Dataverse env URL (e.g. <c>https://acme.crm.dynamics.com</c>).</param>
+/// <param name="ReferenceDataPack">
+/// The starter taxonomy pack the run selected (<c>referenceDataPack</c> intake key, already validated against
+/// <c>IntakeParameterCatalog.AllowedReferenceDataPacks</c> by the handler). Read only by the reference-data seeder; defaults to
+/// <c>none</c> so a caller that does not say seeds no taxonomy.
+/// </param>
 public sealed record AppConfigSeedInput(
     string CustomerId,
     string TenantId,
-    string TargetDataverseUrl);
+    string TargetDataverseUrl,
+    string ReferenceDataPack = IntakeParameterCatalog.NoReferenceDataPack);
 
 /// <summary>
 /// Well-known scope names used by <see cref="IAppConfigSeeder.ScopeName"/>.
