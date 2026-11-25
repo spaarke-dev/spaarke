@@ -4,7 +4,7 @@
     <title>Decision wizard person picker and Confirm summary show the email, so same-name contacts can be told apart (#3062, DI-170)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared LookupField (.tsx, many consumers) and the DecisionWizard parameter fields.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -59,4 +59,5 @@ Entry points (search by name; origin/master e70ff38894): `src/client/shared/Spaa
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt211); PR to master.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3086 squash-merged to master (62fdf29811, Closes #3062) after a main-session review. ILookupItem gains an optional secondaryText that LookupField renders under the name only when set (Fluent tokens), so every other consumer renders as before (DOM test). Person candidates in the Decision wizard carry the email as that line (unless the name already contains it); the picked person and the Confirm summary read "Name (email)", display only, the commit sends ids. The Console's Lookup Records pane is the platform pane: whether its contact view lists Email is a dev check for the main session. Console auto-deploys from master.</completion>
 </task>

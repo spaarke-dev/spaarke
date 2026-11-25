@@ -289,7 +289,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 208 | [Decision commit reports signal_changed when an item changes twice while closing (#3028, DI-167)](208-decision-commit-reports-signal-changed.poml) | FULL | sonnet/high | none | deferred-fixes-2026-11-25 | Owner 2026-11-24 "Continue with next tasks". PR to master |
 | 🔲 209 | [Nightly D-170 close reads only not-in-force policies that still have open Signals (#3014, DI-164)](209-signal-close-reads-policies-with-open-signals.poml) | FULL | opus/high | none | deferred-fixes-2026-11-25 | Task 204 K1; cost grows with ebilling 117 switch-offs. PR to master |
 | 🔲 210 | [Rule wizard and "How this was determined" use column display names and choice labels (#3040 DI-169, #3020 DI-165)](210-column-display-names-and-choice-labels.poml) | FULL | opus/high | none | deferred-fixes-2026-11-25 | Follows task 203; no per-request metadata read. PR to master |
-| 🔲 211 | [Decision wizard person picker and Confirm summary show the email (#3062, DI-170)](211-person-picker-shows-email.poml) | FULL | sonnet/high | none | deferred-fixes-2026-11-25 | Handed over by mcp-r1 (ISS-008). Shared LookupField optional secondary line. PR to master |
+| ✅ 211 | [Decision wizard person picker and Confirm summary show the email (#3062, DI-170)](211-person-picker-shows-email.poml) | FULL | sonnet/high | none | deferred-fixes-2026-11-25 | Handed over by mcp-r1 (ISS-008). Shared LookupField optional secondary line · **Done** 2026-11-25: #3086 squash-merged `62fdf29811` (Closes #3062); Console auto-deploys; dev check of the picker and the Lookup Records pane email column |
 
 ### Phase 5 — The worklist surface
 
