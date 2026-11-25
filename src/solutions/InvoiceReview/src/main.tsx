@@ -5,71 +5,25 @@
  * call goes through `authenticatedFetch` to the BFF; the page never reads or writes Dataverse rows itself (ADR-002): the review, the
  * decisions, the corrections and the PDF bytes are all the server's.
  *
- * Mirrors `src/solutions/InvoiceFiles/src/main.tsx` (and `CommunicationReconciliation/src/main.tsx` for the Navigator): `createRoot` + host
- * `FluentProvider` (theme via `resolveCodePageTheme` / `setupCodePageThemeListener`, dark mode included) + `AppErrorBoundary` + an async
- * `bootstrapAuth()` (`resolveRuntimeConfig` -> `setRuntimeConfig` -> `ensureAuthInitialized`, ADR-028) that the page waits on before it
- * mounts; a failed bootstrap shows a retry state (fail closed). The Navigator side pane is registered on mount
- * (`ensureNavigatorSidePane()`, docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md).
+ * The page scaffolding is the e-billing pages' shared one (`src/solutions/_ebilling-shared/`, issue 2965): the theme, the async auth bootstrap
+ * (`resolveRuntimeConfig` -> `setRuntimeConfig` -> `ensureAuthInitialized`, ADR-028) that the page waits on before it mounts, a retry state
+ * when it fails (fail closed), and the themed surface with its error boundary. The Navigator side pane is registered on mount
+ * (docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md).
  *
  * Web resource: sprk_invoicereviewpage (see the build rename in package.json). Its navigation entry is task 112's.
  */
 
 import * as React from 'react';
-import { createRoot } from 'react-dom/client';
-import { FluentProvider, Spinner, Text, Button, makeStyles, tokens } from '@fluentui/react-components';
-import {
-  resolveCodePageTheme,
-  setupCodePageThemeListener,
-  AppErrorBoundary,
-  AppInsightsService,
-  parseDataParams,
-  createXrmNavigationService,
-  ensureNavigatorSidePane,
-} from '@spaarke/ui-components';
-import { resolveRuntimeConfig, getAuthProvider, getTelemetryConnectionString } from '@spaarke/auth';
+import { parseDataParams, createXrmNavigationService } from '@spaarke/ui-components';
+import { useCodePageBootstrap } from '../../_ebilling-shared/codePageBootstrap';
+import { CodePageMessage, CodePageSpinner, CodePageSurface } from '../../_ebilling-shared/codePageChrome';
+import { mountWizardPage } from '@spaarke/ui-components/utils/mountWizardPage';
 import { InvoiceReviewWithDecisions } from './components/InvoiceReviewWithDecisions';
 import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
 import { createInvoiceReviewApi } from './services/invoiceReviewApi';
 import { createInvoiceDecisionApi } from './services/decisionApi';
 import { parseLaunch } from './services/launch';
-
-const useStyles = makeStyles({
-  centered: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-    width: '100%',
-    gap: tokens.spacingVerticalS,
-    padding: tokens.spacingHorizontalL,
-    boxSizing: 'border-box',
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-  },
-  surface: {
-    height: '100%',
-    backgroundColor: tokens.colorNeutralBackground2,
-    color: tokens.colorNeutralForeground1,
-  },
-});
-
-/** Bootstrap auth (config + MSAL + tenant ID); the page waits on this before it mounts. */
-async function bootstrapAuth(): Promise<void> {
-  const config = await resolveRuntimeConfig();
-  // Application Insights at runtime from this environment's connection string (issue 1537); never awaited, never rejects.
-  void AppInsightsService.initializeFromRuntime(() => getTelemetryConnectionString(config.bffBaseUrl));
-  setRuntimeConfig(config);
-  await ensureAuthInitialized();
-
-  if (!config.tenantId) {
-    const tenantId = await getAuthProvider().getTenantId();
-    if (tenantId) {
-      setRuntimeConfig({ ...config, tenantId });
-    }
-  }
-}
 
 /** Open the invoice's matter, project or work assignment in the host (Xrm.Navigation through the parent frame). */
 function openRecord(entityName: string, id: string): void {
@@ -91,55 +45,15 @@ function openCorrectionWizard(invoiceId: string): Promise<{ confirmed?: boolean 
   });
 }
 
-const Message: React.FC<{ testId: string; title: string; body: string; onRetry?: () => void }> = ({ testId, title, body, onRetry }) => {
-  const s = useStyles();
-  return (
-    <div className={s.centered} data-testid={testId}>
-      <Text weight="semibold">{title}</Text>
-      <Text>{body}</Text>
-      {onRetry && (
-        <Button appearance="primary" size="small" onClick={onRetry}>
-          Retry
-        </Button>
-      )}
-    </div>
-  );
-};
-
 function Root() {
-  const s = useStyles();
-  const [theme, setTheme] = React.useState(resolveCodePageTheme);
-  const [ready, setReady] = React.useState(false);
-  const [bootstrapError, setBootstrapError] = React.useState<unknown>(null);
-  const [attempt, setAttempt] = React.useState(0);
   const launch = React.useMemo(() => parseLaunch(parseDataParams()), []);
-
-  React.useEffect(() => {
-    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
-  }, []);
-
-  // Global Navigator side pane: every code-page host registers it on mount (idempotent, never throws).
-  React.useEffect(() => {
-    ensureNavigatorSidePane();
-  }, []);
-
-  React.useEffect(() => {
-    if (!launch.ok) return undefined;
-    let cancelled = false;
-    setBootstrapError(null);
-    setReady(false);
-    bootstrapAuth()
-      .then(() => {
-        if (!cancelled) setReady(true);
-      })
-      .catch(err => {
-        console.warn('[InvoiceReview] Auth bootstrap failed - page unavailable:', err);
-        if (!cancelled) setBootstrapError(err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attempt, launch]);
+  const { theme, ready, bootstrapError, retry } = useCodePageBootstrap({
+    label: 'InvoiceReview',
+    enabled: launch.ok,
+    registerNavigator: true,
+    setRuntimeConfig,
+    ensureAuthInitialized,
+  });
 
   // Built once the runtime config is set (getBffBaseUrl throws before that).
   const api = React.useMemo(() => (ready ? createInvoiceReviewApi(authenticatedFetch, getBffBaseUrl()) : null), [ready]);
@@ -147,44 +61,27 @@ function Root() {
 
   let body: React.ReactNode;
   if (!launch.ok) {
-    body = <Message testId="invoicereview-launch" title="Invoice Review" body={launch.message} />;
+    body = <CodePageMessage testId="invoicereview-launch" title="Invoice Review" body={launch.message} />;
   } else if (bootstrapError) {
     body = (
-      <Message
+      <CodePageMessage
         testId="invoicereview-auth-error"
         title="Unable to load"
         body="Sign-in could not be verified for this session. Retry, or reload the page."
-        onRetry={() => setAttempt(n => n + 1)}
+        onRetry={retry}
       />
     );
   } else if (!api || !decisionApi) {
-    body = (
-      <div className={s.centered} data-testid="invoicereview-bootstrapping">
-        <Spinner size="small" label="Loading…" />
-      </div>
-    );
+    body = <CodePageSpinner testId="invoicereview-bootstrapping" label="Loading…" />;
   } else {
     body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} initialLineId={launch.lineId} api={api} decisionApi={decisionApi} openRecord={openRecord} openCorrectionWizard={openCorrectionWizard} />;
   }
 
-  // The FluentProvider carries only the theme; the surface colours sit on a wrapper div (project gotcha F-10).
   return (
-    <FluentProvider theme={theme} style={{ height: '100%' }}>
-      <div className={s.surface}>
-        <AppErrorBoundary surfaceName="Invoice Review">{body}</AppErrorBoundary>
-      </div>
-    </FluentProvider>
+    <CodePageSurface theme={theme} surfaceName="Invoice Review" subtle>
+      {body}
+    </CodePageSurface>
   );
 }
 
-const rootElement = document.getElementById('root');
-if (rootElement) {
-  createRoot(rootElement).render(
-    <React.StrictMode>
-      <Root />
-    </React.StrictMode>
-  );
-} else {
-  // eslint-disable-next-line no-console
-  console.error('[InvoiceReview] Root element not found');
-}
+mountWizardPage('InvoiceReview', Root);

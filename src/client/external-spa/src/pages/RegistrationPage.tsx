@@ -6,6 +6,8 @@
  *
  * The gate (`WorkforceHomeGate`) shows it after `GET /api/v1/external/me` answered `registration_required` and the silent
  * link did not apply. The email is read-only and comes from the BFF's prefill (the token decides it, never this form).
+ * When the prefill's `licensedUser` hint is true (R4 FR-25, #2192: the caller's own token email belongs to a licensed user),
+ * the page opens on the licensed-user step instead of the form; the popup still opens only from the click.
  * Sub-states, each a fixed screen (a server message is never shown):
  *
  *   form                           first name, last name, department (optional); validated here and by the BFF
@@ -162,7 +164,11 @@ function refusalView(reason: RegistrationRefusal, confirm: boolean): View {
 
 export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, loginHint, onDone }) => {
   const s = useStyles();
-  const [view, setView] = React.useState<View>({ kind: 'form' });
+  // R4 FR-25 (#2192): a licensed user's email can never be registered, so the page opens on the link step (the same view the
+  // registration POST's `licensed_user_link_required` leads to). No popup opens here: only the "Link my account" click does.
+  const [view, setView] = React.useState<View>(() =>
+    prefill.licensedUser ? { kind: 'linkRequired', busy: false } : { kind: 'form' }
+  );
   const [firstName, setFirstName] = React.useState(prefill.givenName);
   const [lastName, setLastName] = React.useState(prefill.familyName);
   const [department, setDepartment] = React.useState('');

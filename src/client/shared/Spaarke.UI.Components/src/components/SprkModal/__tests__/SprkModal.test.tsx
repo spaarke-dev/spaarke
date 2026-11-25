@@ -161,6 +161,36 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     expect(onNavigate).toHaveBeenCalledWith('next');
   });
 
+  it('nav.disabled turns both ‹ › off and runs neither the guard nor onNavigate; unset leaves them on (ISS-016)', () => {
+    const onNavigate = jest.fn();
+    const onBeforeNavigate = jest.fn(() => true);
+    const { rerender } = renderWithProviders(
+      <SprkModal
+        open
+        onClose={noop}
+        title="Rec"
+        nav={{ index: 1, total: 3, onNavigate, onBeforeNavigate, disabled: true }}
+      >
+        <div>x</div>
+      </SprkModal>
+    );
+    const prev = screen.getByRole('button', { name: /previous record/i });
+    const next = screen.getByRole('button', { name: /next record/i });
+    expect(prev).toBeDisabled();
+    expect(next).toBeDisabled();
+    fireEvent.click(prev);
+    fireEvent.click(next);
+    expect(onBeforeNavigate).not.toHaveBeenCalled();
+    expect(onNavigate).not.toHaveBeenCalled();
+    rerender(
+      <SprkModal open onClose={noop} title="Rec" nav={{ index: 1, total: 3, onNavigate, onBeforeNavigate }}>
+        <div>x</div>
+      </SprkModal>
+    );
+    expect(screen.getByRole('button', { name: /previous record/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /next record/i })).toBeEnabled();
+  });
+
   describe('nav.onBeforeNavigate (browse guard lifted from BrowseModal — ontology task 056)', () => {
     const renderNav = (onBeforeNavigate: NonNullable<SprkModalNav['onBeforeNavigate']>, onNavigate = jest.fn()) => {
       renderWithProviders(
