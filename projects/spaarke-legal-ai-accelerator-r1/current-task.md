@@ -1,6 +1,6 @@
 # Current Task State - spaarke-legal-ai-accelerator-r1 (tiered package: individual base/advanced)
 
-> **Last Updated**: 2026-11-25 (Claude Desktop session `acclerator-r1`, after tier tests round 2)
+> **Last Updated**: 2026-11-25 (Claude Desktop session `acclerator-r1`, after tier tests round 2 and P-1). **Next action:** wait for the owner's Word desktop results (WP-1/WP-2/WP-3, contract steps); on "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
 > **Recovery**: Read "Quick Recovery" section first
 > **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (unmerged)
 > Earlier checkpoints (verbatim): `notes/handoff-history/2026-11.md`. Session narrative: `git log`.
@@ -15,7 +15,7 @@
 - **WP-2b (Word for the web):** probe listed (plugin + both skills), but no WPI/WPS code in (a) or (b); every prompt with "Spaarke" is routed to the Spaarke connector / Spaarke MCP (MCP prompts declined). The test is **confounded by our name**. Follow-up offered: rename the probe trigger phrases (`build/build_word_probe.py`) and re-upload (new inventory row).
 - **Probe plugin P1 is still uploaded (Only you)**, for the owner's Word desktop WP-1/WP-2. copilot-platform-coordination recorded it (`45022ea1c6`) and expects a message when it's removed (planned the same day) or a new date. The owner removes it in Cowork › Customize › Plugins.
 - **Side finding:** the owner's saved custom instruction (names `Spaarke Review Method.docx`) leaks into both agents ("could not be located").
-- **P-1 done:** the Copilot custom instruction reaches Copilot Chat and agents, not Cowork or Word for the web. Owner decision pending: dropped the "read Spaarke Review Method.docx" line from `package_docs.CUSTOM_INSTRUCTION` (owner OK; 9e982f7146 here, e0140591a0 on #3163). The owner's own saved instruction and the OneDrive `Start here/Spaarke – Custom instruction.txt` still have the old line.
+- **P-1 done:** the Copilot custom instruction reaches Copilot Chat and agents, not Cowork or Word for the web. Then dropped the "read Spaarke Review Method.docx" line from `package_docs.CUSTOM_INSTRUCTION` (owner OK; 9e982f7146 here, e0140591a0 on #3163). The owner's own saved instruction and the OneDrive `Start here/Spaarke – Custom instruction.txt` still have the old line.
 - **Still the owner's:** WP-1, WP-2 (Word desktop; pick the skill chip and leave "Spaarke" out of the prompt), WP-3, contract steps, remove `/spaarke-visual-probe` from the Cowork skills list, then remove the probe plugin and tell me.
 
 ## Quick Recovery (READ THIS FIRST)
