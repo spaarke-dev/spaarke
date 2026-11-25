@@ -1,5 +1,14 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-25 18:15Z — manual signal re-evaluation on dev (owner "Yes, run it"; task 218 dev check)
+
+- Dev BFF `a1b7db1def` (uac-r2 deploy, live 15:58:53Z; 30-min gate passed 16:29Z). Also checked on it: task 210 (rule wizard column display names; "How this was determined" reads "created on") and task 211 (Assign to lookup lists emails) PASS in the Console, nothing saved.
+- `POST /api/admin/jobs/signal-reevaluation/trigger` 18:15:51Z → 202, ManualAdmin run, correlation `22f148d417dd41dca112a4ce22f04ac2`; Succeeded 18:16:48Z (55.7 s).
+- Result: policiesEvaluated 6, hits 163, written 1, reraised 5, closed 119, unchanged 149, noDatedEvidence 8; refused, accessDenied, policyFailures, anomalies, evidenceRedacted all 0.
+- Closures by policy (SignalWriter traces, resolution 100000002): POL-MATTER-NOBUDGET 114 (the orphaned NOBUDGET Signals expected at the 2026-11-26 nightly closed now), POL-TASK-OVERDUE 4, POL-TODO-OVERDUE 1; 6 created.
+- **Task 218 PASS:** the manual run's logs reach App Insights: SignalWriter 125, SignalReevaluationJob 2, ScheduledJobHost 9 traces in 18:15:51–18:16:48Z.
+- Still open: 214 (needs a send from the app), 209 and 217 timing (nightly 02:30Z).
+
 ## 2026-11-25 05:40Z — manual signal-reevaluation run 7f929ff2 (mcp-r1, owner go in their session): Failed refused=39, cause found
 
 mcp-r1 switched POL-MATTER-NOBUDGET On (04:51:17Z) and triggered the job once (04:51:23–04:54:01Z): hits 316, reraised 147, unchanged 122, noDatedEvidence 8, refused 39, written 0. Cause (read-only investigation, verified): 154 `sprk_matter` rows were deleted 04:52:22–04:56:39Z from the owner's account (interactive, not a BFF identity; owner confirmed 2026-11-25 the deletion was intended) while the run wrote; the 39 refusals are matters deleted before the run reached them (38 owner_refused: parent unresolved; 1 write_failed). Fail-closed as designed (D-38), not a regression in ef0c566d2c (only DecisionCommitService changed). After the deletes: 144 open NOBUDGET Signals, of which 30 on existing matters and 114 with the matter lookup cleared by the delete cascade (expected to close ConditionCleared at the next nightly: check the 02:30Z heartbeat). No secure-child item. The run's logs were missing: filed DI-175 #3125 (manual trigger inherits the request trace; rate-limited sampler drops it).
