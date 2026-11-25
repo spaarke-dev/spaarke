@@ -2,12 +2,20 @@ using System;
 using System.Collections.Generic;
 using System.Web;
 
-namespace Sprk.Bff.Api.Api.Agent;
+namespace Sprk.Bff.Api.Services.Ai.Handoff;
 
 /// <summary>
-/// Generates deep-link URLs for handoff from M365 Copilot to
-/// the SpaarkeAi three-pane Analysis surface and wizard Code Pages.
+/// Generates server-composed deep-link URLs to the SpaarkeAi three-pane Analysis surface and
+/// wizard Code Pages.
 /// </summary>
+/// <remarks>
+/// Moved here from the legacy agent folder (namespace <c>Sprk.Bff.Api.Api.Agent</c>) by
+/// spaarkeai-mcp-bff-api-r2 task 001, when the legacy M365 Copilot gateway was removed; only the
+/// namespace and these docs changed. Its live consumer is the chat
+/// create-record tool (<c>DataverseCreateRecordHandler</c>). It is registered as a singleton by
+/// <c>ToolFrameworkExtensions.AddToolFramework</c>, next to the tool-handler scan that registers
+/// that consumer.
+/// </remarks>
 public sealed class HandoffUrlBuilder
 {
     private readonly string _dataverseBaseUrl;
@@ -30,8 +38,9 @@ public sealed class HandoffUrlBuilder
     /// legacy Analysis Workspace launcher web resource (would 404 once the legacy code page
     /// is deleted in task 063) to the go-forward SpaarkeAi surface. The method name and
     /// 3-argument signature are kept stable to avoid
-    /// call-site churn across <c>PlaybookStatusEndpoints</c>, <c>PlaybookInvocationService</c>,
-    /// and <c>AgentErrorHandler</c> — only the emitted URL shape changes.
+    /// call-site churn across the legacy M365 Copilot agent's status endpoint, invocation service
+    /// and error handler (all removed with that agent, spaarkeai-mcp-bff-api-r2 task 001) — only
+    /// the emitted URL shape changes.
     ///
     /// Deliberately NOT carried into the new shape: <paramref name="playbookId"/> is accepted
     /// for call-site source compatibility but is DROPPED from the emitted URL — it has no

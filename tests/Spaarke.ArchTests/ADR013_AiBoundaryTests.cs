@@ -61,7 +61,6 @@ public class ADR013_AiBoundaryTests
         "Sprk.Bff.Api.Api.Filters.PlaybookAuthorizationFilterExtensions", // same file — endpoint-filter factory lambdas
         "Sprk.Bff.Api.Api.Ai.ChatEndpoints",                              // IS the Chat API surface (raw AI exposure)
         "Sprk.Bff.Api.Api.Ai.PlaybookEndpoints",                          // IS the Playbook CRUD API (handlers wrap IPlaybookService 1:1)
-        "Sprk.Bff.Api.Api.Agent.AgentEndpoints",                          // M365 Copilot agent gateway (playbook-discovery pattern)
     };
 
     [Fact(DisplayName = "ADR-013/FR-C6: CRUD code must not depend on AI-internal types — use Services/Ai/PublicContracts facade")]

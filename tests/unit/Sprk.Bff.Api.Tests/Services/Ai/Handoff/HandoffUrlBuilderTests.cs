@@ -1,10 +1,10 @@
 using System;
 using System.Web;
 using FluentAssertions;
-using Sprk.Bff.Api.Api.Agent;
+using Sprk.Bff.Api.Services.Ai.Handoff;
 using Xunit;
 
-namespace Sprk.Bff.Api.Tests.Api.Agent;
+namespace Sprk.Bff.Api.Tests.Services.Ai.Handoff;
 
 /// <summary>
 /// Unit tests for HandoffUrlBuilder.

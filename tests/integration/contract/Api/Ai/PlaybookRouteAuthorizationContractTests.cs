@@ -27,7 +27,6 @@ using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Caching;
@@ -43,14 +42,14 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
 /// The per-record authorization of the playbook-surface sweep routes of unified-access-control-r2 task 164,
-/// exercised through the REAL <c>MapPlaybookEndpoints</c>, <c>MapPlaybookRunEndpoints</c> and
-/// <c>MapAgentEndpoints</c>: <c>GET /api/ai/playbooks/by-id/{id}</c> (sweep #55), <c>POST
-/// /api/ai/playbooks/{id:guid}/execute</c> (#29), <c>POST /api/agent/run-playbook</c> (#19), <c>GET
-/// /api/agent/playbooks/status/{jobId:guid}</c> (#78), and the owner-round-12-item-6 owned-playbook list.
+/// exercised through the REAL <c>MapPlaybookEndpoints</c> and <c>MapPlaybookRunEndpoints</c>:
+/// <c>GET /api/ai/playbooks/by-id/{id}</c> (sweep #55), <c>POST /api/ai/playbooks/{id:guid}/execute</c> (#29), and the
+/// owner-round-12-item-6 owned-playbook list. (The legacy M365 Copilot gateway's run and status routes, #19 and #78, were
+/// removed by spaarkeai-mcp-bff-api-r2 task 001; every Run-mode rule their tests proved is proven here on execute.)
 /// </summary>
 /// <remarks>
 /// <para><b>What is real and what is substituted.</b> The endpoint mappers, <see cref="PlaybookAuthorizationFilter"/>,
-/// <see cref="AgentAuthorizationFilter"/>, <see cref="AuthorizationService"/>, <see cref="OperationAccessRule"/>,
+/// <see cref="AuthorizationService"/>, <see cref="OperationAccessRule"/>,
 /// <see cref="OperationAccessPolicy"/> and <see cref="EndpointResponseCache"/> are the production types. The
 /// substitution is at the <see cref="IAccessDataSource"/> boundary (a recording fake answering "what may this caller
 /// do to record X of set S"), at <see cref="CallerRecordAccessProbe"/>'s virtual WhoAmI seam, and at the playbook,
@@ -462,125 +461,6 @@ public class PlaybookRouteAuthorizationContractTests
     }
 
     // =========================================================================================
-    // POST /api/agent/run-playbook  (sweep #19)
-    // =========================================================================================
-
-    [Fact]
-    public async Task AgentRunPlaybook_DeniedUnknownAndFaultingPlaybook_AreOneUniform404_AndNothingRuns()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var documentId = host.ReadableDocument();
-        var deniedId = Guid.NewGuid();
-        var unknownId = Guid.NewGuid();
-        var faultingId = Guid.NewGuid();
-        host.PrivatePlaybook(deniedId);
-        host.Playbooks.Setup(p => p.GetPlaybookAsync(unknownId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PlaybookResponse?)null);
-        host.Playbooks.Setup(p => p.GetPlaybookAsync(faultingId, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("dataverse down"));
-
-        var denied = await host.SendAsync(RunPlaybook(deniedId, documentId));
-        var unknown = await host.SendAsync(RunPlaybook(unknownId, documentId));
-        var faulting = await host.SendAsync(RunPlaybook(faultingId, documentId));
-
-        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        var deniedBody = Normalize(await denied.Content.ReadAsStringAsync());
-        deniedBody.Should().Be(Normalize(await unknown.Content.ReadAsStringAsync()));
-        deniedBody.Should().Be(Normalize(await faulting.Content.ReadAsStringAsync()));
-        DetailAndExtensions(await denied.Content.ReadAsStringAsync()).Should().NotContain(deniedId.ToString());
-        host.VerifyNothingRan();
-    }
-
-    [Fact]
-    public async Task AgentRunPlaybook_UnreadableDocument_Is403_AndNothingRuns()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var playbookId = host.ReadOnlyPublicPlaybook();
-        var unreadable = Guid.NewGuid();
-
-        var response = await host.SendAsync(RunPlaybook(playbookId, unreadable));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        DetailAndExtensions(await response.Content.ReadAsStringAsync()).Should().NotContain(unreadable.ToString());
-        host.VerifyNothingRan();
-    }
-
-    [Fact]
-    public async Task AgentRunPlaybook_ReaderOfThePlaybookAndTheDocument_Gets202()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var playbookId = Guid.NewGuid();
-        host.PrivatePlaybook(playbookId);
-        host.Access.Grant(Playbooks, playbookId, AccessRights.Read);
-        host.NodesOf(playbookId, ExecutorType.AiAnalysis);
-        var documentId = host.ReadableDocument();
-        host.RunSucceeds();
-
-        var response = await host.SendAsync(RunPlaybook(playbookId, documentId));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        host.Orchestration.Verify(o => o.ExecuteAsync(
-            It.Is<PlaybookRunRequest>(r => r.PlaybookId == playbookId),
-            It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task AgentRunPlaybook_EmptyPlaybookId_Is400_BeforeAnyRightsQuery()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-
-        var response = await host.SendAsync(RunPlaybook(Guid.Empty, Guid.NewGuid()));
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync()).Should().Contain(AgentEndpoints.PlaybookIdRequiredDetail);
-        host.Access.Calls.Should().BeEmpty();
-        host.VerifyNothingRan();
-    }
-
-    // =========================================================================================
-    // GET /api/agent/playbooks/status/{jobId:guid}  (sweep #78)
-    // =========================================================================================
-
-    [Fact]
-    public async Task AgentStatus_AnotherCallersRun_AnOwnerlessRun_AndAnUnknownRun_AreOneUniform404_WithNoJobId()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var othersRun = Guid.NewGuid();
-        var ownerlessRun = Guid.NewGuid();
-        var unknownRun = Guid.NewGuid();
-        host.RunStatus(othersRun, startedByOid: OtherOid);
-        host.RunStatus(ownerlessRun, startedByOid: null);
-        host.Orchestration.Setup(o => o.GetRunStatusAsync(unknownRun, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PlaybookRunStatus?)null);
-
-        var others = await host.SendAsync(Get($"/api/agent/playbooks/status/{othersRun}"));
-        var ownerless = await host.SendAsync(Get($"/api/agent/playbooks/status/{ownerlessRun}"));
-        var unknown = await host.SendAsync(Get($"/api/agent/playbooks/status/{unknownRun}"));
-
-        foreach (var (response, id) in new[] { (others, othersRun), (ownerless, ownerlessRun), (unknown, unknownRun) })
-        {
-            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-            (await response.Content.ReadAsStringAsync()).Should().NotContain(id.ToString());
-        }
-
-        var othersBody = Normalize(await others.Content.ReadAsStringAsync());
-        othersBody.Should().Be(Normalize(await ownerless.Content.ReadAsStringAsync()));
-        othersBody.Should().Be(Normalize(await unknown.Content.ReadAsStringAsync()));
-    }
-
-    [Fact]
-    public async Task AgentStatus_TheCallerWhoStartedTheRun_Gets200()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var runId = Guid.NewGuid();
-        host.RunStatus(runId, startedByOid: CallerOid);
-
-        var response = await host.SendAsync(Get($"/api/agent/playbooks/status/{runId}", CallerOid));
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-    }
-
-    // =========================================================================================
     // GET /api/ai/playbooks — owned list keyed by the caller's systemuserid (owner round 12 item 6)
     // =========================================================================================
 
@@ -685,7 +565,7 @@ public class PlaybookRouteAuthorizationContractTests
     }
 
     // =========================================================================================
-    // Playbook parameters on execute and agent run-playbook — the shared policy (owner round 16 item 3, task 164 r1)
+    // Playbook parameters on execute — the shared policy (owner round 16 item 3, task 164 r1)
     // =========================================================================================
 
     [Theory]
@@ -842,72 +722,9 @@ public class PlaybookRouteAuthorizationContractTests
         host.VerifyNothingRan();
     }
 
-    [Fact]
-    public async Task AgentRunPlaybook_ParameterPolicy_AppliesTheSame_AndTheRunUserIsTheCaller()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var playbookId = host.ReadOnlyPublicPlaybook();
-        var documentId = host.ReadableDocument();
-        var unreadableMatter = Guid.NewGuid();
-        host.RunSucceeds();
-
-        var serverOwned = await host.SendAsync(RunPlaybook(playbookId, documentId, new Dictionary<string, string> { ["userId"] = Guid.NewGuid().ToString() }));
-        var unreadable = await host.SendAsync(RunPlaybook(playbookId, documentId, MatterParameter(unreadableMatter)));
-        host.VerifyNothingRan();
-        var allowed = await host.SendAsync(RunPlaybook(playbookId, documentId, new Dictionary<string, string> { ["focus"] = "risk" }));
-
-        serverOwned.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        unreadable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        allowed.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        host.Orchestration.Verify(o => o.ExecuteAsync(
-            It.Is<PlaybookRunRequest>(r => r.RunUserId == host.Probe.SystemUserId),
-            It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
-    }
-
     // =========================================================================================
-    // GET /api/agent/playbooks/status/{jobId:guid} — a lookup fault is the same uniform 404 (task 164 r1)
+    // Owner round 12 item 6 — the caller's systemuserid on share / unshare (task 164 r1)
     // =========================================================================================
-
-    [Fact]
-    public async Task AgentStatus_ALookupFault_IsTheSameUniform404_AsAnUnknownRun()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var unknownRun = Guid.NewGuid();
-        var faultingRun = Guid.NewGuid();
-        host.Orchestration.Setup(o => o.GetRunStatusAsync(unknownRun, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PlaybookRunStatus?)null);
-        host.Orchestration.Setup(o => o.GetRunStatusAsync(faultingRun, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("run store unavailable"));
-
-        var unknown = await host.SendAsync(Get($"/api/agent/playbooks/status/{unknownRun}"));
-        var faulting = await host.SendAsync(Get($"/api/agent/playbooks/status/{faultingRun}"));
-
-        faulting.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        var faultingBody = await faulting.Content.ReadAsStringAsync();
-        faultingBody.Should().NotContain(faultingRun.ToString()).And.NotContain("run store unavailable");
-        Normalize(faultingBody).Should().Be(Normalize(await unknown.Content.ReadAsStringAsync()));
-    }
-
-    // =========================================================================================
-    // Owner round 12 item 6 — the caller's systemuserid on the agent list and on share / unshare (task 164 r1)
-    // =========================================================================================
-
-    [Fact]
-    public async Task AgentOwnedPlaybookList_FiltersByTheCallersSystemUserId_NotTheEntraOid()
-    {
-        await using var host = await PlaybookAuthHost.StartAsync();
-        var systemUserId = Guid.NewGuid();
-        host.Probe.SystemUserId = systemUserId;
-        host.Playbooks.Setup(p => p.ListUserPlaybooksAsync(It.IsAny<Guid>(), It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookListResponse { Items = [], TotalCount = 0, Page = 1, PageSize = 50 });
-        host.Playbooks.Setup(p => p.ListPublicPlaybooksAsync(It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookListResponse { Items = [], TotalCount = 0, Page = 1, PageSize = 50 });
-
-        (await host.SendAsync(Get("/api/agent/playbooks"))).StatusCode.Should().Be(HttpStatusCode.OK);
-
-        host.Playbooks.Verify(p => p.ListUserPlaybooksAsync(systemUserId, It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()), Times.Once());
-        host.Playbooks.Verify(p => p.ListUserPlaybooksAsync(Guid.Parse(CallerOid), It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()), Times.Never());
-    }
 
     [Fact]
     public async Task Share_And_Unshare_PassTheCallersSystemUserId_NotTheEntraOid()
@@ -1315,24 +1132,10 @@ public class PlaybookRouteAuthorizationContractTests
         return request;
     }
 
-    private static HttpRequestMessage RunPlaybook(Guid playbookId, Guid documentId)
-    {
-        var request = Authenticated(HttpMethod.Post, "/api/agent/run-playbook", CallerOid);
-        request.Content = JsonContent.Create(new { playbookId, documentId });
-        return request;
-    }
-
     private static HttpRequestMessage Execute(Guid playbookId, IReadOnlyDictionary<string, string> parameters, params Guid[] documentIds)
     {
         var request = Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{playbookId}/execute", CallerOid);
         request.Content = JsonContent.Create(new { documentIds, parameters });
-        return request;
-    }
-
-    private static HttpRequestMessage RunPlaybook(Guid playbookId, Guid documentId, IReadOnlyDictionary<string, string> parameters)
-    {
-        var request = Authenticated(HttpMethod.Post, "/api/agent/run-playbook", CallerOid);
-        request.Content = JsonContent.Create(new { playbookId, documentId, parameters });
         return request;
     }
 
@@ -1540,10 +1343,6 @@ public class PlaybookRouteAuthorizationContractTests
             // Handler parameter types of routes these tests never call (the mappers need them to be services).
             builder.Services.AddSingleton(Sharing.Object);
             builder.Services.AddSingleton(new Mock<IChatClient>(MockBehavior.Strict).Object);
-            builder.Services.AddScoped<ChatSessionManager>(_ =>
-                throw new InvalidOperationException("POST /api/agent/message is not exercised by this host"));
-            builder.Services.AddScoped<SprkChatAgentFactory>(_ =>
-                throw new InvalidOperationException("POST /api/agent/message is not exercised by this host"));
 
             configureServices?.Invoke(builder.Services);
 
@@ -1557,7 +1356,6 @@ public class PlaybookRouteAuthorizationContractTests
             _app.MapPlaybookEndpoints();
             _app.MapNodeEndpoints();
             _app.MapPlaybookRunEndpoints();
-            _app.MapAgentEndpoints();
 
             await _app.StartAsync();
             _client = _app.GetTestClient();
@@ -1619,6 +1417,7 @@ public class PlaybookRouteAuthorizationContractTests
                 .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
                 .Returns((PlaybookRunRequest r, HttpContext _, CancellationToken ct) => SucceedingStream(r.PlaybookId, ct));
 
+        /// <summary>A stored run for <paramref name="runId"/> (used by PlaybookRunStreamTerminalErrorContractTests).</summary>
         public void RunStatus(Guid runId, string? startedByOid) =>
             Orchestration.Setup(o => o.GetRunStatusAsync(runId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PlaybookRunStatus
