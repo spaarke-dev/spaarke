@@ -8,9 +8,8 @@
 | Field | Value |
 |-------|-------|
 | **Active** | None. Task 041 is ✅ completed (FR-25, #2192); details in `notes/task-041-notes.md`. The next 🔲 in `TASK-INDEX.md` is the next task. |
-| **Unpushed on purpose** | The 041 commits (`026ff0396f`, `f3da9c8f7a`, close commit) are LOCAL ONLY. PR #3160 (task 040) is open on this same branch with auto-merge on, by the owner's go for 040 only. Pushing now would fold 041 into it. **After #3160 merges:** merge origin/master here (keep the branch's `projects/spaarke-SPA-external-access-platform-r4/**`), push, and open a separate 041 PR (Placement Justification, publish-size delta, the UAC review and the timeout decision in the body). Merge only on the owner's go. |
-| **In flight** | PR #3160 (040): auto-merge on. After it merges, the dev deploy: the BFF through uac-r2 (owner go on the exact merged SHA, in uac-r2's session) and the SPA (owner go). |
-| **Next action** | Wait for #3160 to merge (do not poll; use `mcp__ccd_pr__get_status`). Then push 041 and open its PR. Then continue with the next task via task-execute. |
+| **In flight** | **PR #3180** (task 041) is open, pushed at merge `e53166915c` (master `af4cfb4527` merged in; only the 11 task-041 files in the diff); CI is starting. Auto-merge is OFF: **merge only on the owner's go.** PR #3160 (040) MERGED. The next dev deploy candidate (040 + 041 once merged): the BFF through uac-r2 (owner go on the exact master SHA, in uac-r2's session); the SPA with the owner's go (re-check master HEAD vs the approved SHA). |
+| **Next action** | Ask the owner for the #3180 merge go (check CI with `mcp__ccd_pr__get_status`, never poll). Then the next 🔲 in `TASK-INDEX.md` via task-execute (042 depends on 041). No uncommitted files except this one. |
 
 ## Task 041 outcome
 - BFF: the workforce 403 `registration_required` carries a `licensedUser` boolean (the caller's own token email, the registration route's rule, read and decision; any doubt → false). SPA: `RegistrationPage` opens on "Link my account" when it is true; the popup opens only on the click.
