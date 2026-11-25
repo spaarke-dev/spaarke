@@ -143,12 +143,13 @@ public sealed class McpResultSizeTests
     }
 
     [Fact]
-    public async Task WorklistReadsPerCall_AreOneForShow_OneForAPage_OneForThePlan()
+    public async Task WorklistReadsPerCall_AreOneForShow_OneForAPage_NoneForThePlan_WhichReadsOneRow()
     {
         // wave 6 review (022): "opening the widget costs three worklist reads". NFR-01 (2026-11-25, dev App Insights: show p95 6.5 s, two
-        // ~2 s lane reads per call): spaarke_show_decisions now reads the lane once (page 1 carries the whole lanes response the category
-        // counts come from; the widget continues from its cursor), and opening an item adds one (the plan tool reads the row).
-        // Pinned as counted, so a second read creeping back is seen; it is not a performance bound.
+        // ~2 s lane reads per call; plan p95 4.7 s): spaarke_show_decisions now reads the lane once (page 1 carries the whole lanes response
+        // the category counts come from; the widget continues from its cursor), and opening an item reads only that item's row (the lanes
+        // read narrowed to one Signal, ontology task 222 B), never the whole lane.
+        // Pinned as counted, so a whole-lane read creeping back is seen; it is not a performance bound.
         var capability = new FiveToolCapability(DecideLaneSeed.Build());
         await using var host = await Start(capability);
 
@@ -160,6 +161,7 @@ public sealed class McpResultSizeTests
 
         afterShow.Should().Be(1, "opening the widget reads the lane once");
         (afterPage - afterShow).Should().Be(1, "each further page");
-        (capability.WorklistReads - afterPage).Should().Be(1, "opening an item");
+        (capability.WorklistReads - afterPage).Should().Be(0, "opening an item never reads the whole lane");
+        capability.RowReads.Should().Be(1, "opening an item reads its one row");
     }
 }

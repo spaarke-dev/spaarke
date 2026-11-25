@@ -208,6 +208,7 @@ internal sealed class DecideLaneDouble : IDecisionCapability
 {
     private int _laneReads;
     private int _pageReads;
+    private int _rowReads;
 
     public DecideLaneDouble(DecideLaneSeed seed)
     {
@@ -239,11 +240,40 @@ internal sealed class DecideLaneDouble : IDecisionCapability
 
     public int PageReads => Volatile.Read(ref _pageReads);
 
+    /// <summary>Single Work Item reads (<see cref="GetWorkItemAsync"/>), the plan tool's row read.</summary>
+    public int RowReads => Volatile.Read(ref _rowReads);
+
     public Task<SignalReadResult> ListDecideAsync(ClaimsPrincipal? user, CancellationToken ct, WorklistSet set = WorklistSet.Lanes)
     {
         Interlocked.Increment(ref _laneReads);
         Users.Enqueue(user);
         return Task.FromResult(LaneFailure ?? new SignalReadResult(SignalReadOutcome.Ok, LanesResponse()));
+    }
+
+    /// <summary>The lanes response narrowed to <paramref name="signalId"/>, as <c>DecisionCapability</c> reads it: that one row when the
+    /// lane holds it, else none. <see cref="LaneFailure"/> answers it too (the same read's outcomes).</summary>
+    public Task<SignalReadResult> GetWorkItemAsync(ClaimsPrincipal? user, Guid signalId, CancellationToken ct)
+    {
+        Interlocked.Increment(ref _rowReads);
+        Users.Enqueue(user);
+        if (LaneFailure is { } failure)
+        {
+            return Task.FromResult(failure);
+        }
+
+        var all = LanesResponse();
+        return Task.FromResult(new SignalReadResult(SignalReadOutcome.Ok, all with
+        {
+            Lanes = all.Lanes
+                .Select(l => l with
+                {
+                    Groups = l.Groups
+                        .Select(g => g with { Items = g.Items.Where(i => i.SignalId == signalId).ToList() })
+                        .Where(g => g.Items.Count > 0)
+                        .ToList(),
+                })
+                .ToList(),
+        }));
     }
 
     /// <summary>The whole lanes response, as <see cref="ListDecideAsync"/> answers it and as the page carries it (the capability cuts the
