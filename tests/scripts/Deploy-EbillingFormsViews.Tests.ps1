@@ -535,3 +535,157 @@ Describe 'Section merge: wide cells and labels that need escaping (ISS-046 fix r
         $script:FakePatches.Count | Should -Be 0
     }
 }
+
+# ebilling-r1 DEF-046 (#2312). The sprk_MatterManagement sitemap lists sprk_invoice in two areas (area_mattermanagement/group_work and
+# area_finance/group_c6c6d7dd). The script anchored the billing export entry on a document-wide "the sprk_invoicesubmission subarea", which
+# lives in the Finance group, and inserted it into the group of the FIRST sprk_invoice entry: InsertAfter threw "The reference node is not a
+# child of this node" in step 3, after the forms were written. The navigation edit is now pure XML (Update-MatterManagementSiteMap), anchors
+# inside the target group only, refuses with the area / group named when it cannot place the entries, and runs on a copy before step 1.
+Describe 'Matter Management navigation edit (DEF-046)' {
+    BeforeAll {
+        $script:ScriptPath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path 'scripts' 'ebilling' 'Deploy-EbillingFormsViews.ps1'
+        $tokens = $null; $errors = $null
+        $scriptAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errors)
+        if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
+        foreach ($fn in $scriptAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $fn.Extent.Text }
+
+        function New-Sub([string]$Id, [string]$Entity) { return "<SubArea Id=""$Id"" Entity=""$Entity"" />" }
+        function New-Grp([string]$Id, [string[]]$Subs) { return "<Group Id=""$Id"">$($Subs -join '')</Group>" }
+        function New-SiteMap([string[]]$Areas) { return [xml]"<SiteMap>$($Areas -join '')</SiteMap>" }
+        # The Finance area as the live sitemap has it: an Invoice group with the submission, a Review group with the export.
+        function New-FinanceArea([bool]$Submission = $true, [bool]$Export = $true) {
+            $inv = @((New-Sub 'subarea_a33586d7' 'sprk_invoice'), (New-Sub 'subarea_efbdd6ac' 'sprk_invoiceapproval'), (New-Sub 'subarea_7d64963b' 'sprk_invoicecorrection'), (New-Sub 'subarea_9a9e59db' 'sprk_billingevent'))
+            if ($Submission) { $inv += (New-Sub 'subarea_d9b7c277' 'sprk_invoicesubmission') }
+            $rev = @((New-Sub 'subarea_4839733e' 'sprk_spendsignal'))
+            if ($Export) { $rev += (New-Sub 'subarea_8f8f4243' 'sprk_billingexport') }
+            return "<Area Id=""area_finance"">$(New-Grp 'group_billing' @((New-Sub 's1' 'sprk_budget')))$(New-Grp 'group_c6c6d7dd' $inv)$(New-Grp 'group_review' $rev)</Area>"
+        }
+        $script:WorkArea = "<Area Id=""area_mattermanagement"">$(New-Grp 'group_work' @((New-Sub 'subarea_x' 'sprk_matter'), (New-Sub 'subarea_fc9da905' 'sprk_invoice'), (New-Sub 'subarea_y' 'sprk_event')))</Area>"
+        function Get-Entities($Doc, [string]$GroupId) { return @($Doc.SelectNodes("//Group[@Id='$GroupId']/SubArea") | ForEach-Object { $_.GetAttribute('Entity') }) }
+    }
+
+    It 'MUST FIRE (the dev shape): sprk_invoice in two areas, submission present, export missing -> export goes after the submission in the Finance Invoice group, no exception' {
+        $doc = New-SiteMap @($script:WorkArea, (New-FinanceArea $true $false))
+        $script:changed = $null
+        { $script:changed = Update-MatterManagementSiteMap $doc } | Should -Not -Throw
+        $script:changed | Should -BeTrue
+        $inv = Get-Entities $doc 'group_c6c6d7dd'
+        $inv[($inv.IndexOf('sprk_invoicesubmission') + 1)] | Should -Be 'sprk_billingexport'
+        @($doc.SelectNodes("//SubArea[@Entity='sprk_billingexport']")).Count | Should -Be 1
+        # the other area's group is not touched
+        Get-Entities $doc 'group_work' | Should -Be @('sprk_matter', 'sprk_invoice', 'sprk_event')
+    }
+
+    It 'MUST FIRE: sprk_invoice in two areas, neither entry present -> both go into the Finance Invoice group (submission after the invoice, export after the submission)' {
+        $doc = New-SiteMap @($script:WorkArea, (New-FinanceArea $false $false))
+        { Update-MatterManagementSiteMap $doc | Out-Null } | Should -Not -Throw
+        $inv = Get-Entities $doc 'group_c6c6d7dd'
+        $inv[($inv.IndexOf('sprk_invoice') + 1)] | Should -Be 'sprk_invoicesubmission'
+        $inv[($inv.IndexOf('sprk_invoicesubmission') + 1)] | Should -Be 'sprk_billingexport'
+        Get-Entities $doc 'group_work' | Should -Be @('sprk_matter', 'sprk_invoice', 'sprk_event')
+    }
+
+    It 'the same shape with the work area LAST (document order must not decide the group)' {
+        $doc = New-SiteMap @((New-FinanceArea $true $false), $script:WorkArea)
+        { Update-MatterManagementSiteMap $doc | Out-Null } | Should -Not -Throw
+        Get-Entities $doc 'group_c6c6d7dd' | Should -Contain 'sprk_billingexport'
+        Get-Entities $doc 'group_work' | Should -Not -Contain 'sprk_billingexport'
+    }
+
+    It 'a duplicate Group Id in the other area does not redirect the insert (the old //Group[@Id=...] lookup took the first one)' {
+        $dupWork = "<Area Id=""area_mattermanagement"">$(New-Grp 'group_c6c6d7dd' @((New-Sub 'subarea_fc9da905' 'sprk_invoice')))</Area>"
+        $doc = New-SiteMap @($dupWork, (New-FinanceArea $true $false))
+        { Update-MatterManagementSiteMap $doc | Out-Null } | Should -Not -Throw
+        @($doc.SelectNodes("//Area[@Id='area_finance']/Group[@Id='group_c6c6d7dd']/SubArea[@Entity='sprk_billingexport']")).Count | Should -Be 1
+        @($doc.SelectNodes("//Area[@Id='area_mattermanagement']//SubArea[@Entity='sprk_billingexport']")).Count | Should -Be 0
+    }
+
+    It 'idempotent: both entries already listed (anywhere) -> no change, and a second run after an insert changes nothing' {
+        $listed = New-SiteMap @($script:WorkArea, (New-FinanceArea $true $true))
+        $before = $listed.OuterXml
+        Update-MatterManagementSiteMap $listed | Should -BeFalse
+        $listed.OuterXml | Should -Be $before
+        $doc = New-SiteMap @($script:WorkArea, (New-FinanceArea $true $false))
+        Update-MatterManagementSiteMap $doc | Should -BeTrue
+        $once = $doc.OuterXml
+        Update-MatterManagementSiteMap $doc | Should -BeFalse
+        $doc.OuterXml | Should -Be $once
+    }
+
+    It 'MUST NOT FIRE: a normal single-area sitemap with one sprk_invoice still gets both entries after it, in order' {
+        $doc = New-SiteMap @("<Area Id=""area_one"">$(New-Grp 'group_work' @((New-Sub 'a' 'sprk_matter'), (New-Sub 'b' 'sprk_invoice'), (New-Sub 'c' 'sprk_event')))</Area>")
+        Update-MatterManagementSiteMap $doc | Should -BeTrue
+        Get-Entities $doc 'group_work' | Should -Be @('sprk_matter', 'sprk_invoice', 'sprk_invoicesubmission', 'sprk_billingexport', 'sprk_event')
+    }
+
+    It 'refuses a sitemap without sprk_invoice, naming the entity, and writes nothing' {
+        $doc = New-SiteMap @("<Area Id=""area_one"">$(New-Grp 'group_work' @((New-Sub 'a' 'sprk_matter')))</Area>")
+        $before = $doc.OuterXml
+        { Update-MatterManagementSiteMap $doc } | Should -Throw '*no sprk_invoice subarea*'
+        $doc.OuterXml | Should -Be $before
+    }
+
+    It 'refuses an ambiguous sitemap (two invoice groups, no eBilling sibling in either) with both areas and groups named, and writes nothing' {
+        $second = "<Area Id=""area_other"">$(New-Grp 'group_inv2' @((New-Sub 'q' 'sprk_invoice')))</Area>"
+        $doc = New-SiteMap @($script:WorkArea, $second)
+        $before = $doc.OuterXml
+        $err = $null
+        try { Update-MatterManagementSiteMap $doc | Out-Null } catch { $err = $_.Exception.Message }
+        $err | Should -Match 'area_mattermanagement/group_work'
+        $err | Should -Match 'area_other/group_inv2'
+        $err | Should -Match 'nothing was written'
+        $doc.OuterXml | Should -Be $before
+    }
+
+    It 'refuses an ambiguous sitemap where two invoice groups both hold an eBilling sibling' {
+        $a = "<Area Id=""area_a"">$(New-Grp 'g_a' @((New-Sub '1' 'sprk_invoice'), (New-Sub '2' 'sprk_invoiceapproval')))</Area>"
+        $b = "<Area Id=""area_b"">$(New-Grp 'g_b' @((New-Sub '3' 'sprk_invoice'), (New-Sub '4' 'sprk_invoicecorrection')))</Area>"
+        $doc = New-SiteMap @($a, $b)
+        $before = $doc.OuterXml
+        { Update-MatterManagementSiteMap $doc } | Should -Throw '*area_a/g_a*area_b/g_b*'
+        $doc.OuterXml | Should -Be $before
+    }
+
+    It 'Add-SubAreaToGroup refuses a missing target group (no NullReference) and a SubArea Id already used by another entity' {
+        $doc = New-SiteMap @($script:WorkArea)
+        { Add-SubAreaToGroup $doc $null 'subarea_eb_x' 'sprk_something' $null } | Should -Throw '*target group does not exist*'
+        $grp = $doc.SelectSingleNode("//Group[@Id='group_work']")
+        { Add-SubAreaToGroup $doc $grp 'subarea_x' 'sprk_something' $null } | Should -Throw "*already has a SubArea with Id 'subarea_x'*"
+    }
+
+    It 'Add-SubAreaToGroup appends when the anchor is not in the group (an anchor in another group is never used)' {
+        $doc = New-SiteMap @($script:WorkArea, (New-FinanceArea $true $true))
+        $grp = $doc.SelectSingleNode("//Group[@Id='group_work']")
+        Add-SubAreaToGroup $doc $grp 'subarea_new' 'sprk_newthing' 'sprk_invoicesubmission' | Should -BeTrue
+        (Get-Entities $doc 'group_work')[-1] | Should -Be 'sprk_newthing'
+    }
+
+    It 'the SpaarkeMaster source sitemap (the real duplicate shape) is accepted and already complete: no change' {
+        $src = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path 'src' 'dataverse' 'solutions' 'SpaarkeMaster' 'AppModuleSiteMaps' 'sprk_MatterManagement' 'AppModuleSiteMap.xml'
+        $doc = [xml](Get-Content -LiteralPath $src -Raw)
+        @($doc.SelectNodes("//SubArea[@Entity='sprk_invoice']")).Count | Should -BeGreaterThan 1   # the premise: sprk_invoice is listed twice
+        $script:changed = $null
+        { $script:changed = Update-MatterManagementSiteMap $doc } | Should -Not -Throw
+        $script:changed | Should -BeFalse
+    }
+
+    It 'the SpaarkeMaster source sitemap with the two entries taken out gets them back in the Finance Invoice group' {
+        $src = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path 'src' 'dataverse' 'solutions' 'SpaarkeMaster' 'AppModuleSiteMaps' 'sprk_MatterManagement' 'AppModuleSiteMap.xml'
+        $doc = [xml](Get-Content -LiteralPath $src -Raw)
+        foreach ($e in 'sprk_invoicesubmission', 'sprk_billingexport') { foreach ($n in @($doc.SelectNodes("//SubArea[@Entity='$e']"))) { [void]$n.ParentNode.RemoveChild($n) } }
+        { Update-MatterManagementSiteMap $doc | Out-Null } | Should -Not -Throw
+        $parent = $doc.SelectSingleNode("//SubArea[@Entity='sprk_invoicesubmission']").ParentNode
+        $parent.GetAttribute('Id') | Should -Be 'group_c6c6d7dd'
+        $parent.ParentNode.GetAttribute('Id') | Should -Be 'area_finance'
+        $doc.SelectSingleNode("//SubArea[@Entity='sprk_billingexport']").ParentNode | Should -Be $parent
+    }
+
+    It 'the preflight runs before the first form is written, and not in -FormsOnly' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $pre = $text.IndexOf('Update-MatterManagementSiteMap $mmCopy')
+        $forms = $text.IndexOf('Sync-Form $t $Spec[$t]')
+        $pre | Should -BeGreaterThan 0
+        $pre | Should -BeLessThan $forms
+        $text | Should -Match '(?s)if \(-not \$FormsOnly\) \{\s*Write-Host "`n0b\. Navigation preflight'
+    }
+}

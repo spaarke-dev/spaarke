@@ -557,9 +557,13 @@ function Sync-InvoicesToReview {
 function New-SubAreaXml([string]$Id, [string]$Entity) {
     return "<SubArea Id=""$Id"" Icon=""/_imgs/imagestrips/transparent_spacer.gif"" Entity=""$Entity"" Client=""All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web"" AvailableOffline=""true"" PassParams=""false"" Sku=""All,OnPremise,Live,SPLA"" />"
 }
-function Sync-SiteMap([string]$UniqueName, [scriptblock]$Edit) {
+function Get-SiteMapRow([string]$UniqueName) {
     $sm = @((Invoke-Dv -Path "sitemaps?`$select=sitemapid,sitemapxml&`$filter=sitemapnameunique eq '$UniqueName'").value)
     if ($sm.Count -ne 1) { throw "Expected one sitemap $UniqueName, found $($sm.Count)" }
+    return $sm[0]
+}
+function Sync-SiteMap([string]$UniqueName, [scriptblock]$Edit) {
+    $sm = @(Get-SiteMapRow $UniqueName)
     $doc = [xml]$sm[0].sitemapxml
     $dirty = [bool](& $Edit $doc)
     $Evidence["sitemap:$UniqueName"] = $sm[0].sitemapid
@@ -569,13 +573,53 @@ function Sync-SiteMap([string]$UniqueName, [scriptblock]$Edit) {
     $script:SiteMapsTouched += $sm[0].sitemapid
     $Changes.Add("updated sitemap $UniqueName ($($sm[0].sitemapid))"); Write-Host "  CHANGED  sitemap $UniqueName" -ForegroundColor Green
 }
-function Add-SubArea($doc, $parentXPath, [string]$Id, [string]$Entity, $afterXPath) {
+# DEF-046 (#2312): the anchor is looked up INSIDE the parent group only (a child SubArea of that node), never document-wide. A sitemap can
+# list one entity in several areas (sprk_invoice is in two on dev), and a document-wide anchor then belongs to another group and
+# InsertAfter throws "The reference node is not a child of this node". An entity already listed anywhere in the sitemap is left alone
+# (no second entry, no write). No anchor in the group: the entry is appended to the group.
+function Add-SubAreaToGroup($doc, $parent, [string]$Id, [string]$Entity, [string]$AfterEntity) {
     if ($doc.SelectSingleNode("//SubArea[@Entity='$Entity']")) { return $false }
-    $parent = $doc.SelectSingleNode($parentXPath)
+    if (-not $parent) { throw "Cannot add the '$Entity' navigation entry: its target group does not exist in the sitemap. Nothing was written." }
+    $other = $doc.SelectSingleNode("//SubArea[@Id='$Id']")
+    if ($other) { throw "Cannot add the '$Entity' navigation entry: the sitemap already has a SubArea with Id '$Id' for entity '$($other.GetAttribute('Entity'))'. Nothing was written." }
     $frag = $doc.CreateDocumentFragment(); $frag.InnerXml = New-SubAreaXml $Id $Entity
-    $after = if ($afterXPath) { $doc.SelectSingleNode($afterXPath) } else { $null }
+    $after = if ($AfterEntity) { $parent.SelectSingleNode("SubArea[@Entity='$AfterEntity']") } else { $null }
     if ($after) { [void]$parent.InsertAfter($frag, $after) } else { [void]$parent.AppendChild($frag) }
     return $true
+}
+function Add-SubArea($doc, $parentXPath, [string]$Id, [string]$Entity, [string]$AfterEntity) {
+    return Add-SubAreaToGroup $doc $doc.SelectSingleNode($parentXPath) $Id $Entity $AfterEntity
+}
+
+# The group that holds the Invoice entries in the sprk_MatterManagement sitemap, where the invoice submission and billing export entries
+# go. One sprk_invoice entry: its group. Several (the dev sitemap lists sprk_invoice under area_mattermanagement/group_work AND under
+# area_finance/group_c6c6d7dd): the group that also holds an eBilling sibling of the invoice (approval, correction, submission, export),
+# which is the Invoice group of the Finance area. None, or still more than one, is refused with the areas and groups named.
+function Get-InvoiceNavGroup($doc) {
+    $inv = @($doc.SelectNodes("//SubArea[@Entity='sprk_invoice']"))
+    if ($inv.Count -eq 0) { throw 'sprk_MatterManagement has no sprk_invoice subarea: cannot place the invoice submission / billing export entries. Nothing was written.' }
+    $groups = [System.Collections.Generic.List[object]]::new(); foreach ($i in $inv) { if (-not $groups.Contains($i.ParentNode)) { $groups.Add($i.ParentNode) } }; $groups = @($groups)
+    if ($groups.Count -gt 1) {
+        $siblings = 'sprk_invoiceapproval', 'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_billingexport'
+        $groups = @($groups | Where-Object { $g = $_; @($siblings | Where-Object { $g.SelectSingleNode("SubArea[@Entity='$_']") }).Count -gt 0 })
+    }
+    if ($groups.Count -ne 1) {
+        $where = (@($inv | ForEach-Object { "$($_.ParentNode.ParentNode.GetAttribute('Id'))/$($_.ParentNode.GetAttribute('Id'))" }) -join ', ')
+        throw "sprk_MatterManagement lists sprk_invoice in $($inv.Count) places ($where) and the target group cannot be told apart (none, or more than one, holds an invoice approval / correction / submission / export entry). Fix the sitemap or name the group; nothing was written."
+    }
+    return $groups[0]
+}
+
+# The sprk_MatterManagement edit: invoice submission after the invoice entry, billing export after the submission, both inside the one Invoice
+# group. Pure XML: the preflight runs it on a copy before any form is written, Sync-SiteMap runs it for real. Returns true when it changed $doc.
+function Update-MatterManagementSiteMap($doc) {
+    $dirty = $false
+    $group = Get-InvoiceNavGroup $doc
+    if (Add-SubAreaToGroup $doc $group 'subarea_eb_submission' 'sprk_invoicesubmission' 'sprk_invoice') { $dirty = $true }
+    # The submission may sit in another group (then the export goes after the invoice entry of this group).
+    $anchor = if ($group.SelectSingleNode("SubArea[@Entity='sprk_invoicesubmission']")) { 'sprk_invoicesubmission' } else { 'sprk_invoice' }
+    if (Add-SubAreaToGroup $doc $group 'subarea_eb_export' 'sprk_billingexport' $anchor) { $dirty = $true }
+    return $dirty
 }
 
 # A sitemap entry only shows when the table is a component of the app module (type 1). AddAppComponents can answer 204 and add
@@ -628,6 +672,15 @@ foreach ($t in $Spec.Keys) {
     if ($Spec[$t].ContainsKey('Subgrids')) { foreach ($sub in $Spec[$t].Subgrids) { Assert-SubgridRelationship $sub } }
 }
 
+# DEF-046: the navigation edit is checked on a copy of the live sitemap BEFORE any form is written, so a sitemap it cannot place the entries in
+# refuses here (nothing written) and not in step 3 after the forms are already written and before they are published. Read only.
+if (-not $FormsOnly) {
+    Write-Host "`n0b. Navigation preflight (read only)"
+    $mmCopy = [xml](Get-SiteMapRow 'sprk_MatterManagement').sitemapxml
+    [void](Update-MatterManagementSiteMap $mmCopy)
+    Write-Host '  sprk_MatterManagement: the invoice submission / billing export entries can be placed' -ForegroundColor DarkGray
+}
+
 Write-Host "`n1. Forms"
 foreach ($t in $Spec.Keys) { Write-Host " $t"; Sync-Form $t $Spec[$t] }
 
@@ -660,7 +713,8 @@ Sync-SiteMap 'sprk_SpaarkeAdministration' {
             $grp = $doc.SelectSingleNode("//Area[@Id='area_ebilling']/Group[@Id='group_ebilling']")
             $frag = $doc.CreateDocumentFragment()
             $frag.InnerXml = '<SubArea Id="subarea_eb_rulereview" Icon="/_imgs/imagestrips/transparent_spacer.gif" Url="$webresource:sprk_rulereviewpage" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="false" PassParams="false" Sku="All,OnPremise,Live,SPLA"><Titles><Title LCID="1033" Title="Rule Review" /></Titles></SubArea>'
-            $after = $doc.SelectSingleNode("//SubArea[@Id='subarea_eb_ruleset']")
+            if (-not $grp) { throw 'sprk_SpaarkeAdministration has no area_ebilling/group_ebilling group: cannot add the Rule Review entry. Nothing was written.' }
+            $after = $grp.SelectSingleNode("SubArea[@Id='subarea_eb_ruleset']")
             if ($after) { [void]$grp.InsertAfter($frag, $after) } else { [void]$grp.AppendChild($frag) }
             $dirty = $true
         } else {
@@ -671,13 +725,7 @@ Sync-SiteMap 'sprk_SpaarkeAdministration' {
 }
 Sync-SiteMap 'sprk_MatterManagement' {
     param($doc)
-    $dirty = $false
-    $inv = "//SubArea[@Entity='sprk_invoice']"
-    if (-not $doc.SelectSingleNode($inv)) { throw 'sprk_MatterManagement has no sprk_invoice subarea' }
-    $group = $doc.SelectSingleNode($inv).ParentNode.GetAttribute('Id')
-    if (Add-SubArea $doc "//Group[@Id='$group']" 'subarea_eb_submission' 'sprk_invoicesubmission' $inv) { $dirty = $true }
-    if (Add-SubArea $doc "//Group[@Id='$group']" 'subarea_eb_export' 'sprk_billingexport' "//SubArea[@Entity='sprk_invoicesubmission']") { $dirty = $true }
-    return $dirty
+    return (Update-MatterManagementSiteMap $doc)
 }
 
 if ($Tables.Count -eq 0) {
