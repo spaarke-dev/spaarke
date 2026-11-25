@@ -116,5 +116,11 @@ shows nothing. The PCF preview and the legacy regarding-mode timeline are not ch
   one hidden-only filed message (unreadable message; unreadable thread; internal-only for an external caller): false, no log;
   200 anchored and one visible filed message on a readable thread: true, logged (the existing test); the check is one `$top=1`
   newest-first row of the same candidate filter.
+- Before-state: with the PR-head service (`2e1534c797`), 5 of the 9 new tests fail (the three hidden-only cases, nothing
+  filed elsewhere, the `$top=1` shape); the guard and gate tests pass there, since they cover existing behaviour.
+- After (`ef6f7857eb`): BFF build 0 warnings; filed-messages class 39 / 0; `~Communication` 3554 passed / 0 failed / 2 skipped;
+  `~Signals` 5509 / 0 / 6; ArchTests (built explicitly) 2816 / 0 / 0; jest `ConversationWorkspace` 3 suites, 46 tests (no
+  client change this round); client-lint check exit 0, all 14 ok. Publish size, measured the same way on a fresh worktree:
+  43,596,027 bytes / 194 files, +4,033 bytes against master `2ac250cae4` (was +3,280).
 
 rework: fix-round-1 task 221
