@@ -1060,7 +1060,7 @@ public sealed class GateDecisionRecordSharing
     {
         var query = new QueryExpression(Table)
         {
-            ColumnSet = new ColumnSet(new[] { OwningUserColumn, OwningTeamColumn, DecisionRecordWriter.CreatedByColumn }
+            ColumnSet = new ColumnSet(new[] { OwningUserColumn, OwningTeamColumn, DecisionRecordWriter.CreatedByColumn, WriterCreatedRecord.CreatedOnBehalfByColumn }
                 .Concat(CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)).ToArray()),
             TopCount = MaxGateRecords,
             NoLock = true,
@@ -1071,10 +1071,13 @@ public sealed class GateDecisionRecordSharing
         if (rows is null || rows.Count == 0)
             return [];
 
+        // Task 223 (DI-144): WriterCreatedRecord's rule, applied in memory (the writer's id is asked only once a candidate exists): createdby the
+        // writer AND createdonbehalfby empty. createdonbehalfby is in the ColumnSet above; a column left out would read as empty and trust the row.
         var writerUserId = await _writer.GetWriterUserIdAsync(ct).ConfigureAwait(false);
         return rows
             .Where(r => r.Id != Guid.Empty
-                        && r.GetAttributeValue<EntityReference>(DecisionRecordWriter.CreatedByColumn)?.Id == writerUserId)
+                        && r.GetAttributeValue<EntityReference>(DecisionRecordWriter.CreatedByColumn)?.Id == writerUserId
+                        && r.GetAttributeValue<EntityReference>(WriterCreatedRecord.CreatedOnBehalfByColumn) is null)
             .Select(r => (
                 Row: r,
                 Team: r.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null,

@@ -357,13 +357,13 @@ public sealed partial class DecisionRecordWriterTests
 
         var procedureLookup = procedure.Lookups.Should().ContainSingle().Subject;
         Codes(procedureLookup).Should().Equal(RecordProcedureCodes.Order(StringComparer.Ordinal).Cast<object>());
-        Conditions(procedureLookup).Should().Equal("sprk_regardingmatter Equal", "sprk_steps Like", "createdby Equal", "sprk_actioncode In");
+        Conditions(procedureLookup).Should().Equal("sprk_regardingmatter Equal", "sprk_steps Like", "createdby Equal", "createdonbehalfby Null", "sprk_actioncode In");
         procedureLookup.TopCount.Should().Be(10);
 
         // The billing query after its body moved into the shared helper: the same conditions, in the same order, on the billing codes only.
         var billingLookup = billing.Lookups.Should().ContainSingle().Subject;
         Codes(billingLookup).Should().Equal(DecisionActionCatalog.BillingActions.Select(a => a.Code).Order(StringComparer.Ordinal).Cast<object>());
-        Conditions(billingLookup).Should().Equal("sprk_regardinginvoice Equal", "sprk_steps Like", "createdby Equal", "sprk_actioncode In");
+        Conditions(billingLookup).Should().Equal("sprk_regardinginvoice Equal", "sprk_steps Like", "createdby Equal", "createdonbehalfby Null", "sprk_actioncode In");
         billingLookup.TopCount.Should().Be(10);
     }
 

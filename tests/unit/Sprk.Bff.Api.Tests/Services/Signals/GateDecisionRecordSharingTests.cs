@@ -47,6 +47,10 @@ internal sealed class GateSharingWorld
     public Exception? AssignFault { get; set; }
     public bool AssignLands { get; set; } = true;
 
+    /// <summary>Task 223 (DI-144): when set, a Decision Record read returns only the columns its query selects, as Dataverse does (a column
+    /// left out of the ColumnSet reads as absent).</summary>
+    public bool ProjectRecordColumns { get; set; }
+
     /// <summary>D-215 (uac-r2 task 198 Part E): the Direct-message owner team the world's lookup resolves.</summary>
     public static readonly Guid DirectTeam = Guid.Parse("d1d1d1d1-0000-4000-8000-0000000000d1");
 
@@ -79,7 +83,8 @@ internal sealed class GateSharingWorld
                     return Task.FromException<EntityCollection>(fault);
                 if (query.EntityName == Communication && CommunicationReadFault is { } communicationFault)
                     return Task.FromException<EntityCollection>(communicationFault);
-                var rows = Rows.Values.Where(r => r.LogicalName == query.EntityName && Satisfies(query, r)).Select(Clone)
+                var rows = Rows.Values.Where(r => r.LogicalName == query.EntityName && Satisfies(query, r))
+                    .Select(r => ProjectRecordColumns && query.EntityName == Record && !query.ColumnSet.AllColumns ? Project(r, query.ColumnSet) : Clone(r))
                     .Take(query.TopCount ?? int.MaxValue).ToList();
                 return Task.FromResult(new EntityCollection(rows));
             });
@@ -170,7 +175,8 @@ internal sealed class GateSharingWorld
 
     /// <summary>A gate Decision Record filed under the communication, created by the writer, owned by <paramref name="ownerUser"/>.</summary>
     public GateSharingWorld WithGateRecord(
-        Guid id, Guid communicationId, Guid ownerUser, Guid? createdBy = null, Guid? confirmedBy = null, Guid? stampMatter = null)
+        Guid id, Guid communicationId, Guid ownerUser, Guid? createdBy = null, Guid? confirmedBy = null, Guid? stampMatter = null,
+        Guid? createdOnBehalfBy = null)
     {
         var row = new Entity(Record, id)
         {
@@ -183,6 +189,8 @@ internal sealed class GateSharingWorld
             row["sprk_confirmedby"] = new EntityReference("systemuser", confirmer);
         if (stampMatter is { } matter)
             row["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter);
+        if (createdOnBehalfBy is { } onBehalfOf)
+            row["createdonbehalfby"] = new EntityReference("systemuser", onBehalfOf);
         Rows[(Record, id)] = row;
         return this;
     }
@@ -240,6 +248,14 @@ internal sealed class GateSharingWorld
     {
         var copy = new Entity(source.LogicalName, source.Id);
         foreach (var attribute in source.Attributes)
+            copy[attribute.Key] = attribute.Value;
+        return copy;
+    }
+
+    private static Entity Project(Entity source, ColumnSet columns)
+    {
+        var copy = new Entity(source.LogicalName, source.Id);
+        foreach (var attribute in source.Attributes.Where(a => columns.Columns.Contains(a.Key)))
             copy[attribute.Key] = attribute.Value;
         return copy;
     }
@@ -565,6 +581,23 @@ public sealed class GateDecisionRecordSharingTests
         world.RecordSharees(RecordId).Should().NotBeEmpty();
         world.RecordSharees(personsOwn).Should().BeEmpty("a row a person created is never touched (task 153 F1)");
         world.RecordSharees(review).Should().BeEmpty("a human review always has a confirmer");
+    }
+
+    [Fact]
+    public async Task ARecordCreatedOnTheWritersBehalf_IsNotTheWritersOwn_AndIsNeverMirrored()
+    {
+        // Task 223 (DI-144, #2632): WriterCreatedRecord's rule in memory: createdby the writer AND createdonbehalfby empty. The read returns only
+        // the selected columns, so leaving createdonbehalfby out of the ColumnSet would read as "empty" and trust the row.
+        var onBehalf = Guid.NewGuid();
+        var world = UnfiledCommunication()
+            .WithGateRecord(RecordId, CommunicationId, Owner)
+            .WithGateRecord(onBehalf, CommunicationId, Owner, createdOnBehalfBy: Bystander);
+        world.ProjectRecordColumns = true;
+
+        await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        world.RecordSharees(RecordId).Should().NotBeEmpty("the writer's own record (createdonbehalfby empty) is still mirrored");
+        world.RecordSharees(onBehalf).Should().BeEmpty("a row created on the writer's behalf by another identity is never touched");
     }
 
     // ── AC 6: failures are logged, counted and contained ───────────────────────────────────────────────────────
