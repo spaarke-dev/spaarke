@@ -28,6 +28,7 @@
   - A10: `RunUserUnresolved` is not the no-systemuser outcome.
 - **040:** the idempotency key is bound to the payload, reserved atomically, and not consumed by a 4xx refusal. Status stays an integer 400–599. The widget shows the picker error. The callTool timeout goes in 021.
 - **022:** escape the `search.in` delimiter (from 009).
+- **021:** coordinate with mcp-r1 first. The owner decided (2026-11-25) to change the Decision wizard and row-card wording (FoundStep / IssueLine / composeIssueLine and the spaarke-decisions tests wizardHarness / wizardFlow); ontology-r1 owns it and has not started. mcp-r1 will message when that branch opens and merges. 021 changes only spaarke-decisions transport files and build configs, and must pass whichever spaarke-decisions tests are current.
 - **034:** check the Daily Briefing widget bundle for module side effects (`@spaarke/auth` and the ui-components barrel).
 
 ## Open owner questions
