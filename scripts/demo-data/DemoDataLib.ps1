@@ -580,14 +580,23 @@ function Test-DemoTargetAllowed {
 
 function ConvertTo-DemoComparableHost {
     <#
-      The host of a registry or target URL, lower case: 'https://X.crm.dynamics.com/main.aspx?a=1' -> 'x.crm.dynamics.com'.
-      Used on BOTH sides of a registry comparison, so a trailing slash, a path, upper case or a port never makes a row
-      "not match". $null when no host can be read.
+      The host of a registry or target URL in one canonical form: 'https://X.crm.dynamics.com./main.aspx?a=1' ->
+      'x.crm.dynamics.com'. Lower case, a trailing dot (a fully qualified name) removed, and the Web API alias host
+      'x.api.crm.dynamics.com' mapped to the organization host 'x.crm.dynamics.com' (same environment). Used on BOTH sides
+      of a registry comparison, so a trailing slash, a path, upper case, a port, a trailing dot or the api host never
+      makes a Production row "not match". $null when no host can be read.
     #>
     param([string]$Url)
     if ([string]::IsNullOrWhiteSpace($Url)) { return $null }
-    if ($Url.Trim() -match '^(?i:(?:https?://)?)([a-z0-9][a-z0-9.-]*)(?::\d+)?(?:[/?#].*)?$') { return $Matches[1].ToLowerInvariant() }
+    if ($Url.Trim() -match '^(?i:(?:https?://)?)([a-z0-9][a-z0-9.-]*)(?::\d+)?(?:[/?#].*)?$') { return (ConvertTo-DemoCanonicalHost $Matches[1]) }
     return $null
+}
+
+function ConvertTo-DemoCanonicalHost {
+    <# Lower case, no trailing dot, '<org>.api.crm<N>.dynamics.com' -> '<org>.crm<N>.dynamics.com'. #>
+    param([Parameter(Mandatory)][string]$HostName)
+    $h = $HostName.Trim().ToLowerInvariant().TrimEnd('.')
+    return ($h -replace '^([a-z0-9][a-z0-9-]*)\.api\.(crm\d*\.dynamics\.com)$', '$1.$2')
 }
 
 function Test-DemoRegistryUrlMatch {
@@ -597,7 +606,9 @@ function Test-DemoRegistryUrlMatch {
     if (-not $t) { throw "Target '$Target' has no readable host." }
     $h = ConvertTo-DemoComparableHost $RowUrl
     if ($h) { return ($h -eq $t) }
-    return $RowUrl.ToLowerInvariant().Contains($t)
+    # Unreadable shape: look for the host inside the text, with the same normalisation (api alias, trailing dot) as above.
+    $text = $RowUrl.ToLowerInvariant() -replace '\.api\.(crm\d*\.dynamics\.com)', '.$1' -replace '(dynamics\.com)\.(?=[^a-z0-9-]|$)', '$1'
+    return $text.Contains($t)
 }
 
 function Get-DemoRegistryRowForUrl {
@@ -632,6 +643,43 @@ function Resolve-DemoTarget {
     if ($CustomerRow -and $urlRow -and "$($urlRow.sprk_environmenttype)" -ne '' -and [int]$urlRow.sprk_environmenttype -eq 6) { $row = $urlRow }
     $guard = Test-DemoTargetAllowed -RegistryRow $row -AllowNonDemo:$AllowNonDemo
     return [pscustomobject]@{ Row = $row; Guard = $guard }
+}
+
+function Assert-DemoTargetAllowed {
+    <#
+      The refusal itself. The loader calls this unconditionally, before anything else touches the target: it THROWS when the
+      guard says no (a Production row, a non-Demo or inactive row, no row without -AllowNonDemo) and when the registry
+      cannot be read, and returns Row and Guard (with the warnings an -AllowNonDemo override accepted) otherwise. Because
+      the refusal is a throw inside this function, a caller cannot "forget" to test a flag: there is no flag to test.
+    #>
+    param([Parameter(Mandatory)][scriptblock]$ReadRows, [Parameter(Mandatory)][string]$Target, $CustomerRow, [switch]$AllowNonDemo)
+    $resolved = Resolve-DemoTarget -ReadRows $ReadRows -Target $Target -CustomerRow $CustomerRow -AllowNonDemo:$AllowNonDemo
+    if (-not $resolved.Guard.Allowed) {
+        throw ("REFUSED: '$Target' is not a demo stamp. $(@($resolved.Guard.Reasons) -join ' ') " +
+            'Mark the environment Demo in the registry, or pass -AllowNonDemo if you are sure (never for Production). Nothing was read from or written to the target.')
+    }
+    return $resolved
+}
+
+function Test-DemoOperatorSeesAllRows {
+    <#
+      Dataverse silently hides rows the caller cannot read: a reset run by a user who cannot read every row would not see
+      an untagged row that points at a demo row, and would delete the demo row anyway. So the operator must be a System
+      Administrator on the target. -Get is the loader's reader (path -> rows). Roles come from the user's own role
+      assignments and from the roles of the teams the user belongs to. Returns IsSystemAdministrator, Roles and, when the
+      roles could not be read, Problem (never "verified" on a failed read).
+    #>
+    param([Parameter(Mandatory)][scriptblock]$Get, [Parameter(Mandatory)][string]$UserId)
+    if ($UserId -notmatch '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { throw "WhoAmI returned '$UserId', which is not a user id." }
+    $roles = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($r in @(& $Get "systemusers($UserId)/systemuserroles_association?`$select=name")) { $roles.Add("$($r.name)") }
+        foreach ($t in @(& $Get "systemusers($UserId)/teammembership_association?`$select=teamid")) {
+            foreach ($r in @(& $Get "teams($($t.teamid))/teamroles_association?`$select=name")) { $roles.Add("$($r.name)") }
+        }
+    }
+    catch { return [pscustomobject]@{ IsSystemAdministrator = $false; Roles = @(); Problem = "the operator's security roles could not be read ($_)" } }
+    return [pscustomobject]@{ IsSystemAdministrator = [bool]($roles -contains 'System Administrator'); Roles = @($roles | Select-Object -Unique); Problem = $null }
 }
 
 function Test-DemoOperatorIdentity {
@@ -716,8 +764,10 @@ function Get-DemoBlockingReferences {
                A tagged child that was KEPT is not in the set and does block (its parent is kept too).
       EVERY 1:N relationship into the table is checked except the system plumbing columns (created/modified by,
       owner*): the old filter looked only at sprk_/contact/account tables and missed email, systemuser, notes and the like.
-      FAILS CLOSED: a relationship that cannot be read is returned in Unchecked, and the caller keeps every row.
-      Returns Refs (parent id lower case -> reason strings) and Unchecked (strings).
+      FAILS CLOSED: a relationship that cannot be read is returned in Unchecked, and the caller keeps every row. So is a
+      metadata read that returns NO 1:N relationship at all (every table has some, so zero means the caller cannot see them).
+      The one exception is an explicit allow-list of referencing system tables that the platform never lets anyone read (below).
+      Returns Refs (parent id lower case -> reason strings), Unchecked and NotRetrievable (strings).
     #>
     param(
         [Parameter(Mandatory)][scriptblock]$Get,
@@ -732,11 +782,16 @@ function Get-DemoBlockingReferences {
     if ($parents.Count -eq 0) { return [pscustomobject]@{ Refs = $refs; Unchecked = @() } }
     $plumbing = @('createdby', 'modifiedby', 'createdonbehalfby', 'modifiedonbehalfby', 'owninguser', 'owningteam', 'owningbusinessunit', 'ownerid')
     $notRetrievable = New-Object System.Collections.Generic.List[string]
-    # The ONE read error that is not a failure: a few system tables (postrole, postregarding, subscriptionmanuallytrackedobject
-    # ... as seen on a live stamp) answer every Web API read with "RetrieveMultiple does not support entities of type". Nothing
-    # a user filed can live there, and treating them as unreadable would keep every contact on every reset. Any other error
-    # (403, timeout, 5xx, a missing table) is still Unchecked.
-    $notRetrievablePattern = "method does not support entities of type"
+    # The ONE read error that is not a failure, and only for these referencing tables: postrole and
+    # subscriptionmanuallytrackedobject answer every Web API read with "RetrieveMultiple does not support entities of type"
+    # (seen live on the ACME stamp) and hold platform plumbing a user never files (a wall's role grants, auto-follow
+    # subscriptions). ANY OTHER table that returns that error is Unchecked, so a table nobody has looked at fails closed.
+    # postregarding is deliberately NOT here: it answers the same error, but it is the only way a post on a contact or
+    # account wall points at that row ('post' is not a 1:N relationship of contact; checked on ACME), so being unable to
+    # read it means a user's post may exist. That keeps contacts and organizations on reset (see scripts/demo-data/README.md).
+    $notRetrievablePattern = 'method does not support entities of type'
+    $notRetrievableTables = @('postrole', 'subscriptionmanuallytrackedobject')
+    $chunkSize = 20
     $infoCache = @{}
     $taggedCache = @{}
     $logicals = @(Get-DemoTableSpecs | ForEach-Object { $_.Logical })
@@ -755,10 +810,6 @@ function Get-DemoBlockingReferences {
         if (-not $refs.ContainsKey($Parent)) { $refs[$Parent] = New-Object System.Collections.Generic.List[string] }
         $refs[$Parent].Add($Label)
     }
-    $chunks = {
-        param([string[]]$All)
-        for ($i = 0; $i -lt $All.Count; $i += 20) { , @($All[$i..([math]::Min($i + 19, $All.Count - 1))]) }
-    }
 
     # 1:N - every referencing table.
     $oneToMany = @()
@@ -766,6 +817,9 @@ function Get-DemoBlockingReferences {
         $oneToMany = @(& $Get (ConvertTo-DemoQuery -Set "EntityDefinitions(LogicalName='$Logical')/OneToManyRelationships" -Select 'SchemaName,ReferencingEntity,ReferencingAttribute'))
     }
     catch { $unchecked.Add("1:N relationships of $Logical ($_)") }
+    # Every table has 1:N relationships (at least the created/modified/owner columns). None at all means the metadata was
+    # hidden from this caller or the read was cut short: nothing is known about what points at these rows.
+    if ($oneToMany.Count -eq 0 -and $unchecked.Count -eq 0) { $unchecked.Add("1:N relationships of $Logical (the metadata read returned none; every table has some, so the operator may not be able to see them)") }
     foreach ($rel in $oneToMany) {
         if ("$($rel.ReferencingAttribute)" -in $plumbing) { continue }
         $label = "$($rel.ReferencingEntity).$($rel.ReferencingAttribute)"
@@ -773,7 +827,8 @@ function Get-DemoBlockingReferences {
             $info = & $entityInfo "$($rel.ReferencingEntity)"
             if (-not $info.PrimaryId) { throw "no primary id column for '$($rel.ReferencingEntity)'" }
             $col = "$($rel.ReferencingAttribute)"
-            foreach ($chunk in (& $chunks $parents)) {
+            for ($i = 0; $i -lt $parents.Count; $i += $chunkSize) {
+                $chunk = @($parents[$i..([math]::Min($i + $chunkSize - 1, $parents.Count - 1))])
                 $anyOf = ($chunk | ForEach-Object { "_$($col)_value eq $_" }) -join ' or '
                 $rows = @(& $Get (ConvertTo-DemoQuery -Set $info.EntitySet -Select "_$($col)_value,$($info.PrimaryId)" -Filter $anyOf))
                 foreach ($r in $rows) {
@@ -783,7 +838,7 @@ function Get-DemoBlockingReferences {
                 }
             }
         }
-        catch { if ("$_" -match $notRetrievablePattern) { $notRetrievable.Add($label) } else { $unchecked.Add("$label ($_)") } }
+        catch { if ("$_" -match $notRetrievablePattern -and "$($rel.ReferencingEntity)" -in $notRetrievableTables) { $notRetrievable.Add($label) } else { $unchecked.Add("$label ($_)") } }
     }
 
     # M:N - every association of the table.
@@ -800,7 +855,8 @@ function Get-DemoBlockingReferences {
             $label = "m:n $($rel.SchemaName)"
             try {
                 $info = & $entityInfo "$($rel.IntersectEntityName)"
-                foreach ($chunk in (& $chunks $parents)) {
+                for ($i = 0; $i -lt $parents.Count; $i += $chunkSize) {
+                    $chunk = @($parents[$i..([math]::Min($i + $chunkSize - 1, $parents.Count - 1))])
                     $anyOf = ($chunk | ForEach-Object { "$($side.Mine) eq $_" }) -join ' or '
                     $rows = @(& $Get (ConvertTo-DemoQuery -Set $info.EntitySet -Select "$($side.Mine),$($side.Other)" -Filter $anyOf))
                     if ($rows.Count -eq 0) { continue }
@@ -822,7 +878,7 @@ function Get-DemoBlockingReferences {
                     }
                 }
             }
-            catch { if ("$_" -match $notRetrievablePattern) { $notRetrievable.Add($label) } else { $unchecked.Add("$label ($_)") } }
+            catch { $unchecked.Add("$label ($_)") }   # no intersect table is on the allow-list: an unreadable association is never skipped
         }
     }
     return [pscustomobject]@{ Refs = $refs; Unchecked = $unchecked.ToArray(); NotRetrievable = $notRetrievable.ToArray() }

@@ -85,9 +85,17 @@ any row this reset does not delete still points at it:
   are deleted before parents, so a parent is checked after its demo children are gone; a demo child that is itself kept
   keeps its parent too;
 - a many-to-many association blocks unless the other side is also a tagged demo row;
-- a relationship that cannot be read keeps every row of that table (**fails closed**) and is listed. The one exception is a
-  system table the platform refuses to retrieve at all (`RetrieveMultiple ... does not support entities of type`, for example
-  `postrole`): it is noted, not treated as a failure;
+- a relationship that cannot be read keeps every row of that table (**fails closed**) and is listed, and so does a metadata read
+  that returns no 1:N relationship at all (every table has some, so none means the operator cannot see them). The only
+  exception is an explicit allow-list of two platform tables that the platform refuses to retrieve for anyone
+  (`RetrieveMultiple ... does not support entities of type`): `postrole` and `subscriptionmanuallytrackedobject`. They hold
+  plumbing a user never files; they are noted, not treated as failures. Any other table that answers that error is
+  Unchecked. **`postregarding` is deliberately not on the list.** It answers the same error, but it is the only route from a
+  post on a contact or account wall to that row (`post` is not a 1:N relationship of `contact`: checked read-only on ACME,
+  2026-11-24), so a post cannot be ruled out. Result: a reset keeps tagged **contacts and organizations** (accounts) and reports
+  `postregarding.regardingobjectid` as unreadable. Delete those rows by hand once you have looked at their wall, or lift the
+  restriction only with a way to read posts. Matters, projects, events, to-dos, communications and documents are not affected;
+- the id lists are queried 20 at a time;
 - the summary ends with how many tagged rows were **kept** and what still points at each. The exit code does not change
   (a kept row is the safe outcome).
 
@@ -151,6 +159,7 @@ add its spec to `Get-DemoTableSpecs` and its position to the create order in `De
 - The taxonomy names come from the D4 pack files. If a pack changes a name, `demo-records.json` must follow: the loader
   checks the dataset against the pack files first, then resolves each name on the target and does not guess.
 - The signed-in operator can create and delete rows in the demo tables and read the registry on the admin environment.
+- **The operator must be a System Administrator on the target** (directly or through a team). Dataverse silently hides rows the signed-in user cannot read, so a reset run by anyone else would not see an untagged row that points at a demo row and would delete the demo row anyway (silently editing that row). The loader checks this up front (WhoAmI, then the user's roles and the roles of the user's teams): **-Reset refuses** when the role is missing or the roles cannot be read; a load prints a warning.
 
 ## Upgrading a stamp that has the v1 data
 

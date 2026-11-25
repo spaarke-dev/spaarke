@@ -16,7 +16,11 @@
          warning). A Production row is refused even with -AllowNonDemo. -CustomerId resolves the stamp from that row;
          -DataverseUrl names it directly and is checked against the same registry. A registry read that FAILS stops
          the script: it is never taken as "no row" (-AllowNonDemo accepts "registry read OK, no row for this URL",
-         and nothing else about a failed read).
+         and nothing else about a failed read). The refusal is a throw in Assert-DemoTargetAllowed, called before the
+         target is read. URLs are compared by host, lower case, without a trailing dot, with the *.api.crm*.dynamics.com
+         alias mapped to the organization host, on both sides.
+         The operator must also be a System Administrator on the target (Dataverse hides rows the caller cannot read):
+         -Reset refuses otherwise, a load warns.
       3. Everything the dataset references is resolved on the target BEFORE anything is written: the taxonomy rows by
          name (matter types, practice areas, project/contact/organization types), the event types by code, the record
          types, the choice labels, the schema, and the owner team. Every missing value is listed, and nothing is written.
@@ -217,7 +221,7 @@ function Get-RegistryRowByCustomer {
 }
 
 function Get-RegistryRows {
-    <# Every registry row. A failure (token, network, 4xx) throws; the guard (Resolve-DemoTarget) turns it into a refusal, never into "no row". #>
+    <# Every registry row. A failure (token, network, 4xx) throws; the guard (Assert-DemoTargetAllowed) turns it into a refusal, never into "no row". #>
     param([string]$Registry)
     return @(Get-DvAll -Url $Registry -PathAndQuery (ConvertTo-DemoQuery -Set 'sprk_dataverseenvironments' -Select $registrySelect))
 }
@@ -358,9 +362,11 @@ if ($CustomerId) {
 }
 else { $targetUrl = Resolve-DemoDataverseUrl $DataverseUrl }
 
-# The registry read is fatal when it fails (token, network, two active rows): a failed read is never "no row", because
-# "no row" is what -AllowNonDemo accepts. Both sides of the URL match are reduced to the host the same way.
-$resolvedTarget = Resolve-DemoTarget -ReadRows { Get-RegistryRows -Registry $RegistryUrl } -Target $targetUrl -CustomerRow $customerRow -AllowNonDemo:$AllowNonDemo
+# The guard. Assert-DemoTargetAllowed (DemoDataLib.ps1) THROWS when the target is not an active Demo stamp (Production
+# always; anything else unless -AllowNonDemo), and when the registry read fails (token, network, two active rows): a
+# failed read is never "no row", because "no row" is what -AllowNonDemo accepts. It runs here, unconditionally, before
+# the script reads anything from the target. Both sides of the URL match are reduced to the host the same way.
+$resolvedTarget = Assert-DemoTargetAllowed -ReadRows { Get-RegistryRows -Registry $RegistryUrl } -Target $targetUrl -CustomerRow $customerRow -AllowNonDemo:$AllowNonDemo
 $registryRow = $resolvedTarget.Row
 $guard = $resolvedTarget.Guard
 Write-Host "Target:      $targetUrl"
@@ -369,13 +375,6 @@ if ($registryRow) {
 }
 else { Write-Host 'Registry:    (registry read OK, no row for this URL)' -ForegroundColor Yellow }
 
-if (-not $guard.Allowed) {
-    Write-Host ''
-    Write-Host 'REFUSED: this is not a demo stamp.' -ForegroundColor Red
-    $guard.Reasons | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
-    Write-Host '  Mark the environment Demo in the registry, or pass -AllowNonDemo if you are sure (never for Production).' -ForegroundColor Red
-    exit 1
-}
 foreach ($w in $guard.Warnings) { Write-Host "WARNING: $w" -ForegroundColor Yellow }
 
 if ($WhatIfPreference) { Write-Host 'Mode:        WHATIF (reads only, writes nothing)' -ForegroundColor Yellow }
@@ -395,6 +394,19 @@ catch { throw "The target has no Spaarke tables ($_). Import SpaarkeMaster first
 
 # Every read of the target below goes through this one reader (path -> every row, paged).
 $reader = { param($PathAndQuery) Get-DvAll -Url $targetUrl -PathAndQuery $PathAndQuery }
+
+# Dataverse silently hides rows the caller cannot read. A reset by a user who cannot see an untagged row that points at a
+# demo row would delete the demo row and edit that row; a load would not see the demo rows it already made. So the
+# operator must be a System Administrator on the target: -Reset refuses otherwise (and when the roles cannot be read);
+# a load warns.
+$who = Invoke-Dv -Url $targetUrl -PathAndQuery 'WhoAmI'
+$access = Test-DemoOperatorSeesAllRows -Get $reader -UserId "$($who.UserId)"
+if ($access.IsSystemAdministrator) { Write-Host "Operator role: System Administrator on the target" }
+else {
+    $why = if ($access.Problem) { $access.Problem } else { "the operator holds no System Administrator role on the target (roles: $(@($access.Roles) -join ', '))" }
+    if ($Reset) { throw "REFUSED: $why. A reset must see every row to know what still points at a demo row, and Dataverse hides rows the caller cannot read. Run it as a System Administrator." }
+    Write-Host "WARNING: $why. Rows this user cannot read are invisible to the loader (it would not see demo rows already loaded)." -ForegroundColor Yellow
+}
 
 # ============================================================================
 # RESET

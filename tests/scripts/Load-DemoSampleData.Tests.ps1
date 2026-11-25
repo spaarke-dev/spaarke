@@ -612,13 +612,19 @@ Describe 'Loader source guards (scripts/Load-DemoSampleData.ps1)' {
         $text | Should Match 'Invoke-DemoResetSection'
         $text | Should Match 'Get-DemoTaggedRows'
     }
-    It 'wires the registry guard through Resolve-DemoTarget with no try/catch that turns a failed read into "no row"' {
-        $text | Should Match 'Resolve-DemoTarget'
+    It 'wires the registry guard through Assert-DemoTargetAllowed, unconditionally, with no try/catch that turns a failed read into "no row" (behaviour: see "The loader entry" below)' {
         $text | Should Not Match 'Registry lookup failed'
         $text | Should Not Match 'Get-RegistryRowByUrl'
-        $call = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Resolve-DemoTarget' }, $true) | Select-Object -First 1
-        $call | Should Not BeNullOrEmpty
-        for ($p = $call.Parent; $p; $p = $p.Parent) { ($p -is [System.Management.Automation.Language.TryStatementAst]) | Should Be $false }
+        $text | Should Not Match '\$guard\.Allowed'
+        $text | Should Not Match 'Resolve-DemoTarget'
+        $call = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Assert-DemoTargetAllowed' }, $true)
+        @($call).Count | Should Be 1
+        for ($p = $call[0].Parent; $p; $p = $p.Parent) {
+            ($p -is [System.Management.Automation.Language.TryStatementAst]) | Should Be $false
+            ($p -is [System.Management.Automation.Language.IfStatementAst]) | Should Be $false
+        }
+        $call[0].Extent.Text | Should Match '-CustomerRow \$customerRow'
+        $call[0].Extent.Text | Should Match '-AllowNonDemo:\$AllowNonDemo'
     }
     It 'reads choice labels through Get-DemoOptionMap (1033), never UserLocalizedLabel' {
         $text | Should Match 'Get-DemoOptionMap'
@@ -758,6 +764,13 @@ function New-ResetWorld {
     }
 }
 
+function Add-WallRelationship {
+    <# Adds a 1:N relationship of `contact` from another referencing table (a platform table such as postrole), readable unless the test makes it fail. #>
+    param([Parameter(Mandatory)][hashtable]$World, [Parameter(Mandatory)][string]$Entity)
+    $World.Entities[$Entity] = @{ Set = "$($Entity)s"; Pk = "$($Entity)id" }
+    $World.OneToMany['contact'] = @($World.OneToMany['contact']) + @(@{ Entity = $Entity; Attr = 'regardingobjectid' })
+}
+
 Describe 'Reset keeps what something else still points at (finding: every relationship, M:N, cascade children, fail closed)' {
     It 'deletes exactly the clean tagged rows and keeps every referenced one, in dependency order' {
         $fake = New-FakeDataverse -World (New-ResetWorld)
@@ -814,14 +827,16 @@ Describe 'Reset keeps what something else still points at (finding: every relati
         # ...and the other tables are unaffected.
         ($r.Deleted -contains 'matters:M5') | Should Be $true
     }
-    It 'MUST NOT FIRE: a system table the platform refuses to retrieve ("RetrieveMultiple does not support entities of type") is noted, not treated as unreadable' {
+    It 'MUST NOT FIRE: an ALLOW-LISTED system table the platform refuses to retrieve ("RetrieveMultiple does not support entities of type") is noted, not treated as unreadable' {
         $world = New-ResetWorld
-        $world.NotSupported = @('^annotations\?')
+        Add-WallRelationship -World $world -Entity 'postrole'
+        $world.NotSupported = @('^postroles\?')
         $r = Invoke-FakeReset -Fake (New-FakeDataverse -World $world)
-        $r.Counts['contacts'].Deleted | Should Be 3
+        # c1 stays (its untagged note still blocks); c2 and c3 go. The postrole read did not keep them.
+        $r.Counts['contacts'].Deleted | Should Be 2
         $check = Get-DemoBlockingReferences -Get (New-FakeDataverse -World $world).Get -Logical 'contact' -Ids @('00000000-0000-4000-8000-000000000011')
         @($check.Unchecked).Count | Should Be 0
-        (@($check.NotRetrievable) -join ',') | Should Be 'annotation.objectid'
+        (@($check.NotRetrievable) -join ',') | Should Be 'postrole.regardingobjectid'
     }
     It 'FAILS CLOSED: unreadable relationship metadata keeps every row' {
         $world = New-ResetWorld
@@ -990,5 +1005,275 @@ Describe 'Choice labels are matched on the English (1033) label (Get-DemoOptionM
     }
     It 'handles an empty option list' {
         (Get-DemoOptionMap -Options @()).Count | Should Be 0
+    }
+}
+
+Describe 'Only an explicit allow-list of system tables may be skipped when the platform refuses to read them (re-check K3)' {
+    foreach ($entity in 'postrole', 'subscriptionmanuallytrackedobject') {
+        It "MUST NOT FIRE: $entity answering 'does not support entities of type' is noted (NotRetrievable), not Unchecked, and the other contacts are still deleted" {
+            $world = New-ResetWorld
+            Add-WallRelationship -World $world -Entity $entity
+            $world.NotSupported = @("^$($entity)s\?")
+            $check = Get-DemoBlockingReferences -Get (New-FakeDataverse -World $world).Get -Logical 'contact' -Ids @('00000000-0000-4000-8000-000000000012')
+            @($check.Unchecked).Count | Should Be 0
+            (@($check.NotRetrievable) -join ',') | Should Be "$entity.regardingobjectid"
+        }
+    }
+    foreach ($entity in 'postregarding', 'someothertable') {
+        It "MUST FIRE: $entity answering the same error is NOT on the allow-list, so it is Unchecked and every contact is kept (fail closed)" {
+            $world = New-ResetWorld
+            Add-WallRelationship -World $world -Entity $entity
+            $world.NotSupported = @("^$($entity)s\?")
+            $check = Get-DemoBlockingReferences -Get (New-FakeDataverse -World $world).Get -Logical 'contact' -Ids @('00000000-0000-4000-8000-000000000012')
+            (@($check.Unchecked) -join ' ') | Should Match "$entity.regardingobjectid"
+            @($check.NotRetrievable).Count | Should Be 0
+            $r = Invoke-FakeReset -Fake (New-FakeDataverse -World $world)
+            $r.Counts['contacts'].Deleted | Should Be 0
+            $r.Counts['contacts'].Kept | Should Be 3
+        }
+    }
+    It 'MUST FIRE: a table that existed with the same error (annotation, which is readable on a live stamp) is Unchecked, not skipped' {
+        $world = New-ResetWorld
+        $world.NotSupported = @('^annotations\?')
+        $r = Invoke-FakeReset -Fake (New-FakeDataverse -World $world)
+        $r.Counts['contacts'].Deleted | Should Be 0
+        $r.Counts['contacts'].Kept | Should Be 3
+    }
+    It 'MUST FIRE: an allow-listed table that fails for another reason (403) is Unchecked' {
+        $world = New-ResetWorld
+        Add-WallRelationship -World $world -Entity 'postrole'
+        $world.Fail = @('^postroles\?')
+        $check = Get-DemoBlockingReferences -Get (New-FakeDataverse -World $world).Get -Logical 'contact' -Ids @('00000000-0000-4000-8000-000000000012')
+        (@($check.Unchecked) -join ' ') | Should Match 'postrole.regardingobjectid'
+    }
+    It 'MUST FIRE: a many-to-many association the platform refuses to read is Unchecked (no intersect table is allow-listed)' {
+        $world = New-ResetWorld
+        $world.NotSupported = @('^sprk_matter_contactset\?')
+        $r = Invoke-FakeReset -Fake (New-FakeDataverse -World $world)
+        ($r.Deleted -contains 'matters:M5') | Should Be $false
+    }
+}
+
+Describe 'No 1:N relationship at all means the caller cannot see them: fail closed (re-check K2)' {
+    It 'MUST FIRE: a metadata read that returns zero 1:N relationships for a tagged table keeps every row of it' {
+        $world = New-ResetWorld
+        $world.OneToMany['contact'] = @()
+        $r = Invoke-FakeReset -Fake (New-FakeDataverse -World $world)
+        $r.Counts['contacts'].Deleted | Should Be 0
+        $r.Counts['contacts'].Kept | Should Be 3
+        ((@($r.Kept | Where-Object { $_.Name -like 'c*@example.com' } | ForEach-Object { @($_.Reasons) }) -join ' ')) | Should Match 'could not be read'
+        $check = Get-DemoBlockingReferences -Get (New-FakeDataverse -World $world).Get -Logical 'contact' -Ids @('00000000-0000-4000-8000-000000000012')
+        (@($check.Unchecked) -join ' ') | Should Match 'returned none'
+    }
+    It 'MUST NOT FIRE: a table whose only relationships are the plumbing columns is read as non-empty and its rows are deleted' {
+        $world = New-ResetWorld
+        $world.OneToMany['contact'] = @(@{ Entity = 'systemuser'; Attr = 'createdby' })
+        $r = Invoke-FakeReset -Fake (New-FakeDataverse -World $world)
+        $r.Counts['contacts'].Deleted | Should Be 3
+    }
+}
+
+Describe 'Id lists are chunked by 20 whatever their length (re-check F3: one chunk was unwrapped into one read per id)' {
+    foreach ($case in @(@{ N = 1; Reads = 1 }, @{ N = 20; Reads = 1 }, @{ N = 21; Reads = 2 }, @{ N = 40; Reads = 2 }, @{ N = 41; Reads = 3 })) {
+        It "$($case.N) ids -> $($case.Reads) read(s) per relationship, every id queried exactly once (1:N and M:N)" {
+            $fake = New-FakeDataverse -World (New-ResetWorld)
+            $ids = @(1..$case.N | ForEach-Object { '00000000-0000-4000-8000-{0:D12}' -f (900 + $_) })
+            $null = Get-DemoBlockingReferences -Get $fake.Get -Logical 'contact' -Ids $ids
+            foreach ($pattern in '^annotations\?', '^sprk_matter_contactset\?') {
+                $reads = @($fake.Paths | Where-Object { $_ -match $pattern })
+                $reads.Count | Should Be $case.Reads
+                $terms = @($reads | ForEach-Object { @($_ -split ' or ').Count })
+                (($terms | Measure-Object -Sum).Sum) | Should Be $case.N
+                (($terms | Measure-Object -Maximum).Maximum -le 20) | Should Be $true
+            }
+        }
+    }
+}
+
+Describe 'Host normalisation on both sides of the registry comparison (re-check K4)' {
+    It 'reduces every spelling of one environment to one host' {
+        foreach ($u in 'https://x.crm.dynamics.com', 'https://X.CRM.Dynamics.com/', 'https://x.crm.dynamics.com./main.aspx?a=1', 'https://x.api.crm.dynamics.com', 'https://X.API.crm.dynamics.com.:443/api/data/v9.2/', 'x.api.crm.dynamics.com.') {
+            ConvertTo-DemoComparableHost $u | Should Be 'x.crm.dynamics.com'
+        }
+        ConvertTo-DemoComparableHost 'https://x.api.crm4.dynamics.com' | Should Be 'x.crm4.dynamics.com'
+    }
+    It 'MUST NOT FIRE: a different org, or a host that only ends like a Dataverse host, is not rewritten into a match' {
+        ConvertTo-DemoComparableHost 'https://x2.api.crm.dynamics.com' | Should Be 'x2.crm.dynamics.com'
+        ConvertTo-DemoComparableHost 'https://api.crm.dynamics.com' | Should Be 'api.crm.dynamics.com'
+        ConvertTo-DemoComparableHost 'https://x.crm.dynamics.com.evil.com' | Should Be 'x.crm.dynamics.com.evil.com'
+        (Test-DemoRegistryUrlMatch -RowUrl 'https://x2.api.crm.dynamics.com' -Target 'https://x.crm.dynamics.com') | Should Be $false
+        (Test-DemoRegistryUrlMatch -RowUrl 'https://x.crm.dynamics.com.evil.com' -Target 'https://x.crm.dynamics.com') | Should Be $false
+    }
+    It 'MUST FIRE: a Production row stored with the api host, a trailing dot or in free text still refuses the org URL, even with -AllowNonDemo' {
+        $target = 'https://spaarke-acme.crm.dynamics.com'
+        foreach ($u in 'https://spaarke-acme.api.crm.dynamics.com', 'https://spaarke-acme.crm.dynamics.com./', 'https://SPAARKE-ACME.API.CRM.DYNAMICS.COM.', 'see https://spaarke-acme.api.crm.dynamics.com. (prod)', 'see https://spaarke-acme.crm.dynamics.com. (prod)') {
+            $row = [pscustomobject]@{ sprk_name = 'Prod'; sprk_dataverseurl = $u; sprk_environmenttype = 6; sprk_isactive = $true }
+            $reader = { @($row) }.GetNewClosure()
+            $res = Resolve-DemoTarget -ReadRows $reader -Target $target -AllowNonDemo
+            $res.Guard.Allowed | Should Be $false
+        }
+    }
+    It 'MUST FIRE: the target given as the api host is compared against an org-host Production row' {
+        $row = [pscustomobject]@{ sprk_name = 'Prod'; sprk_dataverseurl = 'https://spaarke-acme.crm.dynamics.com'; sprk_environmenttype = 6; sprk_isactive = $true }
+        $reader = { @($row) }.GetNewClosure()
+        (Resolve-DemoTarget -ReadRows $reader -Target 'https://spaarke-acme.api.crm.dynamics.com' -AllowNonDemo).Guard.Allowed | Should Be $false
+    }
+    It 'MUST NOT FIRE: an active Demo row in api-host spelling is allowed for the org URL' {
+        $row = [pscustomobject]@{ sprk_name = 'ACME'; sprk_dataverseurl = 'https://spaarke-acme.api.crm.dynamics.com'; sprk_environmenttype = 1; sprk_isactive = $true }
+        $reader = { @($row) }.GetNewClosure()
+        (Resolve-DemoTarget -ReadRows $reader -Target 'https://spaarke-acme.crm.dynamics.com').Guard.Allowed | Should Be $true
+    }
+}
+
+Describe 'Assert-DemoTargetAllowed (the refusal is a throw inside the lib)' {
+    function Reg2($url, $type, $active = $true, $name = 'Row') { [pscustomobject]@{ sprk_name = $name; sprk_dataverseurl = $url; sprk_environmenttype = $type; sprk_isactive = $active } }
+    $target = 'https://spaarke-acme.crm.dynamics.com'
+    It 'MUST FIRE: throws for Production (also with -AllowNonDemo), for a non-Demo row, an inactive row and no row' {
+        { Assert-DemoTargetAllowed -ReadRows { @((Reg2 $target 6)) } -Target $target } | Should Throw 'REFUSED'
+        { Assert-DemoTargetAllowed -ReadRows { @((Reg2 $target 6)) } -Target $target -AllowNonDemo } | Should Throw 'Production'
+        { Assert-DemoTargetAllowed -ReadRows { @((Reg2 $target 2)) } -Target $target } | Should Throw 'Sandbox'
+        { Assert-DemoTargetAllowed -ReadRows { @((Reg2 $target 1 $false)) } -Target $target } | Should Throw 'not active'
+        { Assert-DemoTargetAllowed -ReadRows { @() } -Target $target } | Should Throw 'has no row'
+        { Assert-DemoTargetAllowed -ReadRows { throw 'token failure' } -Target $target -AllowNonDemo } | Should Throw 'never treated as'
+    }
+    It 'MUST NOT FIRE: returns Row and Guard for an active Demo row, and for -AllowNonDemo with a warning for a non-Demo row' {
+        $ok = Assert-DemoTargetAllowed -ReadRows { @((Reg2 $target 1)) } -Target $target
+        $ok.Guard.Allowed | Should Be $true
+        $ok.Row.sprk_name | Should Be 'Row'
+        $override = Assert-DemoTargetAllowed -ReadRows { @((Reg2 $target 2)) } -Target $target -AllowNonDemo
+        (@($override.Guard.Warnings) -join ' ') | Should Match '-AllowNonDemo'
+    }
+}
+
+Describe 'Test-DemoOperatorSeesAllRows (Dataverse hides rows the caller cannot read)' {
+    $uid = '22222222-2222-4222-8222-222222222222'
+    function New-RoleReader {
+        param([string[]]$Direct = @(), [string[]]$ViaTeam = @(), [switch]$Fail)
+        return { param($p)
+            if ($Fail) { throw 'HTTP 403 (fake)' }
+            if ($p -match 'systemuserroles_association') { return @($Direct | ForEach-Object { [pscustomobject]@{ name = $_ } }) }
+            if ($p -match 'teammembership_association') { return @([pscustomobject]@{ teamid = '33333333-3333-4333-8333-333333333333' }) }
+            if ($p -match 'teamroles_association') { return @($ViaTeam | ForEach-Object { [pscustomobject]@{ name = $_ } }) }
+            throw "unexpected $p"
+        }.GetNewClosure()
+    }
+    It 'MUST NOT FIRE: a System Administrator, directly or through a team, sees everything' {
+        (Test-DemoOperatorSeesAllRows -Get (New-RoleReader -Direct 'System Administrator', 'Basic User') -UserId $uid).IsSystemAdministrator | Should Be $true
+        (Test-DemoOperatorSeesAllRows -Get (New-RoleReader -Direct 'Basic User' -ViaTeam 'System Administrator') -UserId $uid).IsSystemAdministrator | Should Be $true
+    }
+    It 'MUST FIRE: any other role set is not enough, and says which roles it saw' {
+        $r = Test-DemoOperatorSeesAllRows -Get (New-RoleReader -Direct 'Basic User' -ViaTeam 'System Customizer') -UserId $uid
+        $r.IsSystemAdministrator | Should Be $false
+        (@($r.Roles) -join ',') | Should Be 'Basic User,System Customizer'
+        $r.Problem | Should BeNullOrEmpty
+    }
+    It 'MUST FIRE: roles that cannot be read are a Problem, never "verified"' {
+        $r = Test-DemoOperatorSeesAllRows -Get (New-RoleReader -Fail) -UserId $uid
+        $r.IsSystemAdministrator | Should Be $false
+        $r.Problem | Should Match 'could not be read'
+    }
+    It 'refuses a user id that is not a guid (it goes into a URL)' {
+        { Test-DemoOperatorSeesAllRows -Get (New-RoleReader) -UserId "x)/foo" } | Should Throw 'not a user id'
+    }
+}
+
+Describe 'The loader entry (scripts/Load-DemoSampleData.ps1 run against a fake az and a fake Dataverse; no network)' {
+    $admin = 'https://spaarke-admin.crm.dynamics.com'
+    $acme = 'https://spaarke-acme.crm.dynamics.com'
+    function Reg3($customer, $url, $type, $active = $true, $name = 'ACME Corp') {
+        [pscustomobject]@{ sprk_name = $name; sprk_customerid = $customer; sprk_dataverseurl = $url; sprk_environmenttype = $type; sprk_isactive = $active; sprk_businessunitname = 'ACME Corp' }
+    }
+
+    # The loader's two outside dependencies, replaced for the duration of this Describe: the az CLI and Invoke-RestMethod
+    # (the loader's Invoke-Dv is the only caller). Every request is recorded in $global:LoaderFake.Calls.
+    function az {
+        $global:LASTEXITCODE = 0
+        $a = "$args"
+        if ($a -match 'account show') { return '{"user":{"name":"operator@example.com","type":"user"}}' }
+        if ($a -match 'get-access-token') { return 'fake-token' }
+        $global:LASTEXITCODE = 1
+    }
+    function Invoke-RestMethod {
+        param([string]$Uri, [string]$Method = 'GET', $Headers, $Body, $ContentType, [string]$ResponseHeadersVariable)
+        $lf = $global:LoaderFake
+        $lf.Calls.Add([pscustomobject]@{ Method = $Method; Uri = $Uri })
+        if ($Method -ne 'GET') { if ($ResponseHeadersVariable) { Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1 }; return $null }
+        $path = [uri]::UnescapeDataString($Uri.Substring($Uri.IndexOf('/api/data/v9.2/') + '/api/data/v9.2/'.Length))
+        if ($Uri.StartsWith($lf.RegistryUrl)) {
+            if ($lf.RegistryFail) { throw 'HTTP 401 (fake registry failure)' }
+            $rows = @($lf.Registry)
+            if ($path -match "sprk_customerid eq '([^']+)'") { $c = $Matches[1]; $rows = @($rows | Where-Object { $_.sprk_customerid -eq $c }) }
+            return @{ value = $rows }
+        }
+        if ($path -eq 'WhoAmI') { return @{ UserId = '22222222-2222-4222-8222-222222222222' } }
+        if ($path -match 'systemuserroles_association') { return @{ value = @($lf.Roles | ForEach-Object { @{ name = $_ } }) } }
+        if ($path -match 'teammembership_association') { return @{ value = @() } }
+        if ($path -match '\$top=1') { return @{ value = @() } }
+        return @{ value = @(& $lf.Fake.Get $path) }
+    }
+    function Invoke-Loader {
+        param([hashtable]$Params, [object[]]$Registry, [string[]]$Roles = @('System Administrator', 'Basic User'), [switch]$RegistryFail)
+        $global:LoaderFake = @{ Calls = (New-Object System.Collections.Generic.List[object]); Registry = $Registry; RegistryUrl = $admin; Roles = $Roles; RegistryFail = [bool]$RegistryFail; Fake = (New-FakeDataverse -World (New-ResetWorld)) }
+        $err = $null
+        try { & $script:Loader @Params -RegistryUrl $admin -Confirm:$false *> $null } catch { $err = "$_" }
+        return @{ Error = $err; Calls = $global:LoaderFake.Calls.ToArray() }
+    }
+    function Get-TargetCalls { param($Result) return @($Result.Calls | Where-Object { $_.Uri.StartsWith($acme) }) }
+    function Get-WriteCalls { param($Result) return @($Result.Calls | Where-Object { $_.Method -ne 'GET' }) }
+
+    It 'MUST FIRE: a registry-Production target throws before anything is read from or written to it, with or without -AllowNonDemo, by -CustomerId or -DataverseUrl' {
+        foreach ($params in @{ CustomerId = 'acme'; Reset = $true }, @{ CustomerId = 'acme'; Reset = $true; AllowNonDemo = $true }, @{ DataverseUrl = $acme; Reset = $true; AllowNonDemo = $true }, @{ CustomerId = 'acme' }) {
+            $r = Invoke-Loader -Params $params -Registry @((Reg3 'acme' $acme 6))
+            $r.Error | Should Match 'REFUSED'
+            $r.Error | Should Match 'Production'
+            (Get-TargetCalls $r).Count | Should Be 0
+            (Get-WriteCalls $r).Count | Should Be 0
+        }
+    }
+    It 'MUST FIRE: -CustomerRow reaches the resolver: the customer row (inactive Demo) is the one judged, not the active row that shares its URL' {
+        $rows = @((Reg3 'acme' $acme 1 $false), (Reg3 'other' $acme 1 $true 'Other'))
+        $r = Invoke-Loader -Params @{ CustomerId = 'acme'; Reset = $true } -Registry $rows
+        $r.Error | Should Match 'not active'
+        (Get-TargetCalls $r).Count | Should Be 0
+    }
+    It 'MUST NOT FIRE: an active Demo customer row goes through to the target, and a -WhatIf reset writes nothing' {
+        $r = Invoke-Loader -Params @{ CustomerId = 'acme'; Reset = $true; WhatIf = $true } -Registry @((Reg3 'acme' $acme 1))
+        $r.Error | Should BeNullOrEmpty
+        ((Get-TargetCalls $r).Count -gt 0) | Should Be $true
+        (Get-WriteCalls $r).Count | Should Be 0
+    }
+    It 'MUST FIRE and MUST NOT FIRE: -AllowNonDemo reaches the resolver (no registry row for the URL: refused without it, let through with it)' {
+        $rows = @((Reg3 'someone' 'https://someone-else.crm.dynamics.com' 1 $true 'Someone'))
+        $no = Invoke-Loader -Params @{ DataverseUrl = $acme; Reset = $true; WhatIf = $true } -Registry $rows
+        $no.Error | Should Match 'has no row'
+        (Get-TargetCalls $no).Count | Should Be 0
+        $yes = Invoke-Loader -Params @{ DataverseUrl = $acme; Reset = $true; WhatIf = $true; AllowNonDemo = $true } -Registry $rows
+        $yes.Error | Should BeNullOrEmpty
+        ((Get-TargetCalls $yes).Count -gt 0) | Should Be $true
+    }
+    It 'MUST FIRE: a failed registry read stops the loader before the target is touched, even with -AllowNonDemo (never "no row")' {
+        $r = Invoke-Loader -Params @{ DataverseUrl = $acme; Reset = $true; AllowNonDemo = $true } -Registry @((Reg3 'acme' $acme 1)) -RegistryFail
+        $r.Error | Should Match 'could not be read'
+        (Get-TargetCalls $r).Count | Should Be 0
+    }
+    It 'MUST FIRE: two active registry rows with the URL stop the loader before the target is touched' {
+        $r = Invoke-Loader -Params @{ DataverseUrl = $acme; Reset = $true } -Registry @((Reg3 'a' $acme 1), (Reg3 'b' $acme 1 $true 'Second'))
+        $r.Error | Should Match 'active registry rows'
+        (Get-TargetCalls $r).Count | Should Be 0
+    }
+    It 'MUST FIRE: a reset by an operator who is not a System Administrator is refused before any delete' {
+        $r = Invoke-Loader -Params @{ CustomerId = 'acme'; Reset = $true } -Registry @((Reg3 'acme' $acme 1)) -Roles @('Basic User')
+        $r.Error | Should Match 'System Administrator'
+        (Get-WriteCalls $r).Count | Should Be 0
+    }
+    It 'reset shares ONE Gone set across sections: a tagged child deleted in an earlier section (event E6) does not keep its parent (matter M6)' {
+        $r = Invoke-Loader -Params @{ CustomerId = 'acme'; Reset = $true } -Registry @((Reg3 'acme' $acme 1))
+        $r.Error | Should BeNullOrEmpty
+        $deletes = @(Get-WriteCalls $r | ForEach-Object { $_.Uri.Substring($acme.Length + '/api/data/v9.2/'.Length) })
+        (@(Get-WriteCalls $r | Where-Object { $_.Method -ne 'DELETE' })).Count | Should Be 0
+        ((@($deletes) | Sort-Object) -join ',') | Should Be ((@(
+                    'contacts(00000000-0000-4000-8000-000000000012)', 'contacts(00000000-0000-4000-8000-000000000013)',
+                    'sprk_events(00000000-0000-4000-8000-000000000106)',
+                    'sprk_matters(00000000-0000-4000-8000-000000000005)', 'sprk_matters(00000000-0000-4000-8000-000000000006)') | Sort-Object) -join ',')
     }
 }
