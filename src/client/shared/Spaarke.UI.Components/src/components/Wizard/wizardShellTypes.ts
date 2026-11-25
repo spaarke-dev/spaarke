@@ -360,6 +360,11 @@ export interface IWizardShellProps {
    * Footer override. Called on every render while a step is shown (not on the success screen); return
    * slots to replace either side of the standard footer, or `null` / `undefined` to keep the standard
    * footer. Both modes.
+   *
+   * The shell holds the header ‹ › and every close path while `onFinish` runs, but only a save the SHELL started (its own
+   * Finish button). A save started from a button you render in a slot is invisible to the shell: guard that yourself (disable
+   * your buttons, and block close and nav, while it runs), as DecisionWizard does. `context.close` is held during a shell-started
+   * finish.
    * @since ontology task 056
    */
   footer?: (context: IWizardFooterContext) => IWizardFooterSlots | null | undefined;
@@ -406,7 +411,8 @@ export interface IWizardShellProps {
   finishLabel?: string;
   /**
    * Extra content rendered in the footer's left side, after the Cancel button.
-   * Use for additional actions like "Delete" that apply to the whole wizard.
+   * Use for additional actions like "Delete" that apply to the whole wizard. While `onFinish` runs the shell wraps it in a
+   * `<fieldset disabled>`, so its buttons and inputs are natively disabled.
    */
   footerLeftExtra?: React.ReactNode;
   /**

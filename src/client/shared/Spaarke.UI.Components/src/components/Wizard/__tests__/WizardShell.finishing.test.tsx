@@ -149,6 +149,153 @@ describe('WizardShell — not finishing: header unchanged (must-not-fire control
   });
 });
 
+describe('WizardShell — reset, re-entry, errors and unmount while finishing', () => {
+  const finishProps = (
+    onFinish: IWizardShellProps['onFinish'],
+    onClose: jest.Mock,
+    extra: Partial<IWizardShellProps> = {}
+  ) =>
+    ({
+      open: true,
+      title: 'Decide',
+      steps: oneStep,
+      onClose,
+      onFinish,
+      stayOpenOnFinish: true,
+      dismiss: 'light',
+      ...extra,
+    }) as IWizardShellProps;
+
+  it('a reset (resetKey) mid-save releases the header; the stale run changes nothing, and a newer run is not released by it', async () => {
+    const onClose = jest.fn();
+    const onNavigate = jest.fn();
+    const nav = { index: 1, total: 5, onNavigate };
+    const first = deferred();
+    const second = deferred();
+    const onFinish = jest.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { rerender } = renderWithProviders(
+      <WizardShell {...finishProps(onFinish, onClose, { nav, resetKey: 'a' })} />
+    );
+    await startFinish();
+
+    // Moved to another item while the save runs (the host re-keys the shell).
+    rerender(<WizardShell {...finishProps(onFinish, onClose, { nav, resetKey: 'b' })} />);
+    await waitFor(() => expect(byName('Next record')).toBeEnabled());
+    fireEvent.click(byName('Next record'));
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('next'));
+    fireEvent.click(byName('Close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // The new item starts its own save; the OLD save then fails: nothing shows, the new save stays held.
+    fireEvent.click(byName('Finish'));
+    await waitFor(() => expect(byName('Previous record')).toBeDisabled());
+    expect(onFinish).toHaveBeenCalledTimes(2);
+    await act(async () => first.reject(new Error('stale failure')));
+    expect(screen.queryByText(/stale failure/)).toBeNull();
+    expect(byName('Previous record')).toBeDisabled();
+    fireEvent.click(byName('Close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // The new save ends: the header is released.
+    await act(async () => second.resolve());
+    await waitFor(() => expect(byName('Previous record')).toBeEnabled());
+  });
+
+  it('a stale successful run shows no success screen and does not close the wizard on the new item', async () => {
+    const onClose = jest.fn();
+    const first = deferred();
+    const onFinish = jest.fn(() => first.promise);
+    const { rerender } = renderWithProviders(
+      <WizardShell {...finishProps(onFinish, onClose, { stayOpenOnFinish: false, resetKey: 'a' })} />
+    );
+    fireEvent.click(byName('Finish'));
+    await waitFor(() => expect(byName('Processing…')).toBeDisabled());
+    rerender(<WizardShell {...finishProps(onFinish, onClose, { stayOpenOnFinish: false, resetKey: 'b' })} />);
+    await act(async () => first.resolve());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(byName('Finish')).toBeEnabled();
+  });
+
+  it('a second Finish while one save runs starts no second onFinish', async () => {
+    const onClose = jest.fn();
+    const d = deferred();
+    const onFinish = jest.fn(() => d.promise);
+    renderWithProviders(<WizardShell {...finishProps(onFinish, onClose)} />);
+    const finish = byName('Finish');
+    fireEvent.click(finish);
+    fireEvent.click(finish);
+    await act(async () => {});
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    await act(async () => d.resolve());
+  });
+
+  it('a synchronous throw from onFinish shows the error and releases the guard', async () => {
+    const onClose = jest.fn();
+    const nav = { index: 1, total: 5, onNavigate: jest.fn() };
+    const onFinish = jest.fn(() => {
+      throw new Error('threw at once');
+    });
+    renderWithProviders(<WizardShell {...finishProps(onFinish, onClose, { nav })} />);
+    fireEvent.click(byName('Finish'));
+    expect(await screen.findByText(/threw at once/)).toBeInTheDocument();
+    expect(byName('Next record')).toBeEnabled();
+    fireEvent.click(byName('Close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('a footer override context.close is held while finishing and works after', async () => {
+    const onClose = jest.fn();
+    const d = deferred();
+    const onFinish = jest.fn(() => d.promise);
+    const footer: IWizardShellProps['footer'] = ctx => ({
+      start: <button onClick={ctx.close}>Ctx close</button>,
+    });
+    renderWithProviders(<WizardShell {...finishProps(onFinish, onClose, { footer })} />);
+    fireEvent.click(byName('Finish'));
+    await waitFor(() => expect(byName('Processing…')).toBeDisabled());
+    fireEvent.click(byName('Ctx close'));
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => d.resolve());
+    await waitFor(() => expect(byName('Finish')).toBeEnabled());
+    fireEvent.click(byName('Ctx close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('unmounting mid-save leaves no warning, closes nothing and shows nothing', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const onClose = jest.fn();
+      const d = deferred();
+      const onFinish = jest.fn(() => d.promise);
+      const { unmount } = renderWithProviders(
+        <WizardShell {...finishProps(onFinish, onClose, { stayOpenOnFinish: false })} />
+      );
+      fireEvent.click(byName('Finish'));
+      await waitFor(() => expect(byName('Processing…')).toBeDisabled());
+      unmount();
+      await act(async () => d.resolve());
+      expect(onClose).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('footerLeftExtra is disabled while finishing, enabled before and after', async () => {
+    const onClose = jest.fn();
+    const d = deferred();
+    const onFinish = jest.fn(() => d.promise);
+    renderWithProviders(
+      <WizardShell {...finishProps(onFinish, onClose, { footerLeftExtra: <button>Delete</button> })} />
+    );
+    expect(byName('Delete')).toBeEnabled();
+    fireEvent.click(byName('Finish'));
+    await waitFor(() => expect(byName('Delete')).toBeDisabled());
+    await act(async () => d.resolve());
+    await waitFor(() => expect(byName('Delete')).toBeEnabled());
+  });
+});
+
 describe('WizardShell — embedded mode', () => {
   it('× is a no-op while finishing and works after', async () => {
     const { onClose, d } = setup({ embedded: true, nav: undefined });
