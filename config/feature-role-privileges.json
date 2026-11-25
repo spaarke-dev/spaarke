@@ -119,30 +119,12 @@
     },
     {
       "gap": "ISS-042",
-      "role": "Spaarke Basic User",
-      "table": "sprk_eventtype_ref",
-      "privilege": "prvReadsprk_EventType_Ref",
-      "depth": "Global",
-      "from": "Deep",
-      "feature": "Event types readable on stamps (provisioning seeds them in the root unit; ISS-039)"
-    },
-    {
-      "gap": "ISS-042",
-      "role": "Spaarke Core User",
-      "table": "sprk_eventtype_ref",
-      "privilege": "prvReadsprk_EventType_Ref",
-      "depth": "Global",
-      "from": "Deep",
-      "feature": "Event types readable on stamps (provisioning seeds them in the root unit; ISS-039)"
-    },
-    {
-      "gap": "ISS-042",
       "role": "Spaarke Office Add In User",
       "table": "sprk_eventtype_ref",
       "privilege": "prvReadsprk_EventType_Ref",
       "depth": "Global",
       "from": "Deep",
-      "feature": "Event types readable on stamps (provisioning seeds them in the root unit; ISS-039)"
+      "feature": "Event types readable on stamps (provisioning seeds them in the root unit; ISS-039). Office Add In User only: Core and Basic User get the same Read from config/product-configuration-read-role.json"
     }
   ],
   "removals": [

@@ -20,8 +20,8 @@ namespace Spaarke.ArchTests;
 /// <c>RetrieveUserSetOfPrivilegesByNames</c>) or the target table is organization-owned (any depth reaches every row,
 /// <c>CallerWriteAuthorization.CallerMayAppendToOrganizationOwnedAsync</c>). <c>Deep</c> where the caller's right on a business record
 /// is asked (<c>RetrievePrincipalAccess</c>): those rows are owned by business-unit default owner teams (I-6), which a user-depth
-/// grant does not reach. <c>Global</c> where the rows are owned outside the user's business units (the event-type exception in
-/// <c>config/core-user-wizard-linking-role.json</c>; the analysis playbooks, skills, knowledge and tools, user-owned by their authors in
+/// grant does not reach. <c>Global</c> where the rows are owned outside the user's business units (the event types, ISS-042: Read and AppendTo are both Global,
+/// <c>config/product-configuration-read-role.json</c> and <c>config/core-user-wizard-linking-role.json</c>; the analysis playbooks, skills, knowledge and tools, user-owned by their authors in
 /// any business unit).</para>
 /// <para><b>Not repeated here.</b> Spaarke Core User's AppendTo on every target the create wizards bind is guarded by
 /// <see cref="CoreUserWizardLinkingGuardTests"/>; the ontology writer role's AppendTo on Signal and Decision Record lookup targets by
@@ -246,11 +246,13 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Basic",
             Bff + "Api/Events/EventEndpoints.cs:949; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:390-409", "prvAppendTosprk_RecordType_Ref"),
         // ISS-042 (owner 2026-11-25): the event types are user-owned rows that provisioning creates as the control-plane app user in a
-        // stamp's root business unit, while the stamp's users sit in a child unit, so Read below Global hides every event type. Basic is its own row (a [Basic, Office]
-        // row would be met by Office alone); Office Add In User is ruled not standalone and is held with a base role, so it has no row of
-        // its own (the put-back proof puts its change back together with the base roles' ones).
-        .. For("Event types readable on stamps (Create Event wizard picker)", [Core], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125", "prvReadsprk_EventType_Ref"),
-        .. For("Event types readable on stamps (Create Event wizard picker, Basic User)", [Basic], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125", "prvReadsprk_EventType_Ref"),
+        // stamp's root business unit, while the stamp's users sit in a child unit, so Read below Global hides every event type. Core and
+        // Basic User hold the Read through config/product-configuration-read-role.json (ProductConfigurationReadRoleGuardTests holds the
+        // role files to it); Office Add In User through config/feature-role-privileges.json (gap ISS-042). Basic is its own row (a
+        // [Basic, Office] row would be met by Office alone); Office Add In User is ruled not standalone and is held with a base role, so
+        // it has no row of its own (the put-back proof puts its change back together with the base roles' Read, PutBackGroup).
+        .. For("Event types readable on stamps (Create Event wizard picker)", [Core], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125; config/product-configuration-read-role.json", "prvReadsprk_EventType_Ref"),
+        .. For("Event types readable on stamps (Create Event wizard picker, Basic User)", [Basic], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125; config/product-configuration-read-role.json", "prvReadsprk_EventType_Ref"),
         // AppendTo on the regarding record (fix round 1): the route takes any of the eight regarding types from any caller; no
         // Office add-in path posts it, so both role sets the doc names are held to every type.
         .. For("Event (typed route)", [Core], "Deep", EventRegarding, EventRegardingAppendTo),
@@ -1914,6 +1916,56 @@ public class FeatureRolePrivilegeGuardTests
             RuledChangeProblems(changes, roles));
     }
 
+    /// <summary>The role files the seeded proof puts back together for one ruled change: the change itself, and, when its role is ruled
+    /// not standalone (<see cref="StandaloneExceptions"/>; it is held with a base role, so the base role meets its rows), each base
+    /// role's Read of the same privilege. A base role the same gap lists for that privilege is put back to that entry's 'from'; one the
+    /// config does not list is put back to this change's 'from' when it holds the privilege at this change's depth (ISS-042: Core and
+    /// Basic hold the Office Add In User's Read through config/product-configuration-read-role.json); one another gap lists for that
+    /// privilege is left alone, because that gap's own entry puts it back.</summary>
+    internal static List<(string Role, string Privilege, string From)> PutBackGroup(
+        RuledChange change, IReadOnlyList<RuledChange> changes, IEnumerable<string> baseRoles, Func<string, string?> heldDepth)
+    {
+        var group = new List<(string Role, string Privilege, string From)> { (change.Role, change.Privilege, change.From) };
+        if (!StandaloneExceptions.ContainsKey(change.Role))
+            return group;
+
+        foreach (var baseRole in baseRoles)
+        {
+            var listed = changes.Where(c => Same(c.Role, baseRole) && Same(c.Privilege, change.Privilege)).ToList();
+            var sameGap = listed.FirstOrDefault(c => c.Gap == change.Gap);
+            if (sameGap is not null)
+                group.Add((baseRole, change.Privilege, sameGap.From));
+            else if (listed.Count == 0 && heldDepth(baseRole) is { } depth && Same(depth, change.Depth))
+                group.Add((baseRole, change.Privilege, change.From));
+        }
+
+        return group;
+    }
+
+    [Fact(DisplayName = "046b seeded proof control: a standalone-exception change is put back with the base roles of its own gap or unlisted ones at its depth, never with another gap's")]
+    public void PutBackGroupIsKeyedOnTheGap()
+    {
+        const string priv = "prvReadsprk_EventType_Ref";
+        RuledChange office = new("ISS-A", Office, "t", priv, "Global", "Deep");
+        RuledChange coreSameGap = new("ISS-A", Core, "t", priv, "Global", "Basic");
+        RuledChange coreOtherGap = new("ISS-B", Core, "t", priv, "Global", "Basic");
+        string[] baseRoles = [Core, Basic];
+        string? Held(string role) => role == Basic ? "Global" : null;
+
+        // The same gap lists Core: it goes back to that entry's 'from'; Basic is unlisted and holds the depth, so it goes back to the change's.
+        Assert.Equal(
+            new[] { (Office, priv, "Deep"), (Core, priv, "Basic"), (Basic, priv, "Deep") },
+            PutBackGroup(office, [office, coreSameGap], baseRoles, Held));
+
+        // Another gap lists Core for the privilege: Core is left to that gap even though it holds the depth (the bug: a privilege-only\r\n        // key put it back with this one).
+        Assert.Equal(
+            new[] { (Office, priv, "Deep"), (Basic, priv, "Deep") },
+            PutBackGroup(office, [office, coreOtherGap], baseRoles, _ => "Global")); // Core holds the depth too, through the other gap
+
+        // An unlisted base role that holds another depth is not touched; a change on a role that is not an exception goes back alone.
+        Assert.Equal(new[] { (Office, priv, "Deep") }, PutBackGroup(office, [office], baseRoles, _ => "Deep"));
+        Assert.Equal(new[] { (Core, priv, "Basic") }, PutBackGroup(coreSameGap, [office, coreSameGap], baseRoles, Held));
+    }
     [Fact(DisplayName = "046b seeded proof (AC1): putting any one ruled change back to its earlier level in a copy of its role file fails the feature guard")]
     public void PuttingARuledChangeBackFailsTheGuard()
     {
@@ -1932,11 +1984,12 @@ public class FeatureRolePrivilegeGuardTests
             foreach (var change in changes)
             {
                 // A role ruled not standalone (StandaloneExceptions) is held with a base role, so the guard asks its rows of the base role
-                // too: its change is put back together with the base roles' changes to the same privilege (ISS-042: Basic and Core hold
-                // the Read the Office Add In User role is raised with). Any other change is put back alone.
-                var group = StandaloneExceptions.ContainsKey(change.Role)
-                    ? changes.Where(c => Same(c.Privilege, change.Privilege) && !StandaloneExceptions.ContainsKey(c.Role)).Append(change).ToArray()
-                    : [change];
+                // too: its change is put back together with the base roles' Read of the same privilege at the same depth, whether the
+                // config lists them (the same gap, and only that gap) or not (ISS-042: Basic and Core hold the Read the Office Add In User
+                // role is raised with, through config/product-configuration-read-role.json). Any other change is put back alone.
+                var baseRoles = RoleClasses.Where(c => c.Kind == RoleKind.Base).Select(c => c.Role).ToArray();
+                var group = PutBackGroup(change, changes, baseRoles,
+                    role => LoadRoles(dir, [role])[role].TryGetValue(change.Privilege, out var depth) ? depth : null);
                 var originals = new Dictionary<string, string>();
                 foreach (var member in group)
                 {
@@ -2227,20 +2280,32 @@ public class FeatureRolePrivilegeGuardTests
         return problems;
     }
 
-    [Fact(DisplayName = "ISS-042 pending change gaps: a newer expectations file without a pending gap's entries fails; one with them passes and flags the entries stale")]
+    [Fact(DisplayName = "ISS-042 pending change gaps: a newer expectations file without a pending gap's entries fails; one with them passes and flags the entries stale; without the pending list the entries fail the carry check")]
     public void PendingChangeGapsAreARatchet()
     {
         var allChanges = LoadRuledChanges(RuledChangesPath);
         var allReleases = LoadAllExpectations(ExpectationsDirectory);
 
-        // must-not-fire: the real files and list
-        Assert.Empty(PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, allReleases));
+        // The real files and list are held by NewestExpectationsFileCarriesTheRuledSet (it fails once a newer file leaves a pending entry out,
+        // and flags the entries stale once one carries them, which is the signal to take the gap off the list), so this test does not read
+        // them: its controls stay valid after that. Only non-vacuity reads the config: every pending gap names a change in it.
+        Assert.All(PendingNextReleaseChangeGaps.Keys, g => Assert.Contains(allChanges, c => c.Gap == g));
 
-        var (gap, raised) = Assert.Single(PendingNextReleaseChangeGaps);
-        var pending = allChanges.Where(c => c.Gap == gap).ToList();
-        Assert.Equal(3, pending.Count);
-        var newest = allReleases.MaxBy(r => r.Version)!;
+        // The controls below replay ISS-042's history on a local map, so they keep firing after the list changes: raised against
+        // 1.3.2.0, before a later release carried it. Only the files up to the raised-against version count as the releases of that
+        // moment. The entries are the three roles the gap first named, local too, so no control depends on the config's present entries.
+        const string gap = "ISS-042";
+        var raised = new Version(1, 3, 2, 0);
+        var pendingGaps = new Dictionary<string, Version>(StringComparer.Ordinal) { [gap] = raised };
+        var releases = allReleases.Where(r => r.Version <= raised).ToList();
+        var newest = releases[^1];
         Assert.Equal(raised, newest.Version);
+        RuledChange[] pending =
+        [
+            new(gap, Basic, "sprk_eventtype_ref", "prvReadsprk_EventType_Ref", "Global", "Deep"),
+            new(gap, Core, "sprk_eventtype_ref", "prvReadsprk_EventType_Ref", "Global", "Deep"),
+            new(gap, Office, "sprk_eventtype_ref", "prvReadsprk_EventType_Ref", "Global", "Deep"),
+        ];
         var next = new Version(newest.Version.Major, newest.Version.Minor, newest.Version.Build + 1, 0);
 
         IReadOnlyDictionary<string, RoleExpectation> WithPresent(IEnumerable<RuledChange> entries, string? depthOverride = null)
@@ -2252,29 +2317,46 @@ public class FeatureRolePrivilegeGuardTests
             return copy;
         }
 
+        // must-not-fire: that moment's files with the gap pending
+        Assert.Empty(PendingChangeProblems(pending, pendingGaps, releases));
+
+        // must-fire: without the pending list, each pending change fails the carry check
+        var carry = ExpectationProblems([], pending, newest.Roles);
+        Assert.All(pending, c => Assert.Contains(carry, p => p.StartsWith($"{c.Role}: {c.Privilege} — change {c.Gap} is not in the expectations' present list", StringComparison.Ordinal)));
+
         // must-fire: a newer expectations file that does not carry the gap's entries
-        var without = allReleases.Append(new ExpectationsRelease(next, newest.Roles)).ToList();
-        var missing = PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, without);
-        Assert.Equal(pending.Count, missing.Count);
+        var without = releases.Append(new ExpectationsRelease(next, newest.Roles)).ToList();
+        var missing = PendingChangeProblems(pending, pendingGaps, without);
+        Assert.Equal(pending.Length, missing.Count);
         Assert.All(pending, c => Assert.Contains(missing, p => p.StartsWith($"{next}: {c.Role}: {c.Privilege} — the next release's expectations must carry gap {gap}", StringComparison.Ordinal)));
 
         // must-fire: a newer file that carries only some of them (or one at another depth) still fails for the rest
-        var partial = allReleases.Append(new ExpectationsRelease(next, WithPresent(pending.Take(2)))).ToList();
-        Assert.Single(PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, partial), p => p.StartsWith($"{next}: ", StringComparison.Ordinal));
-        var wrongDepth = allReleases.Append(new ExpectationsRelease(next, WithPresent(pending, "Deep"))).ToList();
-        Assert.Equal(pending.Count, PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, wrongDepth).Count);
+        var partial = releases.Append(new ExpectationsRelease(next, WithPresent(pending.Take(2)))).ToList();
+        Assert.Single(PendingChangeProblems(pending, pendingGaps, partial), p => p.StartsWith($"{next}: ", StringComparison.Ordinal));
+        var wrongDepth = releases.Append(new ExpectationsRelease(next, WithPresent(pending, "Deep"))).ToList();
+        Assert.Equal(pending.Length, PendingChangeProblems(pending, pendingGaps, wrongDepth).Count);
 
         // must-not-fire for the carry (other casing), must-fire stale: a newer file that carries all of them flags each pending entry
-        var withThem = allReleases.Append(new ExpectationsRelease(next, WithPresent(pending))).ToList();
+        var withThem = releases.Append(new ExpectationsRelease(next, WithPresent(pending))).ToList();
         Assert.Equal(
             pending.Select(c => $"{c.Role}: {c.Privilege} — change {gap} is pending but the newest expectations file ({next}) carries it; take {gap} off the pending list"),
-            PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, withThem));
+            PendingChangeProblems(pending, pendingGaps, withThem));
+
+        // must-fire stale: the raised-against file itself (the newest) carries an entry
+        foreach (var c in pending)
+        {
+            var seeded = releases.Take(releases.Count - 1).Append(new ExpectationsRelease(newest.Version, WithPresent([c]))).ToList();
+            Assert.Equal(
+                new[] { $"{c.Role}: {c.Privilege} — change {gap} is pending but the newest expectations file ({newest.Version}) carries it; take {gap} off the pending list" },
+                PendingChangeProblems(pending, pendingGaps, seeded));
+        }
 
         // must-fire: a pending gap with no change, and a raised-against version with no file
         Assert.Equal(new[] { "NOPE: a pending gap with no change in the config" },
-            PendingChangeProblems(allChanges, new Dictionary<string, Version>(StringComparer.Ordinal) { ["NOPE"] = newest.Version }, allReleases));
+            PendingChangeProblems(pending, new Dictionary<string, Version>(StringComparer.Ordinal) { ["NOPE"] = newest.Version }, releases));
         var unknown = new Dictionary<string, Version>(StringComparer.Ordinal) { [gap] = new Version(9, 9, 9, 9) };
-        Assert.Contains($"{gap}: raised against expectations 9.9.9.9, but there is no such expectations file", PendingChangeProblems(allChanges, unknown, allReleases));
+        Assert.Equal(new[] { $"{gap}: raised against expectations 9.9.9.9, but there is no such expectations file" },
+            PendingChangeProblems(pending, unknown, releases));
     }
 
     [Fact(DisplayName = "046c fix 2: every removal of config/feature-role-privileges.json is in the newest role-privilege expectations file's absent list, every change in its present list")]
