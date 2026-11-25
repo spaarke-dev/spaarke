@@ -230,7 +230,96 @@ public sealed class RecordSearchQueryConstructionTests
             "the single-type branch (eq) escapes like the multi-type branch (search.in)");
     }
 
-    private RecordSearchService CreateService()
+    private const string ExpectedFilter =
+        $"tenantId eq '{TenantId}' and recordType eq 'sprk_matter'"
+        + " and (organizations/any(o: o eq 'Acme'))";
+
+    private static RecordSearchRequest HostileRequest(
+        string? searchIndexName = null, bool preferKeywordRanking = false) => new()
+        {
+            Query = $"{Marker}' or tenantId ne 'x",
+            RecordTypes = [RecordEntityType.Matter],
+            Filters = new RecordSearchFilters { Organizations = ["Acme"] },
+            Options = new RecordSearchOptions
+            {
+                HybridMode = RecordHybridSearchMode.KeywordOnly,
+                PreferKeywordRanking = preferKeywordRanking,
+            },
+            SearchIndexName = searchIndexName,
+        };
+
+    [Fact]
+    public async Task SearchAsync_ExplicitIndexPath_BuildsTheSameExactFilter()
+    {
+        const string explicitIndex = "tenant-records-index";
+        var explicitClient = new Mock<SearchClient>();
+        explicitClient
+            .Setup(c => c.SearchAsync<SearchIndexDocument>(
+                It.IsAny<string>(), It.IsAny<SearchOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<string, SearchOptions, CancellationToken>((text, options, _) =>
+            {
+                _capturedSearchText = text;
+                _capturedOptions = options;
+            })
+            .ReturnsAsync(Response.FromValue(
+                SearchModelFactory.SearchResults<SearchIndexDocument>(
+                    values: [], totalCount: 0, facets: null, coverage: null, rawResponse: null!),
+                null!));
+        _deployment
+            .Setup(d => d.GetSearchClientAsync(TenantId, explicitIndex, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(explicitClient.Object);
+
+        await CreateService().SearchAsync(HostileRequest(searchIndexName: explicitIndex));
+
+        _capturedOptions.Should().NotBeNull("the explicit-index client must have been called");
+        _capturedOptions!.Filter.Should().Be(ExpectedFilter,
+            "the tenant predicate and the escaped literals are built the same way whichever index is searched; "
+            + "the explicit index changes the client, never the filter");
+        _capturedSearchText.Should().Be(HostileRequest().Query);
+        QueryShapedOptionStrings(_capturedOptions).Should().NotContain(s => s.Contains(Marker));
+    }
+
+    [Fact]
+    public async Task SearchAsync_NoUser_FiltersOnTheConfiguredTenantNotAnAttackerChosenOne()
+    {
+        const string configuredTenant = "bbbbbbbb-0009-0009-0009-00000000000b";
+
+        await CreateService(withUser: false, configuredTenant: configuredTenant).SearchAsync(HostileRequest());
+
+        _capturedOptions!.Filter.Should().Be(
+            $"tenantId eq '{configuredTenant}' and recordType eq 'sprk_matter'"
+            + " and (organizations/any(o: o eq 'Acme'))",
+            "with no user context the tenant comes from AzureAd:TenantId, and the query text still reaches "
+            + "no part of the filter");
+        _capturedOptions.Filter.Should().NotContain(Marker);
+    }
+
+    [Fact]
+    public async Task SearchAsync_NoUserAndNoConfiguredTenant_FiltersOnTheSystemSentinel()
+    {
+        await CreateService(withUser: false).SearchAsync(HostileRequest());
+
+        _capturedOptions!.Filter.Should().Be(
+            "tenantId eq 'system' and recordType eq 'sprk_matter'"
+            + " and (organizations/any(o: o eq 'Acme'))",
+            "the predicate is never omitted, even with nothing to derive a tenant from");
+    }
+
+    [Fact]
+    public async Task SearchAsync_PreferKeywordRanking_BuildsTheSameExactFilter()
+    {
+        await CreateService().SearchAsync(HostileRequest(preferKeywordRanking: true));
+
+        _capturedOptions!.Filter.Should().Be(ExpectedFilter,
+            "opting out of the semantic reranker changes ranking, not the filter");
+        _capturedOptions.QueryType.Should().NotBe(SearchQueryType.Semantic,
+            "this is the keyword-ranked branch the test is about");
+        QueryShapedOptionStrings(_capturedOptions).Should().NotContain(s => s.Contains(Marker));
+        _capturedSearchText.Should().Be(HostileRequest().Query);
+    }
+
+    private RecordSearchService CreateService(
+        bool withUser = true, string? configuredTenant = null)
     {
         var indexClient = new Mock<SearchIndexClient>();
         indexClient.Setup(c => c.GetSearchClient(IndexName)).Returns(_searchClient.Object);
@@ -239,9 +328,17 @@ public sealed class RecordSearchQueryConstructionTests
         {
             HttpContext = new DefaultHttpContext
             {
-                User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tid", TenantId)], "Test")),
+                User = withUser
+                    ? new ClaimsPrincipal(new ClaimsIdentity([new Claim("tid", TenantId)], "Test"))
+                    : new ClaimsPrincipal(new ClaimsIdentity()),
             },
         };
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configuredTenant is null
+                ? []
+                : new Dictionary<string, string?> { ["AzureAd:TenantId"] = configuredTenant })
+            .Build();
 
         return new RecordSearchService(
             indexClient.Object,
@@ -251,7 +348,7 @@ public sealed class RecordSearchQueryConstructionTests
             Options.Create(new DocumentIntelligenceOptions { AiSearchIndexName = IndexName }),
             NullLogger<RecordSearchService>.Instance,
             _deployment.Object,
-            new ConfigurationBuilder().Build(),
+            configuration,
             accessor);
     }
 
