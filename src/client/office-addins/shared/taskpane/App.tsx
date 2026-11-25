@@ -61,6 +61,20 @@ import { fileNameFromWebUrl } from './services/quickSaveHelpers';
 import { canOpenSpaarkeRecords } from './services/openRecordLauncher';
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from './utils/errorMessages';
+import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
+
+/**
+ * #1571: the pane's own BFF calls retry once on 401 through the auth service, like every other call. A 401 that
+ * survives the retry means the session cannot be renewed silently, and the only interactive sign-in is the Sign in
+ * click: the pane shows the sign-in prompt with this text, never a server error.
+ */
+const SIGN_IN_EXPIRED_MESSAGE = 'Your Spaarke sign-in has expired. Sign in again to continue.';
+
+/** The single-retry-on-401 config for the pane's own calls: clear the token cache, re-acquire (silently). */
+const paneRetry = {
+  getRetryToken: async () => (await authService.getAccessToken()) ?? '',
+  onBeforeRetry: () => authService.clearCache(),
+};
 
 // Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its
 // rich-text editor, which Outlook (no Email tab) and Word with the tab held off would otherwise download and parse
@@ -351,6 +365,12 @@ export const App: React.FC<AppProps> = ({
     }
   };
 
+  // #1571: a 401 that survived the single retry — show the sign-in prompt (its click is the interactive sign-in).
+  const showSignInPrompt = useCallback(() => {
+    setError(SIGN_IN_EXPIRED_MESSAGE);
+    setIsAuthenticated(false);
+  }, []);
+
   // Sign out handler
   const handleSignOut = async () => {
     await authService.signOut();
@@ -535,28 +555,36 @@ export const App: React.FC<AppProps> = ({
       // Outlook counterpart. A demo-prefixed communicationId (browser harness) is never sent to the
       // server — the real-communicationId path returns above before reaching this call.
       try {
-        const token = await authService.getAccessToken();
-        const res = await fetch(`${apiBaseUrl}/api/office/todo`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        const token = (await authService.getAccessToken()) ?? '';
+        const res = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/office/todo`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: input.name,
+              description: input.description,
+              assignedToContactId: input.assignedToContactId,
+              dueDate: input.dueDate,
+              priorityScore: input.priorityScore,
+              effortScore: input.effortScore,
+              regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
+              regardingRecordId: savedContext.regardingRecordId,
+              regardingRecordName: savedContext.relatedRecord?.displayName ?? savedContext.regardingName,
+              // ADR-044: canonicalize every GUID crossing this boundary to bare-lowercase.
+              ...(savedContext.documentId ? { documentId: cleanGuid(savedContext.documentId) } : {}),
+              ...(savedContext.communicationId ? { communicationId: cleanGuid(savedContext.communicationId) } : {}),
+            }),
           },
-          body: JSON.stringify({
-            name: input.name,
-            description: input.description,
-            assignedToContactId: input.assignedToContactId,
-            dueDate: input.dueDate,
-            priorityScore: input.priorityScore,
-            effortScore: input.effortScore,
-            regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
-            regardingRecordId: savedContext.regardingRecordId,
-            regardingRecordName: savedContext.relatedRecord?.displayName ?? savedContext.regardingName,
-            // ADR-044: canonicalize every GUID crossing this boundary to bare-lowercase.
-            ...(savedContext.documentId ? { documentId: cleanGuid(savedContext.documentId) } : {}),
-            ...(savedContext.communicationId ? { communicationId: cleanGuid(savedContext.communicationId) } : {}),
-          }),
-        });
+          token,
+          paneRetry
+        );
+        if (res.status === 401) {
+          // #1571: the retry could not renew the session — the sign-in prompt, not a server error. A 403 is a
+          // refusal of THIS To Do (Assigned To, owner team…) and keeps the server's own reason below.
+          showSignInPrompt();
+          return { ok: false, error: SIGN_IN_EXPIRED_MESSAGE };
+        }
         if (!res.ok) {
           // Task 091 (UAT-2, negative case): show the server's own reason, not a bare status code.
           const described = await describeFetchFailure(res);
@@ -570,7 +598,7 @@ export const App: React.FC<AppProps> = ({
         return { ok: false, error: err instanceof Error ? err.message : 'Create failed.' };
       }
     },
-    [savedContext, apiBaseUrl]
+    [savedContext, apiBaseUrl, showSignInPrompt]
   );
 
   // Assigned-To (Contact) lookup — reuses the Office entity search scoped to Contact.
@@ -601,11 +629,18 @@ export const App: React.FC<AppProps> = ({
         return demo.filter(c => c.name.toLowerCase().includes(q));
       }
       try {
-        const token = await authService.getAccessToken();
-        const res = await fetch(
+        const token = (await authService.getAccessToken()) ?? '';
+        const res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=Contact&top=10`,
-          { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+          {},
+          token,
+          paneRetry
         );
+        if (res.status === 401) {
+          // #1571: the retry could not renew the session — the sign-in prompt, not an empty result list.
+          showSignInPrompt();
+          return [];
+        }
         if (!res.ok) {
           return [];
         }
@@ -623,7 +658,7 @@ export const App: React.FC<AppProps> = ({
         return [];
       }
     },
-    [savedContext, apiBaseUrl]
+    [savedContext, apiBaseUrl, showSignInPrompt]
   );
 
   // Send Email (task 036 / FR-15). Capability-gated (NFR-10, never a `hostType` conditional) via

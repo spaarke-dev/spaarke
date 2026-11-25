@@ -83,6 +83,9 @@ class AuthService implements IAuthService {
       clientId: config.clientId,
       bffApiScope: `api://${bffApiClientId}/user_impersonation`,
       proactiveRefresh: true,
+      // #1571: every acquire the provider drives (start-up, proactive refresh, a 401 retry, each BFF call) is silent;
+      // the only interactive acquire is `signIn()`, from the Sign in click.
+      requireSilentOnly: true,
       ...(config.tenantId ? { tenantId: config.tenantId } : {}),
       ...(config.redirectUri ? { redirectUri: config.redirectUri } : {}),
     });
@@ -99,26 +102,30 @@ class AuthService implements IAuthService {
 
     // Eagerly acquire (mirrors `initAuth()`'s warm-cache behavior) so
     // `isAuthenticated()`/`getAccount()` reflect a signed-in state immediately
-    // after `initialize()` when a cached account/session is available. This runs
-    // the strategy's full ladder (silent, then interactive): under NAA the
-    // interactive step goes through the Office host; on the standard popup client
-    // a popup without a user click is usually blocked, and the Sign in button retries.
+    // after `initialize()` when a cached account/session is available. SILENT only
+    // (#1571): no click led here, so no popup and no broker prompt — a popup
+    // without a user gesture is blocked on Office on the web. When nothing can be
+    // had silently the pane shows Sign in, whose click runs `signIn()`.
     await this.provider.getAccessToken();
 
     console.info(`[AuthService] Initialized via @spaarke/auth (naa=${this.strategy.isNaaActive()})`);
   }
 
   /**
-   * Trigger token acquisition. `OfficeNaaStrategy.acquire()` tries silent
-   * acquisition first, then `acquireTokenPopup` (routed through the Office
-   * broker under NAA — not a real popup; a genuine popup only under the
-   * legacy-client fallback path).
+   * Sign in from a user's click — the ONLY interactive path (#1571). Call it from
+   * the click handler, never from a timer or a load. `OfficeNaaStrategy.acquireInteractive()`
+   * tries silent acquisition first, then `acquireTokenPopup` (routed through the
+   * Office broker under NAA — not a real popup; a genuine popup only under the
+   * standard-client path). The provider then re-acquires silently, which MSAL
+   * answers from the account and token the prompt just cached.
    */
   async signIn(): Promise<void> {
-    if (!this.provider) {
+    if (!this.provider || !this.strategy) {
       throw new Error('AuthService not initialized');
     }
     this.provider.clearCache();
+    const interactive = await this.strategy.acquireInteractive();
+    if (!interactive.accessToken) return;
     await this.provider.getAccessToken();
   }
 
@@ -133,11 +140,9 @@ class AuthService implements IAuthService {
     return { authority: this.authority, naaActive: this.strategy?.isNaaActive() ?? false };
   }
 
+  /** The account the strategy signs in with (#1571: in the authority's tenant, never simply the first cached). */
   getAccount(): AccountInfo | null {
-    const msal = this.strategy?.getMsalInstance();
-    if (!msal) return null;
-    const accounts = msal.getAllAccounts();
-    return accounts.length > 0 ? (accounts[0] ?? null) : null;
+    return this.strategy?.getAccount() ?? null;
   }
 
   async getAccessToken(_scopes?: string[]): Promise<string | null> {
