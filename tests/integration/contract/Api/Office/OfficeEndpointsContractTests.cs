@@ -2382,13 +2382,14 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             var sender = new Mock<ServiceBusSender>();
             sender
                 .Setup(s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
-                .Callback((ServiceBusMessage message, CancellationToken _) =>
+                // Awaited, never blocked on: a sync-over-async wait here held a thread-pool thread inside every save request
+                // and added about 1.8 s to each test that queues a finalization.
+                .Returns(async (ServiceBusMessage message, CancellationToken _) =>
                 {
                     var messageKey = world.RecordFinalization(message.Body.ToString());
                     if (world.WorkersFinishInstantly && messageKey is not null)
-                        MarkFinalizationProcessedAsync(messageKey).GetAwaiter().GetResult();
-                })
-                .Returns(Task.CompletedTask);
+                        await MarkFinalizationProcessedAsync(messageKey);
+                });
             var serviceBus = new Mock<ServiceBusClient>();
             serviceBus.Setup(c => c.CreateSender(It.IsAny<string>())).Returns(sender.Object);
             services.RemoveAll<OfficeJobQueue>();
