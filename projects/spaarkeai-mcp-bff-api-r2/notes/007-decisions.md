@@ -79,3 +79,8 @@ rework: none task 007
 - K4: parity helper compares only `IAccessDataSource` calls (both paths run the same `DecideRunAsync`, so it proves the mapping; order parity rests on unchanged contract tests + side-by-side reading).
 - K4: no cap on `documentIds` size in the shared method (REST had none); task 030's tool sets its own.
 - PR-time items: publish delta vs fresh master; uac-r2 + ontology-r1 reviews.
+
+## Verifier pass 2 (2026-11-25, opus; MCP caller, security, tenant isolation)
+- No F findings. Every rights question runs on the caller's OBO token, with no app-only fallback; the A10 filter pins audience and tid; access cache keys are tenant+oid scoped; no static mutable state; parameter policy refuses server-owned keys in any case. 168/168 focused tests.
+- K1 fixed: the doc comment says to pass the request's own context (principal and header token are read separately).
+- K2/K4 and a task-030 hazard (run holds the request HttpContext after the tool returns, a cross-user OBO risk) were written into task 030's constraints.

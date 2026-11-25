@@ -697,6 +697,8 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     /// check's refusal; only a cancellation of <paramref name="cancellationToken"/> propagates, as on the route.</para>
     /// <para>The empty playbook id, which the route's <c>:guid</c> binding never passes, is <see cref="PlaybookRunAuthorization.PlaybookUnavailable"/>
     /// with no Dataverse call.</para>
+    /// <para>Pass the request's own context (<c>IHttpContextAccessor.HttpContext</c>) only: the principal and the bearer token
+    /// in its <c>Authorization</c> header are read separately and must come from the same validated token.</para>
     /// </summary>
     public static Task<PlaybookRunAuthorization> AuthorizePlaybookRunAsync(
         HttpContext? httpContext,
