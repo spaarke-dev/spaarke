@@ -284,6 +284,85 @@ public class OutgoingFiledEmailArchiveTests
         response.ArchivalWarning.Should().Be("Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.");
     }
 
+    // ── #2672 (DI-149): a send as user from the user's OWN mailbox (no FromMailbox) honours that user's switch ────────
+
+    private const string OptOutWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
+
+    [Fact]
+    public async Task UserOwnMailbox_NoFromMailbox_SenderOptedOut_IsNotArchived_WithTheSameWarningAsTheOtherPaths()
+    {
+        // The address comes from the signed-in user's claims; the request names no mailbox.
+        var h = Build(optedOutMailbox: UserMailbox);
+        var request = Request(SendMode.User) with { Associations = [Matter(MatterId)] };
+        request.FromMailbox.Should().BeNull();
+
+        var response = await h.Sut.SendAsync(request, UserContext());
+
+        h.ArchivedEmls.Should().BeEmpty();
+        h.UploadPaths.Should().BeEmpty();
+        response.ArchivalWarning.Should().Be(OptOutWarning);
+        h.Communications.Should().ContainSingle("the send itself and its record are unaffected by the archive switch");
+    }
+
+    [Fact]
+    public async Task UserOwnMailbox_NoFromMailbox_ArchiveToSpeTrue_SenderOptedOut_IsNotArchived()
+    {
+        var h = Build(optedOutMailbox: UserMailbox);
+
+        var response = await h.Sut.SendAsync(Request(SendMode.User) with { ArchiveToSpe = true }, UserContext());
+
+        h.UploadPaths.Should().BeEmpty();
+        response.ArchivalWarning.Should().Be(OptOutWarning);
+    }
+
+    [Fact]
+    public async Task UserOwnMailbox_NoFromMailbox_SenderOptedIn_IsArchived()
+    {
+        // Must-not-fire: another account (the shared mailbox) is opted out, the user is not; only the user's own switch counts.
+        var h = Build(optedOutMailbox: SharedMailbox);
+
+        var response = await h.Sut.SendAsync(Request(SendMode.User) with { Associations = [Matter(MatterId)] }, UserContext());
+
+        h.ArchivedEmls.Should().ContainSingle();
+        response.ArchivalWarning.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UserOwnMailbox_NoFromMailbox_NoAccountRow_IsArchived_AsToday()
+    {
+        // Must-not-fire: no account row for the user means the default (archive), as on the app-only path.
+        var h = Build(accountAddresses: [SharedMailbox]);
+
+        var response = await h.Sut.SendAsync(Request(SendMode.User) with { Associations = [Matter(MatterId)] }, UserContext());
+
+        h.ArchivedEmls.Should().ContainSingle();
+        response.ArchivalWarning.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UserOwnMailbox_NoFromMailbox_AccountReadFails_IsStillArchived()
+    {
+        // Must-not-fire: a failed account read defaults to archive (the lookup logs a warning and the send is unaffected).
+        var h = Build(accountReadFails: true);
+
+        var response = await h.Sut.SendAsync(Request(SendMode.User) with { Associations = [Matter(MatterId)] }, UserContext());
+
+        h.ArchivedEmls.Should().ContainSingle();
+        response.ArchivalWarning.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UserOwnMailbox_NoFromMailbox_OptedOut_RecordLessSend_IsNotArchivedAndNoLookupIsNeeded()
+    {
+        // Must-not-fire: a send that is not archived at all (no record, no ArchiveToSpe) gets no archival warning from the switch.
+        var h = Build(optedOutMailbox: UserMailbox);
+
+        var response = await h.Sut.SendAsync(Request(SendMode.User), UserContext());
+
+        h.UploadPaths.Should().BeEmpty();
+        response.ArchivalWarning.Should().BeNull();
+    }
+
     [Theory]
     [InlineData(SendMode.SharedMailbox)]
     [InlineData(SendMode.User)]
@@ -628,7 +707,8 @@ public class OutgoingFiledEmailArchiveTests
 
     private static Harness Build(
         Entity? sourceCommunication = null, string? optedOutMailbox = null, bool uploadFails = false, Entity? targetThread = null,
-        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? coreAncestors = null)
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? coreAncestors = null,
+        string[]? accountAddresses = null, bool accountReadFails = false)
     {
         var options = new CommunicationOptions
         {
@@ -670,7 +750,7 @@ public class OutgoingFiledEmailArchiveTests
             new ICommunicationArchiver[] { new EmailArchiver(new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>())) });
 
         // The send-enabled accounts (the cache answers them): the opted-out mailbox has ArchiveOutgoingOptIn = false.
-        var accounts = new[] { SharedMailbox, UserMailbox }.Select(address => new CommunicationAccount
+        var accounts = (accountAddresses ?? new[] { SharedMailbox, UserMailbox }).Select(address => new CommunicationAccount
         {
             Id = Guid.NewGuid(),
             Name = address,
@@ -679,9 +759,19 @@ public class OutgoingFiledEmailArchiveTests
             ArchiveOutgoingOptIn = !string.Equals(address, optedOutMailbox, StringComparison.OrdinalIgnoreCase),
         }).ToArray();
         var accountCache = new Mock<IDistributedCache>();
-        accountCache
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(accounts)));
+        if (accountReadFails)
+        {
+            // The cache read and the Dataverse fallback both fault (the account service answers "no accounts").
+            accountCache
+                .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("account read failed"));
+        }
+        else
+        {
+            accountCache
+                .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(accounts)));
+        }
         var accountService = new CommunicationAccountService(
             Mock.Of<IDataverseService>(), Mock.Of<IDataverseService>(), accountCache.Object, Mock.Of<ILogger<CommunicationAccountService>>());
         var senderValidator = new ApprovedSenderValidator(
