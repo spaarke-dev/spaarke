@@ -75,6 +75,11 @@ export interface CatalogJoin {
   path: string;
   dateOnlyFields: string[];
   authorableFields: string[];
+  /**
+   * Task 210 (DI-169): each offered column's Dataverse display name, by logical name. Shown to the admin; the value written into the rule
+   * stays the logical name. Absent from a BFF older than the field, when the column shows its logical name.
+   */
+  fieldLabels?: Record<string, string>;
 }
 
 export interface CatalogSubject {
@@ -83,6 +88,8 @@ export interface CatalogSubject {
   thresholdFields: CatalogThresholdField[];
   joins: CatalogJoin[];
   authorableFields: string[];
+  /** Task 210 (DI-169): each offered column's display name, by logical name (see `CatalogJoin.fieldLabels`). */
+  fieldLabels?: Record<string, string>;
 }
 
 export interface CatalogOperators {

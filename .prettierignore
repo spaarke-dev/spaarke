@@ -63,3 +63,6 @@ package-lock.json
 *.eot
 *.ttf
 *.svg
+
+# Generated reference data: the bytes are owned by scripts/seed-data/reference/Export-ReferenceData.ps1 so a re-export diffs cleanly
+scripts/seed-data/reference/*.json

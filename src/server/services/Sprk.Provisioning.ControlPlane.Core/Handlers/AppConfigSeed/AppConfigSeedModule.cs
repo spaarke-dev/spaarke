@@ -121,6 +121,15 @@ public static class AppConfigSeedModule
             options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
             logger: sp.GetRequiredService<ILogger<DataverseWebApiRecordTypeSeeder>>()));
 
+        // (0b) Reference data — ISS-039. Tier 1 product configuration (event types, agreement types,
+        // triage categories) created with their fixed primary keys; drift is reported, never overwritten.
+        // Independent of the other scopes (no dependency on, or by, them).
+        services.AddHttpClient(DataverseWebApiReferenceDataSeeder.HttpClientName);
+        services.AddScoped<IAppConfigSeeder>(sp => new DataverseWebApiReferenceDataSeeder(
+            httpClient: sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiReferenceDataSeeder.HttpClientName),
+            options: sp.GetRequiredService<IOptions<AppConfigSeedOptions>>(),
+            logger: sp.GetRequiredService<ILogger<DataverseWebApiReferenceDataSeeder>>()));
+
         // (1) DataGrid — task 151 (Wave G-5) ported from PowerShellAppConfigSeeder
         // (shell-out to scripts/seed-reconciliation-gridconfig.ps1, now
         // RETIRED + unregistered — see PowerShellAppConfigSeeder.cs) to a

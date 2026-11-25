@@ -155,7 +155,7 @@ The export text-hardening detail was reported to the owner privately, not in the
 **F2 fixed.** The Date Only export assertion moved to `dateOnlyColumns.tz.test.ts` (America/New_York environment), so a UTC CI runner cannot pass it trivially; it also asserts the result is not the previous day.
 
 **Known limits (K):**
-- An exported date is the viewer's locale text (owner decision "as shown"), so a spreadsheet set to another locale may read a day/month date differently (for example `10/2/2026`). Raised with the owner: keep as shown, or write Date Only values as `yyyy-mm-dd`.
+- An exported date is the viewer's locale text (owner decision "as shown"), so a spreadsheet set to another locale may read a day/month date differently (for example `10/2/2026`). Raised with the owner, who decided 2026-11-24 to keep dates as shown (no `yyyy-mm-dd` for Date Only values). Accepted limit.
 - A phone number such as `+1 (555) 123-4567` is exported with a leading apostrophe.
 - The task 032 test helper `applyTextFilter` reopens the filter popover (at most 3 times), so no test pins "the first open stays open".
 - Further hardening notes were reported to the owner privately.

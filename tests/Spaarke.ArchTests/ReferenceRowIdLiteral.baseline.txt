@@ -1,0 +1,10 @@
+# Baseline for ReferenceRowIdLiteralGuardTests (ISS-039).
+# One line per hard-coded Dataverse dev row id (pattern xxxxxxxx-xxxx-f011-8406-xxxxxxxxxxxx) in product code that is NOT a primary key
+# in scripts/seed-data/reference/*.json (so a customer stamp does not receive that row), with the reason it is tolerated:
+#   <repo-relative path> | <id> | <reason>
+# The list only shrinks. Fix an entry (seed the row, or stop hard-coding the id), then DELETE its line. Never add a line without an
+# owner decision recorded beside the reason.
+
+src/client/shared/Spaarke.UI.Components/src/hooks/useAiSummary.ts | 18cf3cc8-02ec-f011-8406-7c1e520aa4df | Document Profile playbook (PB-002): AI content, not a reference table. Needs seeding by H12a, tracked as L56 (customer-provisioning-orchestration-r1 t186-acme-run-log.md)
+src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/summarize-document-for-chat.playbook.json | 3a8daf85-36da-f011-8406-7ced8d1dc988 | The "Summarize" analysis-action row, named in a $comment only (the playbook resolves it by name). AI content, tracked as L56
+src/solutions/EventsPage/src/config/eventConfig.ts | 348f8195-99ff-f011-8406-7c1e525abd8b | "Communication" event type: no row with this id exists on spaarkedev1 (read 2026-11-24; dev has Email, Phone Call, Teams Message, Text Message, Postal Mail instead), so the config entry is stale. Owner to retire the entry or add the row; reported with ISS-039
