@@ -2661,7 +2661,8 @@ public partial class SignalReevaluationJobTests
 
         /// <summary>Task 143: the reconciler's conditional owner write, over <see cref="Org"/>.</summary>
         public ReownWebApi ReownApi { get; }
-        public IDistributedCache Cache { get; } = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        /// <summary>The job's distributed cache (a <see cref="MemoryDistributedCache"/> unless a test passes its own, task 224).</summary>
+        public IDistributedCache Cache { get; }
         public List<LogEntry> Log { get; } = new();
         public SignalWriter Writer { get; }
         public SignalEvaluator Evaluator { get; }
@@ -2672,8 +2673,9 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 153: the real Decision Record writer, over the same two seams (its creates land in <see cref="WriterOrg.DecisionRecordRows"/>).</summary>
         public DecisionRecordWriter Records { get; }
 
-        public Harness(DateTimeOffset? runAt = null, string? writerClientId = null)
+        public Harness(DateTimeOffset? runAt = null, string? writerClientId = null, IDistributedCache? cache = null)
         {
+            Cache = cache ?? new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
             Clock = new FakeTimeProvider(runAt ?? RunAt);
             Sysadmin.Org = Org;
             Org.Now = () => Clock.GetUtcNow().UtcDateTime;
@@ -3524,6 +3526,8 @@ public partial class SignalReevaluationJobTests
                     // Task 217: a LIKE as Dataverse evaluates it on a string column: % any run, _ one character, case-insensitive; a null
                     // never matches.
                     ConditionOperator.Like => value is string text && LikeHolds(text, (string)c.Values[0]),
+                    // Task 224: an id cursor (the primary key greater than the last id read), ordered as Paged orders the rows.
+                    ConditionOperator.GreaterThan when c.AttributeName == row.LogicalName + "id" => row.Id.CompareTo((Guid)c.Values[0]) > 0,
                     _ => throw new NotSupportedException($"Operator {c.Operator} on {c.AttributeName} is not modelled by the joined read."),
                 };
             }).Concat(filter.Filters.Select(f => Holds(row, f))).ToList();
