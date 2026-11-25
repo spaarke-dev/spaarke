@@ -25,9 +25,9 @@ namespace Sprk.Bff.Api.Services.Ai.PlaybookRuns;
 /// class needs no interface of its own (ADR-010).
 /// </para>
 /// <para>
-/// <b>ADR-015.</b> Only identifiers, timings, counts, tokens, the redacted error text the REST run routes already return,
-/// and a summary built from counts are written. Document content, prompts, the user's instructions and node output
-/// (text, structured data, tool results, warnings, previews, confidence) are never written.
+/// <b>ADR-015.</b> Only identifiers, timings, counts, tokens, a node's numeric confidence score, the redacted error text
+/// the REST run routes already return, and a summary built from counts are written. Document content, prompts, the
+/// user's instructions and node output (text, structured data, tool results, warnings, previews) are never written.
 /// </para>
 /// <para>
 /// Every method throws on failure. The caller decides what a failure means (for a write: log it and carry on).
@@ -61,6 +61,7 @@ public sealed class PlaybookRunRecordStore
     internal const string DurationColumn = "sprk_durationms";
     internal const string TokensInColumn = "sprk_tokensin";
     internal const string TokensOutColumn = "sprk_tokensout";
+    internal const string ConfidenceColumn = "sprk_confidence";
 
     internal const string PlaybookEntity = "sprk_analysisplaybook";
     internal const string NodeEntity = "sprk_playbooknode";
@@ -72,6 +73,11 @@ public sealed class PlaybookRunRecordStore
     private const int SummaryMaxLength = 4000;
     private const int ErrorMessageMaxLength = 100000;
 
+    /// <summary><c>sprk_confidence</c> is a Decimal column, precision 10, range ±1000 (Add-PlaybookRunColumns.ps1).</summary>
+    private const int ConfidenceDecimals = 10;
+
+    private const double ConfidenceMaxMagnitude = 1000d;
+
     private static readonly JsonSerializerOptions InputContextJson = new(JsonSerializerDefaults.Web);
 
     private readonly IGenericEntityService _dataverse;
@@ -81,8 +87,14 @@ public sealed class PlaybookRunRecordStore
         _dataverse = dataverse;
     }
 
-    /// <summary>Creates the run's <c>sprk_playbookrun</c> row, keyed by the run id.</summary>
-    public Task CreateRunAsync(PlaybookRunRecord run, CancellationToken cancellationToken)
+    /// <summary>
+    /// Creates or updates the run's <c>sprk_playbookrun</c> row, keyed by the run id (an upsert on the primary key).
+    /// </summary>
+    /// <remarks>
+    /// An upsert, so every write carries the whole run and any write can be repeated: a final write still lands when the
+    /// start write failed, timed out after Dataverse committed it, or was never made.
+    /// </remarks>
+    public Task WriteRunAsync(PlaybookRunRecord run, CancellationToken cancellationToken)
     {
         var entity = new Entity(RunEntity, run.RunId)
         {
@@ -112,19 +124,7 @@ public sealed class PlaybookRunRecordStore
             entity[RegardingRecordIdColumn] = regarding.RecordId.ToString("D");
         }
 
-        return _dataverse.CreateAsync(entity, cancellationToken);
-    }
-
-    /// <summary>Writes the run's current state (status, completion, error, summary) onto its existing row.</summary>
-    public Task UpdateRunAsync(PlaybookRunRecord run, CancellationToken cancellationToken)
-    {
-        var fields = new Dictionary<string, object>();
-        foreach (var (column, value) in RunStateFields(run))
-        {
-            fields[column] = value;
-        }
-
-        return _dataverse.UpdateAsync(RunEntity, run.RunId, fields, cancellationToken);
+        return _dataverse.UpsertAsync(entity, cancellationToken);
     }
 
     /// <summary>Creates one <c>sprk_playbooknoderun</c> row for a node the run reached.</summary>
@@ -160,6 +160,11 @@ public sealed class PlaybookRunRecordStore
             entity[TokensOutColumn] = tokensOut;
         }
 
+        if (node.Confidence is { } confidence && double.IsFinite(confidence) && Math.Abs(confidence) <= ConfidenceMaxMagnitude)
+        {
+            entity[ConfidenceColumn] = Math.Round((decimal)confidence, ConfidenceDecimals);
+        }
+
         var error = ProblemDetailsHelper.Redact(node.ErrorMessage);
         if (!string.IsNullOrEmpty(error))
         {
@@ -170,10 +175,12 @@ public sealed class PlaybookRunRecordStore
     }
 
     /// <summary>
-    /// Reads a stored run and its node rows, or <see langword="null"/> when no row has this run id. Performs no owner
-    /// check: the caller compares <see cref="StoredPlaybookRun.StartedByOid"/> with its caller.
+    /// Reads a stored run and its node rows for the caller who started it: <see langword="null"/> when no row has this
+    /// run id, or when the run's starter (<c>sprk_triggeredby</c> → <c>systemuser.azureactivedirectoryobjectid</c>) is
+    /// not <paramref name="callerOid"/> or is unknown. The owner check runs before the node rows are read, so another
+    /// caller's request costs no node query.
     /// </summary>
-    public async Task<StoredPlaybookRun?> GetRunAsync(Guid runId, CancellationToken cancellationToken)
+    public async Task<StoredPlaybookRun?> GetOwnedRunAsync(Guid runId, string callerOid, CancellationToken cancellationToken)
     {
         var runQuery = new QueryExpression(RunEntity)
         {
@@ -193,12 +200,16 @@ public sealed class PlaybookRunRecordStore
 
         var startedByOid = await ReadTriggeredByOidAsync(
             row.GetAttributeValue<EntityReference>(TriggeredByColumn), cancellationToken).ConfigureAwait(false);
+        if (!IsSameOid(startedByOid, callerOid))
+        {
+            return null;
+        }
 
         var nodeQuery = new QueryExpression(NodeRunEntity)
         {
             ColumnSet = new ColumnSet(
                 NameColumn, NodeRunNodeColumn, StatusColumn, SequenceColumn, StartedOnColumn, CompletedOnColumn,
-                DurationColumn, TokensInColumn, TokensOutColumn, ErrorMessageColumn),
+                DurationColumn, TokensInColumn, TokensOutColumn, ConfidenceColumn, ErrorMessageColumn),
         };
         nodeQuery.Criteria.AddCondition(NodeRunRunColumn, ConditionOperator.Equal, runId);
         nodeQuery.AddOrder(SequenceColumn, OrderType.Ascending);
@@ -220,6 +231,7 @@ public sealed class PlaybookRunRecordStore
                 DurationMs: nodeRow.GetAttributeValue<int?>(DurationColumn),
                 TokensIn: nodeRow.GetAttributeValue<int?>(TokensInColumn),
                 TokensOut: nodeRow.GetAttributeValue<int?>(TokensOutColumn),
+                Confidence: nodeRow.GetAttributeValue<decimal?>(ConfidenceColumn) is { } confidence ? (double)confidence : null,
                 ErrorMessage: nodeRow.GetAttributeValue<string>(ErrorMessageColumn)));
         }
 
@@ -240,6 +252,10 @@ public sealed class PlaybookRunRecordStore
             StartedByOid: startedByOid,
             Nodes: nodes);
     }
+
+    /// <summary>Same Entra object id: both parse as GUIDs and are equal (case and format insensitive).</summary>
+    internal static bool IsSameOid(string? storedOid, string callerOid) =>
+        Guid.TryParse(storedOid, out var stored) && Guid.TryParse(callerOid, out var caller) && stored == caller;
 
     private async Task<string?> ReadTriggeredByOidAsync(EntityReference? triggeredBy, CancellationToken cancellationToken)
     {
@@ -394,6 +410,7 @@ public sealed record PlaybookNodeRunRecord(
     long? DurationMs,
     int? TokensIn,
     int? TokensOut,
+    double? Confidence,
     string? ErrorMessage);
 
 /// <summary>A node row read back from <c>sprk_playbooknoderun</c>.</summary>
@@ -405,13 +422,14 @@ public sealed record StoredPlaybookNodeRun(
     int? DurationMs,
     int? TokensIn,
     int? TokensOut,
+    double? Confidence,
     string? ErrorMessage);
 
 /// <summary>
 /// A run read back from Dataverse, mapped to the same response types the in-memory run produces
 /// (<see cref="PlaybookRunStatus"/>, <see cref="PlaybookRunDetail"/>). Fields the store never holds (ADR-015) come back
-/// null: <see cref="PlaybookRunStatus.Outputs"/>, <see cref="NodeRunDetail.OutputPreview"/>,
-/// <see cref="NodeRunDetail.Confidence"/> and <see cref="PlaybookRunDetail.UserContext"/>.
+/// null: <see cref="PlaybookRunStatus.Outputs"/>, <see cref="NodeRunDetail.OutputPreview"/> and
+/// <see cref="PlaybookRunDetail.UserContext"/>.
 /// </summary>
 public sealed record StoredPlaybookRun(
     Guid RunId,
@@ -494,7 +512,7 @@ public sealed record StoredPlaybookRun(
                     DurationMs = n.DurationMs,
                     TokensIn = n.TokensIn,
                     TokensOut = n.TokensOut,
-                    Confidence = null,
+                    Confidence = n.Confidence,
                     ErrorMessage = ProblemDetailsHelper.Redact(n.ErrorMessage),
                     OutputPreview = null,
                 })

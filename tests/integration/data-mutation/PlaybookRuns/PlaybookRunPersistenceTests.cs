@@ -77,7 +77,9 @@ public sealed class PlaybookRunPersistenceTests
 
         var runId = await RunAsync(service);
 
-        var created = _dataverse.Creates.Single(e => e.LogicalName == "sprk_playbookrun");
+        var runWrites = _dataverse.Writes.Where(e => e.LogicalName == "sprk_playbookrun").ToList();
+        runWrites.Should().HaveCount(2, "one write at start, one at completion");
+        var created = runWrites[0];
         created.Id.Should().Be(runId);
         created.GetAttributeValue<OptionSetValue>("sprk_status").Value.Should().Be(1, "the row is created at start, Running");
         created.GetAttributeValue<EntityReference>("sprk_triggeredby").Id.Should().Be(CallerSystemUserId);
@@ -99,7 +101,8 @@ public sealed class PlaybookRunPersistenceTests
         nodes.Should().OnlyContain(n =>
             n.GetAttributeValue<EntityReference>("sprk_playbookrunid").Id == runId
             && n.GetAttributeValue<OptionSetValue>("sprk_status").Value == 2
-            && n.GetAttributeValue<DateTime>("sprk_startedon") <= n.GetAttributeValue<DateTime>("sprk_completedon"));
+            && n.GetAttributeValue<DateTime>("sprk_startedon") <= n.GetAttributeValue<DateTime>("sprk_completedon")
+            && n.GetAttributeValue<decimal?>("sprk_confidence") == 0.87m);
     }
 
     [Fact]
@@ -164,13 +167,26 @@ public sealed class PlaybookRunPersistenceTests
 
         storedStatus.Should().NotBeNull();
         storedDetail.Should().NotBeNull();
-
-        // ADR-015: node output is never stored, so a stored run has no outputs; every other byte is the same.
-        storedStatus!.Outputs.Should().BeNull();
-        Json(storedStatus, without: "outputs").Should().Be(Json(inMemoryStatus!, without: "outputs"));
-        Json(storedDetail!, orderNodesBy: "outputVariable").Should().Be(Json(inMemoryDetail!, orderNodesBy: "outputVariable"));
-        storedStatus.State.Should().Be(PlaybookRunState.Completed);
+        storedStatus!.State.Should().Be(PlaybookRunState.Completed);
         storedDetail!.NodeDetails.Should().HaveCount(2);
+
+        // The documented differences (task-005 notes §4), asserted explicitly:
+        // (1) ADR-015: node output is never stored, so a stored run has no outputs.
+        storedStatus.Outputs.Should().BeNull();
+        inMemoryStatus!.Outputs.Should().NotBeNull();
+        // (2) Dataverse keeps DateTime to the second, so the run's timestamps are the in-memory ones truncated, and the
+        //     durations derived from them are computed from the truncated values.
+        storedStatus.StartedAt.Should().Be(ToSecond(inMemoryStatus.StartedAt));
+        storedStatus.CompletedAt.Should().Be(ToSecond(inMemoryStatus.CompletedAt!.Value));
+        storedStatus.Metrics!.Duration.Should().Be(storedStatus.CompletedAt!.Value - storedStatus.StartedAt);
+        storedDetail.DurationMs.Should().Be((long)(storedDetail.CompletedAt!.Value - storedDetail.StartedAt).TotalMilliseconds);
+
+        // Every other byte of the route bodies is the same (node durations, tokens and confidence are stored exactly).
+        Json(storedStatus, without: StoredTimeFields.Append("outputs"))
+            .Should().Be(Json(inMemoryStatus, without: StoredTimeFields.Append("outputs")));
+        Json(storedDetail, without: StoredTimeFields, orderNodesBy: "outputVariable")
+            .Should().Be(Json(inMemoryDetail!, without: StoredTimeFields, orderNodesBy: "outputVariable"));
+        storedDetail.NodeDetails.Should().OnlyContain(n => n.Confidence == 0.87 && n.DurationMs == 1234);
     }
 
     [Fact]
@@ -206,9 +222,26 @@ public sealed class PlaybookRunPersistenceTests
 
         var otherReader = NewService(_dataverse, reader: readerOid, readerHasHttpContext: readerOid is not null);
 
+        var nodeQueriesBefore = _dataverse.QueriedEntities.Count(e => e == "sprk_playbooknoderun");
+
         (await otherReader.GetRunStatusAsync(runId, CancellationToken.None)).Should().BeNull(
             "a stored run is returned only to the caller who started it (the route ledger's CallerScopedOnly basis)");
         (await otherReader.GetRunDetailAsync(runId, CancellationToken.None)).Should().BeNull();
+        _dataverse.QueriedEntities.Count(e => e == "sprk_playbooknoderun").Should().Be(
+            nodeQueriesBefore, "the owner check runs before the node rows are read");
+    }
+
+    [Fact]
+    public async Task GetRunStatusAndDetail_StoreReadFails_Throw_SoTheRouteAnswers500NotA404()
+    {
+        var failingReads = new InMemoryDataverse { FailReads = true };
+        var service = NewService(failingReads, reader: CallerOid);
+
+        var status = () => service.GetRunStatusAsync(Guid.NewGuid(), CancellationToken.None);
+        var detail = () => service.GetRunDetailAsync(Guid.NewGuid(), CancellationToken.None);
+
+        (await status.Should().ThrowAsync<InvalidOperationException>()).WithMessage("playbook_run_read_failed*");
+        (await detail.Should().ThrowAsync<InvalidOperationException>()).WithMessage("playbook_run_read_failed*");
     }
 
     // ── Fail-safe ───────────────────────────────────────────────────────────────────────────────────────────
@@ -233,7 +266,35 @@ public sealed class PlaybookRunPersistenceTests
             e.Level == LogLevel.Warning
             && Equals(e.Properties.GetValueOrDefault("Outcome"), "playbook_run_persist_failed")
             && Equals(e.Properties.GetValueOrDefault("RunId"), withFailingStore.RunId));
-        failing.WriteAttempts.Should().Be(1, "once the run row cannot be created, the run's later writes are skipped");
+        failing.WriteAttempts.Should().Be(
+            2, "the start write fails, so the node rows are skipped; the final upsert is still attempted, once");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StartWriteCommitsButNeverReturns_RunIsBoundedAndUnchanged_AndTheFinalUpsertLands()
+    {
+        TwoSequentialNodes();
+        var baseline = await RunCollectingAsync(NewService(dataverse: null));
+
+        // Dataverse commits the start write but its call never completes (a hung client that ignores its token).
+        var hanging = new InMemoryDataverse { HangAfterFirstRunWrite = true };
+        var logger = new CapturingLogger();
+        var service = NewService(hanging, logger: logger);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var run = await RunCollectingAsync(service);
+        clock.Stop();
+
+        run.Events.Select(e => (e.Type, e.NodeId)).Should().Equal(baseline.Events.Select(e => (e.Type, e.NodeId)));
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(20), "each record call is bounded at 5 s even if Dataverse ignores the token");
+        logger.Entries.Should().Contain(e =>
+            Equals(e.Properties.GetValueOrDefault("Outcome"), "playbook_run_persist_failed")
+            && Equals(e.Properties.GetValueOrDefault("ErrorType"), nameof(TimeoutException)));
+
+        var row = hanging.Row("sprk_playbookrun", run.RunId);
+        row.GetAttributeValue<OptionSetValue>("sprk_status").Value.Should().Be(
+            2, "the final write is an upsert, so it lands on the row the timed-out start write committed");
+        row.GetAttributeValue<DateTime?>("sprk_completedon").Should().NotBeNull();
+        hanging.Rows("sprk_playbooknoderun").Should().BeEmpty("node rows are skipped once the start write is not known to have landed");
     }
 
     // ── Harness ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -305,6 +366,7 @@ public sealed class PlaybookRunPersistenceTests
                 ctx.Node.Id,
                 ctx.Node.OutputVariable,
                 data: null,
+                confidence: 0.87,
                 metrics: new NodeExecutionMetrics
                 {
                     StartedAt = started,
@@ -334,13 +396,30 @@ public sealed class PlaybookRunPersistenceTests
         SprkExecutortype = ExecutorType.AiAnalysis,
     };
 
-    /// <summary>The route body (web JSON defaults, as <c>Results.Ok</c>), with one property removed or node details ordered.</summary>
-    private static string Json(object value, string? without = null, string? orderNodesBy = null)
+    /// <summary>Run-level fields a stored run holds to the second (Dataverse DateTime) or derives from those.</summary>
+    private static readonly string[] StoredTimeFields = ["startedAt", "completedAt", "durationMs", "metrics.duration"];
+
+    private static DateTimeOffset ToSecond(DateTimeOffset value) =>
+        new(value.Ticks - (value.Ticks % TimeSpan.TicksPerSecond), value.Offset);
+
+    /// <summary>
+    /// The route body (web JSON defaults, as <c>Results.Ok</c>), with properties removed (a dotted path reaches one level
+    /// into an object) or node details ordered.
+    /// </summary>
+    private static string Json(object value, IEnumerable<string>? without = null, string? orderNodesBy = null)
     {
         var node = JsonSerializer.SerializeToNode(value, value.GetType(), WebJson)!.AsObject();
-        if (without is not null)
+        foreach (var path in without ?? [])
         {
-            node.Remove(without);
+            var parts = path.Split('.');
+            if (parts.Length == 1)
+            {
+                node.Remove(parts[0]);
+            }
+            else if (node[parts[0]] is JsonObject inner)
+            {
+                inner.Remove(parts[1]);
+            }
         }
 
         if (orderNodesBy is not null && node["nodeDetails"] is JsonArray details)
@@ -358,19 +437,28 @@ public sealed class PlaybookRunPersistenceTests
 
     /// <summary>
     /// The Dataverse seam: an in-memory row store that interprets the store's <see cref="QueryExpression"/> conditions
-    /// (Equal on a column, a lookup, or the primary key) and honours a caller-set primary key on create, as Dataverse does.
-    /// It keeps values as written (real Dataverse keeps DateTime to the second — task-005 notes §4).
+    /// (Equal on a column, a lookup, or the primary key), honours a caller-set primary key on create and upserts on the
+    /// primary key, as Dataverse does. Like Dataverse it keeps a DateTime to the second (task-005 notes §4).
     /// </summary>
     private sealed class InMemoryDataverse : IGenericEntityService
     {
         private readonly Dictionary<(string Entity, Guid Id), Entity> _rows = new();
         private readonly object _gate = new();
+        private bool _runWriteSeen;
 
         public bool FailWrites { get; init; }
 
+        public bool FailReads { get; init; }
+
+        /// <summary>The first <c>sprk_playbookrun</c> write commits, then its call never completes (ignores its token).</summary>
+        public bool HangAfterFirstRunWrite { get; init; }
+
         public int WriteAttempts { get; private set; }
 
-        public List<Entity> Creates { get; } = new();
+        /// <summary>Every successful write, as sent (creates and upserts), in order.</summary>
+        public List<Entity> Writes { get; } = new();
+
+        public List<string> QueriedEntities { get; } = new();
 
         public void Seed(Entity row) => _rows[(row.LogicalName, row.Id)] = row;
 
@@ -378,7 +466,13 @@ public sealed class PlaybookRunPersistenceTests
 
         public IReadOnlyList<Entity> Rows(string entity) => _rows.Values.Where(r => r.LogicalName == entity).ToList();
 
-        public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
+        public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) =>
+            Write(entity, upsert: false).ContinueWith(t => t.Result.Id, TaskScheduler.Default);
+
+        public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) =>
+            Write(entity, upsert: true);
+
+        private Task<(Guid Id, bool Created)> Write(Entity entity, bool upsert)
         {
             lock (_gate)
             {
@@ -389,41 +483,34 @@ public sealed class PlaybookRunPersistenceTests
                 }
 
                 var id = entity.Id != Guid.Empty ? entity.Id : Guid.NewGuid();
-                var row = new Entity(entity.LogicalName, id);
-                foreach (var attribute in entity.Attributes)
+                var created = !_rows.TryGetValue((entity.LogicalName, id), out var row);
+                if (!created && !upsert)
                 {
-                    row[attribute.Key] = attribute.Value;
+                    throw new InvalidOperationException("Duplicate key (test).");
                 }
 
-                _rows[(entity.LogicalName, id)] = row;
+                row ??= new Entity(entity.LogicalName, id);
                 var snapshot = new Entity(entity.LogicalName, id);
                 foreach (var attribute in entity.Attributes)
                 {
-                    snapshot[attribute.Key] = attribute.Value;
+                    var stored = attribute.Value is DateTime dateTime
+                        ? new DateTime(dateTime.Ticks - (dateTime.Ticks % TimeSpan.TicksPerSecond), dateTime.Kind)
+                        : attribute.Value;
+                    row[attribute.Key] = stored;
+                    snapshot[attribute.Key] = stored;
                 }
 
-                Creates.Add(snapshot);
-                return Task.FromResult(id);
-            }
-        }
+                _rows[(entity.LogicalName, id)] = row;
+                Writes.Add(snapshot);
 
-        public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
-        {
-            lock (_gate)
-            {
-                WriteAttempts++;
-                if (FailWrites)
+                if (HangAfterFirstRunWrite && entity.LogicalName == "sprk_playbookrun" && !_runWriteSeen)
                 {
-                    throw new InvalidOperationException("Dataverse unavailable (test).");
+                    _runWriteSeen = true;
+                    return new TaskCompletionSource<(Guid, bool)>().Task;
                 }
 
-                var row = _rows[(entityLogicalName, id)];
-                foreach (var (key, value) in fields)
-                {
-                    row[key] = value;
-                }
-
-                return Task.CompletedTask;
+                _runWriteSeen |= entity.LogicalName == "sprk_playbookrun";
+                return Task.FromResult((id, created));
             }
         }
 
@@ -431,6 +518,12 @@ public sealed class PlaybookRunPersistenceTests
         {
             lock (_gate)
             {
+                QueriedEntities.Add(query.EntityName);
+                if (FailReads)
+                {
+                    throw new InvalidOperationException("Dataverse unavailable (test).");
+                }
+
                 var matches = _rows.Values
                     .Where(r => r.LogicalName == query.EntityName)
                     .Where(r => query.Criteria.Conditions.All(c => Matches(r, query.EntityName, c)))
@@ -463,7 +556,7 @@ public sealed class PlaybookRunPersistenceTests
 
         // ── Not used by PlaybookRunRecordStore ──
         public Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotImplementedException();
         public Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default) => throw new NotImplementedException();

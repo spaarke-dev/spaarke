@@ -16,6 +16,7 @@
         sprk_startedon            DateTime
         sprk_completedon          DateTime
         sprk_sequence             Integer >= 0  start order within the run
+        sprk_confidence           Decimal(10)   the node's numeric confidence score, range +-1000 (not content)
 
     Additive and idempotent: an existing column is checked for the expected type and skipped; a column that exists
     with a different type stops the script. Nothing is deleted. Publishes the two tables at the end.
@@ -139,12 +140,26 @@ function New-IntegerColumn([string]$Name, [string]$Display, [string]$Description
     }
 }
 
+function New-DecimalColumn([string]$Name, [string]$Display, [string]$Description) {
+    return @{
+        "@odata.type"   = "Microsoft.Dynamics.CRM.DecimalAttributeMetadata"
+        "SchemaName"    = $Name
+        "RequiredLevel" = @{ "Value" = "None" }
+        "Precision"     = 10
+        "MinValue"      = -1000
+        "MaxValue"      = 1000
+        "DisplayName"   = New-Label $Display
+        "Description"   = New-Label $Description
+    }
+}
+
 # Expected AttributeType per definition @odata.type, for the idempotency type check.
 $ExpectedType = @{
     "Microsoft.Dynamics.CRM.StringAttributeMetadata"   = "String"
     "Microsoft.Dynamics.CRM.MemoAttributeMetadata"     = "Memo"
     "Microsoft.Dynamics.CRM.DateTimeAttributeMetadata" = "DateTime"
     "Microsoft.Dynamics.CRM.IntegerAttributeMetadata"  = "Integer"
+    "Microsoft.Dynamics.CRM.DecimalAttributeMetadata"  = "Decimal"
 }
 
 $Columns = @(
@@ -156,6 +171,7 @@ $Columns = @(
     @{ Entity = "sprk_playbooknoderun"; Def = New-DateTimeColumn "sprk_startedon" "Started On" "When the node started (FR-13)." }
     @{ Entity = "sprk_playbooknoderun"; Def = New-DateTimeColumn "sprk_completedon" "Completed On" "When the node finished (FR-13)." }
     @{ Entity = "sprk_playbooknoderun"; Def = New-IntegerColumn "sprk_sequence" "Sequence" "Start order of the node within its run, from 1 (FR-13)." }
+    @{ Entity = "sprk_playbooknoderun"; Def = New-DecimalColumn "sprk_confidence" "Confidence" "The node's numeric confidence score, as the run detail returns it; a number, never content (FR-13)." }
 )
 
 Write-Host "Environment: $EnvironmentUrl   Solution: $SolutionName   WhatIf: $WhatIf" -ForegroundColor Cyan

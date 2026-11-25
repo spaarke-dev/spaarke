@@ -296,7 +296,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             // FR-13 (task 005): the run's final state reaches its durable record before the stream ends, so a client
             // that waits for the end of the stream reads the final state. Never throws (see PersistRunAsync).
-            await PersistRunAsync(context, "complete");
+            await PersistRunAsync(context, "complete", isFinal: true);
             writer.Complete();
         }
     }
@@ -355,7 +355,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             // FR-13 (task 005): the run's final state reaches its durable record before the stream ends, so a client
             // that waits for the end of the stream reads the final state. Never throws (see PersistRunAsync).
-            await PersistRunAsync(context, "complete");
+            await PersistRunAsync(context, "complete", isFinal: true);
             writer.Complete();
         }
     }
@@ -660,8 +660,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// starter get <c>null</c>, which the routes already answer with the same 404 as an unknown run id.
     /// </para>
     /// <para>
-    /// <b>Fail-safe.</b> A failed or slow read is logged with <see cref="ReadFailedOutcome"/> and reads as not found —
-    /// the answer every cross-request status read gave before FR-13.
+    /// <b>Failure.</b> A failed or timed-out read throws (<see cref="ReadFailedOutcome"/> in the message), which the run
+    /// routes answer with their existing 500. It does not read as not found: a 404 is a terminal answer that would tell
+    /// the owner, during a Dataverse fault, that their run does not exist. The read fails before ownership or existence
+    /// is known, so the 500 says nothing about either.
     /// </para>
     /// </remarks>
     private async Task<PlaybookRuns.StoredPlaybookRun?> ReadOwnedStoredRunAsync(Guid runId, CancellationToken cancellationToken)
@@ -678,48 +680,52 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             return null;
         }
 
-        var stopwatch = Stopwatch.StartNew();
-        PlaybookRuns.StoredPlaybookRun? stored;
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(RunRecordCallTimeout);
-            stored = await _runRecordStore.GetRunAsync(runId, timeout.Token).ConfigureAwait(false);
+            return await BoundedAsync(
+                ct => _runRecordStore.GetOwnedRunAsync(runId, callerOid, ct), cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            throw;
+            // Wrapped (not logged here) so the route's own error log carries the outcome code once.
+            throw new InvalidOperationException(
+                $"{ReadFailedOutcome}: the durable record of run {runId:D} could not be read ({ex.GetType().Name}).", ex);
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                "Playbook run record read failed - Outcome: {Outcome}, RunId: {RunId}, ErrorType: {ErrorType}, ElapsedMs: {ElapsedMs}",
-                ReadFailedOutcome, runId, ex.GetType().Name, stopwatch.ElapsedMilliseconds);
-            return null;
-        }
-
-        if (stored is null || !IsSameOid(stored.StartedByOid, callerOid))
-        {
-            return null;
-        }
-
-        return stored;
     }
 
-    private static bool IsSameOid(string? storedOid, string callerOid) =>
-        Guid.TryParse(storedOid, out var stored) && Guid.TryParse(callerOid, out var caller) && stored == caller;
+    /// <summary>
+    /// Runs one durable run record call with a hard upper bound of <see cref="RunRecordCallTimeout"/>: the call's token is
+    /// cancelled at the bound, and the wait ends at the bound even if the Dataverse client ignores its token (the call is
+    /// then abandoned). Throws <see cref="TimeoutException"/> at the bound.
+    /// </summary>
+    private static async Task<T> BoundedAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(RunRecordCallTimeout);
+        return await call(timeout.Token).WaitAsync(RunRecordCallTimeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Task BoundedAsync(Func<CancellationToken, Task> call) =>
+        BoundedAsync(async ct => { await call(ct).ConfigureAwait(false); return true; }, CancellationToken.None);
 
     /// <summary>
-    /// Writes the run's current state to its durable record: creates the row on the first call, updates it afterwards.
-    /// Never throws and never changes the run, its events or its in-memory state.
+    /// Writes the run's current state to its durable record (an upsert keyed by the run id). Never throws and never
+    /// changes the run, its events or its in-memory state.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Only a <see cref="PlaybookRunStartedBy.Person"/> run is recorded: the record exists so its starter can read the run
     /// after a restart or on another instance, and a System run (the scheduler's per-user fan-out) has no starter who
-    /// could read it (<see cref="ReadOwnedStoredRunAsync"/>). If creating the row fails, the run's later writes are skipped
-    /// rather than each failing against a row that does not exist.
+    /// could read it (<see cref="ReadOwnedStoredRunAsync"/>).
+    /// </para>
+    /// <para>
+    /// If the start write fails, the run's node rows are skipped (their parent row may not exist), but the final write
+    /// (<paramref name="isFinal"/>) is always attempted: it is an upsert, so it lands whether the start write failed,
+    /// timed out after Dataverse committed it, or succeeded. A Dataverse outage or missing columns therefore cost two
+    /// failed calls per run.
+    /// </para>
     /// </remarks>
-    private async Task PersistRunAsync(PlaybookRunContext context, string operation)
+    private async Task PersistRunAsync(PlaybookRunContext context, string operation, bool isFinal = false)
     {
         if (_runRecordStore is null || context.StartedBy != PlaybookRunStartedBy.Person)
         {
@@ -727,7 +733,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         }
 
         var recordState = context.RunRecordState;
-        if (recordState == PlaybookRunContext.RunRecordUnavailable)
+        if (recordState == PlaybookRunContext.RunRecordUnavailable && !isFinal)
         {
             return;
         }
@@ -736,15 +742,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            using var timeout = new CancellationTokenSource(RunRecordCallTimeout);
+            await BoundedAsync(ct => _runRecordStore.WriteRunAsync(record, ct)).ConfigureAwait(false);
             if (recordState == PlaybookRunContext.RunRecordNotWritten)
             {
-                await _runRecordStore.CreateRunAsync(record, timeout.Token).ConfigureAwait(false);
                 context.RunRecordState = PlaybookRunContext.RunRecordWritten;
-            }
-            else
-            {
-                await _runRecordStore.UpdateRunAsync(record, timeout.Token).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -793,13 +794,13 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             DurationMs: output.Metrics.DurationMs,
             TokensIn: output.Metrics.TokensIn,
             TokensOut: output.Metrics.TokensOut,
+            Confidence: output.Confidence,
             ErrorMessage: output.Success ? null : output.ErrorMessage);
 
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            using var timeout = new CancellationTokenSource(RunRecordCallTimeout);
-            await _runRecordStore.CreateNodeRunAsync(record, timeout.Token).ConfigureAwait(false);
+            await BoundedAsync(ct => _runRecordStore.CreateNodeRunAsync(record, ct)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

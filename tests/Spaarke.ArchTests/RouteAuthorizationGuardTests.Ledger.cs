@@ -3550,21 +3550,21 @@ public partial class RouteAuthorizationGuardTests
             "The in-memory store is per REQUEST (PlaybookOrchestrationService is Scoped, AnalysisServicesModule.cs:1342; "
             + "_activeRuns is an instance field, PlaybookOrchestrationService.cs:63). A run not in it is read from "
             + "sprk_playbookrun ONLY for the caller whose token oid equals the run's sprk_triggeredby oid "
-            + "(ReadOwnedStoredRunAsync, PlaybookOrchestrationService.cs:667/701); anyone else gets the uniform 404. "
+            + "(ReadOwnedStoredRunAsync, PlaybookOrchestrationService.cs:669; owner check PlaybookRunRecordStore.cs:203); anyone else gets the uniform 404. "
             + "Proven by PlaybookRunPersistenceTests (task 005)."),
         Permanent("GET /api/ai/playbooks/runs/{runId:guid}/stream", PermanentBasis.CallerScopedOnly, "167",
             "Reads through GetRunStatusAsync, as GET .../runs/{runId}: the request's own in-memory run, else the "
-            + "durable record for the caller who started it only (PlaybookOrchestrationService.cs:667/701). Another "
+            + "durable record for the caller who started it only (PlaybookRunRecordStore.cs:203). Another "
             + "caller's run is a 404."),
         Permanent("POST /api/ai/playbooks/runs/{runId:guid}/cancel", PermanentBasis.CallerScopedOnly, "167",
             "Cancels only a run in the current request's scoped in-memory store (AnalysisServicesModule.cs:1342; "
             + "PlaybookOrchestrationService.cs:63). Its not-found check reads GetRunStatusAsync, which returns a stored "
-            + "run to its starter only (PlaybookOrchestrationService.cs:701); another caller's run is a 404 and is "
+            + "run to its starter only (PlaybookRunRecordStore.cs:203); another caller's run is a 404 and is "
             + "never cancelled."),
         Permanent("GET /api/ai/playbooks/runs/{runId:guid}/detail", PermanentBasis.CallerScopedOnly, "167",
             "The request's own in-memory run (AnalysisServicesModule.cs:1342; PlaybookOrchestrationService.cs:63), "
             + "else the durable record for the caller who started it only (ReadOwnedStoredRunAsync, "
-            + "PlaybookOrchestrationService.cs:667/701). Another caller's run is a 404."),
+            + "PlaybookOrchestrationService.cs:669; PlaybookRunRecordStore.cs:203). Another caller's run is a 404."),
         Permanent("POST /api/communications/threads/direct", PermanentBasis.CallerScopedOnly, "167",
             "Finds the caller's own Direct thread with one colleague, or creates one OWNED by the caller and "
             + "shares Read to that colleague (DirectThreadAccessService.cs:62-100). The caller is always a party; "
