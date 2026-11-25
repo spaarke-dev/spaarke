@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella program)
 
-> **Last Updated**: 2026-11-24 ~04:40Z (checkpoint at 85% context)
+> **Last Updated**: 2026-11-24 (gate A0 cleared; V3 deferred)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Phase**: pre-`/design-to-spec`. No POML tasks. Do NOT run `/design-to-spec` until the owner says so.
 
@@ -32,11 +32,9 @@
 - Agents reach MCP only through their **own** tool. The owner's Copilot synopsis agrees: one MCP server, tenant connector = the horizontal path, agents = direct MCP clients.
 
 ## Open owner decisions
-- **D-A11:** NDA ownership. Claude proposed a split by layer. The owner chose "Discuss first"; not decided.
-- **The rest:**
-  - D-A12 framing; D-A13 Microsoft-first; D-A16 one roadmap; Q7 catalogue owner; D-A7 (decided at G1).
-  - D-A1 revision (v0.6); the P2 go; the R1 change (with coordination).
-  - Ontology-r1 must confirm "Policy versions".
+- **Gate A0 CLEAR (2026-11-24):** D-A11 split by layer, D-A16 one roadmap, Q7 shared catalogue (accelerator refreshes first); Q2 resolved from the ontology model: the positions master is a **Playbook** (D-209), not "Policy versions". Still to do: tell accelerator r1 about D-A11/Q7/D-A16.
+- **Next step (owner go needed):** split off the Phase 0 child folder (design.md from §7–§8) and run `/design-to-spec` on it. Do NOT start without the owner saying go.
+- **Still open, not A0 blockers:** D-A12 framing; D-A13 Microsoft-first; D-A1 front door (G8-P2 now done); D-A7 (at G1); D-A5 pricing; BR-5 (dynamic discovery as default); the R1 change (with coordination).
 
 ## Standing directives
 - Never `git stash`; never `python3` in Bash; every Agent launch names a model; sub-agents can't write `.claude/`.
