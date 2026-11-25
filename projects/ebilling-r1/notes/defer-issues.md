@@ -2612,6 +2612,39 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 ---
 
+### ISS-053 — Nothing checks that duplicate detection stays off on the BFF job queues (ISS-025's retry copy relies on it)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-25 |
+| **Source** | uac-r2 review of master PR #3084 (ISS-025), 2026-11-25 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3106 |
+
+**Description**
+
+ISS-025 (#2876, in #3084) retries a failed job by scheduling a copy of the same message with the same `MessageId`, then completing the original. That is safe only while Service Bus duplicate detection is off on the queues the BFF processors read (`sdap-jobs` via `ServiceBusJobProcessor`, `sdap-communication` via `CommunicationJobProcessor`). With it on, the broker silently drops the copy inside the detection window, the original is already completed, and the job is lost with no dead-letter and no log.
+
+Today the rule is prose only (`JobSubmissionService.cs` comment, `.claude/constraints/jobs.md`). `infrastructure/bicep/modules/service-bus.bicep:42` sets `requiresDuplicateDetection: false` for every queue it creates (customer stamps take the queue list from `customer.bicep:90-93`), but no test pins that value, and the property is create-time only, so a later edit would only reach new stamps, where nothing would notice. uac-r2 confirmed dev live, read-only: False on both queues (max delivery 10). `sprk-provisioning-jobs` has it True on purpose, but no BFF processor reads that queue.
+
+**Entry-points**
+
+- `infrastructure/bicep/modules/service-bus.bicep:36-48` (the queue resource)
+- `infrastructure/bicep/customer.bicep:90-93` (stamp queue list)
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/JobMessageRetry.cs`, `JobSubmissionService.cs` (the assumption)
+- Precedent for a live check: `scripts/provisioning-prereqs/prereqs.yaml:671-689` (asserts the opposite value on `sprk-provisioning-jobs`)
+
+**Suggested fix** (enforcement ladder, root CLAUDE.md §16)
+
+A source-scan ArchTest that fails when the queue resource in `service-bus.bicep` sets `requiresDuplicateDetection` to anything but `false` (must-fire control: a fixture with `true`; must-not-fire: the real file), plus a read-only prereq/verify recipe for stamps that reads the live value on `sdap-jobs` and `sdap-communication` (like the `sprk-provisioning-jobs` recipe). customer-provisioning-orchestration-r1 owns the stamp side.
+
+**Estimated effort**: 2-4 hours
+**Blockers**: none
+**Related**: ISS-025 (#2876), DEF-055 (#2600), ADR-004, customer-provisioning-orchestration-r1
+
+---
+
 ### ISS-052 — The SPA "Invoice received" screen has no link to the invoice or its record
 
 | Field | Value |
