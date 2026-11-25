@@ -127,6 +127,8 @@ The ontology's term for this is a **Playbook** (D-209: one concept, several form
 
 **Almost all of it is platform (BFF + Console) work.** None of it needs a Copilot agent. Copilot (routes B/C) stays the attorney's own desk tool.
 
+**Correction (2026-11-24, owner question).** The sketch above calls the platform's existing `agreement-review` directly. That skips the specialist. In this program's design the flow **is the specialist's autonomous run** (design §3.6): the same NDA specialist (practice content + the NDA function + the owning attorney's compiled profile L0–L4 + run record) that the Chat area agent uses, started by an intake event instead of by an attorney. It runs at autonomy level **prepare**: it builds the marked-up draft and memo and stops at the approval gate; it never sends. It is a fixed procedure, not an open-ended planner (ADR-039 closed catalog). The background run is app-only and attributed to the attorney (T-1, path C); the send happens on the attorney's own approval click. Design §4 puts autonomous intake in Phase 3; doing the "prepare" level in Phase 1 needs T-1 only, not T-2 (Agent ID). Auto-send stays Phase 3 with counsel sign-off.
+
 ## 6. Already tested: do not redo
 
 The accelerator ran these between 1 and 11 Nov:
