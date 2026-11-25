@@ -469,3 +469,10 @@ Everything below is in the widget unless it says "shared". Every shared change i
 - **Answers** the open Wave 8 question "032 (1) display chain". It supersedes design §9.4 / O-5 step 1 ("ask for fullscreen as it opens"). The fallbacks stay: if the dialog fails to render → master-detail → the Console link.
 - **Evidence.** Live run 2026-11-24 ~00:30Z, Copilot Chat (Work IQ): the widget rendered the lane (192 items). Start review opened the host side pane with the dialog over a dimmed lane. Closing the side pane returned the frame inline, with the dialog shown in the conversation, which is the wanted behaviour.
 - **Delivery.** A separate PR from master (widget files only; the shared DecisionWizard is unchanged), then the next dev deploy through uac-r2 with the owner's go for the exact SHA.
+
+## 2026-11-24 — NFR-01 is measured from live server timings, not 50 calls by hand (owner, task 042)
+
+- **Decision (owner, 2026-11-24).** Task 042 measures NFR-01 from the BFF's own per-call duration (the `MCP tool … completed: … N ms` trace each tool writes) over all live Copilot traffic in the 042 run, and reports p50, p95, max and n per tool. Calls are not scripted, and App Insights sampling is left as it is.
+- **Why.** The POML's "50 calls each" cannot be made by hand in Copilot, above all for lookup and complete. A scripted caller would need the test user's sign-in, which the agent never enters. Stopping sampling would be a dev setting change that needs a go through uac-r2.
+- **Known limit.** Sampling keeps about a third of the traces, so n per tool is smaller than the number of calls made, and lookup and complete may stay well below 50. The results note states n for each p95.
+- **Already seen (owner's own runs since 00:22Z).** Show p95 6.5 s (n=8) and plan p95 4.7 s (n=9) are over the 3 s target. Per the POML, the miss is recorded and escalated to the owner at the end of the run; no tool behaviour changes in 042.

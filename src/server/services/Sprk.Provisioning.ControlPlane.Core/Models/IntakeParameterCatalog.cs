@@ -99,6 +99,26 @@ public static class IntakeParameterCatalog
         new HashSet<string>(StringComparer.Ordinal) { ManagedSolutionPackage, UnmanagedSolutionPackage };
 
     /// <summary>
+    /// Data-setup plan D4 (owner decision B, 2026-11-25) — the starter taxonomy pack H12b seeds into the customer's reference
+    /// tables (matter types, practice areas, document types, …): <see cref="LegalStandardReferenceDataPack"/> (the default) or
+    /// <see cref="NoReferenceDataPack"/> for a customer who brings its own taxonomy. Absent → the default is stored at CreateRun,
+    /// so the run records the pack actually used. Validated at POST /api/runs and again by H12b with
+    /// <see cref="AllowedReferenceDataPacks"/>; every value but <see cref="NoReferenceDataPack"/> names a pack in
+    /// <c>scripts/seed-data/reference/packs/</c> (ReferenceDataPackTests).
+    /// </summary>
+    public const string ReferenceDataPack = "referenceDataPack";
+
+    /// <summary><see cref="ReferenceDataPack"/> value for the standard legal starter taxonomy (the default).</summary>
+    public const string LegalStandardReferenceDataPack = "legal-standard";
+
+    /// <summary><see cref="ReferenceDataPack"/> value that seeds no starter taxonomy.</summary>
+    public const string NoReferenceDataPack = "none";
+
+    /// <summary>Values <see cref="ReferenceDataPack"/> may take (exact case).</summary>
+    public static readonly IReadOnlySet<string> AllowedReferenceDataPacks =
+        new HashSet<string>(StringComparer.Ordinal) { LegalStandardReferenceDataPack, NoReferenceDataPack };
+
+    /// <summary>
     /// T256 — H7b dry run: <c>true</c> makes H7b (Secure Record setup) read everything, record its plan in the gate
     /// evidence and write nothing; the run then stops at H7b. <c>false</c> or absent applies. Exact lower case; validated at
     /// POST /api/runs by <c>SecureRecordSetupIntake</c>, the rule H7b applies.
@@ -200,6 +220,7 @@ public static class IntakeParameterCatalog
         // --- Stamp shape (defaults applied at CreateRun or in the handler) ----------
         new(EnvironmentName, "Customer stamp environment segment (dev | staging | prod). Absent → 'prod' stored at CreateRun. H2a, H2b, H4b."),
         new(SolutionPackageType, "Dataverse package type H6 imports: managed | unmanaged. Absent → 'managed' stored at CreateRun (ADR-027 §3 amended 2026-10-07, owner D8: unmanaged only on explicit instruction). H6; H13 records it on the registry row (sprk_solutionversion)."),
+        new(ReferenceDataPack, "Starter taxonomy pack H12b seeds into the reference tables (matter, practice-area, project, document, contact and organization types): legal-standard | none. Absent → 'legal-standard' stored at CreateRun (data-setup plan D4, owner decision B); 'none' for a customer who brings its own taxonomy. Existing rows are never changed. Validated at POST /api/runs; H12b."),
         new("location", "Primary Azure region for customer.bicep (H2a; default westus2)."),
         new("signalrEnabled", "Deploy SignalR (H2a; default false)."),
         new("requestedIndexes", "Subset of AI Search indexes to create (H2b; default all)."),
@@ -257,6 +278,19 @@ public static class IntakeParameterCatalog
         return nonSecretParameters.TryGetValue(SolutionPackageType, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : ManagedSolutionPackage;
+    }
+
+    /// <summary>
+    /// Data-setup plan D4: the run's starter taxonomy pack — the stored <see cref="ReferenceDataPack"/> value, or
+    /// <see cref="LegalStandardReferenceDataPack"/> when absent (a run created before CreateRun stored the default). Returned as
+    /// stored; callers check it against <see cref="AllowedReferenceDataPacks"/>.
+    /// </summary>
+    public static string ResolveReferenceDataPack(IDictionary<string, string> nonSecretParameters)
+    {
+        ArgumentNullException.ThrowIfNull(nonSecretParameters);
+        return nonSecretParameters.TryGetValue(ReferenceDataPack, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : LegalStandardReferenceDataPack;
     }
 
     /// <summary>True when <paramref name="key"/> is an accepted intake key (ordinal).</summary>

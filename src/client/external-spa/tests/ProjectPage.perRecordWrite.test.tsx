@@ -92,5 +92,7 @@ describe('ProjectPage: /me writeAccessPerRecord reaches the Documents section', 
     const row = await documentRow('Brief.pdf');
     expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
     expect(rowAction(row, 'Download')).toBeNull();
-  });
+    // The same full-page render as the test above, so the same budget: `documentRow` waits up to 15 s, which
+    // vitest's 5 s default cut short on a loaded CI runner (nightly #1906, 2026-11-25).
+  }, 30000);
 });

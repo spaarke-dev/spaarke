@@ -122,6 +122,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string LineTaskCodeAsBilled = "sprk_taskcodeasbilled";
     internal const string LineActivityCodeAsBilled = "sprk_activitycodeasbilled";
     internal const string LineExpenseCodeAsBilled = "sprk_expensecodeasbilled";
+
+    // ISS-051: the resolved code's sprk_billingcode row (FR-04), written with the line's coding JSON by every writer of a resolved code.
+    internal const string LineTaskCode = "sprk_taskcode";
+    internal const string LineActivityCode = "sprk_activitycode";
+    internal const string LineExpenseCode = "sprk_expensecode";
     internal const string LineCodingConfidence = "sprk_codingconfidence";
     internal const string LineExtractionConfidence = "sprk_extractionconfidence";
     internal const string LineVendorOrg = "sprk_vendororg";
@@ -1839,6 +1844,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 row[LineCodingConfidence] = coding.Confidence;
             }
 
+            // ISS-051: the resolved codes' rows. A refused or missing code has no row, so its lookup stays empty (FR-22).
+            foreach (var (column, value) in CodeLookupsFor(coding))
+            {
+                if (value is not null)
+                {
+                    row[column] = value;
+                }
+            }
+
             var flagged = flaggedByFinding.Contains(index)
                 || notChecked.ContainsKey(index)
                 || coding is { RefusedCodes.Count: > 0 }
@@ -2002,6 +2016,39 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         : coding is { Status: LineCodingStatus.NotReturned } ? LineFindingNotReturned
         : null;
 
+    /// <summary>ISS-051: the member of a line JSON code slot (<c>coding.task</c> / <c>activity</c> / <c>expense</c>) that names the code's <c>sprk_billingcode</c> row.</summary>
+    internal const string CodeIdMember = "codeId";
+
+    /// <summary>The code lookup column of a code kind (ISS-051, FR-04).</summary>
+    internal static string CodeLookupColumn(BillingCodeKind kind) => kind switch
+    {
+        BillingCodeKind.Task => LineTaskCode,
+        BillingCodeKind.Activity => LineActivityCode,
+        BillingCodeKind.Expense => LineExpenseCode,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    /// <summary>
+    /// ISS-051: the three code lookups a line's coding gives it, which agree with its coding JSON. A slot with no code (none returned, refused,
+    /// or an uncoded line: <paramref name="coding"/> null) is an empty lookup (<c>null</c> value, FR-22). A code with its row
+    /// (<see cref="LineCodeValue.CodeId"/>) is that row. A code with no recorded row (a line stored before ISS-051) is left out: the caller leaves
+    /// the column as it is (the backfill <c>scripts/ebilling/Backfill-EbillingLineCodeLookups.ps1</c> sets it), never a stale or guessed row.
+    /// </summary>
+    internal static IEnumerable<(string Column, EntityReference? Value)> CodeLookupsFor(LineCodingResult? coding)
+    {
+        foreach (var (kind, slot) in new[] { (BillingCodeKind.Task, coding?.Task), (BillingCodeKind.Activity, coding?.Activity), (BillingCodeKind.Expense, coding?.Expense) })
+        {
+            if (string.IsNullOrWhiteSpace(slot?.Code))
+            {
+                yield return (CodeLookupColumn(kind), null);
+            }
+            else if (slot.CodeId is { } id && id != Guid.Empty)
+            {
+                yield return (CodeLookupColumn(kind), new EntityReference(CodeSetResolver.CodeEntity, id));
+            }
+        }
+    }
+
     internal static Entity BuildApproval(
         SubmissionEvaluationOutcome outcome, Guid invoiceId, InvoiceCoreRecord core, IReadOnlyDictionary<string, object> resolverFields,
         RecordOwnerResolution owner)
@@ -2132,9 +2179,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 ["codeSetSource"] = coding.CodeSetSource.ToString(),
                 ["needsReview"] = coding.CodeSetNeedsReview,
                 ["confidence"] = coding.Confidence,
-                ["task"] = CodeJson(coding.Task),
-                ["activity"] = CodeJson(coding.Activity),
-                ["expense"] = CodeJson(coding.Expense),
+                ["task"] = CodeJson(coding.Task, withCodeId: true),
+                ["activity"] = CodeJson(coding.Activity, withCodeId: true),
+                ["expense"] = CodeJson(coding.Expense, withCodeId: true),
                 ["firmCodeMismatch"] = coding.HasFirmCodeMismatch,
                 ["refused"] = new JsonArray(coding.RefusedCodes.Select(r => (JsonNode)new JsonObject
                 {
@@ -2202,12 +2249,23 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         return json;
     }
 
-    private static JsonObject CodeJson(LineCodeValue value) => new()
+    /// <summary>A code slot. <paramref name="withCodeId"/> (the line's own JSON, ISS-051) adds <see cref="CodeIdMember"/> when the code's row is known, so a
+    /// later rebuild of the line from its stored coding (the re-run after Set firm) sets the same lookup.</summary>
+    private static JsonObject CodeJson(LineCodeValue value, bool withCodeId = false)
     {
-        ["code"] = value.Code,
-        ["firmCode"] = value.FirmCode,
-        ["mismatch"] = value.Mismatch,
-    };
+        var json = new JsonObject
+        {
+            ["code"] = value.Code,
+            ["firmCode"] = value.FirmCode,
+            ["mismatch"] = value.Mismatch,
+        };
+        if (withCodeId && value.Code is not null && value.CodeId is { } codeId)
+        {
+            json[CodeIdMember] = codeId.ToString("D");
+        }
+
+        return json;
+    }
 
     /// <summary>
     /// The submission's <c>sprk_findingsjson</c> (for 130 / 133 and the resume path): every billing finding with its line, values read, rule

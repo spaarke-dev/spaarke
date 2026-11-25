@@ -15,7 +15,7 @@ namespace Spaarke.ArchTests;
 /// too). The rule: AppendTo on each bind target is at its declared <c>appendToDepth</c>, which is the role's Read depth on
 /// that table: a floor (no lower than Read, so the save works) and a ceiling (no higher than Read). A target whose AppendTo
 /// is deliberately above Read declares it with <c>appendToAboveRead</c> (its Read depth, the reason and the commit); today
-/// that is <c>sprk_eventtype_ref</c> only. Append on each created table is at least the role's Create depth (none when the
+/// no target does (<c>sprk_eventtype_ref</c> had it until ISS-042 raised its Read to Global). Append on each created table is at least the role's Create depth (none when the
 /// role cannot create it).</para>
 /// <para><b>The pin.</b> Every privilege Core User holds on the tables this guard owns (the bind targets and created
 /// tables) is pinned in <see cref="PinnedCoreUserPrivileges"/>, so a change to any of them, or a privilege added on one of
@@ -76,31 +76,61 @@ public class CoreUserWizardLinkingGuardTests
         Assert.Contains(PinGaps(raised.ToString(), config), g => g.Contains("prvAppendToContact", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "Core User linking guard control: the declared exception for sprk_eventtype_ref is required, bounded and current")]
-    public void EventTypeAboveReadNeedsItsDeclaredException()
+    // ISS-042: Read on sprk_eventtype_ref is Global (owner 2026-11-25), so it equals AppendTo and the appendToAboveRead
+    // exception (Read Deep, AppendTo Global) is gone from the config; this control replaces the one that required it.
+    [Fact(DisplayName = "Core User linking guard control: sprk_eventtype_ref has Read and AppendTo both Global with no above-Read exception, and Read back at Deep is reported (ISS-042)")]
+    public void EventTypeReadIsGlobalWithNoAboveReadException()
     {
         var config = LoadConfig();
         var role = File.ReadAllText(RolePath(config.RoleName));
         var eventType = config.BindTargets.Single(t => t.LogicalName == "sprk_eventtype_ref");
-        Assert.NotNull(eventType.AboveRead);
-        Assert.Equal("4e9e295a30", eventType.AboveRead!.Since);
-        Assert.Single(config.BindTargets, t => t.AboveRead is not null);
+        Assert.Null(eventType.AboveRead);
+        Assert.Equal("Global", eventType.AppendToDepth);
+        Assert.DoesNotContain(config.BindTargets, t => t.AboveRead is not null);
+        Assert.Empty(Gaps(role, config));
 
-        // Without the exception, Global AppendTo over Deep Read is reported.
-        var undeclared = config with
-        {
-            BindTargets = config.BindTargets.Select(t => t == eventType ? t with { AboveRead = null } : t).ToList(),
-        };
-        var gap = Assert.Single(Gaps(role, undeclared));
+        // Read put back to Deep leaves AppendTo above it with no declared exception, and is reported.
+        var readBack = XDocument.Parse(role);
+        Privilege(readBack, "prvReadsprk_EventType_Ref").SetAttributeValue("level", "Deep");
+        var gap = Assert.Single(Gaps(readBack.ToString(), config));
         Assert.Contains("prvAppendTosprk_EventType_Ref is Global, above Read (prvReadsprk_EventType_Ref) Deep", gap, StringComparison.Ordinal);
-
-        // With it, Read moving from the declared depth makes the exception stale, and is reported.
-        var readRaised = XDocument.Parse(role);
-        Privilege(readRaised, "prvReadsprk_EventType_Ref").SetAttributeValue("level", "Global");
-        gap = Assert.Single(Gaps(readRaised.ToString(), config));
-        Assert.Contains("prvReadsprk_EventType_Ref is Global; the config declares Deep", gap, StringComparison.Ordinal);
     }
 
+    // No target in the config declares appendToAboveRead now (sprk_eventtype_ref was the one, until ISS-042), but the mechanism stays for
+    // the next target whose AppendTo is deliberately above its Read. This control runs it on an in-memory declaration, so the branch
+    // (Gaps: AboveRead, declaredRead) is exercised without any live entry.
+    [Fact(DisplayName = "Core User linking guard control: a declared appendToAboveRead is accepted while Read holds its declared depth, and reported stale once Read moves (in-memory)")]
+    public void DeclaredAboveReadExceptionIsAcceptedAndGoesStale()
+    {
+        var config = LoadConfig();
+        var role = File.ReadAllText(RolePath(config.RoleName));
+        Assert.DoesNotContain(config.BindTargets, t => t.AboveRead is not null); // the live config declares none, so this is the only run of the branch
+        var eventType = config.BindTargets.Single(t => t.LogicalName == "sprk_eventtype_ref");
+
+        // Declared: Read Deep, AppendTo Global (the shape sprk_eventtype_ref had before ISS-042).
+        var declared = config with
+        {
+            BindTargets = config.BindTargets
+                .Select(t => t == eventType ? t with { AboveRead = new AboveRead("Deep", "an in-memory reason", "abc1234") } : t)
+                .ToList(),
+        };
+        var readDeep = XDocument.Parse(role);
+        Privilege(readDeep, "prvReadsprk_EventType_Ref").SetAttributeValue("level", "Deep");
+
+        // must not fire: AppendTo Global above Read Deep is the declared exception.
+        Assert.Empty(Gaps(readDeep.ToString(), declared));
+        // must fire without the declaration (the same role file): the undeclared case is reported.
+        Assert.Contains("above Read (prvReadsprk_EventType_Ref) Deep", Assert.Single(Gaps(readDeep.ToString(), config)), StringComparison.Ordinal);
+
+        // must fire (stale): Read moved off the declared depth, so the exception no longer describes the role.
+        var stale = Assert.Single(Gaps(role, declared)); // the live role holds Read Global
+        Assert.Contains("prvReadsprk_EventType_Ref is Global; the config declares Deep", stale, StringComparison.Ordinal);
+
+        // must fire: the exception never lets AppendTo fall below Read.
+        var below = XDocument.Parse(role);
+        Privilege(below, "prvAppendTosprk_EventType_Ref").SetAttributeValue("level", "Deep");
+        Assert.Contains("prvAppendTosprk_EventType_Ref is Deep; Read (prvReadsprk_EventType_Ref) is Global", Assert.Single(Gaps(below.ToString(), declared)), StringComparison.Ordinal);
+    }
     [Fact(DisplayName = "Core User linking guard control: AppendTo and Read both moved off the declared depth is reported")]
     public void GuardFiresWhenAppendToAndReadLeaveTheDeclaredDepth()
     {
@@ -303,7 +333,7 @@ public class CoreUserWizardLinkingGuardTests
         ["sprk_PracticeArea_Ref"] = "Read=Global AppendTo=Global",
         ["sprk_ProjectType_Ref"] = "Read=Global AppendTo=Global",
         ["sprk_RecordType_Ref"] = "Read=Global AppendTo=Global",
-        ["sprk_EventType_Ref"] = "Read=Deep AppendTo=Global",
+        ["sprk_EventType_Ref"] = "Read=Global AppendTo=Global", // Read Deep -> Global: ISS-042
         ["sprk_Matter"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
         ["sprk_Project"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
         ["sprk_Invoice"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",

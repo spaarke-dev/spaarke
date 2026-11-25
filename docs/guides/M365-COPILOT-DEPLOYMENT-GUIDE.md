@@ -32,7 +32,7 @@
 >
 > **Project**: Spaarke M365 Copilot Integration
 >
-> **Audience**: Developers and administrators deploying the Spaarke Copilot agent to a new environment
+> **Audience**: Developers and administrators deploying the Spaarke AI agent (the declarative agent for Microsoft 365 Copilot) to a new environment
 
 This guide walks through deploying all components of the Spaarke M365 Copilot integration from scratch. It covers Azure infrastructure, BFF API configuration, the Teams app package with declarative agent, and end-to-end verification.
 

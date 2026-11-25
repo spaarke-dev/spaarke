@@ -19,7 +19,12 @@ const mockApiConfigure = jest.fn();
 const mockApiPost = jest.fn();
 const mockApiGet = jest.fn();
 jest.mock('@shared/services', () => ({
-  authService: { initialize: (...args: unknown[]) => mockAuthInitialize(...args) },
+  authService: {
+    initialize: (...args: unknown[]) => mockAuthInitialize(...args),
+    // #1571 review F1: Quick Save checks for a token (and signs in once from the click when there is none).
+    getAccessToken: async () => 'token',
+    signIn: async () => undefined,
+  },
   apiClient: {
     configure: (...args: unknown[]) => mockApiConfigure(...args),
     post: (...args: unknown[]) => mockApiPost(...args),

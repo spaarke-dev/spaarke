@@ -510,6 +510,16 @@ public static class RunsEndpoints
                     $"(exact case). Omit it for '{IntakeParameterCatalog.ManagedSolutionPackage}'.");
             }
 
+            // Data-setup plan D4: the starter taxonomy pack H12b seeds — the same allowed set H12b checks (owner decision B).
+            if (request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.ReferenceDataPack, out var referenceDataPackValue)
+                && !IntakeParameterCatalog.AllowedReferenceDataPacks.Contains(referenceDataPackValue ?? string.Empty))
+            {
+                return BadRequest(httpContext, ControlPlaneErrorCodes.IntakeInvalidReferenceDataPack,
+                    $"nonSecretParameters['{IntakeParameterCatalog.ReferenceDataPack}'] is '{referenceDataPackValue}'; " +
+                    $"allowed values are {IntakeParameterCatalog.LegalStandardReferenceDataPack} | {IntakeParameterCatalog.NoReferenceDataPack} " +
+                    $"(exact case). Omit it for '{IntakeParameterCatalog.LegalStandardReferenceDataPack}'.");
+            }
+
             // T256: H7b's dry-run flag — the handler's own rule (SecureRecordSetupIntake) and its own rejection code.
             if (!SecureRecordSetupIntake.TryReadDryRun(request.NonSecretParameters, out _))
             {
@@ -787,6 +797,12 @@ public static class RunsEndpoints
         if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.SolutionPackageType))
         {
             run.Parameters.NonSecret[IntakeParameterCatalog.SolutionPackageType] = IntakeParameterCatalog.ManagedSolutionPackage;
+        }
+
+        // Data-setup plan D4: store the starter taxonomy pack actually used, so H12b and the run record agree with the intake.
+        if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.ReferenceDataPack))
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.ReferenceDataPack] = IntakeParameterCatalog.LegalStandardReferenceDataPack;
         }
 
         // T228: canonical forms — the URL H5 compares against and hands on (https://{host}/), and the two GUIDs in the

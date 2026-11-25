@@ -30,6 +30,7 @@ internal static class ControlPlaneErrorCodes
     public const string IntakeUnknownKey = "intake-unknown-key";
     public const string IntakeInvalidEnvironmentName = "intake-invalid-environment-name";
     public const string IntakeInvalidSolutionPackageType = "intake-invalid-solution-package-type"; // T218b
+    public const string IntakeInvalidReferenceDataPack = "intake-invalid-reference-data-pack"; // data-setup plan D4
     public const string TenantIdRequired = "tenant-id-required";
     public const string SubscriptionIdRequired = "subscription-id-required";
     // T228: the operator-created Dataverse environment, and the container type (G19) — required for every model.

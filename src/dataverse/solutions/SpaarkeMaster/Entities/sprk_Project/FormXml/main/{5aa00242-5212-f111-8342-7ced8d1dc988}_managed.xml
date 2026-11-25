@@ -786,6 +786,27 @@
                     </row>
                   </rows>
                 </section>
+                <section name="section_ebilling" id="{413A1ABF-417F-30DE-19D7-13F06D46B51F}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Billing firm" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{4B32787E-FB32-22C0-5784-27B77EC532FB}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingfirm" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingfirm" />
+                      </cell>
+                      <cell id="{01DE6446-EFAA-6537-256D-719163A492DB}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingresponsible" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingresponsible" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
               </sections>
             </column>
           </columns>

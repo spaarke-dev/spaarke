@@ -86,6 +86,12 @@
       "reason": "Data grid configuration (columns, views) that the shared DataGrid and ConfigurationService read as the user through Xrm.WebApi; seeded with fixed ids by scripts such as Apply-WorklistGridConfiguration.ps1.",
       "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 23 rows, all in the root unit; no lookups. A child-unit user had no access to root row 00000000-0000-4000-8000-000000005001.",
       "createStaysForbidden": "Read is Global, so a row a user creates here is readable by every user. The saved-search hook (src/client/code-pages/SemanticSearch/src/hooks/useSavedSearches.ts, saveSearch, lines 185-203) writes per-user rows to this table through the Web API. No end-user Spaarke role holds Create on it; ProductConfigurationReadRoleGuardTests (NoCreateTables, AdminRoles) keeps it that way."
+    },
+    {
+      "logicalName": "sprk_eventtype_ref",
+      "privilegeName": "prvReadsprk_EventType_Ref",
+      "reason": "Catalog of event types (Task, Reminder and the rest) that the Create Event wizard picker and the event forms list; seeded by provisioning step H12b with fixed primary keys, so it is product configuration. Provisioning creates the rows as the control-plane app user in a stamp's root business unit, and a stamp's users sit in a child unit, so a Read at Deep hid every event type and the picker was empty (ISS-042, #3105; owner ruling 2026-11-25).",
+      "evidence": "Provisioning, not a live read: H12b seeds the 17 active rows exported from spaarkedev1 (scripts/seed-data/reference/, DataverseWebApiReferenceDataSeeder, customer-provisioning-orchestration-r1 ISS-039); the table is UserOwned and its only lookups are the platform's system ones (Entity.xml: no sprk_ lookup), so it holds no customer content. spaarkedev1 owns its rows in a child unit (#2401), which Global also reaches. AppendTo is already Global for Core User (config/core-user-wizard-linking-role.json), so this raises Read to meet it. The Office Add In User role holds the same Read at Global through config/feature-role-privileges.json (gap ISS-042), because this list is for Core and Basic User only."
     }
   ],
   "excluded": [
@@ -160,10 +166,6 @@
     {
       "logicalName": "sprk_fieldmappingrule",
       "reason": "Customer configuration (config/customer-configuration-owner-role.json)."
-    },
-    {
-      "logicalName": "sprk_eventtype_ref",
-      "reason": "Reference catalog whose rows on spaarkedev1 are owned in a child unit, not the root (#2401), and whose Read depth is pinned by config/core-user-wizard-linking-role.json (appendToAboveRead.readDepth). A separate decision."
     },
     {
       "logicalName": "sprk_aiknowledgedeployment",

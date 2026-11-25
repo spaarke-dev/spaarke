@@ -4,7 +4,7 @@
     <title>Set the firm on a no-firm invoice, part 1: renumber, route, one apply transaction, then record, close, link</title>
     <phase>3 Rules (follow-up to 095c; split of 095d, notes/095c-from-email-firm-optional.md 16.4)</phase>
     <gate>owner decided 2026-11-04 (option 1, apply then record; renumber everything)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New internal write route that changes an invoice's firm and its tracking number (alternate-key value) and records a Decision Record; tags bff-api, auth.</rigor-reason>
     <model-tier>opus</model-tier>
