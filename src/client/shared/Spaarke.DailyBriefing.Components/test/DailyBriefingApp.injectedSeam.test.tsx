@@ -188,6 +188,40 @@ describe('DailyBriefingApp - injected data service and navigation (task 010)', (
     expect(screen.getByText(/widget transport down/)).toBeInTheDocument();
   });
 
+  it.each([
+    ['resolves undefined', undefined],
+    ['returns a raw response without the {status, data} wrapper', { channelNarratives: [], tldr: {} }],
+    ['reports success with no data', { status: 'success' }],
+    ['reports success with data that has no channelNarratives', { status: 'success', data: {} }],
+    ['reports an unrecognised status', { status: 'weird' }],
+  ])('shows the existing error state, not a stuck spinner, when the injected service %s', async (_label, resolved) => {
+    const service: BriefingDataService = {
+      renderBriefing: jest.fn().mockResolvedValue(resolved),
+    };
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    mount(service, {});
+
+    expect(await screen.findByText('Could not load daily briefing.')).toBeInTheDocument();
+    errorSpy.mockRestore();
+  });
+
+  it('never polls for Xrm in injected mode (the poll effect is guarded)', async () => {
+    jest.useFakeTimers();
+    try {
+      mount(serviceReturning(fixtureBriefing()), {});
+      // The poll's first tick is at 500 ms: advance well past it.
+      await act(async () => {
+        jest.advanceTimersByTime(1500);
+      });
+
+      expect(mockGetXrm).not.toHaveBeenCalled();
+      expect(xrmAccess).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('shows the existing unavailable state when the injected service reports it', async () => {
     const service: BriefingDataService = {
       renderBriefing: jest.fn().mockResolvedValue({ status: 'unavailable', reason: 'AI service is busy.' }),
@@ -246,19 +280,27 @@ describe('DailyBriefingApp - injected data service and navigation (task 010)', (
 });
 
 describe('useBriefingPreferences - injected preferences service (task 010)', () => {
-  it('saves the merged preferences through the service and records a failed save without throwing', async () => {
+  it('saves the merged preferences through the service; a failed save rejects and rolls back', async () => {
     const save = jest.fn().mockRejectedValueOnce(new Error('widget transport down'));
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const { result } = renderHook(() =>
       useBriefingPreferences(null, '', { load: jest.fn().mockResolvedValue(DEFAULT_DAILY_DIGEST_PREFERENCES), save })
     );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
+    let rejection: unknown;
     await act(async () => {
-      await result.current.updatePreferences({ autoPopup: false });
+      await result.current.updatePreferences({ autoPopup: false }).catch(e => {
+        rejection = e;
+      });
     });
 
     expect(save).toHaveBeenCalledWith({ ...DEFAULT_DAILY_DIGEST_PREFERENCES, autoPopup: false });
+    // The caller (PreferencesDropdown) only shows its error state when this rejects.
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).toBe('widget transport down');
     expect(result.current.error).toBe('widget transport down');
+    expect(result.current.preferences).toEqual(DEFAULT_DAILY_DIGEST_PREFERENCES);
     errorSpy.mockRestore();
   });
 });
