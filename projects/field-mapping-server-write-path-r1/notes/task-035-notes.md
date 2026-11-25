@@ -131,3 +131,32 @@ Solution builds (`rm -rf dist node_modules/.vite .vite`, `npm install --legacy-p
 4. `.claude/skills/spaarke-conventions/SKILL.md:234`, `adr-aware/SKILL.md:151`, `adr-check/references/adr-validation-rules.md:72`, `code-review/references/review-checklist.md:124` still name the deleted function (sub-agents cannot write `.claude/`).
 5. `createXrmEmailComposeHandlers.attachmentCreate.test.ts:41-42` still passes `searchIndexName` / `searchIndexId` into an untyped mock of `resolveUserBuDefaults`; harmless, could be trimmed.
 6. `SPAARKE-FIELD-MAPPING-FRAMEWORK.md` "Columns read but unused" rows claim the engine does not read `sprk_isrequired` / `sprk_compatibilitymode`; true of the retired client engine, not re-verified for the server engine.
+
+## Main session: CI, review and gates (2026-11-25)
+
+- **CI (enforcement ladder):** the UI library's jest runs on PRs only in the nightly advisory job, so the guard is added as a step of the blocking `ci-tier1-blocking.yml` job `xrm-capability-guard`, next to `wizardLookupPatternGuard` (89e46641f6).
+  - That job's `xrm_guard` filter now also matches `src/**/*.ts` and `src/**/*.tsx`. Before, a change only to `src/dataverse/forms/**/*.ts` skipped the guard (review finding 2).
+- **Enforced by:** `src/client/shared/Spaarke.UI.Components/src/__tests__/architecture/noClientFieldMapping.test.ts`, run by Tier 1 (blocking), the nightly client tests and locally.
+- Observation 6 checked: the server engine (`Services/**`) reads neither `sprk_isrequired` nor `sprk_compatibilitymode`; only `FieldMappingEndpoints.cs` declares them. The doc row stays true.
+- Observation 4: the four `.claude/skills` lines name `applyFieldMappings` as the pattern a reviewer must flag. They stay accurate, so they are unchanged.
+
+### Review (Step 9.5): one adversarial pass, Opus
+
+| # | Class | Finding | Outcome |
+|---|---|---|---|
+| 1 | F4 | Publish delta and CVE result not recorded | Fixed: recorded below |
+| 2 | F2 | The CI job's paths filter missed `src/dataverse/forms/**/*.ts`, which the guard scans | Fixed: `src/**/*.ts` and `src/**/*.tsx` added to `xrm_guard` |
+| 3 | F2 | `matterService.fieldMapping.test.ts` (two literals) and `projectService.fieldMapping.test.ts` still set the removed `searchIndexName`/`searchIndexId` on typed `IUserBuCascadeDefaults` literals (TS2353, hidden by transpile-only jest) | Fixed: members removed; the type now prevents what those probes checked. 3 suites, 38 tests pass |
+| 4 | F2 | Stale pointers to the deleted engine: `.claude/patterns/CAPABILITY-INDEX.md` Row 5 overlap, `.claude/adr/ADR-024` component table, `docs/INDEX.md`, `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-5 ("at Information … task 035 returns it to Warning") | Fixed |
+| 5 | F3, pre-existing | Every matter create reads systemuser and businessunit and discards the result | Filed DI-044 / #3190 (wizard logic is outside 035) |
+| 6 | K2 → fixed | G7 missed write verbs mid-name, aliases, named arguments, method groups and a new writer field; its must-fire control asserted only a count | Fixed: the detectors cover each shape, an unknown Dataverse-typed field fails, and the control asserts the exact 15 findings. 20/20 pass |
+| 7 | K1 | The guard matches the name token only, skips `.js`, and the committed `sprk_spaarkeai` export still holds the token | Known limit by design (POML). The bundle is regenerated at the next SpaarkeMaster export |
+
+No runtime defect was found: no live importer of a deleted symbol, all `indexUploadedFiles` callers pass four arguments, and `resolveUserBuDefaults` consumers read only `.containerId`.
+
+### Gates
+
+- **Publish delta:** master af4cfb4527 vs branch 89e46641f6 via `scripts/publish-delta.ps1`. Branch 43,632,971 bytes vs master 43,632,978 bytes = −7 bytes, 194 = 194 files, `Compress-Archive`, 41.61 MB total.
+- **CVE:** `dotnet list package --vulnerable --include-transitive` reports none.
+- **ArchTests** (no `--no-build`) on the merged branch: 2834 / 2834.
+- The BFF change (log level) ships with the next batched BFF deploy. Client pages pick up the deletion at their next deploy; the deletion changes no runtime behaviour.

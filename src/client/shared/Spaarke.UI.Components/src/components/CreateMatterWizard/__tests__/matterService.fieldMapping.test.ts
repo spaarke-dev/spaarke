@@ -110,12 +110,10 @@ describe('MatterService — creates through the server write path (task 021, FR-
   it('sends ONLY the keys the user entered or picked -- nothing a default, a mapping or the server owns', async () => {
     const dataService = makeDataService();
     const fetchMock = makeFetch();
-    // The host resolved the BU defaults (index name, index id, container) -- none of them may reach the body.
+    // The host resolved the BU defaults (container) -- they must not reach the body.
     const cascade: IUserBuCascadeDefaults = {
       businessUnitId: 'bu-1',
       containerId: 'bu-container',
-      searchIndexName: 'bu-search-index',
-      searchIndexId: 'bu-index-guid',
     };
 
     const service = new MatterService(dataService, fetchMock, BFF_BASE, 'host-container');
@@ -177,8 +175,6 @@ describe('MatterService — creates through the server write path (task 021, FR-
       {
         businessUnitId: 'bu-1',
         containerId: 'bu-container',
-        searchIndexName: 'bu-search-index',
-        searchIndexId: 'bu-index-guid',
       }
     );
 

@@ -94,8 +94,6 @@ const MATTER_ASSOCIATION: AssociationResult = {
 const BU_DEFAULTS: IUserBuCascadeDefaults = {
   businessUnitId: 'bu-1',
   containerId: 'bu-container',
-  searchIndexName: 'bu-search-index',
-  searchIndexId: 'bu-index-guid',
 };
 
 /** Nav-prop metadata for sprk_project, so every user-picked lookup binds under its own navigation property. */

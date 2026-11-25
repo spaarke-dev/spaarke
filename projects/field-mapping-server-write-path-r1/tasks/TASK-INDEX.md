@@ -69,7 +69,7 @@
 | 032 | [Invoice extraction](032-invoice-extraction.poml) | FR-20 | sonnet / high | FULL | W3-server | 019 | 🔄 design final (`task/fm-032b-design` 9083f5df93; owner, UAC-r2 and ebilling-r1 approved; O1 inline, U7 accepted). Split 032b-1 (fm branch: shared gates, invoice out of the access registry, display copies never pushed) → done on `task/fm-032b-1`, adversarial review running; then 032b-2/032b-3 on the current `work/ebilling-r1` tip |
 | 033 | [System creators: generation, playbook, Signal, Decision](033-system-creators-generation-playbook-signal-decision.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🚫 [cancelled] dropped (owner 2026-11-07): named exceptions under the W3 direction; the Repair metadata-reader wiring moves to 052 |
 | 034 | [System creators: inbound ingestion](034-system-creators-inbound-ingestion.poml) | FR-21 | opus / high | FULL | W3-server | 019 | ✅ on master via #2629 (57748ebf6d). Owner: no field mapping on inbound system rows in R1 (DI-022 #2633) |
-| 035 | [Delete client mapping engine + guard](035-delete-client-mapping-engine.poml) | FR-22 | sonnet / high | FULL | none | 029 | 🔲 |
+| 035 | [Delete client mapping engine + guard](035-delete-client-mapping-engine.poml) | FR-22 | sonnet / high | FULL | none | 029 | ✅ |
 | 036 | [W3 server paths deploy + live check](036-w3-server-paths-deploy-and-live-check.poml) | FR-18–FR-21 | sonnet / high | FULL | none | 030–034 | 🔲 |
 | 037 | [Work Assignment Assigned To default (#2354)](037-work-assignment-assignedto-default.poml) | FR-36 | opus / high | FULL | W7-A | none (UAC-r2 diff review) | ✅ [done] #2370 |
 | 038 | [WA wizard: optional Assigned To picker](038-wa-wizard-assignedto-field.poml) | FR-37 | sonnet / high | FULL | none | 037 | ✅ [done] #2376 |

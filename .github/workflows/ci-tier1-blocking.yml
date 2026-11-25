@@ -197,6 +197,10 @@ jobs:
             xrm_guard:
               - 'src/client/**'
               - 'src/solutions/**'
+              # Added 2026-11-25 (task 035): the no-client-field-mapping guard scans every .ts/.tsx under src/,
+              # including the form scripts under src/dataverse/forms/.
+              - 'src/**/*.ts'
+              - 'src/**/*.tsx'
               - '.github/workflows/**'
             # Added 2026-11-15 by spaarkeai-mcp-bff-api-r1 task 025: runs mcp-conformance.
             # A change to anything the MCP route or the conformance host depends on, plus a
