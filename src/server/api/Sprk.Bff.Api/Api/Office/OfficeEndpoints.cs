@@ -257,9 +257,12 @@ public static class OfficeEndpoints
         HttpContext context,
         // Task 055 (#1005): the collision refusal's display fields are gated on the caller's Read access to
         // the colliding document. The gate lives HERE, not in OfficeService — ADR-008 puts resource
-        // authorization at the endpoint, OfficeService has no authorization concern among its fifteen
-        // dependencies, and every caller-scoped check in this codebase is handler-side
+        // authorization at the endpoint, and every caller-scoped check in this codebase is handler-side
         // (ChatDocumentEndpoints, RecordSearchEndpoints). See notes/055-collision-names-its-target.md §2.
+        // Task 055 found OfficeService had no authorization concern. Since task 138 (#2209) it has one, for ONE path: an email
+        // re-save that would add attachments checks the caller's current "write" on the saved .eml before anything runs
+        // (OfficeService.AuthorizeEmailAttachmentAddAsync), because that path is decided inside the save, after the
+        // idempotency lookup, where no route filter can see it. Every other check stays at the endpoint.
         AuthorizationService authorizationService,
         CancellationToken cancellationToken)
     {
@@ -689,7 +692,11 @@ public static class OfficeEndpoints
             "OFFICE_003" => ProblemDetailsHelper.OfficeAssociationRequired(correlationId),
             "OFFICE_006" => ProblemDetailsHelper.OfficeInvalidAssociationTarget("entity", correlationId),
             "OFFICE_007" => ProblemDetailsHelper.OfficeAssociationTargetNotFound("entity", Guid.Empty, correlationId),
-            "OFFICE_009" => ProblemDetailsHelper.OfficeAccessDenied(correlationId),
+            // Task 138 (#2209): the save's own refusal text is the detail (an email re-save refused for rights it no longer
+            // holds says so, and what was not saved); the fixed sentence stays for a refusal that carries none.
+            "OFFICE_009" => string.IsNullOrWhiteSpace(error.Message)
+                ? ProblemDetailsHelper.OfficeAccessDenied(correlationId)
+                : ProblemDetailsHelper.OfficeForbidden("OFFICE_009", "Access Denied", error.Message, correlationId),
             "OFFICE_012" => ProblemDetailsHelper.OfficeSpeUploadFailed(error.Message, correlationId),
             // FR-11 version save (word-add-in-r1 task 023) — refusals that wrote nothing; see OfficeErrorCodes.
             OfficeErrorCodes.VersionTargetNotFound => ProblemDetailsHelper.OfficeNotFound(

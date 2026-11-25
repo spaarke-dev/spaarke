@@ -19,6 +19,7 @@ namespace Sprk.Bff.Api.Services.Office;
 public class EmailAttachmentAddPlanner
 {
     private readonly IDocumentDataverseService _documents;
+    private readonly IGenericEntityService _entities;
     private readonly SpeFileStore _speFileStore;
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilter;
@@ -26,12 +27,14 @@ public class EmailAttachmentAddPlanner
 
     public EmailAttachmentAddPlanner(
         IDocumentDataverseService documents,
+        IGenericEntityService entities,
         SpeFileStore speFileStore,
         IEmailToEmlConverter emlConverter,
         AttachmentFilterService attachmentFilter,
         ILogger<EmailAttachmentAddPlanner> logger)
     {
         _documents = documents ?? throw new ArgumentNullException(nameof(documents));
+        _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
         _attachmentFilter = attachmentFilter ?? throw new ArgumentNullException(nameof(attachmentFilter));
@@ -62,11 +65,20 @@ public class EmailAttachmentAddPlanner
     /// </summary>
     /// <param name="selection"><c>null</c> = every attachment; a list = those names. The caller never passes <c>[]</c>
     /// (none): there is no add operation for it.</param>
-    /// <remarks>A read that fails throws: the caller answers the save as it would without this task (a duplicate).</remarks>
+    /// <param name="targetLogicalName">The logical name of the record the request files to (<see cref="DocumentAssociationMap.ToLogicalName"/>).</param>
+    /// <param name="targetRecordId">That record's id.</param>
+    /// <remarks>
+    /// <para>A read that fails throws: the caller answers the save as it would without this task (a duplicate).</para>
+    /// <para>The <c>.eml</c> must still be filed to the request's record (<see cref="IsFiledTo"/>): the job that named it was
+    /// found by an idempotency key, which says nothing about WHERE the email was filed (the client may send its own key, and
+    /// the <c>.eml</c> may have been re-filed since). Otherwise nothing is added.</para>
+    /// </remarks>
     public async Task<Plan?> PlanAsync(
         Guid emlDocumentId,
         string emlItemId,
         IReadOnlyCollection<string>? selection,
+        string? targetLogicalName,
+        Guid targetRecordId,
         CancellationToken cancellationToken)
     {
         var eml = await _documents.GetDocumentAsync(emlDocumentId.ToString("D"), cancellationToken);
@@ -77,6 +89,18 @@ public class EmailAttachmentAddPlanner
             // A deleted .eml, or one that no longer points at the item its save uploaded: no child is created under it.
             _logger.LogInformation(
                 "Email re-save: the saved .eml document {DocumentId} is gone or no longer points at its item; nothing to add",
+                emlDocumentId);
+            return null;
+        }
+
+        var filing = await _entities.RetrieveAsync(
+            "sprk_document", emlDocumentId, DocumentLinkFields.LogicalNames.ToArray(), cancellationToken);
+        if (!IsFiledTo(filing, targetLogicalName, targetRecordId))
+        {
+            // The key matched a save that filed this .eml somewhere else (or it was re-filed since): adding under it would
+            // make children of another record's email, and expose that record's content to this record's readers.
+            _logger.LogWarning(
+                "Email re-save: the saved .eml document {DocumentId} is not filed to this request's record; nothing is added",
                 emlDocumentId);
             return null;
         }
@@ -123,6 +147,28 @@ public class EmailAttachmentAddPlanner
                 attachment.Content?.Dispose();
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the <c>.eml</c> row is filed to the record <paramref name="targetLogicalName"/> / <paramref name="targetRecordId"/>:
+    /// it carries at least one link of that record's type (both column families, <c>sprk_*</c> and <c>sprk_related*</c>, from
+    /// <see cref="DocumentLinkFields.All"/>), and EVERY link of that type points at that record. A link to a different record of
+    /// the type (a re-filing, or a save to another record) makes it not filed here. No target, an unknown type or an unreadable
+    /// row is not filed here: fail closed.
+    /// </summary>
+    internal static bool IsFiledTo(Microsoft.Xrm.Sdk.Entity? emlRow, string? targetLogicalName, Guid targetRecordId)
+    {
+        if (emlRow is null || string.IsNullOrEmpty(targetLogicalName) || targetRecordId == Guid.Empty)
+        {
+            return false;
+        }
+
+        var links = DocumentLinkFields.All
+            .Where(f => string.Equals(f.TargetEntityLogicalName, targetLogicalName, StringComparison.Ordinal))
+            .Select(f => emlRow.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(f.LogicalName))
+            .Where(r => r is { Id: var id } && id != Guid.Empty)
+            .ToList();
+        return links.Count > 0 && links.All(r => r!.Id == targetRecordId);
     }
 
     /// <summary>

@@ -1190,6 +1190,9 @@ public sealed class OfficeVersionSaveWorld
         /// </summary>
         public Guid? MatterId { get; set; }
 
+        /// <summary>Task 138: the row's <c>sprk_relatedmatter</c> (the second family a document's filing may sit in).</summary>
+        public Guid? RelatedMatterId { get; set; }
+
         /// <summary>Task 138: the row's <c>sprk_parentdocument</c> (an email attachment's <c>.eml</c>), written in the create.</summary>
         public Guid? ParentDocumentId { get; set; }
     }
@@ -1409,13 +1412,19 @@ public sealed class OfficeVersionSaveWorld
         {
             lock (_gate)
             {
-                if (Documents.ContainsKey(id))
+                if (Documents.TryGetValue(id, out var row))
                 {
-                    return new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, id)
+                    var document = new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, id)
                     {
                         ["createdby"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", PointerCreator),
                         ["owningbusinessunit"] = new Microsoft.Xrm.Sdk.EntityReference("businessunit", PointerRootBusinessUnit),
                     };
+                    // Task 138: the row's CURRENT filing — the planner reads it to see the .eml is still filed to the request's record.
+                    if (row.MatterId is { } matterId)
+                        document["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matterId);
+                    if (row.RelatedMatterId is { } relatedMatterId)
+                        document["sprk_relatedmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", relatedMatterId);
+                    return document;
                 }
             }
         }

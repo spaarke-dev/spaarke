@@ -521,20 +521,26 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             EmailAttachmentAddPlanner.Plan? attachmentAdd = null;
             if (existingJob is not null)
             {
-                attachmentAdd = await PlanEmailAttachmentAddAsync(request, existingJob, submission, cancellationToken);
-                if (attachmentAdd is not null)
+                // The request COULD add (an Email save naming attachments, found against a Completed job that made its own
+                // .eml): the duplicate answer leans on the earlier save, but an add WRITES now, so the caller's CURRENT rights
+                // decide, fail closed, BEFORE the app reads anything about that .eml (no download, no child listing, no filing
+                // read: a caller refused here learns nothing from what is stored). The target record was checked on THIS request
+                // by EntityAccessFilter (entity.associate_document), as for a fresh save. What a fresh save does not need, and
+                // an add does, is the existing .eml: "write" on it (the version save's operation on an existing document),
+                // through the one document-grant helper.
+                if (GetEmailAttachmentAddCandidate(request, existingJob, submission) is { } candidate)
                 {
-                    // The duplicate answer leans on the earlier save; an add WRITES now, so the caller's CURRENT rights
-                    // decide, fail closed, before anything runs (capture, filing, job row, queue). The target record was
-                    // checked on THIS request by EntityAccessFilter (entity.associate_document), as for a fresh save.
-                    // What a fresh save does not need, and an add does, is the existing .eml: "write" on it (the version
-                    // save's operation on an existing document), through the one document-grant helper.
-                    var denied = await AuthorizeEmailAttachmentAddAsync(attachmentAdd, userId, httpContext, cancellationToken);
+                    var denied = await AuthorizeEmailAttachmentAddAsync(candidate.Id, userId, httpContext, cancellationToken);
                     if (denied is not null)
                     {
                         return denied;
                     }
 
+                    attachmentAdd = await PlanEmailAttachmentAddAsync(request, candidate, cancellationToken);
+                }
+
+                if (attachmentAdd is not null)
+                {
                     // A fresh save derives its container from the record (or the caller's business unit) now, refusing
                     // what it cannot place. The add runs the same derivation, with the same refusals; if the record's
                     // documents now belong elsewhere than the .eml (e.g. the record became secure), nothing is added
@@ -1705,22 +1711,24 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     public static string ResolveIdempotencyKey(SaveRequest request) =>
         request.IdempotencyKey ?? GenerateIdempotencyKey(request);
 
+    /// <summary>The <c>.eml</c> a re-save could add attachments under: the document the earlier save created and the SPE item it uploaded.</summary>
+    private sealed record EmailAttachmentAddCandidate(Guid Id, string SpeFileId);
+
     /// <summary>
-    /// Task 138 (#2209): the attachments a re-save of an email already saved by <paramref name="existingJob"/> adds, or
-    /// <see langword="null"/> for the duplicate answer as before.
+    /// Task 138 (#2209): the <c>.eml</c> a re-save of an email already saved by <paramref name="existingJob"/> COULD add
+    /// attachments under, or <see langword="null"/> for the duplicate answer as before. Cheap gates only: no read.
     /// </summary>
     /// <remarks>
     /// Only an <c>/office/save</c> Email save (never the from-email submission) whose selection is not <c>[]</c> (none: there is
     /// no add for it) and that names attachments at all (the worker's <c>HasAttachments</c> gate), found against a Completed job that created its own <c>.eml</c> (its result names the SPE item it
-    /// uploaded; a content-duplicate job names another save's canonical and has none). What is missing is the planner's
-    /// answer from the stored <c>.eml</c> and its existing children. A read that fails keeps the duplicate answer: the save
-    /// never adds on a guess.
+    /// uploaded; a content-duplicate job names another save's canonical and has none). The caller's rights on that <c>.eml</c> are
+    /// checked next (<see cref="AuthorizeEmailAttachmentAddAsync"/>), then what is missing is the planner's answer
+    /// (<see cref="PlanEmailAttachmentAddAsync"/>).
     /// </remarks>
-    private async Task<EmailAttachmentAddPlanner.Plan?> PlanEmailAttachmentAddAsync(
+    private static EmailAttachmentAddCandidate? GetEmailAttachmentAddCandidate(
         SaveRequest request,
         JobStatusResponse existingJob,
-        SubmissionSaveState? submission,
-        CancellationToken cancellationToken)
+        SubmissionSaveState? submission)
     {
         if (submission is not null
             || request.ContentType != SaveContentType.Email
@@ -1737,17 +1745,35 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             return null;
         }
 
+        return new EmailAttachmentAddCandidate(artifact.Id, artifact.SpeFileId);
+    }
+
+    /// <summary>
+    /// Task 138 (#2209): the attachments a re-save adds under <paramref name="candidate"/>, or <see langword="null"/> for the
+    /// duplicate answer as before: the planner's answer from the stored <c>.eml</c> (still filed to the request's record) and its
+    /// existing children. A read that fails keeps the duplicate answer: the save never adds on a guess.
+    /// </summary>
+    private async Task<EmailAttachmentAddPlanner.Plan?> PlanEmailAttachmentAddAsync(
+        SaveRequest request,
+        EmailAttachmentAddCandidate candidate,
+        CancellationToken cancellationToken)
+    {
         try
         {
             return await _attachmentAddPlanner.PlanAsync(
-                artifact.Id, artifact.SpeFileId, request.Email.SelectedAttachmentFileNames, cancellationToken);
+                candidate.Id,
+                candidate.SpeFileId,
+                request.Email!.SelectedAttachmentFileNames,
+                DocumentAssociationMap.ToLogicalName(request.TargetEntity?.EntityType),
+                request.TargetEntity?.EntityId ?? Guid.Empty,
+                cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(
                 ex,
                 "Email re-save: could not read what is already saved under .eml document {DocumentId}; answering as a duplicate",
-                artifact.Id);
+                candidate.Id);
             return null;
         }
     }
@@ -1760,7 +1786,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// (OFFICE_009, 403) or <see langword="null"/> when allowed. A decision that faults refuses: fail closed.
     /// </summary>
     private async Task<SaveResponse?> AuthorizeEmailAttachmentAddAsync(
-        EmailAttachmentAddPlanner.Plan plan,
+        Guid emlDocumentId,
         string userId,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -1772,7 +1798,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 httpContext,
                 _authorizationService,
                 userId,
-                new[] { plan.EmlDocumentId },
+                new[] { emlDocumentId },
                 Sprk.Bff.Api.Api.Filters.OfficeVersionSaveAuthorizationFilter.Operation,
                 TokenHelper.ExtractBearerTokenOrNull(httpContext),
                 "office-save:email-attachment-add",
@@ -1781,7 +1807,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Email re-save: the access decision on .eml document {DocumentId} failed; refusing", plan.EmlDocumentId);
+            _logger.LogError(ex, "Email re-save: the access decision on .eml document {DocumentId} failed; refusing", emlDocumentId);
             decision = new Spaarke.Core.Auth.AuthorizationResult
             {
                 IsAllowed = false,
@@ -1797,7 +1823,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 
         _logger.LogWarning(
             "Email re-save refused before any write: the caller may not add to .eml document {DocumentId} ({Reason})",
-            plan.EmlDocumentId, decision.ReasonCode);
+            emlDocumentId, decision.ReasonCode);
         return new SaveResponse
         {
             Success = false,
