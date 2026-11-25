@@ -115,6 +115,13 @@ Setup:
 | FR-21 "Show new messages" | **Not run** | Needs a message posted from a second session (owner's call). |
 | View Only level | **Not run** | The test account has no View Only grant. |
 
+**(b) follow-up:** uac-r2 found no 400 in the BFF logs for the probe window and held (b) as unverified. A re-run at 2026-11-25T01:22:08Z gave:
+- request: POST `https://spaarke-bff-dev.azurewebsites.net/api/v1/external/api/dataverse/fetch`;
+- response: 400 ProblemDetails with the server's refusal text ("Refused: attribute 'ownerid'") and `errorCode` `DV_FETCHXML_COLUMN_NOT_PERMITTED`;
+- no `traceId`, no ownerid value in the body.
+
+Sent to uac-r2 to look for in the logs. **uac-r2 then confirmed (b) PASS.** Only the BFF produces that body. App Insights has no request row for any of the three probes, which points to whole traces being dropped under load: existing #2158, where uac-r2 added this evidence. **(a)–(c) all PASS** on SPA `3067fb3bdc` + BFF `3067fb3bdc`.
+
 **Defect found (pre-existing, shared DataGrid; blocks FR-19/FR-20 sort in practice):**
 - A normal click on a column name does not sort. Almost the whole header is the column-menu trigger, and its click handlers stop the event. The menu's "A to Z" / "Z to A" items are no-ops: DataGrid passes an empty `onSortChange`, see `DataGrid.tsx` ~1531-1540 and `HeaderCellContent.tsx` ~706-729.
 - Sorting works only through a click on the header cell outside that button.
