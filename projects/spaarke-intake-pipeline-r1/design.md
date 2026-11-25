@@ -1,6 +1,6 @@
 # Spaarke Intake Pipeline R1 — Design (initial draft for discussion)
 
-> **Status:** DRAFT v0.1, 2026-11-25. For owner discussion. Project created 2026-11-25. Next: resolve §13, then `/design-to-spec`.
+> **Status:** DRAFT v0.2, 2026-11-25. Owner design review in progress (§13 and §10 being decided one by one). Next: finish §13 and §10, then `/design-to-spec` on the owner's go.
 > **Project:** `spaarke-intake-pipeline-r1`. Worktree `C:/code_files/spaarke-wt-spaarke-intake-pipeline-r1`, branch `work/spaarke-intake-pipeline-r1`.
 > **Origin:** split out of `specialist-legal-agents-r1` (owner, 2026-11-25). The NDA submit-and-return flow turned out to be a shared platform pipeline, not a specialist-agent feature.
 > **Evidence:**
@@ -137,6 +137,16 @@ ADR-052 permits **Durable Task**, in its own host, never inside the BFF, for "mu
 | **A. BFF: ADR-004 jobs + the run record as the state machine** (recommended) | **B2:** routing, AI dispatch (ActionRunner), the Dataverse write path and ownership all live in the BFF. **B3:** low volume. The approval wait is a status on the run record, not a held orchestration (approval enqueues the next stage). It follows the invoice pattern | Hand-rolled: needs the written reason in the Placement Justification |
 | B. Durable Task Scheduler (Durable Functions, .NET isolated, own host) | Native waits for external events, retries, fan-out | Activities may not reference `Sprk.Bff.Api` or call BFF endpoints, so routing and AI code would need extracting to `src/server/shared`, or a queue round-trip to the BFF for every step. Also: first-Function setup, a deployable per stamp, owner approval |
 
+**Decision (owner, 2026-11-25): A.** Request runs are ADR-004 `IJobHandler` jobs in the BFF, with `sprk_processingjob` as the state machine. The approval wait is a run status (`AwaitingApproval`); the approve endpoint enqueues the next stage, so nothing is held in memory.
+
+**Written reason for ADR-052:75** (goes into the Placement Justification verbatim):
+- **B2:** every stage uses BFF domain code (routing, AI dispatch, the Dataverse write path, ownership, the Decision Record writer). Durable activities may not reference `Sprk.Bff.Api` or call it (`ADR-052:66,71`).
+- **B3:** legal request volume is low (hundreds a day at most).
+- **F5 is weak here:** the only long wait is one human approval, which a persisted status covers. The invoice pipeline's step-0 / terminal-last / resume-from-stored-state rules give the durability.
+- **Exit path:** if per-request fan-out or cross-system waits appear, move out behind an ADR-032 kill switch (`ADR-052:79`).
+
+**Noted for elsewhere:** the customer provisioning control plane (`src/server/services/Sprk.Provisioning.ControlPlane.*`) is a stronger Durable Task fit. It is already its own .NET service, gated and multi-phase, and it hand-rolls a Cosmos state machine, a dispatcher, a reconciler and crash recovery. Its design rejected Durable Functions only because ADR-004 banned them then (`customer-provisioning-orchestration-r1/design.md:374,574`), and ADR-052 has since lifted that ban. That is for its own project to assess, not this one.
+
 ## 5. NDA harness: reuse the accelerator's redline engines
 
 The accelerator already has the redline pipeline the owner remembers (`src/accelerators/core/engines/`, tested, on the accelerator branch, **not on master**):
@@ -257,7 +267,7 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 
 | ADR | Tension | Proposed path |
 |---|---|---|
-| ADR-052 | Hand-rolled orchestration of a human-gated flow; a possible Container Apps Job | **C (comply)** with the written reason (§4 A). The engine host needs owner approval if §5 A |
+| ADR-052 | Hand-rolled orchestration of a human-gated flow; a possible Container Apps Job | **C (comply)** with the written reason (§4, decided 2026-11-25). The engine host needs owner approval if §5 A |
 | ADR-028 A5 / ADR-052 identity | The background run acts with no user present | **C:** app-only, attributed to the request and the assigned attorney. The send is from the shared mailbox after a human approval |
 | ADR-049 | Exact-text anchoring in the NDA edit plan | **C** if ADR-049's scope is Compose only; confirm |
 | ADR-039 | Harness AI steps | **C:** closed catalogue; harnesses call cataloged Actions only |
@@ -276,7 +286,7 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 ## 13. Open questions for the owner
 
 1. ~~Project slug and name~~ **Decided 2026-11-25:** `spaarke-intake-pipeline-r1`.
-2. Orchestration host: BFF jobs + run record (recommended) or Durable Task?
+2. ~~Orchestration host~~ **Decided 2026-11-25: A**, BFF ADR-004 jobs + `sprk_processingjob` as the state machine, with the written reason (§4).
 3. NDA engines: Python in a Container Apps Job (lean) or a C# port? A spike decides.
 4. Invoice: move as phase 3, after eBilling UAT and before customer rollout (recommended), or earlier?
 5. Sending identity: the shared legal mailbox (recommended)?
