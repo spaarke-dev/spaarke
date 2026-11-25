@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="210" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Rule wizard and "How this was determined" name columns by display name and choice values by label (#3040 DI-169, #3020 DI-165)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF Signals/Ontology services (.cs) and the shared RuleWizard UI (.tsx); may add a cached metadata read.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Choosing the label source is a reuse decision (§11) across the describer's six callers, the authoring catalog and the rule wizard; must add no per-request metadata read on the hot path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>RuleBodyDescriber.cs, the ontology admin authoring catalog files and OntologyAdmin/RuleWizard steps; tasks 208, 209 and 211 touch none of them.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, react, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-24: "Continue with next tasks". Two issues, one task because both need column metadata and both edit RuleBodyDescriber: read in full #3040 (gh issue view 3040; DI-169) and #3020 (gh issue view 3020; DI-165), and their rows in projects/spaarke-ontology-platform-r1/notes/defer-issues.md.
+
+(1) #3040: the rule wizard (Condition → Add a test → column list; Wording → "Values the message can quote") lists columns by logical name (`createdon`, `sprk_openeddate`, `statecode`), and the decision wizard's plain-language line says "Each matter where createdon is on or before 5 days ago". (2) #3020: the plain-language line shows `statuscode` as a number ("status is 659490001").
+
+Entry points (search by name; origin/master e70ff38894): `src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodyDescriber.cs` (static `ColumnLabels`, `EntityLabels`, `Phrases`, `Display`, `StateWord` from task 203); the authoring catalog columns (`OntologyAdminAuthoringService.cs` ~285 task 102a "allow-listed columns a filter may name", `OntologyAdminAuthoringModels.cs` ~144/156, `PolicyVersionValidator.AuthorableColumns`, `PredicateCompiler` allow-list); client `src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/steps/ConditionStep.tsx` and the Wording step; `DecisionParameterSources.cs` (an existing picklist metadata read, per caller, decision-wizard cache). Task 203 (tasks/203-*.poml, notes/task-203-notes.md) already moved tables to display names and statecode to labels: follow how it did that.</prompt>
+  <role>SPAARKE full-stack developer: .NET 10 BFF (Signals describer, ontology admin authoring catalog, Dataverse entity metadata), shared React RuleWizard.</role>
+  <goal>An admin picks and reads columns by display name in the rule wizard; the plain-language "How this was determined" line names columns by display name and choice/status values by their label; the formal line, option values and stored rule bodies stay logical names and numbers; no metadata read is added per request on the hot path.</goal>
+  <context>
+    <background>Reuse first (root CLAUDE.md §11): before adding a source, find whether column display names and option labels are already read somewhere cached (the authoring catalog, the record-type catalog, `DecisionParameterSources`, an existing entity-metadata service; start at .claude/patterns/CAPABILITY-INDEX.md, then Grep). The allow-list of authorable columns is small and closed (PredicateCompiler), so a static map like today's ColumnLabels extended to every authorable column is a legitimate option and needs no metadata read for column NAMES; choose it if it is complete and guarded by a test that every authorable column has a label (as EntityLabels is guarded). Choice/status LABELS differ per table and per environment's customisation: these need entity metadata, read once per table and cached app-wide (as the record-type catalog is), falling back to the number when unknown. The describer has six callers including Finance: keep its signature or update every caller. Client: the option value stays the logical name; the shown text is the display name. Sentence style follows task 203 (plain, no internal codes).</background>
+  </context>
+  <constraints>
+    <constraint source="project">Stored rule bodies, the formal line, API field values and PredicateCompiler's allow-list unchanged; only shown text changes. TemplateEligibleFields semantics unchanged (task 022); if the Wording step shows display names, the inserted token stays the logical name.</constraint>
+    <constraint source="project">No per-request Dataverse metadata read on the decision or worklist hot path; any new read is app-cached with a bounded lifetime and fails soft to the logical name / number (never fails the describe or the page).</constraint>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Describer text is pinned in contract baselines: run `--filter "FullyQualifiedName~Signals"` and update tests/integration/contract/Api/Signals/Baselines in the same PR; also the OntologyAdmin filter.</constraint>
+    <constraint source="root CLAUDE.md §11">Any new service, interface, DI registration or endpoint answers the three questions in the PR; prefer extending an existing cached metadata source.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests. Client: RuleWizard and DecisionWizard tests, typecheck, and `node scripts/quality/client-lint/client-lint.mjs check` before push.</constraint>
+    <constraint source="project testing rule">A test asserting a Dataverse column list or option-set value is paired with something touching the real schema (for example SpaarkeMaster Entity.xml display names, as the schema-agreement guards do).</constraint>
+    <constraint source="ADR-038">Tests fail on origin/master: describer says "created on" (or the table's display name for createdon) not "createdon"; a statuscode test reads by label when known and by number when unknown; every authorable column has a display label (guard); the rule wizard column list shows display names with logical-name values.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/CAPABILITY-INDEX.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read both issues, task 203's notes and the entry points; inventory existing cached sources of column display names and option labels; decide and record the source (with the §11 answers) in notes/task-210-notes.md.</step>
+    <step order="2">Failing tests first (describer column names and statuscode labels with fallback; authorable-column label guard; rule wizard display text with logical values).</step>
+    <step order="3">Implement the server label source and describer change; then the client display text.</step>
+    <step order="4">Filtered tests (Signals incl. baselines, OntologyAdmin, RuleBodyDescriber), full ArchTests, BFF build, publish-size delta; client tests, typecheck, client-lint.</step>
+    <step order="5">PR to master, body "Closes #3040, Closes #3020"; notes in notes/task-210-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">The plain-language line names every authorable column by a display label (guard test over the allow-list) and a statuscode test by its option label when known, by number otherwise; the formal line is unchanged; tests fail on origin/master.</criterion>
+    <criterion testable="true">The rule wizard's column list and "Values the message can quote" show display names; the selected value and the stored rule body keep the logical name.</criterion>
+    <criterion testable="true">No per-request metadata read on the decision path (test or code-level proof); a metadata failure falls back to logical name / number without failing the request.</criterion>
+    <criterion testable="true">Contract baselines updated in the PR; build, filtered tests, full ArchTests, client tests, typecheck and client-lint pass; publish-size delta reported.</criterion>
+    <criterion testable="false">Main session checks the rule wizard and a decision's "How this was determined" on dev after the next uac-r2 dev BFF build and the Console auto-deploy.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a schema change, a change to stored rule bodies or the allow-list, a per-request metadata read, or a change to the describer's callers' behaviour beyond the shown text: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt210); PR to master.</protocol>
+  </execution>
+</task>

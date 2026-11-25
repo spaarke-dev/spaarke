@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="211" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Decision wizard person picker and Confirm summary show the email, so same-name contacts can be told apart (#3062, DI-170)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared LookupField (.tsx, many consumers) and the DecisionWizard parameter fields.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Located client change with a stated approach; the server already returns the email.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>LookupTypes.ts, LookupField.tsx and DecisionWizard steps; task 210 edits OntologyAdmin/RuleWizard only, 208/209 are server-only.</parallel-reason>
+    <deps>none</deps>
+    <tags>react, fluent-ui, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-24: "Continue with next tasks". Issue #3062 (read it in full with comments: gh issue view 3062 --comments; filed by mcp-r1 as their ISS-008, offered to this project) and DI-170 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. Dev has three active contacts with the same full name; the Assign Task "Assign to" picker lists names only and the Confirm summary reads "Assign to: Name".
+
+Entry points (search by name; origin/master e70ff38894): `src/client/shared/Spaarke.UI.Components/src/types/LookupTypes.ts` (`ILookupItem`); `src/client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx` (the option renders `&lt;Text size={200}&gt;{item.name}&lt;/Text&gt;`, ~726); `src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx` (`LookupParameter` → `ILookupItem` { id, name }; the draft label used by the Confirm summary); server `src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionLookupSearch.cs` (`DecisionLookupCandidate.Email`, already returned). Also check the Console's side-pane person lookup for the same field (task 193 moved Console lookups to the side pane): if it is the Dataverse "Lookup Records" pane, it already shows the email column; record what you find.</prompt>
+  <role>SPAARKE frontend developer: shared Fluent v9 React components (@spaarke/ui-components), DecisionWizard.</role>
+  <goal>Each person option in the Decision wizard's inline picker shows the contact's email under the name, and the Confirm summary reads "Name (email)"; every other LookupField consumer looks exactly as before.</goal>
+  <context>
+    <background>Extend, don't fork (FR-27/28): add an optional secondary line to `ILookupItem` (for example `secondaryText?: string`) rendered under the name only when present, so every existing consumer is unchanged. Keep the selected item's id and the value sent to the commit route unchanged; only shown text changes. A person with no email shows the name only (no empty parentheses). Load the fluent-v9-component skill before editing the component. LookupField is used by many projects: run /conflict-check, and keep keyboard/mouse selection and focus return (task 200) intact. Use display text only from the server's candidate; no new BFF field or route.</background>
+  </context>
+  <constraints>
+    <constraint source="project">No BFF change, no API contract change, no new route; commit payload unchanged.</constraint>
+    <constraint source="project">Every LookupField consumer that passes no secondary text renders byte-identically (snapshot or DOM test).</constraint>
+    <constraint source="public repo">Test data uses invented names and example.com emails; no environment contact ids or real emails.</constraint>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-12">Run `node scripts/quality/client-lint/client-lint.mjs check` before pushing; also the DecisionWizard and LookupField jest tests and typecheck.</constraint>
+    <constraint source="ADR-021">Secondary text uses Fluent tokens (dark mode).</constraint>
+    <constraint source="ADR-038">Tests fail on origin/master: two same-name candidates render with their different emails; the Confirm summary reads "Name (email)"; must-not-fire: no email → name only; a consumer without secondary text is unchanged.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read #3062 with comments and the entry points; list LookupField consumers; check the Console side-pane path; notes in notes/task-211-notes.md.</step>
+    <step order="2">Failing tests first (picker secondary line, Confirm summary, must-not-fire controls).</step>
+    <step order="3">Add the optional secondary line to ILookupItem and LookupField; pass the email from the person candidate in ParameterFields; build the summary label.</step>
+    <step order="4">LookupField and DecisionWizard tests, typecheck, client-lint.</step>
+    <step order="5">PR to master, body "Closes #3062"; notes in notes/task-211-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">In the Assign Task step, each person option shows the email under the name; two same-name candidates are distinguishable; tests fail on origin/master.</criterion>
+    <criterion testable="true">The Confirm summary reads "Name (email)" for a person with an email and "Name" without one; the commit payload is unchanged.</criterion>
+    <criterion testable="true">LookupField consumers that pass no secondary text render unchanged; keyboard and mouse selection and focus return still pass their tests; tests, typecheck and client-lint pass.</criterion>
+    <criterion testable="false">Main session checks the picker on dev after the Console auto-deploy.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a BFF change, a new lookup component, or changes another consumer's display: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt211); PR to master.</protocol>
+  </execution>
+</task>

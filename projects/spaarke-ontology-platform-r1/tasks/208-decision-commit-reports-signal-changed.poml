@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="208" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Decision commit reports signal_changed when an item changes twice while it is being closed (#3028, DI-167)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the decision commit write path (.cs) in BFF Signals; changes which declared outcome one race reports.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One located defect in one method with a stated fix; the outcome code already exists.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Only DecisionCommitService.cs CloseSignalAsync and its tests; tasks 209-211 touch no commit-path file.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-24: "Continue with next tasks" (after 203-207; same standing go as 2026-11-23 "continue with other tasks so we can make progress"). Issue #3028 (read it in full: gh issue view 3028) and DI-167 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md.
+
+`src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs` `CloseSignalAsync` (search by name; ~2484 on origin/master e70ff38894) retries a close once on a row-version mismatch. The mismatch catch is filtered `IsVersionMismatch(ex) &amp;&amp; attempt == 0`, so a second mismatch on attempt 1 falls into the general catch and returns `signal_close_failed` (and records a writer failure in telemetry). The intended `Warn(signalId, "signal_changed", "The item kept changing while it was being closed; it was left as it is.")` after the loop is unreachable. Task 205 (PR #3027) kept that behaviour and pinned it with a test: find that test and change its expectation.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, the ontology decision commit path.</role>
+  <goal>A row-version mismatch on the last close attempt returns the declared `signal_changed` warning and is not counted as a writer failure; every other close outcome is unchanged.</goal>
+  <context>
+    <background>Keep the retry count (one retry). A mismatch on attempt 0 still re-reads and retries; a mismatch on the last attempt returns signal_changed; any other exception on any attempt still returns signal_close_failed with its failure count. Cancellation behaviour unchanged. Before editing, Grep every consumer of `signal_changed` and `signal_close_failed` (Console DecisionWizard display, `decisionDisplay.ts` WARNING_TEXT or equivalent, MCP-facing code in this repo) and confirm signal_changed already has user text; if a consumer outside this repo's shared lib shows these codes, list it in the task notes for the main session, do not edit it. Read `git log -5` on DecisionCommitService.cs first: other projects merge into it (run /conflict-check).</background>
+  </context>
+  <constraints>
+    <constraint source="project">No new outcome code; signal_changed is already declared. Response shape unchanged. Per-item semantics from task 205 unchanged (bounded parallel closes, item order, D-120 stamping, ledger resume, WhoAmI bound).</constraint>
+    <constraint source="project">Security fails closed exactly as today; no change to which items a caller may close.</constraint>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run `--filter "FullyQualifiedName~Signals"` (includes the contract baselines under tests/integration/contract/Api/Signals/Baselines); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="ADR-038">Test fails on origin/master: two consecutive mismatches give signal_changed and no writer-failure count. Must-not-fire: one mismatch then success closes; a non-mismatch exception on attempt 1 still gives signal_close_failed.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read #3028, CloseSignalAsync and the task 205 pinning test; Grep the outcome-code consumers; notes in notes/task-208-notes.md.</step>
+    <step order="2">Failing test first (two mismatches → signal_changed, no failure count) plus the two must-not-fire controls.</step>
+    <step order="3">Fix the catch so the last-attempt mismatch maps to signal_changed.</step>
+    <step order="4">Filtered tests (Signals, DecisionCommit), full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #3028"; notes in notes/task-208-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Two consecutive row-version mismatches on one item's close give that item outcome signal_changed with the existing sentence, and telemetry records no decision_commit_signal_close_failed for it; the test fails on origin/master.</criterion>
+    <criterion testable="true">One mismatch then success still closes the item; a non-mismatch exception on either attempt still gives signal_close_failed with its failure count; cancellation is unchanged.</criterion>
+    <criterion testable="true">No other outcome, response shape or contract baseline changes except where a baseline pinned the old signal_close_failed for this race; build, filtered tests and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a new outcome code, a retry-count change or a change to another item's outcome: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt208); PR to master.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="209" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Nightly D-170 close reads only the not-in-force policies that still have open Signals (#3014, DI-164)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the nightly Signal close (.cs) in BFF Signals; changes which query selects Signals to close.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The selection decides which Signals the nightly job closes: a wrong join closes live items or leaves retired ones open; D-170, D-120, D-61 and task 204's truncation rule must survive.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Only SignalClosureService.cs / SignalReevaluationJob.cs and their tests; no other task in the group touches them.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, performance, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-24: "Continue with next tasks". Issue #3014 (read it in full: gh issue view 3014) and DI-164 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md.
+
+Task 204 (PR #3011) made `SignalClosureService.ReadPoliciesNotInForceAsync` page through every Off or Inactive policy; `ClosePoliciesNotInForceAsync` then sends one Signal query per such policy. ebilling task 117 switches record rules Off on every core-record delete, so that count grows without bound while most of those policies have no open Signals. `SignalReevaluationJob.MaxRunDuration` is 2 h. Entry points (search by name; origin/master e70ff38894): `src/server/api/Sprk.Bff.Api/Services/Signals/SignalClosureService.cs` `ClosePoliciesNotInForceAsync` (~161), `ReadPoliciesNotInForceAsync` (~200, also used with includeBilling:false at ~195 by the preview/sweep path), `CloseAsync`; `SignalReevaluationJob.cs` call site.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse SDK QueryExpression / LinkEntity paging, the ontology nightly re-evaluation job.</role>
+  <goal>The nightly close's Dataverse calls scale with the number of not-in-force policies that still have open Signals, not with all not-in-force policies; which Signals are closed, and how, is unchanged.</goal>
+  <context>
+    <background>Suggested direction from the issue (a hypothesis; check it): one paged query over open sprk_signal rows linked to sprk_policy where the policy is not in force under D-170 (Off, or Inactive; billing included for the close), grouped by policy, then the existing per-policy close on the Signals read. The preview and the sweep share `ReadPoliciesNotInForceAsync(includeBilling: false)`: either give the close its own selection and leave theirs unchanged, or prove both still work with tests. Read task 204's POML and notes (tasks/204-*.poml, notes/task-204-notes.md) and `git log -5` on both files first; ebilling-r1 merges into Signals code (run /conflict-check). A Signal linked to a deleted policy is a different sweep (CloseSignalsOfDeletedPoliciesAsync): leave it alone.</background>
+  </context>
+  <constraints>
+    <constraint source="project">D-170 (which policies are not in force) unchanged; D-120 (resolvedon = lastevaluated in the same update) unchanged; D-61 (never stamp an unchanged Signal) unchanged; task 204: a truncated read is reported and fails the run, including for the new query.</constraint>
+    <constraint source="project">Closure reason codes, telemetry names and the job's outcome shape unchanged; secure-child Signals are closed exactly as today (no new skip, D-38).</constraint>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run `--filter "FullyQualifiedName~Signals"` (includes contract baselines).</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration; private helpers in SignalClosureService.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="ADR-038">Call-count test fails on origin/master: many Off policies (for example 500) with open Signals on few (for example 3) → Signal-read calls bounded by pages of the open-Signal query plus the closes, not per policy. Must-not-fire: an Off policy with open Signals still closes them all with the same reason; an in-force policy's Signals are untouched; a truncated read still fails the run; existing SignalClosure and SignalReevaluation tests pass unmodified.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read #3014, task 204's POML and notes, both entry files; count today's calls on the fake for N Off policies; record in notes/task-209-notes.md.</step>
+    <step order="2">Failing call-count test and the must-not-fire controls.</step>
+    <step order="3">Replace the per-policy discovery with one paged open-Signal query linked to not-in-force policies; keep the per-policy close and truncation reporting.</step>
+    <step order="4">Filtered tests (SignalClosure, SignalReevaluation, Signals), full ArchTests, BFF build, publish-size delta; record after counts.</step>
+    <step order="5">PR to master, body "Closes #3014"; notes in notes/task-209-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">With many not-in-force policies and open Signals on only a few, the close's Signal-read calls do not grow with the number of not-in-force policies (counted on the fake); the test fails on origin/master.</criterion>
+    <criterion testable="true">Every open Signal of a not-in-force policy is still closed with the same reason, resolvedon and telemetry; in-force policies' Signals are untouched; unchanged Signals are not stamped; a truncated read still fails the run.</criterion>
+    <criterion testable="true">The preview and sweep paths behave as before (unchanged or proven by tests); existing SignalClosure and SignalReevaluation tests pass unmodified; build, filtered tests and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix changes which Signals are closed, needs a schema or index change, a new service, or changes the preview/sweep results: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt209); PR to master.</protocol>
+  </execution>
+</task>
