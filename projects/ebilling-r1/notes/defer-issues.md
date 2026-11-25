@@ -2708,7 +2708,7 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-iss053 8b9d8c0aa6: ArchTest JobQueueDuplicateDetectionOffGuardTests, 8/0; jobs.md names it). Closes when the next master PR merges. Stamp-side live check suggested to customer-provisioning-orchestration-r1. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 |
 | **Source** | uac-r2 review of master PR #3084 (ISS-025), 2026-11-25 |
