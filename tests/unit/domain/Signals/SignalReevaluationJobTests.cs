@@ -3324,10 +3324,14 @@ public partial class SignalReevaluationJobTests
                     break;
                 // Task 102b fix round 3: the deleted-policy sweep's read (sprk_policy is null, Open or Acknowledged), as Dataverse answers it.
                 // Fix round 4: and the redaction's read of the codes (sprk_policy is null, ANY status: no status condition); both paged.
+                // Task 217: and the redaction's read of the Signals with no policy whose stored evidence still carries detail (its LIKE
+                // filter, evaluated by Holds as Dataverse evaluates it).
                 case "sprk_signal" when query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_policy" && c.Operator == ConditionOperator.Null):
+                    if (FiltersOnStoredDetail(query.Criteria)) StoredDetailReads.Add("no policy");
                     var sweepStatuses = query.Criteria.Conditions.SingleOrDefault(c => c.AttributeName == "sprk_signalstatus")?.Values.Cast<int>().ToHashSet();
                     result = Paged(query, Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy") is null
-                                 && (sweepStatuses is null || sweepStatuses.Contains(r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value)))
+                                 && (sweepStatuses is null || sweepStatuses.Contains(r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value))
+                                 && Holds(r, query.Criteria))
                         .Select(row =>
                         {
                             var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
@@ -3345,6 +3349,7 @@ public partial class SignalReevaluationJobTests
                         || policyLink.JoinOperator != JoinOperator.Inner || policyLink.LinkEntities.Count > 0)
                         throw new NotSupportedException("Only an inner join of sprk_signal.sprk_policy to sprk_policy.sprk_policyid is modelled.");
                     OpenSignalPolicyJoinReads++;
+                    if (FiltersOnStoredDetail(query.Criteria)) StoredDetailReads.Add("joined");
                     result = Paged(query, Org.Rows.Values.Where(r =>
                             Holds(r, query.Criteria)
                             && r.GetAttributeValue<EntityReference>("sprk_policy") is { } linked
@@ -3504,7 +3509,7 @@ public partial class SignalReevaluationJobTests
         public int OpenSignalPolicyJoinReads { get; private set; }
 
         /// <summary>Task 209: a <see cref="FilterExpression"/> (conditions and nested filters, And or Or) evaluated on one row, as Dataverse does,
-        /// for the operators the joined read uses: <c>eq</c>, <c>in</c>, <c>null</c>, <c>not-null</c>. Any other operator throws.</summary>
+        /// for the operators the joined read uses: <c>eq</c>, <c>in</c>, <c>null</c>, <c>not-null</c>, and (task 217) <c>like</c>. Any other operator throws.</summary>
         private static bool Holds(Entity row, FilterExpression filter)
         {
             var results = filter.Conditions.Select(c =>
@@ -3516,11 +3521,36 @@ public partial class SignalReevaluationJobTests
                     ConditionOperator.In => c.Values.Any(v => Matches(row, c.AttributeName, v)),
                     ConditionOperator.Null => !present,
                     ConditionOperator.NotNull => present,
+                    // Task 217: a LIKE as Dataverse evaluates it on a string column: % any run, _ one character, case-insensitive; a null
+                    // never matches.
+                    ConditionOperator.Like => value is string text && LikeHolds(text, (string)c.Values[0]),
                     _ => throw new NotSupportedException($"Operator {c.Operator} on {c.AttributeName} is not modelled by the joined read."),
                 };
             }).Concat(filter.Filters.Select(f => Holds(row, f))).ToList();
             return filter.FilterOperator == LogicalOperator.Or ? results.Any(r => r) : results.All(r => r);
         }
+
+        /// <summary>Task 217: SQL LIKE (Dataverse string conditions are case-insensitive). Bracket classes are not modelled and throw.</summary>
+        private static bool LikeHolds(string text, string pattern)
+        {
+            if (pattern.Contains('[')) throw new NotSupportedException("LIKE bracket classes are not modelled.");
+            var regex = "^" + string.Concat(pattern.Select(ch => ch switch
+            {
+                '%' => ".*",
+                '_' => ".",
+                _ => System.Text.RegularExpressions.Regex.Escape(ch.ToString()),
+            })) + "$";
+            return System.Text.RegularExpressions.Regex.IsMatch(text, regex,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+        }
+
+        /// <summary>Task 217: a read that filters on the stored evidence (a LIKE on <c>sprk_evidencerefs</c>, at any depth).</summary>
+        private static bool FiltersOnStoredDetail(FilterExpression filter) =>
+            filter.Conditions.Any(c => c.AttributeName == "sprk_evidencerefs" && c.Operator == ConditionOperator.Like)
+            || filter.Filters.Any(FiltersOnStoredDetail);
+
+        /// <summary>Task 217: each read of Signals filtered on their stored evidence, by kind ("joined" to the policy, or "no policy").</summary>
+        public List<string> StoredDetailReads { get; } = new();
 
         private static bool Matches(Entity row, string attribute, object expected) => row.Attributes.TryGetValue(attribute, out var actual) && actual switch
         {

@@ -717,6 +717,28 @@ public sealed class SignalSuppressionService
     /// <summary>The stored evidence column (<see cref="SignalWriter"/> writes it on create; <see cref="StoredEvidenceToRedactAsync"/> reads it).</summary>
     internal const string EvidenceColumn = "sprk_evidencerefs";
 
+    /// <summary>The properties of a stored evidence line that are its DETAIL (the witness's display value and where it came from): what
+    /// <see cref="StoredEvidenceToRedactAsync"/> checks and removes. One definition for the rule and for <see cref="AddStoredDetailFilter"/>.</summary>
+    private static readonly string[] StoredDetailProperties = { "text", "source" };
+
+    /// <summary>
+    /// Task 217 (#3091, DI-172): narrows a <c>sprk_signal</c> query (AND) to the Signals whose stored evidence may still carry detail, so a
+    /// read for the redaction need not return the Signals with nothing left to clear (the redaction is monotonic: a line that lost its detail
+    /// never gets it back). The evidence column CONTAINS a detail property's JSON name (<c>"text"</c> or <c>"source"</c>, quotes included), as
+    /// <see cref="SignalWriter"/> writes it (camelCase, null properties omitted) and as the redaction leaves it (the property removed). A
+    /// SUPERSET of <see cref="StoredEvidenceToRedactAsync"/>'s rule: a row may match on a value, or on a property name in another case
+    /// (Dataverse string conditions are case-insensitive), and is then read and left as it is by the rule; every row the rule would change
+    /// has a line with one of these properties, so it matches. A leading-wildcard LIKE, which Dataverse cannot answer from an index: callers
+    /// pair it with an indexed filter and treat a fault as "unknown", never as "nothing to redact".
+    /// </summary>
+    internal static void AddStoredDetailFilter(FilterExpression criteria)
+    {
+        ArgumentNullException.ThrowIfNull(criteria);
+        var detail = new FilterExpression(LogicalOperator.Or);
+        foreach (var property in StoredDetailProperties) detail.AddCondition(EvidenceColumn, ConditionOperator.Like, $"%\"{property}\"%");
+        criteria.AddFilter(detail);
+    }
+
     /// <summary>
     /// Ontology task 145, review F1 (D-123; main session 2026-10-14, option A): the STORED evidence of existing Signals, open and
     /// resolved. A Signal's evidence is written once, at create (<see cref="EvidenceWithinPartitionAsync"/>), so a witness re-filed into
@@ -762,8 +784,7 @@ public sealed class SignalSuppressionService
                 foreach (var line in stored[i].Lines.OfType<JsonObject>().Where(HasStoredDetail).ToList())
                 {
                     if (KeepsDetail(signalFamilies[i], RefOf(line), familyOfWitness)) continue;
-                    line.Remove("text");
-                    line.Remove("source");
+                    foreach (var property in StoredDetailProperties) line.Remove(property);
                     changed = true;
                     cleared++;
                 }
@@ -801,7 +822,7 @@ public sealed class SignalSuppressionService
             }
         }
 
-        static bool HasStoredDetail(JsonObject line) => line["text"] is not null || line["source"] is not null;
+        static bool HasStoredDetail(JsonObject line) => StoredDetailProperties.Any(property => line[property] is not null);
 
         static string? RefOf(JsonObject line) => line["ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
     }
