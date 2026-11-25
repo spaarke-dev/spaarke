@@ -65,8 +65,7 @@ public class LegacyAgentRouteRetirementTests : IClassFixture<CustomWebAppFactory
 
         var prefix = Prefix.Trim('/');
         var survivors = endpoints
-            .Where(e => (e.RoutePattern.RawText ?? string.Empty).TrimStart('/')
-                .StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Where(e => IsUnderPrefix((e.RoutePattern.RawText ?? string.Empty).TrimStart('/'), prefix))
             .Select(e => $"{e.RoutePattern.RawText}  (registered as: {e.DisplayName})")
             .ToList();
 
@@ -74,6 +73,12 @@ public class LegacyAgentRouteRetirementTests : IClassFixture<CustomWebAppFactory
             "the legacy M365 Copilot agent routes were removed by spaarkeai-mcp-bff-api-r2 task 001. Re-registered routes:\n  "
             + string.Join("\n  ", survivors));
     }
+
+    /// <summary>Segment match: the path IS the prefix or sits below it, so a future sibling route that merely shares the
+    /// characters (a plural collection route, say) is not mistaken for the removed gateway.</summary>
+    private static bool IsUnderPrefix(string path, string prefix)
+        => path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+           || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
 
     [Theory]
     [MemberData(nameof(RetiredRequests))]

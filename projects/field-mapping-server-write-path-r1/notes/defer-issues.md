@@ -412,3 +412,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing. The step creates `sprk_document` rows with a name only (no upload, no attach) and hands their ids to the Playbook Library; the analysis reads the "No file content available" placeholder. The old `/api/v1/documents` create stored no file either. |
 | **Need** | Upload and attach each file before the analysis starts, or refuse to start an analysis on documents without a file; test that a file-less document never reaches an analysis. |
 | **Status** | Filed. Task 029 moved only the create onto the child-records route (FR-16); the upload pipeline is outside its scope. |
+
+## DI-043 — The Document Upload wizard silently drops TXT, PPTX, MSG and EML files (found in the 029 live check)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 029 live check on dev. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3176 |
+| **Class** | Pre-existing. The shared `FileUploadZone` resolves a type only for PDF/DOCX/XLSX, and `AddFilesStep` ignores the validation errors, so the user sees nothing. |
+| **Need** | Every advertised extension resolves to a type; validation errors are shown; tests for each extension and for a shown rejection. |
+| **Status** | Filed. Outside FR-16 (the create payload). |

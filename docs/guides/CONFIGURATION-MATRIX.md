@@ -282,20 +282,15 @@ Options class: `CommunicationOptions` (`Configuration/CommunicationOptions.cs`)
 | `Communication:WebhookSigningKey` | -- | Key Vault | **Yes (Auth v2 Phase C)** | HMAC-SHA256 key for Graph webhook signature validation. Generate via `openssl rand -base64 48`. See [`auth-deployment-setup.md`](auth-deployment-setup.md) §3-§4. |
 | `Communication:ApprovedSenders` | `[]` | appsettings | Yes (min 1) | Approved sender configurations |
 
-### Agent Token (`AgentToken`)
+### Copilot audience (`AgentToken:CopilotAudience`, legacy)
 
-Options class: `AgentTokenOptions` (`Configuration/AgentTokenOptions.cs`)
+No options class binds this key; `AuthorizationModule` reads it directly from configuration.
 
 | Setting | Default | Location | Required | Description |
 |---------|---------|----------|----------|-------------|
-| `AgentToken:TenantId` | -- | Env Var | Yes | Azure AD Tenant ID |
-| `AgentToken:ClientId` | -- | Env Var | Yes | BFF API client ID |
-| `AgentToken:ClientSecret` | -- | Key Vault | Yes | BFF API client secret |
-| `AgentToken:AgentAppId` | -- | Env Var | Yes | Copilot agent app ID |
-| `AgentToken:CopilotAudience` | -- | Env Var | No | Expected token audience |
-| `AgentToken:GraphScopes` | `["https://graph.microsoft.com/.default"]` | appsettings | Yes | Graph scopes for OBO |
-| `AgentToken:DataverseEnvironmentUrl` | -- | Env Var | Yes | Dataverse URL (no trailing slash) |
-| `AgentToken:CacheTtlMinutes` | `55` | appsettings | No | Token cache TTL (1-59) |
+| `AgentToken:CopilotAudience` | -- | Env Var | No | Legacy. No surviving surface presents this audience since the legacy M365 Copilot agent / API plugin was removed (spaarkeai-mcp-bff-api-r2, 2026-11-25); the MCP connector refuses it (ADR-028 A10, `Api/Mcp/McpToolAuthorization.cs`). Do not set it; removal of the merge is tracked separately. |
+
+The other `AgentToken:*` keys (`TenantId`, `ClientId`, `AgentAppId`, `GraphScopes`, `DataverseEnvironmentUrl`, `CacheTtlMinutes`) configured only the removed agent gateway; nothing reads them.
 
 ### LlamaParse (`LlamaParse`)
 
