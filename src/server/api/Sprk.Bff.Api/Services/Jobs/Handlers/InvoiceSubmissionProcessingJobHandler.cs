@@ -94,7 +94,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// ebilling-r1 task 092 (review F1): the waits between reads of an upload whose malware scan has no verdict yet, within ONE delivery.
     /// Their sum (<see cref="ScanWaitBudget"/>, 3 min 50 s) stays inside the processor's 10-minute message-lock renewal and
     /// <see cref="LockDuration"/>, leaving room for the extraction and the commit. Over all <see cref="JobContract.MaxDeliveryCount"/>
-    /// deliveries a scan gets about 19 minutes before the submission is Failed with <see cref="SubmissionReasonCodes.FileScanTimeout"/>.
+    /// deliveries a scan gets about 34 minutes (19 minutes of waits plus the processor's 15-minute <see cref="JobContract.RetryWindow"/>
+    /// between deliveries, ISS-025) before the submission is Failed with <see cref="SubmissionReasonCodes.FileScanTimeout"/>.
     /// </summary>
     internal static readonly TimeSpan[] ScanWaits =
     [

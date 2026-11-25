@@ -513,12 +513,14 @@ public partial class InvoiceSubmissionPersisterTests
     // ── EB-D-175 / EB-D-176: a line the AI did not check, and a line with no description, are Flagged ──
 
     /// <summary>Persists a one-line invoice with the given narrative and coding outcome; returns the stored line and the stored findings JSON.</summary>
-    private static async Task<(Entity Line, JsonDocument Findings)> PersistOneLineAsync(string? narrative, bool notReturned, bool coded = true)
+    private static async Task<(Entity Line, JsonDocument Findings)> PersistOneLineAsync(
+        string? narrative, bool notReturned, bool coded = true, (Guid Task, Guid Activity)? codeRows = null)
     {
         var harness = new ProcessorHarness
         {
             Lines = [InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>(narrative) }],
         };
+        harness.Coding.CodeRows = codeRows;
         if (notReturned)
         {
             harness.Coding.NotReturnedKeys = new HashSet<string> { "0" };
@@ -534,6 +536,70 @@ public partial class InvoiceSubmissionPersisterTests
         await store.Build().PersistAsync(outcome, null);
         var requests = store.Transactions.Single();
         return (Target(requests[2]), JsonDocument.Parse(Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson")));
+    }
+
+    // ── ISS-051: the resolved codes reach the line's code lookups ──
+
+    private static readonly (Guid Task, Guid Activity) CodeRows =
+        (Guid.Parse("05100000-0000-4000-8000-00000000a110"), Guid.Parse("05100000-0000-4000-8000-00000000a103"));
+
+    [Fact(DisplayName = "ISS-051: a coded line is persisted with its task and activity code lookups (the resolved codes' rows) and the rows in its coding JSON; no expense code, no expense lookup")]
+    public async Task ACodedLine_PersistsItsCodeLookups()
+    {
+        var (line, findings) = await PersistOneLineAsync("Drafted the motion.", notReturned: false, codeRows: CodeRows);
+        findings.Dispose();
+
+        line.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineTaskCode).Should().BeEquivalentTo(
+            new EntityReference("sprk_billingcode", CodeRows.Task), "the AP export and the invoice index read the lookup");
+        line.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineActivityCode).Should().BeEquivalentTo(new EntityReference("sprk_billingcode", CodeRows.Activity));
+        line.Contains(InvoiceSubmissionPersister.LineExpenseCode).Should().BeFalse("the line has no expense code");
+        line.GetAttributeValue<string>("sprk_taskcodeasbilled").Should().Be("L110", "the firm's as-billed text is kept next to the lookup");
+
+        var coding = JsonDocument.Parse(line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence)).RootElement.GetProperty("coding");
+        coding.GetProperty("task").GetProperty("code").GetString().Should().Be("L110");
+        coding.GetProperty("task").GetProperty(InvoiceSubmissionPersister.CodeIdMember).GetString().Should().Be(CodeRows.Task.ToString("D"),
+            "the re-run after Set firm rebuilds the lookup from the stored coding");
+        coding.GetProperty("expense").TryGetProperty(InvoiceSubmissionPersister.CodeIdMember, out _).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "ISS-051 / FR-22: an uncoded invoice's line, a line the Action did not return and a line with no description store no code lookup")]
+    public async Task AnUncodedOrUnreturnedLine_StoresNoCodeLookup()
+    {
+        foreach (var (narrative, notReturned, coded) in new[] { ("Drafted the motion.", false, false), ("Drafted the motion.", true, true), ("  ", false, true) })
+        {
+            var (line, findings) = await PersistOneLineAsync(narrative, notReturned, coded, codeRows: CodeRows);
+            findings.Dispose();
+            line.Contains(InvoiceSubmissionPersister.LineTaskCode).Should().BeFalse("no resolved code, so no lookup");
+            line.Contains(InvoiceSubmissionPersister.LineActivityCode).Should().BeFalse();
+            line.Contains(InvoiceSubmissionPersister.LineExpenseCode).Should().BeFalse();
+        }
+    }
+
+    [Fact(DisplayName = "ISS-051: CodeLookupsFor - a code with its row sets it; no code (or no coding) clears it; a code stored before ISS-051 with no row leaves it out")]
+    public void CodeLookupsFor_Cases()
+    {
+        static LineCodingResult Coding(LineCodeValue task) => new()
+        {
+            LineKey = "0",
+            Status = LineCodingStatus.Coded,
+            Task = task,
+            Activity = new LineCodeValue(null, "A101", false),
+            Expense = new LineCodeValue(null, null, false),
+            Confidence = 0.9m,
+            Observations = [],
+            RefusedCodes = [],
+            CodeSetId = Guid.Empty,
+            CodeSetName = "x",
+            CodeSetSource = CodeSetSource.FirmCodes,
+        };
+
+        InvoiceSubmissionPersister.CodeLookupsFor(Coding(new LineCodeValue("L110", null, false, CodeRows.Task))).Should().BeEquivalentTo(new (string, EntityReference?)[]
+        {
+            ("sprk_taskcode", new EntityReference("sprk_billingcode", CodeRows.Task)), ("sprk_activitycode", null), ("sprk_expensecode", null),
+        });
+        InvoiceSubmissionPersister.CodeLookupsFor(Coding(new LineCodeValue("L110", null, false))).Select(l => l.Column)
+            .Should().Equal(["sprk_activitycode", "sprk_expensecode"], "a stored code with no recorded row is left as it is, never cleared or guessed");
+        InvoiceSubmissionPersister.CodeLookupsFor(null).Should().OnlyContain(l => l.Value == null).And.HaveCount(3);
     }
 
     [Fact(DisplayName = "EB-D-175: a line the coding Action did not return is Flagged, with the coding.not_returned finding; the firm's codes are kept")]

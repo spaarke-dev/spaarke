@@ -686,7 +686,7 @@ public sealed class InvoiceLineAddService
             .DefaultIfEmpty(0).Max();
         var sequence = index + 1;
         var extraction = ExtractionFor(decisionId, shape, codes, codeSet, resolved);
-        var row = BuildRow(command, lineId, shape, codes, resolved, sequence, extraction, reads);
+        var row = BuildRow(command, lineId, shape, codes, codeSet, resolved, sequence, extraction, reads);
 
         RecordOwnerResolution owner;
         try
@@ -1142,9 +1142,9 @@ public sealed class InvoiceLineAddService
             ["codeSetSource"] = codeSet.Source.ToString(),
             ["needsReview"] = codeSet.NeedsReview,
             ["confidence"] = 1m,
-            ["task"] = CodeJson(codes[BillingCodeKind.Task]),
-            ["activity"] = CodeJson(codes[BillingCodeKind.Activity]),
-            ["expense"] = CodeJson(codes[BillingCodeKind.Expense]),
+            ["task"] = CodeJson(BillingCodeKind.Task),
+            ["activity"] = CodeJson(BillingCodeKind.Activity),
+            ["expense"] = CodeJson(BillingCodeKind.Expense),
             ["firmCodeMismatch"] = false,
             ["refused"] = new JsonArray(),
             ["observations"] = new JsonArray(),
@@ -1165,13 +1165,24 @@ public sealed class InvoiceLineAddService
 
         return json;
 
-        // The typed code is also the as-billed code (D-117), so it is its own firm code and never a mismatch.
-        static JsonObject CodeJson(string? code) => new() { ["code"] = code, ["firmCode"] = code, ["mismatch"] = false };
+        // The typed code is also the as-billed code (D-117), so it is its own firm code and never a mismatch. ISS-051: with its row in the set, which
+        // the line's code lookup is set to (BuildRow).
+        JsonObject CodeJson(BillingCodeKind kind)
+        {
+            var code = codes[kind];
+            var slot = new JsonObject { ["code"] = code, ["firmCode"] = code, ["mismatch"] = false };
+            if (code is not null && codeSet.CodeIdOf(kind, code) is { } codeId)
+            {
+                slot[InvoiceSubmissionPersister.CodeIdMember] = codeId.ToString("D");
+            }
+
+            return slot;
+        }
     }
 
     private static Entity BuildRow(
-        AddLineCommand command, Guid lineId, Shape shape, IReadOnlyDictionary<BillingCodeKind, string?> codes, ResolvedInvoiceLine? resolved, int sequence,
-        JsonObject extraction, Reads reads)
+        AddLineCommand command, Guid lineId, Shape shape, IReadOnlyDictionary<BillingCodeKind, string?> codes, ResolvedCodeSet codeSet,
+        ResolvedInvoiceLine? resolved, int sequence, JsonObject extraction, Reads reads)
     {
         var invoice = reads.Invoice;
         var tracking = invoice.GetAttributeValue<string>(InvoiceReviewService.InvTrackingNumber) ?? Text(reads.Root, "trackingNumber");
@@ -1219,6 +1230,15 @@ public sealed class InvoiceLineAddService
         SetCode(row, InvoiceSubmissionPersister.LineTaskCodeAsBilled, codes[BillingCodeKind.Task]);
         SetCode(row, InvoiceSubmissionPersister.LineActivityCodeAsBilled, codes[BillingCodeKind.Activity]);
         SetCode(row, InvoiceSubmissionPersister.LineExpenseCodeAsBilled, codes[BillingCodeKind.Expense]);
+
+        // ISS-051: the typed codes were checked against the invoice's set (step 2), so each has its row there; the line's code lookups name them.
+        foreach (var (kind, code) in codes)
+        {
+            if (code is not null && codeSet.CodeIdOf(kind, code) is { } codeId)
+            {
+                row[InvoiceSubmissionPersister.CodeLookupColumn(kind)] = new EntityReference(CodeSetResolver.CodeEntity, codeId);
+            }
+        }
 
         // The firm gate proved the invoice's firm is a confirmed one (not held for one), so it is copied onto the line, with the invoice's currency.
         if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg) is { } firm && firm.Id != Guid.Empty)

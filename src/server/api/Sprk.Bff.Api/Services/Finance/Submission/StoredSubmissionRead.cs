@@ -456,10 +456,12 @@ internal sealed record StoredLineCoding(int Index, LineCodingResult? Coded)
         });
     }
 
+    // ISS-051: the code's row as stored (absent on a line stored before ISS-051: the rebuild then leaves the lookup as it is).
     private static LineCodeValue Code(JsonObject? slot) => new(
         StoredSubmissionRead.Text(slot, "code"),
         StoredSubmissionRead.Text(slot, "firmCode"),
-        slot?["mismatch"] is JsonValue mismatch && mismatch.TryGetValue<bool>(out var differs) && differs);
+        slot?["mismatch"] is JsonValue mismatch && mismatch.TryGetValue<bool>(out var differs) && differs,
+        Guid.TryParse(StoredSubmissionRead.Text(slot, InvoiceSubmissionPersister.CodeIdMember), out var codeId) && codeId != Guid.Empty ? codeId : null);
 }
 
 /// <summary>

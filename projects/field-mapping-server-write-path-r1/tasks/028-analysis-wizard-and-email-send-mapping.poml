@@ -4,7 +4,7 @@
     <title>Migrate Create Analysis wizard and apply analysis-to-email mapping at send (FR-16, FR-17)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>027 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in Spaarke.AI.Widgets and .cs in Sprk.Bff.Api; tags include frontend, bff-api, communication, deploy, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>

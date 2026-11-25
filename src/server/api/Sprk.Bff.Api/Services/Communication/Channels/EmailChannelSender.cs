@@ -76,6 +76,9 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         // (the container create's pattern, ContainerOperations.CreateContainerAsync).
         var sendOption = new NoTransientRetryOption();
 
+        // Ontology task 214 (#2774): the Sent Items read below is bounded below by the moment this send began.
+        var sendStartedUtc = DateTimeOffset.UtcNow;
+
         GraphServiceClient graphClient;
         try
         {
@@ -174,7 +177,7 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         var internetMessageId = saveToSentItems
             ? await TryCaptureInternetMessageIdAsync(
                 graphClient, request.UserMode, request.FromAddress, request.Communication.Subject,
-                request.CorrelationId, cancellationToken)
+                sendStartedUtc, request.CorrelationId, cancellationToken)
             : null;
 
         return new ChannelSendResult
@@ -247,8 +250,28 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
     }
 
     /// <summary>
-    /// Locates the just-sent message in Sent Items (by subject, newest first) and returns its
-    /// Internet-Message-Id. Best-effort — any failure is logged and swallowed, returning null.
+    /// How far before the send start the Sent Items lower bound reaches, so a small clock difference between the BFF and Exchange
+    /// cannot put the just-sent message just outside the filter.
+    /// </summary>
+    internal static readonly TimeSpan SentItemsLookupMargin = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// The Sent Items <c>$filter</c>. Graph answers 400 <c>InefficientFilter</c> to a messages query whose <c>$orderby</c>
+    /// property is not also in <c>$filter</c>, before any property that is not ordered (Microsoft Learn, "List messages",
+    /// "Using filter and orderby in the same query"), so the ordered <c>sentDateTime</c> leads the filter and <c>subject</c>
+    /// follows. The quote in a subject is doubled (OData escaping).
+    /// </summary>
+    internal static string BuildSentItemsFilter(string subject, DateTimeOffset sendStartedUtc)
+    {
+        var lowerBound = (sendStartedUtc - SentItemsLookupMargin).UtcDateTime
+            .ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        return $"sentDateTime ge {lowerBound} and subject eq '{subject.Replace("'", "''")}'";
+    }
+
+    /// <summary>
+    /// Locates the just-sent message in Sent Items (by subject, no older than the send start less
+    /// <see cref="SentItemsLookupMargin"/>, newest first) and returns its Internet-Message-Id. Best-effort — any failure is
+    /// logged and swallowed, returning null.
     /// (Relocated verbatim from CommunicationService.TryStampInternetMessageIdAsync; the Dataverse
     /// stamp itself remains in CommunicationService as channel-agnostic persistence.)
     /// </summary>
@@ -257,18 +280,19 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         bool userMode,
         string senderEmail,
         string subject,
+        DateTimeOffset sendStartedUtc,
         string correlationId,
         CancellationToken ct)
     {
         try
         {
-            var safeSubject = subject.Replace("'", "''");
+            var filter = BuildSentItemsFilter(subject, sendStartedUtc);
             List<Message>? messages;
             if (userMode)
             {
                 var page = await graphClient.Me.MailFolders["sentitems"].Messages.GetAsync(rc =>
                 {
-                    rc.QueryParameters.Filter = $"subject eq '{safeSubject}'";
+                    rc.QueryParameters.Filter = filter;
                     rc.QueryParameters.Orderby = new[] { "sentDateTime desc" };
                     rc.QueryParameters.Select = new[] { "internetMessageId", "sentDateTime" };
                     rc.QueryParameters.Top = 3;
@@ -279,7 +303,7 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
             {
                 var page = await graphClient.Users[senderEmail].MailFolders["sentitems"].Messages.GetAsync(rc =>
                 {
-                    rc.QueryParameters.Filter = $"subject eq '{safeSubject}'";
+                    rc.QueryParameters.Filter = filter;
                     rc.QueryParameters.Orderby = new[] { "sentDateTime desc" };
                     rc.QueryParameters.Select = new[] { "internetMessageId", "sentDateTime" };
                     rc.QueryParameters.Top = 3;

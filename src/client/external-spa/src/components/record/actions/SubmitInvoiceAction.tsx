@@ -42,6 +42,15 @@
  * REFRESH. Once the server has accepted the submission (`onSubmitted`), ANY close (Done, Cancel, ×) re-reads the record's
  * Invoices section, so the new invoice shows as soon as it exists. A submission that is accepted after the dialog was
  * closed mid-flight refreshes at once.
+ *
+ * LINKS (ebilling-r1 iss052). The result screen offers "Open invoice" (an Accepted invoice the server named) and "Open {record}".
+ *   - "Open {record}" for the record this modal already shows CLOSES this dialog back to it: the record is the one behind the
+ *     dialog, so nothing is stacked (a second copy of the same record over itself would be confusing). Another record (not
+ *     reachable with the record locked) opens as a child record over this one.
+ *   - "Open invoice" closes this dialog and opens the invoice the way a row of the Invoices section does: a child record over this
+ *     record (`useChildRecordOpener`), which re-reads the Invoices section on close and puts focus on the invoice's row. Not the
+ *     shell's `useOpenRecord`, which would replace the record shown (or stack a second top-level dialog over a grid's modal).
+ *     Inside a child record there is no child opener, and then no "Open invoice" is offered.
  */
 import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
@@ -51,6 +60,7 @@ import type {
   InvoiceCoreRecordList,
   InvoiceCoreRecordOption,
   InvoiceRecordQuery,
+  InvoiceSubmissionRecordRef,
 } from '@spaarke/ui-components/components/InvoiceSubmission';
 import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import {
@@ -62,7 +72,9 @@ import {
 } from '../../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../../auth/bff-client';
 import { renderSubmissionReport } from '../../ebilling/InvoiceOutcomeReport';
+import { coreRecordTarget, INVOICE_ENTITY } from '../../ebilling/submissionLinks';
 import { useChildDialog } from '../../createAction';
+import { useChildRecordOpener } from '../childRecord';
 import { callerFirmIdsOf, invoiceKindOfEntity, submitInvoiceRightOf, type FirmRecordsRead } from '../recordAccess';
 import { recordText } from '../recordTemplates';
 import type { RecordActionHostContext } from '../recordTemplate.types';
@@ -212,7 +224,58 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
     }
   }, [refreshSection]);
 
-  // The click reads `show` through a ref, so the offered action stays stable across renders.
+  // iss052: the result screen's links (see LINKS above). Each first closes this dialog (a close after a submission re-reads the
+  // Invoices section), and only when no request is in flight.
+  //
+  // FOCUS (iss052 fix round 1). The link button goes away with this dialog, and the child record's own close looks for a row of
+  // the child (a work assignment has no Invoices rows), so focus would fall to the page body. The control that opened this
+  // dialog (the record's "Submit invoice" button, remembered as the dialog is shown) is handed to the child as its trigger, so
+  // closing the child puts focus back on it. The child opens one task later: this dialog's close has then unmounted it and run
+  // its own focus restore (`useChildDialog`, also a zero-delay task, queued first), so that restore cannot land behind the
+  // child, and the child remembers the trigger, not a control of the dialog that is gone.
+  const openChild = useChildRecordOpener();
+  const opener = React.useRef<HTMLElement | null>(null);
+  const pendingChild = React.useRef<number | undefined>(undefined);
+  React.useEffect(() => () => window.clearTimeout(pendingChild.current), []);
+  const openChildAfterClose = React.useCallback(
+    (entity: string, childId: string, section?: 'invoices'): void => {
+      if (!openChild) return;
+      window.clearTimeout(pendingChild.current);
+      pendingChild.current = window.setTimeout(() => {
+        pendingChild.current = undefined;
+        const trigger = opener.current?.isConnected ? opener.current : null;
+        openChild(entity, childId, trigger, section);
+      }, 0);
+    },
+    [openChild]
+  );
+  const handleOpenRecord = React.useCallback(
+    (target: InvoiceSubmissionRecordRef): void => {
+      if (inFlight.current) return;
+      const isShown = target.kind === kind && target.recordId.toLowerCase() === recordId.toLowerCase();
+      handleClose();
+      // The record this modal already shows: closing the dialog IS opening it (no second copy is stacked over it).
+      if (isShown || !openChild) return;
+      const child = coreRecordTarget(target);
+      openChildAfterClose(child.entityName, child.recordId);
+    },
+    [kind, recordId, handleClose, openChild, openChildAfterClose]
+  );
+  const handleOpenInvoice = React.useMemo(
+    () =>
+      openChild
+        ? (invoiceId: string): void => {
+            if (inFlight.current) return;
+            handleClose();
+            // As a row of the Invoices section opens one: a child record over this record, re-reading the section on close.
+            openChildAfterClose(INVOICE_ENTITY, invoiceId.toLowerCase(), 'invoices');
+          }
+        : undefined,
+    [handleClose, openChild, openChildAfterClose]
+  );
+
+  // The click reads `show` through a ref, so the offered action stays stable across renders. It also remembers the control
+  // that opened the dialog (see FOCUS above).
   const latest = React.useRef({ show: dialog.show });
   latest.current = { show: dialog.show };
 
@@ -221,7 +284,14 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
       onActionChange(null);
       return;
     }
-    onActionChange({ visible: true, onClick: () => latest.current.show() });
+    onActionChange({
+      visible: true,
+      onClick: () => {
+        const active = document.activeElement;
+        opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+        latest.current.show();
+      },
+    });
     return () => onActionChange(null);
   }, [visible, onActionChange]);
 
@@ -243,6 +313,9 @@ export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
           renderReport={renderSubmissionReport}
           onSubmitted={handleSubmitted}
           onClose={handleClose}
+          onOpenInvoice={handleOpenInvoice}
+          onOpenRecord={handleOpenRecord}
+          showReasonCode={false}
         />
       </div>
     </SprkModal>

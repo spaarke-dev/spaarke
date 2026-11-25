@@ -44,7 +44,7 @@ public sealed class InvoiceReviewReadServiceTests
     private static readonly Guid Reviewer = Guid.Parse("10000000-0000-4000-8000-0000000000e2");
     private static readonly InvoiceContextService.InvoiceCaller Caller = new("caller-oid", "caller-token");
 
-    private sealed class Rights : IAccessDataSource
+    internal sealed class Rights : IAccessDataSource
     {
         public AccessRights Granted = AccessRights.Read | AccessRights.Write;
         public bool Faulted;
@@ -56,7 +56,8 @@ public sealed class InvoiceReviewReadServiceTests
             throw new InvalidOperationException("The review asks about the invoice only.");
     }
 
-    private sealed class World
+    /// <summary>Internal so the code-description contract tests (tests/integration/contract) reuse this harness instead of copying it.</summary>
+    internal sealed class World
     {
         public Entity? Invoice;
         public List<Entity> Lines = [];
@@ -82,6 +83,9 @@ public sealed class InvoiceReviewReadServiceTests
         public readonly List<string> CallerPaths = [];
         public Func<string, Task<DataverseUserResponse>>? CallerFault;
         public readonly Mock<ILogger<InvoiceReviewReadService>> Logger = new();
+
+        /// <summary>UTBMS code descriptions: the Dataverse the code-set resolver reads (a separate double, so the review's own query count is unchanged); strict, so a test that expects no code-set read fails if one happens.</summary>
+        public readonly Mock<IGenericEntityService> CodeSetEntities = new(MockBehavior.Strict);
 
         /// <summary>Task 113: the Dataverse the Procedure-change banner reads (a separate evaluating double); by default the strict one above, which refuses its reads.</summary>
         public Mock<IGenericEntityService>? BannerEntities;
@@ -156,7 +160,11 @@ public sealed class InvoiceReviewReadServiceTests
             return new InvoiceReviewReadService(
                 Entities.Object, authorization, settings.Object, caller.Object,
                 new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
-                new ProcedureChangeBanner(BannerEntities?.Object ?? Entities.Object, NullLogger<ProcedureChangeBanner>.Instance), Logger.Object);
+                new ProcedureChangeBanner(BannerEntities?.Object ?? Entities.Object, NullLogger<ProcedureChangeBanner>.Instance),
+                new Sprk.Bff.Api.Services.Finance.Coding.CodeSetResolver(
+                    CodeSetEntities.Object, settings.Object, Mock.Of<Sprk.Bff.Api.Services.Finance.Coding.ICodeSetSuggestionProvider>(),
+                    NullLogger<Sprk.Bff.Api.Services.Finance.Coding.CodeSetResolver>.Instance),
+                Logger.Object);
         }
 
         public int CallerReads(string set) => CallerPaths.Count(p => p.StartsWith(set + "?", StringComparison.Ordinal));

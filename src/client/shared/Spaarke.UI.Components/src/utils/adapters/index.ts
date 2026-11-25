@@ -62,6 +62,7 @@ export {
   withBffChildWrites,
   routesChildWritesThroughBff,
   createChildRecordViaBff,
+  createRecordViaBffWithWarnings,
   updateChildRecordViaBff,
   fileProjectUnderMatter,
   PROJECT_ALREADY_FILED_CODE,

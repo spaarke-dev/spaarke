@@ -190,9 +190,10 @@ public class AssignTaskRecipientGate
     {
         // ── Who the contact is and which internal users it represents: uac-r2 task 193's ONE contact -> user rule
         // (ContactUserRepresentation; status-first: a read that failed is "could not tell", never "represents nobody"; an
-        // inactive or missing contact is nobody's, ADR-003; no binding column decides on the link alone). The Restricted bar is
-        // asked below, once, for the one user it can apply to, so eligibility is classified here as on a record that is not
-        // Restricted (as this gate always did). ──────────────────────────────────────────────────────────────────────────
+        // inactive or missing contact is nobody's, ADR-003; no binding column decides on the link alone). Each user's share
+        // eligibility comes with it, classified as on a record that is not Restricted (as this gate always did): the Restricted
+        // bar is asked below, after the count, once, for the one user it can apply to (D-199: several eligible users refuse
+        // whatever the record's Restricted state). ───────────────────────────────────────────────────────────────────────
         var representation = await new ContactUserRepresentation(_identities, _links, _participations)
             .ResolveAsync(contactId, rootIsRestricted: false, BindingColumnMissingPolicy.DecideOnLink, ct).ConfigureAwait(false);
         switch (representation.Status)
@@ -218,17 +219,17 @@ public class AssignTaskRecipientGate
             return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "no internal user is confirmed for the contact");
         }
 
-        return await DecideInternalAsync(contactId, representation.Users.Select(u => u.User).ToList(), core, taskId, ct)
-            .ConfigureAwait(false);
+        return await DecideInternalAsync(contactId, representation.Users, core, taskId, ct).ConfigureAwait(false);
     }
 
     private async Task<AssignTaskRecipient> DecideInternalAsync(
-        Guid contactId, IReadOnlyList<AssignedLinkCandidate> represented, DecisionCoreRecord? core, Guid? taskId, CancellationToken ct)
+        Guid contactId, IReadOnlyList<RepresentedUser> represented, DecisionCoreRecord? core, Guid? taskId, CancellationToken ct)
     {
-        // Enabled interactive people first (the Restricted bar is asked below, once, for the one user it can apply to).
+        // Enabled interactive people first: the eligibility ContactUserRepresentation classified on a record that is not
+        // Restricted (the Restricted bar is asked below, once, for the one user it can apply to).
         var people = represented
-            .Where(u => InternalShareEndpoints.ClassifyEligibility(u.IsDisabled, u.AccessMode, u.ApplicationId, u.IsExternal, rootIsRestricted: false)
-                        == InternalShareEndpoints.ShareEligibility.Eligible)
+            .Where(u => u.Eligibility == InternalShareEndpoints.ShareEligibility.Eligible)
+            .Select(u => u.User)
             .ToList();
         if (people.Count == 0)
             return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "no enabled internal person represents the contact");

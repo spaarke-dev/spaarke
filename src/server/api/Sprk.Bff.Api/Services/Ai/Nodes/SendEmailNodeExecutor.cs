@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Kiota.Abstractions;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Http;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -157,6 +159,12 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
     {
         var startedAt = DateTimeOffset.UtcNow;
 
+        // Ontology task 212 (#2779): sendMail is not idempotent, so the Graph handler must not send it again after a 5xx, a 408 or
+        // a transport fault (Graph may already have delivered it): only after a 429, which Graph did not process. The handler records
+        // on the option whether an attempt left and what it got, which is how a failure is classified in the catch blocks below
+        // (EmailChannelSender, task 191, is the pattern).
+        var sendOption = new NoTransientRetryOption();
+
         _logger.LogDebug(
             "Executing SendEmail node {NodeId} ({NodeName})",
             context.Node.Id,
@@ -238,7 +246,7 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
             {
                 Message = message,
                 SaveToSentItems = config.SaveToSentItems ?? true
-            }, cancellationToken: cancellationToken);
+            }, rc => rc.Options.Add(sendOption), cancellationToken);
 
             _logger.LogInformation(
                 "SendEmail node {NodeId} completed - email sent to {RecipientCount} recipients",
@@ -260,36 +268,55 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
         }
         catch (ServiceException ex)
         {
+            var outcomeUnknown = OutcomeIsUnknown(sendOption, ex);
             _logger.LogError(
                 ex,
-                "SendEmail node {NodeId} failed with Graph error: {ErrorCode} - {ErrorMessage}",
+                "SendEmail node {NodeId} failed with Graph error: {ErrorCode} - {ErrorMessage} (OutcomeUnknown: {OutcomeUnknown})",
                 context.Node.Id,
                 ex.ResponseStatusCode,
-                ex.Message);
+                ex.Message,
+                outcomeUnknown);
 
             return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,
-                $"Failed to send email: {ex.Message}",
+                FailureMessage(ex, outcomeUnknown),
                 NodeErrorCodes.InternalError,
                 NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
         catch (Exception ex)
         {
+            var outcomeUnknown = OutcomeIsUnknown(sendOption, ex);
             _logger.LogError(
                 ex,
-                "SendEmail node {NodeId} failed: {ErrorMessage}",
+                "SendEmail node {NodeId} failed: {ErrorMessage} (OutcomeUnknown: {OutcomeUnknown})",
                 context.Node.Id,
-                ex.Message);
+                ex.Message,
+                outcomeUnknown);
 
             return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,
-                $"Failed to send email: {ex.Message}",
+                FailureMessage(ex, outcomeUnknown),
                 NodeErrorCodes.InternalError,
                 NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
     }
+
+    /// <summary>
+    /// Ontology task 212 (#2779): true when an attempt left and its answer did not settle that Graph refused it (the handler's
+    /// record on <paramref name="option"/>), or when the exception itself carries a 5xx or a 408 (an answer proves the request was
+    /// sent, even through a client built without the Graph handler). Reading the option closes it, so an attempt not yet sent
+    /// cannot overtake the answer. False when nothing was sent (a failure before the request left, a connect refused, a 4xx).
+    /// </summary>
+    private static bool OutcomeIsUnknown(NoTransientRetryOption option, Exception ex) =>
+        option.CloseAndReadOutcomeUnknown() || ex is ApiException { ResponseStatusCode: >= 500 or 408 };
+
+    /// <summary>The node's failure text; an unknown outcome says so, so a playbook re-run does not assume nothing was delivered.</summary>
+    private static string FailureMessage(Exception ex, bool outcomeUnknown) =>
+        outcomeUnknown
+            ? $"Failed to send email: {ex.Message} (the message may have been delivered)"
+            : $"Failed to send email: {ex.Message}";
 
     /// <summary>
     /// Builds template context dictionary from previous node outputs and execution metadata.
