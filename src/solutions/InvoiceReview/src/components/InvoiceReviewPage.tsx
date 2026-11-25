@@ -236,6 +236,12 @@ export interface InvoiceReviewPageProps {
    * would refuse off the screen. Default false (the page alone has no approval state).
    */
   firmNeeded?: boolean;
+  /**
+   * ISS-014: re-reads the approval state; resolves with what is shown after the read (null when there is nothing to show). While `firmNeeded` is
+   * true the page calls it every `pollIntervalMs`, so a firm set elsewhere (another tab or user, the From-email firm step) opens the line actions
+   * without a reload. Once the answer says the firm is no longer needed the poll stops and the review is re-read once. Absent: no poll.
+   */
+  refreshApproval?: () => Promise<{ firmNeeded?: boolean } | null>;
   paneTabs?: PaneTabSlot[];
   headerExtras?: (ctx: ReviewSlotContext) => React.ReactNode;
   banners?: (ctx: ReviewSlotContext) => React.ReactNode;
@@ -301,7 +307,7 @@ function Stat({ label, value, big, testId }: { label: string; value: string; big
 }
 
 export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
-  const { invoiceId, initialLineId, api, openRecord, pollIntervalMs = 5000, firmNeeded = false, paneTabs = [], headerExtras, banners, invoiceActions } = props;
+  const { invoiceId, initialLineId, api, openRecord, pollIntervalMs = 5000, firmNeeded = false, refreshApproval, paneTabs = [], headerExtras, banners, invoiceActions } = props;
   const s = useStyles();
 
   const [review, setReview] = React.useState<InvoiceReview | null>(null);
@@ -412,6 +418,28 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     }, pollIntervalMs);
     return () => clearInterval(t);
   }, [processing, reload, pollIntervalMs]);
+
+  // ISS-014: while the invoice needs its firm, re-read the approval state at the same interval (nothing else re-reads it when the firm is set
+  // elsewhere). When the answer says the firm is no longer needed, the review is re-read once so the line actions enable on current data, and
+  // the poll stops with the prop. A tick is skipped while the previous read is out; a failed read leaves the shown state (still firmNeeded), so
+  // the next tick asks again and nothing is shown for it.
+  React.useEffect(() => {
+    if (!firmNeeded || !refreshApproval) return undefined;
+    let out = false;
+    const t = setInterval(() => {
+      if (out) return;
+      out = true;
+      void refreshApproval()
+        .then(state => {
+          if (state && state.firmNeeded !== true) void reload();
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          out = false;
+        });
+    }, pollIntervalMs);
+    return () => clearInterval(t);
+  }, [firmNeeded, refreshApproval, reload, pollIntervalMs]);
 
   const lines = React.useMemo(() => (review ? [...review.lines].sort((a, b) => a.sequence - b.sequence) : []), [review]);
   const access = review ? reviewAccess(review, refused403) : { canWrite: false, reason: null };
