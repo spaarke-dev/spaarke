@@ -1,6 +1,6 @@
 /**
  * An {@link IDataverseClient} whose CHILD-record creates go through the BFF (unified-access-control-r2 task 147 r1; owner
- * round 28 item 1, "E1 = A1, the existing G5 pattern").
+ * round 28 item 1, 'E1 = A1, the existing G5 pattern').
  *
  * The upload pipeline creates one `sprk_document` row per uploaded file. Through `Xrm.WebApi` (or the OData client) that
  * row is owned by the user, in the user's own business unit — a document of a secure project would be readable by
@@ -19,16 +19,27 @@
 
 import type { DataverseRecordRef, IDataverseClient } from './types';
 import {
-  createChildRecordViaBff,
+  createRecordViaBffWithWarnings,
   isBffChildCreateTable,
   type IBffMappingSource,
 } from '../../utils/adapters/bffChildWriteAdapter';
 import type { AuthenticatedFetch } from '../../utils/adapters/bffDataServiceAdapter';
 
+/** The BFF delete route of a document (`DataverseDocumentsEndpoints`: `DELETE /api/v1/documents/{id}`). */
+function documentDeleteUrl(bffBaseUrl: string, id: string): string {
+  const cleanId = id.replace(/[{}]/g, '').toLowerCase();
+  return `${bffBaseUrl.replace(/\/+$/, '')}/api/v1/documents/${encodeURIComponent(cleanId)}`;
+}
+
 /**
  * Decorates `inner` so its child-record creates go through the BFF; `bffBaseUrl` may be `''` (relative `/api`).
  * `mappingSource` is the record a created row copies its mapped fields from (the parent the documents are filed under);
  * omit it for an unfiled upload, which maps nothing.
+ *
+ * A create returns the server's non-fatal `warnings` (a mapping source it could not read, a mapped value it did not
+ * write) beside the id, only when there are some. `deleteRecord` removes a `sprk_document` through the BFF
+ * (`DELETE /api/v1/documents/{id}`) so the cleanup of a row whose file was refused runs in production; any other table is
+ * the inner client's.
  */
 export function withBffChildCreates(
   inner: IDataverseClient,
@@ -37,19 +48,28 @@ export function withBffChildCreates(
   mappingSource?: IBffMappingSource
 ): IDataverseClient {
   return {
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>): Promise<DataverseRecordRef> =>
-      isBffChildCreateTable(entityLogicalName)
-        ? {
-            id: await createChildRecordViaBff(
-              authenticatedFetch,
-              bffBaseUrl,
-              entityLogicalName,
-              data,
-              mappingSource ? { mappingSource } : undefined
-            ),
-          }
-        : inner.createRecord(entityLogicalName, data),
+    createRecord: async (entityLogicalName: string, data: Record<string, unknown>): Promise<DataverseRecordRef> => {
+      if (!isBffChildCreateTable(entityLogicalName)) return inner.createRecord(entityLogicalName, data);
+      const { id, warnings } = await createRecordViaBffWithWarnings(
+        authenticatedFetch,
+        bffBaseUrl,
+        entityLogicalName,
+        data,
+        mappingSource ? { mappingSource } : undefined
+      );
+      return warnings.length > 0 ? { id, warnings } : { id };
+    },
     updateRecord: (entityLogicalName: string, id: string, data: Record<string, unknown>) =>
       inner.updateRecord(entityLogicalName, id, data),
+    deleteRecord: async (entityLogicalName: string, id: string): Promise<void> => {
+      if (entityLogicalName.toLowerCase() !== 'sprk_document') {
+        if (typeof inner.deleteRecord === 'function') await inner.deleteRecord(entityLogicalName, id);
+        return;
+      }
+      const response = await authenticatedFetch(documentDeleteUrl(bffBaseUrl, id), { method: 'DELETE' });
+      if (!response.ok) {
+        throw new Error(`The document could not be removed (HTTP ${response.status}).`);
+      }
+    },
   };
 }

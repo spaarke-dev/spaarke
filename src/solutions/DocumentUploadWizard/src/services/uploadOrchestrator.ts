@@ -106,6 +106,11 @@ export interface OrchestratorFileResult {
     success: boolean;
     /** Error message if any critical phase failed. */
     errorMessage?: string;
+    /**
+     * The server's non-fatal warnings on this file's document create (a mapping source it could not read, a mapped value
+     * it did not write). Present only when non-empty; the file still succeeded.
+     */
+    warnings?: string[];
     /** Set when the file stopped on a recoverable name collision — see OrchestratorFileProgress. */
     nameConflict?: { fileName: string };
 }
@@ -380,6 +385,9 @@ export async function orchestrateUpload(
                 if (cr.success) {
                     fileResults[idx].success = true;
                     fileResults[idx].errorMessage = undefined;
+                    if (cr.warnings && cr.warnings.length > 0) {
+                        fileResults[idx].warnings = [...cr.warnings];
+                    }
                     onProgress?.({
                         fileName: sourceFileName,
                         phase: "creating-record",
