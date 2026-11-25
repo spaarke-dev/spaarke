@@ -44,9 +44,9 @@ public class ModuleEntitlementResolver
 {
     /// <summary>
     /// The outside-counsel blanket entitlement set (Option B): every CIAM external contact is entitled
-    /// to the outside-counsel module family. The CIAM data widgets (Projects/Matters/Work Assignments/
-    /// Documents/Invoices) are blanket-visible per plane; record visibility is Tier-2. Kept as the exact
-    /// code the client's mock + widget metadata use (<c>assigned-work</c>) so the two stay aligned.
+    /// to the outside-counsel module family. <c>assigned-work</c> is the code the external SPA gates the five
+    /// record tabs (Projects/Matters/Work Assignments/Documents/Invoices) on, for a CIAM partner and for a granted
+    /// workforce contact (<see cref="IsGrantedWorkforceContact"/>); record visibility is Tier-2 either way.
     /// </summary>
     private static readonly IReadOnlyList<string> OutsideCounselModules = new[] { AssignedWorkModule };
 
