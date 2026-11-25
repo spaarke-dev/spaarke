@@ -395,7 +395,8 @@ public sealed class CommunicationThreadReadService
     /// impersonated pipeline and access filter.</para>
     /// <para>Ontology task 221 (#2671): <see cref="RegardingReadResult.Truncated"/> says a bound (threads, a message scan, the
     /// added-thread budget) left out content the caller could see. It is raised only from rows the caller may read (see
-    /// <see cref="BoundedVisibleRead.CutVisibly"/>) and carries no count.</para>
+    /// <see cref="BoundedVisibleRead.CutVisibly"/>) and carries no count; see there for the one bit it can give away when combined
+    /// with paging a thread.</para>
     /// </summary>
     public async Task<RegardingReadResult> ReadByRegardingAsync(
         string entityType,
@@ -500,7 +501,8 @@ public sealed class CommunicationThreadReadService
     /// cut drops the oldest filed messages. The thread rows are read in batches of <see cref="CommunicationOpenThreadGate.ChunkSize"/>
     /// ids (one OR filter each), never one read per thread. At most <paramref name="threadBudget"/> threads are added, those with
     /// the newest filed message first, so the whole result stays within <see cref="MaxThreads"/>. The flag is set when readable
-    /// threads were left out for the budget (or the budget was already spent, so this read did not run), or when the scan was cut
+    /// threads were left out for the budget; when the budget was already spent, from one row of the same candidate read, set only
+    /// when that row is visible on a thread the caller can read (fix round 1); or when the scan was cut
     /// and <see cref="BoundedVisibleRead.CutVisibly"/> holds: every row of the scan is shown or left out only for the budget, and
     /// the next row is a message the caller can see on a thread the caller can read. A row the caller cannot see never raises it.
     /// A read fault propagates (the request fails; nothing is shown).</para>
@@ -516,19 +518,31 @@ public sealed class CommunicationThreadReadService
         Guid callerSystemUserId,
         CancellationToken ct)
     {
-        if (threadBudget <= 0)
-        {
-            // Review F2: the anchored threads used the whole budget, so the filed-message read is skipped and the list may be
-            // incomplete (task 221: the flag, from the visible anchored threads only). Logged as every other bound here is.
-            _logger.LogWarning(
-                "[BY-REGARDING] record={RecordId} caller={Caller}: the filed-message read was bounded (threads read={Read}, added={Added}, messages={Messages}, scan cap={Cap})",
-                recordId, callerSystemUserId, 0, 0, 0, MaxRegardingScan);
-            return (Array.Empty<ThreadReadResult>(), true);
-        }
-
         var filter = new StringBuilder($"_{regardingField}_value eq {recordId} and {ThreadLookupValue} ne null");
         foreach (var anchoredId in anchoredThreadIds)
             filter.Append($" and {ThreadLookupValue} ne {anchoredId}");
+
+        if (threadBudget <= 0)
+        {
+            // Review F2 / task 221 fix round 1: the anchored threads used the whole budget, so no filed thread can be added. One
+            // row of the same candidate read (same filter, access filter and D7 gate, newest first) says whether that left out
+            // anything the caller could see: the flag is set only when that row is visible and its thread is one the caller can
+            // read. A hidden newest row leaves it unset (the same conservative rule as CutVisibly).
+            var newest = (await QueryVisibleMessagesCoreAsync(
+                filter.ToString(), top: 1, newestFirst: true, probe: false, callerSystemUserId, ct)).Messages;
+            var newestThread = newest.Select(m => m.ThreadId)
+                .FirstOrDefault(id => id != Guid.Empty && !anchoredThreadIds.Contains(id));
+            var budgetSpentCut = newestThread != Guid.Empty
+                && (await ReadReadableThreadRowsAsync(new[] { newestThread }, openOnly, callerSystemUserId, ct)).ContainsKey(newestThread);
+            if (budgetSpentCut)
+            {
+                _logger.LogWarning(
+                    "[BY-REGARDING] record={RecordId} caller={Caller}: the filed-message read was bounded (threads read={Read}, added={Added}, messages={Messages}, scan cap={Cap})",
+                    recordId, callerSystemUserId, 0, 0, 0, MaxRegardingScan);
+            }
+
+            return (Array.Empty<ThreadReadResult>(), budgetSpentCut);
+        }
 
         var read = await QueryVisibleMessagesBoundedAsync(
             filter.ToString(), MaxRegardingScan, newestFirst: true, callerSystemUserId, ct);
@@ -552,20 +566,7 @@ public sealed class CommunicationThreadReadService
         if (probeThread is { } pt && !byThread.ContainsKey(pt))
             toRead.Add(pt);
 
-        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField, CreatedOnField });
-        var readable = new Dictionary<Guid, (string? Name, bool IsPinned, DateTimeOffset CreatedOn)>();
-        foreach (var chunk in toRead.Chunk(CommunicationOpenThreadGate.ChunkSize))
-        {
-            var idClause = string.Join(" or ", chunk.Select(id => $"{ThreadPkField} eq {id}"));
-            var odata = $"$select={select}&$filter=({idClause}) and {ActiveOnlyClause}{openOnly}&$top={chunk.Length}";
-            foreach (var row in await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct))
-            {
-                if (TryGuid(row, ThreadPkField) is not { } id || !chunk.Contains(id))
-                    continue;
-                readable[id] = (TryString(row, ThreadNameField), TryBool(row, PinnedField) ?? false,
-                    TryDateTimeOffset(row, CreatedOnField) ?? DateTimeOffset.MaxValue);
-            }
-        }
+        var readable = await ReadReadableThreadRowsAsync(toRead, openOnly, callerSystemUserId, ct);
 
         var candidates = byThread.Keys.Where(readable.ContainsKey).ToList();
         var added = candidates
@@ -592,6 +593,35 @@ public sealed class CommunicationThreadReadService
         }
 
         return (added, truncated);
+    }
+
+    /// <summary>
+    /// The thread rows (name, pinned, created on) of <paramref name="threadIds"/> the caller can read: IMPERSONATED, active only
+    /// and, for an external caller, <paramref name="openOnly"/>, in batches of <see cref="CommunicationOpenThreadGate.ChunkSize"/>
+    /// ids (one OR filter each), never one read per thread. A thread the caller cannot read is absent.
+    /// </summary>
+    private async Task<Dictionary<Guid, (string? Name, bool IsPinned, DateTimeOffset CreatedOn)>> ReadReadableThreadRowsAsync(
+        IReadOnlyCollection<Guid> threadIds,
+        string openOnly,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField, CreatedOnField });
+        var readable = new Dictionary<Guid, (string? Name, bool IsPinned, DateTimeOffset CreatedOn)>();
+        foreach (var chunk in threadIds.Chunk(CommunicationOpenThreadGate.ChunkSize))
+        {
+            var idClause = string.Join(" or ", chunk.Select(id => $"{ThreadPkField} eq {id}"));
+            var odata = $"$select={select}&$filter=({idClause}) and {ActiveOnlyClause}{openOnly}&$top={chunk.Length}";
+            foreach (var row in await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct))
+            {
+                if (TryGuid(row, ThreadPkField) is not { } id || !chunk.Contains(id))
+                    continue;
+                readable[id] = (TryString(row, ThreadNameField), TryBool(row, PinnedField) ?? false,
+                    TryDateTimeOffset(row, CreatedOnField) ?? DateTimeOffset.MaxValue);
+            }
+        }
+
+        return readable;
     }
 
     // ── app-only by-regarding read for the EXTERNAL plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04) ──
@@ -1684,9 +1714,12 @@ public sealed class CommunicationThreadReadService
         /// <summary>
         /// The bound cut content the caller could see, judged from visible rows only: every row of the window is shown (or
         /// left out only for a bound that itself sets the flag) — <paramref name="shownInWindow"/> equals <see cref="WindowRows"/>
-        /// — and the row past the bound is visible. A window holding any row the caller cannot see never sets it, so the flag
-        /// can never say that hidden rows exist, nor how many (known limit: a readable row cut behind hidden ones is not
-        /// signalled).
+        /// — and the row past the bound is visible. A window holding any row the caller cannot see never sets it, so judged from
+        /// this response alone the flag says nothing about hidden rows and never carries a count. Known limit: combined with
+        /// paging the thread itself (<c>GET /threads/{id}</c>), a caller who sees a full window and no flag can infer one bit (a
+        /// hidden row sits immediately after the window), the same kind of channel that already exists when a hidden row inside
+        /// the window lowers the shown count. No count is revealed. Also a known limit: a readable row cut behind hidden ones is
+        /// not signalled.
         /// </summary>
         public bool CutVisibly(int shownInWindow) => ProbeThreadId is not null && shownInWindow == WindowRows;
     }

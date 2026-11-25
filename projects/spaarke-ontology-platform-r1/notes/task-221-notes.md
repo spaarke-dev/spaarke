@@ -46,9 +46,9 @@ When the flag is set:
 | Bound | Flag | Why it cannot reveal hidden content |
 |---|---|---|
 | Anchored threads > 200 | yes | every thread row is one the caller may read (impersonated; Open-only for an external caller) and is shown |
-| Anchored budget spent (exactly 200 anchored threads; filed read skipped) | yes | depends only on the shown anchored threads |
+| Anchored budget spent (exactly 200 anchored threads; no filed thread can be added) | only when one row of the same filed-candidate read (`$top=1`, newest first, same filter, access filter and D7 gate) is visible and its thread is one the caller can read (fix round 1) | the flag depends on a visible message on a readable thread only; a hidden newest row leaves it unset |
 | Filed threads > budget | yes | the left-out threads are readable threads holding visible messages |
-| A message scan (anchored or filed) cut | only when EVERY row of the scan is shown (or left out for the budget) AND the row past the scan is visible to the caller (filed: on a thread the caller can read) | given what is shown, the flag is a function of visible rows only: with fewer than 500 shown it is never set by a scan, so a caller can never infer that hidden rows exist or how many |
+| A message scan (anchored or filed) cut | only when EVERY row of the scan is shown (or left out for the budget) AND the row past the scan is visible to the caller (filed: on a thread the caller can read) | judged from this response alone, the flag is a function of visible rows only: with fewer than 500 shown it is never set by a scan, and it never carries a count. Combined with paging the thread itself (`GET /threads/{id}`), one bit can be inferred (K-221-4) |
 
 The rule errs toward silence: when hidden rows share a cut scan, a readable message beyond them is not signalled (known limit
 K-221-1, K2 class: fails closed toward "no flag", never toward disclosure).
@@ -70,8 +70,13 @@ shows nothing. The PCF preview and the legacy regarding-mode timeline are not ch
 ## Known limits
 
 - K-221-1 (K2): a readable message cut behind hidden rows in the same scan is not signalled (see table).
-- K-221-2 (K2): when the anchored threads fill the 200 budget exactly, the filed read is skipped and the flag is set though no
-  filed thread may exist ("may not be shown" wording covers it).
+- K-221-2 (K2, narrowed in fix round 1): when the anchored threads fill the 200 budget exactly, the flag comes from the newest
+  filed candidate only. If that row is hidden from the caller, an older visible filed message is not signalled (the same
+  conservative rule as K-221-1). The earlier "flag set though no filed thread may exist" behaviour is gone.
+- K-221-4 (K2, access): judged from one response the flag says nothing about hidden rows. Combined with paging the thread
+  itself (`GET /threads/{id}`), a caller who sees a full 500-message window and no flag can infer one bit: a hidden row sits
+  immediately after the window. This is the same kind of channel that already exists when a hidden row inside the window
+  lowers the shown count below 500. No count is revealed.
 - K-221-3 (pre-existing, unchanged): the anchored message scan is oldest first, so a cut there drops the newest anchored
   messages; now flagged, not reordered (the issue scopes the reorder to the filed union).
 - The filed query's `ne` filter is up to ~16 KB of URL at 199 anchored threads, the same scale as the existing anchored OR filter.
@@ -95,4 +100,21 @@ shows nothing. The PCF preview and the legacy regarding-mode timeline are not ch
   (real filter, in-memory Dataverse world, must-not-fire controls). Clean.
 - Not verified visually in a browser.
 
-rework: none task 221
+## Fix round 1 (review of PR #3144: independent Opus review and uac-r2, both PASS on access)
+
+- F2 test gap: the guard that counts the row beyond the filed scan only on a thread the caller can read was never exercised.
+  New test `TheRowBeyondTheScan_OnAThreadTheCallerCannotRead_DoesNotSetTheFlag` (internal caller, 500 visible filed messages on
+  readable thread A, one older visible filed message on unreadable thread B: flag false, B absent). Mutation: with the guard
+  removed it fails (flag true); guard restored. New theory `TheRowBeyondTheScan_SetsTheFlag_OnlyWhenTheOpenThreadGatePassesIt`:
+  external caller, row beyond the scan on a Private thread: false; external with an Open thread: true; internal with Private: true.
+- Wording: the `CutVisibly` doc, the `Truncated` parameter doc and the table above now say "judged from this response alone",
+  and K-221-4 records the one-bit channel with thread paging.
+- uac-r2 nit: a spent budget no longer sets the flag unconditionally. One caller-impersonated `$top=1` read with the same
+  filed-candidate filter (through the same access filter and D7 gate) and, when that row is visible, one impersonated read of its
+  thread row (same active and Open-only clauses; the batched thread-row read is now a helper shared with the full filed read).
+  The Warning log fires only when the flag is set. Tests: 200 anchored and nothing filed elsewhere: false, no log; 200 anchored and
+  one hidden-only filed message (unreadable message; unreadable thread; internal-only for an external caller): false, no log;
+  200 anchored and one visible filed message on a readable thread: true, logged (the existing test); the check is one `$top=1`
+  newest-first row of the same candidate filter.
+
+rework: fix-round-1 task 221

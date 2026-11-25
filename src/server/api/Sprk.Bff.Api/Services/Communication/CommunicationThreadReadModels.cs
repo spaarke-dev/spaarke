@@ -144,7 +144,8 @@ public sealed record UnreadCountResult(
 /// Ontology task 221 (#2671): <c>true</c> when a bound of the read (threads, the message scans, the added-thread budget) left
 /// out content the caller could see, so the list is incomplete; <c>false</c> otherwise (additive, defaults to <c>false</c>).
 /// A plain boolean: it says only that the list is incomplete, never how much is missing, and it is raised only from rows the
-/// caller may read (rows hidden by Dataverse security or by the shared access filter never raise it).
+/// caller may read (rows hidden by Dataverse security or by the shared access filter never raise it). Known limit: combined
+/// with paging a thread itself, its absence can give away one bit (a hidden row just past a full scan window), never a count.
 /// </param>
 public sealed record RegardingReadResult(
     string EntityType,
