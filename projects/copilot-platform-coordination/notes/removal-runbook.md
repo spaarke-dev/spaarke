@@ -50,7 +50,7 @@ Any later test uses a fresh app id, rebuilt from `projects/specialist-legal-agen
 
 | # | What | Trigger |
 |---|---|---|
-| C1 | **P1 "Spaarke Word Probe"** plugin | Same day as the accelerator's Word tests (step 4 below) |
+| C1 | **P1 "Spaarke Word Probe"** plugin (**uploaded 2026-11-25**, "Only you") | Same day, once the accelerator's probe tests finish (step 4 below). acclerator-r1 reports the removal, or a new date if your Word desktop tests need it longer |
 | C2 | **D2–D4** NDA Review, Legal Hold Review, Legal Review (Agent Builder, shared with All users) | When their replacement practice agent ships (step 6 below) |
 
 ### D. Your decision
@@ -82,7 +82,7 @@ What E removes, and what it doesn't:
 
 | # | What | Where / how | Notes |
 |---|---|---|---|
-| 1 | **S5 `spaarke-visual-probe`** skill (confirmed present 2026-11-23) | OneDrive › `Documents/Cowork/Skills/spaarke-visual-probe` › delete the folder. Then check it is gone from the skills list (if it is still there: **…** › **Remove**) | Per-user skill folder; only your account sees it. Active Cowork conversations keep it until they end |
+| 1 | **S5 `spaarke-visual-probe`** skill (confirmed present 2026-11-23; still registered 2026-11-25) | Cowork skills list › `spaarke-visual-probe` › **…** › **Remove**. acclerator-r1 found (2026-11-25) that it is **not** in OneDrive `Documents/Cowork/Skills/`, so deleting a folder alone will not remove it. If the folder does turn up, delete it too | Per-user skill folder; only your account sees it. Active Cowork conversations keep it until they end |
 | 2 | ~~D5 duplicate "Spaarke Dataverse MCP"~~ | **Cancelled 2026-11-23**: only one copy exists (Copilot Studio, Registry). Nothing to delete | Still open: which project owns it |
 | 3 | **D1 stale "Spaarke AI" registration**. *Superseded by E1 (approved 2026-11-24): both rows go* | After the details-pane screenshot, I'll name the row. Then admin center › **Agents › All agents › Registry** › select it › **Uninstall** (if installed) and then **Delete** | Master's manifest is still `1.1.0`. Likely keep the installed v1.1.0 and delete the uploaded-but-not-installed v1.5.0. provisioning-r1 confirmed neither row is theirs (2026-11-23). **Whether "Spaarke AI" stays at all is still your decision** |
 
