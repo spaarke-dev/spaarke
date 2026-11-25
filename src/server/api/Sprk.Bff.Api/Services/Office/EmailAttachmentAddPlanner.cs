@@ -10,10 +10,11 @@ namespace Sprk.Bff.Api.Services.Office;
 /// </summary>
 /// <remarks>
 /// <para>The answer is taken from the stored state, never from the client: the attachments of the STORED <c>.eml</c>, through
-/// the same converter, noise filter and selection rule the upload-finalization worker uses, minus the attachments the
-/// <c>.eml</c> already has a child document for (<see cref="IsAlreadySaved"/>). The worker applies the same two static rules
-/// (<see cref="ApplySelection"/>, <see cref="ExcludeAlreadySaved"/>) when it creates the children, so the save's answer and the
-/// worker's work cannot drift apart.</para>
+/// the ONE selection the upload-finalization worker also calls (<see cref="SelectAttachments"/>: converter, noise filter,
+/// selection, "can be created"), minus the attachments the <c>.eml</c> already has a child document for
+/// (<see cref="IsAlreadySaved"/>). The worker applies <see cref="ExcludeAlreadySaved"/> too when it creates the children, so
+/// the save's answer and the worker's work cannot drift apart. The children are read first: a selection whose every name
+/// already has one reads no SPE bytes.</para>
 /// <para>Notes: <c>projects/spaarkeai-word-add-in-r1/notes/138-email-resave-add-attachments.md</c>.</para>
 /// </remarks>
 public class EmailAttachmentAddPlanner
@@ -105,6 +106,19 @@ public class EmailAttachmentAddPlanner
             return null;
         }
 
+        // The children first: a selection whose every name already has a child has nothing missing, whatever the .eml holds,
+        // and then no SPE byte is read (as before this task). Only a selection of every attachment (null), or one naming a
+        // file with no child yet, needs the .eml to say what is there.
+        var children = (await _documents.GetDocumentsByParentAsync(emlDocumentId, cancellationToken)).ToList();
+        if (selection is not null
+            && selection.All(name => children.Any(child => IsAlreadySaved(child, name))))
+        {
+            _logger.LogInformation(
+                "Email re-save: every selected attachment already has a child under .eml document {DocumentId}; nothing to add",
+                emlDocumentId);
+            return null;
+        }
+
         var stream = await _speFileStore.DownloadFileAsync(eml.GraphDriveId, emlItemId, cancellationToken);
         if (stream is null)
         {
@@ -112,29 +126,22 @@ public class EmailAttachmentAddPlanner
             return null;
         }
 
-        IReadOnlyList<EmailAttachmentInfo> attachments;
+        EmailAttachmentSelection chosen;
         using (stream)
         {
-            attachments = _emlConverter.ExtractAttachments(stream);
+            chosen = SelectAttachments(stream, _emlConverter, _attachmentFilter, selection);
         }
 
         try
         {
-            var wanted = ApplySelection(_attachmentFilter.FilterAttachments(attachments), selection);
-            if (wanted.Count == 0)
-            {
-                return null;
-            }
-
-            var children = await _documents.GetDocumentsByParentAsync(emlDocumentId, cancellationToken);
-            var missing = ExcludeAlreadySaved(wanted, children)
+            var missing = ExcludeAlreadySaved(chosen.Wanted, children)
                 .Select(a => a.FileName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             _logger.LogInformation(
                 "Email re-save: {Missing} of {Wanted} selected attachment(s) are not yet saved under .eml document {DocumentId}",
-                missing.Count, wanted.Count, emlDocumentId);
+                missing.Count, chosen.Wanted.Count, emlDocumentId);
 
             return missing.Count == 0
                 ? null
@@ -142,12 +149,46 @@ public class EmailAttachmentAddPlanner
         }
         finally
         {
-            foreach (var attachment in attachments)
+            foreach (var attachment in chosen.All)
             {
                 attachment.Content?.Dispose();
             }
         }
     }
+
+    /// <summary>
+    /// What a stored <c>.eml</c> holds (<see cref="All"/>, the caller disposes every <c>Content</c>) and which of it an email
+    /// save would create documents for (<see cref="Wanted"/>).
+    /// </summary>
+    internal sealed record EmailAttachmentSelection(
+        IReadOnlyList<EmailAttachmentInfo> All,
+        IReadOnlyList<EmailAttachmentInfo> Wanted);
+
+    /// <summary>
+    /// THE selection of attachments an email save creates documents for, from the stored <c>.eml</c>: extract (the converter),
+    /// drop the noise (the filter), apply the user's selection (<see cref="ApplySelection"/>), and keep only what can become a
+    /// document (<see cref="CanBeCreated"/>). The save's "not yet saved" answer (this class) and the upload-finalization worker's
+    /// create loop both call it, so what the save says it adds is what the worker can create.
+    /// </summary>
+    internal static EmailAttachmentSelection SelectAttachments(
+        Stream emlStream,
+        IEmailToEmlConverter converter,
+        AttachmentFilterService filter,
+        IReadOnlyCollection<string>? selection)
+    {
+        var all = converter.ExtractAttachments(emlStream);
+        var wanted = ApplySelection(filter.FilterAttachments(all), selection)
+            .Where(CanBeCreated)
+            .ToList();
+        return new EmailAttachmentSelection(all, wanted);
+    }
+
+    /// <summary>
+    /// Whether an attachment can become a document: it has content. The worker's create (<c>ProcessSingleAttachmentAsync</c>)
+    /// skips one with none, so it would otherwise be counted missing on every re-save while nothing is ever created.
+    /// </summary>
+    internal static bool CanBeCreated(EmailAttachmentInfo attachment) =>
+        attachment.Content is { Length: > 0 };
 
     /// <summary>
     /// Whether the <c>.eml</c> row is filed to the record <paramref name="targetLogicalName"/> / <paramref name="targetRecordId"/>:

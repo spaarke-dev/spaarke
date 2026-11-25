@@ -1082,6 +1082,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var emlConverter = scope.ServiceProvider.GetRequiredService<IEmailToEmlConverter>();
             var attachmentFilterService = scope.ServiceProvider.GetRequiredService<AttachmentFilterService>();
 
+            // Respect user's attachment selection (if provided)
+            // - null: Process all attachments (backward compatible)
+            // - empty array: Process NO attachments (user deselected all)
+            // - array with names: Process only those attachments
+            if (payload.EmailMetadata?.SelectedAttachmentFileNames is { Count: 0 })
+            {
+                // User explicitly deselected all attachments
+                _logger.LogInformation(
+                    "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
+                    parentDocumentId);
+                return; // Skip all attachment processing
+            }
+
             // Download the .eml file from SPE
             var emlStream = await speFileStore.DownloadFileAsync(driveId, itemId, cancellationToken);
             if (emlStream == null)
@@ -1092,12 +1105,18 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 return;
             }
 
-            // Extract attachments using IEmailToEmlConverter
-            IReadOnlyList<EmailAttachmentInfo> attachments;
+            // Task 138: the ONE selection (extract, drop noise, apply the user's selection, keep what can become a document),
+            // shared with the save's "what is not yet saved" answer.
+            EmailAttachmentAddPlanner.EmailAttachmentSelection chosen;
             using (emlStream)
             {
-                attachments = emlConverter.ExtractAttachments(emlStream);
+                chosen = EmailAttachmentAddPlanner.SelectAttachments(
+                    emlStream, emlConverter, attachmentFilterService, payload.EmailMetadata?.SelectedAttachmentFileNames);
             }
+
+            var attachments = chosen.All;
+            var filteredAttachments = chosen.Wanted;
+            var filteredCount = attachments.Count - filteredAttachments.Count;
 
             if (attachments.Count == 0)
             {
@@ -1109,29 +1128,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 "Extracted {Count} attachments from .eml for document {DocumentId}",
                 attachments.Count, parentDocumentId);
 
-            // Filter out noise (signatures, tracking pixels, etc.)
-            var filteredAttachments = attachmentFilterService.FilterAttachments(attachments);
-            var filteredCount = attachments.Count - filteredAttachments.Count;
-
-            // Respect user's attachment selection (if provided)
-            // - null: Process all attachments (backward compatible)
-            // - empty array: Process NO attachments (user deselected all)
-            // - array with names: Process only those attachments
             if (payload.EmailMetadata?.SelectedAttachmentFileNames != null)
             {
-                if (payload.EmailMetadata.SelectedAttachmentFileNames.Count == 0)
-                {
-                    // User explicitly deselected all attachments
-                    _logger.LogInformation(
-                        "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
-                        parentDocumentId);
-                    return; // Skip all attachment processing
-                }
-
-                // Task 138: the ONE selection rule, shared with the save's "what is not yet saved" answer.
-                filteredAttachments = EmailAttachmentAddPlanner.ApplySelection(
-                    filteredAttachments, payload.EmailMetadata.SelectedAttachmentFileNames);
-
                 _logger.LogInformation(
                     "User selected {SelectedCount} attachments for document {DocumentId}: {SelectedNames}",
                     filteredAttachments.Count,
