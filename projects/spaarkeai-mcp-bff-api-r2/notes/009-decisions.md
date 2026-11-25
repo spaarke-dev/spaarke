@@ -57,3 +57,12 @@ Restored code: 26/26 pass. `git status` showed `RecordSearchService.cs` unmodifi
 - review pending: unified-access-control-r2 (caller-path diff review per project CLAUDE.md §4).
 
 rework: none task 009
+
+## Adversarial verifier pass 1 (main session, 2026-11-25)
+Proof holds: `request.Query` reaches only `searchText` and the embedding input; every filter value is tenant / allow-listed / escaped. Fix-now findings next to the proof (follow-up implementer):
+- F1: cache lookup runs before the explicit-index allow-list check, and the cache id omits `SearchIndexName` and `PreferKeywordRanking` with ambiguous joins → a not-allowed index can be served cached default-index results (rows still per-row trimmed).
+- F1 (low): request `[StringLength]`/`[Range]` never enforced; `limit:0`/`offset:-1` → 500 with raw `ex.Message` as detail.
+- F2: stale "no tenantId field" comment in `AiAnalysisNodeExecutor.cs:1152-1155`; "per-row checks by the endpoint" is REST-only.
+- K4: add proof rows for the explicit-index, no-user fallback and `PreferKeywordRanking` paths.
+- K4 / obligation for task 022: `search.in` delimiter unescaped — the tool must reuse `RecordEntityType.IsValid` (or move the allow-list into the service). K2: record-type casing mismatch fails closed.
+- POML AC1 wording: vector-only sends `"*"`, not null (no query text either way).

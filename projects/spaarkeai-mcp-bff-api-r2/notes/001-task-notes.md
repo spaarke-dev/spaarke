@@ -110,3 +110,10 @@ Both builds: Release, framework-dependent, zipped with `Compress-Archive -Compre
 
 ## Adversarial verifier pass 1 (main session, 2026-11-25)
 No F-class findings. Known limits: K4 AiAuthorizationFilter branch removed beyond the POML's file limit (added to the uac-r2 review list); K4 `System.Configuration.ConfigurationManager` now resolves at 6.0.0 (was floored at 8.0.0 by the removed `Microsoft.Agents.Authentication`), no CVE, mention in the PR; K4 `ChatAgentRouteProofTests` still registers a loose `IPlaybookOrchestrationService` mock no test reads (kept: it still isolates the test host from the real service); K4 comment drift at `PlaybookAuthorizationFilter.cs:290` (fixed); K2 pre-existing dev-URL fallback in `ToolFrameworkExtensions.cs:103` (out of scope).
+
+## Adversarial verifier pass 2 (main session, 2026-11-25; auth/token angle)
+Auth schemes, audiences, issuer validation unchanged; package removal downgraded nothing; no ValidateOnStart on removed keys. Fix-now, being fixed in a follow-up implementer commit:
+- F1 (pre-existing; its reason removed by this project): DEBUG middleware `MiddlewarePipelineExtensions.cs:121-157` logs unvalidated token aud/iss/appid/scp at Warning before authentication on every `/api` request → delete + regression test.
+- F2: comments still present `AgentToken:CopilotAudience` as live for Copilot (`appsettings.template.json:389`, `AuthorizationModule.cs:26,113-114`) → rewrite; removing the audience merge itself is an auth behaviour change → issue to file.
+- F2: `scripts/canonical-secret-catalog/manifest.yaml:185,210` still writes `AgentToken__ClientId/TenantId`; `CONFIGURATION-MATRIX.md:285-298`, `configuration-architecture.md:30-31,88` still document `AgentTokenOptions` → remove + regenerate.
+- K4: retirement test prefix match → segment match.
