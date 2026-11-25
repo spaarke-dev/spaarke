@@ -300,6 +300,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ 219 | [A reopened wizard's stepper shows only its own steps, not the follow-on steps picked last time (#2814, DI-155)](219-wizard-reopen-drops-follow-on-steps.poml) | FULL | sonnet/high | none | deferred-fixes-2026-11-25c | Owner 2026-11-25 "continue with next tasks". PR to master · **Done** 2026-11-25: #3141 squash-merged `423cfc67f7` (Closes #2814); Console auto-deploys |
 | 🔲 220 | [Email composer asks before discarding a typed draft, cleans up the files it uploaded when the email is not sent, and words a network failure as one (#2813 DI-154, #2946 DI-158)](220-email-composer-discard-and-upload-cleanup.poml) | FULL | opus/high | none | deferred-fixes-2026-11-25c | Owner 2026-11-25 "continue with next tasks". PR to master |
 | 🔲 221 | [A record's Messages list says when messages are not shown, keeps the newest filed threads, and spends its scan only on threads it can add (#2671, DI-148)](221-record-messages-filed-union-truncation.poml) | FULL | opus/high | none | deferred-fixes-2026-11-25c | Owner 2026-11-25 "continue with next tasks"; uac-r2 reviews. PR to master |
+| 🔲 222 | [Worklist read gets faster: single Work Item row read for the decision plan + concurrent independent lane queries (mcp-r1 NFR-01 B, D)](222-worklist-read-latency-single-row-and-concurrent.poml) | FULL | opus/high | none | deferred-fixes-2026-11-25c | Peer ask from mcp-r1 2026-11-25; Console worklist p95 3.8 s has the same cause. PR to master |
 
 ### Phase 5 — The worklist surface
 

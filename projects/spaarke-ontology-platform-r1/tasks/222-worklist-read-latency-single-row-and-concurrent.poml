@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="222" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Worklist read gets faster: a single Work Item row read for the decision plan, and the lane read's independent Dataverse queries run concurrently (mcp-r1 NFR-01 asks B and D)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the BFF Signals read path (.cs) that decides which Work Items a caller sees.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The read path enforces the caller-scoped visibility rules (caller-identity reads, core-record access, secure family, witness and duplicate rules); reordering or splitting it can leak or drop rows. Concurrency must respect Dataverse service-protection limits.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SignalReadService.cs and its tests; 217 (merging) touches SignalClosureService/SignalReevaluationJob/SignalSuppressionService, 220/221 touch no Signals file. mcp-r1's own fixes A and C touch DecisionCapability: coordinate if a conflict appears.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, performance, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+  <prompt>Peer request from mcp-r1 (2026-11-25; their owner's go "Yes, fix and ask" covers their side); taken by the main session under the owner's 2026-11-25 "continue with next tasks" because the Console worklist has the same cost. Measured on dev App Insights since 2026-11-24: Copilot show p95 6.5 s and plan p95 4.7 s against NFR-01's 3 s; the Console's `GET /api/v1/signals/worklist` p50 2.0 s, p95 3.8 s (49 calls). About 98% of each call is Dataverse round trips made one after another (~80-110 ms each, sprk_signals ~250 ms); one `SignalReadService.ReadAsync` lane read is ~17 serial queries, ~2 s. mcp-r1's write-up: `projects/spaarkeai-mcp-bff-api-r1/notes/nfr-01-latency-investigation.md` on their branch (commit 2902f60331; reaches master with PR #3127; read it with `git show 2902f60331:projects/spaarkeai-mcp-bff-api-r1/notes/nfr-01-latency-investigation.md` if the object is fetchable, otherwise ask the main session).
+
+(B) A single-Signal row read: return one Work Item's `WorklistItemRow` (and whatever the plan caller needs from the same read) under exactly the same read rules as the lane, so the decision plan stops reading the whole lane to pick one row (task 023's named follow-up). (D) Run the lane read's independent queries concurrently where the data dependencies and rules allow it.
+
+Entry point: `src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs` (origin/master ~2,290 lines): `ReadAsync` (~337) runs, in order: caller resolve (WhoAmI + identity), saved fetches, `FetchAllAsCallerAsync` (caller identity via `IDataverseUserClient _user`), `ReadCatalogAsync`, `ReadReadableCoresAsync` (per core type, caller identity), `NoCoreRowsWithAStoredPairAsync`, `ReadSubjectsAsync` (per table), `PartitionClosedAsync`, `ApplyWitnessRuleAsync`, `ReadLineInvoicesAsync` / `ApplyDuplicateRuleAsync`, `ReadDecisionRecordsAsync`, `ApplyPolicyColumnsAsync` (app identity via `IGenericEntityService _entities`). Find the decision-plan caller (`DecisionCapability*`, `DecisionPlanService`, the MCP plan tool route) that reads the lane to pick one row.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse Web API (caller identity) and SDK reads, async concurrency, the ontology worklist read path.</role>
+  <goal>The decision plan reads one Work Item's row without reading the whole lane, and a lane read issues its independent Dataverse queries concurrently (bounded), so the lane read and the plan get measurably faster; for every caller and every input the set of rows returned, their content and order, and every refusal are exactly what they are today.</goal>
+  <context>
+    <background>Correctness over speed: this read is the visibility gate for Work Items (FR-24: Signals are read only through it; D-33/D-123 secure family; D-35/D-39 no-core owner-only; witness rule D-142; duplicate rule D-176). (B) must apply the same steps to one Signal, not a reimplementation: prefer running the existing pipeline with the Signal-row fetch narrowed to one id (the caller-identity read still decides whether the caller can see it), returning not-found for anything the lane would not show, with no detail that tells a caller a hidden Signal exists. (D) First write down the dependency graph of the steps in notes/task-222-notes.md (which step reads which earlier result), then parallelise only edges that are truly independent: the per-type loops inside ReadReadableCoresAsync and ReadSubjectsAsync, the per-chunk witness reads, and steps that only read `rows`/`catalog` (for example decision records vs policy columns vs witness), keeping every step's output identical. Bound concurrency (a small fixed degree, for example 4-6, never unbounded Task.WhenAll over user data) because Dataverse service-protection limits are per user (52 concurrent requests) and the caller may have other requests in flight; check that `IDataverseUserClient` and `IGenericEntityService` are safe for concurrent calls (no shared mutable state such as a CallerId property, a non-thread-safe cache or a shared HttpRequestMessage) and say what you found. Preserve cancellation and exception behaviour: a fault in any branch must surface exactly as it does today (no swallowed exception, no partial result reported as complete). Measure: count round trips and, with a fake that adds fixed latency per call, show wall-clock before/after for a representative lane; report the numbers. mcp-r1 is changing DecisionCapability themselves (A: show reuses the WorklistResponse it already holds; C: plan authorises once): read `git log -5` on DecisionCapability*.cs and SignalReadService.cs and run /conflict-check first; if their change is not on master, build the single-row API so their plan tool can call it and describe the call in the PR for them.</background>
+  </context>
+  <constraints>
+    <constraint source="project">No change to which rows a caller sees, their content, ordering, grouping, counts, or refusal codes, for any lane or set; caller-scoped reads stay caller-scoped (never move a read from the caller identity to the app identity or back).</constraint>
+    <constraint source="project">No change to the REST response of GET /api/v1/signals/worklist or any route other than adding the single-row capability; no new route unless the plan caller cannot use a service method (then answer the three §11 questions in the PR).</constraint>
+    <constraint source="project">Concurrency is bounded and documented; no fire-and-forget; cancellation token flows to every branch.</constraint>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run `--filter "FullyQualifiedName~Signals"` (includes the contract baselines under tests/integration/contract/Api/Signals/Baselines); baselines must NOT change (the responses are unchanged).</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">Any new public method or interface member answers the three questions in the PR; prefer extending ISignalReadService.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first).</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or private access-control mechanics in code, tests, notes or the PR.</constraint>
+    <constraint source="ADR-038">Equivalence tests: for a representative set of fixtures (Decide and Do lanes, secure-family rows, no-core rows, a witness-hidden row, a duplicate-hidden row, a closed-today row), the lane result after the change equals the result before (same rows, same order, same content). Single-row: for every row the lane returns, the single-row read returns the identical row; for a Signal the lane hides (each hiding rule), the single-row read returns not-found. Must-not-fire: a fault in any concurrent branch fails the read as before.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read mcp-r1's write-up, SignalReadService.ReadAsync end to end, the plan caller, task 023's follow-up note; write the step dependency graph and the client thread-safety findings to notes/task-222-notes.md.</step>
+    <step order="2">Equivalence and single-row tests first (they pin today's output), plus a round-trip/latency harness on the fake.</step>
+    <step order="3">(B) single-row read through the existing pipeline; wire the plan caller to it if it is ontology code, otherwise expose it for mcp-r1.</step>
+    <step order="4">(D) bounded concurrency on the independent edges only.</step>
+    <step order="5">Filtered tests (Signals, incl. baselines unchanged), full ArchTests, BFF build, publish-size delta; before/after round trips and simulated wall-clock.</step>
+    <step order="6">PR to master; notes in notes/task-222-notes.md; tell the main session the single-row method's signature for mcp-r1.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Equivalence tests pass before and after: every fixture lane returns the same rows, order and content; contract baselines unchanged.</criterion>
+    <criterion testable="true">The single-row read returns exactly the lane's row for every visible Signal and not-found (no existence detail) for every Signal a lane rule hides; it issues no lane-wide Signal fetch (round-trip count test).</criterion>
+    <criterion testable="true">With a fixed per-call latency fake, the lane read's wall-clock drops (numbers reported); concurrency degree is bounded and tested; a fault or cancellation in any branch surfaces as before.</criterion>
+    <criterion testable="true">Build, filtered tests, full ArchTests pass; publish-size delta reported.</criterion>
+    <criterion testable="false">Main session (with mcp-r1) measures show/plan and the Console worklist p95 on dev after the next dev BFF build.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>A speed-up needs a change to which identity performs a read, a change to any visibility rule or response, a schema change, unbounded concurrency, or the clients are not safe for concurrent use: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt222); PR to master; do not merge.</protocol>
+  </execution>
+</task>
