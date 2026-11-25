@@ -18,36 +18,15 @@
 # --- Deliberate (no fix planned) ---
 # (none at present; the write-handler pair from #2866 dropped below the floor)
 
-# --- Tracked: e-billing page scaffolding (#2965) ---
-src/solutions/ApExport/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/ApExport/src/main.tsx | src/solutions/InvoiceFiles/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/InvoiceFiles/src/main.tsx | src/solutions/RecordProcedures/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/InvoiceFiles/src/main.tsx | src/solutions/InvoiceReview/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/InvoiceFiles/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/InvoiceReview/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/RecordProcedures/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
-src/solutions/InvoiceFiles/src/services/invoiceFilesApi.ts | src/solutions/RecordProcedures/src/services/recordProceduresApi.ts | #2965 | Duplicated toFailure / ApiFailure mapping; one e-billing API-error module planned.
 
 # --- Tracked: wizard code-page bootstrap (#2966, remainder #3052) ---
-src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #3052 | bootstrapAuth glue around createCodePageAuthInitializer; shared helper planned.
 src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage/src/main.tsx | #3052 | bootstrapAuth glue around createCodePageAuthInitializer; shared helper planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
-src/solutions/ApExport/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
-src/solutions/ApExport/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
 
 # ===== #2974: older clusters recorded (2026-11-24). Jest scaffolding (__mocks__, jest.setup, jest.config) is excluded in .jscpd.json instead. =====
 
-# --- Tracked: e-billing Vite config, more pairs (#2965) ---
-src/solutions/ApExport/vite.config.ts | src/solutions/RuleReview/vite.config.ts | #2965 | E-billing Vite config; one shared config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/vite.wizard.shared.ts | #2965 | E-billing Vite config; one shared config planned.
 
 # --- Tracked: code-page scaffolding, more pairs (#3052) ---
-src/solutions/ApExport/vite.config.ts | src/solutions/CalendarSidePane/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
-src/solutions/ApExport/src/main.tsx | src/solutions/CommunicationReconciliation/src/main.tsx | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/CommunicationReconciliation/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/DailyBriefing/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/Notepad/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/Reporting/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/vite.wizard.shared.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 src/solutions/CommunicationReconciliation/vite.config.ts | src/solutions/EmailPage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 src/solutions/DocumentUploadWizard/vite.config.ts | src/solutions/PlaybookLibrary/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_communicationspage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
