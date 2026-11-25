@@ -52,6 +52,23 @@ public interface IDecisionCapability
     Task<SuppressionReadResult> GetSuppressionAsync(HttpContext? http, Guid signalId, CancellationToken ct);
 
     /// <summary>
+    /// What opening one item needs (<c>spaarke_get_decision_plan</c>): <see cref="GetPlanAsync"/>'s answer, and when that is
+    /// <see cref="DecisionPlanReadOutcome.Ok"/>, <see cref="GetSuppressionAsync"/>'s, each exactly as those members answer it, plan-read stamp
+    /// included. Suppression is null when the plan is not Ok (nothing more is read). <see cref="DecisionCapability"/> asks the Signal access
+    /// question once for both (NFR-01, 2026-11-25); this default, which test doubles inherit, calls the two members in turn.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="GetPlanAsync"/> and <see cref="GetSuppressionAsync"/>,
+    /// which each run the same access check. Extension: this composes them and shares the one decision; their own bodies are unchanged, so the
+    /// REST routes are untouched. Cost of doing nothing: every item opened in Copilot runs the access check twice, a second set of caller
+    /// reads (~0.5 s) against NFR-01's 3 s plan target, which the plan tool misses today (p95 4.7 s).</remarks>
+    async Task<(DecisionPlanReadResult Plan, SuppressionReadResult? Suppression)> GetPlanAndSuppressionAsync(
+        HttpContext? http, Guid signalId, CancellationToken ct)
+    {
+        var plan = await GetPlanAsync(http, signalId, ct);
+        return plan.Outcome == DecisionPlanReadOutcome.Ok ? (plan, await GetSuppressionAsync(http, signalId, ct)) : (plan, null);
+    }
+
+    /// <summary>
     /// Records one decision on a Signal (task 014): <see cref="DecisionCommitService.CommitAsync"/> as the caller, unchanged, with the
     /// request's <see cref="HttpContext"/>. Every commit invariant (order, ledger replay, the invoice-review refusal, the caller-rights
     /// check, locks) is that service's; this member adds only the no-caller guard, which answers
@@ -98,11 +115,21 @@ public sealed record DecidePageResult(
     /// no row on this page has no entry.</summary>
     public IReadOnlyDictionary<Guid, WorklistCoreSummary> Cores { get; init; } = NoCores;
 
+    /// <summary>The whole lanes read the page was cut from (NFR-01, 2026-11-25): the same <see cref="WorklistResponse"/>
+    /// <see cref="IDecisionCapability.ListDecideAsync"/> returns for <see cref="WorklistSet.Lanes"/>, so a caller that needs both the
+    /// lane's counts and page 1 (<c>spaarke_show_decisions</c>) reads the lane once, not twice. Null when the page is not
+    /// <see cref="DecidePageOutcome.Ok"/>.</summary>
+    public WorklistResponse? Lane { get; init; }
+
     public static DecidePageResult Ok(
-        IReadOnlyList<WorklistItemSummary> items, IReadOnlyDictionary<Guid, WorklistCoreSummary> cores, string? nextCursor) =>
+        IReadOnlyList<WorklistItemSummary> items,
+        IReadOnlyDictionary<Guid, WorklistCoreSummary> cores,
+        string? nextCursor,
+        WorklistResponse? lane = null) =>
         new(DecidePageOutcome.Ok, items ?? throw new ArgumentNullException(nameof(items)), nextCursor)
         {
             Cores = cores ?? throw new ArgumentNullException(nameof(cores)),
+            Lane = lane,
         };
 
     public static DecidePageResult ReadFailed(SignalReadResult failure) =>

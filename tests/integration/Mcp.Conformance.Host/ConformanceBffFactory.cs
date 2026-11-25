@@ -126,7 +126,8 @@ internal sealed class SeededDecisionCapability : IDecisionCapability
         Task.FromResult(DecidePageResult.Ok(
             Items,
             new Dictionary<Guid, WorklistCoreSummary> { [MatterId] = new("Alpha matter", "MAT-0001") },
-            nextCursor: null));
+            nextCursor: null,
+            lane: new WorklistResponse("lanes", []))); // the lanes response the page is cut from (show counts from it), as ListDecideAsync answers
 
     public Task<DecisionPlanReadResult> GetPlanAsync(HttpContext? http, Guid signalId, CancellationToken ct) =>
         Task.FromResult(DecisionPlanReadResult.AccessUnavailable);

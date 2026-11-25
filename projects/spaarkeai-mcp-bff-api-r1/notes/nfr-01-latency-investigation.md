@@ -30,6 +30,19 @@
 
 A + B + C bring plan under 3 s; show needs A + D to be safely under 3 s at p95. None changes read rules, results or the commit path; REST contract tests must stay byte-for-byte green.
 
+D's estimate assumes most of the lane's 17 queries can overlap. They can't: the lane read is mostly a chain where each step needs the previous step's rows (fetch → catalog → cores → subjects → witness → invoices → policy). Only the per-type and per-chunk loops and the two saved fetches can overlap. A realistic gain is ~0.8 s per lane read (~2 → ~1.2 s); the B+D PR measures it on a fixed-latency fake.
+
+## Status (owner 2026-11-25: "Yes, fix and ask"; then "keep B and D here if this session can do them now, and have ontology check and approve")
+
+| Fix | Where | State |
+|---|---|---|
+| A | `ShowDecisionsTool` + `DecidePageResult.Lane` (set by `DecisionCapability.ListDecidePageAsync`) | Built on `work/spaarkeai-mcp-bff-api-r1`; PR to master with C; ontology-r1 reviews |
+| C | `IDecisionCapability.GetPlanAndSuppressionAsync` (`DecisionCapability` asks `SignalCoreRecordAccess.AuthorizeAsync` once; REST routes unchanged) + `GetDecisionPlanTool` | Built with A |
+| B, D | `SignalReadService` (ontology-owned), branch `perf/signal-read-single-row-and-concurrent`, built to ontology's task 222 review contract (equivalence fixtures first, written dependency graph, bounded degree, Opus adversarial review by ontology) | In progress; own PR to master. Notes: `signal-read-b-d-notes.md` |
+| B wiring | `GetDecisionPlanTool` reads one row instead of the lane | After B+D merges |
+
+Measure show, plan and the Console worklist p95 on dev after the next dev BFF build that carries them.
+
 ## Not the cause
 - Token acquisition (`DefaultAzureCredential.GetToken` is cached, 0 ms in-process; an OBO token request, ~380 ms, appears on 6 of the 10 show calls and on none of the plan calls).
 - Privilege derivation (task 018): one batched read at the end of the page.

@@ -141,7 +141,7 @@ public sealed class ShowDecisionsToolTests
         await host.CallAsync(ShowDecisionsTool.Name, null, token);
         await host.CallAsync(ListDecisionPageTool.Name, null, token);
 
-        lane.Users.Should().HaveCount(3, "show reads the lane and page 1; the paging tool reads one page");
+        lane.Users.Should().HaveCount(2, "show reads the lane once, through page 1 (NFR-01); the paging tool reads one page");
         lane.Users.Should().AllSatisfy(user =>
         {
             user.Should().NotBeNull();
@@ -332,7 +332,20 @@ public sealed class ShowDecisionsToolTests
         var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
 
         AssertWorklistUnavailable(result, reason);
-        lane.PageReads.Should().Be(0, "no page is read once the lane failed");
+        lane.LaneReads.Should().Be(0, "show reads the lane once, through the page (NFR-01)");
+        lane.PageReads.Should().Be(1, "the one read of the lane is the page's");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_WhenAnOkPageCarriesNoLane_IsTheWorklistUnavailableError_NeverCountsOfZero()
+    {
+        var seed = DecideLaneSeed.Build();
+        var (items, cores, next) = DecideLanePaging.Page(seed.Groups, seed.Extras, null);
+        var lane = new DecideLaneDouble(seed) { PageFailure = DecidePageResult.Ok(items, cores, next) }; // no lane
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        AssertWorklistUnavailable(await host.CallAsync(ShowDecisionsTool.Name, null, Token), "fault");
+        lane.LaneReads.Should().Be(0, "the tool never falls back to a second read of the lane");
     }
 
     [Theory]
