@@ -230,7 +230,7 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Event (typed route)", [Core], "Basic", Bff + "Api/Events/EventEndpoints.cs:66,131", "prvCreatesprk_Event"),
         .. For("Event (typed route)", [Core], "Basic", Bff + "Services/Dataverse/CallerWriteAuthorization.cs:72-77", "prvAppendsprk_Event"),
         .. For("Event (typed route)", [Core], "Global",
-            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToAboveRead)",
+            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToDepth)",
             "prvAppendTosprk_EventType_Ref"),
         .. For("Event (typed route)", [Core], "Basic", Bff + "Api/Events/EventEndpoints.cs:949; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:390-409",
             "prvAppendTosprk_RecordType_Ref"),
@@ -241,10 +241,16 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Basic", Bff + "Api/Events/EventEndpoints.cs:66,131",
             "prvCreatesprk_Event", "prvAppendsprk_Event"),
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Global",
-            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToAboveRead)",
+            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToDepth)",
             "prvAppendTosprk_EventType_Ref"),
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Basic",
             Bff + "Api/Events/EventEndpoints.cs:949; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:390-409", "prvAppendTosprk_RecordType_Ref"),
+        // ISS-042 (owner 2026-11-25): the event types are user-owned rows that provisioning creates as the control-plane app user in a
+        // stamp's root business unit, while the stamp's users sit in a child unit, so Read below Global hides every event type. Basic is its own row (a [Basic, Office]
+        // row would be met by Office alone); Office Add In User is ruled not standalone and is held with a base role, so it has no row of
+        // its own (the put-back proof puts its change back together with the base roles' ones).
+        .. For("Event types readable on stamps (Create Event wizard picker)", [Core], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125", "prvReadsprk_EventType_Ref"),
+        .. For("Event types readable on stamps (Create Event wizard picker, Basic User)", [Basic], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125", "prvReadsprk_EventType_Ref"),
         // AppendTo on the regarding record (fix round 1): the route takes any of the eight regarding types from any caller; no
         // Office add-in path posts it, so both role sets the doc names are held to every type.
         .. For("Event (typed route)", [Core], "Deep", EventRegarding, EventRegardingAppendTo),
@@ -1925,20 +1931,32 @@ public class FeatureRolePrivilegeGuardTests
             var misses = new List<string>();
             foreach (var change in changes)
             {
-                var path = Path.Combine(dir, change.Role + ".xml");
-                var original = File.ReadAllText(path);
-                var doc = XDocument.Parse(original);
-                var element = doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", change.Privilege));
-                if (Same(change.From, "None"))
-                    element.Remove();
-                else
-                    element.SetAttributeValue("level", change.From);
-                doc.Save(path);
+                // A role ruled not standalone (StandaloneExceptions) is held with a base role, so the guard asks its rows of the base role
+                // too: its change is put back together with the base roles' changes to the same privilege (ISS-042: Basic and Core hold
+                // the Read the Office Add In User role is raised with). Any other change is put back alone.
+                var group = StandaloneExceptions.ContainsKey(change.Role)
+                    ? changes.Where(c => Same(c.Privilege, change.Privilege) && !StandaloneExceptions.ContainsKey(c.Role)).Append(change).ToArray()
+                    : [change];
+                var originals = new Dictionary<string, string>();
+                foreach (var member in group)
+                {
+                    var path = Path.Combine(dir, member.Role + ".xml");
+                    var original = File.ReadAllText(path);
+                    originals[path] = original;
+                    var doc = XDocument.Parse(original);
+                    var element = doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", member.Privilege));
+                    if (Same(member.From, "None"))
+                        element.Remove();
+                    else
+                        element.SetAttributeValue("level", member.From);
+                    doc.Save(path);
+                }
 
                 var (unlisted, _, changed) = Ratchet(Gaps(Requirements, LoadRoles(dir, roleNames)), KnownGaps);
                 if (!unlisted.Concat(changed).Any(s => s.Contains(": " + change.Privilege + " ", StringComparison.OrdinalIgnoreCase)))
                     misses.Add($"{change.Gap} {change.Role}: {change.Privilege} back to {change.From} — the guard did not fail");
-                File.WriteAllText(path, original);
+                foreach (var (path, original) in originals)
+                    File.WriteAllText(path, original);
             }
 
             Assert.Empty(misses);
@@ -2130,6 +2148,13 @@ public class FeatureRolePrivilegeGuardTests
     internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseRemovalGaps =
         new Dictionary<string, Version>(StringComparer.Ordinal);
 
+    /// <summary>Change gaps that no expectations file carries yet, each with the newest expectations version it was raised against; the same
+    /// rule as <see cref="PendingNextReleaseRemovalGaps"/> for the config's <c>changes</c>: the published files are not edited, so the next
+    /// release's expectations file must carry each entry in its role's present list; then the gap leaves this list. ISS-042 (event types
+    /// readable at Global, raised against 1.3.2.0).</summary>
+    internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseChangeGaps =
+        new Dictionary<string, Version>(StringComparer.Ordinal) { ["ISS-042"] = new Version(1, 3, 2, 0) };
+
     /// <summary>One expectations file: its version and its roles.</summary>
     internal sealed record ExpectationsRelease(Version Version, IReadOnlyDictionary<string, RoleExpectation> Roles);
 
@@ -2171,11 +2196,92 @@ public class FeatureRolePrivilegeGuardTests
         return problems;
     }
 
+    /// <summary>The pending-change ratchet, as <see cref="PendingRemovalProblems"/> for changes: a pending gap with no change in the config; a
+    /// raised-against version with no expectations file; each expectations file NEWER than the raised-against version that does not carry an
+    /// entry of the gap in its role's present list at the declared depth; and each entry of the gap that the newest file carries (stale: the
+    /// gap leaves the pending list).</summary>
+    internal static List<string> PendingChangeProblems(
+        IReadOnlyList<RuledChange> changes, IReadOnlyDictionary<string, Version> pendingGaps, IReadOnlyList<ExpectationsRelease> releases)
+    {
+        var problems = new List<string>();
+        var newest = releases.MaxBy(r => r.Version);
+        bool Carries(ExpectationsRelease release, RuledChange c) =>
+            release.Roles.TryGetValue(c.Role, out var e) && e.Present.TryGetValue(c.Privilege, out var depth) && Same(depth, c.Depth);
+
+        foreach (var (gap, raised) in pendingGaps.OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            var entries = changes.Where(c => c.Gap == gap).ToList();
+            if (entries.Count == 0) problems.Add($"{gap}: a pending gap with no change in the config");
+            if (!releases.Any(r => r.Version == raised)) problems.Add($"{gap}: raised against expectations {raised}, but there is no such expectations file");
+
+            foreach (var release in releases.Where(r => r.Version > raised).OrderBy(r => r.Version))
+                foreach (var c in entries.Where(c => !Carries(release, c)))
+                    problems.Add($"{release.Version}: {c.Role}: {c.Privilege} — the next release's expectations must carry gap {gap} (raised against "
+                        + $"{raised}) in the role's present list at {c.Depth}");
+
+            if (newest is not null)
+                foreach (var c in entries.Where(c => Carries(newest, c)))
+                    problems.Add($"{c.Role}: {c.Privilege} — change {gap} is pending but the newest expectations file ({newest.Version}) carries it; take {gap} off the pending list");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "ISS-042 pending change gaps: a newer expectations file without a pending gap's entries fails; one with them passes and flags the entries stale")]
+    public void PendingChangeGapsAreARatchet()
+    {
+        var allChanges = LoadRuledChanges(RuledChangesPath);
+        var allReleases = LoadAllExpectations(ExpectationsDirectory);
+
+        // must-not-fire: the real files and list
+        Assert.Empty(PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, allReleases));
+
+        var (gap, raised) = Assert.Single(PendingNextReleaseChangeGaps);
+        var pending = allChanges.Where(c => c.Gap == gap).ToList();
+        Assert.Equal(3, pending.Count);
+        var newest = allReleases.MaxBy(r => r.Version)!;
+        Assert.Equal(raised, newest.Version);
+        var next = new Version(newest.Version.Major, newest.Version.Minor, newest.Version.Build + 1, 0);
+
+        IReadOnlyDictionary<string, RoleExpectation> WithPresent(IEnumerable<RuledChange> entries, string? depthOverride = null)
+        {
+            var copy = newest.Roles.ToDictionary(x => x.Key, x => x.Value);
+            foreach (var c in entries)
+                copy[c.Role] = new RoleExpectation(copy[c.Role].Absent,
+                    copy[c.Role].Present.Append(new(c.Privilege.ToUpperInvariant(), depthOverride ?? c.Depth.ToLowerInvariant())).ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase));
+            return copy;
+        }
+
+        // must-fire: a newer expectations file that does not carry the gap's entries
+        var without = allReleases.Append(new ExpectationsRelease(next, newest.Roles)).ToList();
+        var missing = PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, without);
+        Assert.Equal(pending.Count, missing.Count);
+        Assert.All(pending, c => Assert.Contains(missing, p => p.StartsWith($"{next}: {c.Role}: {c.Privilege} — the next release's expectations must carry gap {gap}", StringComparison.Ordinal)));
+
+        // must-fire: a newer file that carries only some of them (or one at another depth) still fails for the rest
+        var partial = allReleases.Append(new ExpectationsRelease(next, WithPresent(pending.Take(2)))).ToList();
+        Assert.Single(PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, partial), p => p.StartsWith($"{next}: ", StringComparison.Ordinal));
+        var wrongDepth = allReleases.Append(new ExpectationsRelease(next, WithPresent(pending, "Deep"))).ToList();
+        Assert.Equal(pending.Count, PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, wrongDepth).Count);
+
+        // must-not-fire for the carry (other casing), must-fire stale: a newer file that carries all of them flags each pending entry
+        var withThem = allReleases.Append(new ExpectationsRelease(next, WithPresent(pending))).ToList();
+        Assert.Equal(
+            pending.Select(c => $"{c.Role}: {c.Privilege} — change {gap} is pending but the newest expectations file ({next}) carries it; take {gap} off the pending list"),
+            PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, withThem));
+
+        // must-fire: a pending gap with no change, and a raised-against version with no file
+        Assert.Equal(new[] { "NOPE: a pending gap with no change in the config" },
+            PendingChangeProblems(allChanges, new Dictionary<string, Version>(StringComparer.Ordinal) { ["NOPE"] = newest.Version }, allReleases));
+        var unknown = new Dictionary<string, Version>(StringComparer.Ordinal) { [gap] = new Version(9, 9, 9, 9) };
+        Assert.Contains($"{gap}: raised against expectations 9.9.9.9, but there is no such expectations file", PendingChangeProblems(allChanges, unknown, allReleases));
+    }
+
     [Fact(DisplayName = "046c fix 2: every removal of config/feature-role-privileges.json is in the newest role-privilege expectations file's absent list, every change in its present list")]
     public void NewestExpectationsFileCarriesTheRuledSet()
     {
         var allRemovals = LoadRemovals(RuledChangesPath);
-        var changes = LoadRuledChanges(RuledChangesPath);
+        var allChanges = LoadRuledChanges(RuledChangesPath);
         var file = NewestExpectationsFile(ExpectationsDirectory);
         var expectations = LoadExpectations(file);
 
@@ -2185,6 +2291,10 @@ public class FeatureRolePrivilegeGuardTests
         var pendingProblems = PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, LoadAllExpectations(ExpectationsDirectory));
         Assert.True(pendingProblems.Count == 0, "Pending removal gaps:\n  " + string.Join("\n  ", pendingProblems));
         var removals = allRemovals.Where(r => !PendingNextReleaseRemovalGaps.ContainsKey(r.Gap)).ToList();
+        // The same for changes (ISS-042): held by PendingChangeProblems, which fails once a newer file leaves them out.
+        var pendingChangeProblems = PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, LoadAllExpectations(ExpectationsDirectory));
+        Assert.True(pendingChangeProblems.Count == 0, "Pending change gaps:\n  " + string.Join("\n  ", pendingChangeProblems));
+        var changes = allChanges.Where(c => !PendingNextReleaseChangeGaps.ContainsKey(c.Gap)).ToList();
 
         // must-not-fire: the repo as it is
         Assert.Empty(ExpectationProblems(removals, changes, expectations));
