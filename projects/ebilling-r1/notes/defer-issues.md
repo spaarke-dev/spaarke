@@ -238,7 +238,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on task/ebilling-def064 (b27b743f22, fix rounds 1-2 over 0fc02f9f7c; pending merge). Enforced by: `InvoiceFamilyCoreLookupWriterGuardTests` |
+| **Status** | Fixed on work (merged 2d8aa1d59b from task/ebilling-def064 cde47c85a9; review + 2 fix rounds + re-check). Closes when the next master PR merges. Enforced by: `InvoiceFamilyCoreLookupWriterGuardTests` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 task 130b fix round 4, review question Q1 (uac-r2 ruling (ii)) |
@@ -728,7 +728,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on task/ebilling-iss016 (17adaafc5f, b6aa9f9c24; pending merge) |
+| **Status** | Fixed on work (merged 6444b25adb from task/ebilling-iss016 8d802b9102; review + fix round 1). Closes when the next master PR merges |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 084b adversarial review (finding 2) |
