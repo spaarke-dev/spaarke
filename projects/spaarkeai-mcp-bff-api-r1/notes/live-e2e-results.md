@@ -52,3 +52,7 @@
 - The missing run logs are a separate defect, #3125 (DI-175, ontology's).
 
 Open: (1) non-billing seed for the test user; (2) whether the run was signed in as the non-admin test user (the model's reply greets the user by first name).
+
+## Run 2: non-admin test user, 2026-11-25 (owner report)
+- Signed in as the licensed non-admin user, the owner ran `/spaarke-decision` in Cowork and the `spaarke-legal-g8p2-dd` agent in Chat; both work. Connect-once and non-admin access: pass.
+- Still to check: resolving items (one per action type, with a because rationale), a Chat resolve, the routing eval, widget-frame console errors, the Console smoke afterwards, NFR-01 (after the deploy carrying #3146/#3152/#3161) and the runbook re-run.
