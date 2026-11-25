@@ -1,0 +1,232 @@
+{
+  "$comment": "Snapshot of the reference values demo-records.json depends on. It is the offline oracle for tests/scripts/Load-DemoSampleData.Tests.ps1 (every reference in the dataset must be listed here) - the loader itself resolves the same names against the TARGET stamp at load time and fails, listing every missing value, before it writes anything. Sources: taxonomy names = projects/customer-provisioning-orchestration-r1/notes/data-setup-plan.md section 6 (the 'legal-standard' pack seeded by H12b, data plan D4; names use U+2013 where the plan does); event types = scripts/seed-data/reference/sprk_eventtype_ref.json (data plan D1/D2, ISS-039); option labels = SpaarkeMaster metadata as read from spaarkedev1 on 2026-11-25. Update this file in the same PR as any dataset change that needs a new value. When the event-type seed file is on master, the test pins this snapshot to it.",
+  "snapshotDate": "2026-11-25",
+  "taxonomy": {
+    "sprk_mattertype_ref": [
+      "Litigation",
+      "Commercial",
+      "Employment",
+      "Intellectual Property – Patent",
+      "Intellectual Property – Trademark",
+      "Corporate / M&A",
+      "Regulatory & Compliance",
+      "Real Estate",
+      "Finance & Banking",
+      "Privacy & Data Protection",
+      "Investigations",
+      "Tax",
+      "Bankruptcy & Restructuring",
+      "General Advisory"
+    ],
+    "sprk_practicearea_ref": [
+      "Appellate",
+      "Intellectual Property Patents",
+      "Intellectual Property Trademarks",
+      "Mergers & Acquisitions",
+      "Banking & Finance",
+      "Commercial Transactions",
+      "Litigation & Disputes",
+      "Employment & Labor",
+      "Real Estate",
+      "Regulatory",
+      "Privacy & Cybersecurity",
+      "Tax",
+      "Antitrust & Competition",
+      "Corporate Governance"
+    ],
+    "sprk_projecttype_ref": [
+      "Litigation",
+      "Intellectual Property – Patent",
+      "Contract Lifecycle",
+      "Due Diligence",
+      "Regulatory Filing",
+      "Compliance Program",
+      "Policy Review",
+      "Internal Investigation"
+    ],
+    "sprk_contacttype_ref": [
+      "Outside Counsel",
+      "Attorney",
+      "Client Contact",
+      "In-house Counsel",
+      "Paralegal",
+      "Expert Witness",
+      "Opposing Counsel",
+      "Judge / Court Staff",
+      "Vendor Contact"
+    ],
+    "sprk_organizationtype_ref": [
+      "Law Firm",
+      "Client",
+      "Vendor",
+      "Court",
+      "Government Agency",
+      "Opposing Party",
+      "Expert Firm",
+      "Insurer"
+    ]
+  },
+  "eventTypes": [
+    {
+      "id": "124f5fc9-98ff-f011-8406-7c1e525abd8b",
+      "code": "TASK",
+      "name": "Task",
+      "requiresDueDate": true,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "1ab1c782-99ff-f011-8406-7c1e525abd8b",
+      "code": "APRV",
+      "name": "Approval",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "1f06537c-99ff-f011-8406-7c1e525abd8b",
+      "code": "STCG",
+      "name": "Status Change",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "23300069-af0d-f111-8342-7ced8d1dc988",
+      "code": "PHN",
+      "name": "Phone Call",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "5a1c56c3-98ff-f011-8406-7c1e525abd8b",
+      "code": "ACTN",
+      "name": "Action",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "5b7698b2-af0d-f111-8342-7ced8d1dc988",
+      "code": "POST",
+      "name": "Postal Mail",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "6c971edf-180d-f111-8342-7ced8d1dc988",
+      "code": "TDO",
+      "name": "To Do",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "748b1a64-99ff-f011-8406-7c1e525abd8b",
+      "code": "NTFC",
+      "name": "Notification",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "8fb9b5a7-99ff-f011-8406-7c1e525abd8b",
+      "code": "MTNG",
+      "name": "Meeting",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "b1afed9f-af0d-f111-8342-7ced8d1dc988",
+      "code": "TXTM",
+      "name": "Text Message",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "b86d712b-99ff-f011-8406-7c1e525abd8b",
+      "code": "MLST",
+      "name": "Milestone",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "c7468474-ba1d-f111-88b3-7c1e520aa4df",
+      "code": "WRK",
+      "name": "Assign Work",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "da6bc005-99ff-f011-8406-7c1e525abd8b",
+      "code": "REM",
+      "name": "Reminder",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "e0043c4b-99ff-f011-8406-7c1e525abd8b",
+      "code": "DDLN",
+      "name": "Deadline",
+      "requiresDueDate": true,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "e818da87-af0d-f111-8342-7ced8d1dc988",
+      "code": "TEAM",
+      "name": "Teams Message",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "ebfb62ba-99ff-f011-8406-7c1e525abd8b",
+      "code": "FLNG",
+      "name": "Filing",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    },
+    {
+      "id": "f6e75ae8-ad0d-f111-8342-7ced8d1dc988",
+      "code": "EML",
+      "name": "Email",
+      "requiresDueDate": false,
+      "requiresBaseDate": false
+    }
+  ],
+  "recordTypes": ["sprk_matter", "sprk_project"],
+  "options": {
+    "sprk_event.sprk_eventstatus": [
+      "Draft",
+      "Open",
+      "Completed",
+      "Closed",
+      "On Hold",
+      "Cancelled",
+      "Reassigned",
+      "Archived"
+    ],
+    "sprk_event.sprk_priority": ["Low", "Normal", "High", "Urgent"],
+    "sprk_todo.sprk_priority": ["Urgent", "Important", "Medium", "Low"],
+    "sprk_communication.sprk_direction": ["Incoming", "Outgoing"],
+    "sprk_communication.sprk_communicationtype": ["Email", "Teams Message", "SMS", "Notification", "Message"],
+    "sprk_communication.sprk_bodyformat": ["PlainText", "HTML"],
+    "sprk_document.sprk_documenttype": [
+      "Contract",
+      "Invoice",
+      "Proposal",
+      "Report",
+      "Letter",
+      "Memo",
+      "Email",
+      "Agreement",
+      "Statement",
+      "Patent",
+      "Trademark",
+      "Non-Disclosure Agreement",
+      "Other"
+    ],
+    "sprk_document.sprk_documentstatus": [
+      "Draft",
+      "Working",
+      "In Review",
+      "Approved Final",
+      "Rejected Final",
+      "Replaced Final",
+      "Archived"
+    ]
+  }
+}

@@ -1,210 +1,1352 @@
 {
-  "$schema": "demo-records-schema",
-  "description": "Non-confidential sample data for the Spaarke demo environment. Creates realistic records that exercise all major features: matters, projects, events, documents, contacts, and chart definitions.",
-  "lastUpdated": "2026-03-13",
-  "version": "1.0.0",
+  "$comment": "Demo dataset v2 for scripts/Load-DemoSampleData.ps1. One coherent story: the in-house legal department of Meridian Corp (fictional) runs a patent suit against Pinnacle Industries through outside counsel, renews supplier and licence agreements, answers a privacy audit and an employment dispute, and prepares an acquisition. All names, emails (example.com) and numbers are invented. Content borrowed and condensed from the spaarke-data CLI 'Meridian' scenario (C:\\code_files\\SPAARKE-DATA-CLI, 2026-05). Shape: every row has a stable 'key'; 'fields' are literal columns; 'dates' are day offsets from the load day; 'reference' names a taxonomy row BY NAME (data plan section 6) or an event type BY CODE; 'options' name a choice by LABEL; 'links' point at another row's key. Rules and the allowed names per section: scripts/demo-data/DemoDataLib.ps1 (Get-DemoTableSpecs) and scripts/demo-data/README.md. The loader tags every row it creates (importsequencenumber) and never writes eBilling rows (see extensionPoints).",
+  "datasetName": "spaarke-demo-legal-department",
+  "datasetVersion": "2.0.0",
+  "extensionPoints": {
+    "ebilling": "OUT of v2 (owner decision F, 2026-11-25): invoices, budgets and billing events need the UTBMS billing codes and code sets first (data plan D5). To add them, append sections 'budgets', 'invoices' and 'billingEvents' after 'matters', add their specs to Get-DemoTableSpecs (create order: budgets, invoices, billingEvents) and their tables to the reset order, and borrow shapes from C:\\code_files\\SPAARKE-DATA-CLI\\output\\scenario-1-meridian\\{budgets,invoices,billing-events}.json. Invoice-family rows are written only by the BFF's InvoiceSubmissionPersister on a real stamp (write-path I-20/I-24), so a loader that writes them directly needs an owner decision first.",
+    "documentFiles": "v2 documents are metadata only. Files need the BFF upload endpoints with a user token for the stamp's BFF app (scripts/demo-data/README.md, 'Documents and files'). A document row may carry sampleFile (a file under scripts/demo-data/sample-documents/) so a future upload step can pair the two; the loader ignores it today."
+  },
+
+  "organizations": [
+    {
+      "key": "org-meridian",
+      "fields": { "sprk_organizationname": "Meridian Corp", "sprk_domain": "meridiancorp.example.com" },
+      "reference": { "organizationType": "Client" }
+    },
+    {
+      "key": "org-baker",
+      "fields": { "sprk_organizationname": "Baker & Associates LLP", "sprk_domain": "bakerassociates.example.com" },
+      "reference": { "organizationType": "Law Firm" }
+    },
+    {
+      "key": "org-whitfield",
+      "fields": { "sprk_organizationname": "Whitfield Hartman LLP", "sprk_domain": "whitfieldhartman.example.com" },
+      "reference": { "organizationType": "Law Firm" }
+    },
+    {
+      "key": "org-chenwalsh",
+      "fields": { "sprk_organizationname": "Chen & Walsh LLP", "sprk_domain": "chenwalsh.example.com" },
+      "reference": { "organizationType": "Law Firm" }
+    },
+    {
+      "key": "org-pinnacle",
+      "fields": { "sprk_organizationname": "Pinnacle Industries", "sprk_domain": "pinnacleindustries.example.com" },
+      "reference": { "organizationType": "Opposing Party" }
+    },
+    {
+      "key": "org-adventure",
+      "fields": { "sprk_organizationname": "Adventure Works", "sprk_domain": "adventureworks.example.com" },
+      "reference": { "organizationType": "Opposing Party" }
+    },
+    {
+      "key": "org-contoso",
+      "fields": { "sprk_organizationname": "Contoso Ltd.", "sprk_domain": "contoso.example.com" },
+      "reference": { "organizationType": "Vendor" }
+    },
+    {
+      "key": "org-fabrikam",
+      "fields": { "sprk_organizationname": "Fabrikam Inc.", "sprk_domain": "fabrikam.example.com" },
+      "reference": { "organizationType": "Vendor" }
+    },
+    {
+      "key": "org-northwind",
+      "fields": { "sprk_organizationname": "Northwind Traders", "sprk_domain": "northwindtraders.example.com" },
+      "reference": { "organizationType": "Vendor" }
+    },
+    {
+      "key": "org-woodgrove",
+      "fields": { "sprk_organizationname": "Woodgrove Bank", "sprk_domain": "woodgrovebank.example.com" },
+      "reference": { "organizationType": "Client" }
+    },
+    {
+      "key": "org-court",
+      "fields": {
+        "sprk_organizationname": "U.S. District Court, Northern District of California",
+        "sprk_domain": "cand.example.gov"
+      },
+      "reference": { "organizationType": "Court" }
+    },
+    {
+      "key": "org-uspto",
+      "fields": { "sprk_organizationname": "U.S. Patent and Trademark Office", "sprk_domain": "uspto.example.gov" },
+      "reference": { "organizationType": "Government Agency" }
+    },
+    {
+      "key": "org-ftc",
+      "fields": { "sprk_organizationname": "Federal Trade Commission", "sprk_domain": "ftc.example.gov" },
+      "reference": { "organizationType": "Government Agency" }
+    },
+    {
+      "key": "org-patel",
+      "fields": { "sprk_organizationname": "Patel Technical Consulting", "sprk_domain": "pateltech.example.com" },
+      "reference": { "organizationType": "Expert Firm" }
+    },
+    {
+      "key": "org-hartwell",
+      "fields": {
+        "sprk_organizationname": "Hartwell Mutual Insurance Co.",
+        "sprk_domain": "hartwellmutual.example.com"
+      },
+      "reference": { "organizationType": "Insurer" }
+    }
+  ],
 
   "contacts": [
     {
-      "firstname": "Sarah",
-      "lastname": "Mitchell",
-      "emailaddress1": "sarah.mitchell@contoso.com",
-      "telephone1": "206-555-0101",
-      "jobtitle": "General Counsel",
-      "company": "Contoso Ltd."
+      "key": "ct-chen",
+      "fields": {
+        "firstname": "Sarah",
+        "lastname": "Chen",
+        "emailaddress1": "sarah.chen@meridiancorp.example.com",
+        "telephone1": "415-555-0101",
+        "jobtitle": "General Counsel"
+      },
+      "reference": { "contactType": "In-house Counsel" },
+      "links": { "organization": "org-meridian" }
     },
     {
-      "firstname": "James",
-      "lastname": "Chen",
-      "emailaddress1": "james.chen@fabrikam.com",
-      "telephone1": "206-555-0102",
-      "jobtitle": "Associate Attorney",
-      "company": "Fabrikam Inc."
+      "key": "ct-webb",
+      "fields": {
+        "firstname": "Marcus",
+        "lastname": "Webb",
+        "emailaddress1": "marcus.webb@meridiancorp.example.com",
+        "telephone1": "415-555-0102",
+        "jobtitle": "Associate General Counsel, Commercial"
+      },
+      "reference": { "contactType": "In-house Counsel" },
+      "links": { "organization": "org-meridian" }
     },
     {
-      "firstname": "Maria",
-      "lastname": "Rodriguez",
-      "emailaddress1": "maria.rodriguez@northwindtraders.com",
-      "telephone1": "206-555-0103",
-      "jobtitle": "Contract Manager",
-      "company": "Northwind Traders"
+      "key": "ct-raman",
+      "fields": {
+        "firstname": "Priya",
+        "lastname": "Raman",
+        "emailaddress1": "priya.raman@meridiancorp.example.com",
+        "telephone1": "415-555-0103",
+        "jobtitle": "Legal Operations Manager"
+      },
+      "reference": { "contactType": "Client Contact" },
+      "links": { "organization": "org-meridian" }
     },
     {
-      "firstname": "David",
-      "lastname": "Kim",
-      "emailaddress1": "david.kim@adventureworks.com",
-      "telephone1": "206-555-0104",
-      "jobtitle": "Compliance Officer",
-      "company": "Adventure Works"
+      "key": "ct-morrison",
+      "fields": {
+        "firstname": "James",
+        "lastname": "Morrison",
+        "emailaddress1": "james.morrison@meridiancorp.example.com",
+        "telephone1": "415-555-0104",
+        "jobtitle": "Vice President of Engineering"
+      },
+      "reference": { "contactType": "Client Contact" },
+      "links": { "organization": "org-meridian" }
     },
     {
-      "firstname": "Emily",
-      "lastname": "Thompson",
-      "emailaddress1": "emily.thompson@woodgrove.com",
-      "telephone1": "206-555-0105",
-      "jobtitle": "Senior Paralegal",
-      "company": "Woodgrove Bank"
+      "key": "ct-torres",
+      "fields": {
+        "firstname": "Rachel",
+        "lastname": "Torres",
+        "emailaddress1": "rachel.torres@bakerassociates.example.com",
+        "telephone1": "415-555-0110",
+        "jobtitle": "Lead Partner, IP Litigation"
+      },
+      "reference": { "contactType": "Outside Counsel" },
+      "links": { "organization": "org-baker" }
+    },
+    {
+      "key": "ct-park",
+      "fields": {
+        "firstname": "Michael",
+        "lastname": "Park",
+        "emailaddress1": "michael.park@bakerassociates.example.com",
+        "telephone1": "415-555-0111",
+        "jobtitle": "Senior Associate, IP Litigation"
+      },
+      "reference": { "contactType": "Attorney" },
+      "links": { "organization": "org-baker" }
+    },
+    {
+      "key": "ct-huang",
+      "fields": {
+        "firstname": "Lisa",
+        "lastname": "Huang",
+        "emailaddress1": "lisa.huang@bakerassociates.example.com",
+        "telephone1": "415-555-0112",
+        "jobtitle": "Senior Paralegal, IP Litigation"
+      },
+      "reference": { "contactType": "Paralegal" },
+      "links": { "organization": "org-baker" }
+    },
+    {
+      "key": "ct-hartman",
+      "fields": {
+        "firstname": "Daniel",
+        "lastname": "Hartman",
+        "emailaddress1": "daniel.hartman@whitfieldhartman.example.com",
+        "telephone1": "206-555-0120",
+        "jobtitle": "Partner, Employment and Commercial"
+      },
+      "reference": { "contactType": "Outside Counsel" },
+      "links": { "organization": "org-whitfield" }
+    },
+    {
+      "key": "ct-voss",
+      "fields": {
+        "firstname": "Elena",
+        "lastname": "Voss",
+        "emailaddress1": "elena.voss@whitfieldhartman.example.com",
+        "telephone1": "206-555-0121",
+        "jobtitle": "Associate, Employment"
+      },
+      "reference": { "contactType": "Attorney" },
+      "links": { "organization": "org-whitfield" }
+    },
+    {
+      "key": "ct-kim",
+      "fields": {
+        "firstname": "David",
+        "lastname": "Kim",
+        "emailaddress1": "david.kim@chenwalsh.example.com",
+        "telephone1": "512-555-0130",
+        "jobtitle": "Lead Partner, Patent Defense"
+      },
+      "reference": { "contactType": "Opposing Counsel" },
+      "links": { "organization": "org-chenwalsh" }
+    },
+    {
+      "key": "ct-walsh",
+      "fields": {
+        "firstname": "Jennifer",
+        "lastname": "Walsh",
+        "emailaddress1": "jennifer.walsh@chenwalsh.example.com",
+        "telephone1": "512-555-0131",
+        "jobtitle": "Senior Associate, Patent Litigation"
+      },
+      "reference": { "contactType": "Opposing Counsel" },
+      "links": { "organization": "org-chenwalsh" }
+    },
+    {
+      "key": "ct-sullivan",
+      "fields": {
+        "firstname": "Alan",
+        "lastname": "Sullivan",
+        "emailaddress1": "alan.sullivan@cand.example.gov",
+        "telephone1": "415-555-0140",
+        "jobtitle": "District Judge"
+      },
+      "reference": { "contactType": "Judge / Court Staff" },
+      "links": { "organization": "org-court" }
+    },
+    {
+      "key": "ct-patel",
+      "fields": {
+        "firstname": "Robert",
+        "lastname": "Patel",
+        "emailaddress1": "robert.patel@pateltech.example.com",
+        "telephone1": "408-555-0150",
+        "jobtitle": "Principal, Precision Manufacturing"
+      },
+      "reference": { "contactType": "Expert Witness" },
+      "links": { "organization": "org-patel" }
+    },
+    {
+      "key": "ct-rodriguez",
+      "fields": {
+        "firstname": "Maria",
+        "lastname": "Rodriguez",
+        "emailaddress1": "maria.rodriguez@northwindtraders.example.com",
+        "telephone1": "206-555-0160",
+        "jobtitle": "Contract Manager"
+      },
+      "reference": { "contactType": "Vendor Contact" },
+      "links": { "organization": "org-northwind" }
+    },
+    {
+      "key": "ct-alvarez",
+      "fields": {
+        "firstname": "Tom",
+        "lastname": "Alvarez",
+        "emailaddress1": "tom.alvarez@contoso.example.com",
+        "telephone1": "206-555-0161",
+        "jobtitle": "Key Account Executive"
+      },
+      "reference": { "contactType": "Vendor Contact" },
+      "links": { "organization": "org-contoso" }
+    },
+    {
+      "key": "ct-hollis",
+      "fields": {
+        "firstname": "Greg",
+        "lastname": "Hollis",
+        "emailaddress1": "greg.hollis@fabrikam.example.com",
+        "telephone1": "206-555-0162",
+        "jobtitle": "Director of Licensing"
+      },
+      "reference": { "contactType": "Vendor Contact" },
+      "links": { "organization": "org-fabrikam" }
+    },
+    {
+      "key": "ct-thompson",
+      "fields": {
+        "firstname": "Emily",
+        "lastname": "Thompson",
+        "emailaddress1": "emily.thompson@woodgrovebank.example.com",
+        "telephone1": "206-555-0163",
+        "jobtitle": "Compliance Director"
+      },
+      "reference": { "contactType": "Client Contact" },
+      "links": { "organization": "org-woodgrove" }
+    },
+    {
+      "key": "ct-ellis",
+      "fields": {
+        "firstname": "Karen",
+        "lastname": "Ellis",
+        "emailaddress1": "karen.ellis@hartwellmutual.example.com",
+        "telephone1": "312-555-0170",
+        "jobtitle": "Senior Claims Manager"
+      },
+      "reference": { "contactType": "Vendor Contact" },
+      "links": { "organization": "org-hartwell" }
     }
   ],
 
   "matters": [
     {
-      "sprk_mattername": "Contoso Supply Agreement Review",
-      "sprk_matternumber": "MTR-2026-001",
-      "sprk_matterdescription": "Review and negotiate the annual supply agreement between Contoso Ltd. and our organization. Includes pricing terms, delivery schedules, and liability provisions. Target completion by end of Q2 2026."
+      "key": "mt-pinnacle",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-001",
+        "sprk_mattername": "Meridian Corp v. Pinnacle Industries - Patent Infringement",
+        "sprk_matterdescription": "Patent infringement action in the Northern District of California (Case No. 3:2025-cv-04892). Meridian asserts three precision-manufacturing patents against Pinnacle's AutoForge product line. Outside counsel: Baker & Associates LLP. Claim construction (Markman) ruling received; expert discovery and settlement posture are the live workstreams.",
+        "sprk_highpriority": true
+      },
+      "dates": { "sprk_openeddate": "-400d", "sprk_nextreviewdate": "+14d" },
+      "reference": { "matterType": "Litigation", "practiceArea": "Intellectual Property Patents" },
+      "links": {
+        "assignedLawFirm1": "org-baker",
+        "assignedAttorney1": "ct-torres",
+        "assignedAttorney2": "ct-park",
+        "assignedParalegal1": "ct-huang",
+        "assignedToInternal": "ct-chen"
+      }
     },
     {
-      "sprk_mattername": "Fabrikam IP Licensing",
-      "sprk_matternumber": "MTR-2026-002",
-      "sprk_matterdescription": "Intellectual property licensing arrangement with Fabrikam Inc. covering software patents and trade secrets. Includes cross-licensing terms and royalty calculations."
+      "key": "mt-contoso",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-002",
+        "sprk_mattername": "Contoso Supply Agreement Renewal",
+        "sprk_matterdescription": "Review and renegotiate the annual supply agreement with Contoso Ltd. (version 3.2): pricing schedules, delivery commitments, liability caps and force majeure. The agreement expires in about five weeks; notice of intent to renew is due 60 days before expiry."
+      },
+      "dates": { "sprk_openeddate": "-75d", "sprk_nextreviewdate": "+7d" },
+      "reference": { "matterType": "Commercial", "practiceArea": "Commercial Transactions" },
+      "links": {
+        "assignedLawFirm1": "org-whitfield",
+        "assignedAttorney1": "ct-hartman",
+        "assignedToInternal": "ct-webb"
+      }
     },
     {
-      "sprk_mattername": "Northwind Data Processing Agreement",
-      "sprk_matternumber": "MTR-2026-003",
-      "sprk_matterdescription": "Data processing agreement with Northwind Traders to comply with GDPR and CCPA requirements. Covers data handling, retention policies, breach notification procedures, and sub-processor management."
+      "key": "mt-fabrikam",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-003",
+        "sprk_mattername": "Fabrikam Patent Cross-License",
+        "sprk_matterdescription": "Cross-licensing of software patents between Meridian and Fabrikam Inc. covering patent families US-9,876,543 and US-10,234,567, with a quarterly royalty on usage metrics. Draft is in final review."
+      },
+      "dates": { "sprk_openeddate": "-120d", "sprk_nextreviewdate": "+21d" },
+      "reference": {
+        "matterType": "Intellectual Property \u2013 Patent",
+        "practiceArea": "Intellectual Property Patents"
+      },
+      "links": { "assignedLawFirm1": "org-baker", "assignedAttorney1": "ct-park", "assignedToInternal": "ct-chen" }
     },
     {
-      "sprk_mattername": "Adventure Works Employment Dispute",
-      "sprk_matternumber": "MTR-2026-004",
-      "sprk_matterdescription": "Employment dispute resolution with Adventure Works regarding non-compete clause enforcement. Includes arbitration preparation, witness statements, and settlement negotiations."
+      "key": "mt-northwind",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-004",
+        "sprk_mattername": "Northwind Data Processing Agreement",
+        "sprk_matterdescription": "Data processing agreement with Northwind Traders under GDPR Article 28 and CCPA: controller and processor roles, data categories, security measures, breach notification timelines and sub-processor approval."
+      },
+      "dates": { "sprk_openeddate": "-45d", "sprk_nextreviewdate": "+10d" },
+      "reference": { "matterType": "Privacy & Data Protection", "practiceArea": "Privacy & Cybersecurity" },
+      "links": { "assignedLawFirm1": "org-whitfield", "assignedAttorney1": "ct-voss", "assignedToInternal": "ct-webb" }
     },
     {
-      "sprk_mattername": "Woodgrove Banking Compliance Audit",
-      "sprk_matternumber": "MTR-2026-005",
-      "sprk_matterdescription": "Annual compliance audit of Woodgrove Bank partnership agreements. Covers regulatory requirements (OCC, FDIC), anti-money laundering provisions, and consumer protection clauses."
+      "key": "mt-adventure",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-005",
+        "sprk_mattername": "Adventure Works Non-Compete Dispute",
+        "sprk_matterdescription": "Dispute over enforcement of a non-compete clause against a former senior engineer now at Adventure Works. Covers arbitration preparation, witness statements and settlement talks. Enforceability analysis spans Washington, California and New York law.",
+        "sprk_highpriority": true
+      },
+      "dates": { "sprk_openeddate": "-90d", "sprk_nextreviewdate": "+5d" },
+      "reference": { "matterType": "Employment", "practiceArea": "Employment & Labor" },
+      "links": {
+        "assignedLawFirm1": "org-whitfield",
+        "assignedAttorney1": "ct-hartman",
+        "assignedAttorney2": "ct-voss",
+        "assignedToInternal": "ct-chen"
+      }
+    },
+    {
+      "key": "mt-woodgrove",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-006",
+        "sprk_mattername": "Woodgrove Banking Compliance Audit",
+        "sprk_matterdescription": "Annual compliance audit of the Woodgrove Bank partnership agreements: OCC and FDIC requirements, BSA/AML obligations, consumer protection clauses and fair lending."
+      },
+      "dates": { "sprk_openeddate": "-60d", "sprk_nextreviewdate": "+14d" },
+      "reference": { "matterType": "Regulatory & Compliance", "practiceArea": "Regulatory" },
+      "links": { "assignedToInternal": "ct-webb" }
+    },
+    {
+      "key": "mt-trademark",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-007",
+        "sprk_mattername": "AutoForge Trademark Registration",
+        "sprk_matterdescription": "Federal registration of the AutoForge-adjacent house mark and product mark in classes 7 and 42, plus a clearance search and watch notice for confusingly similar filings."
+      },
+      "dates": { "sprk_openeddate": "-30d", "sprk_nextreviewdate": "+30d" },
+      "reference": {
+        "matterType": "Intellectual Property \u2013 Trademark",
+        "practiceArea": "Intellectual Property Trademarks"
+      },
+      "links": { "assignedLawFirm1": "org-baker", "assignedAttorney1": "ct-park", "assignedToInternal": "ct-chen" }
+    },
+    {
+      "key": "mt-atlas",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-008",
+        "sprk_mattername": "Project Atlas - Acquisition of Horizon Systems",
+        "sprk_matterdescription": "Proposed acquisition of Horizon Systems Inc.: deal structure, legal due diligence, antitrust clearance and signing mechanics. Confidential; deal team only.",
+        "sprk_highpriority": true
+      },
+      "dates": { "sprk_openeddate": "-50d", "sprk_nextreviewdate": "+7d" },
+      "reference": { "matterType": "Corporate / M&A", "practiceArea": "Mergers & Acquisitions" },
+      "links": {
+        "assignedLawFirm1": "org-whitfield",
+        "assignedAttorney1": "ct-hartman",
+        "assignedToInternal": "ct-chen"
+      }
+    },
+    {
+      "key": "mt-financing",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-009",
+        "sprk_mattername": "Equipment Financing Facility Amendment",
+        "sprk_matterdescription": "Amendment to the equipment financing facility: revised borrowing base, updated financial covenants and a new collateral schedule."
+      },
+      "dates": { "sprk_openeddate": "-20d", "sprk_nextreviewdate": "+12d" },
+      "reference": { "matterType": "Finance & Banking", "practiceArea": "Banking & Finance" },
+      "links": {
+        "assignedLawFirm1": "org-whitfield",
+        "assignedAttorney1": "ct-hartman",
+        "assignedToInternal": "ct-webb"
+      }
+    },
+    {
+      "key": "mt-insurance",
+      "fields": {
+        "sprk_matternumber": "MTR-2026-010",
+        "sprk_mattername": "Pinnacle Counterclaim - Insurance Coverage Position",
+        "sprk_matterdescription": "Notice to Hartwell Mutual of Pinnacle's counterclaim for declaratory relief, and the coverage position under the product liability policy."
+      },
+      "dates": { "sprk_openeddate": "-100d", "sprk_nextreviewdate": "+20d" },
+      "reference": { "matterType": "General Advisory", "practiceArea": "Litigation & Disputes" },
+      "links": { "assignedToInternal": "ct-chen" }
     }
   ],
 
   "projects": [
     {
-      "sprk_projectname": "Q2 Contract Portfolio Review",
-      "sprk_projectnumber": "PRJ-2026-001",
-      "sprk_projectdescription": "Comprehensive review of all active contracts expiring in Q2 2026. Identify renewal opportunities, renegotiation candidates, and contracts requiring termination. 47 contracts across 12 vendors."
+      "key": "pj-contracts",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-001",
+        "sprk_projectname": "Q2 Contract Portfolio Review",
+        "sprk_projectdescription": "Review of all active contracts expiring in the next two quarters: renewal candidates, renegotiations and terminations. 47 contracts across 12 vendors."
+      },
+      "dates": { "sprk_openeddate": "-80d", "sprk_nextreviewdate": "+14d" },
+      "reference": { "projectType": "Contract Lifecycle", "practiceArea": "Commercial Transactions" },
+      "links": { "assignedToInternal": "ct-webb" }
     },
     {
-      "sprk_projectname": "GDPR Compliance Documentation",
-      "sprk_projectnumber": "PRJ-2026-002",
-      "sprk_projectdescription": "Prepare and organize all documentation required for GDPR compliance audit. Includes data processing agreements, privacy impact assessments, and records of processing activities."
+      "key": "pj-gdpr",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-002",
+        "sprk_projectname": "GDPR Compliance Documentation",
+        "sprk_projectdescription": "Prepare and organise the documentation for the GDPR compliance audit: data processing agreements, privacy impact assessments and records of processing activities."
+      },
+      "dates": { "sprk_openeddate": "-60d", "sprk_nextreviewdate": "+10d" },
+      "reference": { "projectType": "Compliance Program", "practiceArea": "Privacy & Cybersecurity" },
+      "links": { "assignedToInternal": "ct-raman" }
     },
     {
-      "sprk_projectname": "Vendor Due Diligence Program",
-      "sprk_projectnumber": "PRJ-2026-003",
-      "sprk_projectdescription": "Establish vendor due diligence program for all new and existing critical vendors. Includes risk assessment templates, financial stability checks, and ongoing monitoring procedures."
+      "key": "pj-vendor",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-003",
+        "sprk_projectname": "Vendor Due Diligence Program",
+        "sprk_projectdescription": "Due diligence for new and existing critical vendors: risk assessment templates, financial stability checks and ongoing monitoring."
+      },
+      "dates": { "sprk_openeddate": "-40d", "sprk_nextreviewdate": "+30d" },
+      "reference": { "projectType": "Due Diligence", "practiceArea": "Commercial Transactions" },
+      "links": { "assignedToInternal": "ct-raman" }
+    },
+    {
+      "key": "pj-atlas-dd",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-004",
+        "sprk_projectname": "Atlas - Legal Due Diligence",
+        "sprk_projectdescription": "Legal due diligence on Horizon Systems for Project Atlas: corporate records, material contracts, IP, litigation and employment matters."
+      },
+      "dates": { "sprk_openeddate": "-35d", "sprk_nextreviewdate": "+7d" },
+      "reference": { "projectType": "Due Diligence", "practiceArea": "Mergers & Acquisitions" },
+      "links": {
+        "assignedLawFirm1": "org-whitfield",
+        "assignedAttorney1": "ct-hartman",
+        "assignedToInternal": "ct-chen"
+      }
+    },
+    {
+      "key": "pj-hsr",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-005",
+        "sprk_projectname": "Atlas - HSR Premerger Filing",
+        "sprk_projectdescription": "Hart-Scott-Rodino premerger notification for Project Atlas: filing preparation, item 4(c)/4(d) document collection and agency correspondence."
+      },
+      "dates": { "sprk_openeddate": "-25d", "sprk_nextreviewdate": "+7d" },
+      "reference": { "projectType": "Regulatory Filing", "practiceArea": "Antitrust & Competition" },
+      "links": {
+        "assignedLawFirm1": "org-whitfield",
+        "assignedAttorney1": "ct-hartman",
+        "assignedToInternal": "ct-chen"
+      }
+    },
+    {
+      "key": "pj-hold",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-006",
+        "sprk_projectname": "Pinnacle Litigation Hold and Discovery",
+        "sprk_projectdescription": "Litigation hold, custodian interviews, ESI collection and production logistics for Meridian Corp v. Pinnacle Industries.",
+        "sprk_highpriority": true
+      },
+      "dates": { "sprk_openeddate": "-380d", "sprk_nextreviewdate": "+7d" },
+      "reference": { "projectType": "Litigation", "practiceArea": "Litigation & Disputes" },
+      "links": { "assignedLawFirm1": "org-baker", "assignedAttorney1": "ct-torres", "assignedToInternal": "ct-chen" }
+    },
+    {
+      "key": "pj-patents",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-007",
+        "sprk_projectname": "Patent Portfolio Maintenance Review",
+        "sprk_projectdescription": "Annual review of the patent portfolio: maintenance fee deadlines, continuation strategy and abandonment candidates."
+      },
+      "dates": { "sprk_openeddate": "-55d", "sprk_nextreviewdate": "+45d" },
+      "reference": {
+        "projectType": "Intellectual Property \u2013 Patent",
+        "practiceArea": "Intellectual Property Patents"
+      },
+      "links": { "assignedLawFirm1": "org-baker", "assignedAttorney1": "ct-park", "assignedToInternal": "ct-chen" }
+    },
+    {
+      "key": "pj-policy",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-008",
+        "sprk_projectname": "Records Retention Policy Review",
+        "sprk_projectdescription": "Refresh of the corporate records retention schedule and legal hold procedures after the Pinnacle preservation exercise."
+      },
+      "dates": { "sprk_openeddate": "-15d", "sprk_nextreviewdate": "+30d" },
+      "reference": { "projectType": "Policy Review", "practiceArea": "Corporate Governance" },
+      "links": { "assignedToInternal": "ct-raman" }
+    },
+    {
+      "key": "pj-investigation",
+      "fields": {
+        "sprk_projectnumber": "PRJ-2026-009",
+        "sprk_projectname": "Ethics Hotline Report 2026-04 Review",
+        "sprk_projectdescription": "Privileged internal review of an ethics hotline report: scope, interviews, findings memorandum and remediation recommendations."
+      },
+      "dates": { "sprk_openeddate": "-28d", "sprk_nextreviewdate": "+5d" },
+      "reference": { "projectType": "Internal Investigation", "practiceArea": "Corporate Governance" },
+      "links": { "assignedToInternal": "ct-chen" }
     }
   ],
 
   "events": [
     {
-      "sprk_eventname": "Contract Renewal Deadline - Contoso",
-      "sprk_eventdescription": "Annual supply agreement with Contoso Ltd. expires on June 30, 2026. Begin renewal negotiations at least 60 days prior. Key contact: Sarah Mitchell (General Counsel)."
+      "key": "ev-01",
+      "fields": {
+        "sprk_eventname": "Respond to Pinnacle's second set of interrogatories",
+        "sprk_description": "Draft responses and objections with Baker & Associates; client verification needed from Engineering."
+      },
+      "dates": { "sprk_duedate": "+9d" },
+      "reference": { "eventTypeCode": "TASK" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
     },
     {
-      "sprk_eventname": "GDPR Audit Preparation Meeting",
-      "sprk_eventdescription": "Kickoff meeting for GDPR compliance audit preparation. Review current DPA status, identify gaps in documentation, and assign remediation tasks. All stakeholders required."
+      "key": "ev-02",
+      "fields": {
+        "sprk_eventname": "Joint Case Management Statement due",
+        "sprk_description": "Court's standing order: file on CM/ECF by 5:00 PM Pacific. Covers discovery status, remaining depositions, anticipated motions and settlement status."
+      },
+      "dates": { "sprk_duedate": "+6d" },
+      "reference": { "eventTypeCode": "DDLN" },
+      "options": { "status": "Open", "priority": "Urgent" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
     },
     {
-      "sprk_eventname": "IP License Fee Payment Due",
-      "sprk_eventdescription": "Quarterly royalty payment to Fabrikam Inc. under cross-licensing agreement. Amount calculated per usage metrics from Q1 2026. Payment deadline: April 15, 2026."
+      "key": "ev-03",
+      "fields": {
+        "sprk_eventname": "Claim construction follow-up strategy meeting",
+        "sprk_description": "Review the Markman ruling with Baker & Associates and decide whether to make a formal settlement demand."
+      },
+      "dates": { "sprk_duedate": "+3d", "sprk_plannedstart": "+3d 16:00", "sprk_plannedend": "+3d 17:00" },
+      "reference": { "eventTypeCode": "MTNG" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
     },
     {
-      "sprk_eventname": "Board Compliance Report",
-      "sprk_eventdescription": "Prepare and submit quarterly compliance report to the board of directors. Cover regulatory changes, outstanding issues, remediation progress, and risk assessments."
+      "key": "ev-04",
+      "fields": {
+        "sprk_eventname": "File opposition to motion to compel third-party subpoena compliance",
+        "sprk_description": "Opposition brief and supporting declaration, due before the hearing notice date."
+      },
+      "dates": { "sprk_duedate": "+12d" },
+      "reference": { "eventTypeCode": "FLNG" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
     },
     {
-      "sprk_eventname": "Vendor Risk Assessment - Northwind",
-      "sprk_eventdescription": "Conduct annual risk assessment for Northwind Traders. Evaluate financial stability, data handling practices, and regulatory compliance. Schedule on-site audit if risk score exceeds threshold."
+      "key": "ev-05",
+      "fields": {
+        "sprk_eventname": "Markman ruling received - 6 of 8 terms construed for Meridian",
+        "sprk_description": "Judge Sullivan adopted a broad construction of 'precision alignment mechanism', the core limitation of all three asserted patents."
+      },
+      "dates": { "sprk_duedate": "-40d", "sprk_completeddate": "-40d" },
+      "reference": { "eventTypeCode": "MLST" },
+      "options": { "status": "Completed", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-06",
+      "fields": {
+        "sprk_eventname": "Approve expert engagement budget - Dr. Patel",
+        "sprk_description": "Approve the fee estimate for the infringement expert report and deposition support."
+      },
+      "dates": { "sprk_duedate": "+4d" },
+      "reference": { "eventTypeCode": "APRV" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-07",
+      "fields": {
+        "sprk_eventname": "Call with Baker & Associates on settlement range",
+        "sprk_description": "Discussed a range based on AutoForge revenue and the claim construction outcome. Decision: hold a formal demand until expert reports are exchanged."
+      },
+      "dates": { "sprk_duedate": "-12d", "sprk_completeddate": "-12d" },
+      "reference": { "eventTypeCode": "PHN" },
+      "options": { "status": "Completed", "priority": "High" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-08",
+      "fields": {
+        "sprk_eventname": "Email to opposing counsel re ESI protocol",
+        "sprk_description": "Meet-and-confer follow-up proposing search terms and custodians."
+      },
+      "dates": { "sprk_duedate": "-20d", "sprk_completeddate": "-20d" },
+      "reference": { "eventTypeCode": "EML" },
+      "options": { "status": "Completed", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-park" }
+    },
+    {
+      "key": "ev-09",
+      "fields": {
+        "sprk_eventname": "Contoso supply agreement expires",
+        "sprk_description": "The annual supply agreement with Contoso Ltd. expires. Renewal terms must be signed before this date to avoid a gap in supply."
+      },
+      "dates": { "sprk_duedate": "+36d" },
+      "reference": { "eventTypeCode": "DDLN" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingMatter": "mt-contoso", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "ev-10",
+      "fields": {
+        "sprk_eventname": "Contoso renewal: 60-day notice window opens",
+        "sprk_description": "Start renewal negotiations; contact Tom Alvarez."
+      },
+      "dates": { "sprk_duedate": "+5d" },
+      "reference": { "eventTypeCode": "REM" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-contoso", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "ev-11",
+      "fields": {
+        "sprk_eventname": "Send redlined supply agreement to Contoso",
+        "sprk_description": "Redline of v3.2 with Whitfield Hartman's comments on liability caps and force majeure."
+      },
+      "dates": { "sprk_duedate": "+10d" },
+      "reference": { "eventTypeCode": "ACTN" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-contoso", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "ev-12",
+      "fields": {
+        "sprk_eventname": "Notify Procurement of Contoso pricing schedule change",
+        "sprk_description": "Pricing schedule B changes from quarterly to annual adjustment."
+      },
+      "dates": { "sprk_duedate": "+2d" },
+      "reference": { "eventTypeCode": "NTFC" },
+      "options": { "status": "Open", "priority": "Low" },
+      "links": { "regardingMatter": "mt-contoso", "assignedTo": "ct-raman" }
+    },
+    {
+      "key": "ev-13",
+      "fields": {
+        "sprk_eventname": "Calculate quarterly royalty payment due to Fabrikam",
+        "sprk_description": "Royalty on usage metrics under the cross-licence; finance needs the figure a week before payment."
+      },
+      "dates": { "sprk_duedate": "+18d" },
+      "reference": { "eventTypeCode": "TASK" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-fabrikam", "assignedTo": "ct-raman" }
+    },
+    {
+      "key": "ev-14",
+      "fields": {
+        "sprk_eventname": "Fabrikam licence moved to final review",
+        "sprk_description": "Status moved from negotiation to final review after the royalty clause was agreed."
+      },
+      "dates": { "sprk_duedate": "-6d", "sprk_completeddate": "-6d" },
+      "reference": { "eventTypeCode": "STCG" },
+      "options": { "status": "Completed", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-fabrikam", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-15",
+      "fields": {
+        "sprk_eventname": "Text: confirm Fabrikam signatory availability",
+        "sprk_description": "Greg Hollis confirmed the signing officer is available next week."
+      },
+      "dates": { "sprk_duedate": "-2d", "sprk_completeddate": "-2d" },
+      "reference": { "eventTypeCode": "TXTM" },
+      "options": { "status": "Completed", "priority": "Low" },
+      "links": { "regardingMatter": "mt-fabrikam", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-16",
+      "fields": {
+        "sprk_eventname": "GDPR audit preparation kickoff",
+        "sprk_description": "Review current DPA status, identify documentation gaps and assign remediation. All stakeholders required."
+      },
+      "dates": { "sprk_duedate": "+7d", "sprk_plannedstart": "+7d 15:00", "sprk_plannedend": "+7d 16:00" },
+      "reference": { "eventTypeCode": "MTNG" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingProject": "pj-gdpr", "assignedTo": "ct-raman" }
+    },
+    {
+      "key": "ev-17",
+      "fields": {
+        "sprk_eventname": "Complete records of processing activities",
+        "sprk_description": "Article 30 register for all processing owned by Legal and HR."
+      },
+      "dates": { "sprk_duedate": "+21d" },
+      "reference": { "eventTypeCode": "TASK" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingProject": "pj-gdpr", "assignedTo": "ct-raman" }
+    },
+    {
+      "key": "ev-18",
+      "fields": {
+        "sprk_eventname": "Call with Northwind DPO on sub-processor list",
+        "sprk_description": "Northwind will add two sub-processors; request 30 days' notice and audit rights in the DPA."
+      },
+      "dates": { "sprk_duedate": "-8d", "sprk_completeddate": "-8d" },
+      "reference": { "eventTypeCode": "PHN" },
+      "options": { "status": "Completed", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-northwind", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "ev-19",
+      "fields": {
+        "sprk_eventname": "Respond to Adventure Works arbitration demand",
+        "sprk_description": "Response to the demand for arbitration, with a counterclaim for breach of the non-compete."
+      },
+      "dates": { "sprk_duedate": "+11d" },
+      "reference": { "eventTypeCode": "DDLN" },
+      "options": { "status": "Open", "priority": "Urgent" },
+      "links": { "regardingMatter": "mt-adventure", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-20",
+      "fields": {
+        "sprk_eventname": "Assign witness preparation to Whitfield Hartman",
+        "sprk_description": "Elena Voss to prepare the two former colleagues who will give witness statements."
+      },
+      "dates": { "sprk_duedate": "+4d" },
+      "reference": { "eventTypeCode": "WRK" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingMatter": "mt-adventure", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-21",
+      "fields": {
+        "sprk_eventname": "Certified mail: preservation notice to Adventure Works",
+        "sprk_description": "Preservation demand sent by certified mail and email; return receipt on file."
+      },
+      "dates": { "sprk_duedate": "-30d", "sprk_completeddate": "-30d" },
+      "reference": { "eventTypeCode": "POST" },
+      "options": { "status": "Completed", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-adventure", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-22",
+      "fields": {
+        "sprk_eventname": "Teams huddle on witness statements",
+        "sprk_description": "Agreed the outline for both statements and the exhibits to attach."
+      },
+      "dates": { "sprk_duedate": "-3d", "sprk_completeddate": "-3d" },
+      "reference": { "eventTypeCode": "TEAM" },
+      "options": { "status": "Completed", "priority": "Low" },
+      "links": { "regardingMatter": "mt-adventure", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-23",
+      "fields": {
+        "sprk_eventname": "Submit HSR premerger filing",
+        "sprk_description": "File with the FTC and the Antitrust Division once the signed agreement and 4(c) documents are collected."
+      },
+      "dates": { "sprk_duedate": "+25d" },
+      "reference": { "eventTypeCode": "FLNG" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingProject": "pj-hsr", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-24",
+      "fields": {
+        "sprk_eventname": "Atlas signing target date",
+        "sprk_description": "Target date to sign the merger agreement, subject to diligence and board approval."
+      },
+      "dates": { "sprk_duedate": "+40d" },
+      "reference": { "eventTypeCode": "MLST" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingMatter": "mt-atlas", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-25",
+      "fields": {
+        "sprk_eventname": "Review Horizon disclosure schedules",
+        "sprk_description": "Check the disclosure schedules against the data room index and flag gaps for the diligence report."
+      },
+      "dates": { "sprk_duedate": "+8d" },
+      "reference": { "eventTypeCode": "TASK" },
+      "options": { "status": "Open", "priority": "High" },
+      "links": { "regardingProject": "pj-atlas-dd", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "ev-26",
+      "fields": {
+        "sprk_eventname": "Woodgrove audit: evidence request response due",
+        "sprk_description": "Respond to the auditor's first evidence request for the partnership agreements."
+      },
+      "dates": { "sprk_duedate": "+14d" },
+      "reference": { "eventTypeCode": "REM" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-woodgrove", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "ev-27",
+      "fields": {
+        "sprk_eventname": "File trademark application for the product mark",
+        "sprk_description": "Class 7 and class 42 application after the clearance search report is approved."
+      },
+      "dates": { "sprk_duedate": "+16d" },
+      "reference": { "eventTypeCode": "FLNG" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-trademark", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-28",
+      "fields": {
+        "sprk_eventname": "Respond to USPTO office action on the house mark",
+        "sprk_description": "Examiner raised a likelihood-of-confusion refusal; response period is six months from issue."
+      },
+      "dates": { "sprk_duedate": "+30d" },
+      "reference": { "eventTypeCode": "ACTN" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-trademark", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "ev-29",
+      "fields": {
+        "sprk_eventname": "Approve facility amendment signature pages",
+        "sprk_description": "Approve the execution version and signature pages for the lender."
+      },
+      "dates": { "sprk_duedate": "+9d" },
+      "reference": { "eventTypeCode": "APRV" },
+      "options": { "status": "Open", "priority": "Normal" },
+      "links": { "regardingMatter": "mt-financing", "assignedTo": "ct-webb" }
+    }
+  ],
+
+  "todos": [
+    {
+      "key": "td-01",
+      "fields": {
+        "sprk_name": "Review Baker & Associates monthly billing narrative",
+        "sprk_description": "Check task descriptions against the litigation budget before approving."
+      },
+      "dates": { "sprk_duedate": "+3d" },
+      "options": { "priority": "Important" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "td-02",
+      "fields": {
+        "sprk_name": "Confirm James Morrison's availability for trial preparation",
+        "sprk_description": "Three sessions of two to three hours each."
+      },
+      "dates": { "sprk_duedate": "+5d" },
+      "options": { "priority": "Medium" },
+      "links": { "regardingMatter": "mt-pinnacle", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "td-03",
+      "fields": {
+        "sprk_name": "Sign off on Contoso pricing schedule B",
+        "sprk_description": "Finance has approved; Legal sign-off on the indexation clause."
+      },
+      "dates": { "sprk_duedate": "+4d" },
+      "options": { "priority": "Important" },
+      "links": { "regardingMatter": "mt-contoso", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "td-04",
+      "fields": {
+        "sprk_name": "Send executed Fabrikam licence to the patent docketing team",
+        "sprk_description": "Docket the royalty reporting dates."
+      },
+      "dates": { "sprk_duedate": "+25d" },
+      "options": { "priority": "Low" },
+      "links": { "regardingMatter": "mt-fabrikam", "assignedTo": "ct-raman" }
+    },
+    {
+      "key": "td-05",
+      "fields": {
+        "sprk_name": "Collect IT security questionnaire from Northwind",
+        "sprk_description": "Needed for Annex II of the DPA."
+      },
+      "dates": { "sprk_duedate": "+6d" },
+      "options": { "priority": "Medium" },
+      "links": { "regardingMatter": "mt-northwind", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "td-06",
+      "fields": {
+        "sprk_name": "Prepare settlement authority memo for the Adventure Works dispute",
+        "sprk_description": "Range, rationale and walk-away position for the General Counsel."
+      },
+      "dates": { "sprk_duedate": "+8d" },
+      "options": { "priority": "Urgent" },
+      "links": { "regardingMatter": "mt-adventure", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "td-07",
+      "fields": {
+        "sprk_name": "Schedule privacy impact assessment interviews",
+        "sprk_description": "HR, Marketing and Engineering."
+      },
+      "dates": { "sprk_duedate": "+10d" },
+      "options": { "priority": "Medium" },
+      "links": { "regardingProject": "pj-gdpr", "assignedTo": "ct-raman" }
+    },
+    {
+      "key": "td-08",
+      "fields": {
+        "sprk_name": "Circulate Atlas diligence request list to the data room team",
+        "sprk_description": "Include IP, employment and litigation categories."
+      },
+      "dates": { "sprk_duedate": "+2d" },
+      "options": { "priority": "Important" },
+      "links": { "regardingProject": "pj-atlas-dd", "assignedTo": "ct-webb" }
+    },
+    {
+      "key": "td-09",
+      "fields": {
+        "sprk_name": "Book the next Board meeting slot for the Atlas approval",
+        "sprk_description": "Corporate Secretary needs two weeks' notice."
+      },
+      "dates": { "sprk_duedate": "+12d" },
+      "options": { "priority": "Medium" },
+      "links": { "regardingMatter": "mt-atlas", "assignedTo": "ct-raman" }
+    },
+    {
+      "key": "td-10",
+      "fields": {
+        "sprk_name": "Order trademark clearance search report",
+        "sprk_description": "Federal, state and common-law sources."
+      },
+      "dates": { "sprk_duedate": "+1d" },
+      "options": { "priority": "Medium" },
+      "links": { "regardingMatter": "mt-trademark", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "td-11",
+      "fields": {
+        "sprk_name": "Send Hartwell Mutual the updated counterclaim pleading",
+        "sprk_description": "Required under the notice condition of the policy."
+      },
+      "dates": { "sprk_duedate": "+3d" },
+      "options": { "priority": "Important" },
+      "links": { "regardingMatter": "mt-insurance", "assignedTo": "ct-chen" }
+    },
+    {
+      "key": "td-12",
+      "fields": {
+        "sprk_name": "Update the retention schedule draft with the Pinnacle lessons learned",
+        "sprk_description": "Email, chat and mobile device categories."
+      },
+      "dates": { "sprk_duedate": "+20d" },
+      "options": { "priority": "Low" },
+      "links": { "regardingProject": "pj-policy", "assignedTo": "ct-raman" }
+    }
+  ],
+
+  "communications": [
+    {
+      "key": "cm-01",
+      "fields": {
+        "sprk_name": "Email: Meridian Corp v. Pinnacle Industries - Engagement and Case Strategy",
+        "sprk_subject": "Meridian Corp v. Pinnacle Industries - Engagement and Case Strategy",
+        "sprk_from": "rachel.torres@bakerassociates.example.com",
+        "sprk_to": "sarah.chen@meridiancorp.example.com",
+        "sprk_body": "Dear Sarah,\n\nThank you for selecting Baker & Associates to represent Meridian Corp. I want to confirm the key points of our litigation strategy. First, we will file the complaint in the Northern District of California asserting infringement of the three patents. Second, we should expect Pinnacle to assert invalidity defenses based on prior art; our initial search suggests these are manageable, but we will need a technical expert early. Third, I recommend budgeting approximately $500,000 through trial, with the expectation that settlement discussions may reduce the total.\n\nWe will provide monthly invoices and quarterly budget reviews and will schedule a strategy meeting next week to discuss the discovery plan.\n\nBest regards,\nRachel Torres\nLead Partner, IP Litigation\nBaker & Associates LLP"
+      },
+      "dates": { "sprk_sentat": "-390d 14:30", "sprk_receiveddate": "-390d 14:30" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-pinnacle" }
+    },
+    {
+      "key": "cm-02",
+      "fields": {
+        "sprk_name": "Email: RE: Meridian Corp v. Pinnacle Industries - Engagement and Case Strategy",
+        "sprk_subject": "RE: Meridian Corp v. Pinnacle Industries - Engagement and Case Strategy",
+        "sprk_from": "sarah.chen@meridiancorp.example.com",
+        "sprk_to": "rachel.torres@bakerassociates.example.com",
+        "sprk_cc": "marcus.webb@meridiancorp.example.com",
+        "sprk_body": "Rachel,\n\nThank you for the thorough overview. The board has approved the litigation budget of $500,000 and I have full authority to direct strategy on behalf of Meridian.\n\nTwo points from our side. James Morrison, our VP of Engineering, was directly involved in developing the patented processes and will be an excellent fact witness; he can be made available for preparation sessions on short notice. We are also particularly concerned about the AutoForge Mark III, which we believe is the clearest infringing model.\n\nSarah"
+      },
+      "dates": { "sprk_sentat": "-389d 09:10", "sprk_receiveddate": "-389d 09:10" },
+      "options": { "direction": "Outgoing", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-pinnacle" }
+    },
+    {
+      "key": "cm-03",
+      "fields": {
+        "sprk_name": "Email: Deposition Preparation - James Morrison",
+        "sprk_subject": "Deposition Preparation - James Morrison",
+        "sprk_from": "michael.park@bakerassociates.example.com",
+        "sprk_to": "sarah.chen@meridiancorp.example.com",
+        "sprk_body": "Sarah,\n\nWe have finalised the deposition date for James Morrison. I want to schedule three preparation sessions to make sure he is thoroughly prepared for the defense examination: (1) review of key documents and chronology, 2 hours; (2) practice questioning on technical topics, 3 hours; (3) final preparation, 2 hours.\n\nThe defense will likely focus on the development timeline, any prior art references James may have been aware of, and the technical differences between Meridian's patented processes and the prior art. Please confirm James's availability.\n\nBest regards,\nMichael Park"
+      },
+      "dates": { "sprk_sentat": "-300d 09:30", "sprk_receiveddate": "-300d 09:30" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-pinnacle" }
+    },
+    {
+      "key": "cm-04",
+      "fields": {
+        "sprk_name": "Email: Settlement Posture Discussion - Confidential",
+        "sprk_subject": "Settlement Posture Discussion - Confidential",
+        "sprk_from": "rachel.torres@bakerassociates.example.com",
+        "sprk_to": "sarah.chen@meridiancorp.example.com",
+        "sprk_body": "Sarah,\n\nFollowing our call yesterday, I want to memorialise our discussion on settlement posture. Based on Pinnacle's AutoForge revenue, a reasonable-royalty analysis and the strength of our claim construction positions, we believe a settlement range is supportable, but I recommend we hold off on a formal demand until after the claim construction hearing. A favourable ruling would strengthen our negotiating position.\n\nOpposing counsel has made informal inquiries about mediation, which suggests Pinnacle may be feeling pressure. I recommend we say we are open to discussing resolution but focused on trial preparation. Please confirm you are comfortable with this approach.\n\nBest regards,\nRachel Torres\n\nPRIVILEGED AND CONFIDENTIAL - ATTORNEY-CLIENT COMMUNICATION"
+      },
+      "dates": { "sprk_sentat": "-95d 14:00", "sprk_receiveddate": "-95d 14:00" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-pinnacle" }
+    },
+    {
+      "key": "cm-05",
+      "fields": {
+        "sprk_name": "Email: Post-Markman Hearing Analysis - Confidential",
+        "sprk_subject": "Post-Markman Hearing Analysis - Confidential",
+        "sprk_from": "rachel.torres@bakerassociates.example.com",
+        "sprk_to": "sarah.chen@meridiancorp.example.com",
+        "sprk_body": "Dear Sarah,\n\nI am pleased to report that the claim construction hearing went very well for Meridian. Judge Sullivan construed 6 of 8 disputed claim terms in our favour. The court adopted a broad construction of 'precision alignment mechanism', the core limitation in all three asserted patents, which encompasses the full range of AutoForge implementations including the Mark III. The two terms construed in Pinnacle's favour relate to peripheral limitations.\n\nThis ruling strengthens our position for trial and settlement. I would like to schedule a call with you and the executive team to discuss next steps.\n\nBest regards,\nRachel Torres\n\nPRIVILEGED AND CONFIDENTIAL"
+      },
+      "dates": { "sprk_sentat": "-40d 16:00", "sprk_receiveddate": "-40d 16:00" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-pinnacle" }
+    },
+    {
+      "key": "cm-06",
+      "fields": {
+        "sprk_name": "Email: Expert Engagement - Dr. Robert Patel",
+        "sprk_subject": "Expert Engagement - Dr. Robert Patel",
+        "sprk_from": "rachel.torres@bakerassociates.example.com",
+        "sprk_to": "robert.patel@pateltech.example.com",
+        "sprk_cc": "sarah.chen@meridiancorp.example.com",
+        "sprk_body": "Dear Dr. Patel,\n\nThank you for agreeing to serve as plaintiff's expert in Meridian Corp v. Pinnacle Industries. We need your opinion on whether Pinnacle's AutoForge product line infringes the three asserted patents. Specifically we ask you to analyse the technical specifications of AutoForge, compare the implementation against each claim, provide a claim-by-claim analysis and prepare a written report suitable for submission to the Court.\n\nOur target for your initial report is early next quarter. Please let us know your availability for a kickoff meeting next week.\n\nBest regards,\nRachel Torres\nBaker & Associates LLP"
+      },
+      "dates": { "sprk_sentat": "-70d 09:00", "sprk_receiveddate": "-70d 09:00" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-pinnacle" }
+    },
+    {
+      "key": "cm-07",
+      "fields": {
+        "sprk_name": "Email: Deadline Reminder - Joint Case Management Statement",
+        "sprk_subject": "Deadline Reminder - Joint Case Management Statement",
+        "sprk_from": "clerk@cand.example.gov",
+        "sprk_to": "sarah.chen@meridiancorp.example.com",
+        "sprk_body": "TO: All Counsel of Record\nFROM: Clerk of Court, Northern District of California\nRE: Case No. 3:2025-cv-04892 - Joint Case Management Statement Reminder\n\nThis is an automated reminder that the Joint Case Management Statement is due per the Court's standing order. The statement should address: current status of discovery; remaining depositions and discovery disputes; anticipated motions; settlement status; readiness for trial.\n\nPlease file the joint statement on CM/ECF by 5:00 PM Pacific.\n\nClerk of Court"
+      },
+      "dates": { "sprk_sentat": "-3d 07:00", "sprk_receiveddate": "-3d 07:00" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-pinnacle" }
+    },
+    {
+      "key": "cm-08",
+      "fields": {
+        "sprk_name": "Email: Contoso renewal - proposed commercial terms",
+        "sprk_subject": "Contoso renewal - proposed commercial terms",
+        "sprk_from": "tom.alvarez@contoso.example.com",
+        "sprk_to": "marcus.webb@meridiancorp.example.com",
+        "sprk_body": "Marcus,\n\nAhead of the renewal, Contoso would like to propose a move from quarterly to annual price adjustment, a 3 percent volume rebate above the agreed forecast, and a mutual cap on liability equal to twelve months of fees. We would also like to discuss extending the term to three years.\n\nCould we set up a call this week?\n\nTom Alvarez\nKey Account Executive, Contoso Ltd."
+      },
+      "dates": { "sprk_sentat": "-9d 11:20", "sprk_receiveddate": "-9d 11:20" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-contoso" }
+    },
+    {
+      "key": "cm-09",
+      "fields": {
+        "sprk_name": "Email: RE: Contoso renewal - proposed commercial terms",
+        "sprk_subject": "RE: Contoso renewal - proposed commercial terms",
+        "sprk_from": "marcus.webb@meridiancorp.example.com",
+        "sprk_to": "tom.alvarez@contoso.example.com",
+        "sprk_cc": "daniel.hartman@whitfieldhartman.example.com",
+        "sprk_body": "Tom,\n\nThank you. We are open to the annual price adjustment and the rebate, subject to review of the indexation clause. A mutual liability cap is acceptable in principle but we need carve-outs for confidentiality and data protection. A three-year term works if there is a termination right on 90 days' notice after year one.\n\nDaniel Hartman of Whitfield Hartman will send a redline next week.\n\nMarcus Webb"
+      },
+      "dates": { "sprk_sentat": "-8d 15:45", "sprk_receiveddate": "-8d 15:45" },
+      "options": { "direction": "Outgoing", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-contoso" }
+    },
+    {
+      "key": "cm-10",
+      "fields": {
+        "sprk_name": "Email: Adventure Works - response to preservation demand",
+        "sprk_subject": "Adventure Works - response to preservation demand",
+        "sprk_from": "daniel.hartman@whitfieldhartman.example.com",
+        "sprk_to": "sarah.chen@meridiancorp.example.com",
+        "sprk_body": "Sarah,\n\nAdventure Works' counsel has acknowledged our preservation demand and confirmed a hold on the former employee's devices and accounts. They dispute that the non-compete is enforceable in California, which makes the choice-of-law clause the central issue.\n\nI recommend we prepare the Washington enforceability analysis in parallel with witness statements so we are ready for the arbitration. I will send the draft analysis by the end of next week.\n\nDaniel Hartman\nWhitfield Hartman LLP"
+      },
+      "dates": { "sprk_sentat": "-24d 10:05", "sprk_receiveddate": "-24d 10:05" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-adventure" }
+    },
+    {
+      "key": "cm-11",
+      "fields": {
+        "sprk_name": "Email: Atlas - HSR filing plan and documents",
+        "sprk_subject": "Atlas - HSR filing plan and documents",
+        "sprk_from": "daniel.hartman@whitfieldhartman.example.com",
+        "sprk_to": "sarah.chen@meridiancorp.example.com",
+        "sprk_cc": "marcus.webb@meridiancorp.example.com",
+        "sprk_body": "Sarah,\n\nAttached to our filing plan is the list of documents we need for the premerger notification: transaction documents, the 4(c) and 4(d) materials, and the overlap analysis. Based on the overlap analysis we do not expect a second request, but we should budget for the 30-day waiting period.\n\nPlease have the deal team start collecting 4(c) documents now.\n\nDaniel Hartman"
+      },
+      "dates": { "sprk_sentat": "-12d 13:00", "sprk_receiveddate": "-12d 13:00" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingProject": "pj-hsr" }
+    },
+    {
+      "key": "cm-12",
+      "fields": {
+        "sprk_name": "Email: Woodgrove audit - first evidence request",
+        "sprk_subject": "Woodgrove audit - first evidence request",
+        "sprk_from": "emily.thompson@woodgrovebank.example.com",
+        "sprk_to": "marcus.webb@meridiancorp.example.com",
+        "sprk_body": "Marcus,\n\nFor this year's partnership audit please send the executed partnership agreements, the BSA/AML addendum, the consumer complaint log for the period and your fair lending policy. Evidence is due in two weeks.\n\nEmily Thompson\nCompliance Director, Woodgrove Bank"
+      },
+      "dates": { "sprk_sentat": "-5d 08:40", "sprk_receiveddate": "-5d 08:40" },
+      "options": { "direction": "Incoming", "communicationType": "Email", "bodyFormat": "PlainText" },
+      "links": { "regardingMatter": "mt-woodgrove" }
     }
   ],
 
   "documents": [
     {
-      "sprk_documentname": "Contoso Supply Agreement v3.2",
-      "sprk_documentdescription": "Master supply agreement between our organization and Contoso Ltd. covering raw materials, components, and finished goods. Version 3.2 includes amended pricing schedules and updated force majeure clauses.",
-      "sprk_documenttype": "Contract",
-      "sampleFileName": "Contoso-Supply-Agreement-v3.2.pdf"
+      "key": "dc-01",
+      "fields": {
+        "sprk_documentname": "Contoso Supply Agreement v3.2",
+        "sprk_documentdescription": "Master supply agreement with Contoso Ltd. covering raw materials, components and finished goods. Version 3.2 includes amended pricing schedules and updated force majeure clauses."
+      },
+      "options": { "documentType": "Agreement", "documentStatus": "Working" },
+      "links": { "matter": "mt-contoso" },
+      "sampleFile": "Contoso-Supply-Agreement-v3.2.txt"
     },
     {
-      "sprk_documentname": "Fabrikam Patent License Agreement",
-      "sprk_documentdescription": "Cross-licensing agreement for software patents between our organization and Fabrikam Inc. Covers patent families US-9,876,543 and US-10,234,567. Includes royalty calculation methodology.",
-      "sprk_documenttype": "License Agreement",
-      "sampleFileName": "Fabrikam-Patent-License.pdf"
+      "key": "dc-02",
+      "fields": {
+        "sprk_documentname": "Contoso Supply Agreement - Redline Draft",
+        "sprk_documentdescription": "Whitfield Hartman's redline of v3.2: liability cap, indexation and force majeure."
+      },
+      "options": { "documentType": "Agreement", "documentStatus": "Draft" },
+      "links": { "matter": "mt-contoso" }
     },
     {
-      "sprk_documentname": "Northwind DPA - GDPR Compliant",
-      "sprk_documentdescription": "Data Processing Agreement with Northwind Traders compliant with GDPR Article 28. Defines roles (controller/processor), data categories, security measures, and breach notification timelines.",
-      "sprk_documenttype": "DPA",
-      "sampleFileName": "Northwind-DPA-GDPR.pdf"
+      "key": "dc-03",
+      "fields": {
+        "sprk_documentname": "Fabrikam Patent License Agreement",
+        "sprk_documentdescription": "Cross-licensing agreement for software patents between Meridian and Fabrikam. Covers patent families US-9,876,543 and US-10,234,567 and the royalty calculation methodology."
+      },
+      "options": { "documentType": "Agreement", "documentStatus": "In Review" },
+      "links": { "matter": "mt-fabrikam" },
+      "sampleFile": "Fabrikam-Patent-License.txt"
     },
     {
-      "sprk_documentname": "Employment Non-Compete Analysis",
-      "sprk_documentdescription": "Legal analysis of non-compete clause enforceability across jurisdictions. Covers Washington State, California, and New York statutes. Prepared for Adventure Works employment dispute.",
-      "sprk_documenttype": "Legal Analysis",
-      "sampleFileName": "NonCompete-Analysis.pdf"
+      "key": "dc-04",
+      "fields": {
+        "sprk_documentname": "Q1 Invoice Summary - Fabrikam",
+        "sprk_documentdescription": "Consolidated invoice summary for the quarter's consulting fees, licence royalties and expense reimbursements."
+      },
+      "options": { "documentType": "Invoice", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-fabrikam" },
+      "sampleFile": "Q1-2026-Invoice-Fabrikam.txt"
     },
     {
-      "sprk_documentname": "Woodgrove Compliance Checklist 2026",
-      "sprk_documentdescription": "Annual compliance checklist for Woodgrove Bank partnership. Covers OCC regulatory requirements, BSA/AML obligations, consumer protection standards, and fair lending compliance.",
-      "sprk_documenttype": "Checklist",
-      "sampleFileName": "Woodgrove-Compliance-Checklist-2026.pdf"
+      "key": "dc-05",
+      "fields": {
+        "sprk_documentname": "Northwind DPA - GDPR Compliant",
+        "sprk_documentdescription": "Data Processing Agreement with Northwind Traders compliant with GDPR Article 28: roles, data categories, security measures and breach notification timelines."
+      },
+      "options": { "documentType": "Agreement", "documentStatus": "In Review" },
+      "links": { "matter": "mt-northwind" },
+      "sampleFile": "Northwind-DPA-GDPR.txt"
     },
     {
-      "sprk_documentname": "Vendor Risk Assessment Template",
-      "sprk_documentdescription": "Standardized template for evaluating third-party vendor risk. Includes financial stability metrics, cybersecurity posture assessment, regulatory compliance verification, and business continuity evaluation.",
-      "sprk_documenttype": "Template",
-      "sampleFileName": "Vendor-Risk-Assessment-Template.pdf"
+      "key": "dc-06",
+      "fields": {
+        "sprk_documentname": "Employment Non-Compete Analysis",
+        "sprk_documentdescription": "Legal analysis of non-compete enforceability across Washington, California and New York. Prepared for the Adventure Works dispute."
+      },
+      "options": { "documentType": "Memo", "documentStatus": "Working" },
+      "links": { "matter": "mt-adventure" },
+      "sampleFile": "NonCompete-Analysis.txt"
     },
     {
-      "sprk_documentname": "Q1 2026 Invoice Summary - Fabrikam",
-      "sprk_documentdescription": "Consolidated invoice summary for Q1 2026 services rendered by Fabrikam Inc. Includes consulting fees, license royalties, and expense reimbursements. Total: $127,450.00.",
-      "sprk_documenttype": "Invoice",
-      "sampleFileName": "Q1-2026-Invoice-Fabrikam.pdf"
+      "key": "dc-07",
+      "fields": {
+        "sprk_documentname": "Preservation Demand Letter - Adventure Works",
+        "sprk_documentdescription": "Demand to preserve devices, email and chat records of the former employee."
+      },
+      "options": { "documentType": "Letter", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-adventure" }
     },
     {
-      "sprk_documentname": "Board Meeting Minutes - March 2026",
-      "sprk_documentdescription": "Minutes from the March 2026 board of directors meeting. Topics covered: Q1 financial results, compliance audit status, vendor program update, and strategic planning for H2 2026.",
-      "sprk_documenttype": "Minutes",
-      "sampleFileName": "Board-Minutes-March-2026.pdf"
-    }
-  ],
-
-  "chartDefinitions": [
-    {
-      "sprk_name": "Demo - Active Matters by Status",
-      "sprk_visualtype": 100000004,
-      "sprk_entitylogicalname": "sprk_matter",
-      "sprk_groupbyfield": "statecode",
-      "sprk_aggregationtype": 100000000,
-      "sprk_optionsjson": "{\"title\":\"Matters by Status\",\"showPercentages\":true,\"showLegend\":true}"
+      "key": "dc-08",
+      "fields": {
+        "sprk_documentname": "Woodgrove Compliance Checklist",
+        "sprk_documentdescription": "Annual compliance checklist for the Woodgrove partnership: OCC requirements, BSA/AML, consumer protection and fair lending."
+      },
+      "options": { "documentType": "Report", "documentStatus": "Working" },
+      "links": { "matter": "mt-woodgrove" },
+      "sampleFile": "Woodgrove-Compliance-Checklist-2026.txt"
     },
     {
-      "sprk_name": "Demo - Projects Overview",
-      "sprk_visualtype": 100000000,
-      "sprk_entitylogicalname": "sprk_project",
-      "sprk_aggregationtype": 100000000,
-      "sprk_optionsjson": "{\"title\":\"Active Projects\",\"icon\":\"ProjectCollection\"}"
+      "key": "dc-09",
+      "fields": {
+        "sprk_documentname": "Vendor Risk Assessment Template",
+        "sprk_documentdescription": "Standard template for third-party vendor risk: financial stability, cybersecurity posture, regulatory compliance and business continuity."
+      },
+      "options": { "documentType": "Other", "documentStatus": "Approved Final" },
+      "links": { "project": "pj-vendor" },
+      "sampleFile": "Vendor-Risk-Assessment-Template.txt"
     },
     {
-      "sprk_name": "Demo - Events Timeline",
-      "sprk_visualtype": 100000002,
-      "sprk_entitylogicalname": "sprk_event",
-      "sprk_groupbyfield": "createdon",
-      "sprk_aggregationtype": 100000000,
-      "sprk_optionsjson": "{\"title\":\"Events Over Time\",\"dateGrouping\":\"month\",\"showDataPoints\":true}"
+      "key": "dc-10",
+      "fields": {
+        "sprk_documentname": "Board Meeting Minutes - Litigation Update",
+        "sprk_documentdescription": "Minutes of the board meeting: litigation status, Atlas approval timetable and compliance audit status."
+      },
+      "options": { "documentType": "Memo", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-pinnacle" },
+      "sampleFile": "Board-Minutes-March-2026.txt"
     },
     {
-      "sprk_name": "Demo - Documents by Type",
-      "sprk_visualtype": 100000001,
-      "sprk_entitylogicalname": "sprk_document",
-      "sprk_groupbyfield": "sprk_documenttype",
-      "sprk_aggregationtype": 100000000,
-      "sprk_optionsjson": "{\"title\":\"Documents by Type\",\"showDataLabels\":true}"
+      "key": "dc-11",
+      "fields": {
+        "sprk_documentname": "Claim Construction Order",
+        "sprk_documentdescription": "Court order construing the disputed claim terms of the three asserted patents."
+      },
+      "options": { "documentType": "Report", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-pinnacle" }
     },
     {
-      "sprk_name": "Demo - Document Count",
-      "sprk_visualtype": 100000000,
-      "sprk_entitylogicalname": "sprk_document",
-      "sprk_aggregationtype": 100000000,
-      "sprk_optionsjson": "{\"title\":\"Total Documents\",\"icon\":\"Document\"}"
+      "key": "dc-12",
+      "fields": {
+        "sprk_documentname": "Patent US 10,234,567 - Precision Alignment Mechanism",
+        "sprk_documentdescription": "First of the three asserted patents."
+      },
+      "options": { "documentType": "Patent", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-pinnacle" }
+    },
+    {
+      "key": "dc-13",
+      "fields": {
+        "sprk_documentname": "Expert Engagement Letter - Dr. Patel",
+        "sprk_documentdescription": "Engagement terms and scope for the infringement expert."
+      },
+      "options": { "documentType": "Letter", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-pinnacle" }
+    },
+    {
+      "key": "dc-14",
+      "fields": {
+        "sprk_documentname": "Mutual NDA - Horizon Systems",
+        "sprk_documentdescription": "Mutual non-disclosure agreement for Project Atlas diligence."
+      },
+      "options": { "documentType": "Non-Disclosure Agreement", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-atlas" }
+    },
+    {
+      "key": "dc-15",
+      "fields": {
+        "sprk_documentname": "Atlas Diligence Request List",
+        "sprk_documentdescription": "Request list by category: corporate, IP, contracts, employment, litigation."
+      },
+      "options": { "documentType": "Report", "documentStatus": "Working" },
+      "links": { "project": "pj-atlas-dd" }
+    },
+    {
+      "key": "dc-16",
+      "fields": {
+        "sprk_documentname": "AutoForge Trademark Clearance Search Request",
+        "sprk_documentdescription": "Instructions for the clearance search covering classes 7 and 42."
+      },
+      "options": { "documentType": "Trademark", "documentStatus": "Draft" },
+      "links": { "matter": "mt-trademark" }
+    },
+    {
+      "key": "dc-17",
+      "fields": {
+        "sprk_documentname": "Facility Amendment - Execution Version",
+        "sprk_documentdescription": "Execution version of the equipment financing facility amendment with the revised borrowing base and covenants."
+      },
+      "options": { "documentType": "Agreement", "documentStatus": "In Review" },
+      "links": { "matter": "mt-financing" }
+    },
+    {
+      "key": "dc-18",
+      "fields": {
+        "sprk_documentname": "Hartwell Mutual Coverage Position Letter",
+        "sprk_documentdescription": "Insurer's reservation of rights on the counterclaim."
+      },
+      "options": { "documentType": "Letter", "documentStatus": "Approved Final" },
+      "links": { "matter": "mt-insurance" }
     }
   ]
 }
