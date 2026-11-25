@@ -461,3 +461,32 @@ This under-lists, which fails closed.
 **Why it matters.** A real-browser regression would not show in the unit tests: a grid that fails to load for a user who blocks site data, or a remote image loading in a portal thread.
 
 **Fix.** Run the three at the next SPA E2E or the R4 closing task, with the owner's OK for the storage block, the test email and contrast mode; file a Bug for any failure. Effort: about an hour. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3149 (board Type=Idea).
+
+## D-39 — External SPA: one entitlement code gates five record tabs against one Workforce-role table (#3153)
+
+**What.** Since task 040, `assigned-work` opens the five record tabs for CIAM partners and granted workforce contacts.
+
+The Workforce-role ceiling (`WorkforceRoleCeilingGate.cs` `ModuleTables` ~:273-278) maps the code to `sprk_workassignment` only. For a workforce contact this has two effects:
+- A role that reads work assignments but not, for example, invoices still shows the Invoices tab. Its list fetch is refused by the ceiling, and the grid shows its empty state ("No records to display"). The shared DataGrid never renders a row-fetch error, because `useLazyLoad`'s `error` is not read (`DataGrid.tsx` ~:2138).
+- A role without work-assignment Read hides all five tabs, even for a project-only grant.
+
+Security holds: every fetch is ceiling-checked per table and Tier-2-scoped. The case arises only for a misconfigured role; the prerequisite role reads all five tables. uac-r2 reviewed it (2026-11-25) and chose to accept it as a known limit for R4, with per-tab codes as the later fix.
+
+**Why it matters.** A workforce contact on a misconfigured role sees a tab that is silently empty, or loses tabs it could use.
+
+**Fix.**
+- Give each tab its own code, mapped to its own table, under the same grant rule.
+- Optionally, show a row-fetch 403 in the shared grid as "no access" (needs the dataset-grid owners' OK).
+- `WorkforceRoleCeilingGate` is uac-r2's file (task 186).
+
+Effort: about a day plus a UAC review. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3153 (board Type=Idea).
+
+## D-40 — External SPA: a licensed user linked to a WorkforceHome contact gets none of the contact's record grants (K3) (#3154)
+
+**What.** This is known limit K3 from R3 task 090, revisited in task 040 and kept. A licensed user whose systemuser is linked to a WorkforceHome contact's home identity resolves as the systemuser. The contact's grants (and since task 040 its record tabs) don't apply to that person on the external SPA.
+
+The fix would change principal precedence, which is escalation trigger 3 for task 040 (auth plane). uac-r2 agreed (2026-11-25) and asked for a cross-reference to the stored-link rule in ADR-028 A9.
+
+**Why it matters.** Such a person sees fewer records than the contact's grants give. The grants go unused. This fails closed.
+
+**Fix.** The auth plane needs to decide whether a linked licensed user gets the union of both sets of grants or stays on the licensed model. That needs an auth review and an ADR-028 check. Effort: unknown. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3154 (board Type=Idea).
