@@ -114,3 +114,14 @@ Filed: DI-040 / #3126. A TYPED subject over 2000 characters is sent and then has
   - Rollback: the previous dev bundle (2026-11-24 22:06Z, SHA 6C0C6DBA…46E3866, 1,000,446 bytes), kept outside the repo.
 - `Deploy-WizardCodePages.ps1` always republishes `sprk_wizard_commands` from source. That file is unchanged on master since 2026-10-31, and the earlier wizard deploys used the same script. Read-back SHA 22671FA9…1739D435 equals master's file.
 - BFF: candidates come only from master and are deployed by UAC-r2. The go is given in UAC-r2's session ("BFF deploy <sha>"). The dev checks run after UAC-r2's LIVE notice.
+
+## Live-check setup on dev (2026-11-25, owner's go)
+
+- Created "FMSWP-028 live check: Matter to Analysis (temporary)" `62bac40d-dbe8-f111-84ea-00224829aef9`, active, with three One-time Copy rules:
+  - `sprk_matterdescription` → `sprk_description` (`9eeea60e-dbe8-f111-84e8-7ced8d1d8f6b`);
+  - `sprk_assignedtointernal` → `sprk_assignedtointernal` (`8abac40d-dbe8-f111-84ea-00224829aef9`);
+  - `sprk_assignedattorney1` → `sprk_assignedattorney1` (`71d17711-dbe8-f111-84ea-002248359bb2`).
+  - Deactivate it after the check.
+- Test Matter: PAT-176903 "Targeted Protein Degradation Patent Issuance" (`232852f8-a263-f111-ab0c-000d3a582930`), team-owned (Spaarke Business Unit 1). Attorney 1 is Ralph Schroeder, Internal is Jake Schroeder, and it has a description. The 027 Matter `3fa0d616…` no longer exists on dev.
+- The BFF on dev (ef0c566d2c) already serves `POST /api/v1/child-records/sprk_analysis` with a mapping source; 028 did not change that route. So the create half of the check can run before the BFF deploy.
+- **Blocked: the Analysis → Communication profile.** `sprk_recordtype_ref` has no `sprk_communication` row on dev. The provisioning `DataverseWebApiRecordTypeSeeder` does not seed one either, so no environment has it. A profile's target is a lookup to that catalog, so FR-17's profile cannot be configured anywhere. The catalog is also the regarding-parent list that `PolymorphicResolverService`, `OwnedChildWrite` and the regarding pickers read, so adding a row is a product change, not test setup. Waiting on the owner's decision. Not created.
