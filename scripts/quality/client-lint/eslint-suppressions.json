@@ -1472,19 +1472,6 @@
       "count": 1
     }
   },
-  "src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/solutions/LegalWorkspace/src/hooks/useUserPreferences.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
@@ -1505,7 +1492,7 @@
   },
   "src/solutions/LegalWorkspace/src/services/DataverseService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 21
+      "count": 19
     }
   },
   "src/solutions/LegalWorkspace/src/services/DocumentApiService.ts": {

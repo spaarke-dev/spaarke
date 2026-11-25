@@ -56,8 +56,10 @@ jest.mock(
     },
     { virtual: true },
 );
-jest.mock("@spaarke/ui-components", () => ({ cleanGuid: (s: string) => s, getXrm: () => undefined }), { virtual: true });
-jest.mock("@spaarke/sdap-client", () => ({ SdapApiClient: class {} }), { virtual: true });
+// SdapApiClient comes from the main barrel since DEF-001 (2026-11-24) — it was @spaarke/sdap-client.
+jest.mock("@spaarke/ui-components", () => ({ cleanGuid: (s: string) => s, getXrm: () => undefined, SdapApiClient: class {} }), {
+    virtual: true,
+});
 jest.mock("@spaarke/auth", () => ({ authenticatedFetch: jest.fn(async () => ({ ok: true, json: async () => ({}) })) }), {
     virtual: true,
 });

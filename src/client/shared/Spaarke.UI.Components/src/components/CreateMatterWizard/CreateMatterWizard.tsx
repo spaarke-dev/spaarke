@@ -223,7 +223,7 @@ export interface ICreateMatterWizardProps {
   resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
   /**
    * AAD tenant ID. Forwarded to `MatterService` so post-upload RAG indexing
-   * via `@spaarke/sdap-client` can route to the correct multi-tenant index.
+   * via the SDAP client (`services/sdap`) can route to the correct multi-tenant index.
    * When omitted, indexing is skipped (files still upload to SPE successfully).
    * Typically sourced from solution `config.tenantId` in `main.tsx`.
    */

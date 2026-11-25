@@ -26,23 +26,27 @@ inherent to the side-pane pattern, not a fixable bug.
 ```
 App (FluentProvider + theme detection)
   SmartTodoApp
-    TodoProvider (shared state: items, selectedEventId — sprk_todoid; optimistic updates)
-      SmartTodoLayout
-        Header (4-row — search / filters / view-toggle / selection-aware toolbar)
-        Primary surface — SmartToDo (Kanban: Today/Tomorrow/Future) OR ListView
-        SmartTodoModal (conditional — mounts when modalTodoId !== null)
+    SmartTodoLayout (data: hooks/useSmartTodoBridge)
+      Header (@spaarke/smart-todo-components — search / Filter / + New Task / overflow, selection-aware toolbar)
+      SmartToDo (@spaarke/smart-todo-components — Kanban: Today/Tomorrow/Future, compact cards, hideHeader)
+    LaunchCreateTodoWizardHost (Outlook / parent-ribbon createTodo launch)
 ```
+
+Since #2907 / #2972 the page keeps no copy of the board or its data layer: the board, `TodoDataverseService`,
+`useTodoItems` and `useTodoKanbanPreferences` come from `@spaarke/smart-todo-components` (LegalWorkspace uses the
+same ones). The page supplies its list scope (to-dos assigned to the user's contact, narrowed by an `openTodos`
+launch), the BFF create helper (`services/childRecordWrites.ts`) and its chrome. To-dos open in the OOB `sprk_todo`
+form (`services/openTodoLauncher.ts`).
 
 ### Key Components
 
 | Component | Purpose |
 |-----------|---------|
 | `App.tsx` | Root shell with FluentProvider and theme detection |
-| `SmartTodoApp.tsx` | Single-surface layout — Header + Kanban/List + conditional modal |
-| `TodoContext.tsx` | Shared state: items, selectedEventId, updateItem, handleRemove |
-| `components/Modal/` | Hybrid `<SmartTodoModal>` — `<RecordNavigationModalShell>` + OOB form iframe |
-| `SmartToDo.tsx` | Kanban board with drag-drop, scoring, and card click selection |
-| `KanbanCard.tsx` | Individual card in Kanban columns |
+| `SmartTodoApp.tsx` | Single-surface layout — Header + shared Kanban; open / new-task / toolbar actions |
+| `hooks/useSmartTodoBridge.ts` | The board's data: list scope, BFF create, one preferences instance |
+| `hooks/useLaunchContext.ts` | URL launch parameters (`createTodo`, `openTodos`, `openTodo`) |
+| `components/Toolbar/` | Selection-aware Open / Delete / Email / Pin actions |
 
 ### Shared Library Dependencies
 

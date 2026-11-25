@@ -124,7 +124,7 @@ export interface IWorkAssignmentWizardDialogProps {
   resolveSpeContainerId?: () => Promise<string>;
   /**
    * AAD tenant ID. Forwarded to `WorkAssignmentService` so post-upload RAG
-   * indexing via `@spaarke/sdap-client` routes to the correct multi-tenant
+   * indexing via the SDAP client (`services/sdap`) routes to the correct multi-tenant
    * index. When omitted, indexing is skipped (files still upload to SPE).
    */
   tenantId?: string;

@@ -14,7 +14,7 @@
  * `@spaarke/auth` at runtime: the fetch is injected precisely so it need not (see
  * `communicationApi.ts`; `EmailComposer.smoketest.test.tsx` enforces it for the composer), and
  * consumer test suites map `@spaarke/auth` to stubs that would not carry these guards. Same reason
- * `@spaarke/sdap-client`'s `httpStatusOfThrown` is structural.
+ * the SDAP client's `httpStatusOfThrown` (`services/sdap`) is structural.
  *
  * Structural (by `name` + fields), never `instanceof`: a class from a second bundled copy of
  * `@spaarke/auth` fails `instanceof` silently.
