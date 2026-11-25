@@ -271,7 +271,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
 /// module boundaries doubled locally for the Generate Profile contract — configured entirely in THIS file,
 /// per the task's boundary ("configure your test class locally", do not modify shared fixture files).
 /// </summary>
-public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFactory
+public class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFactory
 {
     private readonly Dictionary<string, Spaarke.Dataverse.AccessRights> _grants = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<JobContract> _queuedJobs = new();

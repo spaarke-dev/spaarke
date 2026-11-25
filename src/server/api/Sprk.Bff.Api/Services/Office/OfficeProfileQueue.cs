@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Jobs;
@@ -36,16 +38,22 @@ namespace Sprk.Bff.Api.Services.Office;
 /// </remarks>
 public class OfficeProfileQueue
 {
+    // sprk_filesummarystatus "None" (the pane reads a never-set column the same way).
+    private const int SummaryStatusNone = 100000000;
+
     private readonly JobSubmissionService _jobs;
+    private readonly IDocumentDataverseService _documents;
     private readonly IDocumentProfileAi? _profiling;
     private readonly ILogger<OfficeProfileQueue> _logger;
 
     public OfficeProfileQueue(
         JobSubmissionService jobs,
+        IDocumentDataverseService documents,
         ILogger<OfficeProfileQueue> logger,
         IDocumentProfileAi? profiling = null)
     {
         _jobs = jobs;
+        _documents = documents;
         _logger = logger;
         _profiling = profiling;
     }
@@ -71,6 +79,13 @@ public class OfficeProfileQueue
                 documentId);
             return new GenerateProfileResult(GenerateProfileDispatchOutcome.FacadeUnavailable);
         }
+
+        // Pending is written BEFORE the submit and the 202 (task 137, #1090). The pane re-reads the document as soon as it
+        // has the 202, and the job writes its own first status only once it starts, so a read in between would return
+        // the status from before the click (Failed, say) as if it were this request's result. Before the submit, never
+        // after: a job that fails fast writes its terminal status within a second of starting, and a Pending written
+        // after it would overwrite that and stay.
+        var pending = await MarkPendingAsync(documentId);
 
         var requestId = Guid.NewGuid();
         var job = new JobContract
@@ -100,6 +115,9 @@ public class OfficeProfileQueue
             _logger.LogError(ex,
                 "Office Generate Profile: the job queue refused document {DocumentId} (reason {Reason}, transient {Transient}, correlation {CorrelationId}).",
                 documentId, ex.Reason, ex.IsTransient, correlationId);
+
+            // Nothing was queued, so nothing will ever move the status on from Pending: put back what was there.
+            await RestoreStatusAsync(documentId, pending);
             return new GenerateProfileResult(GenerateProfileDispatchOutcome.QueueUnavailable);
         }
 
@@ -108,6 +126,70 @@ public class OfficeProfileQueue
             documentId, requestId, requestedBy ?? "(unknown)", job.IdempotencyKey, correlationId);
         return new GenerateProfileResult(GenerateProfileDispatchOutcome.Dispatched, requestId);
     }
+
+    /// <summary>
+    /// Records <c>sprk_filesummarystatus</c> = Pending on the document, and the status that was there. Best effort: a
+    /// failed read or write is logged and the request is still queued, because the profile is still wanted, and the
+    /// pane's own cap ends its wait. The job writes Pending again when it starts (<c>AppOnlyAnalysisService</c>), so the
+    /// two writes agree.
+    /// </summary>
+    private async Task<PendingMark> MarkPendingAsync(Guid documentId)
+    {
+        int? previous = null;
+        try
+        {
+            var document = await _documents.GetDocumentAsync(documentId.ToString(), CancellationToken.None);
+            if (document is null)
+            {
+                _logger.LogWarning(
+                    "Office Generate Profile: document {DocumentId} was not found when marking it Pending; the job is queued anyway.",
+                    documentId);
+                return new PendingMark(Written: false, Previous: null);
+            }
+
+            previous = document.SummaryStatus;
+            await _documents.UpdateDocumentAsync(
+                documentId.ToString(),
+                new UpdateDocumentRequest { SummaryStatus = AppOnlyAnalysisService.SummaryStatusPending },
+                CancellationToken.None);
+            return new PendingMark(Written: true, Previous: previous);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Office Generate Profile: could not mark document {DocumentId} Pending; the job is queued anyway and the pane's wait is capped.",
+                documentId);
+            return new PendingMark(Written: false, Previous: previous);
+        }
+    }
+
+    /// <summary>
+    /// Undoes <see cref="MarkPendingAsync"/> after the queue refused the request. A row that never had a status goes back
+    /// to None, which the pane reads exactly as it reads a missing one. Best effort: a failure here is logged.
+    /// </summary>
+    private async Task RestoreStatusAsync(Guid documentId, PendingMark pending)
+    {
+        if (!pending.Written)
+        {
+            return;
+        }
+
+        try
+        {
+            await _documents.UpdateDocumentAsync(
+                documentId.ToString(),
+                new UpdateDocumentRequest { SummaryStatus = pending.Previous ?? SummaryStatusNone },
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Office Generate Profile: could not restore the profile status of document {DocumentId} after the queue refused it; it stays Pending until the next profile.",
+                documentId);
+        }
+    }
+
+    private readonly record struct PendingMark(bool Written, int? Previous);
 }
 
 /// <summary>
