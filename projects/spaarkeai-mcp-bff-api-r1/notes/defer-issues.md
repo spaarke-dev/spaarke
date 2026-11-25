@@ -184,6 +184,50 @@ Extend the shared `ILookupItem` with an optional secondary line and render it un
 
 ---
 
+### ISS-010 — Decision commit takes ~27 s, so Copilot stops waiting and shows "may not have been recorded"
+
+| Field | Value |
+|---|---|
+| **Status** | Open; sent to spaarke-ontology-platform-r1 (owner of the commit path) for a fix or a hand-off |
+| **Urgency** | now |
+| **Filed** | 2026-11-25 |
+| **Source** | Owner, task 042 live run 3 in Cowork as the non-admin test user; App Insights on dev BFF `a1b7db1def` (`notes/live-e2e-results.md` "Run 3") |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3184 |
+
+**Description**
+
+One decision with four actions (Create budget, Assign Task, Add To Do, Assign Work) took **26,924 ms** on the server for `spaarke_complete_decision` (outcome ok, 2026-11-25 21:09:27Z). The Copilot host stopped waiting before the answer arrived, so the widget showed "The decision may not have been recorded". It had been recorded. Try again took 697 ms, made 13 reads and 0 writes, and returned the server-side replay, so there was one Decision Record and no duplicate writes or email. The safety path works. The cost does not: NFR-01 sets 15 s for complete and 30 s as the hard bound for every call, and this call used 90% of the hard bound. A user who sees "may not have been recorded" after every multi-action decision stops trusting the tool, and a slightly slower call would cross the 30 s bound. The Console's REST commit runs the same service, so it is likely as slow there.
+
+Where the 27 s went, in one call (dependency sums):
+- about 110 SDK (`Organization.svc`) calls, 13.3 s;
+- 51 caller-access calls on `systemusers(…)/Microsoft.Dynamics.CRM.…`, 5.1 s;
+- about 40 `EntityDefinitions` metadata reads (the same tables re-read: `sprk_matter` ×8, `sprk_recordtype_ref` ×8, `contact` ×4), about 3.5 s;
+- four writes (budget, event, to-do, work assignment), about 1.4 s;
+- inside the same request after the writes: the assignee notification email (Key Vault secret, token, `sendMail`, sent-items read, SPE archive PUT), about 3 s, and two Azure OpenAI `gpt-4o-mini` calls plus analysis-action reads, about 1.3 s.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs` (commit order and writes)
+- `src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitFollowUps.cs`, `AssignTaskNotifier.cs` (what runs after the writes)
+- App Insights app `6a76b012-…`: `dependencies | where operation_Id == '23ff642a15526e99ab9df9b869eef423' | summarize count(), sum(duration) by type, target, name`; the retry is `f265871405f3bf6b5b6a74db7942a4ed`
+- `traces | where message startswith 'MCP tool spaarke_complete_decision'` for the duration of each call
+
+**Suggested fix**
+
+Hypotheses for the owner to validate:
+- Move the email, archive and AI work out of the request into the ADR-004 job queue once the record is written (non-fatal already per task 043).
+- Cache the `EntityDefinitions` reads per process.
+- Batch or memoise the per-record caller-access checks within one commit.
+- Find what the ~110 SDK calls are; that is the largest single block.
+
+No change to validation, idempotency or execution order (spec MUST NOT).
+
+**Estimated effort**: 1–2 days, starting with a profile of the SDK calls
+**Blockers**: none
+**Related**: NFR-01; ontology task 222 (the read-side fixes); task 043 (follow-ups must not fail the commit); ADR-004, ADR-052
+
+---
+
 ### ISS-009 — Assign Task email refused as "no access" for an assignee whom Dataverse lets read the task
 
 | Field | Value |
