@@ -1,7 +1,7 @@
 # sprk_invoicesubmission (Invoice Submission)
 
 > **Project**: ebilling-r1, task 020 (FR-10, FR-05, FR-17, FR-20, D-37)
-> **Last Updated**: 2026-10-19
+> **Last Updated**: 2026-11-25 (task 189: files section); 2026-10-19
 > **Script**: `scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1` (idempotent, additive; a second run changes nothing)
 > **Solution**: `SpaarkeMaster` (unmanaged, in dev). Solution source, forms and views are synced by task 029.
 
@@ -46,7 +46,7 @@ All are optional except `sprk_vendororg`, which is **SystemRequired** (alternate
 |---|---|---|---|
 | `sprk_submitter` | `contact` | `sprk_invoicesubmission_submitter_contact` | Who submitted (persons are contacts). |
 | `sprk_vendororg` | `sprk_organization` | `sprk_invoicesubmission_vendororg_organization` | The firm. Same name as on `sprk_invoice`. Part of the alternate key. |
-| `sprk_document` | `sprk_document` | `sprk_invoicesubmission_document_document` | The submitted PDF. |
+| `sprk_document` | `sprk_document` | `sprk_invoicesubmission_document_document` | Set only on a from-document submission (channel Internal): the existing Document the intake read the PDF from. It is the source, not the invoice's file; the invoice's PDF is its Stored File (see "Files" below). Empty on every other channel. |
 | `sprk_reportdocument` | `sprk_document` | `sprk_invoicesubmission_reportdocument_document` | The rejection or adjustment report PDF. |
 | `sprk_invoice` | `sprk_invoice` | `sprk_invoicesubmission_invoice_invoice` | The resulting invoice; empty unless accepted. |
 | `sprk_resubmissionof` | `sprk_invoicesubmission` (self) | `sprk_invoicesubmission_resubmissionof` | The earlier submission a Correction replaces (task 097b, EB-D-179 item 1); empty for a New submission. **Field-secured, readable by everyone, settable only by the server** (task 097 second review F2, owner decision 2026-10-30). **Writes:** only "Spaarke BFF-Managed Field Writers" (the BFF application users) hold read, create and update; the BFF sets it once, on the submission's create, after the intake's Correction checks (`InvoiceSubmissionService` and `SubmitInvoiceFromEmailOperation`, through `ITrackingNumberAllocator`, i.e. the app-only `IGenericEntityService`), and no BFF code updates it. Any other profile that can create or update it is a FAIL in the script, the platform System Administrator profile excepted. **Reads:** "Spaarke BFF-Managed Field Readers" (on every business unit's default team) holds read only, so every user still sees it on the form and the Web API, and the BFF's own reads (commit gate, after-steps, evaluation snapshot) are app-only. Every BFF write is pinned app-only by `ResubmissionOfAppOnlyWriteGuardTests`; the script and the SpaarkeMaster source are pinned to each other by `ResubmissionOfFieldSecurityAgreementTests`. Set by `scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1`. |
@@ -77,3 +77,7 @@ Lengths follow `projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md`
 
 - The Web API navigation names follow the lookup schema names: `sprk_VendorOrg@odata.bind`, `sprk_Document@odata.bind`, `sprk_ReportDocument@odata.bind`, `sprk_Invoice@odata.bind`, `sprk_ResubmissionOf@odata.bind`, `sprk_Submitter@odata.bind`, `sprk_RegardingMatter@odata.bind`, and so on; value properties are `_sprk_vendororg_value` etc.
 - Secure-record family (task 013, for unified-access-control-r2 review): a child table in `config/secure-record-owner-role.json`, `SecureChildLineage` (every core-record lookup plus its invoice / line / document parents) and `RecordOwnerAssignmentCensusTests.ChildTables`; the Secure Record Owner role holds Read on it (dev, 2026-10-15). It carries `sprk_createdbyperson` (lookup to systemuser, field-secured so only the BFF writes it; created by this table's schema script, secured by `scripts/Set-ChildRecordCreatorPersonSchema.ps1`, which lists the table with SpaarkeMaster as its solution home).
+
+## Files (EB-D-148, task 189)
+
+Since the file-store model the invoice's PDF is its [Stored File](sprk_storedfile.md) (purpose Invoice PDF) on every channel (`InvoiceSubmissionPersister`, task 094). `sprk_document` above names only the source Document of a from-document submission, which the job copies from; it does not hold the file. A from-email submission still records its `.eml` as `sprk_sourceemaildocument`, equal to the `sprk_sourcedocument` of the invoice's Stored Files. The all-or-nothing Submit Invoice sequence is in [EBILLING-FILE-STORE.md](../architecture/EBILLING-FILE-STORE.md).

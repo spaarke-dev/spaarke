@@ -81,6 +81,7 @@ This directory contains comprehensive architecture documentation covering system
 | [SPAARKE-FIELD-MAPPING-FRAMEWORK.md](SPAARKE-FIELD-MAPPING-FRAMEWORK.md) | Field Mapping Framework: two Dataverse tables, additive BFF contract, context-agnostic client engine, four mapping types (Copy/Default/Concat/Template), `sprk_expression` extensibility, creation-time-vs-update-time boundary, same-entity support | 2026-07-09 | 2026-07-09 | New (r2) |
 | [external-access-spa-architecture.md](external-access-spa-architecture.md) | External access SPA architecture | 2026-04-05 | 2026-04-05 | Current |
 | [finance-intelligence-architecture.md](finance-intelligence-architecture.md) | Finance intelligence feature design | 2026-04-05 | 2026-04-05 | Current |
+| [EBILLING-FILE-STORE.md](EBILLING-FILE-STORE.md) | E-billing file store: one Stored File table, one service, blob layout and protection, upload and download, the copy rule, Submit Invoice, the firm file route, export files (EB-D-148) | 2026-11-25 | 2026-11-25 | Current |
 
 > **Moved**: `AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md` is a strategy/positioning doc — relocated to [`docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md`](../enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md). For current SprkChat technical architecture, see [`chat-architecture.md`](chat-architecture.md).
 
