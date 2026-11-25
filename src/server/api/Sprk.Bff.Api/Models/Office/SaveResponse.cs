@@ -63,6 +63,15 @@ public record SaveResponse
     [JsonConverter(typeof(JsonStringEnumConverter))]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EmailFilingOutcome? EmailFiling { get; init; }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 138 (#2209): a re-save of an email already saved to the same record that named
+    /// attachments not yet saved under its <c>.eml</c> — the file names of those attachments, which this save's job adds as
+    /// documents under the existing <c>.eml</c> (no second <c>.eml</c>). Omitted (<c>null</c>) on every other answer,
+    /// including "already saved" (<see cref="Duplicate"/>). Additive: clients that do not know the field ignore it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? AttachmentsAdded { get; init; }
 }
 
 /// <summary>

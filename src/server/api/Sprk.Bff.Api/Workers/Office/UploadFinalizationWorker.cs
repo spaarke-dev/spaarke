@@ -275,6 +275,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var driveId = parts[0];
             var itemId = parts[1];
 
+            // Task 138 (#2209): a re-save that adds attachments to an email already saved. Only the missing children.
+            if (payload.AttachmentsOnly)
+            {
+                return await ProcessAttachmentsOnlyAsync(message, payload, driveId, itemId, cancellationToken);
+            }
+
             _logger.LogInformation(
                 "File already uploaded to SPE, skipping upload. DriveId={DriveId}, ItemId={ItemId}",
                 driveId, itemId);
@@ -430,6 +436,60 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 $"Upload finalization failed: {ex.Message}",
                 retryable: message.Attempt < message.MaxAttempts);
         }
+    }
+
+    /// <summary>
+    /// Task 138 (#2209): the attachments-only finalization of a re-save that adds attachments to an email already saved as
+    /// the <c>.eml</c> document the payload names. Creates the missing attachment children through the SAME
+    /// <see cref="ProcessEmailAttachmentsAsync"/> → <see cref="ProcessSingleAttachmentAsync"/> as a first save, which skips
+    /// any child that already exists (read again here, just before creating). Nothing else: the <c>.eml</c>, its email
+    /// artifact and its profile/index were made by the first save.
+    /// </summary>
+    private async Task<JobOutcome> ProcessAttachmentsOnlyAsync(
+        OfficeJobMessage message,
+        UploadFinalizationPayload payload,
+        string driveId,
+        string itemId,
+        CancellationToken cancellationToken)
+    {
+        if (payload.ContentType != SaveContentType.Email
+            || payload.DocumentId is not { } emlDocumentId
+            || emlDocumentId == Guid.Empty)
+        {
+            // Never the fallback create: that would make a second .eml.
+            return JobOutcome.Failure(
+                "OFFICE_INTERNAL",
+                "An attachments-only finalization names the existing .eml document of an Email save.",
+                retryable: false);
+        }
+
+        await UpdateJobStatusAsync(message.JobId, JobStatus.Running, "AddingAttachments", 50, cancellationToken);
+
+        await ProcessEmailAttachmentsAsync(
+            driveId,
+            itemId,
+            emlDocumentId,
+            payload,
+            message.UserId,
+            message.JobId,
+            cancellationToken);
+
+        await MarkAsProcessedAsync(message.IdempotencyKey, emlDocumentId, cancellationToken);
+
+        await UpdateJobStatusAsync(
+            message.JobId,
+            JobStatus.Completed,
+            "AttachmentsAdded",
+            100,
+            cancellationToken,
+            emlDocumentId);
+
+        _logger.LogInformation(
+            "Attachments-only finalization completed for job {JobId} under .eml document {DocumentId}",
+            message.JobId,
+            emlDocumentId);
+
+        return JobOutcome.Success();
     }
 
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
@@ -1068,10 +1128,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     return; // Skip all attachment processing
                 }
 
-                var selectedNames = new HashSet<string>(payload.EmailMetadata.SelectedAttachmentFileNames, StringComparer.OrdinalIgnoreCase);
-                filteredAttachments = filteredAttachments
-                    .Where(a => selectedNames.Contains(a.FileName))
-                    .ToList();
+                // Task 138: the ONE selection rule, shared with the save's "what is not yet saved" answer.
+                filteredAttachments = EmailAttachmentAddPlanner.ApplySelection(
+                    filteredAttachments, payload.EmailMetadata.SelectedAttachmentFileNames);
 
                 _logger.LogInformation(
                     "User selected {SelectedCount} attachments for document {DocumentId}: {SelectedNames}",
@@ -1085,6 +1144,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     "No attachment selection provided - processing all {Count} attachments for document {DocumentId}",
                     filteredAttachments.Count,
                     parentDocumentId);
+            }
+
+            if (payload.AttachmentsOnly)
+            {
+                // Task 138: a re-save adds only what the .eml does not already have. Read just before creating, so a
+                // second add of the same attachment that runs after this one creates nothing (two at the same moment
+                // upload to the same drive item, and the second create is refused by sprk_graphitemid_uk).
+                var existingChildren = await _documentService.GetDocumentsByParentAsync(parentDocumentId, cancellationToken);
+                var notYetSaved = EmailAttachmentAddPlanner.ExcludeAlreadySaved(filteredAttachments, existingChildren);
+                _logger.LogInformation(
+                    "Attachments-only finalization for document {DocumentId}: {AlreadySaved} already saved, {ToCreate} to create",
+                    parentDocumentId, filteredAttachments.Count - notYetSaved.Count, notYetSaved.Count);
+                filteredAttachments = notYetSaved;
             }
 
             _logger.LogInformation(

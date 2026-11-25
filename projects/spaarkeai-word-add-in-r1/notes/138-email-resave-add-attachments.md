@@ -39,6 +39,9 @@ When the save finds an existing job, and **all** of these hold, it computes what
 
 - the save is an Email save from `/office/save` (`submission is null`: the from-email route never adds);
 - the selection is not `[]` (empty means none, so there is never an "add"; ebilling's route forces `[]`);
+- the request names attachments at all (`Attachments` or `SelectedAttachmentFileNames` non-empty: the worker's own
+  `HasAttachments` gate). A save that names none creates no children, so its re-save has nothing to add and reads no
+  file (`OfficeVersionSaveRevertTests` pins "an immutable message's duplicate is decided by its key alone");
 - the existing job is Completed and its result names the document it created **with its own SPE item**
   (`Result.Artifact.SpeFileId` set). A content-dedup job (`DeduplicatedToExisting`) carries no file id and keeps today's
   duplicate answer: its document is another save's canonical;
@@ -92,6 +95,36 @@ Two identical add re-saves create each missing child at most once, by three exis
 3. Two add jobs that run at the same moment upload the same attachment to the same path, so the same drive item, and the
    second create is refused by the `sprk_graphitemid_uk` alternate key (NFR-07). The refusal is caught per attachment,
    as every attachment failure is today, and logged.
+
+### 2.4a Authorization: fail closed, as a fresh save (fm-r1 condition 4)
+
+What runs on `POST /api/office/save` today, in order: `OfficeRateLimitFilter`, `IdempotencyFilter`, `OfficeAuthFilter`,
+`EntityAccessFilter` (`entity.associate_document` on `TargetEntity`), `OfficeVersionSaveAuthorizationFilter` ("write" on
+the existing document — **version saves only**, so it does not run for an email save).
+
+- **Target record.** `EntityAccessFilter` runs on every request, a re-save included, before `SaveAsync`. A caller who can
+  no longer file to the record is refused there, exactly as a fresh save is; nothing in the add path runs. Pinned by
+  `ReSave_ByACallerWhoMayNoLongerFileToTheRecord_IsRefused_AndQueuesNothing`.
+- **The saved `.eml`.** Nothing checked it before this task (the duplicate answer wrote nothing). The add writes children
+  under it, so the add path checks "write" on it with the caller's CURRENT rights, through the one document-grant helper
+  outside `DocumentAuthorizationFilter` (`InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync`, the
+  `OfficeVersionSaveAuthorizationFilter.Operation` "write"). A deny, or an exception from the check, refuses the save
+  with `OFFICE_009` (403) **before** the capture, the job row and the queue: nothing is created. Pinned by
+  `ReSave_ByACallerWhoLostWriteOnTheSavedEmail_IsRefused_AndQueuesNothing`.
+- **The container.** The add re-derives the container as a fresh save does (`ResolveContainerAsync` on the target); a
+  refusal there is returned as a fresh save's refusal, and a container that is not the `.eml`'s drive keeps the duplicate
+  answer (the children are never put in another drive than their parent).
+- **Owner.** Resolved by the save's own `ResolveOwnerAsync` over `OfficeDocumentPersistence.DocumentOwnershipOf` on the
+  same association (target, communication, caller); always a team, never the user (fm G3). The add adds no owner logic.
+
+### 2.4b fm-r1 conditions (2026-11-25)
+
+1. Nothing of fm's in flight touches the duplicate path or the child loop — taken as given.
+2. Every child is created by the existing `ProcessSingleAttachmentAsync`: G1 (association in the create), G3 (owner team
+   from the save's resolution), G5 (server-minted id, plain create) and G6 (`FilePointer` and `ParentDocumentLookup` =
+   the existing `.eml`'s id in the create) hold unchanged; `OfficeDocumentSaveGuardTests` stays green.
+3. Full ArchTests (built) and the filtered Office / RecordOwnership / DocumentAssociation BFF tests run before merge.
+4. §2.4a.
 
 ### 2.5 Pane
 
