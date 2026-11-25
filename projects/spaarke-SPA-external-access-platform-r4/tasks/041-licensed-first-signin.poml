@@ -4,7 +4,7 @@
     <title>Licensed user's first sign-in skips the profile form; link-popup timeout set in the auth review (FR-25, #2192)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 038 (P3 deploy)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tag auth; modifies .ts/.tsx on the first-sign-in path and possibly the BFF registration_required answer</rigor-reason>
     <model-tier>opus</model-tier>

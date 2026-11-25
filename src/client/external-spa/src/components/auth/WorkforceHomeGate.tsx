@@ -10,10 +10,12 @@
  *   2. 403 `registration_required` (the first time only): try the STORED LINK, silently - a Spaarke-tenant guest token
  *      (`acquireSpaarkeGuestToken('silent')`, the home account as login hint) goes in the body of
  *      POST /api/v1/external/workforce/link, then /me is read again. No token ({@link afterSilentLinkFailure}), or the guest
- *      has no licensed user (`no_systemuser`) -> the profile form (`RegistrationPage`). Any other refusal -> an
+ *      has no licensed user (`no_systemuser`) -> `RegistrationPage`: the profile form, or, when the refusal's `licensedUser`
+ *      hint says the token email is a licensed user's (R4 FR-25, #2192), its "Link my account" step. Any other refusal -> an
  *      administrator must resolve it. In Teams the silent token comes through NAA (`setGuestLinkHost('teams')`).
- *   3. A second `registration_required` always shows the form (never a loop). The form registers through the BFF (or, for
- *      a licensed user whose silent link failed, links through the popup), then /me is read again.
+ *   3. A second `registration_required` always shows `RegistrationPage` (the form, or its link step when the hint is
+ *      true) and never re-runs the silent link, so nothing loops without a click. The form registers through the BFF (or,
+ *      for a licensed user whose silent link failed, the link step links through the popup), then /me is read again.
  *
  * 401 -> the sign-in state; any other 403 -> the denied state; 5xx or a network fault -> a generic error with a retry.
  * `onReady(true)` tells the shell the workspace is showing (the notification bell waits for it, so it never reads the BFF
@@ -49,9 +51,10 @@ export function isHomeGateActive(): boolean {
 
 /**
  * THE switch point for the link popup (task 075, AC3; owner-confirmed 2026-10-19): what the gate shows when the SILENT link
- * produced no token. The answer is the profile form, in the browser and in Teams alike. The Spaarke-sign-in popup is NOT
- * opened here: it opens only from the "Link my account" click on `RegistrationPage`, after the registration POST returns
- * `licensed_user_link_required`. A gesture-less popup here would greet every new contact (not a guest of Spaarke's tenant)
+ * produced no token. The answer is `RegistrationPage`, in the browser and in Teams alike: the profile form, or its "Link my
+ * account" step when the prefill's `licensedUser` hint is true (R4 FR-25). The Spaarke-sign-in popup is NOT opened here: it
+ * opens only from the "Link my account" click on `RegistrationPage` (reached through that hint, or after the registration
+ * POST returns `licensed_user_link_required`). A gesture-less popup here would greet every new contact (not a guest of Spaarke's tenant)
  * with a sign-in window that must fail. To change the decision, change this one function.
  */
 export function afterSilentLinkFailure(prefill: RegistrationPrefill): GateState {

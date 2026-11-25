@@ -27,7 +27,7 @@ What the Teams app is, in brief. The "why" lives in ADR-028 Amendment A9 and [ex
 |---|---|---|
 | **Registered workforce contact**: a member of a listed customer directory with a WorkforceHome contact | The workspace loads | `[WF-AUTH] Resolved home tid=… oid=… to WorkforceHome contact …` |
 | **New workforce contact**: a member of a listed directory, not yet registered | The profile form at first sign-in, then the workspace | `registration_required` on `/me`, then `POST /api/v1/external/registration` 201 |
-| **Licensed user**: a member of a listed directory with a linked Spaarke `systemuser` | The workspace loads. The first time, a silent account link runs; if it fails, the profile form offers "Link my account" (a popup) | `[WF-AUTH] Resolved home tid=… oid=… to linked systemuser …` |
+| **Licensed user**: a member of a listed directory with a linked Spaarke `systemuser` | The workspace loads. The first time, a silent account link runs; if it fails, the page opens on "Link my account" (a popup on the click), not the profile form, because `/me`'s `registration_required` carries `licensedUser: true` for a licensed email (R4 FR-25) | First time: `registration_required` on `/me`, then `POST /api/v1/external/workforce/link`. After: `[WF-AUTH] Resolved home tid=… oid=… to linked systemuser …` |
 | **Guest**: a B2B guest of the Teams tenant | "This tab can't be used with a guest account". No BFF call | None (refused in the tab). The BFF would refuse the token too (`acct` ≠ 0) |
 | **Unlisted organization**: a Teams tenant no customer lists | "Your organization is not set up for Spaarke". No token request, no BFF call | None |
 
