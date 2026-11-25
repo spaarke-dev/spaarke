@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="220" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Email composer asks before discarding a typed draft, cleans up the files it uploaded when the email is not sent, and words a network failure as one (#2813 DI-154, #2946 DI-158)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared UI code (.tsx/.ts) used by many consumers.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Deletes documents the session uploaded: must never delete a document the user picked from existing records or one an email references; many composer hosts.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>EmailComposer folder (EmailComposer.tsx, wrappers/SendEmailDialog.tsx) and the composer hosts' upload handlers; task 219 edits the Wizard folder only.</parallel-reason>
+    <deps>none</deps>
+    <tags>react, fluent-ui, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Yes let me know when done and continue with next tasks". Two issues, one task because both live on the composer's close path: read in full #2813 (gh issue view 2813; DI-154) and #2946 (gh issue view 2946; DI-158), and their rows in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. (1) #2946: closing the composer with x after typing To/Subject/body loses the draft without asking (the rule wizard asks "Discard this rule?"); a send that fails at the network says "Something went wrong on this page and the email was not sent." (2) #2813: a local attachment is uploaded as a document at once (`onUploadLocalAttachment`); cancel, a failed send at Finish, or removing and re-attaching leaves that document with no email referencing it. Entry points on origin/master 2ac250cae4 (search by name): `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx`, `EmailComposer/wrappers/SendEmailDialog.tsx`; hosts that pass `onUploadLocalAttachment`: `git grep -ln onUploadLocalAttachment -- src/client src/solutions ':!*bundle.js'` (CommunicationActions PCF, Spaarke.Communication.Components useEmailComposeActions / EmailWorkspace, TrackingFieldTrio, the create wizards' Send Email step from tasks 182/188).</prompt>
+  <role>SPAARKE frontend developer: shared Fluent v9 React components (@spaarke/ui-components EmailComposer), Spaarke.Communication.Components, PCF hosts.</role>
+  <goal>Closing a non-empty draft asks before discarding it; when an email is not sent (confirmed discard, cancel, failed send) or an uploaded file is removed from the draft, the documents this composer session uploaded are removed through the existing document delete path; documents picked from existing records are never touched; a network failure says the connection failed and the email was not sent.</goal>
+  <context>
+    <background>Find the existing document delete route the clients already use (do not add a BFF route); if none exists or it is not safe for this (for example it would delete a document another record now references), STOP and report. Track upload ids per composer session; clean up only ids this session uploaded and that the final sent email does not reference. A failed send keeps the draft (and its uploads) while the dialog stays open for retry: clean up when the user abandons it, not on the failure itself, and say in the notes what you chose. A host with no delete capability passes none, and its behaviour is unchanged (opt-in prop). Reuse the existing discard-confirmation pattern (the rule wizard's "Discard this rule?") rather than a new dialog component. Network failure: detect a fetch that never got a response (TypeError / no status) separately from an HTTP error; keep the retry and "draft kept" parts.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-12">Run `node scripts/quality/client-lint/client-lint.mjs check` (after the root npm install) before pushing, plus the jest tests named below and the package typecheck.</constraint>
+    <constraint source="shared UI">@spaarke/ui-components is edited by many projects: run /conflict-check first; every consumer that does not opt in behaves exactly as before. Load the fluent-v9-component skill before editing components; Fluent tokens only (ADR-021 dark mode).</constraint>
+    <constraint source="root CLAUDE.md §11">Extend the existing component; no new shared component, hook package or BFF route unless the three questions are answered in the PR.</constraint>
+    <constraint source="public repo">Test data uses invented names and example.com addresses; no environment ids.</constraint>
+    <constraint source="ADR-038">Each cleanup case and the never-delete case is a test that fails on origin/master (or passes as a control), with the delete call observed on a fake.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-220-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Jest tests for every touched package, typecheck, client-lint.</step>
+    <step order="5">PR to master, body "Closes #2813, Closes #2946"; notes in notes/task-220-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Tests fail on origin/master: x on a draft with typed content asks to discard; cancelling the prompt keeps the draft; an empty draft closes without asking.</criterion>
+    <criterion testable="true">Tests fail on origin/master, one per case: confirmed discard, cancel after a failed send, and remove-then-reattach each delete exactly the session's unreferenced uploads; a document picked from existing records is never deleted; a successful send deletes nothing.</criterion>
+    <criterion testable="true">A test fails on origin/master: a network-level send failure shows connection wording, an HTTP 500 keeps the existing wording.</criterion>
+    <criterion testable="true">Must-not-fire: a host that passes no delete handler behaves as before; existing EmailComposer, SendEmailDialog and host jest tests pass; typecheck and client-lint pass for every touched package.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a new BFF route, a schema change, or would delete a document that is not provably this session's unreferenced upload: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt220); PR to master; do not merge.</protocol>
+  </execution>
+</task>

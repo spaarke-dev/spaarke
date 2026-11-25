@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="217" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Nightly evidence redaction reads only the Signals that still need redaction, not every Signal of every Off/Retired policy (#3091, DI-172)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes which rows a nightly privacy sweep reads: a wrong selection leaves evidence unredacted; task 145 redaction and 209 truncation rules must survive.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SignalReevaluationJob.cs redaction sweep (RedactPoliciesNotInForceAsync / SweepStoredEvidenceAsync) and its tests; no other wave task touches Signals.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, performance, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Yes let me know when done and continue with next tasks". Issue #3091 (read it in full: gh issue view 3091) and DI-172 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. Entry points on origin/master 2ac250cae4 (search by name): `src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs` `RedactPoliciesNotInForceAsync` (~1356) calls `SweepStoredEvidenceAsync` (~1384) with every Off/Retired ontology policy; it reads each policy's Signals by dedupe-key prefix in every status via `ReadPolicySignalsAsync(..., forRedactionSweep: true)`. The deleted-policy sweep (~556) shares `SweepStoredEvidenceAsync`. Task 209 (PR #3087, e9393ace47) solved the same shape for the close with one paged query joined to the not-in-force policies: read its POML (tasks/209-*.poml) and notes/task-209-notes.md first, and task 145's redaction rule (tasks/145-*.poml, its notes).</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse SDK QueryExpression / LinkEntity paging, the ontology nightly re-evaluation job.</role>
+  <goal>The not-in-force redaction sweep's Dataverse reads scale with the Signals whose stored evidence still needs redaction, not with every Signal of every Off/Retired policy; which evidence is redacted, and how, is unchanged.</goal>
+  <context>
+    <background>Hypothesis from the issue (check it): find a stored marker that tells redacted evidence from unredacted (task 145 writes a redacted form; if it is detectable in a query, filter on it), and read only unredacted Signals of not-in-force policies in one paged query joined to sprk_policy, as task 209 did. If redaction leaves nothing a query can filter on, STOP and report rather than adding a column. Keep the deleted-policy sweep unchanged unless a test proves both. Keep the one-failure-per-policy-per-run accounting, forRedactionSweep mode (unparseable keys skipped silently), the D-170 policy set, D-61 (never stamp an unchanged Signal), and task 204/209: a truncated read is reported and fails the run. Read `git log -5` on SignalReevaluationJob.cs; run /conflict-check (ebilling-r1 merges into Signals code).</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes the contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first).</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-217-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #3091"; notes in notes/task-217-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A call-count test fails on origin/master: many Off/Retired policies (for example 500) whose Signals are already redacted, plus a few with unredacted evidence: the sweep's Signal reads are bounded by pages of the new query, not one per policy.</criterion>
+    <criterion testable="true">Must-not-fire: every Signal with unredacted evidence of a not-in-force policy is still redacted exactly as before; already-redacted Signals are not rewritten; in-force policies' Signals are untouched; a truncated read still fails the run; existing SignalReevaluation and redaction tests pass unmodified.</criterion>
+    <criterion testable="true">The deleted-policy sweep behaves as before (unchanged or proven by tests); build, filtered tests (Signals) and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a schema change or a new column, changes which evidence is redacted, or changes the deleted-policy sweep's results: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt217); PR to master; do not merge.</protocol>
+  </execution>
+</task>

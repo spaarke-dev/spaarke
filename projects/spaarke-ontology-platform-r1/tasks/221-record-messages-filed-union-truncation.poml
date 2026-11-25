@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="221" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A record's Messages list says when messages are not shown, keeps the newest filed threads, and spends its scan only on threads it can add (#2671, DI-148)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes a bounded, access-filtered read and adds a field to its response; the visible set must stay exactly what the caller may read.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>CommunicationThreadReadService.cs by-regarding read, its response DTO and the client Messages list that shows it; no other wave task touches them.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, react, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Yes let me know when done and continue with next tasks". Issue #2671 (read it in full: gh issue view 2671) and DI-148 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. `GET /api/communications/by-regarding/{entityType}/{id}` unions messages anchored to the record with threads whose messages are filed to it by their own lookup (task 177, D-217). In `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs` (origin/master 2ac250cae4: `MaxRegardingScan` ~192, the filed read ~438-494, `ReadThreadsOfFiledMessagesAsync`): (1) when the 500-row scan or the thread budget cuts the result, the response carries no flag (only a [BY-REGARDING] log); (2) added threads are taken oldest first, so the newest are dropped; (3) the filed query also returns messages on threads already anchored to the record, which use up the scan. Find the client surface that renders this route (grep the route path in src/client and src/solutions) and record it in the notes.</prompt>
+  <role>SPAARKE full-stack developer: .NET 10 BFF (Communication thread reads, Dataverse paging), shared React components.</role>
+  <goal>When the by-regarding result is cut by any bound, the response says so and the Messages list tells the user that not every message is shown; the newest filed threads are kept first; the filed scan excludes threads already anchored to the record; the set of messages a caller can see is otherwise unchanged.</goal>
+  <context>
+    <background>Add an additive response field (for example `truncated: true` or a reason), defaulting to false, so existing clients are unaffected; document it in the route's contract baseline if one exists. Order added threads newest first before the budget applies. Exclude already-anchored threads in the query (for example a not-in filter on the anchored thread ids, bounded) or by ordering, without adding a per-thread read. Keep the visibility filter (`callerSystemUserId`) on every read exactly as today: the result must never include a message the caller cannot read, and the flag must not reveal how many hidden messages exist (say only that the list is incomplete). Client: one short line under the list using the existing empty/info text pattern of that component, Fluent tokens. uac-r2 reviews this route (DI-148 row): their review before merge.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes the contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first).</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-12">Run `node scripts/quality/client-lint/client-lint.mjs check` (after the root npm install) before pushing, plus the jest tests named below and the package typecheck.</constraint>
+    <constraint source="uac-r2 coordination">uac-r2 reviews the by-regarding route (DI-148): their review before merge (project CLAUDE.md §4).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-221-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests (Communication), full ArchTests, BFF build, publish-size delta; client jest, typecheck, client-lint.</step>
+    <step order="5">PR to master, body "Closes #2671"; notes in notes/task-221-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: a record whose filed messages exceed the scan (or thread budget) returns the flag set; a record within bounds returns it false/absent.</criterion>
+    <criterion testable="true">A test fails on origin/master: with more filed threads than the budget, the kept threads are the newest; with many anchored messages, filed threads beyond the anchored ones are still found (the scan is not spent on anchored threads).</criterion>
+    <criterion testable="true">Must-not-fire: a message the caller cannot read never appears, and the flag carries no count; existing by-regarding, CommunicationThreadRead and Signals contract tests pass (update a baseline only for the additive field).</criterion>
+    <criterion testable="true">The Messages list shows the incomplete-list line only when the flag is set (jest); build, filtered tests (Communication), full ArchTests, client tests, typecheck and client-lint pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a schema change, a per-thread read, changes which messages a caller can see, or would reveal a count of hidden messages: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt221); PR to master; do not merge.</protocol>
+  </execution>
+</task>

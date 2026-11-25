@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="218" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A manually triggered scheduled job keeps its logs: the run no longer inherits the trigger request's sampled-out trace (#3125, DI-175)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One located defect with a stated fix copied from an existing pattern (ExternalAccessAudit).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs only; no other wave task touches it.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, background, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Yes let me know when done and continue with next tasks". Issue #3125 (read it in full: gh issue view 3125) and DI-175 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. `src/server/shared/Spaarke.Scheduling/ScheduledJobHost.cs` (~342 on origin/master 2ac250cae4, search `RunManualTriggerAsync`) starts a manual run with `Task.Run(...)` from inside the `POST /api/admin/jobs/{jobId}/trigger` request, so the run inherits `Activity.Current` from that request. `Program.cs` `UseAzureMonitor()` (Azure.Monitor.OpenTelemetry.AspNetCore 1.6.0) samples with a rate-limited sampler (5 traces/s); when the trigger request's trace is not sampled, every log of the run, minutes long, is dropped with it. Run 7f929ff2 on 2026-11-25 logged nothing in App Insights or Log Analytics. The scheduled path (~667) starts from the BackgroundService with no request activity and is unaffected. Pattern to copy: `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalAccessAudit.cs` lines ~41-42 (save Activity.Current, set it to null, restore in finally).</prompt>
+  <role>SPAARKE backend developer: .NET 10, System.Diagnostics.Activity / OpenTelemetry, the shared Spaarke.Scheduling host.</role>
+  <goal>A manual run starts with no ambient request Activity (a fresh root, as a scheduled run has), so its logs are exported independently of the trigger request's sampling decision; the trigger response, run accounting and the scheduled path are unchanged.</goal>
+  <context>
+    <background>Clear Activity.Current only around the Task.Run that starts the run (ExecutionContext flows the AsyncLocal into the task when it is created), and restore it for the request afterwards. Do not change the sampler or the OpenTelemetry setup. If the scheduled path already opens an Activity per run (search ActivitySource in Spaarke.Scheduling), give the manual path the same; otherwise do not add one. Spaarke.Scheduling is shared: read `git log -5` on ScheduledJobHost.cs and run /conflict-check; list other users of TriggerNowAsync in the notes.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes the contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first).</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-218-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #3125"; notes in notes/task-218-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: with an Activity current on the calling thread when a manual trigger is made, the handler observes no inherited parent (Activity.Current is null, or a new root whose ParentId is not the request's) while it runs.</criterion>
+    <criterion testable="true">Must-not-fire: the caller's Activity.Current is the same object after the trigger call returns; the trigger response, run id and the run store record are unchanged; the scheduled path's behaviour and tests are unchanged.</criterion>
+    <criterion testable="true">Build, filtered tests (Scheduling, ScheduledJob, AdminJobs) and full ArchTests pass; publish-size delta reported.</criterion>
+    <criterion testable="false">(Not testable here) Main session triggers signal-reevaluation on dev after the next uac-r2 dev BFF build and confirms the run's logs reach App Insights.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a sampler or OpenTelemetry configuration change, a new package, or changes the trigger API: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt218); PR to master; do not merge.</protocol>
+  </execution>
+</task>

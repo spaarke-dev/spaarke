@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="219" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A reopened wizard's stepper shows only its own steps, not the follow-on steps picked last time (#2814, DI-155)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared UI code (.tsx/.ts) used by many consumers.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One located reducer defect with a stated fix.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wizard/WizardShell.tsx and Wizard/wizardShellReducer.ts only; task 220 edits EmailComposer only.</parallel-reason>
+    <deps>none</deps>
+    <tags>react, fluent-ui, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Yes let me know when done and continue with next tasks". Issue #2814 (read it in full: gh issue view 2814) and DI-155 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. In `src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx` the reset-on-open effect dispatches `GO_TO_STEP` with `clearSkipped`; that case in `wizardShellReducer.ts` rebuilds only the config map and keeps the dynamic follow-on steps (for example "Create Event") in `state.steps`, so a wizard reopened in the same session shows last session's follow-on steps in its stepper. Finish is unaffected (selectedActions is cleared). Line numbers on origin/master 2ac250cae4 differ from the issue's; search by name.</prompt>
+  <role>SPAARKE frontend developer: shared Fluent v9 React components (@spaarke/ui-components), WizardShell.</role>
+  <goal>On reopen, the wizard's step list is back to its static steps; adding a follow-on step afterwards works as before; nothing else in WizardShell changes.</goal>
+  <context>
+    <background>Fix it in the reducer's reset (or a dedicated reset action if GO_TO_STEP+clearSkipped is used elsewhere for a non-reset purpose: grep every dispatch first and keep those callers' behaviour). WizardShell is used by many wizards (CreateRecordWizard hosts, DecisionWizard, Work Assignment, create wizards with Send Email follow-ons): keep keyboard focus and step navigation tests green.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-12">Run `node scripts/quality/client-lint/client-lint.mjs check` (after the root npm install) before pushing, plus the jest tests named below and the package typecheck.</constraint>
+    <constraint source="shared UI">@spaarke/ui-components is edited by many projects: run /conflict-check first; every consumer that does not opt in behaves exactly as before. Load the fluent-v9-component skill before editing components; Fluent tokens only (ADR-021 dark mode).</constraint>
+    <constraint source="root CLAUDE.md §11">Extend the existing component; no new shared component, hook package or BFF route unless the three questions are answered in the PR.</constraint>
+    <constraint source="public repo">Test data uses invented names and example.com addresses; no environment ids.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-219-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Jest tests for every touched package, typecheck, client-lint.</step>
+    <step order="5">PR to master, body "Closes #2814"; notes in notes/task-219-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A reducer test fails on origin/master: open, add a dynamic step, reset → state.steps equals the static steps.</criterion>
+    <criterion testable="true">A WizardShell test fails on origin/master: open, pick a follow-on, close, reopen → the stepper shows only the static steps; picking the follow-on again adds it once.</criterion>
+    <criterion testable="true">Must-not-fire: GO_TO_STEP without a reset keeps dynamic steps; every existing Wizard and DecisionWizard jest test passes unmodified; typecheck and client-lint pass.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix changes another wizard's step behaviour, the WizardShell props contract, or needs a new component: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt219); PR to master; do not merge.</protocol>
+  </execution>
+</task>
