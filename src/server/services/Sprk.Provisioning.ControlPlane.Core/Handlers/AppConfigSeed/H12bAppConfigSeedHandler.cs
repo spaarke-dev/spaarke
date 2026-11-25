@@ -258,7 +258,26 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
         // `az` for token acquisition + hit Dataverse REST, so parallelism buys
         // ~seconds. Serial keeps per-scope diagnostics readable and matches
         // Invoke-SeedManifest.ps1's own serial-fan-out shape.
-        var input = new AppConfigSeedInput(envelope.CustomerId, tenantId, dataverseUrl);
+        // Data-setup plan D4: the starter taxonomy pack (legal-standard by default, stored at CreateRun; none = the customer
+        // brings its own). POST /api/runs refuses any other value with the same allowed set; a run that holds one anyway fails
+        // here BEFORE any seeder writes.
+        var referenceDataPack = IntakeParameterCatalog.ResolveReferenceDataPack(run.Parameters.NonSecret);
+        if (!IntakeParameterCatalog.AllowedReferenceDataPacks.Contains(referenceDataPack))
+        {
+            var diagnostic =
+                $"Run parameter '{IntakeParameterCatalog.ReferenceDataPack}' is '{referenceDataPack}'; allowed values are " +
+                $"{IntakeParameterCatalog.LegalStandardReferenceDataPack} | {IntakeParameterCatalog.NoReferenceDataPack}. " +
+                "Nothing was seeded.";
+            await MarkFailedAsync(
+                run, etag, AppConfigSeedRejectionCodes.InvalidReferenceDataPack,
+                diagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
+            return new HandlerResult.Failure(
+                FailureClass.Resumable,
+                AppConfigSeedRejectionCodes.InvalidReferenceDataPack,
+                diagnostic);
+        }
+
+        var input = new AppConfigSeedInput(envelope.CustomerId, tenantId, dataverseUrl, referenceDataPack);
         var scopeOutcomes = new List<ScopeOutcome>(_seeders.Count);
         foreach (var seeder in _seeders)
         {

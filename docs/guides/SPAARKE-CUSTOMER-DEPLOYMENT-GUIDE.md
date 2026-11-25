@@ -1880,6 +1880,8 @@ internal-only message.
 
 **H12b** seeds app-config: DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions.
 
+**H12b also seeds the starter taxonomy** (data-setup plan D4): matter types and subtypes, practice areas, project types, document types, contact types and organization types, from `scripts/seed-data/reference/packs/legal-standard/` (87 rows). The intake key `referenceDataPack` selects it: `legal-standard` (the default when omitted) or `none` for a customer who brings its own taxonomy by data migration. The customer owns these rows once they exist: H12b creates a row only when none matches by id, code or name (active or inactive), never updates one, and lists present rows that differ from the pack in the step diagnostic. A pack row the customer deleted is created again on the next run — deactivate a row to retire it, and pass `none` on a run against a stamp whose taxonomy is the customer's own.
+
 Both consume the **declarative seed manifest** (resolves the `scripts/seed-data` MVP vs `infra/dataverse` R7 drift per INVENTORY §9).
 
 **H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (dedicated per customer — both models). Runs AFTER H12a + H12b + H2a (OpenAI deployed).

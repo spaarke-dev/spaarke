@@ -261,7 +261,13 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
             ],
             [HandlerIds.H12a] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
-            [HandlerIds.H12b] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
+            [HandlerIds.H12b] =
+            [
+                Tenant,
+                // Data-setup plan D4: legal-standard (default, stored at CreateRun) | none — the starter taxonomy pack.
+                RunInput.Intake(IntakeParameterCatalog.ReferenceDataPack, required: false),
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+            ],
             [HandlerIds.H12c] =
             [
                 Tenant,
