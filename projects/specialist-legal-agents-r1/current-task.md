@@ -1,8 +1,10 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella program)
 
-> **Last Updated**: 2026-11-24 (gate A0 cleared; V3 deferred)
+> **Last Updated**: 2026-11-25 (design v0.7: patent attorney is the first archetype; OD-4..OD-6)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Phase**: pre-`/design-to-spec`. No POML tasks. Do NOT run `/design-to-spec` until the owner says so.
+>
+> **2026-11-25 (owner):** OD-2 amended (patent attorney first; NDA stays a function, intake harness in `spaarke-intake-pipeline-r1` #3128); OD-4 Cowork + area agent for drafting; OD-5 Dataverse profile + Code Page (§3.14); OD-6 MCP shape and `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (PR #3147); MCP parity is `spaarkeai-mcp-bff-api-r2` (#3150). D-A8 (supervision timing) re-opened. Phase 1 child slug now `specialist-legal-agents-patents-r1`.
 
 ## Quick Recovery
 
