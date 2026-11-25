@@ -728,7 +728,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on task/ebilling-iss016 (17adaafc5f; pending merge) |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 084b adversarial review (finding 2) |
