@@ -938,7 +938,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// Task 153 (adversarial pass 1 F2): of the closed Signals that link a Decision Record, those whose link is NOT their own closure record
     /// and that record existed before the close (a D-128 reminder or inquiry the item carried while it was open): their closure still needs
     /// its record, and the link replaces exactly that record. One read per <see cref="LinkedRecordReadChunk"/> linked records. Adversarial pass
-    /// 2: the read returns only records the writer created (<c>createdby</c>), and a record is replaced only when it took nothing but actions
+    /// 2: the read returns only records the writer created (<see cref="WriterCreatedRecord"/>, task 223), and a record is replaced only when it took nothing but actions
     /// that leave the item open (<see cref="DecisionRecordWriter.IsNonResolvingReviewRecord"/>). A record that is this closure's own is left alone; one that was created
     /// after the close, was created by a person, is any other decision, or cannot be found is left alone, logged at Warning and metered
     /// (<see cref="OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink"/>). A read fault (the writer's identity
@@ -958,8 +958,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
             };
             query.Criteria.AddCondition("sprk_decisionrecordid", ConditionOperator.In, chunk.Cast<object>().ToArray());
             // Adversarial pass 2: only records the writer itself created. A record a person created is never a link this job replaces.
+            // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
             writerUserId ??= await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
-            query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId.Value);
+            WriterCreatedRecord.AddConditions(query.Criteria, writerUserId.Value);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
             {
