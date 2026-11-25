@@ -126,6 +126,11 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>Task 267 S25: "Spaarke Basic User" as SpaarkeMaster ships it — the root copy and the customer unit's copy.</summary>
     internal Guid RootBasicUserRoleId { get; private set; }
     internal Guid BasicUserRoleId { get; private set; }
+
+    /// <summary>DEF-059 S29: "Spaarke Decision Record Reader" - the root copy, the customer unit's copy and the writer unit's copy.</summary>
+    internal Guid RootDecisionReaderRoleId { get; private set; }
+    internal Guid DecisionReaderRoleId { get; private set; }
+    internal Guid WriterDecisionReaderRoleId { get; private set; }
     internal Guid OntologyWriterFieldWritersProfileId { get; private set; }
     internal Guid OntologyWriterFirmReasonProfileId { get; private set; }
     internal static readonly string[] LockedTables = ["sprk_invoice", "sprk_matter", "sprk_project", "sprk_workassignment"];
@@ -259,10 +264,18 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
                 dv.RolePrivileges[basicUser][privilege.Id] = (privilege.Name, "Deep");
             }
         }
+
+        // DEF-059 S29: "Spaarke Decision Record Reader" as SpaarkeMaster 1.3.1.0 ships it - exactly Read on sprk_decisionrecord
+        // at Global in the root unit, copied into the customer and writer units, held by nobody. By the shipped name and
+        // privilege (not the constants), so the S29 tests fail if the procedure ever names another role or privilege.
+        dv.RootDecisionReaderRoleId = dv.AddRole(dv.RootUnitId, "Spaarke Decision Record Reader");
+        dv.DecisionReaderRoleId = dv.AddRole(dv.CustomerUnitId, "Spaarke Decision Record Reader", parentRootRoleId: dv.RootDecisionReaderRoleId);
+        dv.WriterDecisionReaderRoleId = dv.AddRole(dv.WriterUnitId, "Spaarke Decision Record Reader", parentRootRoleId: dv.RootDecisionReaderRoleId);
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = ("prvReadsprk_DecisionRecord", "Global");
         return dv;
     }
 
-    /// <summary>A systemuser in <paramref name="unitId"/>; <paramref name="isApplicationUser"/> false = an interactive user (no application id).</summary>
+    /// <summary>A systemuser in <paramref name="unitId"/>;<paramref name="isApplicationUser"/> false = an interactive user (no application id).</summary>
     internal Guid AddUser(Guid unitId, bool isApplicationUser)
     {
         var id = Guid.NewGuid();

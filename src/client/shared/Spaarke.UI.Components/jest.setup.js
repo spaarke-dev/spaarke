@@ -8,20 +8,24 @@ require('@testing-library/jest-dom');
 // timeout so a real failure still reports Testing Library's message. No test here awaits a rejected query.
 require('@testing-library/react').configure({ asyncUtilTimeout: 3000 });
 
-// Mock window.matchMedia (required for Fluent UI components)
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: jest.fn().mockImplementation(query => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: jest.fn(),
-    removeListener: jest.fn(),
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
-    dispatchEvent: jest.fn(),
-  })),
-});
+// Mock window.matchMedia (required for Fluent UI components). Guarded like the polyfills below: a
+// framework-free suite that needs real fetch types (`services/sdap/__tests__/uploadFailureShapes`)
+// runs under `@jest-environment node`, where there is no `window`.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: jest.fn().mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    })),
+  });
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // jsdom polyfills (task 071)

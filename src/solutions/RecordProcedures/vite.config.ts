@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
  * Custom Vite plugin to resolve bare module imports from shared library
  * source files to THIS project's node_modules.
  *
- * Required because @spaarke/auth, @spaarke/sdap-client (imported by the ui-components barrel) and @spaarke/ui-components
+ * Required because @spaarke/auth and @spaarke/ui-components
  * are aliased to source directories outside
  * the project root. Their bare imports (e.g., "@fluentui/react-components")
  * must be resolved from this project's node_modules. Mirrors
@@ -22,7 +22,6 @@ function resolveSharedLibDeps(): import("vite").Plugin {
   const sharedLibPaths = [
     path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
-    path.resolve(__dirname, "../../client/shared/Spaarke.SdapClient/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -71,7 +70,6 @@ export default defineConfig({
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.ts"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src/**/*.ts"),
-        path.resolve(__dirname, "../../client/shared/Spaarke.SdapClient/src/**/*.ts"),
       ],
     }),
     // Inline all JS/CSS into HTML for simple Dataverse web resource deployment
@@ -82,7 +80,6 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
-      "@spaarke/sdap-client": path.resolve(__dirname, "../../client/shared/Spaarke.SdapClient/src"),
       "@fluentui/react-components": path.resolve(__dirname, "node_modules/@fluentui/react-components"),
       "@fluentui/react-icons": path.resolve(__dirname, "node_modules/@fluentui/react-icons"),
     },

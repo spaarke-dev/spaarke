@@ -4,8 +4,8 @@
  * Configuration-driven Dataverse grid built on Fluent v9 native `DataGrid` primitives:
  * - Three-tier config resolution (explicit `overrides` → `sprk_configjson` → metadata + layoutXml → framework defaults)
  * - Native selection (`selectionMode="multiselect"`) — NO hand-rolled checkbox column
- * - Native sort (`sortable` + `createTableColumn({ compare })`) — NO manual sort state (unless the host opts in to
- *   persisted settings: `initialSettings` / `onSettingsChange` / `settingsResetKey`, which control Fluent's sort state)
+ * - Native sort (`sortable` + `createTableColumn({ compare })`); the grid holds the sort column/direction and hands it to
+ *   Fluent (`sortState`), so a header-cell click and the column menu's "A to Z" / "Z to A" set the same sort
  * - Native column resize (`resizableColumns` + `columnSizingOptions`) — NO drag handles
  * - Native keyboard nav (`focusMode="composite"`) — NO `onKeyDown` switch
  * - Lazy infinite-scroll paging (FetchXML paging-cookie chain via {@link useLazyLoad})
@@ -300,9 +300,8 @@ export interface DataGridProps {
    * the grid mounted with `initialSettings`; but a stored width for a column the configuration does not have is pruned
    * once the columns load, and that prune IS reported (the settings then differ from the ones handed in). While a
    * column is being dragged it can fire on every pointer step: a host that stores them should be cheap or debounce.
-   * Absent = nothing is reported; note the sort is controlled by the grid (not Fluent's own uncontrolled sort) whenever
-   * ANY of `initialSettings`, `onSettingsChange` or `settingsResetKey` is passed, and uncontrolled, unchanged, only when
-   * none is. The grid never stores anything itself.
+   * Absent = nothing is reported (the user can still sort and resize; it is just not remembered). The grid never stores
+   * anything itself.
    */
   onSettingsChange?: (settings: DataGridSettings) => void;
 
@@ -1515,6 +1514,36 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     [hostColumnRenderers]
   );
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Sort. The grid always holds the sort in state and hands it to Fluent (`sortState` + `onSortChange`), so both ways a
+  // user sorts land in one place: a click on the header cell (Fluent's own toggle) and the column menu's "A to Z" /
+  // "Z to A". In a browser the column name IS the menu trigger and stops the click, so the menu is the way most users
+  // sort (task 038 E2E, 2026-11-25: the menu items used to be no-ops and sorting was reachable only from the cell edge).
+  //
+  // Task 032 (FR-19, #2489): opt-in persisted settings. The grid stores nothing: `onSettingsChange` hands the host the
+  // widths + sort, `initialSettings` takes them back, `settingsResetKey` clears them. A host that sets none of the three
+  // gets the same sort behaviour, just not remembered.
+  // ─────────────────────────────────────────────────────────────────────────
+  const [userSort, setUserSort] = React.useState<DataGridSortSetting | undefined>(() =>
+    initialSettings?.sort && initialSettings.sort.columnId ? { ...initialSettings.sort } : undefined
+  );
+  const handleSortChange = React.useCallback<NonNullable<FluentDataGridProps['onSortChange']>>((_ev, data) => {
+    setUserSort(
+      data.sortColumn === undefined ? undefined : { columnId: String(data.sortColumn), direction: data.sortDirection }
+    );
+  }, []);
+  // A sort on a column the configuration does not have (or on a grid with sorting off) is not applied or reported.
+  const enableSorting = resolved?.behavior.enableSorting ?? false;
+  const effectiveSort = React.useMemo<DataGridSortSetting | undefined>(() => {
+    if (!userSort) return undefined;
+    if (visibleColumns.length === 0) return userSort; // columns still loading: keep it until they are known
+    return enableSorting && visibleColumns.some(c => c.name === userSort.columnId) ? userSort : undefined;
+  }, [userSort, visibleColumns, enableSorting]);
+  const fluentSortState = React.useMemo(
+    () => ({ sortColumn: effectiveSort?.columnId, sortDirection: effectiveSort?.direction ?? ('ascending' as const) }),
+    [effectiveSort]
+  );
+
   const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(() => {
     if (!resolved) return [];
     const columns = visibleColumns.map(col =>
@@ -1528,16 +1557,19 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             state={chipState}
             onStateChange={setChipState}
             theme={theme}
-            // Always passing `onSortChange` so the chevron menu always renders
-            // (HeaderCellContent hides the trigger when BOTH descriptor and
-            // onSortChange are undefined). The actual sort is still applied
-            // by Fluent v9's native `sortable={true}` header click — the menu
-            // items just give a discoverable surface for the same action.
-            onSortChange={() => {
-              // no-op — Fluent v9 native sort is wired via `sortable` on the
-              // DataGrid below; future enhancement: pass through to Fluent
-              // sort state explicitly so the menu can drive sort programmatically.
-            }}
+            // "A to Z" / "Z to A" set the grid's sort (see the Sort block above). With sorting off there are no sort
+            // items, and a column with no filter either shows a plain label. No `sortDirection`: Fluent's header cell
+            // already draws the sort arrow.
+            onSortChange={
+              enableSorting
+                ? next =>
+                    setUserSort(
+                      next === null
+                        ? undefined
+                        : { columnId: col.name, direction: next === 'asc' ? 'ascending' : 'descending' }
+                    )
+                : undefined
+            }
           />
         ),
         renderCell: item => {
@@ -1622,6 +1654,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     styles.visuallyHidden,
     rowActions,
     onRecordAction,
+    enableSorting,
   ]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1702,35 +1735,10 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     [hasUserColumnWidths]
   );
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Task 032 (FR-19, #2489): opt-in persisted settings. The grid keeps the user's sort in state ONLY when the host opted
-  // in (any of the three props); otherwise Fluent's sort stays uncontrolled, exactly as before. The grid stores nothing:
-  // `onSettingsChange` hands the host the widths + sort, `initialSettings` takes them back, `settingsResetKey` clears them.
-  // ─────────────────────────────────────────────────────────────────────────
-  const settingsEnabled =
-    initialSettings !== undefined || onSettingsChange !== undefined || settingsResetKey !== undefined;
-  const [userSort, setUserSort] = React.useState<DataGridSortSetting | undefined>(() =>
-    initialSettings?.sort && initialSettings.sort.columnId ? { ...initialSettings.sort } : undefined
-  );
-  const handleSortChange = React.useCallback<NonNullable<FluentDataGridProps['onSortChange']>>((_ev, data) => {
-    setUserSort(
-      data.sortColumn === undefined ? undefined : { columnId: String(data.sortColumn), direction: data.sortDirection }
-    );
-  }, []);
-  // A sort on a column the configuration does not have (or on a grid with sorting off) is not applied or reported.
-  const enableSorting = resolved?.behavior.enableSorting ?? false;
-  const effectiveSort = React.useMemo<DataGridSortSetting | undefined>(() => {
-    if (!userSort) return undefined;
-    if (visibleColumns.length === 0) return userSort; // columns still loading: keep it until they are known
-    return enableSorting && visibleColumns.some(c => c.name === userSort.columnId) ? userSort : undefined;
-  }, [userSort, visibleColumns, enableSorting]);
-  const fluentSortState = React.useMemo(
-    () => ({ sortColumn: effectiveSort?.columnId, sortDirection: effectiveSort?.direction ?? ('ascending' as const) }),
-    [effectiveSort]
-  );
-
-  // Report a change. Compared with what was last reported (or handed in), so nothing is reported on mount, in StrictMode,
-  // or when a state update produced the same settings. The latest callback is read from a ref (an inline one is fine).
+  // Task 032 (FR-19, #2489): report a change of widths or sort (the sort state is declared above `tableColumns`, which
+  // the column menu sets). Compared with what was last reported (or handed in), so nothing is reported on mount, in
+  // StrictMode, or when a state update produced the same settings. The latest callback is read from a ref (an inline
+  // one is fine).
   const onSettingsChangeRef = React.useRef(onSettingsChange);
   React.useEffect(() => {
     onSettingsChangeRef.current = onSettingsChange;
@@ -2065,8 +2073,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               selectedItems={selectedRowIds}
               onSelectionChange={handleSelectionChange}
               sortable={resolved.behavior.enableSorting}
-              // Task 032: controlled sort only when the host opted in; otherwise Fluent's own uncontrolled sort.
-              {...(settingsEnabled ? { sortState: fluentSortState, onSortChange: handleSortChange } : {})}
+              // Always controlled, so the column menu and a header-cell click share one sort (see the Sort block).
+              sortState={fluentSortState}
+              onSortChange={handleSortChange}
               resizableColumns={resolved.behavior.enableColumnResize}
               columnSizingOptions={columnSizingOptions}
               resizableColumnsOptions={resizableColumnsOptions}

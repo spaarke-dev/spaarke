@@ -34,6 +34,3 @@ src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage
 src/solutions/ApExport/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
 src/solutions/ApExport/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
 src/solutions/ApExport/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #3052 | resolveSharedLibDeps plugin and aliases; src/solutions/vite.wizard.shared.ts exists, needs parameters before these adopt it.
-
-# --- Tracked: Smart To Do and Email host copies (#2972, #2973) ---
-src/solutions/LegalWorkspace/src/services/DataverseService.ts | src/solutions/SmartTodo/src/services/DataverseService.ts | #2972 | SmartTodo page keeps a drifted copy of the workspace data service; shared to-do service planned.

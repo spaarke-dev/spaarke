@@ -10,7 +10,7 @@
  * attached to a SECURE record landed in the shared BU container; SPE permissions are additive-only,
  * so nothing retracted that afterwards.
  *
- * **Migrated 2026-09-03** onto `@spaarke/sdap-client`'s `SdapApiClient`, retiring the parallel
+ * **Migrated 2026-09-03** onto the shared `SdapApiClient` (then `@spaarke/sdap-client`, now `services/sdap`), retiring the parallel
  * client that used to live beside this file at `./SdapApiClient.ts`. There were THREE upload
  * implementations in the repo (this one, `EntityCreationService`'s raw inline `fetch`, and the
  * shared package); this was the last of the three to converge. Upload behaviour — the explicit
@@ -26,10 +26,10 @@
  * @version 2.0.0
  */
 
-import type { SdapApiClient } from '@spaarke/sdap-client';
+import type { SdapApiClient } from '../sdap';
 import type { ILogger, SpeFileMetadata, ServiceResult, FileUploadRequest } from './types';
 import { consoleLogger } from './types';
-import { UploadNameConflictError } from '@spaarke/sdap-client';
+import { UploadNameConflictError } from '../sdap';
 
 /**
  * Service for uploading files to SharePoint Embedded.

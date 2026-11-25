@@ -25,6 +25,7 @@ import { DeleteRegular } from '@fluentui/react-icons';
 import type { AuthoringCatalog, CatalogCategory } from '../authoringService';
 import { emptyRow } from '../ruleDraft';
 import type { FilterRow, RelativeDateDraft, ValueKind } from '../ruleDraft';
+import { fieldLabel } from '../stepCommon';
 
 const useStyles = makeStyles({
   rows: {
@@ -242,6 +243,8 @@ interface RowEditorProps {
   row: FilterRow;
   /** The columns this row may choose: the table's, less those a sibling row already tests. */
   columns: readonly string[];
+  /** Display names of the columns, by logical name (the catalog's `fieldLabels`); a column with none shows its logical name. */
+  columnLabels: Readonly<Record<string, string>> | undefined;
   /** The catalog's triage categories when this row's column is the triage column; otherwise null. */
   categories: readonly CatalogCategory[] | null;
   issue: string | undefined;
@@ -251,7 +254,18 @@ interface RowEditorProps {
   onRemove: () => void;
 }
 
-const RowEditor: React.FC<RowEditorProps> = ({ catalog, row, columns, categories, issue, testId, disabled, onChange, onRemove }) => {
+const RowEditor: React.FC<RowEditorProps> = ({
+  catalog,
+  row,
+  columns,
+  columnLabels,
+  categories,
+  issue,
+  testId,
+  disabled,
+  onChange,
+  onRemove,
+}) => {
   const styles = useStyles();
   const canWindow = catalog.operators.rangeLower.length > 0 && catalog.operators.rangeUpper.length > 0;
 
@@ -271,7 +285,7 @@ const RowEditor: React.FC<RowEditorProps> = ({ catalog, row, columns, categories
           <option value="">Choose a column</option>
           {columns.map(column => (
             <option key={column} value={column}>
-              {column}
+              {fieldLabel(columnLabels, column)}
             </option>
           ))}
         </Select>
@@ -445,6 +459,8 @@ export interface FilterRowsEditorProps {
   entity: string;
   /** Every column the table offers (the catalog's `authorableFields` for it). */
   columns: readonly string[];
+  /** The table's column display names (the catalog's `fieldLabels` for it). The option VALUE stays the logical name. */
+  columnLabels?: Readonly<Record<string, string>>;
   rows: FilterRow[];
   onChange: (rows: FilterRow[]) => void;
   /** What the wizard found cannot be written into the rule, by row id. */
@@ -460,6 +476,7 @@ export const FilterRowsEditor: React.FC<FilterRowsEditorProps> = ({
   catalog,
   entity,
   columns,
+  columnLabels,
   rows,
   onChange,
   issues,
@@ -482,7 +499,10 @@ export const FilterRowsEditor: React.FC<FilterRowsEditorProps> = ({
           row={row}
           // A column can be tested once in a filter (the grammar keys a filter by column), so a sibling's column is not offered.
           columns={columns.filter(c => c === row.field || !used.has(c))}
-          categories={entity === catalog.triage.entity && row.field === catalog.triage.field ? catalog.triage.categories : null}
+          columnLabels={columnLabels}
+          categories={
+            entity === catalog.triage.entity && row.field === catalog.triage.field ? catalog.triage.categories : null
+          }
           issue={issues[row.id]}
           testId={`${testId}-${index}`}
           disabled={disabled}

@@ -162,16 +162,6 @@ export default defineConfig({
       // + `useComposeLaunch` from `@spaarke/compose-components` (barrel).
       // Mirrors the daily-briefing entry above.
       "@spaarke/compose-components": path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
-      // @spaarke/sdap-client — pulled in transitively via
-      // @spaarke/ui-components/services/EntityCreationService.ts (Phase G of
-      // multi-container-multi-index-r1 / PR #369). Mirrors the alias already
-      // present in CreateMatter/Project/Event/WorkAssignmentWizard +
-      // SmartTodo. Source-resolves rather than dist-resolves so no pre-build
-      // is required.
-      "@spaarke/sdap-client": path.resolve(
-        __dirname,
-        "../../client/shared/Spaarke.SdapClient/src",
-      ),
     },
     // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
     // .gitignore) never silently shadow source. See Task 112 (2026-05-22).

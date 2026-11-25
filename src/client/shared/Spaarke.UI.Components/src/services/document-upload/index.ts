@@ -33,9 +33,10 @@ export { consoleLogger } from './types';
 // SDAP API Client — NOT re-exported from here any more (2026-09-03).
 //
 // `./SdapApiClient.ts` was this package's own parallel upload client, one of three in the repo. It
-// is deleted; `FileUploadService` now takes `@spaarke/sdap-client`'s client. Import it from there:
+// is deleted; `FileUploadService` now takes the shared SDAP client (`../sdap`, the former
+// `@spaarke/sdap-client` package, folded into this one 2026-11-24). Import it from the main barrel:
 //
-//     import { SdapApiClient } from '@spaarke/sdap-client';
+//     import { SdapApiClient } from '@spaarke/ui-components';
 //
 // Its `SdapApiClientOptions` / `OnUnauthorizedCallback` types went with it. The replacement config
 // is `{ baseUrl, authenticatedFetch }` (ADR-028) — there is no `getAccessToken` / `onUnauthorized`

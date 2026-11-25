@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (Amended 2026-11-24)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-11-24 (`@spaarke/compose-components` sanctioned: Compose document-editing model, TipTap quarantine; `@spaarke/ai-outputs` retired into `@spaarke/ai-widgets`; previous: 2026-11-18 Pattern D feature packages sanctioned: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`; previous: 2026-11-13 census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
+> **Last Updated**: 2026-11-24 (`@spaarke/sdap-client` folded into `@spaarke/ui-components` (`src/services/sdap`), so no Grandfathered package remains; `@spaarke/compose-components` sanctioned: Compose document-editing model, TipTap quarantine; `@spaarke/ai-outputs` retired into `@spaarke/ai-widgets`; previous: 2026-11-18 Pattern D feature packages sanctioned: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`; previous: 2026-11-13 census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
 
 ---
 
@@ -53,7 +53,7 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 **Decision**: the table below is the complete list of shared packages (every `src/client/shared/*/package.json`).
 
 - **Sanctioned**: has an ADR-backed contract. Extend it before adding anything new.
-- **Grandfathered — under review**: existed before this census and was never assessed against the three-test bar above. Each one may be used and extended. Each one is later either sanctioned (by an amendment that adds an ADR citation) or consolidated into a sanctioned package. A grandfathered package is not a precedent for adding another.
+- **Grandfathered — under review**: existed before this census and was never assessed against the three-test bar above. Each one may be used and extended. Each one is later either sanctioned (by an amendment that adds an ADR citation) or consolidated into a sanctioned package. A grandfathered package is not a precedent for adding another. None remain since 2026-11-24; the status stays defined so the census test can still parse and reject it.
 
 **Enforced by**: `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs`. It fails when a folder is missing from this table, when the table lists a package that does not exist, and when the table and the test's census disagree on a package's status. Adding a package therefore takes an ADR amendment and a census entry together.
 
@@ -66,7 +66,6 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 | `@spaarke/events-components` | `Spaarke.Events.Components` | Sanctioned | Events + Tasks components shared by the EventsPage code page and the SpaarkeAi Calendar widget (named in the 2026-07-12 amendment) |
 | `@spaarke/notifications` | `Spaarke.Notifications` | Sanctioned | Host-agnostic notification-spine client: SignalR delivery with poll fallback (ADR-047) |
 | `@spaarke/ai-widgets` | `Spaarke.AI.Widgets` | Sanctioned | Workspace + context widgets for the three-pane shell, including the internal output / source pane widgets in `src/outputs` (ADR-030 pane event bus, ADR-031 stage lifecycle) |
-| `@spaarke/sdap-client` | `Spaarke.SdapClient` | Grandfathered — under review | SDAP API client used by PCF and TS apps (18 consumers); overlap with the BFF adapters in `@spaarke/ui-components` not yet assessed |
 | `@spaarke/smart-todo-components` | `Spaarke.SmartTodo.Components` | Sanctioned | Smart To Do feature package: SmartTodo code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
 | `@spaarke/communication-components` | `Spaarke.Communication.Components` | Sanctioned | Communications feature package: 3 PCFs (deep imports), Office add-ins, ai-widgets, 4 code pages (2026-11-18 Pattern D amendment) |
 | `@spaarke/daily-briefing-components` | `Spaarke.DailyBriefing.Components` | Sanctioned | Daily Briefing feature package: DailyBriefing code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
@@ -80,6 +79,7 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 - 2026-11-18: `@spaarke/smart-todo-components`, `@spaarke/communication-components` and `@spaarke/daily-briefing-components` sanctioned as Pattern D feature packages (amendment below).
 - 2026-11-24: `@spaarke/compose-components` sanctioned (Compose amendment below).
 - 2026-11-24: `@spaarke/ai-outputs` retired. `@spaarke/ai-widgets` was its only importer; its widgets and types moved into `src/outputs` there, internal (not re-exported from the barrel). The registries key them by the `OutputWidgetType` / `SourceWidgetType` enums, and its duplicate pane-event and chat-session types were dropped for SprkChat's `IAiPaneEvent` / `IChatSession`.
+- 2026-11-24: `@spaarke/sdap-client` retired, the last Grandfathered package. It failed the three-test bar on its own (no contract distinct from ui-components' BFF services, no dependency to quarantine, two real importers — ui-components and DocumentUploadWizard — not the 18 its row claimed). The client moved into `@spaarke/ui-components` (`src/services/sdap`), exported from the main barrel only, not `pcf-safe`. Its drive-keyed `downloadFile` / `deleteFile` / `getFileMetadata` were deleted (P-2: they called retired BFF routes and had no callers); reads and deletes stay on the document-id routes. The stale listings, aliases, path maps and PCF stubs went with it (P-9, P-10).
 
 ---
 

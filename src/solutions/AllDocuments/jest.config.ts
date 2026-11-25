@@ -10,9 +10,9 @@ import type { Config } from 'jest';
  *
  * Module mapping resolves @spaarke/* packages to their source trees so tests
  * don't require a dist build of the shared libraries. ESM-only transitive
- * imports of the @spaarke/ui-components barrel (marked, d3-force,
- * @spaarke/sdap-client) are mapped to tiny CJS stubs in src/__mocks__/ —
- * the same three stubs proven in SpaarkeAi + WorkspaceLayoutWizard.
+ * imports of the @spaarke/ui-components barrel (marked, d3-force) are
+ * mapped to tiny CJS stubs in src/__mocks__/ (sdap-client had a third until
+ * it moved into ui-components, 2026-11-24) — the stubs proven in SpaarkeAi.
  *
  * @see src/solutions/WorkspaceLayoutWizard/jest.config.ts — reference config
  */
@@ -30,7 +30,6 @@ const config: Config = {
     // ESM-only packages ts-jest's CommonJS transform can't consume — stubs.
     '^d3-force$': '<rootDir>/src/__mocks__/d3-force.ts',
     '^marked$': '<rootDir>/src/__mocks__/marked.ts',
-    '^@spaarke/sdap-client$': '<rootDir>/src/__mocks__/sdap-client.ts',
     // Dedupe React — force a single instance across workspace-linked libs.
     '^react$': '<rootDir>/node_modules/react',
     '^react/(.*)$': '<rootDir>/node_modules/react/$1',

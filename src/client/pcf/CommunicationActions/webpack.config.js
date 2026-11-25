@@ -16,13 +16,11 @@
  *   3. `module.rules[1]` — Tree-shaking marker for `@fluentui/react-icons` so
  *      the bundle doesn't pull in the ~6.8MB icon set.
  *
- *   4. `@spaarke/sdap-client$: false` — the shared lib's services barrel
- *      re-exports EntityCreationService (imports @spaarke/sdap-client); this
- *      PCF only uses TODO_REGARDING_CATALOG + applyResolverFields +
- *      buildRecordUrl. Stub the unused package so webpack tree-shakes the
- *      dead import path (same workaround as RegardingResolver).
+ *   (A fourth item, a `@spaarke/sdap-client$: false` stub, was removed on
+ *   2026-11-24: that client moved into @spaarke/ui-components itself, so
+ *   there is no separate package left to stub.)
  *
- *   5. `pdfjs-dist$` / `mammoth$: false` (task 092, master build/test baseline
+ *   4. `pdfjs-dist$` / `mammoth$: false` (task 092, master build/test baseline
  *      repair, 2026-10-04) — `@spaarke/ui-components`'s root barrel does
  *      `export * from './SprkChat'` alongside `export * from './EmailComposer'`
  *      in the SAME `components/index.ts` module, so ANY import from
@@ -40,7 +38,7 @@
  *      [babelLoader]`) has no `node_modules` exclude, so it tries to
  *      re-transpile vendor ESM that was never meant to be re-transpiled. This
  *      PCF never calls the chat-attachment extraction path, so stub both
- *      packages the same way `@spaarke/sdap-client` is stubbed above —
+ *      packages (the way an unused `@spaarke/sdap-client` once was) —
  *      smallest surface, no change to `@spaarke/ui-components` public exports,
  *      no change to any consumer's import statements.
  */
@@ -57,7 +55,6 @@ module.exports = {
     alias: {
       'react/jsx-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
-      '@spaarke/sdap-client$': false,
       // Loud stubs, not `false` — see pdfjsDistUnreachable.js for why.
       'pdfjs-dist$': path.resolve(__dirname, '../shared/stubs/pdfjsDistUnreachable.js'),
       'mammoth$': path.resolve(__dirname, '../shared/stubs/mammothUnreachable.js'),

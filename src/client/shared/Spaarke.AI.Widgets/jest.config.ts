@@ -21,14 +21,6 @@ const config: Config = {
     // tests. Mirrors src/solutions/SpaarkeAi/jest.config.ts (R5 task 038).
     // Added by ai-architecture-redesign-r2 task 021 (test-repair).
     '^d3-force$': '<rootDir>/src/__mocks__/d3-force.ts',
-    // `@spaarke/sdap-client` is not resolvable from this package's workspace
-    // (it lives on the PCF / Office Add-in module-resolution paths). Every
-    // test transitively importing @spaarke/ui-components/services/index fails
-    // because EntityCreationService.ts has a top-level
-    // `import { SdapApiClient } from '@spaarke/sdap-client'`. Map to a tiny
-    // stub. Mirrors src/solutions/SpaarkeAi/jest.config.ts (R6 Wave C-G3).
-    // Added by ai-architecture-redesign-r2 task 021 (test-repair).
-    '^@spaarke/sdap-client$': '<rootDir>/src/__mocks__/sdap-client.ts',
     // `marked` ships pure ESM that ts-jest's CommonJS transform can't consume.
     // Every test transitively importing @spaarke/ui-components/services/
     // renderMarkdown fails with "SyntaxError: Unexpected token 'export'" at

@@ -141,20 +141,25 @@ public sealed record OntologyAuthoringCatalog(
     IReadOnlyList<OntologyCatalogLane> Lanes);
 
 /// <summary>A table a rule may be about, with the fields and joins the compiler verifies for it. <paramref name="AuthorableFields"/>
-/// (task 102a) are the columns of this table a rule may name (<c>PolicyVersionValidator.AuthorableColumns</c>).</summary>
+/// (task 102a) are the columns of this table a rule may name (<c>PolicyVersionValidator.AuthorableColumns</c>).
+/// <paramref name="FieldLabels"/> (task 210, DI-169) maps each of those columns to its Dataverse display name, for the wizard to show; the
+/// field values stay logical names.</summary>
 public sealed record OntologyCatalogSubject(
     string Entity,
     IReadOnlyList<string> DateOnlyFields,
     IReadOnlyList<OntologyCatalogThresholdField> ThresholdFields,
     IReadOnlyList<OntologyCatalogJoin> Joins,
-    IReadOnlyList<string> AuthorableFields);
+    IReadOnlyList<string> AuthorableFields,
+    IReadOnlyDictionary<string, string> FieldLabels);
 
 /// <summary>A column a Threshold rule may compare, with the range Dataverse holds for it.</summary>
 public sealed record OntologyCatalogThresholdField(string Field, decimal Min, decimal Max);
 
 /// <summary>A clause table reachable from the subject through its one verified lookup. <paramref name="AuthorableFields"/> (task 102a)
-/// are the columns of the clause table a filter may name (the join path itself is not a filter field).</summary>
-public sealed record OntologyCatalogJoin(string Related, string Path, IReadOnlyList<string> DateOnlyFields, IReadOnlyList<string> AuthorableFields);
+/// are the columns of the clause table a filter may name (the join path itself is not a filter field). <paramref name="FieldLabels"/> (task 210)
+/// maps them to their Dataverse display names.</summary>
+public sealed record OntologyCatalogJoin(
+    string Related, string Path, IReadOnlyList<string> DateOnlyFields, IReadOnlyList<string> AuthorableFields, IReadOnlyDictionary<string, string> FieldLabels);
 
 /// <summary>
 /// One lane's authoring lists (task 102a, owner option A), each read from its server source:

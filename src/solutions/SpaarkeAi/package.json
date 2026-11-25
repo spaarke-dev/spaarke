@@ -44,7 +44,6 @@
     "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
     "legal-workspace": "file:../LegalWorkspace",
     "@spaarke/notifications": "file:../../client/shared/Spaarke.Notifications",
-    "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@tiptap/core": "^2.10.3",
     "@tiptap/extension-character-count": "^2.10.3",

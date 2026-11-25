@@ -160,14 +160,24 @@ public class SignalClosureService
     /// the same way (D-170, owner 2026-10-19) but is never re-raised.
     /// </summary>
     /// <remarks>
-    /// <b>Complete or reported (D-78; #2982, DI-162).</b> The policies are read in id-cursor pages (<see cref="ReadPoliciesNotInForceAsync"/>),
+    /// <para><b>Complete or reported (D-78; #2982, DI-162).</b> The policies are read in id-cursor pages (<see cref="ReadPoliciesNotInForceAsync"/>),
     /// so a catalogue past one Dataverse page is closed in full. A read that faults or runs past <paramref name="maxPages"/> pages is not a
     /// silent partial success: the policies read before it ARE closed (a retry only has the rest to do), and the outcome carries one
     /// <see cref="SignalClosureOutcome.PolicyFailures"/>, so <see cref="SignalClosureOutcome.IsComplete"/> is false and the job fails the run
-    /// (<c>policyFailures</c> in its result), as for any other policy it could not read.
+    /// (<c>policyFailures</c> in its result), as for any other policy it could not read.</para>
+    /// <para><b>Only the policies with an open Signal are selected (#3014, DI-164, task 209).</b> One paged read of the open Signals whose
+    /// policy is not in force (<see cref="ReadPoliciesWithOpenSignalsAsync"/>) names those policies; the per-policy selection
+    /// (<see cref="SelectOpenSignalsOfPolicyAsync"/>) and close then run for those only, so the Signal reads grow with the policies that still
+    /// have open Signals, not with every Off or Retired policy (ebilling switches record rules Off on every core-record delete). A policy
+    /// that read names no open Signal for has nothing to close: the per-policy selection would return no row. Which Signals close, and
+    /// how, is unchanged: a policy is closed only when the policy read returned it (D-170's set, as before), and its Signals are selected
+    /// and closed exactly as before. That read is bounded and reported the same way: a fault, or <paramref name="maxPages"/> pages with
+    /// more to come, adds one <see cref="SignalClosureOutcome.PolicyFailures"/> (the run fails), and the policies it did name are still
+    /// closed.</para>
     /// </remarks>
     /// <param name="pageSize">Policies per read; a test lowers it. Production uses <see cref="NotInForcePageSize"/>.</param>
-    /// <param name="maxPages">Pages per condition before the read is reported truncated; a test lowers it.</param>
+    /// <param name="maxPages">Pages per condition before the policy read is reported truncated, and pages of the open-Signal read; a test
+    /// lowers it.</param>
     internal async Task<SignalClosureOutcome> ClosePoliciesNotInForceAsync(
         CancellationToken ct, int pageSize = NotInForcePageSize, int maxPages = SignalEvaluator.MaxPages)
     {
@@ -175,10 +185,16 @@ public class SignalClosureService
         // re-raises nothing, unlike an Ontology policy (D-32): Billing has no evaluator, so nothing ever re-raises its Signals.
         var read = await ReadPoliciesNotInForceAsync(includeBilling: true, pageSize, maxPages, ct).ConfigureAwait(false);
 
+        // Task 209 (#3014): which of them still have an open Signal. No policy read: nothing to look for.
+        var withOpen = read.Policies.Count == 0
+            ? new PoliciesWithOpenSignals(new HashSet<Guid>(), 0, true)
+            : await ReadPoliciesWithOpenSignalsAsync(maxPages, ct).ConfigureAwait(false);
+
         var total = SignalClosureOutcome.None;
         foreach (var (policyId, code) in read.Policies)
         {
             ct.ThrowIfCancellationRequested();
+            if (!withOpen.PolicyIds.Contains(policyId)) continue; // no open Signal: the selection below would return no row
             try
             {
                 // No billing subject: the sweep reads every domain's policies (Ontology included), and sprk_signal has the invoice columns
@@ -196,6 +212,17 @@ public class SignalClosureService
             }
         }
 
+        if (!withOpen.IsComplete)
+        {
+            total = total with { PolicyFailures = total.PolicyFailures + 1 };
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
+                "The open Signals of the Off and Retired policies were not all read: {SignalsRead} were read, naming {PoliciesHandled} of the " +
+                "policies read, whose open Signals were handled ({Closed} closed); the policies of the Signals after them were not checked, so " +
+                "those Signals stay open until a run reads them. The run is reported failed.",
+                // Only the named policies the policy read also returned were handled: a race or a cut-short policy read can name others.
+                withOpen.SignalsRead, read.Policies.Keys.Count(withOpen.PolicyIds.Contains), total.Closed);
+        }
+
         if (!read.IsComplete)
         {
             total = total with { PolicyFailures = total.PolicyFailures + 1 };
@@ -206,6 +233,83 @@ public class SignalClosureService
         }
 
         return total;
+    }
+
+    /// <summary>The policies <see cref="ReadPoliciesWithOpenSignalsAsync"/> found an open Signal for, and whether it read to the end.</summary>
+    /// <param name="PolicyIds">The policy of every open Signal read.</param>
+    /// <param name="SignalsRead">The open Signals read, for the log.</param>
+    /// <param name="IsComplete">False when a page read faulted or the page bound was reached; the cause was logged at Error with the counts and
+    /// <paramref name="PolicyIds"/> is only the part read.</param>
+    private sealed record PoliciesWithOpenSignals(IReadOnlySet<Guid> PolicyIds, int SignalsRead, bool IsComplete);
+
+    /// <summary>
+    /// Task 209 (#3014, DI-164): the policies that are not in force AND still have an Open or Acknowledged Signal, from ONE paged read of
+    /// <c>sprk_signal</c> inner-joined to its policy, with D-170's conditions (<see cref="NotInForceConditions"/>, Off OR Inactive) and the
+    /// close's domain allowlist (<see cref="RuleDomains.AddClosableOnRetirementAllowlist"/>) on the joined policy: the same predicate as the
+    /// policy read, so it names every policy that read returns with an open Signal. Only the policy lookup is selected (it exists in every
+    /// environment). A Signal whose policy was deleted has no row to join and is never returned
+    /// (<see cref="CloseSignalsOfDeletedPoliciesAsync"/> handles it). <see cref="NotInForcePageSize"/> Signals per page, ordered by id, at most
+    /// <paramref name="maxPages"/> pages; a page fault or the bound ends the read, logged at Error with the counts, as an incomplete result
+    /// carrying the policies read so far.
+    /// </summary>
+    private async Task<PoliciesWithOpenSignals> ReadPoliciesWithOpenSignalsAsync(int maxPages, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_signal")
+        {
+            ColumnSet = new ColumnSet("sprk_policy"),
+            PageInfo = new PagingInfo { Count = NotInForcePageSize, PageNumber = 1 },
+        };
+        query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
+            OpenSignalStatuses());
+        query.AddOrder("sprk_signalid", OrderType.Ascending);
+        var policy = query.AddLink("sprk_policy", "sprk_policy", "sprk_policyid", JoinOperator.Inner);
+        var notInForce = new FilterExpression(LogicalOperator.Or);
+        foreach (var (attribute, value) in NotInForceConditions) notInForce.AddCondition(attribute, ConditionOperator.Equal, value);
+        policy.LinkCriteria.AddFilter(notInForce);
+        // The allowlist helper writes to a query's criteria; it reaches the joined policy's criteria through a carrier query, so the close's
+        // domain rule keeps one definition.
+        var domain = new QueryExpression("sprk_policy");
+        RuleDomains.AddClosableOnRetirementAllowlist(domain);
+        policy.LinkCriteria.AddFilter(domain.Criteria);
+
+        var policyIds = new HashSet<Guid>();
+        var signalsRead = 0;
+        for (var page = 1; ; page++)
+        {
+            EntityCollection result;
+            try
+            {
+                result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                    "The open Signals of the Off and Retired policies could not be read on page {Page} ({ExceptionType}); {SignalsRead} were read " +
+                    "in all, and the Signals after them were not checked this run.",
+                    page, ex.GetType().Name, signalsRead);
+                return new PoliciesWithOpenSignals(policyIds, signalsRead, false);
+            }
+
+            foreach (var row in result.Entities)
+            {
+                signalsRead++;
+                if (row.GetAttributeValue<EntityReference>("sprk_policy") is { } policyRef) policyIds.Add(policyRef.Id);
+            }
+
+            if (!result.MoreRecords) return new PoliciesWithOpenSignals(policyIds, signalsRead, true);
+
+            if (page >= maxPages)
+            {
+                _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "More than {MaxPages} pages of {PageSize} open Signals of the Off and Retired policies exist; {SignalsRead} were read in all, " +
+                    "and the Signals after them were not checked this run.",
+                    maxPages, NotInForcePageSize, signalsRead);
+                return new PoliciesWithOpenSignals(policyIds, signalsRead, false);
+            }
+
+            query.PageInfo.PageNumber = page + 1;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
     }
 
     /// <summary>Every ONTOLOGY policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), by id, with its code. The job's
@@ -226,8 +330,17 @@ public class SignalClosureService
     }
 
     /// <summary>Policies per "not in force" read: Dataverse's limit on the rows of one query, so N policies take ceil(N / 5,000) reads
-    /// per condition.</summary>
+    /// per condition. Also the page of the close's open-Signal read (<see cref="ReadPoliciesWithOpenSignalsAsync"/>).</summary>
     internal const int NotInForcePageSize = 5000;
+
+    /// <summary>D-170's "not in force" on <c>sprk_policy</c>: Off (<c>sprk_enabled</c> No) or Retired (<c>statecode</c> Inactive). The policy
+    /// read (<see cref="ReadPoliciesNotInForceAsync"/>, one read per condition) and the close's open-Signal read (both, OR-ed, on the joined
+    /// policy) take them from here, so the two cannot disagree.</summary>
+    private static readonly (string Attribute, object Value)[] NotInForceConditions = { ("sprk_enabled", false), ("statecode", 1) };
+
+    /// <summary>The statuses every open-Signal read here selects: Open and Acknowledged (a Resolved Signal is never read as open). One
+    /// definition for the three reads; a new array per call, so no two queries' conditions share one array of values.</summary>
+    private static object[] OpenSignalStatuses() => new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged };
 
     /// <summary>The not-in-force policies read, and whether the read reached the end of both conditions.</summary>
     /// <param name="Policies">Every policy read, by id, with its code (a policy both Off and Inactive appears once).</param>
@@ -244,7 +357,7 @@ public class SignalClosureService
     {
         var policies = new Dictionary<Guid, string>();
         var complete = true;
-        foreach (var (attribute, value) in new (string, object)[] { ("sprk_enabled", false), ("statecode", 1) })
+        foreach (var (attribute, value) in NotInForceConditions)
         {
             var condition = attribute == "sprk_enabled" ? "Off" : "Inactive";
             var read = await ReadPolicyPagesAsync(_entities, _logger, $"{condition} policies", new ColumnSet("sprk_policycode", RuleDomains.PolicyDomainColumn),
@@ -484,7 +597,7 @@ public class SignalClosureService
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
         query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
-            new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
+            OpenSignalStatuses());
         query.AddOrder("sprk_signalid", OrderType.Ascending);
 
         var signals = new List<(ExistingSignal, string?, DateTime?)>();
@@ -583,7 +696,7 @@ public class SignalClosureService
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
         query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
-            new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
+            OpenSignalStatuses());
         query.AddOrder("sprk_signalid", OrderType.Ascending);
         return query;
     }

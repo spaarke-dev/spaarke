@@ -10,7 +10,7 @@
 
 import * as React from 'react';
 import { Button, Input, Text, Textarea } from '@fluentui/react-components';
-import { RefusableField, useStepStyles } from '../stepCommon';
+import { conditionFieldLabels, fieldLabel, RefusableField, useStepStyles } from '../stepCommon';
 import type { StepBaseProps } from '../stepCommon';
 
 export interface WordingStepProps extends StepBaseProps {
@@ -37,15 +37,26 @@ export function tokensOf(template: string): string[] {
   return found;
 }
 
-export const WordingStep: React.FC<WordingStepProps> = ({ draft, onChange, errors, locked, eligibleFields, checking }) => {
+export const WordingStep: React.FC<WordingStepProps> = ({
+  catalog,
+  draft,
+  onChange,
+  errors,
+  locked,
+  eligibleFields,
+  checking,
+}) => {
   const styles = useStepStyles();
+  // Task 210 (DI-169): a value is offered by its column's display name; the token inserted is still `{{logicalName}}`.
+  const labels = conditionFieldLabels(catalog, draft.condition);
   const templateRef = React.useRef<HTMLTextAreaElement>(null);
 
   const insertToken = (field: string) => {
     const token = `{{${field}}}`;
     const element = templateRef.current;
     onChange(d => {
-      const at = element === null ? d.messageTemplate.length : Math.min(element.selectionStart, d.messageTemplate.length);
+      const at =
+        element === null ? d.messageTemplate.length : Math.min(element.selectionStart, d.messageTemplate.length);
       return { ...d, messageTemplate: `${d.messageTemplate.slice(0, at)}${token}${d.messageTemplate.slice(at)}` };
     });
   };
@@ -113,7 +124,7 @@ export const WordingStep: React.FC<WordingStepProps> = ({ draft, onChange, error
                 onClick={() => insertToken(field)}
                 data-testid={`rule-wizard-eligible-${field}`}
               >
-                {field}
+                {fieldLabel(labels, field)}
               </Button>
             ))}
           </div>

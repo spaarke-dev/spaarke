@@ -108,6 +108,13 @@ public static class AppConfigSeedScopes
     public const string RecordType = "record-type";
 
     /// <summary>
+    /// Tier 1 product-configuration reference tables with fixed primary keys (<c>sprk_eventtype_ref</c>,
+    /// <c>sprk_agreementtype</c>, <c>sprk_triagecategory</c>). Seeded by
+    /// <see cref="DataverseWebApiReferenceDataSeeder"/>: create-if-missing by id, drift reported, never overwritten (ISS-039).
+    /// </summary>
+    public const string ReferenceData = "reference-data";
+
+    /// <summary>
     /// DataGrid configurations (<c>sprk_gridconfiguration</c>). Wraps
     /// <c>scripts/seed-reconciliation-gridconfig.ps1</c>. See task 004
     /// §4b row 10 for the drift-resolution rationale.

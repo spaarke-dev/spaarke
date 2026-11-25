@@ -57,9 +57,11 @@ export {
 } from './services/document-upload';
 // `SdapApiClient` + `SdapApiClientOptions` + `OnUnauthorizedCallback` were REMOVED from this
 // surface 2026-09-03. They belonged to this package's parallel upload client, which is deleted —
-// `FileUploadService` now takes the one from `@spaarke/sdap-client`, so consumers construct it as:
+// `FileUploadService` now takes the shared SDAP client. Since 2026-11-24 (DEF-001) that client lives
+// in this package (`services/sdap`, formerly `@spaarke/sdap-client`) and is exported from the MAIN
+// barrel only — not from this PCF-safe entry, because no PCF uses it. Consumers construct it as:
 //
-//     import { SdapApiClient } from '@spaarke/sdap-client';
+//     import { SdapApiClient } from '@spaarke/ui-components';
 //     new FileUploadService(new SdapApiClient({ baseUrl, authenticatedFetch }), logger);
 
 // ─── Types (no React dependency) ────────────────────────────────────────────

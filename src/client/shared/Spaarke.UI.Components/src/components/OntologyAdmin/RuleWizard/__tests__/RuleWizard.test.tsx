@@ -263,11 +263,42 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     expect(document.body.textContent).not.toMatch(/sprk_(matter|invoice|workassignment|budgetrevision)/);
   });
 
+  it('shows each column by its display name and keeps the logical name as the value (DI-169)', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    click('rule-wizard-when-row-add');
+    expect(optionTexts('rule-wizard-when-row-0-field')).toEqual([
+      'Choose a column',
+      'Widget State',
+      'Due On',
+      'Colour',
+    ]);
+    expect(optionValues('rule-wizard-when-row-0-field')).toEqual(['', 'zz_state', 'zz_due', 'zz_colour']);
+
+    // The rule body written from the choice names the column by its logical name.
+    change('rule-wizard-when-row-0-field', 'zz_state');
+    change('rule-wizard-when-row-0-value', 'open');
+    const preview = byId('rule-wizard-body-preview').textContent as string;
+    expect(preview).toContain('"zz_state"');
+    expect(preview).not.toContain('Widget State');
+
+    click('rule-wizard-add-clause');
+    change('rule-wizard-clause-0-related', 'zz_note');
+    expect(optionTexts('rule-wizard-clause-0-row-0-field')).toEqual(['Choose a column', 'Note Kind', 'Noted On']);
+    expect(optionValues('rule-wizard-clause-0-row-0-field')).toEqual(['', 'zz_kind', 'zz_noted']);
+  });
+
+  it('shows a column by its logical name when the catalog names it no display name (an older BFF)', () => {
+    change('rule-wizard-subject', 'zz_gadget');
+    click('rule-wizard-when-row-add');
+    expect(optionTexts('rule-wizard-when-row-0-field')).toEqual(['Choose a column', 'zz_size']);
+  });
+
   it("offers a Threshold only the tables that have a measure, and only that table's measures", () => {
     change('rule-wizard-rule-type', 'Threshold');
     expect(optionValues('rule-wizard-subject')).toEqual(['', 'zz_widget']);
     change('rule-wizard-subject', 'zz_widget');
     expect(optionValues('rule-wizard-threshold-field')).toEqual(['', 'zz_load']);
+    expect(optionTexts('rule-wizard-threshold-field')).toEqual(['Choose a measure', 'Load (percent)']);
     expect(optionValues('rule-wizard-threshold-operator')).toEqual(['>=', '<=']);
     change('rule-wizard-threshold-field', 'zz_load');
     expect(byId('rule-wizard-threshold-range')).toHaveTextContent('0 to 250');
@@ -508,6 +539,11 @@ describe('RuleWizard - wording', () => {
     expect(maybe('rule-wizard-eligible-zz_due')).not.toBeNull();
     // An authorable column of the table that the BFF did not return is not offered.
     expect(maybe('rule-wizard-eligible-zz_colour')).toBeNull();
+
+    // Task 210 (DI-169): offered by the column's display name; the token inserted is still the logical name.
+    expect(byId('rule-wizard-eligible-zz_state')).toHaveTextContent('Widget State');
+    expect(byId('rule-wizard-eligible-zz_due')).toHaveTextContent('Due On');
+    expect(byId('rule-wizard-eligible-zz_state')).not.toHaveTextContent('zz_state');
 
     click('rule-wizard-eligible-zz_state');
     expect(valueOf('rule-wizard-message')).toBe('{{zz_state}}');
