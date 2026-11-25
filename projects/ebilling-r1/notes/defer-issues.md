@@ -770,7 +770,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-iss014 aa80d83b99: approval re-read every pollIntervalMs while firmNeeded, one review re-read when it clears; jest 667/0). Closes when the next master PR merges; reaches dev with the next Invoice Review page deploy. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 095d0 review (Codex P2 fix `546296be5c` covers only the re-read case) |
