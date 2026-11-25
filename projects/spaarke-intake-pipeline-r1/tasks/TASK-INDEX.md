@@ -54,7 +54,7 @@ External gates:
 
 | Task | Risk | Mitigation |
 |---|---|---|
-| 001 / 014 | First Container Apps resource. Engine wrapper on stdlib + lxml means Service Bus/Blob over REST; DLQ over REST may need the abandon-until-`MaxDeliveryCount` route | Escalation trigger in 001; spike in 008 |
+| 001 / 014 | First Container Apps resource; engine runs up to 10 min exceed the 5-min maximum Service Bus lock | Wrapper uses pinned Azure SDKs with `AutoLockRenewer` and explicit dead-letter (decided 2026-11-25); CVE gate in 003; spike in 008 |
 | 015 | Prior-markup preservation; Clean copy unresolved (spec Unresolved Q1) | Settled by the 008 spike with the accelerator; escalation trigger |
 | 017 / 024 / 021 | Authorization (fail-closed approve, requester-scoped status, external door) | Opus tier; auth/contract integration tests |
 | 040 | "Anyone" senders at intake mailboxes | Per-sender cap, kill switch, triage |

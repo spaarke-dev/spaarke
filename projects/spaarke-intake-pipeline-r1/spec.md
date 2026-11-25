@@ -109,7 +109,7 @@ r1 = design Phases 0–3 (owner clarification, 2026-11-25).
 1. **FR-01 Engine hosting (Container Apps Job).**
    - **What:** a Container Apps Job runs `segment_clauses`, `ooxml_redline`, `summary_table` and `check_outputs` unchanged.
      - It is built from `src/accelerators/core/engines/` on master.
-     - It uses Python 3.11, the standard library and `lxml` only.
+     - It runs on Python 3.11. The engines use the standard library and `lxml` only, as the accelerator ships them. The entrypoint (wrapper) layer alone uses the hash-pinned Azure SDKs (`azure-identity`, `azure-servicebus`, `azure-storage-blob`) for managed-identity auth, peek-lock with lock renewal, explicit dead-lettering with a reason, and conditional blob writes (owner decision 2026-11-25).
      - It consumes a Service Bus queue as an ADR-004 A2 consumer.
      - It reads its inputs (source `.docx`, edit plan) from, and writes its outputs (redline, external and clean `.docx`, check report) to, stamp-private blob storage, using the stamp's managed identity only.
    - **Acceptance:**
@@ -377,7 +377,7 @@ r1 = design Phases 0–3 (owner clarification, 2026-11-25).
 - ❌ MUST NOT add Dataverse plugins or enforce invariants only in client code.
 - ❌ MUST NOT add a hand-rolled timer `BackgroundService`.
 - ❌ MUST NOT edit eBilling code (`Services/Finance/Submission/**`) before eBilling UAT sign-off.
-- ❌ MUST NOT copy the accelerator engines. Build the image from `src/accelerators` on master, keeping Python 3.11, the standard library and `lxml` only.
+- ❌ MUST NOT copy the accelerator engines. Build the image from `src/accelerators` on master. The engines keep Python 3.11, the standard library and `lxml` only. Only the entrypoint layer adds the hash-pinned Azure SDKs (FR-01).
 - ❌ MUST NOT add a `.WithClientSecret(...)` site (ArchTests).
 
 ### Existing Patterns to Follow
@@ -399,14 +399,14 @@ r1 = design Phases 0–3 (owner clarification, 2026-11-25).
 
 ### Hot-Path Declaration
 
-Copied from the review decisions. **design.md does not yet carry this block** (see the Step 5 report).
+Canonical copy: design.md §8.5 (added 2026-11-25). Skill directives = Y because ADR-004 A2 edits `.claude/constraints/jobs.md` (task 007).
 
 ```xml
 <hot-path-declaration>
   <bff>Y</bff>
   <spaarkeai>Y</spaarkeai>
   <ci-workflows>Y</ci-workflows>
-  <skill-directives>N</skill-directives>
+  <skill-directives>Y</skill-directives>
   <root-claude-md>N</root-claude-md>
 </hot-path-declaration>
 ```
@@ -510,6 +510,7 @@ The External SPA (Front Door) is also touched (FR-13, FR-16).
 | Rejection / status | What does the requester get? | Every step updates status; decisions go in the Decision Record; a per-request "send email updates" option emails each status change | FR-05, FR-11, FR-12 |
 | Reuse: suggestion surface | Triage hint plus command, or Job B proposal queue? | Job B proposal queue (new proposal kind; triage supplies the signal) | FR-18; §11 row |
 | Accelerator coordination | Ownership and engine source | Standard stays accelerator-owned, pinned here; engines used from master after #3163, never copied; Python 3.11, stdlib + `lxml` | NFR-09; MUST NOT rule; FR-01 |
+| Engine wrapper dependencies (2026-11-25) | Wrapper on stdlib REST, or Azure SDKs? | Take the correct technical approach: the wrapper layer uses hash-pinned `azure-identity`, `azure-servicebus`, `azure-storage-blob`. Explicit dead-letter with reason, lock renewal past the 5-minute maximum lock for runs up to the 10-minute timeout, and maintained token and retry handling are A2 requirements that hand-written REST would re-implement in security-sensitive code. The engines stay stdlib + `lxml`; the image is CVE-gated (task 003) | FR-01; task 001 |
 
 ## Assumptions
 

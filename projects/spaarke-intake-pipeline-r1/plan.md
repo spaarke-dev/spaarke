@@ -65,7 +65,7 @@
 - NFR-09: pinned NDA standard version.
 - NFR-10: synthetic NDAs only.
 - No edits to `Services/Finance/Submission/` before eBilling UAT sign-off.
-- Engines are used from `src/accelerators/core/engines/` on master (after #3163), never copied (Python 3.11, stdlib + `lxml`).
+- Engines are used from `src/accelerators/core/engines/` on master (after #3163), never copied (Python 3.11, stdlib + `lxml`). The entrypoint layer alone uses the hash-pinned Azure SDKs (FR-01, decided 2026-11-25).
 
 ### Key Technical Decisions
 

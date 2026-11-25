@@ -284,6 +284,37 @@ The alternative, migrating before eBilling's UAT, saves one UAT cycle but tests 
 | Request-type hint in triage + "Submit as request" action | `CommunicationTriageAi` (category, priority, summary), `CategoryRoutingGate` | Extend the triage Action's output; no new AI call | Requests sent to ordinary mailboxes never reach the pipeline unless re-sent |
 | Engine host: Container Apps Job (§5 A, decided) | None (no Container Apps Jobs in `infra/`) | The engines themselves are reused unchanged | No server-side marked-up NDA without a port to C# |
 
+## 8.5 Hot-path declaration and Placement Justification (root CLAUDE.md §10)
+
+Added 2026-11-25 at the start of execution. The canonical copy lives here; `spec.md` carries the same block.
+
+```xml
+<hot-path-declaration>
+  <bff>Y</bff>
+  <spaarkeai>Y</spaarkeai>
+  <ci-workflows>Y</ci-workflows>
+  <skill-directives>Y</skill-directives>
+  <root-claude-md>N</root-claude-md>
+</hot-path-declaration>
+```
+
+- **Skill directives = Y:** ADR-004 A2 edits `.claude/constraints/jobs.md` and `.claude/adr/` (task 007, main session only).
+- **External SPA** (Front Door) is also touched (FR-13, FR-16).
+
+**Placement Justification** (`.claude/constraints/bff-extensions.md`; ≤ 60 MB publish-size ceiling, delta measured per task):
+- **Orchestrator, harness registry, NDA harness (C# side), approval, status, run admin, doors:** in the BFF.
+  - ADR-052 B2: every stage uses BFF domain code (routing, AI dispatch, write path, ownership, Decision Record).
+  - B3: low volume.
+  - F5 is weak: the only wait is one approval, persisted as a status.
+  - The hand-rolled state machine has its written reason in §4.
+  - Exit path: ADR-052:79, behind an ADR-032 kill switch.
+- **Redline engines:** in a Container Apps Job, owner-approved 2026-11-25 (§5; ADR-052:76–77).
+  - Why: heavy custom runtime (Python + `lxml`), isolation for untrusted `.docx` (F4), and no BFF code is needed.
+  - Guardrails: the stamp's managed identity, app-only, no BFF calls, per-stamp Bicep.
+  - Dependencies: the engines use stdlib + `lxml`. Only the entrypoint layer uses the hash-pinned Azure SDKs, for lock renewal, explicit dead-lettering and conditional blob writes (decided 2026-11-25). No package is added to the BFF.
+- **Status emails and email return:** in the BFF, through the existing `CommunicationService`.
+- **MCP tools:** in the BFF's existing MCP server.
+
 ## 9. Phasing (first cut)
 
 | Phase | Scope | Gate |

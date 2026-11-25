@@ -12,4 +12,8 @@ The full rationale for each decision lives where it was made; this log indexes t
 | 2026-11-25 | Q7: intake mailboxes + suggest-only at other mailboxes | design.md §3.1 |
 | 2026-11-25 | §10.1 cleanup split across Phase 0 / 1 / 2; item 5b → #3162 | design.md §10.1, notes/section10-verification-2026-11-25.md |
 | 2026-11-25 | ADR-004 Amendment A2 (path B): queue consumers outside the BFF | docs/adr/ADR-004-async-job-contract.md |
+| 2026-11-25 | Engine wrapper uses hash-pinned Azure SDKs (azure-identity, azure-servicebus, azure-storage-blob); engines stay stdlib + lxml. Reason: explicit dead-letter with reason, lock renewal past the 5-min maximum lock, maintained token and retry handling (owner: "take the correct technical approach") | spec.md FR-01 + Owner Clarifications; task 001 |
+| 2026-11-25 | design.md §8.5 gets the hot-path declaration (skill-directives = Y) and the Placement Justification | design.md §8.5 |
+| 2026-11-25 | Engine completion = Job Contract on the existing BFF jobs queue, handled by an `IJobHandler` (not a dedicated completion queue, which would need a second hosted processor) | tasks 002, 014 |
+| 2026-11-25 | `agreement-edit-plan` is a new catalogued Action; `agreement-review`'s closed output contract (consumed by the Console) is unchanged | task 004 |
 | 2026-11-25 | Spec interview: r1 = Phases 0–3; approve from Console and MDA (one endpoint); team queue then claim; manual triage; any sender + cap; preserve prior markup; per-status email opt-in; suggestion = Job B proposal kind | spec.md "Owner Clarifications" |
