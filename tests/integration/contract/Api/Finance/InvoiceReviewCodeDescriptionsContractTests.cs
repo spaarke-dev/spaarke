@@ -33,12 +33,21 @@ public sealed class InvoiceReviewCodeDescriptionsContractTests
         public readonly Dictionary<Guid, List<Entity>> Sets = [];
         public readonly HashSet<Guid> Faulted = [];
         public readonly List<Guid> SetReads = [];
+        /// <summary>The shared sets a set without activity or expense codes falls back to, by name ("UTBMS Activity", "UTBMS Expense").</summary>
+        public readonly Dictionary<string, Guid> SharedByName = [];
 
         public void Attach(World world)
         {
             world.CodeSetEntities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression query, CancellationToken _) =>
                 {
+                    if (query.Criteria.Conditions.SingleOrDefault(c => c.AttributeName == "sprk_name") is { } byName)
+                    {
+                        return new EntityCollection(SharedByName.TryGetValue((string)byName.Values[0], out var shared)
+                            ? [new Entity("sprk_billingcodeset", shared)]
+                            : []);
+                    }
+
                     var setId = (Guid)query.Criteria.Conditions
                         .Single(c => c.AttributeName is "sprk_billingcodesetid" or "sprk_codeset").Values[0];
                     if (query.EntityName == "sprk_billingcodeset")
@@ -154,6 +163,27 @@ public sealed class InvoiceReviewCodeDescriptionsContractTests
         review.Should().NotBeNull("a code list that cannot be read must never fail the review");
         review!.Lines.Should().HaveCount(2);
         review.Lines.Select(l => l.Codes.Task).Should().OnlyContain(c => c.Code == "L190" && c.Description == null && c.FirmDescription == null);
+    }
+
+    // Review round 1 (F3): the seeded task sets keep their activity and expense codes in the shared "UTBMS Activity" / "UTBMS Expense" sets, so the
+    // common case goes through the resolver's shared-set fallback; a missing shared set leaves that kind without descriptions, the review still loads.
+    [Fact(DisplayName = "GetReview_TaskOnlySet_TakesActivityDescriptionsFromTheSharedSet_AndAMissingSharedSetLeavesNull")]
+    public async Task GetReview_TaskOnlySet_TakesActivityDescriptionsFromTheSharedSet_AndAMissingSharedSetLeavesNull()
+    {
+        var sharedActivity = Guid.Parse("20000000-0000-4000-8000-0000000000ac");
+        var catalog = new CodeCatalog();
+        catalog.Sets[SetA] = [Code(BillingCodeKind.Task, "L190", "Pleadings")];
+        catalog.Sets[sharedActivity] = [Code(BillingCodeKind.Activity, "A103", "Draft/revise")];
+        catalog.SharedByName[CodeSetResolver.ActivitySetName] = sharedActivity; // no "UTBMS Expense" set
+        var world = new World();
+        catalog.Attach(world);
+        world.AddLine(1, InvoiceLineStatus.Flagged, extraction: Extraction(SetA, "MatterType", "L190", "L190", "A103", "E101"));
+
+        var codes = await ReadCodesAsync(world);
+
+        codes.Task.Description.Should().Be("Pleadings");
+        codes.Activity.Description.Should().Be("Draft/revise", "a task-only set takes its activity codes from the shared set");
+        codes.Expense.Description.Should().BeNull("the shared expense set is missing");
     }
 
     [Fact(DisplayName = "GetReview_SeveralLinesAndNoRecordedSet_LoadsEachDistinctSetOnceAndNoneForUncodedLines")]

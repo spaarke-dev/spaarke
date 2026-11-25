@@ -63,7 +63,7 @@ export function RuleGroups({ lines, canWrite, busy, onSelectLine, onApply }: Rul
         const Icon = g.severity === 'Critical' ? ErrorCircle16Filled : g.severity === 'Warning' ? Warning16Filled : Info16Regular;
         const tone = g.severity === 'Critical' ? s.critical : g.severity === 'Warning' ? s.warn : s.info;
         return (
-          <section key={g.key} className={s.group} data-testid={`rule-group-${g.key}`} aria-label={`${g.label}, ${g.lines.length} lines`}>
+          <section key={g.key} className={s.group} data-testid={`rule-group-${g.key}`} aria-label={`${g.label}, ${g.lines.length} ${g.lines.length === 1 ? 'line' : 'lines'}`}>
             <div className={s.head}>
               <Icon className={tone} />
               <Text weight="semibold" className={s.title}>
@@ -81,7 +81,7 @@ export function RuleGroups({ lines, canWrite, busy, onSelectLine, onApply }: Rul
         );
       })}
       {checks.length > 0 && (
-        <Caption1 className={s.muted} data-testid="other-checks-heading">
+        <Caption1 className={s.muted} role="heading" aria-level={3} data-testid="other-checks-heading">
           Other checks (not billing rules)
         </Caption1>
       )}
@@ -89,7 +89,7 @@ export function RuleGroups({ lines, canWrite, busy, onSelectLine, onApply }: Rul
         const Icon = c.severity === 'Warning' ? Warning16Filled : Info16Regular;
         const tone = c.severity === 'Warning' ? s.warn : s.info;
         return (
-          <section key={c.key} className={s.group} data-testid={`check-group-${c.key}`} aria-label={`${c.label}, ${c.lines.length} lines`}>
+          <section key={c.key} className={s.group} data-testid={`check-group-${c.key}`} aria-label={`${c.label}, ${c.lines.length} ${c.lines.length === 1 ? 'line' : 'lines'}`}>
             <div className={s.head}>
               <Icon className={tone} />
               <Text weight="semibold" className={s.title}>

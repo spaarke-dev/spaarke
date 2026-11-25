@@ -481,7 +481,10 @@ public sealed class InvoiceReviewReadService
         var pdfTask = ReadInvoicePdfFileIdAsync(_entities, invoiceId, ct);
         var canWriteTask = CallerReadCheck.CheckAsync(
             _authorization, caller, FinanceAuthorizationFilter.InvoiceEntitySet, "ebilling.invoice.decide", invoiceId, _logger, "Invoice review", ct);
-        await Task.WhenAll(submissionTask, historyTask, rosterTask, thresholdTask, pdfTask, canWriteTask).ConfigureAwait(false);
+        // The recorded code set does not depend on the reliability threshold, so the sets load beside the other reads, off the critical path.
+        var descriptionsTask = LoadCodeDescriptionsAsync(
+            lineRows.Select(l => LineExtraction.Parse(l.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence), null)), ct);
+        await Task.WhenAll(submissionTask, historyTask, rosterTask, thresholdTask, pdfTask, canWriteTask, descriptionsTask).ConfigureAwait(false);
 
         var submission = submissionTask.Result;
         var threshold = thresholdTask.Result;
@@ -497,7 +500,7 @@ public sealed class InvoiceReviewReadService
         var bySequence = lineRows.ToDictionary(l => l.Id, l => l.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0);
         var extractions = lineRows.ToDictionary(
             l => l.Id, l => LineExtraction.Parse(l.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence), threshold));
-        var descriptions = await LoadCodeDescriptionsAsync(extractions.Values, ct).ConfigureAwait(false);
+        var descriptions = descriptionsTask.Result;
         var lines = new List<ReviewLineDto>(lineRows.Count);
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
         {
@@ -771,22 +774,23 @@ public sealed class InvoiceReviewReadService
     /// </summary>
     private async Task<CodeDescriptions> LoadCodeDescriptionsAsync(IEnumerable<LineExtraction> extractions, CancellationToken ct)
     {
-        var sets = new Dictionary<(Guid, CodeSetSource), SetDescriptions?>();
-        foreach (var key in extractions.Where(e => e.CodeSetId is { } id && id != Guid.Empty).Select(e => (e.CodeSetId!.Value, e.CodeSetSource)).Distinct())
+        var keys = extractions.Where(e => e.CodeSetId is { } id && id != Guid.Empty).Select(e => (e.CodeSetId!.Value, e.CodeSetSource)).Distinct().ToList();
+        // The distinct sets (usually one per invoice) load in parallel: each load is several sequential Dataverse reads.
+        var loaded = await Task.WhenAll(keys.Select(async key =>
         {
             try
             {
                 var set = await _codeSets.LoadRecordedAsync(key.Item1, key.Item2, ct).ConfigureAwait(false);
-                sets[key] = set is null ? null : new SetDescriptions(Index(set.TaskCodes), Index(set.ActivityCodes), Index(set.ExpenseCodes));
+                return (Key: key, Set: set is null ? null : new SetDescriptions(Index(set.TaskCodes), Index(set.ActivityCodes), Index(set.ExpenseCodes)));
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogWarning("Invoice review: the code set {CodeSetId} could not be read ({ExceptionType}); its codes are shown without descriptions.", key.Item1, ex.GetType().Name);
-                sets[key] = null;
+                return (Key: key, Set: (SetDescriptions?)null);
             }
-        }
+        })).ConfigureAwait(false);
 
-        return new CodeDescriptions(sets);
+        return new CodeDescriptions(loaded.ToDictionary(l => l.Key, l => l.Set));
     }
 
     private static Dictionary<string, string> Index(IReadOnlyList<InvoiceCodeOption> options)
