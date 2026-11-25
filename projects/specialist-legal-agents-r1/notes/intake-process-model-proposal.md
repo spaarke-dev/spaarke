@@ -2,6 +2,7 @@
 
 > **Status:** proposal for owner discussion. Nothing decided beyond the owner decisions in §0. Not a spec.
 > **Evidence:** three read-only Fable code reviews of origin/master `b005279c4d` (invoice intake; content intake paths; routing, run records, outputs and return), with the key claims re-checked by hand. Paths are relative to `src/server/api/Sprk.Bff.Api/` unless stated.
+> **Superseded for design purposes (2026-11-25)** by `notes/spaarke-intake-pipeline-r1-design-draft.md`; kept as the evidence record.
 > **Related:** `notes/nda-current-state-2026-11-24.md` §5 and §8.
 
 ## 0. Owner decisions this builds on (2026-11-24)
