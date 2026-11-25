@@ -59,7 +59,11 @@ We want **one process model** for requests:
 
 Every request also files its content, so it reuses the filing level. Most filing is not a request, so it never creates a run.
 - **Console chat upload stays interactive.** It is a live conversation, not a pipeline.
-- **Email is a door into both levels.** It always files. It creates a request when the mail is a request: sent to an intake mailbox, or classified as one, for example an NDA arriving at the legal mailbox.
+- **Email is a door into both levels.** It always files. It creates a request only in two cases:
+  - the mail was sent to an **intake mailbox**;
+  - a person accepts a **suggestion** on mail at any other mailbox (§3.5, decided 2026-11-25).
+
+  Nothing creates a request automatically at an ordinary mailbox.
 
 ### 3.2 Records
 
@@ -108,7 +112,8 @@ Every request also files its content, so it reuses the filing level. Most filing
 
 | Door | Intake | Return |
 |---|---|---|
-| Email (intake mailbox or classified request) | Existing Graph intake; new step that creates a request | Reply from the shared legal mailbox with the outputs attached (`CommunicationService` shared-mailbox send is app-only and takes `AttachmentDocumentIds`, 35 MB). **Check:** In-Reply-To threading (§10) |
+| Email: intake mailbox | Existing Graph intake; new step that creates a request for every mail to a mailbox flagged as intake on `sprk_communicationaccount`. Classify sets the type. A reply on an existing request's thread becomes a new run on that request | Reply from the shared legal mailbox with the outputs attached (`CommunicationService` shared-mailbox send is app-only and takes `AttachmentDocumentIds`, 35 MB). Must thread under the requester's mail (§10 item 7, a Phase 2 dependency) |
+| Email: other mailboxes (suggest only) | Existing triage (`CommunicationTriageAi`) also returns a possible request type, as an extension of the same Action output with no extra AI call per mail. A person sees "Submit as request" on the communication and confirms. The confirm uses the same request-creation code as the intake mailbox. Never automatic | Same as the intake mailbox |
 | Front Door (External SPA) | Existing `POST /servicerequests` + document upload; new: enqueue a run when the draft arrives | Output documents filed on the request (already visible to the requester), plus a message regarding the request so the bell fires (the bell fires on messages, not documents) |
 | Copilot agent (and Teams via the agent) | New gated MCP tools on the Spaarke MCP server (mcp-r1): submit for review, request status | Status tool / widget with the output links |
 | Console upload | Existing upload; new "submit as a request" action | The run's outputs on the request |
@@ -273,6 +278,8 @@ The alternative, migrating before eBilling's UAT, saves one UAT cycle but tests 
 | Harness contract | None (invoice is closed) | — | Each request type would need its own pipeline |
 | Approve-then-resume | Task seam, Decision Record | New action | Nothing can wait for an attorney and continue |
 | MCP submit and status tools | mcp-r1 server | New tools | The Copilot/Teams door doesn't exist |
+| Intake-mailbox flag on `sprk_communicationaccount` | `sprk_accounttype` (Shared/Service/User), `sprk_autocreaterecords`, `sprk_receiveenabled` | None of them means "takes requests". Overloading `sprk_accounttype` would conflate who owns the mailbox with what it does | Every mail to the legal mailbox would need a manual submit, or none would become a request |
+| Request-type hint in triage + "Submit as request" action | `CommunicationTriageAi` (category, priority, summary), `CategoryRoutingGate` | Extend the triage Action's output; no new AI call | Requests sent to ordinary mailboxes never reach the pipeline unless re-sent |
 | Engine host: Container Apps Job (§5 A, decided) | None (no Container Apps Jobs in `infra/`) | The engines themselves are reused unchanged | No server-side marked-up NDA without a port to C# |
 
 ## 9. Phasing (first cut)
@@ -281,7 +288,7 @@ The alternative, migrating before eBilling's UAT, saves one UAT cycle but tests 
 |---|---|---|
 | **0 Spikes and cleanup** | (a) Container Apps Job hosting spike for the Python engines (§5 conditions 2–3). (b) App-only `agreement-review` writing an edit plan on 3 synthetic NDAs. (c) §10 cleanup items 1–8 | Job runs the engines from blob storage with identical golden-fixture output; edit plan valid on all 3; cleanup PRs merged or filed |
 | **1 Core + NDA via Front Door and Console** | Records, orchestrator, routing key, NDA harness, approval, Front Door return, Decision Record | An NDA submitted on the Front Door comes back marked up after approval, on dev |
-| **2 Email and Copilot doors** | Intake mailbox, classify-to-request, reply with attachments (threading checked), MCP submit/status tools | Same NDA end-to-end through email and through the agent |
+| **2 Email and Copilot doors** | Intake-mailbox flag and request creation; thread replies → new run; suggest-only "Submit as request" at other mailboxes (triage hint + confirm); reply with attachments threaded (§10 item 7); MCP submit/status tools | The same NDA end-to-end through an intake mailbox, through a suggestion accepted at an ordinary mailbox, and through the agent. No request is ever created at an ordinary mailbox without a person confirming |
 | **3 Invoice harness** | Move invoice orchestration onto the model (§7). Starts only after eBilling UAT sign-off | eBilling tests and end-to-end run unchanged |
 | **4 Other Front Door types** | Invention, trademark, policy harnesses as the owner prioritises | — |
 
@@ -329,4 +336,7 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 4. ~~Invoice timing~~ **Decided 2026-11-25:** Phase 3, after eBilling UAT (task 163) and before customer rollout; no edits to eBilling code until then (§7).
 5. ~~Sending identity~~ **Decided 2026-11-25:** the shared legal mailbox, app-only, as the queued Return stage; attorney named and Cc'd (§3.5).
 6. ~~NDA standard master~~ **Decided 2026-11-25:** the accelerator's topic-keyed "Spaarke NDA – Mutual" v1.2, with KNW-011 rendered from it. Owned by the accelerator, then the specialist-legal-agents-r1 T3 master. This pipeline is a version-stamping consumer. Counsel ratification gates customer rollout (§5).
-7. Email door: an intake mailbox only, or also classify mail arriving at existing mailboxes?
+7. ~~Email door scope~~ **Decided 2026-11-25: both, suggest-only at existing mailboxes.**
+   - Intake mailboxes (a flag on `sprk_communicationaccount`) create a request for every mail.
+   - At other mailboxes, existing triage adds a request-type hint, and a person confirms "Submit as request". Nothing is created automatically.
+   - Both are in Phase 2 (§3.5).
