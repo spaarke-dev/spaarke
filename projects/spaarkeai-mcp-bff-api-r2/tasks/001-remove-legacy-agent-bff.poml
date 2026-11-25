@@ -4,7 +4,7 @@
     <title>Remove the legacy agent from the BFF</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and deletion; modifies and deletes .cs files and tests across the BFF, ArchTests and contract suites</rigor-reason>
     <model-tier>opus</model-tier>
@@ -138,7 +138,10 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-01; plan risk R3. uac-r2 reviews this diff (ledger rows, guard tests, credential-path comments). Tagged auth because AgentTokenService and the confidential-client seams change: two adversarial-verifier passes. The 404 on dev is verified in task 019, not here.</notes>
+  <notes>Spec FR-01; plan risk R3. uac-r2 reviews this diff (ledger rows, guard tests, credential-path comments). Tagged auth because AgentTokenService and the confidential-client seams change: two adversarial-verifier passes. The 404 on dev is verified in task 019, not here.
+
+EXECUTION 2026-11-25 (worktree-agent-a3c0a6c062265ea73): implementation committed (8a92da8751 + follow-ups); code-review and adr-check done in-session (0 violations); BFF build 0 warnings; publish -0.48 MB (41.61 -> 41.13 MB zip); no vulnerable packages. Status stays in-progress ONLY because the two adversarial-verifier passes could not be launched (concurrent-subagent cap) - the main session runs them, then sets completed. Details: notes/001-task-notes.md. Review pending: uac-r2, ebilling-r1, ontology-r1.
+rework: none task 001</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

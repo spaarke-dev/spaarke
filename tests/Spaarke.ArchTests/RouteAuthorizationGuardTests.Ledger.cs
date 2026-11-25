@@ -169,9 +169,7 @@ public partial class RouteAuthorizationGuardTests
         new GovernedFile("Api/Ai/SummarizeSessionEndpoint.cs", Scope.RouteLevelGate,
             "chat-summarize on an owned session (SessionOwnershipFilter)."),
 
-        // ---- agent, admin, insights, memory, notifications ----
-        new GovernedFile("Api/Agent/AgentEndpoints.cs", Scope.RouteLevelGate,
-            "/api/agent/* — the M365 Copilot gateway (sweep S-18, S-19, S-78; task 164)."),
+        // ---- admin, insights, memory, notifications ----
         new GovernedFile("Api/Admin/JobsEndpoints.cs", Scope.RouteLevelGate,
             "/api/admin/jobs/* — background-job inspection and control, SystemAdmin."),
         new GovernedFile("Api/Admin/MembershipAdminEndpoints.cs", Scope.RouteLevelGate,
@@ -1294,7 +1292,11 @@ public partial class RouteAuthorizationGuardTests
     // (task 020, 2026-11-12, FR-01) -- POST /mcp/legal-operations, the stateless MCP endpoint, counted once the census vocabulary learned
     // MapMcp (the SDK's MCP registration form). Classified by GovernedFiles (RouteLevelGate). Task 021 (2026-11-12, ADR-028 A10) removed its
     // interim Pending waiver; the route is declared by the MCP credit (McpRoutes + McpTools, RouteAuthorizationGuardTests.Mcp.cs).
-    private const int ExpectedEndpointFileCount = 157;
+    // 157 -> 156 (2026-11-25, spaarkeai-mcp-bff-api-r2 task 001, FR-01). Net -1: the legacy M365 Copilot agent's endpoint file
+    // (AgentEndpoints.cs in the removed Agent folder, the one file that mapped all four agent routes) REMOVED with the agent. Its
+    // GovernedFiles entry, NonDeciding attachment, claim-only filter, permanent waiver and sweep findings S-18, S-19 and S-78 were
+    // deleted in the same change; tests/integration/regression/LegacyAgentRouteRetirementTests.cs pins the routes' absence.
+    private const int ExpectedEndpointFileCount = 156;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1551,9 +1553,10 @@ public partial class RouteAuthorizationGuardTests
         // request bodies (AiAuthorizationFilter.cs:35-40, :375-521), and the old path otherwise. The guard credits by FORM, and
         // the same form still passes through on every other route, so the form stays here and earns no credit: the five
         // chat-context routes (S-18, S-23..S-25, S-53) are resolved in the ledger by declaration where the route is otherwise
-        // credited (SessionOwnershipFilter) and stay Pending 164 where it is not (S-18, S-24).
+        // credited (SessionOwnershipFilter) and stay Pending 164 where it is not (S-18, S-24). spaarkeai-mcp-bff-api-r2 task
+        // 001 removed S-18's route (the legacy agent message route) and its request body, so four chat-context bodies remain.
         new NonDecidingAttachment("AddAiAuthorizationFilter", "Api/Filters/AiAuthorizationFilter.cs", "164",
-            "Outside the five chat-context request bodies (task 164 r1) it decides only for DocumentAnalysisRequest / Guid "
+            "Outside the four chat-context request bodies (task 164 r1) it decides only for DocumentAnalysisRequest / Guid "
             + "arguments and returns next otherwise; no handler binds DocumentAnalysisRequest, and the one Guid binder passes an "
             + "ANALYSIS id it authorizes as a document.",
             "if (documentIds.Count == 0) return await next(context) (AiAuthorizationFilter.cs:84) and zero handlers bind DocumentAnalysisRequest"),
@@ -1580,9 +1583,6 @@ public partial class RouteAuthorizationGuardTests
         new NonDecidingAttachment("AddEndpointFilter<WorkspaceAuthorizationFilter>", "Api/Filters/WorkspaceAuthorizationFilter.cs", "-",
             "Resolves the caller's oid into HttpContext.Items and denies 401 without one — an identity precondition by design, "
             + "not a record decision.",
-            "the file references no decision service"),
-        new NonDecidingAttachment("AddAgentAuthorizationFilter", "Api/Agent/AgentAuthorizationFilter.cs", "164",
-            "Asserts an oid and a tid on the agent token, nothing else (with a TODO for audience/app-role validation).",
             "the file references no decision service"),
         new NonDecidingAttachment("AddCallerPrincipalAuthorizationFilter", "Api/Filters/CallerPrincipalAuthorizationFilter.cs", "-",
             "Resolves the caller principal (contact-plane identity) as the PRECONDITION of the per-record checks the handlers "
@@ -2780,14 +2780,8 @@ public partial class RouteAuthorizationGuardTests
             ["SpeAdminTenantScopeFilter"] =
                 "Scopes SPE-admin operations to the caller's business units. Tenant scoping, not per-record authorization; it "
                 + "passes through without a configId and fails open on lookup errors (NonDecidingAttachments, task 165).",
-            // Agent and Communication reasons ported from the integration branch's guard (tasks 164 and 161), task-167 shape.
-            ["AgentAuthorizationFilter"] =
-                "M365 Copilot gateway (/api/agent/*). Asserts a resolvable oid AND tid on the inbound agent token and denies "
-                + "without either — an IDENTITY PRECONDITION only, so Rule A does not credit it. The agent routes DO reach "
-                + "document and playbook data (sweep S-18, S-19): the per-record decisions are other filters in the same chain "
-                + "(POST /run-playbook: PlaybookAuthorizationFilter run mode — playbook-use, Read/Write on the document and the "
-                + "record parameters; POST /message: AiAuthorizationFilter's chat-context evaluation; task 164), and the status "
-                + "route's run-owner comparison is in its handler.",
+            // The Communication reason ported from the integration branch's guard (task 161), task-167 shape. The Agent
+            // reason was removed together with the legacy M365 Copilot gateway (spaarkeai-mcp-bff-api-r2 task 001).
             ["CommunicationAuthorizationFilter"] =
                 "IDENTITY PRECONDITION only (authenticated + a resolvable oid) for the /api/communications routes; it decides "
                 + "nothing about any record. The 2026-10-02 route sweep found the old reason ('per-record scoping is "
@@ -3656,10 +3650,6 @@ public partial class RouteAuthorizationGuardTests
             "The picker list: the caller's own playbooks (ListUserPlaybooksAsync with the server-derived caller "
             + "id, ChatEndpoints.cs:1815-1824) plus public ones. Takes no id. Owner round 12 item 6; the filter fix "
             + "is task 164's."),
-        Permanent("GET /api/agent/playbooks", PermanentBasis.CallerScopedOnly, "167",
-            "The agent's list: the caller's own playbooks (ListUserPlaybooksAsync with the server-derived caller "
-            + "id, AgentEndpoints.cs:306-311) plus the public catalog. Takes no id. Owner round 12 item 6; the "
-            + "filter fix is task 164's."),
 
         // ---------- P:OwnerComparison (owner round 12 item 4) ----------
         Permanent("DELETE /api/memory/pins/{pinId}", PermanentBasis.OwnerComparison, "166",
@@ -3877,12 +3867,10 @@ public partial class RouteAuthorizationGuardTests
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/ChatContextAuthorizationContractTests.cs::Messages_APerTurnDocumentTheCallerCannotRead_IsTheUniform403ProblemDetails_NotAStream_AndNoTurnRuns" },
         new SweepFinding("S-53", Severity.Medium, "POST /api/ai/chat/sessions/{sessionId}/dispatch", "164", Gap.InsufficientDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/ChatContextAuthorizationContractTests.cs::Dispatch_AStoredContextTheCallerCannotRead_IsTheUniform403_AndTheOrchestratorNeverRuns" },
-        new SweepFinding("S-18", Severity.High, "POST /api/agent/message", "164", Gap.NoDecision)
-            { ResolvedBy = "164", ProvenByTest = true, ProofTest = "tests/integration/contract/Api/Ai/ChatAgentRouteProofTests.cs::ProvenByTest_AgentMessage_UnreadableBodyDocumentIs403_ReadableOneRunsTheTurnAnd200" },
-        new SweepFinding("S-19", Severity.High, "POST /api/agent/run-playbook", "164", Gap.NoDecision)
-            { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/PlaybookRouteAuthorizationContractTests.cs::AgentRunPlaybook_UnreadableDocument_Is403_AndNothingRuns" },
-        new SweepFinding("S-78", Severity.Low, "GET /api/agent/playbooks/status/{jobId:guid}", "164", Gap.NoDecision)
-            { ResolvedBy = "164", ProvenByTest = true, ProofTest = "tests/integration/contract/Api/Ai/ChatAgentRouteProofTests.cs::ProvenByTest_AgentPlaybookStatus_AnotherUsersRunIs404_TheCallersOwnRunIs200" },
+        // S-18, S-19 and S-78 (the legacy M365 Copilot gateway's message, run-playbook and status routes, all resolved by
+        // task 164) were REMOVED from this ledger with the gateway itself (spaarkeai-mcp-bff-api-r2 task 001, owner
+        // 2026-11-25: remove, no parallel period). Their absence is pinned by
+        // tests/integration/regression/LegacyAgentRouteRetirementTests.cs; the pre-removal ledger is at commit 37f0864afe.
         new SweepFinding("S-29", Severity.High, "POST /api/ai/playbooks/{id:guid}/execute", "164", Gap.InsufficientDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/PlaybookRouteAuthorizationContractTests.cs::Execute_UnreadableDocument_Is403ProblemDetailsBeforeAnySseHeader_AndNothingRuns" },
         new SweepFinding("S-54", Severity.Medium, "PUT /api/ai/playbooks/{id:guid}/nodes/reorder", "164", Gap.InsufficientDecision)

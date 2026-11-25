@@ -333,8 +333,9 @@ public static class AuthorizationModule
         // authenticates as ITSELF to Entra (OBO exchanges and app-only confidential clients).
         //
         // Placed here rather than in SpaarkeCore because the provider is not a Dataverse concern —
-        // task 022 wires it into GraphClientFactory, DataverseAccessDataSource, DataverseUserClient
-        // and AgentTokenService alike. This module is where a reader looks for "how does the BFF
+        // task 022 wires it into GraphClientFactory, DataverseAccessDataSource and DataverseUserClient
+        // alike (and into the legacy agent's token service, which spaarkeai-mcp-bff-api-r2 task 001
+        // later removed). This module is where a reader looks for "how does the BFF
         // authenticate", and that question now has both an inbound and an outbound answer.
         //
         // NOT registered inline in Program.cs: ADR-010 forbids inline registrations, and the
@@ -1029,7 +1030,8 @@ public static class AuthorizationModule
         services.AddSingleton<IValidateOptions<CredentialSelectionOptions>, IdentityConfigurationValidator>();
 
         // SINGLETON, and it owns the ONE confidential-client cache. Task 022 collapses the three
-        // per-class CCA caches (DataverseAccessDataSource, DataverseUserClient, AgentTokenService) onto
+        // per-class CCA caches (DataverseAccessDataSource, DataverseUserClient and the since-removed legacy
+        // agent token service) onto
         // it — which is what CLOSES task 011's time-boxed A4 exception. If this cache is not authored
         // here, that exception becomes permanent.
         //
