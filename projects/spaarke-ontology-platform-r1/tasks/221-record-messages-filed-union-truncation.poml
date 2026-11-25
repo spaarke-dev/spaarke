@@ -4,7 +4,7 @@
     <title>A record's Messages list says when messages are not shown, keeps the newest filed threads, and spends its scan only on threads it can add (#2671, DI-148)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -59,4 +59,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt221); PR to master; do not merge.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3144 squash-merged to master (affc00997f) after a main-session review, an independent Opus adversarial review and one fix round; uac-r2 had no objection. The by-regarding Messages read returns a truncated flag when its regarding scan or thread budget cut readable threads short, including when the budget is spent before the filed union (one probe for the newest readable thread outside the anchored set, read under the caller's identity); the Console's thread list shows Some messages may not be shown. ReadReadableThreadRowsAsync is a private helper extracted unchanged. Reaches dev with the next uac-r2 dev BFF candidate (needs a new owner go on an exact SHA).</completion>
 </task>

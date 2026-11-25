@@ -4,7 +4,7 @@
     <title>Worklist read gets faster: a single Work Item row read for the decision plan, and the lane read's independent Dataverse queries run concurrently (mcp-r1 NFR-01 asks B and D)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the BFF Signals read path (.cs) that decides which Work Items a caller sees.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -68,4 +68,5 @@ Entry point: `src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs`
   <execution>
     <protocol>Built by mcp-r1 in their own PR to master (their owner's direction, relayed 2026-11-25); the ontology main session reviews it against this POML (independent Opus adversarial review) and approves before merge. If mcp-r1 hands it back, run through task-execute in C:\wt222.</protocol>
   </execution>
+  <completion>Done 2026-11-25: built by mcp-r1 (their owner's go), PR #3152 merged to master (9ce92b3104) after the ontology main session's review against this POML and an independent Opus adversarial review (PASS; one F2 doc fix on the DataverseConcurrencyGate summary, applied; K1 per-read bound and K2 per-row fault scope recorded in projects/spaarkeai-mcp-bff-api-r1/notes/signal-read-b-d-notes.md). (B) SignalReadService.ReadAsync takes an optional single Signal id that narrows the caller-identity Signal fetch, so the plan reads one row under the lane's rules and returns not-found for anything a lane hides. (D) the lane read's independent queries run concurrently behind a per-read 4-permit gate; every read keeps its identity, faults and cancellation surface as before. Simulated 50 ms per call: 2140-2438 ms to 1039-1065 ms. Equivalence tests pass on the old serial code (22/22) and at head; Signals-filtered tests 197 pass, contract baselines unchanged; full ArchTests 2816 pass. Remaining: mcp-r1 wires GetDecisionPlanTool to the single-row read in a follow-up PR (ontology reviews); dev p95 for the Console worklist and the plan/show tools measured after the next dev BFF build.</completion>
 </task>

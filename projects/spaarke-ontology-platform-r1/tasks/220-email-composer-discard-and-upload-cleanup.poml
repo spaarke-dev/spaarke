@@ -4,7 +4,7 @@
     <title>Email composer asks before discarding a typed draft, cleans up the files it uploaded when the email is not sent, and words a network failure as one (#2813 DI-154, #2946 DI-158)</title>
     <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared UI code (.tsx/.ts) used by many consumers.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -57,4 +57,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt220); PR to master; do not merge.</protocol>
   </execution>
+  <completion>Done 2026-11-25: PR #3145 squash-merged to master (4b0611ebf1, Closes #2813 and #2946) after an independent Opus adversarial review (3 F1s) and two fix rounds; round 2 changed the approach, so the main session re-checked its whole diff. The EmailComposer discard prompt appears only when the user changed something (entity- and style-normalised body words) and, after a send that may have gone out, no longer says the email will not be sent. Documents uploaded by the composer or a create wizard's Send Email step are deleted (sprk_document row only) when the draft is abandoned or the wizard closes, unless a send carried them: every attachment with a document, attached or only linked, is held while a send's outcome is unknown and kept for good when it went out or may have; a keep is never undone by a later refused retry. All six wizard hosts hold the step's uploads from the first moment of Finish, so closing during Creating deletes nothing a send is about to carry; a guard test pins the hold and close hook on every host. Tests fail on the round-1 sources (10 of 43) and pass at head; client suites, tsc and client-lint pass. Known limits: the SharePoint file stays (row only); a 5xx still reads Email not sent while its documents are kept (K4, acceptance wording); the flaky EmailComposer.lookupFocus test is #2990. Console auto-deploys from master; no dev check required beyond normal use.</completion>
 </task>
