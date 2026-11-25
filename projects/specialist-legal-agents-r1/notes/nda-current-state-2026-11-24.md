@@ -162,3 +162,38 @@ The accelerator ran these between 1 and 11 Nov:
 1. **One standard:** which is the master, the platform's KNW-011 rubric or the accelerator's `topics.yaml` playbook? Recommendation: the accelerator's topic-keyed playbook. Word and Cowork already read it, and the platform pack would be rendered from it.
 2. **The submit-and-return flow:** make it the NDA deliverable of this program (Phase 1), in place of a Copilot NDA agent? It is platform work in the BFF and the Console.
 3. **Drafting:** build NDA drafting (a firm NDA form + template merge, or `NDA-DRAFT`), or rely on Microsoft's `draft-new-contract` with our model form? Run R-2 first either way.
+
+## 8. Proposed shape after the owner discussion (2026-11-24, a proposal, not decided)
+
+Owner points: separate how a request starts (email, Teams or Front Door form, Copilot agent) from the analysis; output is a **Word file plus a clause table**, not Compose; treat it as a **shared intake pipeline** that routes content to the right AI harness, reusing what invoice, email and document intake already do.
+
+**What exists to reuse (origin/master, 2026-11-24):**
+- **Invoice intake is the model.**
+  - `sprk_invoicesubmission`: a channel (SPA, Internal; Mailbox, Outlook and API reserved) and status Received → Processing → Accepted / Rejected / Failed.
+  - One ADR-004 job per submission (`InvoiceSubmissionProcessingJobHandler`): lock, re-read and resume rules.
+  - The pipeline is a processor (reads and runs AI, writes nothing) → a persister (one transaction) → after-steps (Signals, Decision Record, indexing, notification, terminal status last).
+  - The email side classifies attachments (`AttachmentClassificationJobHandler`, `invoice-classify`) and `SubmitInvoiceFromEmailOperation` creates the submission.
+- **Email intake:** `IncomingCommunicationJobHandler` (Graph webhook → `sprk_communication`, attachments as `sprk_document`, `.eml`), behind the channel seam `ICommunicationChannelIngestor` (email, ACS messaging; Teams reserved).
+- **Document intake:** upload → `AppOnlyDocumentAnalysis` job → playbook chosen by consumer routing (`IConsumerRoutingService`, the Binding table).
+- **Front Door:** `POST /api/v1/external/servicerequests` creates `sprk_servicerequest` with `sprk_requesttype` (NDA Assessment, Invention Submission, Policy Question, Trademark Search) and the intake answers. No processing follows today.
+- **Routing:** `agreement-classify` with the `sprk_agreementtype` registry; consumer types → Actions/playbooks.
+
+**Proposed pipeline:**
+- **Doors** only create a request, attach the content and enqueue one job:
+  - email;
+  - Front Door;
+  - the Copilot agent (a gated MCP submit tool);
+  - Teams (through the Copilot agent in Teams, G8-P2; no Teams bot today);
+  - Console upload.
+- **One request record:** extend `sprk_servicerequest` (§11: existing), adding a channel, a status and links to the input and output documents.
+- **One processing job** modelled on the invoice job:
+  1. classify;
+  2. route by request type plus agreement type to the harness (NDA → the NDA specialist with the owner's profile);
+  3. build outputs;
+  4. persist;
+  5. after-steps (approval Work Item, Decision Record, notification).
+- **Return** goes through the door the request came in by, and only after attorney approval.
+
+**Same AI components for every door.** The door changes only intake and return. The attorney's own desk tools (Word legal plugin, Cowork `nda-review`) run in Microsoft's runtime and share the **content** (the one standard, the profile export), not the server code. That is why the one standard and the shared golden set matter.
+
+**Output:** the redlined `.docx` (comments + tracked changes) and a clause table (the review's per-topic result). The OOXML engine under Compose is server-side; whether it runs without a Compose session is **not yet checked**. The attorney opens the `.docx` in Word to edit and approves from the Work Item.
