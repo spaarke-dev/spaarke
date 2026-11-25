@@ -4,7 +4,7 @@
     <title>Complete the matter-summary Insights topic (column, registry row, persister check)</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>scripts startable; the dev schema change and registry seed need the owner's explicit go</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a Dataverse column and a configuration row consumed by the live persister; may touch WorkProductRecordPersister (.cs) if the data path does not write it</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,7 +102,7 @@
     <criterion testable="true">Negative: no file under src/server/** changed.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-10 prerequisite, Assumptions ("Insights topic"). The column also needs to ship in the Dataverse solution for other environments: record that as a follow-up for the solution export (dataverse-deploy) in notes, not here.</notes>
+  <notes>BLOCKED (code complete, pending owner decision), 2026-11-25: dev already has the Binding (work_product), the registry row (target sprk_recordsummary, TTL 60) and the column, so no column or seed was needed; see notes/012-matter-summary-topic.md. Owner decides whether to run scripts/dataverse/Set-MatterSummaryTopicRegistryKey.ps1 (sprk_playbookname chat-summarize to matter-summary so TopicRegistryTtlLookup finds the TTL). rework: none task 012. Original notes: Spec FR-10 prerequisite, Assumptions ("Insights topic"). The column also needs to ship in the Dataverse solution for other environments: record that as a follow-up for the solution export (dataverse-deploy) in notes, not here.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
