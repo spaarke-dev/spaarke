@@ -1,6 +1,6 @@
 # Spaarke Intake Pipeline R1 — Design (initial draft for discussion)
 
-> **Status:** DRAFT v0.2, 2026-11-25. Owner design review in progress (§13 and §10 being decided one by one). Next: finish §13 and §10, then `/design-to-spec` on the owner's go.
+> **Status:** v0.3, 2026-11-25. Owner design review complete: all §13 questions and the §10 cleanup decided (§10.1). Next: `/design-to-spec`, only when the owner says go.
 > **Project:** `spaarke-intake-pipeline-r1`. Worktree `C:/code_files/spaarke-wt-spaarke-intake-pipeline-r1`, branch `work/spaarke-intake-pipeline-r1`.
 > **Origin:** split out of `specialist-legal-agents-r1` (owner, 2026-11-25). The NDA submit-and-return flow turned out to be a shared platform pipeline, not a specialist-agent feature.
 > **Evidence:**
@@ -286,9 +286,9 @@ The alternative, migrating before eBilling's UAT, saves one UAT cycle but tests 
 
 | Phase | Scope | Gate |
 |---|---|---|
-| **0 Spikes and cleanup** | (a) Container Apps Job hosting spike for the Python engines (§5 conditions 2–3). (b) App-only `agreement-review` writing an edit plan on 3 synthetic NDAs. (c) §10 cleanup items 1–8 | Job runs the engines from blob storage with identical golden-fixture output; edit plan valid on all 3; cleanup PRs merged or filed |
-| **1 Core + NDA via Front Door and Console** | Records, orchestrator, routing key, NDA harness, approval, Front Door return, Decision Record | An NDA submitted on the Front Door comes back marked up after approval, on dev |
-| **2 Email and Copilot doors** | Intake-mailbox flag and request creation; thread replies → new run; suggest-only "Submit as request" at other mailboxes (triage hint + confirm); reply with attachments threaded (§10 item 7); MCP submit/status tools | The same NDA end-to-end through an intake mailbox, through a suggestion accepted at an ordinary mailbox, and through the agent. No request is ever created at an ordinary mailbox without a person confirming |
+| **0 Spikes and cleanup** | (a) Container Apps Job hosting spike for the Python engines (§5 conditions 2–3). (b) App-only `agreement-review` writing an edit plan on 3 synthetic NDAs. (c) §10.1 Phase 0 items (1b, 2, 4, 5a, 6, 7, 8-docs) as one cleanup PR | Job runs the engines from blob storage with identical golden-fixture output; edit plan valid on all 3; cleanup PR merged (5b filed as #3162) |
+| **1 Core + NDA via Front Door and Console** | Records, orchestrator, routing key, NDA harness, approval, Front Door return, Decision Record; run admin view with DLQ re-drive (§10.1 item 3); `sprk_backgroundjob` description (§10.1 item 8) | An NDA submitted on the Front Door comes back marked up after approval, on dev |
+| **2 Email and Copilot doors** | Intake-mailbox flag and request creation; thread replies → new run; suggest-only "Submit as request" at other mailboxes (triage hint + confirm); `AttachmentClassification` producer (§10.1 item 1a, #1920); reply with attachments (threading fixed in Phase 0, §10.1 item 7); MCP submit/status tools | The same NDA end-to-end through an intake mailbox, through a suggestion accepted at an ordinary mailbox, and through the agent. No request is ever created at an ordinary mailbox without a person confirming |
 | **3 Invoice harness** | Move invoice orchestration onto the model (§7). Starts only after eBilling UAT sign-off | eBilling tests and end-to-end run unchanged |
 | **4 Other Front Door types** | Invention, trademark, policy harnesses as the owner prioritises | — |
 
@@ -306,6 +306,26 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 | 6 | `agreement-classify` and `nda-review` Binding rows have no `ConsumerTypes.All` entry; the health check may report Unhealthy | read; health effect not checked | Add constants as part of making them app-only |
 | 7 | Outbound "reply" email may not set In-Reply-To (no `CreateReply`; only a marker header) | inferred | Confirm with a test send; fix if so (affects every reply Spaarke sends) |
 | 8 | `sprk_backgroundjobrun` deployed but unused; `sprk_backgroundjob` description says `sprk_processingjob` is Office-scoped | data-model doc, entity XML | Update the description when `sprk_processingjob` is extended; record the unused table's intent |
+
+### 10.1 Decisions (owner, 2026-11-25)
+
+All eight were re-verified on master `4af7aaecb5`. The evidence is in `notes/section10-verification-2026-11-25.md`.
+
+**Phase 0 fixes ship as one cleanup PR, together with the real defect fixes (5a, 7).** There are no hygiene-only PRs.
+
+| # | Decision | Where |
+|---|---|---|
+| 1a | `AttachmentClassification`: keep it. Wire the producer in the email door's classify step (`IncomingCommunicationProcessor`, near the `DocAnalysis` enqueue). Plan posted on issue #1920 | **Phase 2** |
+| 1b | Delete `DocumentProcessing` (sample), `ProfileSummary` and `EmailAnalysis`: handler, DI line, tests and StartupDiagnostics entry. Only archived projects reference them | **Phase 0** |
+| 2 | Remove the ghost `ProcessEmailToDocument` / `BatchProcessEmails` (and the 1b names) from `StartupDiagnostics.cs:84` | **Phase 0** |
+| 3 | Keep `DeadLetterQueueService`. Wire it as the re-drive behind the run admin view (ADR-052 monitored DLQ; held runs) | **Phase 1** |
+| 4 | Rewrite the "node playbook / Path C" statements in `DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md` (`:21, :59, :118, :129, :177, :180, :257, :265, :280`) to the direct-Action spine, with the node path as the null-seam fallback | **Phase 0** |
+| 5a | Both `DocAnalysis:{id}` literals (`IncomingCommunicationProcessor.cs:1656`, `CommunicationService.cs:4554`) call `AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId)`; `MaxAttempts` becomes 3. Add a regression test that the same document enqueued by email and by upload profiles once | **Phase 0** |
+| 5b | Email bypassing `ICommunicationChannelIngestor`: **filed as #3162** (communication area: join the seam or record the bypass as the design) | Issue |
+| 6 | Add `ConsumerTypes` constants and `All` entries for `agreement-classify` and `nda-review`. Check `nda-standard-summary` too. Update the tests that assert `All` | **Phase 0** |
+| 7 | Replies thread: when `InReplyToMessageId` is set, `EmailChannelSender` resolves the parent Graph message and sends through `createReply`/`createReplyAll` (Graph rejects a custom `In-Reply-To` header). Prove it with a test send. Affects every Spaarke reply; Phase 2 depends on it | **Phase 0** |
+| 8 | Fix `docs/adr/ADR-036-background-job-infrastructure.md:104` and the `sprk_backgroundjobrun` data-model note (the table is unused; runs are in memory) | **Phase 0** |
+| 8 | Change the `sprk_backgroundjob` "Office-scoped" description (`Entity.xml:13`, `Create-BackgroundJobEntity.ps1:233`, `docs/data-model/sprk_backgroundjob.md:33-35`) together with the `sprk_processingjob` extension | **Phase 1** |
 
 ## 11. ADR tensions (to resolve before the spec)
 
