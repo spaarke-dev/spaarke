@@ -224,6 +224,12 @@ Attribution: the owner gave no times. The two calls are told apart by order and 
     - The BFF doesn't log caller identity on these requests, so the user is attributed by the owner's report and the timing.
     - **First sign-in ✅ (owner, 2026-11-24):** `demo@` had **never signed in to any Spaarke plugin**. Copilot asked them to authenticate, then the call went through. So the sign-in card does appear for an admin-uploaded agent that uses dynamic discovery with OAuth; #16973 did not reproduce here.
   - **Measurement caveat:** BFF requests are now sampled at **25%**, so not every call is logged. The `show_decisions` call for this turn is missing. Any logged call carrying `?pkg=1.1.1` is still proof; the absence of one needs several turns.
+  - **Remaining tests closed out (2026-11-25, owner "Housekeeping first"):**
+    - **V1a** (`?pkg=` on a fresh id): **DROPPED.** Dynamic discovery (V2) makes package-version logging low value. No artifact was created.
+    - **V3** (Model 1, second tenant): **DEFERRED** until provisioning D3. It needs a multitenant connector app, a new OAuth registration, ACME consent and a BFF issuer change.
+    - **V5:** dropped, because the Spaarke AI agent is being removed.
+    - **G11:** optional and not planned; MCP Apps widgets are the default.
+    - COPILOT-PLATFORM-COORDINATION was told the V2 result and this status on 2026-11-25. The owner's removals of every G8 artifact are due **2026-11-30** (table below).
 
 **Cause (working hypothesis):** something stored against app id `802fd9cc` in the tenant kept the action from loading. Most likely the first upload (1.0.0) bound a broken action state, and later **catalog updates of the same app id did not refresh the action**. Every change we tested (pinned tools, URL, instructions, even pointing at Learn) went in as an update to that id, so none of them could show. **The lesson for building agents:** test action changes on a fresh app id, and before customers rely on it, verify that an org-catalog **update** of an existing agent picks up changed actions (a D-A1 deployment check). Coordination S-3 called this correctly.
 
