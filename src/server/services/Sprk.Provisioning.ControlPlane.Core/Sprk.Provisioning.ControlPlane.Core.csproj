@@ -363,6 +363,26 @@
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.GridConfig.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
 
+    <!-- ISS-039: the Tier 1 product-configuration reference tables (event types,
+         agreement types, triage categories), exported with their fixed primary
+         keys by scripts/seed-data/reference/Export-ReferenceData.ps1 and seeded
+         create-if-missing by DataverseWebApiReferenceDataSeeder (H12b). Embedded
+         from the repo-root scripts/ folder (one source of truth, same pattern as
+         the seed manifest above). ReferenceDataSet.TableNames lists the same
+         three names; a missing item is caught by the embedded-data unit test. -->
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\reference\sprk_eventtype_ref.json"
+                       Link="Handlers\AppConfigSeed\ReferenceData\sprk_eventtype_ref.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ReferenceData.sprk_eventtype_ref.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\reference\sprk_agreementtype.json"
+                       Link="Handlers\AppConfigSeed\ReferenceData\sprk_agreementtype.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ReferenceData.sprk_agreementtype.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\reference\sprk_triagecategory.json"
+                       Link="Handlers\AppConfigSeed\ReferenceData\sprk_triagecategory.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ReferenceData.sprk_triagecategory.json</LogicalName>
+    </EmbeddedResource>
+
     <!-- Task 151: scripts/system-layouts.json is the retired
          Deploy-SystemWorkspaceLayouts.ps1's data sidecar (repo-root
          scripts/, NOT this project's folder) — embedded directly so
