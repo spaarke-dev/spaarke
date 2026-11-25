@@ -7,6 +7,10 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-25 — ADR-026: ribbon/command scripts live in `src/client/webresources/js/`
+
+#3074 (2026-11-24) removed the last files under `src/dataverse/webresources/`, so ADR-026's surface matrix named a folder that no longer exists (`Test-InstructionPaths` new miss). Both copies (`.claude/adr/` and `docs/adr/`) now name `src/client/webresources/js/`, where the ribbon and command scripts are. Wording fix only; no rule changed. Found and fixed by spaarkeai-mcp-bff-api-r1 (owner: "Fix it here").
+
 ###### 2026-11-25 — Root CLAUDE.md §1.1: "Spaarke for Microsoft 365 Copilot" row
 
 `spaarkeai-mcp-bff-api-r1` task 050 (spec FR-18).
