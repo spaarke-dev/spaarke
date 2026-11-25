@@ -1,5 +1,12 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-25 04:10Z — read-only check: nightly close of the switched-off POL-MATTER-NOBUDGET (spaarkedev1)
+
+- Main session, Web API GETs only (az CLI token; nothing written). Dev BFF at the time: `20129e985c` (contains task 204's paged policy read; not yet 208-210).
+- **Result: PASS.** The rule (Off since 2026-11-24 02:58:50Z, statecode Active) has **0** open Signals (183 before). **183** Signals closed with resolution type PolicyRetired, all at 02:30:39-02:30:40Z 2026-11-25, each with `resolvedon` = `sprk_lastevaluated` (D-120). No other policy's Signal was closed PolicyRetired. One other resolution tonight: an "Open task coming due" Do item, Condition Cleared at 02:30:05Z (normal). Billing items untouched. 135 open Signals remain on other policies.
+- App Insights 02:29-03:06Z: no warning or error from the Signals job (no "could not be read" / truncation errors), so the paged policy read ran clean.
+- Switching the rule On again would re-raise them (D-32).
+
 ## 2026-11-24 22:02Z — dev write: #3063 re-check after task 207 (dev BFF `20129e985c`, live 21:36:18Z by uac-r2 on owner go)
 
 - **Owner go:** "Yes, run it" (2026-11-24, chat), answering whether to run the #3063 reproduction now.
