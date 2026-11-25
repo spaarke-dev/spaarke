@@ -6,10 +6,11 @@
 >
 > **2026-11-25 (owner):** OD-2 amended (patent attorney first; NDA stays a function, intake harness in `spaarke-intake-pipeline-r1` #3128); OD-4 Cowork + area agent for drafting; OD-5 Dataverse profile + Code Page (§3.14); OD-6 MCP shape and `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (PR #3147); MCP parity is `spaarkeai-mcp-bff-api-r2` (#3150). D-A8 decided (no supervision in Phase 1; chaining designed for, §3.15). Fable reuse review (`notes/profile-reuse-review-2026-11-25.md`): profile anchors on the existing `sprk_userprofile`; only new surface is a server-written `sprk_agentprofile`/`-version` pair; owner questions are D-A18. The Spaarke AI agent is removed now (mcp-r2 §4.5; tenant steps E1/E2 are the owner's). Phase 1 child slug now `specialist-legal-agents-patents-r1`.
 
-## OPEN NOW (checkpoint 2026-11-25, read first)
-- **In progress:** answering the owner on (a) whether practice area / matter type / project type tables should store AI tuning data, and (b) how the 15 Dataverse "AI *" tables relate to this program; then walk the owner through **mcp-r2 design §9** (Q1-5, Q7; Q6 decided remove-now) and **D-A18** (8 profile data questions).
-- **Findings so far:** Insights Engine already keys AI by taxonomy: `sprk_practicearea_documenttype` junction carries `sprk_layer2actioncode` (InsightsActionRouter.cs); `sprk_practicearea_ref` is the source of truth (PA-1); N:N `sprk_analysisplaybook_mattertype_nn` exists but no code reads it; `sprk_mattersubtype_ref` exists (candidate for "semiconductor"). Recommendation: taxonomy tables are the KEYS/bindings for L2 tuning (junctions to AI definitions), not the place for versioned tuning content. AI tables: Persona (L1 candidate), Topic Registry (hostentity/playbookname/targetfield, 11 code files, check), Chat Context Map (entity/page → playbook), Knowledge Source/Type/Deployment + Retrieval Mode (knowledge layer; Source and Retrieval Mode have 0 code refs), Model Deployment (model ceilings), Skill/Tool/Action/Output Type (lookups), Chat Message/Summary (session history), Search Index (per-container index).
-- **PR #3147** (surfaces doc) set to auto squash-merge; checks were queued. After merge: remove worktree `spaarke-wt-ai-surfaces-and-packaging` with `scripts/worktree/Remove-WorktreeSafe.ps1`.
+## OPEN NOW (checkpoint 2026-11-25 evening, read first)
+- **Design v0.8:** D-A18 (2)–(8) accepted; T1 specialty = `sprk_technologyarea` (DEV-only table, needs columns + solution export); taxonomy tables are keys for L2, not storage (§3.14).
+- **Open with the owner:** D-A18 (1) after the persona clarification. `sprk_aipersona` is LIVE (chat default system prompt via `ResolvePersonaForChatAsync`); recommendation: keep it, profile template row points at it.
+- **DEV facts (2026-11-25):** `sprk_playbookrun`/`noderun` 0 rows (BFF keeps runs in memory); `sprk_precedent` 0 rows; `sprk_technologyarea` 0 rows, 2 columns.
+- **mcp-r2** (separate worktree) design v0.2 holds the MCP-side answers (incl. Dataverse MCP position §4.7).
 - **Owner tenant action pending:** remove Spaarke AI (coordination runbook E1/E2).
 
 ## Quick Recovery
