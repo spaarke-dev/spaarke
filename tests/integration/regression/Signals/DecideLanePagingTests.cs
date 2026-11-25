@@ -462,4 +462,45 @@ public sealed partial class SignalReadRouteTests
 
         (await PageAsync(seed.World, cursor[..(cursor.Length / 2)])).Outcome.Should().Be(DecidePageOutcome.CursorInvalid);
     }
+
+    // NFR-01 (2026-11-25): the plan tool reads one Work Item's row through the REAL capability, the caller's lanes read narrowed to that
+    // Signal (ontology task 222 B). It is the very row the lane holds, the Signal's own id narrows the caller's fetch, and a Signal on a
+    // matter the caller cannot read comes back with no row, the same answer as an unknown id.
+    [Fact]
+    public async Task GetWorkItem_ReturnsTheLanesOwnRow_ReadsOnlyThatSignal_AndNoRowForAHiddenOrUnknownSignal()
+    {
+        var seed = SeedDecideLane(count: 30);
+        WorklistResponse lane;
+        using (var scope = CapabilityScope(seed.World, out var capability))
+        {
+            lane = (await capability.ListDecideAsync(AliceCaller, CancellationToken.None)).Response!;
+        }
+
+        var laneRows = lane.Lanes.SelectMany(l => l.Groups).SelectMany(g => g.Items).ToList();
+        var targets = new[] { laneRows[0], laneRows.First(r => r.InvoiceReview is not null), laneRows.First(r => seed.Privileged.Contains(r.SignalId)) };
+
+        foreach (var target in targets)
+        {
+            using var scope = CapabilityScope(seed.World, out var capability);
+            var before = seed.World.Requests.Count;
+
+            var read = await capability.GetWorkItemAsync(AliceCaller, target.SignalId, CancellationToken.None);
+
+            read.Outcome.Should().Be(SignalReadOutcome.Ok);
+            var rows = read.Response!.Lanes.SelectMany(l => l.Groups).SelectMany(g => g.Items).ToList();
+            rows.Should().ContainSingle().Which.Should().BeEquivalentTo(target, "the one row is the lane's own row for that Signal");
+            seed.World.Requests.Skip(before).Where(r => r.StartsWith("sprk_signals?fetchXml=", StringComparison.Ordinal))
+                .Should().NotBeEmpty().And.OnlyContain(r => Uri.UnescapeDataString(r).Contains(target.SignalId.ToString("D"), StringComparison.OrdinalIgnoreCase),
+                    "the caller's Signal fetch is narrowed to the one Signal");
+        }
+
+        foreach (var absent in new[] { seed.HiddenPrivileged, Guid.NewGuid() })
+        {
+            using var scope = CapabilityScope(seed.World, out var capability);
+            var read = await capability.GetWorkItemAsync(AliceCaller, absent, CancellationToken.None);
+
+            read.Outcome.Should().Be(SignalReadOutcome.Ok);
+            read.Response!.Lanes.SelectMany(l => l.Groups).SelectMany(g => g.Items).Should().BeEmpty("hidden and unknown are the same answer");
+        }
+    }
 }

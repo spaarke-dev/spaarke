@@ -380,12 +380,59 @@ function serverProblemOf(error: unknown): (ProblemDetails & { status: number }) 
 }
 
 /**
+ * #1571 review F1: what a ribbon Quick Save says when it cannot sign in. A ribbon click can sign in once
+ * ({@link ensureQuickSaveSignedIn}); when that does not produce a token either, the pane's Sign in is the way.
+ */
+export const QUICK_SAVE_SIGN_IN_MESSAGE = 'Open the Spaarke pane and sign in, then try again.';
+
+/** A ribbon Quick Save that has no token, even after its one sign-in attempt. */
+export class QuickSaveSignInRequiredError extends Error {
+  constructor() {
+    super(QUICK_SAVE_SIGN_IN_MESSAGE);
+    this.name = 'QuickSaveSignInRequiredError';
+  }
+}
+
+/**
+ * Whether a Quick Save failed because it is not signed in: {@link QuickSaveSignInRequiredError}, the API client's
+ * "Not authenticated" (no token), or the server's 401 after the request's retry.
+ */
+export function isQuickSaveSignInFailure(error: unknown): boolean {
+  if (error instanceof QuickSaveSignInRequiredError) return true;
+  if (error instanceof Error && error.message === 'Not authenticated') return true;
+  return serverProblemOf(error)?.status === 401;
+}
+
+/**
+ * #1571 review F1: make sure a ribbon command has a token before it saves. The ribbon click IS a user gesture, so when
+ * the silent acquire found none it signs in interactively ONCE. Throws {@link QuickSaveSignInRequiredError} when there
+ * is still no token (the prompt was closed or blocked); nothing is saved then.
+ */
+export async function ensureQuickSaveSignedIn(auth: {
+  getAccessToken(): Promise<string | null>;
+  signIn(): Promise<void>;
+}): Promise<void> {
+  if (await auth.getAccessToken()) return;
+  try {
+    await auth.signIn();
+  } catch (err) {
+    console.warn('[Spaarke] Quick Save: sign-in from the ribbon did not complete', err);
+    throw new QuickSaveSignInRequiredError();
+  }
+  if (!(await auth.getAccessToken())) throw new QuickSaveSignInRequiredError();
+}
+
+/**
  * The notification for a Quick Save that failed — never the fixed "Failed to save" text (UAT-9, task 089):
  * - the server refused (403, 409, 413, 429, …) → the server's own message (its `detail`, else the catalog message
  *   for its `errorCode`, else its title), with the HTTP status;
  * - no server reason → what failed, in words: reading the document from Word, or reaching Spaarke.
  */
 export function describeQuickSaveFailure(error: unknown, stage: QuickSaveStage): string {
+  if (isQuickSaveSignInFailure(error)) {
+    // #1571 review F1: not a connection problem — the sign-in. Say what fixes it.
+    return QUICK_SAVE_SIGN_IN_MESSAGE;
+  }
   const problem = serverProblemOf(error);
   if (problem) {
     const known = problem.errorCode ? mapProblemDetailsToMessage(problem).message : '';

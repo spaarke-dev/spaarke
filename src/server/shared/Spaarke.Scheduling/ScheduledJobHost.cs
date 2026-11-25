@@ -339,9 +339,25 @@ public sealed class ScheduledJobHost : BackgroundService
             "Manual admin trigger dispatched for job '{JobId}' runId={RunId} correlationId={CorrelationId}",
             jobId, persistedRunId, context.CorrelationId);
 
-        var task = Task.Run(
-            () => RunManualTriggerAsync(handler, context, persistedRunId, hold),
-            CancellationToken.None);
+        // The run is minutes long and outlives the trigger request. Task.Run captures the ambient Activity, so a run
+        // started under the request would inherit its trace; when the exporter's sampler drops that trace, every log
+        // line of the run goes with it (#3125). Start the task with no ambient Activity so the run is its own root,
+        // as a scheduled run is, and restore the request's Activity for the caller (same device as ExternalAccessAudit.Write).
+        // RunId/CorrelationId in each message keep the run correlated with the trigger. No Activity is started here:
+        // the scheduled path starts none either.
+        Task task;
+        var requestActivity = Activity.Current;
+        Activity.Current = null;
+        try
+        {
+            task = Task.Run(
+                () => RunManualTriggerAsync(handler, context, persistedRunId, hold),
+                CancellationToken.None);
+        }
+        finally
+        {
+            Activity.Current = requestActivity;
+        }
         _inFlight[runId] = task;
 
         // Untrack on completion regardless of outcome (same pattern as DispatchAndAdvance).

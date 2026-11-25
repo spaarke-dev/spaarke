@@ -68,6 +68,16 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private const string IndexingQueueName = "office-indexing";
     private const int MaxConcurrentCalls = 5;
     private static readonly TimeSpan IdempotencyKeyTtl = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// The cache resource of the "processed" mark a finished finalization sets under its message key. Shared with
+    /// <see cref="EmailAttachmentAddPlanner"/>, which reads the mark to tell a finalization that has not finished from one
+    /// that has (task 138): one definition, so the writer and the reader cannot drift apart.
+    /// </summary>
+    internal const string ProcessedMarkResource = "office-upload-processed";
+
+    /// <summary>The schema version of the <see cref="ProcessedMarkResource"/> mark.</summary>
+    internal const int ProcessedMarkVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -275,6 +285,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var driveId = parts[0];
             var itemId = parts[1];
 
+            // Task 138 (#2209): a re-save that adds attachments to an email already saved. Only the missing children.
+            if (payload.AttachmentsOnly)
+            {
+                return await ProcessAttachmentsOnlyAsync(message, payload, driveId, itemId, cancellationToken);
+            }
+
             _logger.LogInformation(
                 "File already uploaded to SPE, skipping upload. DriveId={DriveId}, ItemId={ItemId}",
                 driveId, itemId);
@@ -432,6 +448,60 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         }
     }
 
+    /// <summary>
+    /// Task 138 (#2209): the attachments-only finalization of a re-save that adds attachments to an email already saved as
+    /// the <c>.eml</c> document the payload names. Creates the missing attachment children through the SAME
+    /// <see cref="ProcessEmailAttachmentsAsync"/> → <see cref="ProcessSingleAttachmentAsync"/> as a first save, which skips
+    /// any child that already exists (read again here, just before creating). Nothing else: the <c>.eml</c>, its email
+    /// artifact and its profile/index were made by the first save.
+    /// </summary>
+    private async Task<JobOutcome> ProcessAttachmentsOnlyAsync(
+        OfficeJobMessage message,
+        UploadFinalizationPayload payload,
+        string driveId,
+        string itemId,
+        CancellationToken cancellationToken)
+    {
+        if (payload.ContentType != SaveContentType.Email
+            || payload.DocumentId is not { } emlDocumentId
+            || emlDocumentId == Guid.Empty)
+        {
+            // Never the fallback create: that would make a second .eml.
+            return JobOutcome.Failure(
+                "OFFICE_INTERNAL",
+                "An attachments-only finalization names the existing .eml document of an Email save.",
+                retryable: false);
+        }
+
+        await UpdateJobStatusAsync(message.JobId, JobStatus.Running, "AddingAttachments", 50, cancellationToken);
+
+        await ProcessEmailAttachmentsAsync(
+            driveId,
+            itemId,
+            emlDocumentId,
+            payload,
+            message.UserId,
+            message.JobId,
+            cancellationToken);
+
+        await MarkAsProcessedAsync(message.IdempotencyKey, emlDocumentId, cancellationToken);
+
+        await UpdateJobStatusAsync(
+            message.JobId,
+            JobStatus.Completed,
+            "AttachmentsAdded",
+            100,
+            cancellationToken,
+            emlDocumentId);
+
+        _logger.LogInformation(
+            "Attachments-only finalization completed for job {JobId} under .eml document {DocumentId}",
+            message.JobId,
+            emlDocumentId);
+
+        return JobOutcome.Success();
+    }
+
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
         _logger.LogWarning(
@@ -566,9 +636,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var tenantId = GetTenantIdForCache();
         var cached = await _cache.GetAsync<string>(
             tenantId,
-            resource: "office-upload-processed",
+            resource: ProcessedMarkResource,
             id: idempotencyKey,
-            version: 1,
+            version: ProcessedMarkVersion,
             ct: cancellationToken);
         return !string.IsNullOrEmpty(cached);
     }
@@ -581,9 +651,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var tenantId = GetTenantIdForCache();
         await _cache.SetAsync<string>(
             tenantId,
-            resource: "office-upload-processed",
+            resource: ProcessedMarkResource,
             id: idempotencyKey,
-            version: 1,
+            version: ProcessedMarkVersion,
             value: documentId.ToString(),
             ttl: IdempotencyKeyTtl,
             ct: cancellationToken);
@@ -595,9 +665,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// is the BFF's own AAD tenant (TENANT_ID or AzureAd:TenantId).
     /// Falls back to "bff" if neither is configured (defensive — should not happen in deployed envs).
     /// </summary>
-    private string GetTenantIdForCache()
+    private string GetTenantIdForCache() => TenantIdForCache(_configuration);
+
+    /// <summary>The cache tenant id, for the readers of the <see cref="ProcessedMarkResource"/> mark.</summary>
+    internal static string TenantIdForCache(IConfiguration configuration)
     {
-        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"];
+        var tenantId = configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"];
         return string.IsNullOrWhiteSpace(tenantId) ? "bff" : tenantId;
     }
 
@@ -1022,6 +1095,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var emlConverter = scope.ServiceProvider.GetRequiredService<IEmailToEmlConverter>();
             var attachmentFilterService = scope.ServiceProvider.GetRequiredService<AttachmentFilterService>();
 
+            // Respect user's attachment selection (if provided)
+            // - null: Process all attachments (backward compatible)
+            // - empty array: Process NO attachments (user deselected all)
+            // - array with names: Process only those attachments
+            if (payload.EmailMetadata?.SelectedAttachmentFileNames is { Count: 0 })
+            {
+                // User explicitly deselected all attachments
+                _logger.LogInformation(
+                    "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
+                    parentDocumentId);
+                return; // Skip all attachment processing
+            }
+
             // Download the .eml file from SPE
             var emlStream = await speFileStore.DownloadFileAsync(driveId, itemId, cancellationToken);
             if (emlStream == null)
@@ -1032,12 +1118,18 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 return;
             }
 
-            // Extract attachments using IEmailToEmlConverter
-            IReadOnlyList<EmailAttachmentInfo> attachments;
+            // Task 138: the ONE selection (extract, drop noise, apply the user's selection, keep what can become a document),
+            // shared with the save's "what is not yet saved" answer.
+            EmailAttachmentAddPlanner.EmailAttachmentSelection chosen;
             using (emlStream)
             {
-                attachments = emlConverter.ExtractAttachments(emlStream);
+                chosen = EmailAttachmentAddPlanner.SelectAttachments(
+                    emlStream, emlConverter, attachmentFilterService, payload.EmailMetadata?.SelectedAttachmentFileNames);
             }
+
+            var attachments = chosen.All;
+            var filteredAttachments = chosen.Wanted;
+            var filteredCount = attachments.Count - filteredAttachments.Count;
 
             if (attachments.Count == 0)
             {
@@ -1049,30 +1141,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 "Extracted {Count} attachments from .eml for document {DocumentId}",
                 attachments.Count, parentDocumentId);
 
-            // Filter out noise (signatures, tracking pixels, etc.)
-            var filteredAttachments = attachmentFilterService.FilterAttachments(attachments);
-            var filteredCount = attachments.Count - filteredAttachments.Count;
-
-            // Respect user's attachment selection (if provided)
-            // - null: Process all attachments (backward compatible)
-            // - empty array: Process NO attachments (user deselected all)
-            // - array with names: Process only those attachments
             if (payload.EmailMetadata?.SelectedAttachmentFileNames != null)
             {
-                if (payload.EmailMetadata.SelectedAttachmentFileNames.Count == 0)
-                {
-                    // User explicitly deselected all attachments
-                    _logger.LogInformation(
-                        "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
-                        parentDocumentId);
-                    return; // Skip all attachment processing
-                }
-
-                var selectedNames = new HashSet<string>(payload.EmailMetadata.SelectedAttachmentFileNames, StringComparer.OrdinalIgnoreCase);
-                filteredAttachments = filteredAttachments
-                    .Where(a => selectedNames.Contains(a.FileName))
-                    .ToList();
-
                 _logger.LogInformation(
                     "User selected {SelectedCount} attachments for document {DocumentId}: {SelectedNames}",
                     filteredAttachments.Count,
@@ -1085,6 +1155,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     "No attachment selection provided - processing all {Count} attachments for document {DocumentId}",
                     filteredAttachments.Count,
                     parentDocumentId);
+            }
+
+            if (payload.AttachmentsOnly)
+            {
+                // Task 138: a re-save adds only what the .eml does not already have. Read just before creating, so a
+                // second add of the same attachment that runs after this one creates nothing (two at the same moment
+                // upload to the same drive item, and the second create is refused by sprk_graphitemid_uk).
+                var existingChildren = await _documentService.GetDocumentsByParentAsync(parentDocumentId, cancellationToken);
+                var notYetSaved = EmailAttachmentAddPlanner.ExcludeAlreadySaved(filteredAttachments, existingChildren);
+                _logger.LogInformation(
+                    "Attachments-only finalization for document {DocumentId}: {AlreadySaved} already saved, {ToCreate} to create",
+                    parentDocumentId, filteredAttachments.Count - notYetSaved.Count, notYetSaved.Count);
+                filteredAttachments = notYetSaved;
             }
 
             _logger.LogInformation(

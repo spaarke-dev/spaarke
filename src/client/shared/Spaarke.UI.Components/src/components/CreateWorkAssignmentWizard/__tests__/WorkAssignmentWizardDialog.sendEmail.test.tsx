@@ -127,6 +127,46 @@ describe('WorkAssignmentWizardDialog — Finish sends the composed email (task 1
   });
 });
 
+describe('WorkAssignmentWizardDialog — closing deletes the Send Email step unsent uploads (task 220, #2813)', () => {
+  const dialog = (open: boolean) => (
+    <WorkAssignmentWizardDialog
+      open={open}
+      onClose={jest.fn()}
+      dataService={{} as never}
+      authenticatedFetch={jest.fn() as never}
+      bffBaseUrl="https://bff.example"
+    />
+  );
+
+  it('closing without Finish deletes the document the step uploaded, and leaves a passed-in document alone', async () => {
+    const discard = jest.fn(async () => undefined);
+    const view = render(dialog(true));
+    const nextSteps = (mockShell.props.steps as Array<{ id: string; renderContent: () => React.ReactNode }>).find(
+      st => st.id === 'next-steps'
+    )!;
+    render(<>{nextSteps.renderContent()}</>);
+    act(() => mockGrid.props.onSelectionChange(['send-email']));
+    const card = (mockGrid.props.cards as Array<{ id: string; renderStep: () => React.ReactNode }>).find(
+      c => c.id === 'send-email'
+    )!;
+    render(<>{card.renderStep()}</>);
+    act(() =>
+      mockEmail.props.onChange({
+        ...COMPOSED,
+        attachments: [
+          { id: 'local:1', source: 'local', fileName: 'fees.pdf', sizeBytes: 1, documentId: 'doc-up', discard },
+          { id: 'doc:d-9', source: 'related', fileName: 'brief.pdf', sizeBytes: 1, documentId: 'd-9' },
+        ],
+      })
+    );
+    expect(discard).not.toHaveBeenCalled();
+
+    view.rerender(dialog(false));
+
+    await waitFor(() => expect(discard).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe('WorkAssignmentService.sendEmail (task 182)', () => {
   it('sends the composed email with Cc, Bcc and From, filed under the work assignment', async () => {
     const { RealWorkAssignmentService } = jest.requireMock('../workAssignmentService') as {

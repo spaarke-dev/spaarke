@@ -138,11 +138,13 @@ class ApiClient implements IApiClient {
     return JSON.parse(text) as T;
   }
 
-  /** Single-retry-on-401 config shared by `request()` and `uploadFile()` (task 040 / FR-B0). */
+  /**
+   * Single-retry-on-401 config shared by `request()` and `uploadFile()` (task 040 / FR-B0). `authenticatedJsonFetch`
+   * itself clears the token cache before the retry, forcing a new token (#1571 review F1).
+   */
   private retryConfig() {
     return {
       getRetryToken: async () => (await this.getAccessToken()) ?? '',
-      onBeforeRetry: () => authService.clearCache(),
     };
   }
 

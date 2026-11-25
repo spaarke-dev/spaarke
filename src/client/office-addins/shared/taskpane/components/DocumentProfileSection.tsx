@@ -149,7 +149,7 @@ export interface DocumentProfileSectionProps {
   refreshSignal?: number;
   /**
    * Task 088 (UAT-6): called once each time a Generate Profile request is ACCEPTED by the server (202 — the
-   * profile job is queued; the hook does not poll for the job's end, #1090). `SaveFlow` uses it to turn its
+   * profile job is queued; the hook then follows the job to its end, task 137 / #1090). `SaveFlow` uses it to turn its
    * gray "Saved" button back into an enabled "Save" (task 094). Not called when the request is refused or fails.
    */
   onProfileGenerated?: () => void;
@@ -180,7 +180,8 @@ export function DocumentProfileSection({
   onRefresh,
 }: DocumentProfileSectionProps): React.ReactElement {
   const styles = useStyles();
-  const { outcome, generateProfile, isGenerating, generateError, refetch } = useDocumentProfile(documentId);
+  const { outcome, generateProfile, isGenerating, generateError, refetch, waitTimedOut } =
+    useDocumentProfile(documentId);
 
   // Summary viewport height. `undefined` = never adjusted: the viewport keeps its content-sized default
   // (max-height). Once adjusted it is a fixed height, remembered per viewer.
@@ -326,7 +327,18 @@ export function DocumentProfileSection({
         );
 
       case 'status':
-        return <Text size={200}>{DOCUMENT_SUMMARY_STATUS_MESSAGES[outcome.status]}</Text>;
+        return (
+          <>
+            <Text size={200}>{DOCUMENT_SUMMARY_STATUS_MESSAGES[outcome.status]}</Text>
+            {/* task 137: the wait for the profile job ran out while the status is still Pending. Not an error: the job
+                may still finish, so the status stays and Generate Profile stays enabled. */}
+            {waitTimedOut && outcome.status === 'Pending' && (
+              <Text size={200} className={styles.disabledReason} role="status">
+                This is taking longer than expected. Check back in a few minutes.
+              </Text>
+            )}
+          </>
+        );
 
       case 'completed': {
         const keywords = splitKeywords(outcome.keywords);

@@ -1036,6 +1036,161 @@ public class AssignedAccessStoreODataTests
         }
     }
 
+    // ── The link candidates: the systemusers a contact may represent (#3120, DI-174) ─────────────────────────────
+
+    private static Dictionary<string, object?> SystemUser(Guid contact, bool disabled = false) => new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["systemuserid"] = Guid.NewGuid(),
+        ["_sprk_primarycontact_value"] = contact,
+        ["azureactivedirectoryobjectid"] = Guid.NewGuid(),
+        ["isdisabled"] = disabled,
+        ["accessmode"] = 0,
+        ["applicationid"] = null,
+        ["sprk_isexternal"] = false,
+    };
+
+    /// <summary>
+    /// #3120: the read is the COMPLETE set of users a contact may represent, so it must not stop at an arbitrary prefix. The
+    /// old read asked for 10 rows; a contact linked to 11 users lost one, and the caller's "exactly one eligible" was decided
+    /// on a part of the set.
+    /// </summary>
+    [Fact]
+    public async Task TheLinkCandidates_OfAContactLinkedToMoreThanTenUsers_AreEveryLinkedUser()
+    {
+        var table = new SystemUsersTable();
+        var users = Enumerable.Range(0, 11).Select(_ => SystemUser(Contact)).ToList();
+        users.ForEach(table.Add);
+        table.Add(SystemUser(Guid.NewGuid())); // another contact's user
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        var candidates = await store.ReadLinkCandidatesAsync(Contact, boundOid: null, CancellationToken.None);
+
+        candidates.Select(c => c.SystemUserId).Should().BeEquivalentTo(users.Select(u => (Guid)u["systemuserid"]!));
+        candidates.Should().OnlyContain(c => c.PrimaryContactId == Contact);
+    }
+
+    /// <summary>#3120: the read asks for one row past the cap, so a full page is told apart from a complete set.</summary>
+    [Fact]
+    public async Task TheLinkCandidates_AskForOneRowPastTheCap_WithTheLinkAndOidFilter()
+    {
+        var table = new SystemUsersTable();
+        var oid = Guid.NewGuid();
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        await store.ReadLinkCandidatesAsync(Contact, oid, CancellationToken.None);
+
+        table.Tops.Should().ContainSingle().Which.Should().Be(AssignedAccessStore.MaxScanRows + 1).And.Be(5000);
+        table.Filters.Should().ContainSingle().Which.Should().Be(
+            $"_sprk_primarycontact_value eq {Contact:D} or azureactivedirectoryobjectid eq {oid:D}");
+    }
+
+    /// <summary>
+    /// #3120: exactly the cap is a complete set; one row more is NOT a set the caller can decide on — the read throws (never a
+    /// silent prefix), naming the contact and the cap.
+    /// </summary>
+    [Fact]
+    public async Task TheLinkCandidates_PastTheCap_Throw_AndAtTheCap_AreReturned()
+    {
+        var table = new SystemUsersTable();
+        for (var i = 0; i < AssignedAccessStore.MaxScanRows; i++)
+            table.Add(SystemUser(Contact));
+        var store = new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance);
+
+        (await store.ReadLinkCandidatesAsync(Contact, null, CancellationToken.None))
+            .Should().HaveCount(AssignedAccessStore.MaxScanRows, "the cap itself is a complete set");
+
+        table.Add(SystemUser(Contact));
+
+        var read = () => store.ReadLinkCandidatesAsync(Contact, null, CancellationToken.None);
+        (await read.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain(Contact.ToString("D")).And.Contain(AssignedAccessStore.MaxScanRows.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// #3120 (D-199), through the ONE representation rule over the production store: 12 linked users of whom the first and the
+    /// last are eligible. A 10-row prefix held exactly one eligible user, so a caller picked it; the whole set holds two, and
+    /// several eligible users must refuse.
+    /// </summary>
+    [Fact]
+    public async Task WhoAContactRepresents_IsDecidedOnEveryLinkedUser_NotAPrefixWithOneEligibleUser()
+    {
+        var table = new SystemUsersTable();
+        table.Add(SystemUser(Contact));
+        for (var i = 0; i < 10; i++)
+            table.Add(SystemUser(Contact, disabled: true));
+        table.Add(SystemUser(Contact));
+
+        var result = await Representation(table).ResolveAsync(
+            Contact, rootIsRestricted: false, BindingColumnMissingPolicy.DecideOnLink, CancellationToken.None);
+
+        result.Status.Should().Be(ContactRepresentationStatus.Read);
+        result.Users.Should().HaveCount(12);
+        result.Users.Count(u => u.Eligibility == Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.ShareEligibility.Eligible)
+            .Should().Be(2, "several eligible users — the caller refuses rather than pick one");
+    }
+
+    /// <summary>#3120: a contact linked to more users than one read returns is "could not tell" (fail closed), never a partial answer.</summary>
+    [Fact]
+    public async Task WhoAContactRepresents_PastTheCap_IsUnreadable_NotAPartialSet()
+    {
+        var table = new SystemUsersTable();
+        for (var i = 0; i <= AssignedAccessStore.MaxScanRows; i++)
+            table.Add(SystemUser(Contact));
+
+        var result = await Representation(table).ResolveAsync(
+            Contact, rootIsRestricted: false, BindingColumnMissingPolicy.DecideOnLink, CancellationToken.None);
+
+        result.Status.Should().Be(ContactRepresentationStatus.Unreadable);
+        result.Users.Should().BeEmpty();
+        result.Fault.Should().BeOfType<InvalidOperationException>();
+    }
+
+    private static ContactUserRepresentation Representation(SystemUsersTable table)
+    {
+        var identities = new Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore();
+        identities.AddContact(Contact);
+        return new ContactUserRepresentation(
+            identities,
+            new AssignedAccessStore(table, NullLogger<AssignedAccessStore>.Instance),
+            new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None));
+    }
+
+    /// <summary>An in-memory <c>systemusers</c> table that evaluates the <c>$filter</c> and honours <c>$top</c>; records both.</summary>
+    private sealed class SystemUsersTable : DataverseWebApiClient
+    {
+        private readonly List<Dictionary<string, object?>> _rows = new();
+
+        public SystemUsersTable()
+            : base(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                NoCredential.Instance)
+        {
+        }
+
+        public List<string> Filters { get; } = new();
+
+        public List<int?> Tops { get; } = new();
+
+        public void Add(Dictionary<string, object?> row) => _rows.Add(row);
+
+        public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+        {
+            entitySetName.Should().Be("systemusers");
+            if (filter is not null) Filters.Add(filter);
+            Tops.Add(top);
+
+            var columns = select?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var page = _rows.Where(filter is null ? (_ => true) : ODataFilter.Parse(filter))
+                .Take(top ?? int.MaxValue)
+                .Select(r => columns is null ? r : columns.ToDictionary(c => c, c => r.TryGetValue(c, out var v) ? v : null))
+                .ToList();
+            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(page))!);
+        }
+    }
+
     private sealed class NoCredential : TokenCredential
     {
         public static readonly NoCredential Instance = new();

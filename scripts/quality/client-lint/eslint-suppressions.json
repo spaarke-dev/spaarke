@@ -175,7 +175,7 @@
       "count": 23
     },
     "no-restricted-syntax": {
-      "count": 6
+      "count": 5
     }
   },
   "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx": {
@@ -820,7 +820,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 21
+      "count": 18
     },
     "no-restricted-syntax": {
       "count": 2
@@ -1001,7 +1001,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeAnalysisStep.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 5
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummaryResultsStep.tsx": {

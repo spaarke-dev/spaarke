@@ -182,6 +182,9 @@ processors (`ServiceBusJobProcessor`, `CommunicationJobProcessor`) schedule a co
 `PriorDeliveryCount` property, back off 1, 2, 4, 8 min (capped at 15), then complete the original
 (`Services/Jobs/JobMessageRetry.cs`). Handlers read the **logical** attempt from `JobContract.DeliveryCount` /
 `IsFinalDelivery`, never the broker's count. Turning duplicate detection on would make the broker drop every retry copy.
+Enforced by: `JobQueueDuplicateDetectionOffGuardTests` (`tests/Spaarke.ArchTests`; every queue resource in
+`infrastructure/**/*.bicep` must set `requiresDuplicateDetection: false`; the only exemption is `sprk-provisioning-jobs`,
+which no BFF processor reads). Live stamps are not covered by the scan; their read-only check belongs to provisioning.
 
 **SHA-256 hashing rule**: Service Bus limits `MessageId` to 128 characters. If the IdempotencyKey exceeds this, hash it:
 

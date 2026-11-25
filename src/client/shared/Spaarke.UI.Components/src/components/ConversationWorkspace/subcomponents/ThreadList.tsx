@@ -117,6 +117,11 @@ export interface IThreadListProps {
   createLabel?: string;
   /** Text shown when the list is empty. Default "No threads yet.". */
   emptyText?: string;
+  /**
+   * One short line shown under the loaded list (ontology task 221: "Some messages may not be shown." when the record's
+   * read was cut by a bound). Omit to show nothing.
+   */
+  footnote?: string;
   className?: string;
 }
 
@@ -358,6 +363,16 @@ const useStyles = makeStyles({
   errorState: {
     color: tokens.colorPaletteRedForeground1,
   },
+  // The line under the list (task 221): the muted info text of the empty state, compact, pinned below the rows.
+  footnote: {
+    flexShrink: 0,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
 });
 
 export const ThreadList: React.FC<IThreadListProps> = ({
@@ -375,6 +390,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   subHeader,
   createLabel = 'New thread',
   emptyText = 'No threads yet.',
+  footnote,
   className,
 }) => {
   const styles = useStyles();
@@ -573,6 +589,12 @@ export const ThreadList: React.FC<IThreadListProps> = ({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {status === 'ready' && footnote && (
+        <div className={styles.footnote} role="note">
+          <Text size={200}>{footnote}</Text>
         </div>
       )}
 

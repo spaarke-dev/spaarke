@@ -233,12 +233,12 @@ afterEach(() => {
 });
 
 /** Fresh module graph; the plane's backend is activated and its acquirer installed, as the plane bootstrap does. */
-async function load() {
+async function load(plane: 'ciam' | 'workforce' = 'ciam') {
   vi.resetModules();
   const selection = await import('../src/auth/backend-selection');
   const msalAuth = await import('../src/auth/msal-auth');
-  msalAuth.setActiveBffTokenAcquirer(vi.fn(async () => 'ciam-token'));
-  selection.activateBackend('ciam', { ...CONTOSO });
+  msalAuth.setActiveBffTokenAcquirer(vi.fn(async () => `${plane}-token`));
+  selection.activateBackend(plane, { ...CONTOSO });
   const { InvoiceSubmitPage } = await import('../src/pages/InvoiceSubmitPage');
   const { INVOICE_SUBMIT_PATH } = await import('../src/pages/invoiceSubmitLink');
   const { default: InvoicesWidgetBody } = await import('../src/widgets/InvoicesWidget');
@@ -1258,6 +1258,20 @@ describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
       expect(screen.queryByRole('button', { name: /submit invoice/i })).toBeNull();
       expect(screen.getByTestId('invoices-grid')).toBeTruthy();
       expect(calls.some(c => new URL(c.url).pathname === '/api/v1/external/invoice-submissions')).toBe(false);
+    },
+    SLOW
+  );
+
+  it(
+    'hands the grid no command on the workforce plane, even when /me lists firms (SPA-r4 task 040)',
+    async () => {
+      // The default /me lists a firm, which on the CIAM plane offers the command (first test above).
+      const { InvoicesWidgetBody } = await load('workforce');
+      renderWidget(InvoicesWidgetBody);
+      await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+      await new Promise(r => setTimeout(r, 100));
+      expect(screen.queryByRole('button', { name: /submit invoice/i })).toBeNull();
+      expect(screen.getByTestId('invoices-grid')).toBeTruthy();
     },
     SLOW
   );

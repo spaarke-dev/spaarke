@@ -138,3 +138,31 @@ describe('wizardShellReducer — dynamic steps', () => {
     expect(wizardShellReducer(s0, { type: 'REMOVE_DYNAMIC_STEP', stepId: 'zzz' })).toBe(s0);
   });
 });
+
+describe('wizardShellReducer — dynamic steps and reset (DI-155)', () => {
+  const statics = [cfg('a'), cfg('b'), cfg('c')];
+  const withFollowOn = () => {
+    const s0 = buildInitialShellState(statics);
+    return wizardShellReducer(s0, { type: 'ADD_DYNAMIC_STEP', config: cfg('follow') });
+  };
+
+  it('RESET after a dynamic step was added gives back exactly the static steps, on the first step', () => {
+    const s = wizardShellReducer(withFollowOn(), { type: 'RESET', steps: statics });
+    expect(ids(s)).toEqual(['a', 'b', 'c']);
+    expect(s.currentStepIndex).toBe(0);
+    expect(statuses(s)).toEqual(['active', 'pending', 'pending']);
+  });
+
+  it('RESET also forgets skipped marks', () => {
+    let s = wizardShellReducer(buildInitialShellState(statics), { type: 'SKIP_STEP' });
+    expect(statuses(s)[0]).toBe('skipped');
+    s = wizardShellReducer(s, { type: 'RESET', steps: statics });
+    expect(statuses(s)).toEqual(['active', 'pending', 'pending']);
+  });
+
+  it('must-not-fire: GO_TO_STEP without a reset keeps the dynamic steps', () => {
+    const s = wizardShellReducer(withFollowOn(), { type: 'GO_TO_STEP', stepIndex: 1 });
+    expect(ids(s)).toEqual(['a', 'b', 'c', 'follow']);
+    expect(s.currentStepIndex).toBe(1);
+  });
+});

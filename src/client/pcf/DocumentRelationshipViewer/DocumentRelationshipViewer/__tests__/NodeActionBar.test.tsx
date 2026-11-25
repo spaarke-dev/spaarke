@@ -14,7 +14,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { NodeActionBar } from '../components/NodeActionBar';
-import type { DocumentNodeData } from '../types/graph';
+import type { DocumentNodeData } from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
 
 // Import mocks from setup
 import { mockXrmNavigation, mockWindowOpen } from '../../jest.setup';

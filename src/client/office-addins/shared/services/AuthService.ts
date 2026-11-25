@@ -48,8 +48,20 @@ export interface IAuthService {
    * re-acquiring a token for the retry attempt — mirrors `@spaarke/auth`'s
    * `authenticatedFetch`, which calls `provider.clearCache()` on a 401 before
    * its own retry.
+   *
+   * @param refusedToken The token the server just answered 401 for (#1571 fix round 3). The strategy records it as
+   *   refused only when it is still the token it last issued; with no argument nothing is recorded.
    */
-  clearCache(): void;
+  clearCache(refusedToken?: string): void;
+  /**
+   * #1571 review F2: subscribe to "sign-in required" — raised when the provider could not acquire a token silently,
+   * or when a request was still refused (401) after its single retry. The pane shows its sign-in prompt: nothing else
+   * can renew the session, because the only interactive sign-in is a user's click. Returns the unsubscribe. Optional
+   * so test doubles need not implement it.
+   */
+  onSignInRequired?(listener: () => void): () => void;
+  /** #1571 review F2: raise "sign-in required" (a request's 401 that survived its retry). */
+  notifySignInRequired?(): void;
   /**
    * Task 113 (dev-only Diagnostics view): how this pane signed in — the MSAL authority and whether the Office
    * broker (NAA) or the popup fallback is in use. Optional so test doubles need not implement it.
@@ -63,6 +75,10 @@ export interface SignInDiagnostics {
   naaActive: boolean;
 }
 
+/** #1571 review F2: what a Sign in click that produced no token tells the user. */
+export const SIGN_IN_INCOMPLETE_MESSAGE =
+  'Sign-in did not complete. If a pop-up was blocked, allow pop-ups for this site and try again.';
+
 export interface AuthConfig {
   clientId: string;
   tenantId?: string;
@@ -75,6 +91,7 @@ class AuthService implements IAuthService {
   private provider: SpaarkeAuthProvider | null = null;
   private strategy: OfficeNaaStrategy | null = null;
   private authority: string | null = null;
+  private readonly signInRequiredListeners = new Set<() => void>();
 
   async initialize(config: AuthConfig): Promise<void> {
     const bffApiClientId = config.bffApiClientId || '1e40baad-e065-4aea-a8d4-4b7ab273458c';
@@ -83,6 +100,9 @@ class AuthService implements IAuthService {
       clientId: config.clientId,
       bffApiScope: `api://${bffApiClientId}/user_impersonation`,
       proactiveRefresh: true,
+      // #1571: every acquire the provider drives (start-up, proactive refresh, a 401 retry, each BFF call) is silent;
+      // the only interactive acquire is `signIn()`, from the Sign in click.
+      requireSilentOnly: true,
       ...(config.tenantId ? { tenantId: config.tenantId } : {}),
       ...(config.redirectUri ? { redirectUri: config.redirectUri } : {}),
     });
@@ -99,27 +119,41 @@ class AuthService implements IAuthService {
 
     // Eagerly acquire (mirrors `initAuth()`'s warm-cache behavior) so
     // `isAuthenticated()`/`getAccount()` reflect a signed-in state immediately
-    // after `initialize()` when a cached account/session is available. This runs
-    // the strategy's full ladder (silent, then interactive): under NAA the
-    // interactive step goes through the Office host; on the standard popup client
-    // a popup without a user click is usually blocked, and the Sign in button retries.
+    // after `initialize()` when a cached account/session is available. SILENT only
+    // (#1571): no click led here, so no popup and no broker prompt — a popup
+    // without a user gesture is blocked on Office on the web. When nothing can be
+    // had silently the pane shows Sign in, whose click runs `signIn()`.
     await this.provider.getAccessToken();
 
     console.info(`[AuthService] Initialized via @spaarke/auth (naa=${this.strategy.isNaaActive()})`);
   }
 
   /**
-   * Trigger token acquisition. `OfficeNaaStrategy.acquire()` tries silent
-   * acquisition first, then `acquireTokenPopup` (routed through the Office
-   * broker under NAA — not a real popup; a genuine popup only under the
-   * legacy-client fallback path).
+   * Sign in from a user's click — the ONLY interactive path (#1571). Call it from
+   * the click handler, never from a timer or a load. `OfficeNaaStrategy.acquireInteractive()`
+   * tries silent acquisition first, then `acquireTokenPopup` (routed through the
+   * Office broker under NAA — not a real popup; a genuine popup only under the
+   * standard-client path). The provider's cache is then filled with the token the
+   * click returned (the strategy hands it to the provider's next acquire), not with
+   * a second request.
+   *
+   * Throws an Error with {@link SIGN_IN_INCOMPLETE_MESSAGE} when the click produced
+   * no token (the user closed the prompt, or a pop-up blocker stopped it), so the
+   * pane can say so instead of showing nothing.
    */
   async signIn(): Promise<void> {
-    if (!this.provider) {
+    if (!this.provider || !this.strategy) {
       throw new Error('AuthService not initialized');
     }
     this.provider.clearCache();
-    await this.provider.getAccessToken();
+    const interactive = await this.strategy.acquireInteractive();
+    if (!interactive.accessToken) {
+      throw new Error(SIGN_IN_INCOMPLETE_MESSAGE);
+    }
+    const token = await this.provider.getAccessToken();
+    if (!token) {
+      throw new Error(SIGN_IN_INCOMPLETE_MESSAGE);
+    }
   }
 
   async signOut(): Promise<void> {
@@ -133,11 +167,9 @@ class AuthService implements IAuthService {
     return { authority: this.authority, naaActive: this.strategy?.isNaaActive() ?? false };
   }
 
+  /** The account the strategy signs in with (#1571: in the authority's tenant, never simply the first cached). */
   getAccount(): AccountInfo | null {
-    const msal = this.strategy?.getMsalInstance();
-    if (!msal) return null;
-    const accounts = msal.getAllAccounts();
-    return accounts.length > 0 ? (accounts[0] ?? null) : null;
+    return this.strategy?.getAccount() ?? null;
   }
 
   async getAccessToken(_scopes?: string[]): Promise<string | null> {
@@ -145,15 +177,41 @@ class AuthService implements IAuthService {
       return null;
     }
     const token = await this.provider.getAccessToken();
-    return token || null;
+    if (!token) {
+      // #1571 review F2: no token silently. Only the user's Sign in click can renew the session.
+      this.notifySignInRequired();
+      return null;
+    }
+    return token;
+  }
+
+  onSignInRequired(listener: () => void): () => void {
+    this.signInRequiredListeners.add(listener);
+    return () => {
+      this.signInRequiredListeners.delete(listener);
+    };
+  }
+
+  notifySignInRequired(): void {
+    for (const listener of [...this.signInRequiredListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        console.warn('[AuthService] a sign-in-required listener failed:', err);
+      }
+    }
   }
 
   isAuthenticated(): boolean {
     return this.provider?.isAuthenticated() ?? false;
   }
 
-  clearCache(): void {
+  clearCache(refusedToken?: string): void {
     this.provider?.clearCache();
+    // #1571 review F1: this runs before a 401 retry, and MSAL's cached token is the one the server just refused, so
+    // the re-acquire asks for a new one (still silently). The token the request sent is passed on, so a late 401 for
+    // an older token never marks a newer, good one as refused (fix round 3).
+    this.strategy?.requestFreshToken(refusedToken);
   }
 }
 

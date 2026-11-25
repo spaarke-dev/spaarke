@@ -98,6 +98,11 @@ export interface IThreadListResultDto {
   /** Opaque composite keyset cursor; null when there is no further page. */
   nextPageToken: string | null;
   hasMore: boolean;
+  /**
+   * Set only by {@link listThreadsByRegarding} (ontology task 221): the server's by-regarding read was cut by a bound, so
+   * the record's list is incomplete. A plain flag, never a count of what is missing. Absent on the `/threads` list.
+   */
+  truncated?: boolean;
 }
 
 /** Mirrors `UnreadCountResult` (`GET /threads/{threadId}/unread-count`). */
@@ -253,6 +258,8 @@ interface IRegardingReadResultForListDto {
   recordId: string;
   threads: Array<{ threadId: string; name: string | null; isPinned?: boolean }>;
   threadCount: number;
+  /** `RegardingReadResult.Truncated` (ontology task 221): a bound cut the read. Absent from an older BFF (treated as false). */
+  truncated?: boolean;
 }
 
 function resolveByRegardingUrl(base: string | undefined, entityType: string, id: string): string {
@@ -306,6 +313,7 @@ export async function listThreadsByRegarding(
     count: body.threadCount,
     nextPageToken: null,
     hasMore: false,
+    truncated: body.truncated === true,
   };
 }
 

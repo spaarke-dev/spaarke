@@ -23,6 +23,10 @@ module.exports = {
       '<rootDir>/../../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts',
     '^@spaarke/communication-components/logic/connections$':
       '<rootDir>/../../shared/Spaarke.Communication.Components/src/logic/connections/index.ts',
+    // Deep shared-lib imports (`@spaarke/ui-components/dist/theme/regardingRowStyles`, ...) resolve
+    // to the shared TS source, as in RecordHeader / RegardingResolver / SemanticSearchControl: the
+    // compiled dist is ESM, which jest's CommonJS runtime cannot load (#1906).
+    '^@spaarke/ui-components/dist/(.*)$': '<rootDir>/../../shared/Spaarke.UI.Components/src/$1',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   transform: {

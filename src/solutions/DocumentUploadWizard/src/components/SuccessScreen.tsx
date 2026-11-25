@@ -64,7 +64,7 @@ export interface IBuildSuccessConfigParams {
  * - Title: "X documents created successfully"
  * - Body: descriptive text + clickable links to each created document record
  * - Actions: Done button (rendered in wizard footer)
- * - Warnings: per-file failure messages
+ * - Warnings: per-file failure messages, and the server's non-blocking warnings on a document that was created
  */
 export function buildSuccessConfig({
     uploadResults,
@@ -188,6 +188,10 @@ export function buildSuccessConfig({
             warnings.push(`${fr.fileName}: ${fr.errorMessage}`);
         } else if (!fr.success) {
             warnings.push(`${fr.fileName}: Upload failed`);
+        }
+        // Non-blocking server warnings on a document that WAS created (e.g. a mapping source it could not read).
+        for (const warning of fr.warnings ?? []) {
+            warnings.push(`${fr.fileName}: ${warning}`);
         }
     }
 

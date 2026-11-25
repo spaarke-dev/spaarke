@@ -23,9 +23,12 @@ import { toPlainText } from './composeOnlyText';
 import {
   SEND_FAILURE_NETWORK_CODE,
   SEND_FAILURE_UNCONFIRMED_CODE,
+  mayHaveBeenSent,
   meaningfulDetail,
   toSendCommunicationError,
+  toSendRequestError,
 } from './describeSendFailure';
+import { discardUpload, holdUploads, keepUploads } from './uploadDiscard';
 import type {
   EmailComposerBodyFormat,
   EmailComposerState,
@@ -105,18 +108,39 @@ export function invalidRecipients(email: IComposedEmail): IRecipient[] {
   return [...email.to, ...email.cc, ...email.bcc].filter(r => !EMAIL_RE.test(r.email.trim()));
 }
 
+/** Options for {@link isComposedEmailReady}. */
+export interface IComposedEmailReadyOptions {
+  /**
+   * The subject and body may be left empty, because the server fills an empty one at send (field-mapping-server-write-path-r1
+   * task 028, FR-17: an email filed under an analysis gets them from the analysis mapping). The send still refuses one that
+   * nothing filled. Default `false`: both are required.
+   */
+  allowEmptySubjectAndBody?: boolean;
+}
+
 /**
- * True when the email can be sent at Finish: at least one To, every address valid, a subject and a body, and every kept
- * attachment uploaded (otherwise the send would leave it out without saying so).
+ * True when the email can be sent at Finish: at least one To, every address valid, a subject and a body (unless
+ * `allowEmptySubjectAndBody`), and every kept attachment uploaded (otherwise the send would leave it out without saying so).
  */
-export function isComposedEmailReady(email: IComposedEmail): boolean {
+export function isComposedEmailReady(email: IComposedEmail, options?: IComposedEmailReadyOptions): boolean {
+  const allowEmpty = options?.allowEmptySubjectAndBody === true;
   return (
     email.to.length > 0 &&
     invalidRecipients(email).length === 0 &&
-    email.subject.trim() !== '' &&
-    toPlainText(email.body, email.bodyFormat).trim() !== '' &&
+    (allowEmpty || email.subject.trim() !== '') &&
+    (allowEmpty || toPlainText(email.body, email.bodyFormat).trim() !== '') &&
     pendingAttachments(email).length === 0
   );
+}
+
+/**
+ * The email will not be sent from here (the wizard closed, with or without Finish): remove every document this email's
+ * composer uploaded (task 220, #2813). Picked and host-passed documents have no `discard` and are untouched; a document a
+ * Finish send carried that went out, or may have, was kept by {@link sendComposedEmail} and is untouched; each delete
+ * runs at most once. Call it when the wizard closes — not when it reopens. Never throws.
+ */
+export function discardComposedEmailUploads(email: IComposedEmail): void {
+  for (const a of email.attachments) discardUpload(a.discard);
 }
 
 /** Addresses joined with "; " (the shape the wizards' older string fields used). */
@@ -155,6 +179,12 @@ export interface ISendComposedEmailOptions {
    * Whether there is a record follows `associations` (none: the email is filed under no record).
    */
   retryLabel?: string;
+  /**
+   * The subject and body may be empty: the server fills an empty one (task 028, FR-17: an email filed under one analysis
+   * gets them from the analysis mapping) and refuses the send when nothing filled it, which comes back as the usual
+   * warning. Pair with `isComposedEmailReady(email, { allowEmptySubjectAndBody: true })`. Default `false`.
+   */
+  allowEmptySubjectAndBody?: boolean;
 }
 
 export interface ISendComposedEmailResult {
@@ -251,6 +281,13 @@ export async function sendComposedEmail(
     fromMailbox: email.fromMailbox,
   };
 
+  // Task 220: every document this email names is held from cleanup until the outcome is known — attached or only linked
+  // (`buildBodyWithAttachmentLinks` links every `linkSelected` item to its row, whether or not it is attached) — and kept
+  // for good when the send went out or may have (no response, 5xx, success without an id). A send that provably sent
+  // nothing only ends its hold; it never undoes what an earlier attempt kept.
+  const carried = email.attachments.filter(a => !!a.documentId).map(a => a.discard);
+  const hold = holdUploads(carried);
+  let requestSent = false;
   try {
     // Same order as EmailComposer.send(): resolve linked documents' record links, refuse a link that cannot be built.
     const attachments = await resolveAttachmentShareLinks(state.attachments, options.onResolveShareLink);
@@ -261,12 +298,25 @@ export async function sendComposedEmail(
         warning: `The email was not sent: the Spaarke record link for ${unresolved.map(a => a.fileName).join(', ')} could not be built here.`,
       };
     }
-    const result = await sendCommunication(mapStateToSendRequest({ ...state, attachments }), {
-      authenticatedFetch: options.authenticatedFetch,
-      bffBaseUrl: options.bffBaseUrl,
-    });
+    const request = mapStateToSendRequest({ ...state, attachments });
+    requestSent = true;
+    let result: Awaited<ReturnType<typeof sendCommunication>>;
+    try {
+      result = await sendCommunication(
+        options.allowEmptySubjectAndBody === true ? { ...request, serverFillsEmptySubject: true } : request,
+        {
+          authenticatedFetch: options.authenticatedFetch,
+          bffBaseUrl: options.bffBaseUrl,
+        }
+      );
+    } catch (requestErr) {
+      // What the request itself threw without a response is a connection failure, whatever the browser called it.
+      throw toSendRequestError(requestErr);
+    }
+    keepUploads(carried);
     return { success: true, communicationId: result.communicationId };
   } catch (err) {
+    if (requestSent && mayHaveBeenSent(toSendCommunicationError(err))) keepUploads(carried);
     return {
       success: false,
       warning: failureWarning(err, {
@@ -275,5 +325,7 @@ export async function sendComposedEmail(
         retryLabel: options.retryLabel,
       }),
     };
+  } finally {
+    hold.release();
   }
 }

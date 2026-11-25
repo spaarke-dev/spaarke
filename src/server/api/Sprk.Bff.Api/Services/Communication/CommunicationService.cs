@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Tracking;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
@@ -2484,6 +2485,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             return await SendMessageAsync(request, httpContext, correlationId, cancellationToken);
         }
+
+        // field-mapping-server-write-path-r1 task 028 (FR-17): an email filed under one sprk_analysis whose subject or body is empty
+        // gets it from the analysis -> communication mapping profile (fill-only; the source is read as the caller; a denied, missing
+        // or faulted source leaves the request as it is). Before both email paths so a mapped subject/body is what is validated and sent.
+        request = await SendTimeFieldMapping.FillEmptySubjectAndBodyAsync(
+            request, httpContext, _genericEntityService, _logger, correlationId, cancellationToken);
 
         // Branch: User mode sends via OBO as the authenticated user
         if (request.SendMode == SendMode.User)

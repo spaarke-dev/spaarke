@@ -329,6 +329,116 @@ public class SignalClosureService
         return read.Policies;
     }
 
+    /// <summary>The codes <see cref="PoliciesNotInForceWithStoredDetailAsync"/> named, and whether both of its reads reached the end.</summary>
+    /// <param name="Codes">The codes, among the policies it was given, that have a Signal whose stored evidence may still carry detail.</param>
+    /// <param name="IsComplete">False when a page read faulted or the page bound was reached (logged at Warning with the counts):
+    /// <paramref name="Codes"/> is then only the part read, and the caller must not take a policy missing from it as having nothing to redact.</param>
+    internal sealed record NotInForceStoredDetail(IReadOnlySet<string> Codes, bool IsComplete);
+
+    /// <summary>
+    /// Task 217 (#3091, DI-172): which of <paramref name="policies"/> (the Off or Retired ONTOLOGY policies, <see cref="PoliciesNotInForceAsync"/>)
+    /// still have a Signal whose stored evidence may carry detail (<see cref="SignalSuppressionService.AddStoredDetailFilter"/>), so the
+    /// job's stored-evidence redaction reads only those policies' Signals instead of every Off or Retired policy's, every night. Two paged reads
+    /// of <c>sprk_signal</c>, the stored-detail filter on both, selecting only what names the policy:
+    /// <list type="number">
+    /// <item>inner-joined to its policy (the pattern of <see cref="ReadPoliciesWithOpenSignalsAsync"/>), with D-170's conditions
+    /// (<see cref="NotInForceConditions"/>, Off OR Inactive) and the Ontology allowlist (<see cref="RuleDomains.AddOntologyPolicyAllowlist"/>) on the
+    /// joined policy: the predicate of <see cref="PoliciesNotInForceAsync"/>. Names each policy by id.</item>
+    /// <item>with an EMPTY policy lookup, named by its dedupe key's code. The per-policy sweep reads by dedupe-key prefix, so it also reaches a
+    /// Signal of the policy whose lookup is empty (a deleted policy's code reused, or a hand edit); this keeps every such Signal reached.</item>
+    /// </list>
+    /// A Signal's lookup and its key name the same policy otherwise: the code is written on create only and is an alternate key of
+    /// <c>sprk_policy</c>. Only a name in <paramref name="policies"/> is returned. <see cref="NotInForcePageSize"/> Signals per page, ordered by
+    /// id, at most <paramref name="maxPages"/> pages per read. A page fault or the bound ends the read as incomplete, logged at Warning: the
+    /// caller then reads every policy, as before task 217 (a fault here never leaves evidence unredacted).
+    /// </summary>
+    internal async Task<NotInForceStoredDetail> PoliciesNotInForceWithStoredDetailAsync(
+        IReadOnlyDictionary<Guid, string> policies, CancellationToken ct, int maxPages = SignalEvaluator.MaxPages)
+    {
+        ArgumentNullException.ThrowIfNull(policies);
+        var codes = new HashSet<string>(StringComparer.Ordinal);
+        if (policies.Count == 0) return new NotInForceStoredDetail(codes, true);
+
+        var joined = new QueryExpression("sprk_signal") { ColumnSet = new ColumnSet("sprk_policy") };
+        SignalSuppressionService.AddStoredDetailFilter(joined.Criteria);
+        var policy = joined.AddLink("sprk_policy", "sprk_policy", "sprk_policyid", JoinOperator.Inner);
+        var notInForce = new FilterExpression(LogicalOperator.Or);
+        foreach (var (attribute, value) in NotInForceConditions) notInForce.AddCondition(attribute, ConditionOperator.Equal, value);
+        policy.LinkCriteria.AddFilter(notInForce);
+        // The allowlist helper writes to a query's criteria; it reaches the joined policy's criteria through a carrier query (as the close does).
+        var domain = new QueryExpression("sprk_policy");
+        RuleDomains.AddOntologyPolicyAllowlist(domain);
+        policy.LinkCriteria.AddFilter(domain.Criteria);
+        var joinedComplete = await ReadStoredDetailPagesAsync(joined, "of Off or Retired policies", maxPages, row =>
+        {
+            if (row.GetAttributeValue<EntityReference>("sprk_policy") is { } policyRef && policies.TryGetValue(policyRef.Id, out var code)) codes.Add(code);
+        }, ct).ConfigureAwait(false);
+        if (!joinedComplete) return new NotInForceStoredDetail(codes, false); // the caller reads every policy: the second read would not change that
+
+        var notInForceCodes = policies.Values.ToHashSet(StringComparer.Ordinal);
+        var withoutPolicy = new QueryExpression("sprk_signal") { ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_policy") };
+        withoutPolicy.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
+        SignalSuppressionService.AddStoredDetailFilter(withoutPolicy.Criteria);
+        var withoutComplete = await ReadStoredDetailPagesAsync(withoutPolicy, "with no policy", maxPages, row =>
+        {
+            if (row.GetAttributeValue<EntityReference>("sprk_policy") is null // defence in depth, as the deleted-policy reads
+                && SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out _, out _, out _)
+                && notInForceCodes.Contains(code))
+            {
+                codes.Add(code);
+            }
+        }, ct).ConfigureAwait(false);
+
+        return new NotInForceStoredDetail(codes, joinedComplete && withoutComplete);
+    }
+
+    /// <summary>Task 217: one paged read for <see cref="PoliciesNotInForceWithStoredDetailAsync"/>, <see cref="NotInForcePageSize"/> rows per page
+    /// in id order, each row handed to <paramref name="onRow"/>. False when a page faulted or <paramref name="maxPages"/> pages had more to come,
+    /// logged at Warning with the counts (the caller falls back to reading every policy).</summary>
+    private async Task<bool> ReadStoredDetailPagesAsync(
+        QueryExpression query, string whose, int maxPages, Action<Entity> onRow, CancellationToken ct)
+    {
+        query.PageInfo = new PagingInfo { Count = NotInForcePageSize, PageNumber = 1 };
+        query.AddOrder("sprk_signalid", OrderType.Ascending);
+        var rowsRead = 0;
+        for (var page = 1; ; page++)
+        {
+            EntityCollection result;
+            try
+            {
+                result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                    "The Signals {Whose} whose stored evidence may carry detail could not be read on page {Page} ({ExceptionType}); {RowsRead} were " +
+                    "read. The redaction reads every Off or Retired policy's Signals instead this run.",
+                    whose, page, ex.GetType().Name, rowsRead);
+                return false;
+            }
+
+            foreach (var row in result.Entities)
+            {
+                rowsRead++;
+                onRow(row);
+            }
+
+            if (!result.MoreRecords) return true;
+
+            if (page >= maxPages)
+            {
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "More than {MaxPages} pages of {PageSize} Signals {Whose} whose stored evidence may carry detail exist; {RowsRead} were read. " +
+                    "The redaction reads every Off or Retired policy's Signals instead this run.",
+                    maxPages, NotInForcePageSize, whose, rowsRead);
+                return false;
+            }
+
+            query.PageInfo.PageNumber = page + 1;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
+    }
+
     /// <summary>Policies per "not in force" read: Dataverse's limit on the rows of one query, so N policies take ceil(N / 5,000) reads
     /// per condition. Also the page of the close's open-Signal read (<see cref="ReadPoliciesWithOpenSignalsAsync"/>).</summary>
     internal const int NotInForcePageSize = 5000;
@@ -519,9 +629,12 @@ public class SignalClosureService
     /// and keeps each parseable code that <paramref name="existing"/> calls an orphan for at least one of them (the same rule as
     /// <see cref="CloseSignalsOfDeletedPoliciesAsync"/>, so a reused code's older Signals are included). A read fault throws: the caller
     /// redacts nothing extra and fails the run. Bounded to <see cref="SignalEvaluator.MaxPages"/> pages: past it the codes read so far are
-    /// returned with <see cref="DeletedPolicyCodes.MoreRemain"/> set (a partial list redacts less than the whole, never something else).
+    /// returned with <see cref="DeletedPolicyCodes.MoreRemain"/> set (a partial list redacts less than the whole, never something else) and
+    /// <see cref="DeletedPolicyCodes.ResumeAfter"/> naming the last Signal read.
+    /// Task 224 (#2085): <paramref name="after"/> continues an earlier run's read after that Signal id (<c>sprk_signalid</c> greater than it,
+    /// in the same id order, so Dataverse compares and orders by the same rule); null reads from the start.
     /// </summary>
-    internal async Task<DeletedPolicyCodes> DeletedPolicyCodesWithSignalsAsync(ExistingPolicyCodes existing, CancellationToken ct)
+    internal async Task<DeletedPolicyCodes> DeletedPolicyCodesWithSignalsAsync(ExistingPolicyCodes existing, CancellationToken ct, Guid? after = null)
     {
         ArgumentNullException.ThrowIfNull(existing);
         var query = new QueryExpression("sprk_signal")
@@ -530,14 +643,19 @@ public class SignalClosureService
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
+        if (after is { } cursor) query.Criteria.AddCondition("sprk_signalid", ConditionOperator.GreaterThan, cursor);
         query.AddOrder("sprk_signalid", OrderType.Ascending);
 
         var codes = new SortedSet<string>(StringComparer.Ordinal);
+        var read = 0;
+        Guid? last = null;
         for (var page = 1; ; page++)
         {
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in result.Entities)
             {
+                read++;
+                last = row.Id;
                 if (row.GetAttributeValue<EntityReference>("sprk_policy") is not null) continue; // defence in depth, as above
                 if (SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out _, out _, out _)
                     && existing.IsOrphan(code, row.GetAttributeValue<DateTime?>("createdon")))
@@ -546,8 +664,8 @@ public class SignalClosureService
                 }
             }
 
-            if (!result.MoreRecords) return new DeletedPolicyCodes(codes.ToList(), false);
-            if (page >= SignalEvaluator.MaxPages) return new DeletedPolicyCodes(codes.ToList(), true);
+            if (!result.MoreRecords) return new DeletedPolicyCodes(codes.ToList(), false) { SignalsRead = read };
+            if (page >= SignalEvaluator.MaxPages) return new DeletedPolicyCodes(codes.ToList(), true) { SignalsRead = read, ResumeAfter = last };
             query.PageInfo.PageNumber = page + 1;
             query.PageInfo.PagingCookie = result.PagingCookie;
         }
@@ -825,7 +943,14 @@ internal sealed record DeletedPolicySweep(
 /// <summary>What <see cref="SignalClosureService.DeletedPolicyCodesWithSignalsAsync"/> found (task 102b fix round 4).</summary>
 /// <param name="Codes">The deleted policies' codes that still have Signals, in ordinal order.</param>
 /// <param name="MoreRemain">The per-run bound was reached: more Signals with no policy lookup were not read this run.</param>
-internal sealed record DeletedPolicyCodes(IReadOnlyList<string> Codes, bool MoreRemain);
+internal sealed record DeletedPolicyCodes(IReadOnlyList<string> Codes, bool MoreRemain)
+{
+    /// <summary>Task 224: the Signals with no policy lookup this read returned.</summary>
+    public int SignalsRead { get; init; }
+
+    /// <summary>Task 224: when <see cref="MoreRemain"/>, the id of the last Signal read, after which the next run continues; otherwise null.</summary>
+    public Guid? ResumeAfter { get; init; }
+}
 
 /// <summary>
 /// Every existing <c>sprk_policy</c> code (any state), compared ignoring case, with the <c>createdon</c> of the policy holding it (task 102b

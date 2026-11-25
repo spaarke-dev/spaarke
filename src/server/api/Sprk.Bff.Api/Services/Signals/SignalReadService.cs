@@ -215,6 +215,18 @@ public sealed class SignalReadService
     /// <summary>Witness ids per batched caller read (task 151, D-142: In lists of at most 200 ids).</summary>
     internal const int WitnessIdChunk = 200;
 
+    /// <summary>
+    /// Ontology task 222 (D): the most Dataverse requests one read has in flight at once. Its independent reads (the caller and the
+    /// configuration, the saved fetches, the per-type and per-chunk core and subject reads, the witness chunks, the pair check, the
+    /// policy columns) share one per-read <see cref="DataverseConcurrencyGate"/> of this many permits. Small and fixed: Dataverse's
+    /// service protection allows about 52 concurrent requests per user, and the caller may have other requests in flight.
+    /// </summary>
+    internal const int DefaultMaxConcurrentReads = 4;
+
+    /// <summary>The permits of each read's gate (<see cref="DefaultMaxConcurrentReads"/>). Settable by tests only: 1 sends one request
+    /// at a time, as before task 222.</summary>
+    internal int MaxConcurrentReads { get; set; } = DefaultMaxConcurrentReads;
+
     internal const string SignalEntitySet = "sprk_signals";
 
     internal const string HighPriorityColumn = "sprk_highpriority";
@@ -333,35 +345,68 @@ public sealed class SignalReadService
     /// the privilege sources, task 018), for the slim Decide-lane page (spaarkeai-mcp-bff-api-r1 task 015). The pipeline, the read rules and the
     /// returned <see cref="WorklistResponse"/> are the same whether or not it is given. One method, not an overload pair: the task 167
     /// authorization guard credits a route only when every overload reaches the caller's Dataverse client in its own body.
+    /// <para><b>One Work Item (ontology task 222, B).</b> When <paramref name="onlySignalId"/> is given, each of the set's saved fetches
+    /// is narrowed to that Signal (<see cref="NarrowedToSignal"/>) and everything else is unchanged: the same caller read, the same rules,
+    /// the same shaping. A Signal the set shows comes back as the one row the set has for it, identical; a Signal any rule hides, or that
+    /// does not exist, comes back as the empty response (no detail tells the two apart). The id is never logged.</para>
+    /// <para><b>Concurrency (task 222, D).</b> Independent reads run at the same time through one per-read gate of
+    /// <see cref="MaxConcurrentReads"/> permits; their answers are merged, and their failures judged, in the order the steps ran one after
+    /// another before, so the response, and which failure answers, are as before. Every started read is awaited before this returns.</para>
     /// </summary>
     public async Task<SignalReadResult> ReadAsync(
-        WorklistSet set, ClaimsPrincipal? user, CancellationToken ct, IDictionary<Guid, WorklistItemExtras>? extras = null)
+        WorklistSet set, ClaimsPrincipal? user, CancellationToken ct, IDictionary<Guid, WorklistItemExtras>? extras = null,
+        Guid? onlySignalId = null)
     {
+        var gate = new DataverseConcurrencyGate(MaxConcurrentReads);
+
+        // (3) The configuration (task 050's row) is read app-only and needs nothing from the caller, so it is read beside (1) + (2).
+        var fetchesRead = gate.RunAsync(c => ReadFetchesAsync(set, c), ct);
+
         // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
-        var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
+        MineCaller caller;
+        try
+        {
+            caller = await gate.RunAsync(c => ResolveMineCallerAsync(_user, _identity, _logger, c), ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await SettledAsync(fetchesRead).ConfigureAwait(false);
+            throw;
+        }
+
         if (caller.Failure is { } callerFailure)
         {
+            await SettledAsync(fetchesRead).ConfigureAwait(false);
             return callerFailure;
         }
 
         var callerId = caller.CallerId;
         var contactId = caller.ContactId;
 
+        // Reads started ahead of their step (6b, 11): each is awaited at its step, and always before this method returns.
+        var started = new List<Task>();
         try
         {
-            // (3) The configuration (task 050's row): which FetchXML runs for this set.
-            var fetches = await ReadFetchesAsync(set, ct).ConfigureAwait(false);
+            var fetches = await fetchesRead.ConfigureAwait(false);
             if (fetches is null)
             {
                 return SignalReadResult.Unavailable("configuration_invalid");
             }
 
-            // (4) The Signals, AS THE CALLER. Dataverse trims by the Signal's own business unit and shares first.
+            if (onlySignalId is { } only)
+            {
+                fetches = [.. fetches.Select(f => NarrowedToSignal(f, only))];
+            }
+
+            // (4) The Signals, AS THE CALLER. Dataverse trims by the Signal's own business unit and shares first. The saved fetches are
+            // read at the same time; their pages are taken in the configuration's order, and the first fetch that failed answers.
+            var pages = fetches.Select(f => gate.RunAsync(c => FetchAllAsCallerAsync(f, c), ct)).ToList();
+            await SettledAsync(pages).ConfigureAwait(false);
             var rows = new List<SignalRow>();
             var seen = new HashSet<Guid>();
-            foreach (var fetch in fetches)
+            foreach (var pageRead in pages)
             {
-                var page = await FetchAllAsCallerAsync(fetch, ct).ConfigureAwait(false);
+                var page = await pageRead.ConfigureAwait(false);
                 if (page.Outcome is { } failure)
                 {
                     return failure;
@@ -381,18 +426,22 @@ public sealed class SignalReadService
                 return Ok(set, []);
             }
 
+            // (6b) reads only the rows, so it runs beside (5) and (6); it is judged after (6), as before.
+            var pairChecked = gate.RunAsync(c => NoCoreRowsWithAStoredPairAsync(rows, c), ct);
+            started.Add(pairChecked);
+
             // (5) The record-type catalog rows the page names (core and subject types), one app-only query.
-            var catalog = await ReadCatalogAsync(rows, ct).ConfigureAwait(false);
+            var catalog = await gate.RunAsync(c => ReadCatalogAsync(rows, c), ct).ConfigureAwait(false);
 
             // (6) Core-record access: one caller read per core type per chunk. Unreadable, malformed or non-core: dropped.
-            var cores = await ReadReadableCoresAsync(rows, catalog, ct).ConfigureAwait(false);
+            var cores = await ReadReadableCoresAsync(rows, catalog, gate, ct).ConfigureAwait(false);
             if (cores.Outcome is { } coreFailure)
             {
                 return coreFailure;
             }
 
             // (6b) The no-core rows the caller's read returned are confirmed by the BFF's own batched read of the pair. A fault is 503.
-            var pairCheck = await NoCoreRowsWithAStoredPairAsync(rows, ct).ConfigureAwait(false);
+            var pairCheck = await pairChecked.ConfigureAwait(false);
             if (pairCheck.Outcome is { } pairFailure)
             {
                 return pairFailure;
@@ -428,7 +477,7 @@ public sealed class SignalReadService
 
             // (7) Do lane: the caller's own work only (also proves the caller reads the subject). Also the subject flag and,
             // for the closed sets, the assignee whose day decides "today".
-            var subjects = await ReadSubjectsAsync(candidates, catalog, callerId, contactId, ct).ConfigureAwait(false);
+            var subjects = await ReadSubjectsAsync(candidates, catalog, callerId, contactId, gate, ct).ConfigureAwait(false);
             if (subjects.Outcome is { } subjectFailure)
             {
                 return subjectFailure;
@@ -465,12 +514,25 @@ public sealed class SignalReadService
             // and sender only when the caller's own read returns its witness AND the witness is in the Signal's own known secure family.
             // D-176 (task 157): a billing Duplicate's earlier-invoice references are taken from the STORED evidence first, because (9)
             // removes the text of every line whose ref is not a witness, which is every billing line.
-            var duplicates = DuplicateQuotesOf(visible);
-            visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
+            // (11), started here: for every set but Decided the policy ids of the returned rows are fixed from here on (steps 9 to 10 change
+            // no row's policy and drop none), so the BFF's policy read runs beside them. Applied, and its fault judged, at (11), as before.
+            var admitted = visible;
+            Task<Dictionary<Guid, PolicyColumns>?>? policyRead = null;
+            if (set != WorklistSet.Decided)
+            {
+                policyRead = gate.RunAsync(c => ReadPolicyColumnsAsync(admitted, user, c), ct);
+                started.Add(policyRead);
+            }
 
             // (9a) Task 174 (D-207): the parent invoice of every invoice-line subject, read ONCE as the caller. The Duplicate rule below
             // (D-176, the same read of the same lines) and the invoiceReview member (12) both use it, so a response never reads it twice.
-            var lineInvoices = await ReadLineInvoicesAsync(visible, catalog, ct).ConfigureAwait(false);
+            // It reads only the subjects, which (9) does not change, so it runs beside (9).
+            var lineInvoicesRead = gate.RunAsync(c => ReadLineInvoicesAsync(admitted, catalog, c), ct);
+            started.Add(lineInvoicesRead);
+
+            var duplicates = DuplicateQuotesOf(visible);
+            visible = await ApplyWitnessRuleAsync(visible, gate, ct).ConfigureAwait(false);
+            var lineInvoices = await lineInvoicesRead.ConfigureAwait(false);
 
             // (9b) D-176 (task 157): a Duplicate keeps its earlier-invoice detail only when the caller's own read returns that invoice;
             // otherwise it is shaped as ebilling withholds it at write time. Runs after (9); both rules must keep.
@@ -506,7 +568,10 @@ public sealed class SignalReadService
 
             // (11) D-185 (task 163, #2285): the policy short name, work type and severity of the rows that are returned, read as the
             // BFF. A read fault is caught below as "fault" (503): severity ranks the list, so rows are never returned without it.
-            visible = await ApplyPolicyColumnsAsync(visible, user, ct).ConfigureAwait(false);
+            var policies = policyRead is null
+                ? await ReadPolicyColumnsAsync(visible, user, ct).ConfigureAwait(false)
+                : await policyRead.ConfigureAwait(false);
+            visible = WithPolicyColumns(visible, policies);
 
             // (12) Task 174 (D-207): the invoice each billing item is decided on, one batched read for the lines' parent invoices.
             // Never fails the response: a fault leaves the lines without the member.
@@ -535,6 +600,50 @@ public sealed class SignalReadService
             _logger.LogError("Signal read: faulted ({ExceptionType}); unavailable.", ex.GetType().Name);
             return SignalReadResult.Unavailable("fault");
         }
+        finally
+        {
+            // No read outlives the answer: a step that answered early (a failure, or an empty list) still waits for the reads it started.
+            await SettledAsync(started).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Task 222 (D): waits until every one of <paramref name="reads"/> has finished, whatever it answered. It never throws: the caller
+    /// then awaits each read again, in the order the steps used to run one after another, so the first failure the serial read would
+    /// have met (an exception, rethrown as it was, or a failure outcome) is the one that answers.
+    /// </summary>
+    private static async Task SettledAsync(IEnumerable<Task> reads)
+    {
+        try
+        {
+            await Task.WhenAll(reads).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Judged by the caller, read by read, in serial order.
+        }
+    }
+
+    private static Task SettledAsync(Task read) => SettledAsync([read]);
+
+    /// <summary>
+    /// Task 222 (B): <paramref name="fetchXml"/> narrowed to one Signal. The root entity's top-level filters and the condition
+    /// <c>sprk_signalid eq <paramref name="signalId"/></c> are wrapped in ONE <c>&lt;filter type="and"&gt;</c>, so the id can only narrow
+    /// the configuration's own predicate, never widen it (whatever type its filters have). Attributes, link-entities and orders are untouched.
+    /// </summary>
+    internal static string NarrowedToSignal(string fetchXml, Guid signalId)
+    {
+        var doc = XDocument.Parse(fetchXml);
+        var entity = doc.Root!.Element("entity")!;
+        var filters = entity.Elements("filter").ToList();
+        filters.ForEach(f => f.Remove());
+        var narrowed = new XElement("filter", new XAttribute("type", "and"),
+            new XElement("condition", new XAttribute("attribute", "sprk_signalid"), new XAttribute("operator", "eq"),
+                new XAttribute("value", signalId.ToString("D"))),
+            filters);
+        var lastAttribute = entity.Elements("attribute").LastOrDefault();
+        if (lastAttribute is null) entity.AddFirst(narrowed); else lastAttribute.AddAfterSelf(narrowed);
+        return doc.ToString(SaveOptions.DisableFormatting);
     }
 
     private static SignalReadResult Ok(WorklistSet set, IReadOnlyList<WorklistLaneGroups> lanes) =>
@@ -823,19 +932,22 @@ public sealed class SignalReadService
     /// A caller who is external or unknown (<see cref="IsExternalOrUnknownCallerAsync"/>) gets no BFF enrichment and no query: they get only
     /// what their own read returned (the same blanks as the caller-run link gave), so the BFF read never shows them more than their own read did.
     /// </summary>
-    private async Task<List<VisibleRow>> ApplyPolicyColumnsAsync(List<VisibleRow> visible, ClaimsPrincipal? user, CancellationToken ct)
+    /// <remarks>Task 222 (D): read (<see cref="ReadPolicyColumnsAsync"/>) and applied (<see cref="WithPolicyColumns"/>) in two halves, so
+    /// the read can run beside steps (9) to (10); the rule is unchanged.</remarks>
+    private async Task<Dictionary<Guid, PolicyColumns>?> ReadPolicyColumnsAsync(
+        IReadOnlyList<VisibleRow> visible, ClaimsPrincipal? user, CancellationToken ct)
     {
         var ids = visible.Select(v => v.Row.PolicyId).Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
         if (ids.Length == 0)
         {
-            return visible;
+            return null;
         }
 
         // D-185 (uac-r2 condition): a caller who is external or unknown gets no enrichment and no sprk_policy query. Their rows keep what
         // the caller-run read carried (blank name and work type, severity unknown, ranked last), as when the link was caller-run.
         if (await IsExternalOrUnknownCallerAsync(_callerResolver, _systemUsers, user, _logger, ct).ConfigureAwait(false))
         {
-            return visible;
+            return null;
         }
 
         var found = new Dictionary<Guid, PolicyColumns>();
@@ -853,10 +965,17 @@ public sealed class SignalReadService
             }
         }
 
-        return [.. visible.Select(v => v.Row.PolicyId is { } id && found.TryGetValue(id, out var p)
-            ? v with { Row = v.Row with { RuleShortName = p.ShortName, WorkType = p.WorkType, Severity = p.Severity } }
-            : v)];
+        return found;
     }
+
+    /// <summary>Each row whose policy <paramref name="found"/> names takes its three columns; every other row keeps what its Signal row
+    /// carried. Null <paramref name="found"/> (no policy ids, or an external or unknown caller): the rows unchanged.</summary>
+    private static List<VisibleRow> WithPolicyColumns(List<VisibleRow> visible, Dictionary<Guid, PolicyColumns>? found) =>
+        found is null
+            ? visible
+            : [.. visible.Select(v => v.Row.PolicyId is { } id && found.TryGetValue(id, out var p)
+                ? v with { Row = v.Row with { RuleShortName = p.ShortName, WorkType = p.WorkType, Severity = p.Severity } }
+                : v)];
 
     /// <summary>
     /// True when the caller is external or unknown: <c>ISystemUserIdentityResolver.IsExternalAsync</c> is true, the resolver cannot match
@@ -944,32 +1063,75 @@ public sealed class SignalReadService
 
     private sealed record CoreAccess(Dictionary<(Guid TypeId, Guid CoreId), (string? Name, string? Number)> Readable, SignalReadResult? Outcome);
 
+    /// <summary>
+    /// Task 222 (D): one table's batched caller reads, started together. <see cref="EntitySet"/> is read first (app-only metadata); each
+    /// chunk's read waits for it, then for a gate permit. Null <see cref="EntitySet"/>: the table is not read (a K2-dropped core type).
+    /// </summary>
+    private sealed record TableReads(Task<string>? EntitySet, IReadOnlyList<(Guid[] Chunk, Task<DataverseUserResponse> Read)> Chunks);
+
+    /// <summary>Task 222 (D): <paramref name="table"/>'s entity set name, then one caller read per chunk of <paramref name="ids"/>,
+    /// all started now through <paramref name="gate"/>. <paramref name="path"/> builds a chunk's request from the entity set name.</summary>
+    private TableReads StartTableReads(
+        string table, IEnumerable<Guid> ids, int chunkSize, Func<string, Guid[], string> path, DataverseConcurrencyGate gate, CancellationToken ct)
+    {
+        var entitySet = gate.RunAsync(c => _entities.GetEntitySetNameAsync(table, c), ct);
+        var chunks = ids.Chunk(chunkSize).Select(chunk => (chunk, ReadAfterAsync(entitySet, chunk))).ToList();
+        return new TableReads(entitySet, chunks);
+
+        async Task<DataverseUserResponse> ReadAfterAsync(Task<string> set, Guid[] chunk)
+        {
+            var name = await set.ConfigureAwait(false);
+            return await gate.RunAsync(c => _user.GetAsync(path(name, chunk), c), ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Every task <paramref name="reads"/> started (to settle them all before they are judged).</summary>
+    private static IEnumerable<Task> AllOf(IEnumerable<TableReads> reads) =>
+        reads.SelectMany(r => (r.EntitySet is null ? Enumerable.Empty<Task>() : new Task[] { r.EntitySet }).Concat(r.Chunks.Select(c => (Task)c.Read)));
+
     private async Task<CoreAccess> ReadReadableCoresAsync(
-        IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, CancellationToken ct)
+        IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, DataverseConcurrencyGate gate, CancellationToken ct)
     {
         var readable = new Dictionary<(Guid, Guid), (string?, string?)>();
+
+        // Task 222 (D): every core type's reads start together; they are judged below in the serial order (type by first appearance,
+        // then chunk), so the dictionary, the logs and the failure that answers are those of the serial loop.
+        var types = new List<(Guid TypeId, int Count, CatalogRow? Type, string Pk, TableReads Reads)>();
         foreach (var byType in rows.Where(r => r.CoreTypeId is not null && r.CoreId is not null).GroupBy(r => r.CoreTypeId!.Value))
         {
             if (!catalog.TryGetValue(byType.Key, out var type)
                 || !CoreAncestorResolver.CoreRecordEntities.Contains(type.LogicalName, StringComparer.OrdinalIgnoreCase))
             {
-                // K2 (as SignalCoreRecordAccess): a type that does not resolve, or is not one of uac-r2's core types, is a forged or
-                // stale pointer. The rows are dropped; the route is never a probe of an arbitrary table.
-                _logger.LogWarning("Signal read: {Count} Signals name a core record type that is not an access-control core type; dropped.",
-                    byType.Count());
+                types.Add((byType.Key, byType.Count(), null, string.Empty, new TableReads(null, [])));
                 continue;
             }
 
-            var entitySet = await _entities.GetEntitySetNameAsync(type.LogicalName, ct).ConfigureAwait(false);
             var pk = $"{type.LogicalName}id";
             var select = new List<string> { pk };
             if (type.DisplayField is { } d && d != pk) select.Add(d);
             if (type.NumberField is { } n && n != pk && !select.Contains(n)) select.Add(n);
+            var columns = string.Join(',', select);
+            types.Add((byType.Key, byType.Count(), type, pk, StartTableReads(
+                type.LogicalName, byType.Select(r => r.CoreId!.Value).Distinct(), IdChunk,
+                (entitySet, chunk) => $"{entitySet}?$select={columns}&$filter={InFilter(pk, chunk)}", gate, ct)));
+        }
 
-            foreach (var chunk in byType.Select(r => r.CoreId!.Value).Distinct().Chunk(IdChunk))
+        await SettledAsync(AllOf(types.Select(t => t.Reads))).ConfigureAwait(false);
+        foreach (var (typeId, count, type, pk, reads) in types)
+        {
+            if (type is null)
             {
-                var response = await _user.GetAsync(
-                    $"{entitySet}?$select={string.Join(',', select)}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                // K2 (as SignalCoreRecordAccess): a type that does not resolve, or is not one of uac-r2's core types, is a forged or
+                // stale pointer. The rows are dropped; the route is never a probe of an arbitrary table.
+                _logger.LogWarning("Signal read: {Count} Signals name a core record type that is not an access-control core type; dropped.",
+                    count);
+                continue;
+            }
+
+            await reads.EntitySet!.ConfigureAwait(false);
+            foreach (var (chunk, read) in reads.Chunks)
+            {
+                var response = await read.ConfigureAwait(false);
                 var result = ReadAccessRows(response, "core record");
                 if (result.Outcome is { } failure)
                 {
@@ -980,7 +1142,7 @@ public sealed class SignalReadService
                 {
                     if (TryReadGuid(core, pk, out var id) && chunk.Contains(id))
                     {
-                        readable[(byType.Key, id)] = (
+                        readable[(typeId, id)] = (
                             type.DisplayField is { } df ? ReadDisplay(core, df) : null,
                             type.NumberField is { } nf ? ReadDisplay(core, nf) : null);
                     }
@@ -1092,13 +1254,18 @@ public sealed class SignalReadService
     private sealed record SubjectReads(Dictionary<Guid, MineSubject> MineDo, Dictionary<Guid, MineSubject> Decide, SignalReadResult? Outcome);
 
     private async Task<SubjectReads> ReadSubjectsAsync(
-        IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, Guid callerId, Guid? contactId, CancellationToken ct)
+        IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, Guid callerId, Guid? contactId,
+        DataverseConcurrencyGate gate, CancellationToken ct)
     {
         var mine = new Dictionary<Guid, MineSubject>();
         var decide = new Dictionary<Guid, MineSubject>();
 
+        // Task 222 (D): every Do rule table's and every Decide table's reads start together; they are judged below in the serial order
+        // (the Do rules, then the Decide tables by first appearance; chunk by chunk), so the dictionaries, the logs and the failure that
+        // answers are those of the serial loop.
         // Do lane: per rule table, the subject ids typed to it, plus every untyped id (a GUID matches in its own table only).
         var doRows = rows.Where(r => r.Lane == DecisionLane.Do && r.SubjectId is not null).ToList();
+        var doReads = new List<(DoLaneMineRule Rule, TableReads Reads)>();
         foreach (var rule in DoLaneMineRules.Values)
         {
             var ids = doRows
@@ -1109,12 +1276,36 @@ public sealed class SignalReadService
                 continue;
             }
 
-            var entitySet = await _entities.GetEntitySetNameAsync(rule.Table, ct).ConfigureAwait(false);
+            doReads.Add((rule, StartTableReads(rule.Table, ids, IdChunk,
+                (entitySet, chunk) => MineSubjectQuery(rule, entitySet, chunk, callerId, contactId), gate, ct)));
+        }
+
+        // Decide lane: the flag and, for the closed sets' per-item day (D-25 as amended by D-129), the subject's individual (its
+        // Assigned To contact, OwnedChildWrite.ForPersonColumns). A subject the caller cannot read is simply not flagged and has no
+        // assignee (its day is UTC); the row stays (D-15 checks the core).
+        var decideReads = new List<(string Table, string? Person, TableReads Reads)>();
+        foreach (var byTable in rows.Where(r => r.Lane == DecisionLane.Decide && r.SubjectId is not null)
+                     .GroupBy(r => SubjectTable(r, catalog))
+                     .Where(g => g.Key is { } t && HighPriorityTables.Contains(t)))
+        {
+            var table = byTable.Key!;
+            var pk = $"{table}id";
+            var person = OwnedChildWrite.ForPersonColumns.TryGetValue(table, out var column)
+                && string.Equals(column.RelatedTable, "contact", StringComparison.Ordinal) ? column.Column : null;
+            var select = $"{pk},{HighPriorityColumn}" + (person is null ? string.Empty : $",_{person}_value");
+            decideReads.Add((table, person, StartTableReads(table, byTable.Select(r => r.SubjectId!.Value).Distinct(), IdChunk,
+                (entitySet, chunk) => $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)}", gate, ct)));
+        }
+
+        await SettledAsync(AllOf(doReads.Select(r => r.Reads).Concat(decideReads.Select(r => r.Reads)))).ConfigureAwait(false);
+
+        foreach (var (rule, reads) in doReads)
+        {
+            await reads.EntitySet!.ConfigureAwait(false);
             var pk = $"{rule.Table}id";
-            foreach (var chunk in ids.Chunk(IdChunk))
+            foreach (var (chunk, read) in reads.Chunks)
             {
-                var response = await _user.GetAsync(
-                    MineSubjectQuery(rule, entitySet, chunk, callerId, contactId), ct).ConfigureAwait(false);
+                var response = await read.ConfigureAwait(false);
                 var result = ReadAccessRows(response, "Do-lane subject");
                 if (result.Outcome is { } failure)
                 {
@@ -1134,23 +1325,13 @@ public sealed class SignalReadService
             }
         }
 
-        // Decide lane: the flag and, for the closed sets' per-item day (D-25 as amended by D-129), the subject's individual (its
-        // Assigned To contact, OwnedChildWrite.ForPersonColumns). A subject the caller cannot read is simply not flagged and has no
-        // assignee (its day is UTC); the row stays (D-15 checks the core).
-        foreach (var byTable in rows.Where(r => r.Lane == DecisionLane.Decide && r.SubjectId is not null)
-                     .GroupBy(r => SubjectTable(r, catalog))
-                     .Where(g => g.Key is { } t && HighPriorityTables.Contains(t)))
+        foreach (var (table, person, reads) in decideReads)
         {
-            var table = byTable.Key!;
-            var entitySet = await _entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
+            await reads.EntitySet!.ConfigureAwait(false);
             var pk = $"{table}id";
-            var person = OwnedChildWrite.ForPersonColumns.TryGetValue(table, out var column)
-                && string.Equals(column.RelatedTable, "contact", StringComparison.Ordinal) ? column.Column : null;
-            var select = $"{pk},{HighPriorityColumn}" + (person is null ? string.Empty : $",_{person}_value");
-            foreach (var chunk in byTable.Select(r => r.SubjectId!.Value).Distinct().Chunk(IdChunk))
+            foreach (var (chunk, read) in reads.Chunks)
             {
-                var response = await _user.GetAsync(
-                    $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                var response = await read.ConfigureAwait(false);
                 var result = ReadAccessRows(response, "Decide-lane subject");
                 if (result.Outcome is { } failure)
                 {
@@ -1351,8 +1532,8 @@ public sealed class SignalReadService
                     new XElement("filter", new XAttribute("type", "and"),
                         new XElement("condition", new XAttribute("attribute", "sprk_decisionrecordid"), new XAttribute("operator", "in"),
                             chunk.Select(id => new XElement("value", id.ToString("D")))),
-                        new XElement("condition", new XAttribute("attribute", DecisionRecordWriter.CreatedByColumn), new XAttribute("operator", "eq"),
-                            new XAttribute("value", writerUserId.ToString("D"))))));
+                        // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
+                        WriterCreatedRecord.FetchXmlFilter(writerUserId))));
 
             var response = await _user.GetAsync(
                 $"{DecisionRecordEntitySet}?fetchXml={Uri.EscapeDataString(fetch.ToString(SaveOptions.DisableFormatting))}", ct).ConfigureAwait(false);
@@ -1401,7 +1582,7 @@ public sealed class SignalReadService
     /// either judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
     /// is returned as null: what it holds cannot be judged line by line.
     /// </summary>
-    private async Task<List<VisibleRow>> ApplyWitnessRuleAsync(List<VisibleRow> rows, CancellationToken ct)
+    private async Task<List<VisibleRow>> ApplyWitnessRuleAsync(List<VisibleRow> rows, DataverseConcurrencyGate gate, CancellationToken ct)
     {
         var parsed = new Dictionary<Guid, JsonArray?>();
         var asked = new List<(Guid SignalId, IReadOnlyList<string> References)>();
@@ -1430,8 +1611,10 @@ public sealed class SignalReadService
         IReadOnlyDictionary<Guid, IReadOnlySet<string>>? shown = new Dictionary<Guid, IReadOnlySet<string>>();
         if (asked.Count > 0)
         {
-            var readable = await WitnessesTheCallerReadsAsync(asked.SelectMany(a => a.References), ct).ConfigureAwait(false);
-            shown = readable is null ? null : await _families.WitnessDetailShownOnReadAsync(asked, readable, ct).ConfigureAwait(false);
+            var readable = await WitnessesTheCallerReadsAsync(asked.SelectMany(a => a.References), gate, ct).ConfigureAwait(false);
+            shown = readable is null
+                ? null
+                : await gate.RunAsync(c => _families.WitnessDetailShownOnReadAsync(asked, readable, c), ct).ConfigureAwait(false);
         }
 
         var withheld = 0;
@@ -1493,26 +1676,41 @@ public sealed class SignalReadService
     /// the rows a Signal's evidence quotes, so this applies the same caller read to the witness rows. Cost of doing nothing: a reader
     /// sees the subject and sender of a communication they cannot open (re-filed to another business unit's matter, or unfiled and
     /// privately owned), contrary to D-142.</remarks>
-    private async Task<IReadOnlySet<(string Table, Guid Id)>?> WitnessesTheCallerReadsAsync(IEnumerable<string> references, CancellationToken ct)
+    private async Task<IReadOnlySet<(string Table, Guid Id)>?> WitnessesTheCallerReadsAsync(
+        IEnumerable<string> references, DataverseConcurrencyGate gate, CancellationToken ct)
     {
         var readable = new HashSet<(string Table, Guid Id)>();
-        foreach (var byTable in references.Select(SignalSuppressionService.WitnessOf).OfType<(string Table, Guid Id)>().Distinct()
-                     .GroupBy(w => w.Table, StringComparer.Ordinal))
+
+        // Task 222 (D): every (table, chunk) read starts together; they are judged below in the serial order, so the first failure the
+        // serial loop met is the one logged and answered (null), as before.
+        var reads = references.Select(SignalSuppressionService.WitnessOf).OfType<(string Table, Guid Id)>().Distinct()
+            .GroupBy(w => w.Table, StringComparer.Ordinal)
+            .Select(byTable =>
+            {
+                var lineage = SecureChildLineage.Children[byTable.Key];
+                var pk = lineage.IdColumn;
+                return (Table: byTable.Key, Pk: pk, Chunks: byTable.Select(w => w.Id).Chunk(WitnessIdChunk)
+                    .Select(chunk => (Chunk: chunk, Read: gate.RunAsync(
+                        c => _user.GetAsync($"{lineage.EntitySet}?$select={pk}&$filter={InFilter(pk, chunk)}", c), ct)))
+                    .ToList());
+            })
+            .ToList();
+        await SettledAsync(reads.SelectMany(t => t.Chunks.Select(c => (Task)c.Read))).ConfigureAwait(false);
+
+        foreach (var (table, pk, chunks) in reads)
         {
-            var lineage = SecureChildLineage.Children[byTable.Key];
-            var pk = lineage.IdColumn;
-            foreach (var chunk in byTable.Select(w => w.Id).Chunk(WitnessIdChunk))
+            foreach (var (chunk, read) in chunks)
             {
                 DataverseUserResponse response;
                 try
                 {
-                    response = await _user.GetAsync($"{lineage.EntitySet}?$select={pk}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                    response = await read.ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
                     _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
                         "Signal read: the caller's read of {Table} witnesses faulted ({ExceptionType}); every witness line is shown without its detail (D-142, fail closed).",
-                        byTable.Key, ex.GetType().Name);
+                        table, ex.GetType().Name);
                     return null;
                 }
 
@@ -1523,7 +1721,7 @@ public sealed class SignalReadService
                     {
                         if (TryReadGuid(row, pk, out var id) && chunk.Contains(id))
                         {
-                            readable.Add((byTable.Key, id));
+                            readable.Add((table, id));
                         }
                     }
 
@@ -1539,7 +1737,7 @@ public sealed class SignalReadService
 
                 _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
                     "Signal read: the caller's read of {Table} witnesses failed ({ErrorCode}); every witness line is shown without its detail (D-142, fail closed).",
-                    byTable.Key, response.IsSuccess ? "unparseable" : response.ErrorCode);
+                    table, response.IsSuccess ? "unparseable" : response.ErrorCode);
                 return null;
             }
         }
@@ -2270,7 +2468,7 @@ public sealed class SignalReadService
 
         /// <summary>The <c>policy</c> link-entity column, present only under the pre-D-185 configuration: the Web API names it
         /// <c>policy.{column}</c> (verified live on spaarkedev1, 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted
-        /// too. Since D-185 the BFF reads these columns itself (<c>ApplyPolicyColumnsAsync</c>) and the configuration has no link.</summary>
+        /// too. Since D-185 the BFF reads these columns itself (<c>ReadPolicyColumnsAsync</c>) and the configuration has no link.</summary>
         private static JsonElement? Aliased(JsonElement raw, string column) =>
             raw.TryGetProperty($"policy.{column}", out var v) || raw.TryGetProperty($"policy_x002e_{column}", out v) ? v : null;
 

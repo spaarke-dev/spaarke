@@ -155,8 +155,11 @@ public static class InvoiceApprovalCodes
     /// <see cref="CompletionRefused"/>. A missing currency is the R1 default, USD (D-115), and is not refused.</summary>
     public const string CurrencyUnsupported = "ebilling.approve.currency_unsupported";
 
-    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (K3): the writer answered "already recorded" for a decision no
-    /// writer-created record was found for, so the record it names is not one the writer created under the completion's filter.</summary>
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (K3): the writer answered "already recorded" for a decision the
+    /// completion's read found no writer-created record for. Since ontology task 223 (DI-144) both reads apply <see cref="WriterCreatedRecord"/>,
+    /// so the record the writer names is a writer-created one that landed after the completion's read: a concurrent approve of the same
+    /// decision (a double-click, a retry racing the first request), not a forged row. The name predates that and overstates it; it is kept
+    /// because logs and tests key on it.</summary>
     public const string CompletionRecordNotWriterCreated = "ebilling.approve.completion.record_not_writer_created";
 
     /// <summary>409 (task 165b-2, EB-D-200 item 3): a stored total of the invoice differs from what <see cref="InvoiceTotalsCalculator"/> derives from
@@ -1020,8 +1023,9 @@ public sealed class InvoiceApprovalService
     }
 
     /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.
-    /// <paramref name="refuseAlreadyRecorded"/> (task 165b-3 fix round, K3): the completion found no writer-created record, so the writer's
-    /// "already recorded" answer names a record that is not one under the completion's filter; it is refused, not linked or closed against.</summary>
+    /// <paramref name="refuseAlreadyRecorded"/> (task 165b-3 fix round, K3): the completion found no writer-created record, so a writer's
+    /// "already recorded" answer names a record that landed after that read (both reads apply <see cref="WriterCreatedRecord"/> since ontology
+    /// task 223: a concurrent approve of the same decision); it is refused, not linked or closed against.</summary>
     private async Task<ApprovalResult> FinishAsync(
         Guid invoiceId, Guid approvalId, BillingDecision decision, int? portionStatus, Guid? recordId, Guid deciderContactId,
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, bool refuseAlreadyRecorded = false, Guid? storedDeciderUserId = null)
@@ -1068,6 +1072,8 @@ public sealed class InvoiceApprovalService
 
         if (refuseAlreadyRecorded && recorded.AlreadyRecorded)
         {
+            // K3: a writer-created record the completion's read did not see, so one that landed after it (a concurrent approve; ontology task
+            // 223 made both reads WriterCreatedRecord). Refused rather than linked or closed against; the reason code keeps its older name.
             return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionRecordNotWriterCreated);
         }
 

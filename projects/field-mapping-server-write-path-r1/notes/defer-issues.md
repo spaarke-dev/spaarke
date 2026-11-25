@@ -382,3 +382,43 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Latent defect. Events are correct today only because Dataverse lists `sprk_assignedto` first among `sprk_event`'s contact lookups. |
 | **Need** | `eventService.ts` (~:191): pass `'sprk_assignedto'` to `findNavProp`, not `'assignedto'`; add a test with another `assignedto` column listed first. |
 | **Status** | Filed. Not fixed here: task 024 must not edit another wizard's files. |
+
+## DI-040 — A typed email subject over the column length is sent with no communication record (found in the 028 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 028 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3126 |
+| **Class** | Pre-existing. The composer's subject has no length limit and `ValidateRequest` checks only for an empty subject. The `sprk_communication` create after the send is best-effort, so an over-long subject is delivered with no row. |
+| **Need** | Refuse a subject longer than `sprk_subject` (2000) before sending, and limit the composer field; tests at and over the limit. |
+| **Status** | Filed. Task 028 covers only the mapped subject (an over-long mapped value is not used); the typed case is the communication path's owner's. |
+
+## DI-041 — One email's attachments must each keep their own bytes (pointer; found in word-add-in-r1 task 138's review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, word-add-in-r1 task 138 adversarial review; registered there as ISS-040. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3135 |
+| **Class** | Pre-existing, in the Office save / upload-finalization path. This project touched that worker only for the record-first owner (015) and the save stamp (030). |
+| **Need** | Two attachments with the same name in one email keep their own files; redelivery stays idempotent. |
+| **Status** | Filed; owner is the Office save / upload-finalization path, not this project. Pointer only. |
+
+## DI-042 — Summarize Files "Work on Analysis" analyses documents that have no file (found in the 029 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 029 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3156 |
+| **Class** | Pre-existing. The step creates `sprk_document` rows with a name only (no upload, no attach) and hands their ids to the Playbook Library; the analysis reads the "No file content available" placeholder. The old `/api/v1/documents` create stored no file either. |
+| **Need** | Upload and attach each file before the analysis starts, or refuse to start an analysis on documents without a file; test that a file-less document never reaches an analysis. |
+| **Status** | Filed. Task 029 moved only the create onto the child-records route (FR-16); the upload pipeline is outside its scope. |
+
+## DI-043 — The Document Upload wizard silently drops TXT, PPTX, MSG and EML files (found in the 029 live check)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 029 live check on dev. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3176 |
+| **Class** | Pre-existing. The shared `FileUploadZone` resolves a type only for PDF/DOCX/XLSX, and `AddFilesStep` ignores the validation errors, so the user sees nothing. |
+| **Need** | Every advertised extension resolves to a type; validation errors are shown; tests for each extension and for a shown rejection. |
+| **Status** | Filed. Outside FR-16 (the create payload). |
