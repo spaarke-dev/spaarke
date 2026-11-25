@@ -260,7 +260,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Fixed on work (merged 2026-11-25 from task/ebilling-def063 32a5f8a388: -AllowNothingToPublish on the import paths; exit 0 'Nothing to publish; import complete'; app-settings-only plans still throw; Pester 96/0). Closes when the next master PR merges. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 DEF-059 dev apply (a role-only solution import) |
