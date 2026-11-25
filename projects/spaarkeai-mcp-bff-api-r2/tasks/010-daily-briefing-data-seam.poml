@@ -4,7 +4,7 @@
     <title>Daily Briefing data seam in Spaarke.DailyBriefing.Components</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts code in a shared component consumed by the Console, the standalone page and the SpaarkeAi host; tags include react and frontend</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -132,7 +132,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-16, FR-09. No BFF change.</notes>
+  <notes>Spec FR-16, FR-09. No BFF change. Completed 2026-11-25: BriefingDataService + BriefingNavigationHandler seam (briefingDataService.ts), optional dataService/navigation props on DailyBriefingApp, injected-service args on useBriefingRender/useBriefingPreferences, optional To Do/dismiss on NarrativeBullet and ActivityNotesSection. 11 new tests; package suite 180 -> 191 tests, existing tests unmodified. Inventory, decisions and the test-environment note are in notes/010-decisions.md. Consumer tsc (DailyBriefing, LegalWorkspace) not run here: no node_modules or built dist in the worktree. Out-of-scope findings: none new. rework: none task 010</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
