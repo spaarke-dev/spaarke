@@ -287,7 +287,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     /// <summary>
     /// The playbook-use decision — "may this caller run this playbook" — shared by every route that runs or binds a
     /// caller-chosen playbook (unified-access-control-r2 task 162: /api/ai/analysis/execute and /promote; task 164
-    /// switches this filter's own routes and the chat/agent playbook routes to it).
+    /// switches this filter's own routes and the chat playbook routes to it).
     /// </summary>
     /// <returns>
     /// <c>null</c> when no check is needed: the playbook exists and is PUBLIC (<c>sprk_ispublic</c>, an application

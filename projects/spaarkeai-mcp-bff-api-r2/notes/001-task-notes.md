@@ -100,10 +100,13 @@ Both builds: Release, framework-dependent, zipped with `Compress-Archive -Compre
 - **adr-check:** done in-session. 0 violations. The ADRs considered were 001, 002, 007, 008, 009, 010, 012, 013, 028 (including A4), 038, 039 and 052. Nothing new was added that touches 001, 052, 007, 009 or 012.
 - **adversarial-verifier:** **0 of 2 passes run.** The agents could not be launched because the concurrent-subagent cap (4) was reached. The main session must run two `adversarial-reviewer` (opus) passes over `058dc46a17..HEAD` before this task is marked completed.
 - **External reviews pending:**
-  - **uac-r2:** ledger rows and pinned counts, the AddAiAuthorizationFilter reason text, the ProvenByTest fixture, and the SessionOwnership, I6 and SpeAppOnly guard edits.
+  - **uac-r2:** ledger rows and pinned counts, the AddAiAuthorizationFilter reason text, the ProvenByTest fixture, and the SessionOwnership, I6 and SpeAppOnly guard edits.; also the removal of the agent-only branch in `AiAuthorizationFilter` (the old `:427-444`, `:690-708`, which went beyond the POML's "using + doc reference" limit; verifier pass 1 found no behaviour change for other callers)
   - **ebilling-r1:** pending, no overlap.
   - **ontology-r1:** pending, no overlap.
 
 ## Measurement worktrees
 
 `C:\wt001m` and `C:\wt001b` are detached, publish-only worktrees. They are to be removed with `scripts/worktree/Remove-WorktreeSafe.ps1`; see the final report for whether that was done.
+
+## Adversarial verifier pass 1 (main session, 2026-11-25)
+No F-class findings. Known limits: K4 AiAuthorizationFilter branch removed beyond the POML's file limit (added to the uac-r2 review list); K4 `System.Configuration.ConfigurationManager` now resolves at 6.0.0 (was floored at 8.0.0 by the removed `Microsoft.Agents.Authentication`), no CVE, mention in the PR; K4 `ChatAgentRouteProofTests` still registers a loose `IPlaybookOrchestrationService` mock no test reads (kept: it still isolates the test host from the real service); K4 comment drift at `PlaybookAuthorizationFilter.cs:290` (fixed); K2 pre-existing dev-URL fallback in `ToolFrameworkExtensions.cs:103` (out of scope).
