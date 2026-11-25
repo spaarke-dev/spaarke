@@ -36,7 +36,7 @@
 | 041 | Dev BFF deploy (gated on ontology pair) | D | ✅ [done] | 025, 032 | Group I (alone) | sonnet / high | STANDARD |
 | 043 | Spaarke AI agent fallback on MCP (if T1 fails) | D | 🚫 [cancelled] | 003, 041 | Group J (alone) | sonnet / high | STANDARD |
 | 042 | Connector, runbooks and live E2E in Cowork and Chat | D | 🔄 [wip] | 040, 041, 043 | Group K (alone) | sonnet / high | STANDARD |
-| 050 | Root CLAUDE.md §1.1 row and CHANGELOG | E | 🔲 [open] | 042 | Group L (main session) | sonnet / high | STANDARD |
+| 050 | Root CLAUDE.md §1.1 row and CHANGELOG | E | ✅ [done] | 042 | Group L (main session) | sonnet / high | STANDARD |
 | 051 | Rewrite mcp-tool-handler; update widget and DA skills | E | ✅ [done] | 042, 043, 050 | Group L (main session) | sonnet / high | STANDARD |
 | 052 | MCP architecture doc and add-a-tool guide | E | ✅ [done] | 042 | Group L | sonnet / high | STANDARD |
 | 090 | Project wrap-up | Wrap-up | 🔲 [open] | 050, 051, 052 | Group M (alone) | sonnet / high | STANDARD |

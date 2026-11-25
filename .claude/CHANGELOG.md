@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-25 — Root CLAUDE.md §1.1: "Spaarke for Microsoft 365 Copilot" row
+
+`spaarkeai-mcp-bff-api-r1` task 050 (spec FR-18).
+
+- **Root `CLAUDE.md` §1.1**: one row added for **Spaarke for Microsoft 365 Copilot** (Copilot connector **"Spaarke MCP"**), citing `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §1.1 (on master; its connector row reads "Spaarke MCP", commit `324cf6e5e2`). Identifiers: `/mcp/legal-operations`, `Api/Mcp/`, `spaarke_*` tools, `ui://spaarke/decisions.html`, `src/client/widgets/spaarke-decisions/`, `src/solutions/CopilotPlugins/spaarke/`. Nothing else in the file changed; the Spaarke Connect row is unchanged.
+- **Budget:** 218 → 219 lines, 21,730 → 22,121 bytes (**+391 bytes**, LF), under the 30 KB ceiling. Over the 200-line budget by one more line with the **owner's explicit OK** ("Yes, OK the +1", 2026-11-25).
+- `/widget-design`: the bundle-size script path made repo-rooted (`Test-InstructionPaths` caught the short form). `.claude/skills/INDEX.md`: the `mcp-tool-handler` rows now describe the MCP server, not `IAiToolHandler` (Checklist F item 1).
+
 ###### 2026-11-25 — MCP skills describe the server, widget and packages that were built
 
 `spaarkeai-mcp-bff-api-r1` task 051 (spec FR-18), from the live MCP server in the BFF.
