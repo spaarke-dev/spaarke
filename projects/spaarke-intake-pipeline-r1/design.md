@@ -199,7 +199,14 @@ The platform's C# engine (`ComposeShadowPatchEngine`) anchors by paragraph id, a
 
 Rejected: **B** (C# port: two implementations to keep identical, slower to a first output, untrusted parsing in-process). Also rejected: **C** (`ComposeShadowPatchEngine`: a different anchoring model, and no plan-to-anchor step, table or checks).
 
-**Review content.** Review against the **one NDA standard** (the accelerator's topic-keyed playbook is recommended as master, still an open owner decision). Today's model step is the `agreement-review` Action, which must become callable app-only: `agreement-classify` and `agreement-review` run only inside a chat session (`SessionDispatchOrchestrator`) today. The step must write an edit plan rather than flagged sections alone. Later, `specialist-legal-agents-r1` supplies the attorney profile layers.
+**Review content.** Review against the **one NDA standard**.
+
+**Decision (owner, 2026-11-25):**
+- **The standard:** the accelerator's topic-keyed playbook "Spaarke NDA – Mutual" v1.2 (24 topics keyed by `topics.yaml`) is the one NDA standard. The platform's KNW-011 "Baseline NDA Standard v0.1" is rendered from it, not maintained separately.
+- **Ownership:** the accelerator owns the content until `specialist-legal-agents-r1` stands up the T3 Dataverse master (its design Q2: a Playbook, ontology D-209).
+- **This project consumes it:** it reads the current version and stamps it on every output.
+- **Gate:** counsel ratifies the standard before any customer rollout. Dev phases use synthetic NDAs against the unratified version.
+- **Why:** the §5 engines are keyed by topic id (`edit-plan.schema.json:52-58,88`; `summary_table.py` "# | Topic | Rating | Recommended action"), and Word and Cowork already read this playbook. The two standards differ in content (NDA note §4), and neither is counsel-approved yet. Today's model step is the `agreement-review` Action, which must become callable app-only: `agreement-classify` and `agreement-review` run only inside a chat session (`SessionDispatchOrchestrator`) today. The step must write an edit plan rather than flagged sections alone. Later, `specialist-legal-agents-r1` supplies the attorney profile layers.
 
 **ADR-049 check.** ADR-049 forbids text search in the **Compose** write path. The edit plan's exact-text anchoring is not Compose, but confirm the ADR's scope in `/adr-check`.
 
@@ -306,7 +313,7 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 ## 12. Dependencies and coordination
 
 - **specialist-legal-agents-r1:** the NDA specialist and attorney profiles plug into the NDA harness later. That program's design §3.6 "Autonomous runs" is delivered here.
-- **Accelerator r1:** the engines, edit-plan schema and NDA standard (not on master yet; merge or vendor them). It also decides which NDA standard is the master. **Its design §6.3 ("C# twins in the BFF") changes:** the server hosts the same Python engines in a Container Apps Job (§5). Tell the accelerator.
+- **Accelerator r1:** the engines, edit-plan schema and NDA standard (not on master yet; merge or vendor them). It owns the one NDA standard's content (§5, decided) until the specialist program's T3 master exists. **Its design §6.3 ("C# twins in the BFF") changes:** the server hosts the same Python engines in a Container Apps Job (§5). Tell the accelerator.
 - **Customer provisioning r1:** the per-stamp Container Apps environment, Job and registry need a provisioning step.
 - **Ontology r1:** columns on `sprk_servicerequest`; the request vs Inquiry distinction (owner: different concepts).
 - **eBilling r1:** §7 timing and the regression proof.
@@ -321,5 +328,5 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 3. ~~NDA engines~~ **Decided 2026-11-25: A**, the Python engines in a Container Apps Job, with conditions and a Phase 0 hosting spike (§5). Owner approval under ADR-052:77 given.
 4. ~~Invoice timing~~ **Decided 2026-11-25:** Phase 3, after eBilling UAT (task 163) and before customer rollout; no edits to eBilling code until then (§7).
 5. ~~Sending identity~~ **Decided 2026-11-25:** the shared legal mailbox, app-only, as the queued Return stage; attorney named and Cc'd (§3.5).
-6. NDA standard master: the accelerator's playbook (recommended)? Carried from the NDA note.
+6. ~~NDA standard master~~ **Decided 2026-11-25:** the accelerator's topic-keyed "Spaarke NDA – Mutual" v1.2, with KNW-011 rendered from it. Owned by the accelerator, then the specialist-legal-agents-r1 T3 master. This pipeline is a version-stamping consumer. Counsel ratification gates customer rollout (§5).
 7. Email door: an intake mailbox only, or also classify mail arriving at existing mailboxes?
