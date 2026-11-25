@@ -50,7 +50,7 @@ PCF controls remain the standard for form-level UI per ADR-006.
 | Full navigation page | Standalone HTML web resource | 19 (self-bundled) | `src/solutions/{PageName}/` |
 | Side pane | Standalone HTML web resource | 19 (self-bundled) | `src/solutions/{PaneName}/` |
 | Wizard / dialog (standalone) | Standalone HTML web resource | 19 (self-bundled) | `src/solutions/{WizardName}/` |
-| Ribbon/command script | Minimal JS | N/A | `src/dataverse/webresources/` |
+| Ribbon/command script | Minimal JS | N/A | `src/client/webresources/js/` |
 
 ---
 

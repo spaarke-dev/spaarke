@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss049" project="ebilling-r1">
+  <metadata>
+    <title>ISS-049 (#3057): the chat document, visualization and SPE admin upload routes answer a broken multipart body with 400, and an abandoned upload is not logged as a fault</title>
+    <phase>Issue fix; filed 2026-11-24 from the iss043 Opus review</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF endpoint .cs files.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copies the reviewed iss043 catch onto three routes; narrow and fully specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>iss043</deps>
+    <tags>bff-api, api, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-049. Task iss043 fixed the Finance multipart routes (notes/iss043-multipart-input.md; code Api/Finance/InvoiceSubmissionHttp.cs and Api/Finance/StoredFileEndpoints.cs). Three routes elsewhere in the BFF still mishandle a broken upload body:
+- src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs (~377) and Api/Ai/VisualizationEndpoints.cs (~281) catch nothing around ReadFormAsync: a truncated multipart body throws IOException (or InvalidDataException) into the global handler, which answers 500 and logs an Error for a client fault.
+- Api/SpeAdmin/ContainerItemEndpoints.cs (~1036-1039) catches every exception except SdapProblemException, including OperationCanceledException, so an abandoned upload is logged at Warning with a stack trace and answered 400.
+Find how iss043 did it (grep the helper or catch filter it added, e.g. "connection reset" / HResult / IsCancellationRequested in those Finance files) and reuse that code; if it is a private helper in a Finance file, decide in the notes whether to call it from a shared location or repeat the filter (root CLAUDE.md §11: existing / extension / cost of doing nothing).</prompt>
+
+  <constraints>
+    <constraint>Behaviour after the fix, on each of the three routes: a malformed or truncated multipart body answers 400 with the route's existing error shape (ProblemDetails as the route already uses) and logs a Warning with the exception type and HResult only, never the body or file name; a client disconnect or request-aborted cancellation is not answered as 400 and is not logged as a fault (same rule as iss043); every other exception keeps its current handling. Nothing else on these routes changes (auth, limits, success responses).</constraint>
+    <constraint>These are AI-platform and SPE-admin routes owned by other projects: change only the read-form error handling. No new endpoint, service, DI registration, package or option. If reuse needs moving an iss043 helper out of Api/Finance, keep its Finance behaviour byte-identical and say so in the notes.</constraint>
+    <constraint>Tests, failing before and passing after, in the routes' existing endpoint test classes (find them with grep; if a route has none, add the smallest one next to the iss043 tests using the same test host pattern): a body with no closing boundary answers 400; a cancelled request is not 400 and logs no Warning (SPE admin at least); a well-formed upload still succeeds. Run only those classes: dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "&lt;the classes&gt;" -- xUnit.MaxParallelThreads=4. Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests.</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings. Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss049-multipart-other-routes.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A truncated multipart body on each of the three routes answers 400 and logs a Warning, not a 500 Error.</criterion>
+    <criterion testable="true">An abandoned upload on the SPE admin route is not answered 400 and not logged as a fault.</criterion>
+    <criterion testable="true">Well-formed uploads behave as before.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

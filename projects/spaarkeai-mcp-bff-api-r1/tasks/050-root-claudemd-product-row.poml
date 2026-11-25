@@ -4,7 +4,7 @@
     <title>Root CLAUDE.md §1.1 row and CHANGELOG</title>
     <phase>E Docs and terminology</phase>
     <gate>after 042</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation edit with explicit constraints (200-line / 30 KB budget, Checklist F)</rigor-reason>
     <model-tier>sonnet</model-tier>

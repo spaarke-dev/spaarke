@@ -411,7 +411,7 @@
     <RolePrivilege name="prvReadsprk_ebillingsetting" level="Global" />
     <RolePrivilege name="prvReadsprk_EmailArtifact" level="Basic" />
     <RolePrivilege name="prvReadsprk_Event" level="Deep" />
-    <RolePrivilege name="prvReadsprk_EventType_Ref" level="Deep" />
+    <RolePrivilege name="prvReadsprk_EventType_Ref" level="Global" />
     <RolePrivilege name="prvReadsprk_Invoice" level="Deep" />
     <RolePrivilege name="prvReadsprk_Matter" level="Deep" />
     <RolePrivilege name="prvReadsprk_MatterSubtype_Ref" level="Global" />

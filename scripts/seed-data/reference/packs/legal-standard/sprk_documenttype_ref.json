@@ -10,21 +10,21 @@
     {
       "sprk_documenttype_refid": "bcf1ab75-495f-f111-a825-70a8a59455f4",
       "sprk_documenttypecode": "CTRNS_CLOSING_STATEMENT",
-      "sprk_documenttypedescription": "M&A / commercial-transactions closing statement listing buyer/seller, parties, purchase-price tabulation, and closing-date facts. Highest extraction value for the CTRNS practice area; Wave D3 priority 1.",
+      "sprk_documenttypedescription": "Closing statement for a commercial transaction or M&A deal: buyer and seller, parties, purchase-price tabulation and closing-date facts.",
       "sprk_documenttypename": "Closing Statement",
       "sprk_sortorder": 10
     },
     {
       "sprk_documenttype_refid": "d2f1ab75-495f-f111-a825-70a8a59455f4",
       "sprk_documenttypecode": "CTRNS_ASSET_PURCHASE_AGREEMENT",
-      "sprk_documenttypedescription": "Commercial-transactions asset purchase agreement covering acquired assets, excluded assets, purchase price, allocations, representations, and warranties. Wave D3 priority 2 for CTRNS.",
+      "sprk_documenttypedescription": "Asset purchase agreement covering the acquired and excluded assets, purchase price, allocations, representations and warranties.",
       "sprk_documenttypename": "Asset Purchase Agreement",
       "sprk_sortorder": 20
     },
     {
       "sprk_documenttype_refid": "7be7be7b-495f-f111-a825-70a8a59455f4",
       "sprk_documenttypecode": "IPPAT_PATENT_APPLICATION",
-      "sprk_documenttypedescription": "USPTO/PCT patent application — title, inventors, claims, specification, abstract, priority dates. Always-extract pair (Layer 2 required even at low Layer 1 confidence).",
+      "sprk_documenttypedescription": "USPTO or PCT patent application: title, inventors, claims, specification, abstract and priority dates.",
       "sprk_documenttypename": "Patent Application",
       "sprk_sortorder": 10
     },
@@ -38,14 +38,14 @@
     {
       "sprk_documenttype_refid": "cbe7be7b-495f-f111-a825-70a8a59455f4",
       "sprk_documenttypecode": "BNKF_LOAN_AGREEMENT",
-      "sprk_documenttypedescription": "Banking & finance loan agreement — borrower, lender, principal amount, interest rate, maturity date, security description, covenants. Wave D3 priority for BNKF.",
+      "sprk_documenttypedescription": "Banking and finance loan agreement: borrower, lender, principal amount, interest rate, maturity date, security description and covenants.",
       "sprk_documenttypename": "Loan Agreement",
       "sprk_sortorder": 10
     },
     {
       "sprk_documenttype_refid": "48a7e481-495f-f111-a825-70a8a59455f4",
       "sprk_documenttypecode": "CTRNS_NDA",
-      "sprk_documenttypedescription": "Non-disclosure agreement — effective date, parties, term, confidentiality scope. Wave D1 seeds this against CTRNS as the canonical structured-gate-fail example (sprk_layer2actioncode = NULL on its intersect row).",
+      "sprk_documenttypedescription": "Non-disclosure agreement: effective date, parties, term and confidentiality scope.",
       "sprk_documenttypename": "Non-Disclosure Agreement",
       "sprk_sortorder": 90
     },

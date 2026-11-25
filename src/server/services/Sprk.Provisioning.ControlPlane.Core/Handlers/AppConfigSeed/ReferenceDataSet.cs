@@ -207,13 +207,30 @@ internal static class ReferenceDataSet
             var tables = new List<ReferenceTable>(names.Count);
             foreach (var name in names)
             {
-                tables.Add(Parse(ReadEmbedded($"{PackResourcePrefix}{pack}.{name}.json")));
+                tables.Add(RequireNaturalKeyTable(pack, Parse(ReadEmbedded($"{PackResourcePrefix}{pack}.{name}.json"))));
             }
 
             packs[pack] = tables;
         }
 
         return packs;
+    }
+
+    /// <summary>
+    /// A starter-pack table must be Tier 2 (<see cref="ReferenceMatch.NaturalKey"/>) with a name column. A pack file that omits
+    /// <c>"match"</c> would otherwise load as Tier 1 (fixed-id), with name matching silently off, and H12b would create duplicates of
+    /// rows a customer already renamed or re-keyed. Throws <see cref="InvalidOperationException"/> (a build defect, not a runtime input).
+    /// </summary>
+    internal static ReferenceTable RequireNaturalKeyTable(string pack, ReferenceTable table)
+    {
+        if (table.Match != ReferenceMatch.NaturalKey || string.IsNullOrWhiteSpace(table.NameColumn))
+        {
+            throw new InvalidOperationException(
+                $"Starter pack '{pack}' table '{table.Table}' must declare \"match\": \"naturalKey\" and a \"nameColumn\" " +
+                "(a pack file without them would seed as fixed-id Tier 1 data with name matching off).");
+        }
+
+        return table;
     }
 
     private static string ReadEmbedded(string resource)

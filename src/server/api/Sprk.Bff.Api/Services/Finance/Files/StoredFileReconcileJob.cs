@@ -17,12 +17,14 @@ namespace Sprk.Bff.Api.Services.Finance.Files;
 public static class StoredFileRetention
 {
     /// <summary>
-    /// The invoice submission job's longest retry horizon: every delivery the broker makes (<see cref="JobContract.MaxDeliveryCount"/>)
-    /// may hold its per-submission lock for <see cref="InvoiceSubmissionProcessingJobHandler.LockDuration"/>. A staged blob younger than
-    /// this may still gain its row, so <c>Finance:FileStore:OrphanGraceMinutes</c> may not be shorter (start-up validation).
+    /// The invoice submission job's longest retry horizon: every delivery the processor makes (<see cref="JobContract.MaxDeliveryCount"/>)
+    /// may hold its per-submission lock for <see cref="InvoiceSubmissionProcessingJobHandler.LockDuration"/>, and the processor waits
+    /// <see cref="JobContract.RetryWindow"/> in all between them (ISS-025 back-off). A staged blob younger than this may still gain its
+    /// row, so <c>Finance:FileStore:OrphanGraceMinutes</c> may not be shorter (start-up validation).
     /// </summary>
     public static TimeSpan SubmissionRetryHorizon { get; } =
-        TimeSpan.FromTicks(InvoiceSubmissionProcessingJobHandler.LockDuration.Ticks * JobContract.MaxDeliveryCount);
+        TimeSpan.FromTicks(InvoiceSubmissionProcessingJobHandler.LockDuration.Ticks * JobContract.MaxDeliveryCount)
+        + JobContract.RetryWindow;
 }
 
 /// <summary>

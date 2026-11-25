@@ -4,6 +4,7 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
@@ -18,11 +19,13 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 internal sealed class MappingSourceReader
 {
     private MappingSourceReader(
-        CallerRecordAccessProbe? probe, string? callerBearerToken, Func<Guid, CancellationToken, Task<bool>>? documentShown)
+        CallerRecordAccessProbe? probe, string? callerBearerToken, Func<Guid, CancellationToken, Task<bool>>? documentShown,
+        Func<Guid, CancellationToken, Task<bool>>? analysisShown)
     {
         Probe = probe;
         CallerBearerToken = callerBearerToken;
         DocumentShown = documentShown;
+        AnalysisShown = analysisShown;
     }
 
     /// <summary>The caller-rights probe, or <see langword="null"/> for the system principal.</summary>
@@ -40,17 +43,28 @@ internal sealed class MappingSourceReader
     /// </summary>
     internal Func<Guid, CancellationToken, Task<bool>>? DocumentShown { get; }
 
+    /// <summary>
+    /// Whether the external document narrowing leaves an analysis visible to this caller (an analysis whose source document or
+    /// output file the narrowing hides is withheld), as the route decided it, or <see langword="null"/> when the route gave no
+    /// answer. With no answer a <c>sprk_analysis</c> source is not mapped. Asked only for an analysis source, only after the
+    /// caller's Read has allowed it, and before the analysis is read app-only. <see langword="false"/> and a throw both mean
+    /// "not shown".
+    /// </summary>
+    internal Func<Guid, CancellationToken, Task<bool>>? AnalysisShown { get; }
+
     /// <summary>True for the system principal: the source is read app-only without a caller probe.</summary>
     internal bool IsSystem => Probe is null;
 
     /// <summary>A system creator (generation job, playbook node, ingestion, the repair pass): reads app-only.</summary>
-    internal static MappingSourceReader System { get; } = new(null, null, null);
+    internal static MappingSourceReader System { get; } = new(null, null, null, null);
 
     /// <summary>A caller: the source is read only after <see cref="MappingSourceReadProbe.CheckCallerReadOfSourceAsync"/>
-    /// answers Read and, for a document, <paramref name="documentShown"/> shows it.</summary>
+    /// answers Read and, for a document, <paramref name="documentShown"/> shows it (for an analysis,
+    /// <paramref name="analysisShown"/>).</summary>
     internal static MappingSourceReader ForCaller(
-        CallerRecordAccessProbe probe, string? callerBearerToken, Func<Guid, CancellationToken, Task<bool>>? documentShown = null)
-        => new(probe ?? throw new ArgumentNullException(nameof(probe)), callerBearerToken, documentShown);
+        CallerRecordAccessProbe probe, string? callerBearerToken, Func<Guid, CancellationToken, Task<bool>>? documentShown = null,
+        Func<Guid, CancellationToken, Task<bool>>? analysisShown = null)
+        => new(probe ?? throw new ArgumentNullException(nameof(probe)), callerBearerToken, documentShown, analysisShown);
 }
 
 /// <summary>A resolved mapping source: the record whose fields a new record inherits (FR-03).</summary>
@@ -146,15 +160,28 @@ internal static class MappingSourceReadProbe
     internal static bool IsDocumentSource(string? entityLogicalName) =>
         string.Equals(entityLogicalName?.Trim(), DocumentLogicalName, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>True when <paramref name="entityLogicalName"/> names the Analysis table (trimmed, any case, as the map compares).</summary>
+    internal static bool IsAnalysisSource(string? entityLogicalName) =>
+        string.Equals(entityLogicalName?.Trim(), AnalysisLogicalName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The Analysis table's logical name: a mapping source outside <see cref="EntityAccessFilter"/>'s map
+    /// (field-mapping-server-write-path-r1 task 028: the send path fills an email's subject and body from it).</summary>
+    internal const string AnalysisLogicalName = "sprk_analysis";
+
     /// <summary>
     /// Task 043 (owner 2026-11-04): THE entity set of a field-mapping source, shared by the three mapping-source readers
     /// (<see cref="CheckCallerReadOfSourceAsync"/>, <see cref="MappingSourceCallerMask.ApplyAsync"/> and the push's source
     /// check). <see cref="EntityAccessFilter.TryResolveEntitySet"/> first, so every table in that map resolves exactly as
-    /// before; then <c>sprk_document</c> to the Document access path's set (<see cref="FinanceAuthorizationFilter.DocumentEntitySet"/>).
+    /// before; then <c>sprk_document</c> to the Document access path's set (<see cref="FinanceAuthorizationFilter.DocumentEntitySet"/>),
+    /// and (task 028) <c>sprk_analysis</c> to its live-verified set (<see cref="RegardingNameFields.EntitySetName"/>).
     /// Any other table is a miss. The association lockstep map itself is unchanged: upload, record-route and Compose
-    /// authorization still find no document entry in it.
+    /// authorization still find no document or analysis entry in it. The caller's Read is asked of the set found here, so an
+    /// analysis is mapped from only when the caller holds Read on it.
+    /// <para>An analysis resolves ONLY when <paramref name="includeAnalysis"/> is set, which only the send-time fill's read
+    /// path sets (<see cref="MappingSourceReader.AnalysisShown"/> given). Every other reader (the create's mapping read, the
+    /// push's source checks) leaves it off, so an analysis stays a table they cannot authorize, as before the send fill.</para>
     /// </summary>
-    internal static bool TryResolveSourceEntitySet(string? entityLogicalName, out string entitySet)
+    internal static bool TryResolveSourceEntitySet(string? entityLogicalName, out string entitySet, bool includeAnalysis = false)
     {
         if (EntityAccessFilter.TryResolveEntitySet(entityLogicalName, out entitySet))
         {
@@ -164,6 +191,14 @@ internal static class MappingSourceReadProbe
         if (IsDocumentSource(entityLogicalName))
         {
             entitySet = FinanceAuthorizationFilter.DocumentEntitySet;
+            return true;
+        }
+
+        if (includeAnalysis
+            && IsAnalysisSource(entityLogicalName)
+            && RegardingNameFields.EntitySetName(AnalysisLogicalName) is { } analysisSet)
+        {
+            entitySet = analysisSet;
             return true;
         }
 
@@ -205,18 +240,20 @@ internal static class MappingSourceReadProbe
     /// Task 043: <see cref="CheckCallerReadAsync"/> for a FIELD-MAPPING SOURCE: the same decision over
     /// <see cref="TryResolveSourceEntitySet"/>, so a <c>sprk_document</c> is asked on the Document access path's set. The
     /// quick-create filter keeps <see cref="CheckCallerReadAsync"/>, so its responses are unchanged (NFR-07). Never throws
-    /// except a cancellation of <paramref name="ct"/>.
+    /// except a cancellation of <paramref name="ct"/>. An analysis is asked only with <paramref name="includeAnalysis"/>
+    /// (see <see cref="TryResolveSourceEntitySet"/>); otherwise it is <see cref="CallerReadDecision.EntityTypeNotAuthorizable"/>.
     /// </summary>
     internal static async Task<CallerReadCheck> CheckCallerReadOfSourceAsync(
         CallerRecordAccessProbe probe,
         string? callerBearerToken,
         string? entityLogicalName,
         Guid recordId,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool includeAnalysis = false)
     {
         ArgumentNullException.ThrowIfNull(probe);
 
-        if (!TryResolveSourceEntitySet(entityLogicalName, out var entitySet))
+        if (!TryResolveSourceEntitySet(entityLogicalName, out var entitySet, includeAnalysis))
         {
             return new CallerReadCheck(CallerReadDecision.EntityTypeNotAuthorizable, string.Empty, AccessRights.None, null);
         }
@@ -286,8 +323,18 @@ internal static class MappingSourceReadProbe
                 return MappingSourceRead.Unavailable;
             }
 
+            // An analysis is mapped from only when the route gave an analysis decision (the same shape as a document): with none,
+            // the caller-rights probe is not asked, and the create and the push, which give none, map nothing from an analysis.
+            if (IsAnalysisSource(source.EntityLogicalName) && reader.AnalysisShown is null)
+            {
+                logger?.LogInformation(
+                    "[FIELD-MAPPING-SOURCE] This read carries no analysis decision for the caller; an analysis source maps nothing.");
+                return MappingSourceRead.Unavailable;
+            }
+
             var check = await CheckCallerReadOfSourceAsync(
-                    probe, reader.CallerBearerToken, source.EntityLogicalName, source.RecordId, ct)
+                    probe, reader.CallerBearerToken, source.EntityLogicalName, source.RecordId, ct,
+                    includeAnalysis: reader.AnalysisShown is not null)
                 .ConfigureAwait(false);
 
             if (!check.IsAllowed)
@@ -312,6 +359,14 @@ internal static class MappingSourceReadProbe
             // before anything of it is read app-only. Not shown, no answer and a fault are the same Unavailable.
             if (IsDocumentSource(source.EntityLogicalName)
                 && !await IsDocumentShownAsync(reader, source.RecordId, logger, ct).ConfigureAwait(false))
+            {
+                return MappingSourceRead.Unavailable;
+            }
+
+            // An analysis whose source document or output file the external document narrowing hides is withheld from this
+            // caller, as the analysis routes withhold it; asked before anything of it is read app-only.
+            if (IsAnalysisSource(source.EntityLogicalName)
+                && !await IsAnalysisShownAsync(reader, source.RecordId, logger, ct).ConfigureAwait(false))
             {
                 return MappingSourceRead.Unavailable;
             }
@@ -346,6 +401,41 @@ internal static class MappingSourceReadProbe
         }
 
         return record is null ? MappingSourceRead.Unavailable : new MappingSourceRead(true, record, null);
+    }
+
+    /// <summary>
+    /// The route's answer for <paramref name="analysisId"/> (<see cref="MappingSourceReader.AnalysisShown"/>):
+    /// <see langword="false"/> when the route gave none, when it answers "not shown", and when it throws. A cancellation of
+    /// <paramref name="ct"/> propagates.
+    /// </summary>
+    private static async Task<bool> IsAnalysisShownAsync(
+        MappingSourceReader reader, Guid analysisId, ILogger? logger, CancellationToken ct)
+    {
+        if (reader.AnalysisShown is not { } analysisShown)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (await analysisShown(analysisId, ct).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            logger?.LogInformation(
+                "[FIELD-MAPPING-SOURCE] The external document narrowing hides the analysis source; no mapping.");
+            return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "[FIELD-MAPPING-SOURCE] The analysis decision faulted; no mapping (fail closed).");
+            return false;
+        }
     }
 
     /// <summary>

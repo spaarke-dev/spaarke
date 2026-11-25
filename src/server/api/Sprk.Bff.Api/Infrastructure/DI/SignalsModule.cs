@@ -146,7 +146,8 @@ public static class SignalsModule
         services.AddScoped<IDecisionLookupSearch, DecisionLookupSearch>();
 
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
-        // compiler and the shared sysadmin entity service, both singletons.
+        // compiler and the shared sysadmin entity service, both singletons. DI picks its scope-factory constructor (task 210): choice
+        // labels come from the scoped, Redis-cached MetadataService (AddDataverseMetadataServices), resolved per description.
         services.AddSingleton<RuleBodyDescriber>();
 
         // Task 100 (FR-57, D-22): the Ontology admin Rules routes' service. Scoped: it holds the CALLER's IDataverseUserClient, so every read

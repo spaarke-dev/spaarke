@@ -4,7 +4,7 @@
     <title>Set the firm, part 2: the rules re-run after Set firm, the hold release, and the shared Signal's ConditionCleared close</title>
     <phase>3 Rules (095d split, notes/095c-from-email-firm-optional.md 16.4; follows 095d-1)</phase>
     <gate>Open questions Q3, Q4, Q6 answered before 2a; Q1, Q2, Q5 before 2b (notes/095d2-brief.md section 4)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Releases the hold that gates approval and export (fail-open risk); rewrites field-secured findings; resets line decisions; closes a shared Signal; adds a job type.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -25,8 +25,8 @@ export type { ISmartTodoKanbanProps } from './SmartTodoKanban';
 //    2026-08-17) so the Code Page AND SmartTodoWidget render the IDENTICAL
 //    Header (Filter · + New Task · overflow) + inline SearchFilter — a code page
 //    and its widget must compose the same shared-lib components. ──────────────
-export { Header, QUICK_ADD_TODO_EVENT } from './Header';
-export type { HeaderProps, QuickAddTodoEventDetail } from './Header';
+export { Header } from './Header';
+export type { HeaderProps } from './Header';
 export { SearchFilter } from './SearchFilter';
 export type { SearchFilterProps } from './SearchFilter';
 

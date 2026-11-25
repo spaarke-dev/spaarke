@@ -254,6 +254,38 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         }
     }
 
+    // Task 210 (DI-169): the wizard shows a column by its display name and writes its logical name. The names come from the describer's
+    // table, which RuleBodyDescriberLabelTests pins to the solution source (Entity.xml) and to the allow-list.
+    [Fact]
+    public void Catalog_LabelsEveryColumnItOffers_ByItsDisplayName_AndKeepsTheLogicalNameAsTheValue()
+    {
+        var catalog = OntologyAdminAuthoringService.BuildCatalog(Array.Empty<OntologyCatalogCategory>());
+
+        foreach (var subject in catalog.Subjects)
+        {
+            foreach (var field in subject.DateOnlyFields.Concat(subject.ThresholdFields.Select(t => t.Field)).Concat(subject.AuthorableFields))
+            {
+                subject.FieldLabels.Should().ContainKey(field, $"{subject.Entity}.{field} is offered, so it is shown by a name");
+                subject.FieldLabels[field].Should().Be(RuleBodyDescriber.ColumnDisplayNames[(subject.Entity, field)]);
+            }
+
+            foreach (var join in subject.Joins)
+            {
+                foreach (var field in join.DateOnlyFields.Concat(join.AuthorableFields))
+                {
+                    join.FieldLabels.Should().ContainKey(field, $"{join.Related}.{field} is offered, so it is shown by a name");
+                    join.FieldLabels[field].Should().Be(RuleBodyDescriber.ColumnDisplayNames[(join.Related, field)]);
+                }
+            }
+        }
+
+        var matter = catalog.Subjects.Single(s => s.Entity == "sprk_matter");
+        matter.AuthorableFields.Should().Contain("createdon", "the value the wizard writes stays the logical name");
+        matter.FieldLabels["createdon"].Should().Be("Created On");
+        matter.FieldLabels["sprk_openeddate"].Should().Be("Opened Date");
+        matter.Joins.Single(j => j.Related == "sprk_communication").FieldLabels["sprk_receiveddate"].Should().Be("Received Date");
+    }
+
     [Fact]
     public void Catalog_EveryColumnItOffers_IsAllowListed_AndEveryAuthorableFieldCompiles()
     {

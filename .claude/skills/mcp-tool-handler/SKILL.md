@@ -2,106 +2,73 @@
 description: Implement or modify an MCP tool handler for the Spaarke MCP server
 tags: [mcp, ai, tool-handler, api]
 techStack: [aspnet-core, csharp, mcp]
-appliesTo: ["**/Services/Ai/**/*.cs", "**/IAiToolHandler*.cs", "**/AiToolService*.cs", "**/McpTool*.cs"]
+appliesTo: ["**/Api/Mcp/**/*.cs", "**/Infrastructure/DI/McpModule.cs", "**/RouteAuthorizationGuardTests.Mcp.cs", "**/McpTool*.cs"]
 alwaysApply: false
 ---
 
 # mcp-tool-handler
 
 > **Category**: Development
-> **Last Updated**: 2026-05-14
+> **Last Updated**: 2026-11-25 (rewritten by spaarkeai-mcp-bff-api-r1 task 051 from the implemented server)
 
 ---
 
 ## Purpose
 
-Anchor implementation work on Spaarke's MCP tool surface in current Microsoft platform idioms. The Spaarke BFF exposes tools to AI agents (Foundry Agent Service, Microsoft Agent Framework, declarative agents) via an MCP server. Tool handlers wire imperative document operations and Dataverse-aware skills into that surface. Without this skill, generated tool handlers drift toward training-data patterns that predate MCP Apps, approval modes, and the current tool-binding contract.
+Add or change a tool on Spaarke's MCP server, the one hosted in the BFF at `/mcp/{area}`. Microsoft 365 Copilot Chat and Cowork call it through a Copilot connector (v1: "Spaarke MCP" → `/mcp/legal-operations`). The conventions below are what the code does; when this file and the code disagree, the code wins (root CLAUDE.md §2) and this file gets fixed.
 
----
+Architecture: `docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md`. Step-by-step guide with tests: `docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md`.
 
 ## Applies When
 
-- Creating a new MCP tool handler (implementing `IAiToolHandler` or adding to `AiToolService` registration)
-- Modifying tool definitions, tool schemas, or tool approval semantics
-- Wiring Spaarke MCP tools into a Foundry agent, declarative agent, or Agent Framework loop
-- Designing a new agent-callable verb the team wants to expose via MCP
-- **NOT applicable** for: built-in Dataverse MCP tools (use `dataverse-mcp-usage` skill), widget UI for tool results (use `widget-design` skill)
+- Adding a tool to an existing area, or a new area (`/mcp/{area}`).
+- Changing a tool's schema, description, annotations, visibility, authorization or result shape.
+- **Not for:** the widget a tool renders (`widget-design`); the Copilot packages (`declarative-agent`); Dataverse's own MCP server (`dataverse-mcp-usage`). The older `IAiToolHandler` / `AiToolService` chat tools are a different, in-BFF agent surface, not MCP.
 
----
+## Rules (binding)
+
+| Rule | Where it is enforced |
+|---|---|
+| **One MCP server.** A new product area is a new `/mcp/{area}` route on this host, never a second server or service (ADR-013 placement). | `Api/Mcp/McpEndpoints.cs` (one `MapMcp` per area, area constant beside `LegalOperationsArea`) |
+| **Tool name** `spaarke_{verb}_{object}` (e.g. `spaarke_show_decisions`). Copilot shows it prefixed by the connector (`SpaarkeMCP_`). Not the April camelCase `/api/agent/*` names. | naming note `projects/spaarkeai-mcp-bff-api-r1/notes/coordination/2026-11-06-copilot-naming-and-ownership.md` §1 |
+| **Shape:** one `McpToolDefinition` subclass per tool, tagged `[McpArea(McpEndpoints.{Area}Area)]`, under `Api/Mcp/{Area}/{Group}/`. `Create(IServiceProvider services)` returns `McpServerTool.Create(<static method group>, new McpServerToolCreateOptions { Services = services, ... })`. The handler is a `static` method taking services as parameters; no state between calls. No reflection (`Type.GetMethods`) and no SDK `WithToolsFromAssembly`. | `Api/Mcp/McpToolCatalog.cs` (discovers by attribute, partitions by area) |
+| **Caller identity:** every tool runs as the caller (OBO). Pass exactly `IHttpContextAccessor.HttpContext` to the capability; a null context or unauthenticated caller fails closed, never app-only. The route stays **stateless**: that is what keeps the accessor populated. | `Infrastructure/DI/McpModule.cs`; tests `tests/integration/auth/Mcp/McpCallerPathTests.cs` |
+| **Authorization:** `[Authorize]` on the class, naming only the allowed policies (bare `[Authorize]` or `SystemAdmin`). Never `ExternalCollaboration` or any other scheme's policy. The route accepts only ADR-028 **A10** tokens (Spaarke tenant, v2 issuer, scope `user_impersonation`, `aud` = BFF app); CIAM and A9 home-directory tokens are refused before any tool runs. | `Api/Mcp/McpToolAuthorization.cs`; ledger `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs` (`McpTools`) |
+| **Metadata:** explicit `Title`, explicit `ReadOnly` hint (true or false, never left out), and a "use for / not for" description of at most 1,024 characters. | Title, `ReadOnly` and "writes are app-only": `McpToolAuthorization` startup validation (a breaking tool stops the app from starting). Description length: the contract tests (`McpHostContractTests.cs`) |
+| **Visibility:** a tool only the widget calls is **app-only** (`_meta.ui.visibility = ["app"]`). Any tool that writes (`ReadOnly = false`) must be app-only: the model never commits. Model-visible tools point at their widget with `_meta.ui.resourceUri`. | e.g. `CompleteDecisionTool.cs` (app-only write), `ShowDecisionsTool.cs` (model + app) |
+| **Input schema:** stated explicitly, not inferred; closed enums where the value set is closed; `additionalProperties: false`. | `ShowDecisionsTool.cs` (`category` enum from `DecideLaneCategories.Keys`) |
+| **Domain logic stays in services.** A tool is a thin adapter over the same service the REST route uses (decisions: `Services/Signals/IDecisionCapability.cs`, `IDecisionLookupSearch.cs`). Never a second validation, billing refusal or write path; writes go through `DecisionCommitService` only. | spec FR-08, FR-09 |
+| **Errors:** domain failures come back as a tool result with `isError: true`, mapped by `Api/Signals/DecisionResultMapper.cs` → `Api/Mcp/McpToolResults.cs`, with the same `reasonCode` vocabulary as REST. Transport errors never carry domain failures. | `tests/unit/domain/Mcp/McpToolResultsTests.cs` |
+| **Model-visible output is minimal (FR-04 style).** `content`/`structuredContent` of a model-visible tool carries counts and slim rows only; privileged Work Items appear only as "N privileged items — open to review". Detail goes through app-only tools to the widget. | `tests/integration/auth/Mcp/DecisionsPrivilegeReductionTests.cs` |
+| **Limits:** every result < 64 KiB at the worst-case seed; finish under 30 s; no background work (ADR-052). Per-user rate limit policy `mcp` (`RateLimitingModule.McpPolicyName`). Kill switch `Mcp:Enabled=false` → 503 `mcp.disabled` via the null-object catalog (ADR-032). | `tests/integration/regression/Mcp/McpResultSizeTests.cs`; `Infrastructure/DI/RateLimitingModule.cs` |
+| **Logging:** log `oid`, `appid`, correlation id and outcome; never the token or its claims (ADR-028 A10, NFR-05). Each call logs `MCP tool {tool} completed: outcome …, {n} rows, {ms} ms` (the NFR-01 latency source). | `McpToolAuthorization.cs`, the tool classes |
 
 ## Workflow
 
-### Step 1: Load knowledge context (mandatory before generating code)
-
-Read in this order:
-
-1. **`knowledge/mcp-apps/NOTES.md`** — Spaarke-specific commentary on widget/tool composition (may be a stub pre-Phase-4; still read it for the heading scaffold).
-2. **`knowledge/foundry-agent-service/NOTES.md`** — When tools attach to Foundry agents, how approval-mode wiring works (`McpTool.set_approval_mode("prompt")`, `SubmitToolApprovalAction`).
-3. **`knowledge/foundry-agent-service/samples/mcp-tool-binding/`** — The canonical `McpTool` + approval flow pattern.
-4. **`knowledge/foundry-agent-service/samples/mcp-approval-gate/`** — Config-driven approval modes (closest current HITL primitive).
-5. **`knowledge/mcp-apps/trey-research/` and `knowledge/mcp-apps/approvals-box/`** — If the tool returns rich data that may render in a widget, study the host-bridge hook (`useMcpApp`) for the contract.
-
-### Step 2: Identify the integration target
-
-Determine which agent surface will call the tool:
-
-| Calling surface | Knowledge to consult |
-|---|---|
-| Foundry agent (durable, HITL) | `knowledge/foundry-agent-service/` |
-| Microsoft Agent Framework (in-process BFF loop) | `knowledge/agent-framework/` |
-| Declarative agent in Copilot Chat | `knowledge/declarative-agents/` + `knowledge/m365-copilot/` |
-| Direct widget invocation (MCP App) | `knowledge/mcp-apps/` |
-
-### Step 3: Apply Spaarke contracts (ADR-013, ADR-007)
-
-- **ADR-013 (AI Architecture)**: Use the existing `IAiToolHandler` pattern in `src/server/api/Sprk.Bff.Api/Services/Ai/`. The `AiToolService` is the orchestrator — register handlers in DI per ADR-010 (feature-module registration; ~15 Program.cs lines is a readability target, not a count — check before adding).
-- **ADR-007 (SpeFileStore facade)**: If the tool reads/writes SharePoint Embedded content, route through `SpeFileStore`. Do NOT inject `GraphServiceClient` directly into the handler.
-- **ADR-001 (Minimal API)**: tool handlers are .NET services hosted in `Sprk.Bff.Api` — they serve live requests, so they stay in the BFF (ADR-052 signal B4).
-- **ADR-008 (Endpoint filters)**: Authorization for tool invocation goes through endpoint filters on `AiToolEndpoints`, not global middleware.
-
-### Step 4: Tool schema and approval mode
-
-- Define the tool schema with the type-safe attribute-based idioms shown in `knowledge/agent-framework/dotnet/samples/01-get-started/02_add_tools/`.
-- Decide approval mode explicitly: `auto`, `prompt`, or `never`. Document the choice in the handler XML doc comment.
-- For destructive operations (delete, mass-update): default to `prompt` (manual confirmation) until a stable use case justifies `auto`.
-
-### Step 5: Streaming and telemetry
-
-- If the tool result is large or progressive, stream — see `knowledge/agent-framework/dotnet/samples/03-workflows/_StartHere/01_Streaming/`.
-- Emit OpenTelemetry traces — pattern in `knowledge/agent-framework/dotnet/samples/02-agents/Agents/Agent_Step05_Observability/`. Spaarke routes OTel to Application Insights (the customer's instance).
-
-### Step 6: Code review checklist (before declaring done)
-
-- [ ] Tool registered via DI; does not exceed ADR-010 budget
-- [ ] No Graph SDK types in the handler signature (use `SpeFileStore` facade)
-- [ ] Approval mode chosen and documented
-- [ ] Tool schema is type-safe (no string-bag inputs unless schema-validated)
-- [ ] Endpoint filter authorization applied at `AiToolEndpoints` level
-- [ ] OTel tracing wired (at minimum: handler invocation, downstream call)
-- [ ] Unit test covers the happy path and an authorization failure
-
----
+1. **Placement.** Confirm the tool belongs in an existing area; a new area follows `docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md` "Add an area". Answer root CLAUDE.md §11's three questions for the new surface.
+2. **Service first.** Find or extend the service the REST route uses. If none exists, the logic goes in a service, not the tool.
+3. **Write the tool class** by copying the nearest existing one: read-only and model-visible → `ShowDecisionsTool.cs`; app-only read → `ListDecisionPageTool.cs` / `GetDecisionPlanTool.cs` / `SearchDecisionLookupTool.cs`; app-only write → `CompleteDecisionTool.cs`. Shared argument parsing: `DecisionToolCall.cs`.
+4. **Add the ledger entry** in `RouteAuthorizationGuardTests.Mcp.cs` `McpTools` (policy, caller seam, reason). The ArchTest fails on any tagged tool missing from it.
+5. **Tests** (all required):
+   - auth: `tests/integration/auth/Mcp/` (unauthenticated → 401; refused token types; caller path);
+   - contract: `tests/integration/contract/Api/Mcp/` (`tools/list` entry: name, title, hints, visibility, schema; happy path; `isError` mapping);
+   - size: add the tool to `tests/integration/regression/Mcp/McpResultSizeTests.cs` / `McpFiveToolFixtures.cs`;
+   - writes: `tests/integration/data-mutation/Mcp/` (idempotency key, replay, nothing written on refusal);
+   - conformance: the CI job `mcp-conformance` in `.github/workflows/ci-tier1-blocking.yml` (host `tests/integration/Mcp.Conformance.Host/`) must stay green.
+6. **BFF hygiene** (root CLAUDE.md §10): publish-size delta against fresh master, no new HIGH CVE.
+7. **Review:** auth-touching changes go to the uac-r2 reviewer; changes under `Services/Signals/**` or `Api/Signals/**` go to the ontology project.
 
 ## Conventions
 
-- Tool handlers live under `src/server/api/Sprk.Bff.Api/Services/Ai/`
-- File naming: `{ToolName}ToolHandler.cs`; class name matches
-- Tool ID (the string clients call): `kebab-case` (e.g., `summarize-document`, `extract-entities`)
-- Do NOT extend the BFF with a separate AI microservice — per ADR-013, extend in-process
+- Files: `Api/Mcp/{Area}/{Group}/{Verb}{Object}Tool.cs`; class name matches the file. Widget resources: `Api/Mcp/{Area}/{Widget}WidgetResource.cs`.
+- Route constants: `McpEndpoints.{Area}Route` = `/mcp/{area}`, `McpEndpoints.{Area}Area` = `{area}` (lower-case, hyphenated; never `core`).
+- One connector per product area, not per function (ontology-component-model.md §1.1).
 
 ## Resources
 
 | Resource | Purpose |
-|----------|---------|
-| `knowledge/mcp-apps/NOTES.md` | Spaarke perspective on widget+tool composition |
-| `knowledge/foundry-agent-service/NOTES.md` | When/how to bind tools to Foundry agents |
-| `knowledge/foundry-agent-service/samples/mcp-tool-binding/` | Canonical `McpTool` + approval flow |
-| `knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx` | Host-bridge contract if tool result renders in widget |
-
-## Output
-
-When this skill completes, expect:
-- A new `{ToolName}ToolHandler.cs` (or modifications to existing) following ADR-013
-- A DI registration in `Program.cs` or the AI module's extension method
-- Unit tests for the handler
-- A reference in `NOTES.md` of the relevant knowledge folder if the work establishes a new Spaarke-specific pattern (note for senior engineer to incorporate at next annotation pass)
+|---|---|
+| `src/server/api/Sprk.Bff.Api/Api/Mcp/` | The host, catalog, authorization, result helpers and the five legal-operations tools |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs` | DI, stateless transport, kill switch |
+| `projects/spaarkeai-mcp-bff-api-r1/spec.md` | FR-01–FR-12, NFR-01–NFR-09 (the requirements these rules come from) |
+| `.claude/adr/ADR-028-spaarke-auth-architecture.md` (A10) | The connector auth plane |

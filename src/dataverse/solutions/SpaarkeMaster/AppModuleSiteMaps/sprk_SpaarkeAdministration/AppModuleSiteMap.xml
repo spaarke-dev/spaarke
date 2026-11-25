@@ -62,6 +62,11 @@
         <SubArea Id="subarea_eb_ratecard" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_ratecard" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
         <SubArea Id="subarea_eb_codeset" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_billingcodeset" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
         <SubArea Id="subarea_eb_ruleset" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_ruleset" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_eb_rulereview" Icon="/_imgs/imagestrips/transparent_spacer.gif" Url="$webresource:sprk_rulereviewpage" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="false" PassParams="false" Sku="All,OnPremise,Live,SPLA">
+          <Titles>
+            <Title LCID="1033" Title="Rule Review" />
+          </Titles>
+        </SubArea>
       </Group>
     </Area>
   </SiteMap>

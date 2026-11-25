@@ -21,12 +21,15 @@ export const catalog: AuthoringCatalog = {
       dateOnlyFields: ['zz_due'],
       thresholdFields: [{ field: 'zz_load', min: 0, max: 250 }],
       authorableFields: ['zz_state', 'zz_due', 'zz_colour'],
+      // Task 210: display names for the widget's columns (zz_gadget carries none, so it shows logical names).
+      fieldLabels: { zz_state: 'Widget State', zz_due: 'Due On', zz_colour: 'Colour', zz_load: 'Load (percent)' },
       joins: [
         {
           related: 'zz_note',
           path: 'zz_widgetref',
           dateOnlyFields: [],
           authorableFields: ['zz_kind', 'zz_noted'],
+          fieldLabels: { zz_kind: 'Note Kind', zz_noted: 'Noted On' },
         },
         {
           related: 'zz_mail',
@@ -158,7 +161,9 @@ export const published: VersionPublished = {
 };
 
 /** A service whose every call succeeds. Each is a jest mock so a test can read its calls or replace its answer. */
-export function makeAuthoringService(over: Partial<OntologyAuthoringService> = {}): jest.Mocked<OntologyAuthoringService> {
+export function makeAuthoringService(
+  over: Partial<OntologyAuthoringService> = {}
+): jest.Mocked<OntologyAuthoringService> {
   return {
     getCatalog: jest.fn(async () => ({ ok: true as const, data: catalog })),
     validate: jest.fn(async () => ({ ok: true as const, data: validation() })),

@@ -78,8 +78,33 @@ Both rows:
 - Gates: jest `CreateReportCardWizard` + `CreateWorkAssignmentWizard` + `utils/adapters` pass, 26 suites / 259 tests. `tsc --noEmit` 0 errors. eslint clean on both files.
 - Review: the diff is the source, the call argument and comments. The error path and body are unchanged.
 
-Next: PR to master, then redeploy and re-check on dev; each needs the owner's go.
+PR #3083 merged to master on 2026-11-25 at 00:09Z as e70ff38894, after every CI check had finished with no failures.
 
-## Left (on the owner's go)
+Redeployed `sprk_createreportcardwizard` to dev on 2026-11-25 at 01:23Z (owner's go). It was built in a temporary worktree at e70ff38894.
+- Built bundle: SHA256 728C5DC4…8B7BC999, 1,542,824 bytes.
+  - The create call passes `{ mappingSource }` when the wizard has an association.
+  - The bundle has no `/field-mappings/` call and no `applyFieldMappings`.
+- Read-back from dev: the same SHA.
+- Rollback: the 22:19Z bundle, SHA 3F0701D3…6FC3ABB. A copy is kept outside the repo.
 
-1. Live check on dev under a Matter whose profile maps Law Firm 1 / External / Internal: pick one of each and confirm the picks are kept; create one leaving them unpicked and confirm they are filled from the matter; owner = the matter's team; mapped values present on first load.
+## Re-check on dev (2026-11-25, 02:45Z): PASS
+
+The owner gave the go. The wizard was opened on Matter FMSWP-021-after-08 with the association locked to the Matter. The wizard frame was confirmed to run the new bundle.
+
+Both creates went to `POST /api/v1/child-records/sprk_reportcard` with `mappingSourceEntity=sprk_matter` and `mappingSourceId`. Neither made a `/field-mappings/` call or showed a warning.
+
+| Report card | Picked | Result |
+|---|---|---|
+| FMSWP-027b-picks db9d21bd-5594-4ffd-b6f7-13afcfd39fc4 | Law Firm 1 Tennant Whitcombe PC, External Ralph Dewey, Internal Test User 1 | The three picks were kept; the Matter's values for those three are different. The five unpicked columns were filled from the Matter: Attorney 1 Test User 1, Attorney 2 Jessica Broyles, Paralegal 1 Eyal Iffergan, Paralegal 2 Ralph Schroeder, Law Firm 2 Ravenscroft and Vance LLP. |
+| FMSWP-027b-unpicked 793e1b62-2cd8-4910-9408-1904dbe31ea2 | nothing | All eight columns equal the Matter's. |
+
+Both rows:
+- Owner is the Matter's team (Spaarke Business Unit 1).
+- Regarding matter, record type, id and name are all right.
+- The mapped values were there when the row was first read.
+
+Dev test rows left: report cards 45edd549…, 737f7880… (failed check) and db9d21bd…, 793e1b62… (re-check).
+
+## Left
+
+- The owner's dark-mode look.

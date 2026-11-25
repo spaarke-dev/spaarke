@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss052" project="ebilling-r1">
+  <metadata>
+    <title>ISS-052 (#3082): the SPA "Invoice received" screen links to the invoice and to the matter / project / work assignment it was filed against</title>
+    <phase>Issue fix; owner request from checklist Q, 2026-11-24</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits an external-access BFF route's response (firm visibility, D-70) and .tsx in the shared library and the external SPA.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The invoice id is exposed to CIAM callers: it must follow the existing firm-match predicate exactly (tenant-isolation class).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, api, frontend, react, external-access, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-052. Owner, 2026-11-24: "the 'invoice received' should have navigation to the Invoice and to the related record (e.g., project or matter)".
+The result screen is the shared InvoiceSubmissionWizard / InvoiceSubmissionOutcome (src/client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/). The SPA uses it in pages/InvoiceSubmitPage.tsx (the wizard and the `?submissionId=` resume view) and in components/record/actions/SubmitInvoiceAction.tsx (inside the record modal). The SPA opens any record by id with useOpenRecord (components/detail/RecordOpener.tsx); intake/intakeSuccess.tsx is the precedent for opening a just-created record from a success screen. The internal CreateInvoiceWizard also uses the shared screen.
+GET /api/v1/external/invoice-submissions/{id} (Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs GetAsync) returns InvoiceSubmissionView (Services/Finance/Submission/InvoiceSubmissionContracts.cs): CoreRecord is already serialized; InvoiceId is read but [JsonIgnore] (task 098), and the route already hides a submission whose invoice the (a') predicate hides.
+Read first: spec.md FR-17, FR-38 and the D-70 / 130-0 firm-match ruling in the project CLAUDE.md; the 098 and 097f notes on why InvoiceId is server-side only; the shared types.ts InvoiceSubmissionStatusView.</prompt>
+
+  <constraints>
+    <constraint>BFF: the external status route (one submission, and the list route only if the SPA needs it) returns the invoice id only when the submission is Accepted AND its invoice is the one the route already decided the caller may see under the existing predicate. Reuse that decision; add no new access check, endpoint, service, DI registration or package. A Rejected / Failed / still-processing submission, a hidden invoice, or a failed read returns no invoice id (absent from the JSON). The internal route's contract is unchanged. Do not expose DocumentId, ChannelValue or ResubmissionOfId. State in the notes why exposing the id is safe: opening it still goes through the external record read and its own access checks.</constraint>
+    <constraint>Shared library: InvoiceSubmissionStatusView gains an optional invoiceId and a typed coreRecord; the result screen takes optional callbacks (e.g. onOpenInvoice(invoiceId), onOpenRecord(coreRecord)) and shows "Open invoice" and "Open {matter|project|work assignment}" actions only when the callback is supplied and the id is present. With no callback the screen is unchanged (the internal CreateInvoiceWizard stays as it is; record in the notes whether wiring it to Xrm navigation is worth a follow-up and do not build it). Fluent v9 (ADR-021), no new dependency.</constraint>
+    <constraint>SPA: wire both callbacks to useOpenRecord in InvoiceSubmitPage (wizard result and resume view) and in SubmitInvoiceAction. Inside the record modal, "Open {record}" for the record the modal already shows must not stack a second copy of it: close back to it or hide the action; say which in the notes. The invoice opens the same way the record's Invoices section opens one. Firm-facing UI never shows internal reason codes or ids as text. Send nothing to spa-r4 yourself; the main session copies them.</constraint>
+    <constraint>Tests, failing before and passing after: BFF route tests in the existing ExternalInvoiceSubmission test class(es) (grep them) for Accepted + visible (id present), Accepted + hidden, Rejected, Processing, read failure (id absent), and the internal route unchanged; shared-library tests for the actions shown / not shown; SPA tests (vitest) in InvoiceSubmitPage.test.tsx and RecordTemplateSubmitInvoice.test.tsx that a click calls openRecord with the right entityName and id. Run only those: dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~ExternalInvoiceSubmission" -- xUnit.MaxParallelThreads=4 (adjust to the real names), and the two packages' own test commands for the touched files. Never run the whole Sprk.Bff.Api.Tests or the whole ArchTests; run RouteAuthorizationGuardTests by filter if the route's metadata changes.</constraint>
+    <constraint>Build: dotnet build src/server/api/Sprk.Bff.Api/ with no new warnings; the shared library's build; the SPA's build. Install with npm install --legacy-peer-deps --no-audit --no-fund where needed. Measure the BFF publish-size delta only if a package changes (none should). Never use --no-verify or git stash. Never run python. Never kill processes. Do not edit anything under .claude/. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss052-spa-received-links.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">On the SPA result screen and the resume view, an Accepted invoice the firm may see shows "Open invoice" and "Open {record}", and each opens that record.</criterion>
+    <criterion testable="true">A Rejected, Failed, still-processing or hidden invoice shows no "Open invoice" and the response carries no invoice id; "Open {record}" shows whenever the core record is known.</criterion>
+    <criterion testable="true">The internal route and the internal CreateInvoiceWizard are unchanged.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

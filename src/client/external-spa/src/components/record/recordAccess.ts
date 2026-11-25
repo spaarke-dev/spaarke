@@ -305,6 +305,11 @@ const INVOICE_KIND_OF_ENTITY: Readonly<Record<string, InvoiceCoreRecordKind>> = 
   sprk_workassignment: 'workassignment',
 };
 
+/** The record entity of each invoice-submission kind: the inverse of the map above (ebilling-r1 iss052, the result screen's links). */
+export const ENTITY_OF_INVOICE_KIND = Object.freeze(
+  Object.fromEntries(Object.entries(INVOICE_KIND_OF_ENTITY).map(([entity, kind]) => [kind, entity]))
+) as Readonly<Record<InvoiceCoreRecordKind, string>>;
+
 export function invoiceKindOfEntity(entity: string): InvoiceCoreRecordKind | undefined {
   return Object.prototype.hasOwnProperty.call(INVOICE_KIND_OF_ENTITY, entity)
     ? INVOICE_KIND_OF_ENTITY[entity]

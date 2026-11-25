@@ -8,7 +8,32 @@
 import * as React from 'react';
 import { Field, makeStyles, tokens } from '@fluentui/react-components';
 import type { AuthoringCatalog, FieldErrors } from './authoringService';
-import type { RuleDraft } from './ruleDraft';
+import type { ConditionDraft, RuleDraft } from './ruleDraft';
+
+/**
+ * Task 210 (DI-169): how a column is shown to the admin. Its Dataverse display name from the catalog's `fieldLabels`; its logical name
+ * when the catalog has none for it (an older BFF). The logical name is always what the rule stores.
+ */
+export function fieldLabel(labels: Readonly<Record<string, string>> | undefined, field: string): string {
+  const label = labels?.[field];
+  return label !== undefined && label !== '' ? label : field;
+}
+
+/**
+ * The display names of every column the condition can read: the subject's, then those of each related table its clauses name. A value
+ * the message may quote comes from one of them (`validate`'s `templateEligibleFields`).
+ */
+export function conditionFieldLabels(catalog: AuthoringCatalog, condition: ConditionDraft): Record<string, string> {
+  const subject = catalog.subjects.find(s => s.entity === condition.subject);
+  if (subject === undefined) return {};
+  const labels: Record<string, string> = {};
+  for (const clause of condition.clauses) {
+    const join = subject.joins.find(j => j.related === clause.related);
+    Object.assign(labels, join?.fieldLabels ?? {});
+  }
+  // The subject's own columns win a name shared with a related table.
+  return Object.assign(labels, subject.fieldLabels ?? {});
+}
 
 export interface StepBaseProps {
   catalog: AuthoringCatalog;
@@ -92,9 +117,19 @@ export interface RefusableFieldProps {
  * A labelled control that shows the BFF's refusal for `field` beneath it. The refusal is the BFF's own message, so a code the BFF
  * refuses (a column outside the authorable list, a duplicate action) reads the same here whether it came from validate or from save.
  */
-export const RefusableField: React.FC<RefusableFieldProps> = ({ label, field, errorField, errors, localProblem, required, hint, children }) => {
+export const RefusableField: React.FC<RefusableFieldProps> = ({
+  label,
+  field,
+  errorField,
+  errors,
+  localProblem,
+  required,
+  hint,
+  children,
+}) => {
   const server = errorMessage(errors, errorField === undefined ? field : errorField);
-  const message = server ?? (localProblem ? <span data-testid={`field-problem-${field}`}>{localProblem}</span> : undefined);
+  const message =
+    server ?? (localProblem ? <span data-testid={`field-problem-${field}`}>{localProblem}</span> : undefined);
   return (
     <Field
       label={label}

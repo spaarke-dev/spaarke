@@ -65,6 +65,35 @@ public sealed class ReferenceDataPackTests
         IntakeParameterCatalog.IsKnown("referenceDataPack").Should().BeTrue();
     }
 
+    private const string PackFileWithoutMatch = """
+        { "table": "sprk_widget", "entitySet": "sprk_widgets", "primaryKey": "sprk_widgetid",
+          "columns": ["sprk_name"], "rows": [ { "sprk_widgetid": "11111111-0000-4000-8000-000000000001", "sprk_name": "Alpha" } ] }
+        """;
+
+    [Fact]
+    public void D4_APackTableWithoutMatchNaturalKey_IsRefusedAtLoad_NotSeededAsTier1()
+    {
+        var parsed = ReferenceDataSet.Parse(PackFileWithoutMatch);
+        parsed.Match.Should().Be(ReferenceMatch.FixedId, "this is how an omitted \"match\" parses");
+
+        var act = () => ReferenceDataSet.RequireNaturalKeyTable("legal-standard", parsed);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*legal-standard*sprk_widget*match*naturalKey*");
+    }
+
+    [Fact]
+    public void D4_EveryShippedPackTable_IsNaturalKeyWithANameColumn()
+    {
+        foreach (var pack in ReferenceDataSet.PackTableNames.Keys)
+        {
+            foreach (var table in ReferenceDataSet.Pack(pack))
+            {
+                table.Match.Should().Be(ReferenceMatch.NaturalKey, table.Table);
+                table.NameColumn.Should().NotBeNullOrWhiteSpace(table.Table);
+            }
+        }
+    }
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

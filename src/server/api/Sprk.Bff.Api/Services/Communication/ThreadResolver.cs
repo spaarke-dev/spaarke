@@ -265,15 +265,11 @@ public sealed class ThreadResolver : IThreadResolver
     // ── Ownership (unified-access-control-r2 task 146, owner decision S6) ────────────────────────────────────────
 
     /// <summary>
-    /// The typed regarding lookups a THREAD actually carries: <see cref="RegardingFieldMap"/>'s set minus
-    /// <c>sprk_regardingreportcard</c>, which does not exist on <c>sprk_communicationthread</c> (verified against its
-    /// metadata 2026-08-03 — the same exclusion <c>CommunicationThreadReadService.ThreadRegardingFields</c> makes).
+    /// The typed regarding lookups a THREAD actually carries: <see cref="RegardingFieldMap.ThreadRegardingColumns"/>, the one
+    /// shared definition (the family minus <c>sprk_regardingreportcard</c>, which <c>sprk_communicationthread</c> lacks).
     /// Selecting a column the table lacks faults the whole read.
     /// </summary>
-    internal static readonly string[] ThreadRegardingColumns = RegardingFieldMap.All
-        .Where(x => x.RegardingField != "sprk_regardingreportcard")
-        .Select(x => x.RegardingField)
-        .ToArray();
+    internal static readonly string[] ThreadRegardingColumns = RegardingFieldMap.ThreadRegardingColumns.ToArray();
 
     /// <summary>The message's thread lookup — the column a JOIN writes (and a failed owner assignment puts back).</summary>
     internal const string ThreadLookupOnCommunication = "sprk_communicationthread";

@@ -16,6 +16,9 @@
     "**/*.d.ts",
     "**/*.test.*",
     "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/jest.setup.*",
+    "**/jest.config.*",
     "tests/**",
     ".claude/worktrees/agent-*/**"
   ],
