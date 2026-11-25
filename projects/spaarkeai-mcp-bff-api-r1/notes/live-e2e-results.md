@@ -55,4 +55,5 @@ Open: (1) non-billing seed for the test user; (2) whether the run was signed in 
 
 ## Run 2: non-admin test user, 2026-11-25 (owner report)
 - Signed in as the licensed non-admin user, the owner ran `/spaarke-decision` in Cowork and the `spaarke-legal-g8p2-dd` agent in Chat; both work. Connect-once and non-admin access: pass.
+- FR-04 live spot-check: not testable on dev (owner 2026-11-25, `notes/decisions.md`); covered by the automated tests.
 - Still to check: resolving items (one per action type, with a because rationale), a Chat resolve, the routing eval, widget-frame console errors, the Console smoke afterwards, NFR-01 (after the deploy carrying #3146/#3152/#3161) and the runbook re-run.

@@ -476,3 +476,10 @@ Everything below is in the widget unless it says "shared". Every shared change i
 - **Why.** The POML's "50 calls each" cannot be made by hand in Copilot, above all for lookup and complete. A scripted caller would need the test user's sign-in, which the agent never enters. Stopping sampling would be a dev setting change that needs a go through uac-r2.
 - **Known limit.** Sampling keeps about a third of the traces, so n per tool is smaller than the number of calls made, and lookup and complete may stay well below 50. The results note states n for each p95.
 - **Already seen (owner's own runs since 00:22Z).** Show p95 6.5 s (n=8) and plan p95 4.7 s (n=9) are over the 3 s target. Per the POML, the miss is recorded and escalated to the owner at the end of the run; no tool behaviour changes in 042.
+
+## 042: FR-04 privileged spot-check not testable on dev (2026-11-25)
+
+- **Decision (owner, 2026-11-25: "Not testable now").** Task 042's live FR-04 spot-check (no privileged marker in model text) is recorded as not testable on dev. No privileged item is created for it.
+- **Why.** Dev has no privileged Decide item: the "No active budget" rule raised items only on business-unit-owned matters, and a privileged item comes only from a qualifying Secure matter or a privileged communication. Creating one is a dev Dataverse write.
+- **Coverage instead.** The automated tests cover FR-04: task 018's derivation (`WorkItemPrivilege`, fail closed) and task 022's marker-string negative test with a seeding proof (`DecideLanePagingTests`, `ShowDecisionsToolTests`).
+- **Reopen when.** A privileged Decide item exists on dev or another test environment; then run the spot-check and record it here.
