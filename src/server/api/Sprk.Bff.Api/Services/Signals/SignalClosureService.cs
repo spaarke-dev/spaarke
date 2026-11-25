@@ -216,10 +216,11 @@ public class SignalClosureService
         {
             total = total with { PolicyFailures = total.PolicyFailures + 1 };
             _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
-                "The open Signals of the Off and Retired policies were not all read: {SignalsRead} were read, naming {PoliciesWithOpenSignals} " +
-                "policies, whose open Signals were handled ({Closed} closed); the policies of the Signals after them were not checked, so those " +
-                "Signals stay open until a run reads them. The run is reported failed.",
-                withOpen.SignalsRead, withOpen.PolicyIds.Count, total.Closed);
+                "The open Signals of the Off and Retired policies were not all read: {SignalsRead} were read, naming {PoliciesHandled} of the " +
+                "policies read, whose open Signals were handled ({Closed} closed); the policies of the Signals after them were not checked, so " +
+                "those Signals stay open until a run reads them. The run is reported failed.",
+                // Only the named policies the policy read also returned were handled: a race or a cut-short policy read can name others.
+                withOpen.SignalsRead, read.Policies.Keys.Count(withOpen.PolicyIds.Contains), total.Closed);
         }
 
         if (!read.IsComplete)
@@ -259,7 +260,7 @@ public class SignalClosureService
             PageInfo = new PagingInfo { Count = NotInForcePageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
-            new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
+            OpenSignalStatuses());
         query.AddOrder("sprk_signalid", OrderType.Ascending);
         var policy = query.AddLink("sprk_policy", "sprk_policy", "sprk_policyid", JoinOperator.Inner);
         var notInForce = new FilterExpression(LogicalOperator.Or);
@@ -336,6 +337,10 @@ public class SignalClosureService
     /// read (<see cref="ReadPoliciesNotInForceAsync"/>, one read per condition) and the close's open-Signal read (both, OR-ed, on the joined
     /// policy) take them from here, so the two cannot disagree.</summary>
     private static readonly (string Attribute, object Value)[] NotInForceConditions = { ("sprk_enabled", false), ("statecode", 1) };
+
+    /// <summary>The statuses every open-Signal read here selects: Open and Acknowledged (a Resolved Signal is never read as open). One
+    /// definition for the three reads; a new array per call, so no two queries' conditions share one array of values.</summary>
+    private static object[] OpenSignalStatuses() => new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged };
 
     /// <summary>The not-in-force policies read, and whether the read reached the end of both conditions.</summary>
     /// <param name="Policies">Every policy read, by id, with its code (a policy both Off and Inactive appears once).</param>
@@ -592,7 +597,7 @@ public class SignalClosureService
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
         query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
-            new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
+            OpenSignalStatuses());
         query.AddOrder("sprk_signalid", OrderType.Ascending);
 
         var signals = new List<(ExistingSignal, string?, DateTime?)>();
@@ -691,7 +696,7 @@ public class SignalClosureService
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
         query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
-            new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
+            OpenSignalStatuses());
         query.AddOrder("sprk_signalid", OrderType.Ascending);
         return query;
     }

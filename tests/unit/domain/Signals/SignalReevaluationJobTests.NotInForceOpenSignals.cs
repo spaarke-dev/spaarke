@@ -80,6 +80,43 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task ClosePoliciesNotInForce_TheJoinedReadReturnsOnlyTheOpenSignalsOfNotInForceClosablePolicies_InOnePage()
+    {
+        // Fix round 1 (F3): the join's link filter IS the performance fix (the intersection with the policy read keeps the closes right
+        // without it). Qualifying: Off Ontology, Retired Ontology (Open and Acknowledged), Off Billing. Noise the filter must keep out of the
+        // read: open Signals of an in-force Ontology policy (state filter) and of an Off Docketing policy (domain allowlist). The page holds
+        // exactly the qualifying Signals, so one read means nothing else came back.
+        var h = new Harness();
+        var off = AddOffPolicies(h, 2);
+        var qualifying = off.Select(p => SeedOpenSignalOf(h, p.Code, p.Id)).ToList();
+        h.Sysadmin.AddPolicy("POL-RETIRED", SignalWriter.LaneDecide, enabled: true, PathBBody, PathBTemplate);
+        h.Sysadmin.SetPolicyState("POL-RETIRED", enabled: true, statecode: 1);
+        var retired = h.Sysadmin.PolicyIdOf("POL-RETIRED");
+        qualifying.Add(SeedOpenSignalOf(h, "POL-RETIRED", retired));
+        qualifying.Add(h.Org.SeedSignal(Key("POL-RETIRED", "sprk_matter", Guid.NewGuid(), 1), SignalWriter.SignalStatusAcknowledged,
+            coreId: MatterId, policyId: retired, versionId: h.Sysadmin.CurrentVersionOf("POL-RETIRED")));
+        h.Sysadmin.AddPolicy("POL-BILL-OFF", SignalWriter.LaneDecide, enabled: false, PathBBody, PathBTemplate);
+        SetDomain(h, "POL-BILL-OFF", RuleDomains.PolicyDomainBilling);
+        qualifying.Add(SeedOpenSignalOf(h, "POL-BILL-OFF", h.Sysadmin.PolicyIdOf("POL-BILL-OFF")));
+
+        h.Sysadmin.AddPolicy("POL-LIVE", SignalWriter.LaneDecide, enabled: true, PathBBody, PathBTemplate);
+        var noise = Enumerable.Range(0, 10).Select(_ => SeedOpenSignalOf(h, "POL-LIVE", h.Sysadmin.PolicyIdOf("POL-LIVE"))).ToList();
+        h.Sysadmin.AddPolicy("POL-DOCKET-OFF", SignalWriter.LaneDecide, enabled: false, PathBBody, PathBTemplate);
+        SetDomain(h, "POL-DOCKET-OFF", 100000002); // reserved Docketing: not closable on retirement
+        noise.AddRange(Enumerable.Range(0, 3).Select(_ => SeedOpenSignalOf(h, "POL-DOCKET-OFF", h.Sysadmin.PolicyIdOf("POL-DOCKET-OFF"))));
+        h.Sysadmin.PageSizeCap = qualifying.Count;
+
+        var outcome = await h.Closure.ClosePoliciesNotInForceAsync(default);
+
+        h.Sysadmin.OpenSignalPolicyJoinReads.Should().Be(1,
+            "the read returns only the open Signals of Off or Retired policies of a closable domain, so they fit one page of their own count");
+        outcome.Should().Be(new SignalClosureOutcome(qualifying.Count, 0, 0));
+        outcome.IsComplete.Should().BeTrue();
+        foreach (var signal in qualifying) AssertClosedAsBefore(h, signal);
+        noise.Should().OnlyContain(s => IsOpen(h, s), "an in-force policy's and a Docketing policy's Signals are never closed");
+    }
+
+    [Fact]
     public async Task ClosePoliciesNotInForce_InForceSignalsAreUntouched_ResolvedAreNotStamped_AndAPolicyWithNothingOpenIsNotSelected()
     {
         var h = new Harness();
@@ -129,7 +166,7 @@ public partial class SignalReevaluationJobTests
         h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
             && e.Message.Contains("More than 2 pages of 5000 open Signals of the Off and Retired policies") && e.Message.Contains("4 were read in all"));
         h.Log.Should().Contain(e => e.Level == LogLevel.Error
-            && e.Message.Contains("open Signals of the Off and Retired policies were not all read: 4 were read, naming 4 policies"));
+            && e.Message.Contains("open Signals of the Off and Retired policies were not all read: 4 were read, naming 4 of the policies read"));
 
         // The next run reads the rest: the closed ones dropped out.
         (await h.Closure.ClosePoliciesNotInForceAsync(default, maxPages: 2)).Should().Be(new SignalClosureOutcome(1, 0, 0));

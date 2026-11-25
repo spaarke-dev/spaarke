@@ -123,4 +123,38 @@ Fix direction: the same joined-read pattern, or a per-policy "already redacted" 
   `DataverseServiceClientImpl`, which passes the `QueryExpression` (link included) to `ServiceClient`. The dry-run `ProcedureRowOverlay`, which
   refuses joins, never wraps this service.
 
-rework: none task 209
+## Fix round 1 (main session's independent review of #3087)
+- **F3, a test now guards the join's link filter.** Without one, removing both `policy.LinkCriteria.AddFilter(...)` lines left every test green:
+  the intersection with the policy read keeps the closes right, but the link filter is the whole performance fix. New test
+  `ClosePoliciesNotInForce_TheJoinedReadReturnsOnlyTheOpenSignalsOfNotInForceClosablePolicies_InOnePage`:
+  - 5 qualifying Signals: two Off Ontology policies, one Retired Ontology policy (Open + Acknowledged), one Off Billing policy.
+  - 13 noise Signals: 10 open on an in-force Ontology policy, 3 on an Off Docketing policy.
+  - `PageSizeCap` = 5. It asserts `OpenSignalPolicyJoinReads == 1`, the 5 closed as before and the noise untouched.
+
+  Mutation evidence (scratch edits to `SignalClosureService.cs`, each reverted and checked identical by `cmp`):
+
+  | Mutation | Joined reads | Test |
+  |---|---|---|
+  | Both link filters removed | 4 | fails |
+  | Domain allowlist removed (widened to every domain) | 2 | fails |
+  | Docketing added to the allowlist's OR (widened by one value) | 2 | fails |
+  | State filter removed (in-force policies' Signals read) | 3 | fails |
+  | Allowlist replaced by a `NotEqual` condition | — | fails, but only because the fake refuses an unmodelled operator; not counted as evidence |
+- **K3:** the open-status set (Open, Acknowledged) has one definition, `OpenSignalStatuses()`, used by all three reads: the joined read,
+  `ReadOpenSignalsWithoutPolicyAsync` and `OpenSignalsOfPolicyQuery`. It is a method returning a new array per call rather than a shared static
+  array, so no two queries' conditions can share one array of values. The criteria are unchanged (`ProcedureRetire`'s criteria-equality test
+  passes).
+- **K4:** the "not all read" log of the joined read counts the named policies that the policy read also returned, which are the ones actually
+  handled. It no longer counts every policy named: a race or a cut-short policy read can name others.
+- Known limits recorded, no change:
+  - K2: the join's cost on real Dataverse is not measured. The main session times it on dev after deploy.
+  - K4: the fake does not page the per-policy selection.
+
+- Re-run after the fix:
+  - BFF build `--warnaserror`: 0 warnings, 0 errors.
+  - `~SignalReevaluation|~SignalClosure|~ProcedureRetire`: 316 pass / 0 fail.
+  - `~Signals`: 5,413 pass / 0 fail / 6 skipped.
+  - ArchTests `~Signal`: 23 pass, plus `~ProcedureRetireSelection|~DryRunNoWrite` (they scan this file): 12 pass.
+  - Nothing structural changed, so the full ArchTests suite was not re-run.
+
+rework: fix-round-1 task 209
