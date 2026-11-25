@@ -82,6 +82,36 @@ public static class RecordSearchEndpoints
             });
         }
 
+        // Validate: bounds. The [StringLength]/[Range] attributes on the DTOs are metadata only (no
+        // validation filter runs on this route), so enforce them here, from the same constants the
+        // attributes use. Without this, limit:0 / offset:-1 reached Azure AI Search and came back 500.
+        if (request.Query.Length > RecordSearchRequest.MaxQueryLength)
+        {
+            return BadRequest(
+                "Query Too Long",
+                $"query must not exceed {RecordSearchRequest.MaxQueryLength} characters.",
+                SearchErrorCodes.QueryTooLong);
+        }
+
+        if (request.Options is { } options)
+        {
+            if (options.Limit is < RecordSearchOptions.MinLimit or > RecordSearchOptions.MaxLimit)
+            {
+                return BadRequest(
+                    "Invalid Limit",
+                    $"options.limit must be between {RecordSearchOptions.MinLimit} and {RecordSearchOptions.MaxLimit}.",
+                    SearchErrorCodes.InvalidLimit);
+            }
+
+            if (options.Offset is < RecordSearchOptions.MinOffset or > RecordSearchOptions.MaxOffset)
+            {
+                return BadRequest(
+                    "Invalid Offset",
+                    $"options.offset must be between {RecordSearchOptions.MinOffset} and {RecordSearchOptions.MaxOffset}.",
+                    SearchErrorCodes.InvalidOffset);
+            }
+        }
+
         // Validate: RecordTypes not empty
         if (request.RecordTypes == null || request.RecordTypes.Count == 0)
         {
@@ -188,7 +218,9 @@ public static class RecordSearchEndpoints
 
             return Results.Problem(
                 title: "Record Search Failed",
-                detail: ex.Message,
+                // Fixed text, never ex.Message: exception text can carry endpoints, index names and
+                // query fragments. The exception is logged above.
+                detail: "The record search could not be completed. Try again, and contact support if it persists.",
                 statusCode: 500,
                 extensions: new Dictionary<string, object?>
                 {
@@ -196,6 +228,15 @@ public static class RecordSearchEndpoints
                 });
         }
     }
+
+    private static IResult BadRequest(string title, string detail, string code) =>
+        Results.Problem(new ProblemDetails
+        {
+            Title = title,
+            Detail = detail,
+            Status = 400,
+            Extensions = { ["code"] = code }
+        });
 
     /// <summary>
     /// Upper bound on record-access checks spent assembling one page.
