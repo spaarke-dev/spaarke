@@ -22,7 +22,7 @@ The user model **Ask / Do / Practice** says what the attorney wants. This docume
 
 The key decision: **one MCP server in the BFF is the capability layer for every Microsoft host and every Spaarke agent.** Spaarke's own apps (Console, PCF, Office add-ins, External Access) keep calling BFF services over REST, or in process. They don't go through MCP.
 
-This document replaces [M365-COPILOT-INTEGRATION-ARCHITECTURE.md](M365-COPILOT-INTEGRATION-ARCHITECTURE.md) as the model. The April document still describes the legacy agent and gateway code, which are being retired (see Design Decisions).
+This document replaces the April 2026 `M365-COPILOT-INTEGRATION-ARCHITECTURE.md`, which was removed on 2026-11-25. See [Legacy: the Spaarke AI agent](#legacy-the-spaarke-ai-agent-retired-2026-11-25) for what it described.
 
 ## What we build, by orchestrator
 
@@ -57,8 +57,8 @@ The capability matrix was researched on 2026-11-23 and changes quickly; re-verif
 | Spaarke runtime: agent loop | `Services/Ai/Chat/SprkChatAgentFactory.cs`, `Services/Ai/Chat/SideEffectGateAIFunction.cs`, `Services/Ai/Chat/Gate/ConfirmationPolicyEngine.cs`, `Api/Ai/ChatEndpoints.cs` | Governed multi-step tool loop with a confirmation gate; the Practice engine when Spaarke orchestrates |
 | Spaarke runtime: playbooks | `Services/Ai/AnalysisOrchestrationService.cs`, `Services/Ai/Chat/SessionDispatchOrchestrator.cs` | JPS playbook execution and session dispatch |
 | Work IQ seam | `Services/Ai/PublicContracts/IOrganizationalContextProvider.cs` | Where M365 organisational context plugs in for a runtime agent (no provider wired yet) |
-| **Legacy:** "Spaarke AI" agent | `src/solutions/CopilotAgent/` | A general declarative agent on an OpenAPI plugin; retire once MCP has parity (mcp-r2) |
-| **Legacy:** agent gateway | `src/server/api/Sprk.Bff.Api/Api/Agent/` | REST gateway for the legacy agent. Its message handler is not a live Bot endpoint |
+| **Retired:** "Spaarke AI" agent | `src/solutions/CopilotAgent/` | Being removed (see Legacy below); code removal in `spaarkeai-mcp-bff-api-r2` |
+| **Retired:** agent gateway | `src/server/api/Sprk.Bff.Api/Api/Agent/`, `infrastructure/bot-service/` | Being removed with the agent |
 
 ## Data Flow
 
@@ -99,7 +99,8 @@ The capability matrix was researched on 2026-11-23 and changes quickly; re-verif
 | Role (partner, associate) | A **profile setting**, not a separate agent | Avoids an area × role catalogue in the `@` picker |
 | Personalisation | **Server-side profile**, returned by a tool and versioned per run | A declarative agent's manifest is shared by all users and capped at 8,000 characters of instructions |
 | Long-form drafting (e.g. patent applications) | **Cowork** (with its Word canvas) and/or a practice-area agent session; plain Word is not the preferred surface (owner, 2026-11-25) | Cowork can produce and edit documents; a declarative agent in Word can only advise |
-| Legacy "Spaarke AI" agent | Keep the code; **retire the tenant registration once MCP has parity** (mcp-r2) | Its 28 REST functions are the Ask tool checklist for MCP |
+| Legacy "Spaarke AI" agent | **Removed now** (owner, 2026-11-25): tenant registration first, then code and bot infrastructure in mcp-r2 | It isn't needed in the interim, and running it beside the new MCP tools risks the same request being answered twice. Its 28 REST functions are the Ask tool checklist for MCP |
+| Document grounding | Copilot **does not ground directly on SharePoint Embedded content**; documents reach Copilot only through BFF tools with per-record authorization | Carried forward from the April 2026 design; keeps Spaarke's access rules the only path to content. The April design relied on containers being non-discoverable; no code in the repo sets that, so confirm the container-type setting before relying on it |
 
 ### Decision order for a new AI capability
 
@@ -120,10 +121,29 @@ The capability matrix was researched on 2026-11-23 and changes quickly; re-verif
 - **MUST**: put engines that must run on every surface in the BFF; a Cowork-only Python engine is acceptable only for the file-based accelerator tiers.
 - **MUST NOT**: route Spaarke's own apps or server-side intake through MCP.
 
+## Legacy: the Spaarke AI agent (retired 2026-11-25)
+
+The first Copilot integration (project `ai-m365-copilot-integration`, April 2026) was documented in `M365-COPILOT-INTEGRATION-ARCHITECTURE.md`. That document was removed on 2026-11-25; its full text is in git history. In brief:
+
+- **Agent.** "Spaarke AI" (`src/solutions/CopilotAgent/`) was a general declarative agent: a manifest with instructions and conversation starters, an API plugin with 28 functions, an OpenAPI spec over existing BFF REST routes, delegated OAuth, and 10 Adaptive Card templates.
+- **Gateway.** `Api/Agent/` added `/api/agent/*` (message, playbooks, run-playbook, status) with these services:
+  - an OBO token service (Graph and Dataverse);
+  - conversation-session mapping and a card formatter;
+  - playbook invocation and email drafting;
+  - Analysis Workspace hand-off links;
+  - an async job tracker.
+
+  `infrastructure/bot-service/` provisioned an Azure Bot. Its `ActivityHandler` was never registered, so no live Bot channel existed.
+- **What carried forward:**
+  - tools are thin adapters over existing services;
+  - Copilot never grounds directly on SPE (Design Decisions);
+  - long-running work hands off to the Analysis Workspace by deep link;
+  - Copilot serves general questions while the Console serves deep analysis (now the orchestrator table above).
+- **What replaced it:** MCP tools on the Spaarke server, without a general agent. The function-by-function disposition is in `projects/spaarkeai-mcp-bff-api-r2/design.md` §3 (branch `work/spaarkeai-mcp-bff-api-r2`).
+
 ## Related
 
 - [SPAARKE-MCP-SERVER-ARCHITECTURE.md](SPAARKE-MCP-SERVER-ARCHITECTURE.md): the server, auth and tools
-- [M365-COPILOT-INTEGRATION-ARCHITECTURE.md](M365-COPILOT-INTEGRATION-ARCHITECTURE.md): the legacy agent and gateway (being retired)
 - [chat-architecture.md](chat-architecture.md): SprkChat, the Spaarke runtime
 - [ASSISTANT-SURFACE-LAUNCH-MECHANISM.md](ASSISTANT-SURFACE-LAUNCH-MECHANISM.md): surfaces inside Spaarke's own apps
 - [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md): auth
