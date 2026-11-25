@@ -78,7 +78,7 @@ Both rows:
 - Gates: jest `CreateReportCardWizard` + `CreateWorkAssignmentWizard` + `utils/adapters` pass, 26 suites / 259 tests. `tsc --noEmit` 0 errors. eslint clean on both files.
 - Review: the diff is the source, the call argument and comments. The error path and body are unchanged.
 
-Next: PR to master, then redeploy and re-check on dev; each needs the owner's go.
+PR #3083 merged to master on 2026-11-25 at 00:09Z as e70ff38894, after every CI check had finished with no failures. Next: redeploy from e70ff38894 and re-check on dev. Each needs the owner's go.
 
 ## Left (on the owner's go)
 
