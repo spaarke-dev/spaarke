@@ -1,0 +1,91 @@
+{
+  "table": "sprk_mattersubtype_ref",
+  "entitySet": "sprk_mattersubtype_refs",
+  "primaryKey": "sprk_mattersubtype_refid",
+  "match": "naturalKey",
+  "naturalKey": "sprk_mattersubtypecode",
+  "nameColumn": "sprk_mattersubtypename",
+  "columns": ["sprk_mattersubtypecode", "sprk_mattersubtypename"],
+  "rows": [
+    {
+      "sprk_mattersubtype_refid": "c62a3eca-caf1-4e61-a01b-b43d706bfbd9",
+      "sprk_mattersubtypecode": "COMDISP",
+      "sprk_mattersubtypename": "Commercial Dispute"
+    },
+    {
+      "sprk_mattersubtype_refid": "d75d9aec-6382-4fbd-a5bd-dcbcb86d03d4",
+      "sprk_mattersubtypecode": "EMPDISP",
+      "sprk_mattersubtypename": "Employment Dispute"
+    },
+    {
+      "sprk_mattersubtype_refid": "07338236-0d63-46e8-b2dc-fc17af0e498f",
+      "sprk_mattersubtypecode": "IPLIT",
+      "sprk_mattersubtypename": "IP Litigation"
+    },
+    {
+      "sprk_mattersubtype_refid": "cbcd4525-2523-4dbc-9eb8-39d6a87d533d",
+      "sprk_mattersubtypecode": "CLSACT",
+      "sprk_mattersubtypename": "Class Action"
+    },
+    {
+      "sprk_mattersubtype_refid": "4f2ce440-39b6-48e4-abae-6d7b22866c91",
+      "sprk_mattersubtypecode": "ARBTRN",
+      "sprk_mattersubtypename": "Arbitration"
+    },
+    {
+      "sprk_mattersubtype_refid": "e05c65d6-e21e-495f-b5cd-75d468e40fb0",
+      "sprk_mattersubtypecode": "APPEAL",
+      "sprk_mattersubtypename": "Appeal"
+    },
+    {
+      "sprk_mattersubtype_refid": "dc124fa2-f66d-41c5-b8fe-5a6c53498663",
+      "sprk_mattersubtypecode": "CTRDRFT",
+      "sprk_mattersubtypename": "Contract Drafting"
+    },
+    {
+      "sprk_mattersubtype_refid": "f23b099d-e538-479b-a9c1-c7cc2febe78f",
+      "sprk_mattersubtypecode": "CTRREV",
+      "sprk_mattersubtypename": "Contract Review"
+    },
+    {
+      "sprk_mattersubtype_refid": "0d7cc630-fcda-4ff1-a5f6-762d9c542d32",
+      "sprk_mattersubtypecode": "PROCURE",
+      "sprk_mattersubtypename": "Procurement"
+    },
+    {
+      "sprk_mattersubtype_refid": "f17dc12f-2184-4fd2-b92e-41aafaeaf939",
+      "sprk_mattersubtypecode": "LICENSING",
+      "sprk_mattersubtypename": "Licensing"
+    },
+    {
+      "sprk_mattersubtype_refid": "8b2716ec-a832-4da4-a7d5-957e5c19adec",
+      "sprk_mattersubtypecode": "EMPADV",
+      "sprk_mattersubtypename": "Advice"
+    },
+    {
+      "sprk_mattersubtype_refid": "5f4fedf4-9df4-4c07-bc71-a8dbfc2168b4",
+      "sprk_mattersubtypecode": "EMPINV",
+      "sprk_mattersubtypename": "Investigation"
+    },
+    {
+      "sprk_mattersubtype_refid": "612b4999-f7ff-4a07-a2ec-0323b1bd5d7a",
+      "sprk_mattersubtypecode": "EMPSEP",
+      "sprk_mattersubtypename": "Separation"
+    },
+    {
+      "sprk_mattersubtype_refid": "ff8e63da-197b-4c14-b2c7-65efba1b5439",
+      "sprk_mattersubtypecode": "PATPROS",
+      "sprk_mattersubtypename": "Prosecution"
+    },
+    {
+      "sprk_mattersubtype_refid": "5efcd5f0-3c7b-4b71-9a41-278ef14bdef6",
+      "sprk_mattersubtypecode": "PATOPP",
+      "sprk_mattersubtypename": "Opposition"
+    },
+    {
+      "sprk_mattersubtype_refid": "f2ad9241-2ea0-4601-9c8c-66ac5c4c0229",
+      "sprk_mattersubtypecode": "PATPORT",
+      "sprk_mattersubtypename": "Portfolio Management"
+    }
+  ]
+}

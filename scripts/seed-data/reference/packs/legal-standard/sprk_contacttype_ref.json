@@ -1,0 +1,56 @@
+{
+  "table": "sprk_contacttype_ref",
+  "entitySet": "sprk_contacttype_refs",
+  "primaryKey": "sprk_contacttype_refid",
+  "match": "naturalKey",
+  "naturalKey": "sprk_contacttypecode",
+  "nameColumn": "sprk_contacttypename",
+  "columns": ["sprk_contacttypecode", "sprk_contacttypename"],
+  "rows": [
+    {
+      "sprk_contacttype_refid": "a59066e4-8f96-f111-b8db-0022482fb5a7",
+      "sprk_contacttypecode": "OUTCNSL",
+      "sprk_contacttypename": "Outside Counsel"
+    },
+    {
+      "sprk_contacttype_refid": "28674cc1-5396-f111-b8dc-7ced8ddc4cc6",
+      "sprk_contacttypecode": "ATTY",
+      "sprk_contacttypename": "Attorney"
+    },
+    {
+      "sprk_contacttype_refid": "5d155f28-9f0e-4e75-8d36-6d5d16266b11",
+      "sprk_contacttypecode": "CLIENT",
+      "sprk_contacttypename": "Client Contact"
+    },
+    {
+      "sprk_contacttype_refid": "b4c9b855-a226-40eb-a857-e7d594336f96",
+      "sprk_contacttypecode": "INHSCNSL",
+      "sprk_contacttypename": "In-house Counsel"
+    },
+    {
+      "sprk_contacttype_refid": "f5dab686-117a-4b46-9cde-874c857b9707",
+      "sprk_contacttypecode": "PARALGL",
+      "sprk_contacttypename": "Paralegal"
+    },
+    {
+      "sprk_contacttype_refid": "516a414b-0c09-4b77-93ea-bbb4535973ee",
+      "sprk_contacttypecode": "EXPERT",
+      "sprk_contacttypename": "Expert Witness"
+    },
+    {
+      "sprk_contacttype_refid": "10372d24-4f0b-4c96-adad-73e6aa7a0c9a",
+      "sprk_contacttypecode": "OPPCNSL",
+      "sprk_contacttypename": "Opposing Counsel"
+    },
+    {
+      "sprk_contacttype_refid": "7a230213-73ba-4d3d-b7a4-0915e3196a3f",
+      "sprk_contacttypecode": "COURTSTF",
+      "sprk_contacttypename": "Judge / Court Staff"
+    },
+    {
+      "sprk_contacttype_refid": "06668084-b287-4004-a8ae-ce5cb398430b",
+      "sprk_contacttypecode": "VENDOR",
+      "sprk_contacttypename": "Vendor Contact"
+    }
+  ]
+}

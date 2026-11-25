@@ -1,0 +1,138 @@
+{
+  "table": "sprk_agreementtype",
+  "entitySet": "sprk_agreementtypes",
+  "primaryKey": "sprk_agreementtypeid",
+  "columns": [
+    "sprk_classificationcue",
+    "sprk_confidencethreshold",
+    "sprk_description",
+    "sprk_isfallback",
+    "sprk_isselectable",
+    "sprk_key",
+    "sprk_knowledgepackref",
+    "sprk_name",
+    "sprk_sortorder"
+  ],
+  "rows": [
+    {
+      "sprk_agreementtypeid": "433e1688-908c-f111-8077-7ced8ddc4cc6",
+      "sprk_classificationcue": "Fallback classification for any agreement that is clearly a contract between parties creating enforceable obligations, but whose primary subject matter does not clearly match one of the specific registered sub-domains (nda, employment, lease, asset-purchase, services, licensing, vendor, partnership, loan). Use for settlement agreements, novel or hybrid arrangements, multi-subject documents with no single dominant type, or any agreement type not yet given its own registry row. This is the deliberately lower-value, broad-guidance fallback -- never prefer it over a specific sub-domain whose distinguishing characteristics are actually present in the document.",
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": true,
+      "sprk_isselectable": true,
+      "sprk_key": "general",
+      "sprk_knowledgepackref": "KNW-012",
+      "sprk_name": "General",
+      "sprk_sortorder": null
+    },
+    {
+      "sprk_agreementtypeid": "92b3c59a-908c-f111-8077-7ced8ddc4cc6",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "employment",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Employment",
+      "sprk_sortorder": null
+    },
+    {
+      "sprk_agreementtypeid": "caa461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "lease",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Lease / Real Property",
+      "sprk_sortorder": 40
+    },
+    {
+      "sprk_agreementtypeid": "cca461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "asset-purchase",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Asset Purchase",
+      "sprk_sortorder": 50
+    },
+    {
+      "sprk_agreementtypeid": "d557c894-908c-f111-8077-7ced8ddc4cc6",
+      "sprk_classificationcue": "Agreement whose PRIMARY subject is confidentiality / non-disclosure obligations protecting confidential information exchanged during discussions, due diligence, or a business relationship. Distinguishing signals: a defined 'Confidential Information' term, disclosure/use restrictions, standard exclusions (already known, public, independently developed, rightfully received from a third party), a stated term/survival period, and NO substantive license, sale, service, or employment obligations beyond the mutual promise to protect information. Classify as nda ONLY when confidentiality protection is the document's principal purpose -- not when it is a single clause embedded in a broader deal (e.g. an employment or services agreement that happens to include a confidentiality clause); those route to their own sub-domain instead.",
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "nda",
+      "sprk_knowledgepackref": "KNW-011",
+      "sprk_name": "NDA Confidentiality",
+      "sprk_sortorder": null
+    },
+    {
+      "sprk_agreementtypeid": "dea461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "services",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Services / MSA",
+      "sprk_sortorder": 60
+    },
+    {
+      "sprk_agreementtypeid": "e6a461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "licensing",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Licensing / IP",
+      "sprk_sortorder": 70
+    },
+    {
+      "sprk_agreementtypeid": "f0a461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "vendor",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Vendor / Procurement",
+      "sprk_sortorder": 80
+    },
+    {
+      "sprk_agreementtypeid": "f9a461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "partnership",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Partnership / JV",
+      "sprk_sortorder": 90
+    },
+    {
+      "sprk_agreementtypeid": "fba461f3-fb8c-f111-8076-3833c5deff74",
+      "sprk_classificationcue": null,
+      "sprk_confidencethreshold": null,
+      "sprk_description": null,
+      "sprk_isfallback": false,
+      "sprk_isselectable": true,
+      "sprk_key": "loan",
+      "sprk_knowledgepackref": null,
+      "sprk_name": "Loan / Financing",
+      "sprk_sortorder": 100
+    }
+  ]
+}

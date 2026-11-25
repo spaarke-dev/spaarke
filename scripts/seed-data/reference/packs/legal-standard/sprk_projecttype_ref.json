@@ -1,0 +1,42 @@
+{
+  "table": "sprk_projecttype_ref",
+  "entitySet": "sprk_projecttype_refs",
+  "primaryKey": "sprk_projecttype_refid",
+  "match": "naturalKey",
+  "nameColumn": "sprk_name",
+  "columns": ["sprk_name"],
+  "rows": [
+    {
+      "sprk_projecttype_refid": "0ed9d8ac-b018-f111-8343-7ced8d1dc988",
+      "sprk_name": "Litigation"
+    },
+    {
+      "sprk_projecttype_refid": "3f71fcb2-b018-f111-8343-7ced8d1dc988",
+      "sprk_name": "Intellectual Property - Patent"
+    },
+    {
+      "sprk_projecttype_refid": "a4b63391-0ad3-4299-83f6-f7114d06b038",
+      "sprk_name": "Contract Lifecycle"
+    },
+    {
+      "sprk_projecttype_refid": "8286282b-133d-489b-9807-d59c9ecea7a0",
+      "sprk_name": "Due Diligence"
+    },
+    {
+      "sprk_projecttype_refid": "d6701ee6-de20-46f9-add2-dff5992d7d26",
+      "sprk_name": "Regulatory Filing"
+    },
+    {
+      "sprk_projecttype_refid": "eca3f4f4-6f06-4024-949a-34a97d97a2a0",
+      "sprk_name": "Compliance Program"
+    },
+    {
+      "sprk_projecttype_refid": "ff49e456-6738-4ff4-87e5-2b03c0e46e9b",
+      "sprk_name": "Policy Review"
+    },
+    {
+      "sprk_projecttype_refid": "91eb56fe-2af4-4227-9873-f6cbb876473c",
+      "sprk_name": "Internal Investigation"
+    }
+  ]
+}
