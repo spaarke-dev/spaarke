@@ -632,8 +632,11 @@ internal sealed class EventsCapability : IEventsCapability
         try
         {
             // The ADR-024 denormalised regarding fields, read here (the catalog and the target are not the service's reads).
-            // Runs only after the caller was authorized (AppendTo on the regarding record), so the server-side name read is
-            // not a disclosure path. The I-1 core stamps and the owner are the service's, from the lookups below.
+            // Runs only after the caller was authorized AppendTo on the regarding record. AppendTo does NOT imply Read, so the
+            // app-only name/number read below can copy a record's name onto an event a caller without Read then reads back:
+            // a pre-existing disclosure carried over unchanged from REST (task 006 tenant-isolation review F1, filed in
+            // notes/defer-issues.md; the fix changes who sees what and needs an owner decision). The I-1 core stamps and the
+            // owner are the service's, from the lookups below.
             RegardingFields? regarding = null;
             if (CarriesRegarding(request.RegardingRecordType, request.RegardingRecordId))
             {
@@ -986,8 +989,9 @@ internal sealed class EventsCapability : IEventsCapability
     /// (task 031), and a stamp that cannot be derived refuses there (<see cref="ClassifyRefusal"/>).
     /// </summary>
     /// <remarks>
-    /// Runs only after the caller was authorized (AppendTo on the regarding record), so the server-side name read is not a
-    /// disclosure path. The pieces and their posture, after TodoRegardingBuilder:
+    /// Runs only after the caller was authorized AppendTo on the regarding record. AppendTo does not imply Read, so the
+    /// app-only name/number read is a known pre-existing disclosure (task 006 tenant-isolation review F1, filed in
+    /// notes/defer-issues.md). The pieces and their posture, after TodoRegardingBuilder:
     /// <list type="bullet">
     ///   <item>record-type row — <see cref="ICommunicationDataverseService.QueryRecordTypeRefAsync"/>; absent or faulted →
     ///   the record-type lookup is left unset with a warning (non-fatal, as TodoRegardingBuilder);</item>

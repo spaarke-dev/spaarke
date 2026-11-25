@@ -109,7 +109,12 @@ internal sealed record EventCapabilityResult<T>(EventCapabilityStatus Status, T?
     /// <summary><see cref="EventCapabilityStatus.Invalid"/> or <see cref="EventCapabilityStatus.InvalidTransition"/>: the text REST shows.</summary>
     public string? Message { get; init; }
 
-    /// <summary><see cref="EventCapabilityStatus.Refused"/>: the service's refusal.</summary>
+    /// <summary>
+    /// <see cref="EventCapabilityStatus.Refused"/>: the service's refusal, for diagnostics and logs only. A tool must NOT
+    /// render its <c>Detail</c> or <c>RefusedColumn</c> to the caller: REST collapses every refusal it does not classify into
+    /// a generic 500 and never names the refused lookup (which would tell a caller which record was "not found or denied").
+    /// Report <see cref="ReasonCode"/> instead, as REST does.
+    /// </summary>
     public RecordCreationRefusal? Refusal { get; init; }
 
     /// <summary><see cref="EventCapabilityStatus.Refused"/>: the service's step records (which step refused).</summary>

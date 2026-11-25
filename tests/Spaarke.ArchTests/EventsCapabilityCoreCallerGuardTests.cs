@@ -13,13 +13,24 @@ namespace Spaarke.ArchTests;
 /// which decide it through the same methods. Anything else — an MCP tool above all — must call <c>IEventsCapability</c>, or it
 /// gets the rule without the gate (adversarial review of task 006, finding K1, promoted to a guard).</para>
 ///
-/// <para><b>Limits, stated exactly</b>: a source scan of <c>src/server/**</c>. It sees a call written as
-/// <c>EventsCapability.XCoreAsync(</c> and a <c>using static</c> of the type; a call through reflection or a delegate captured
-/// inside an allowed file is not seen.</para>
+/// <para><b>Limits, stated exactly</b>: a source scan of <c>src/server/**</c>, allowing the two files by repo-relative path.
+/// It sees a call written as <c>EventsCapability.XCoreAsync(</c>, a <c>using static</c> of the type and a <c>using</c> alias of
+/// it; a call through reflection or a delegate captured inside an allowed file is not seen, and a new route added inside
+/// <c>EventEndpoints.cs</c> itself is not told apart from the four filtered handlers (route filters there are held by
+/// <c>RouteAuthorizationGuardTests</c>).</para>
 /// </summary>
 public class EventsCapabilityCoreCallerGuardTests
 {
-    private static readonly string[] AllowedFiles = ["EventsCapability.cs", "EventEndpoints.cs"];
+    // Repo-relative paths, '/'-separated: a file of the same name elsewhere is not allowed.
+    private static readonly string[] AllowedFiles =
+    [
+        "src/server/api/Sprk.Bff.Api/Services/Events/EventsCapability.cs",
+        "src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs",
+    ];
+
+    private static readonly Regex UsingAlias = new(
+        @"^\s*using\s+\w+\s*=\s*(?:global::)?Sprk\.Bff\.Api\.Services\.Events\.EventsCapability\s*;",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline);
 
     private static readonly Regex CoreCall = new(
         @"\bEventsCapability\s*\.\s*(?<core>ListCoreAsync|GetCoreAsync|CreateCoreAsync|CompleteCoreAsync)\s*\(",
@@ -34,6 +45,7 @@ public class EventsCapabilityCoreCallerGuardTests
     {
         var found = CoreCall.Matches(code).Select(m => m.Groups["core"].Value + "(").ToList();
         found.AddRange(UsingStatic.Matches(code).Select(_ => "using static EventsCapability"));
+        found.AddRange(UsingAlias.Matches(code).Select(_ => "using alias = EventsCapability"));
         return found;
     }
 
@@ -51,7 +63,7 @@ public class EventsCapabilityCoreCallerGuardTests
                 continue;
             }
 
-            if (AllowedFiles.Contains(Path.GetFileName(file), StringComparer.Ordinal))
+            if (AllowedFiles.Contains(SourceScan.Relative(file).Replace('\\', '/'), StringComparer.Ordinal))
             {
                 allowedCalls += found.Count;
                 continue;
@@ -77,6 +89,7 @@ public class EventsCapabilityCoreCallerGuardTests
         Assert.Equal(["GetCoreAsync("], ViolationsIn("var r = await EventsCapability.GetCoreAsync(id, events, logger, ct);"));
         Assert.Equal(["CompleteCoreAsync("], ViolationsIn("await Sprk.Bff.Api.Services.Events.EventsCapability . CompleteCoreAsync (id, http);"));
         Assert.Equal(["using static EventsCapability"], ViolationsIn("using static Sprk.Bff.Api.Services.Events.EventsCapability;\nclass X {}"));
+        Assert.Equal(["using alias = EventsCapability"], ViolationsIn("using E = Sprk.Bff.Api.Services.Events.EventsCapability;\nclass X {}"));
 
         // Must not fire.
         Assert.Empty(ViolationsIn("var r = await _events.GetAsync(http, id, ct); var l = await capability.ListAsync(http, q, ct);"));
