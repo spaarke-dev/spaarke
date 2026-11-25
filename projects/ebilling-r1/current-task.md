@@ -10,7 +10,7 @@
 
 ## Quick recovery
 
-- **NOW (2026-11-25 ~22:30Z): issue batch 5 merged into work; master PR prep** (master merged in at e590e2bf31; build, filtered tests, CVE check and publish-size delta running from fresh worktrees C:\wt5m / C:\wt5w — remove both with Remove-WorktreeSafe after). Then open the batch 5 master PR; merge needs the owner's go.
+- **NOW (2026-11-25 ~23:00Z): batch 5 master PR #3174 OPEN** (head 1d619044a9; master 75e01f35f1 merged in at e590e2bf31; publish +26 B, 194 files each; no vulnerable packages; build 0/0; filtered ArchTests 32/0, Sprk.Bff.Api.Tests 1,745/0, Wizard + SprkModal jest 381/0). Waits for the owner's merge go; uac-r2 told (FYI, read-only). Publish worktrees removed. No runtime BFF change, so no dev BFF deploy is needed for it.
   - **DEF-046 #2312** (caac9a518d): Deploy-EbillingFormsViews navigation anchors inside the Invoice group, read-only preflight of both sitemaps before any form write, early refusal; Pester 5.7.1 49/0; -WhatIf on dev wrote nothing. A live full run needs the owner's go.
   - **DEF-064 #2643** (2d8aa1d59b): ArchTest `InvoiceFamilyCoreLookupWriterGuardTests` + `InvoiceFamilyWriterScan` — per-method roster of deciding guard calls, delegate pins, locked-write seam caller pin, lambda attribution; review + 2 fix rounds + re-check; four production mutations each fail; 6/6.
   - **ISS-016 #2755** (6444b25adb): WizardShell holds ‹ ›, ×/Escape/backdrop/Cancel and footerLeftExtra while onFinish runs; run token / re-entry refusal / stale run dropped; new optional `SprkModalNav.disabled`; RecordProcedures 084b local guard removed; jest 381/0.
