@@ -218,3 +218,9 @@ Live on dev since ~02:20Z. The billing-rule-draft Action and Binding, the Billin
   - As a flagged-external test user, `/review` answers 403, and `/invoice-submissions/{id}` answers the same 404 for a real id and a made-up id.
   - The four retired `/documents` routes answer 404.
 - [ ] 079 step 12: 077's UI tests against dev, including dark mode. This runs after the step 10 data exists.
+
+## W. Invoice Review review points 2-4 (#3130, merged 2026-11-25 at 6e04bc024e): after uac-r2 redeploys `sprk_invoicereviewpage` from that commit
+Your review points: (2) UTBMS code without its description, (3) the highlight covering two invoice lines, (4) By rule showing nothing. Point 1 (no `<` `>` to the next invoice) is filed as DEF-070, #3124.
+- [ ] Open INV-123.1 (MAT-000113) and click a line that shares its timekeeper and rate with the line above or below it: the yellow row box covers only that line on the PDF, not its neighbour. Click a value (Hours, Amount): the value box sits inside the row box.
+- [ ] Switch to **By rule**. Rule findings show first (if any). Then the heading "Other checks (not billing rules)" lists groups such as "UTBMS code differs from the firm's", "Codes not checked by the AI" or "Timekeeper not on the firm's roster", each with a line count. Clicking **Line n** selects that line in the grid. An invoice with nothing flagged shows "No rule findings or other checks on these lines."
+- [ ] UTBMS descriptions (point 2) need a dev BFF that carries #3130 as well (you name the BFF SHA in uac-r2's session). Until then the pane shows the bare code (for example "L190"), as before, with no error. After that BFF deploy, the pane shows the code with its description from the matter's code set (for example "L190 · …"), and a line whose code differs from the firm's shows a "Firm billed" line with the firm's code and its description.
