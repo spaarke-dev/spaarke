@@ -31,7 +31,7 @@ Task: `tasks/iss052-spa-received-links.poml`. Rigor FULL. Branch `task/ebilling-
 - **No new decision.** `GetAsync` runs only after `ExternalInvoiceSubmissionAuthorizationFilter.DecideReadOneAsync` put the submission on the scope. It does that only when `VisibleSubmissionsAsync` kept it. For a submission with an invoice, that function puts EXACTLY that invoice id to the caller-aware invoice seam (`ExternalInvoiceHiding`: the D-70 / 130-0 firm-match ruling plus the (a') predicate) and withholds the submission when the invoice is hidden. So a hidden invoice is the uniform 404 and a faulted decision is the retryable 503 before the handler runs; neither can carry an id. The handler reuses that outcome and adds no check.
 - **Status gate.** A Rejected submission also has an invoice (D-101). Only Accepted carries the id, per the POML.
 - **Opening it still goes through the record read and its checks.** The SPA's record view reads `sprk_invoice` through the Tier-2 module read (`POST /api/v1/external/api/dataverse/fetch`), which applies the same (a') predicate per row (task 098 surface (a)). The single-record route on the invoices module still answers 403 for every invoice id. A link can only ASK to open; a record the caller cannot see shows the modal's "You don't have access" state.
-- **Nothing new is disclosed.** The same caller already sees this invoice's `sprk_invoiceid` in the record's Invoices section and the Invoices grid, through that module read.
+- **What can be disclosed (corrected in fix round 1).** The decision checks the firm (D-70 / 130-0) and the (a') predicate on the invoice. It does NOT check the invoice's CURRENT core record. So an invoice moved to another matter / project after it was filed (D-96) can still yield its id here, while the caller may no longer see it in any Invoices section. The id is not a grant: opening it goes through the record read and its per-row (a') check (above), which refuses it, and the modal shows its "You don't have access" state. What leaks is only that the firm's own Accepted submission produced an invoice with that id. Triaged K2 (below); no code change.
 
 ## Decisions (POML asks to say which)
 
@@ -71,7 +71,46 @@ Task: `tasks/iss052-spa-received-links.poml`. Rigor FULL. Branch `task/ebilling-
 - K4: the BFF writes `coreRecord.kind` as the enum's number (no global string-enum converter). The client reads a number or a name; the contract is unchanged.
 - K2: a submission with an invoice whose status is not Accepted never offers "Open invoice", even if the firm could see the invoice elsewhere (the POML's rule).
 - K4: in the record modal, "Open {record}" for a record other than the shown one opens a child record; unreachable while the wizard is locked to the record.
-- Observation, not changed: the shared Rejected bar shows `Reason: {outcomeReasonCode}` as text (task 051, pre-existing, asserted by existing SPA and shared tests; EB-D-210 shows reason codes to firms). This task adds no code or id as text.
+- K2 (fix round 1): a moved invoice (D-96). The external read can name an Accepted submission's invoice that has since moved to a core record the caller cannot see, because the decision checks the firm and (a'), not the invoice's current record. "Open invoice" then shows the record view's "You don't have access" state (the record read refuses it). No access is granted; the firm learns only the id of an invoice its own submission produced. Not changed: closing it would need a current-record check on the submission read (a contract decision for the owner).
+
+## Fix round 1
+
+- **F1-a (a11y), fixed.** In the record modal, "Open invoice" left focus on the page body after the invoice was closed. Two causes:
+  - The link button unmounts with the Submit dialog, and the child's close looks for an Invoices row (a work assignment has none).
+  - The Submit dialog's own focus restore (a zero-delay task) could land behind the child.
+
+  The fix, in `SubmitInvoiceAction`:
+  - The action's click remembers the control that opened the dialog (`document.activeElement`).
+  - Both links close the dialog, then open the child one task later, passing that control as `trigger`. By then the Submit dialog has unmounted and its restore has run first, so focus is not left behind the child.
+  - Closing the child puts focus back on the record's Submit invoice button.
+  - "Open {record}" for the shown record still only closes.
+- **F1-b, pre-existing defect (since task 051), fixed in scope.** The shared Rejected bar showed `Reason: {outcomeReasonCode}`, so firms saw internal codes (`invoice.read.unreadable`, `.page_limit`, `.no_invoice`, `duplicate_invoice`, ...).
+  - `InvoiceSubmissionOutcome` and `InvoiceSubmissionWizard` take `showReasonCode` (default `true`, so the internal `CreateInvoiceWizard` is unchanged).
+  - The SPA passes `false` in the page (wizard and resume view) and in the record modal. The bar then says "The invoice was rejected."
+  - The iss048 `record_owner_*` title and the "Submit it again" rule are unchanged (they read the code, not the text).
+  - Existing SPA tests that asserted `Reason: ...` now assert the sentence and the absence of the code.
+- **K2 correction**: see "What can be disclosed" above and the K2 known limit.
+- **`ENTITY_OF_INVOICE_KIND` is now derived** from `recordAccess.ts`'s `INVOICE_KIND_OF_ENTITY` (exported inverse), not hand-kept, so the two maps cannot drift. `recordAccess` imports only types plus `useAccessLevel` and `types` at runtime, so no import cycle.
+- **Tests:**
+  - Shared `InvoiceSubmissionOutcome.links.test.tsx`: 4 new tests:
+    - the default shows the code;
+    - `false` hides `invoice.read.unreadable` and "Reason:";
+    - `false` keeps the `record_owner_` setup text with no "Submit it again.";
+    - the wizard passes it.
+  - SPA `InvoiceSubmitPage.test.tsx`:
+    - 4 existing assertions moved from `Reason: <code>` to the sentence plus no code;
+    - 2 new tests: `invoice.read.unreadable` in the resume view and the wizard result shows no code text.
+  - SPA `RecordTemplateSubmitInvoice.test.tsx`:
+    - the modal's Rejected test asserts the sentence and no code;
+    - 2 new focus tests: on a work assignment and on a matter, after "Open invoice", focus is inside the invoice, and closing it puts focus back on the record's Submit invoice button, still there 350 ms later. `openWizard` now takes the record type.
+  - Before, with the SPA sources reverted: 9 failed (2 focus, 7 reason code), 115 passed. After: 124 / 124 (72 + 52).
+  - Shared, before (shared sources at the round-0 tip): links file 2 failed, 18 passed. The default and `record_owner_` tests pin behaviour that is unchanged. After: `src/components/InvoiceSubmission` 174 / 174 (11 suites).
+- **Builds:**
+  - Shared `npm run build`: clean.
+  - SPA `npm run typecheck`: 0 errors.
+  - SPA `npm run build`: succeeds.
+  - eslint and prettier are clean on the touched files.
+  - BFF untouched, so not re-run.
 
 ## Copies
 
