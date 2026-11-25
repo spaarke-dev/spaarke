@@ -347,7 +347,7 @@ describe('InvoiceSubmitPage — submit', () => {
   );
 
   it(
-    'a Rejected result shows the reason code and the outcome report, not the placeholder (task 134)',
+    'a Rejected result says it was rejected (no internal reason code, iss052) and shows the outcome report, not the placeholder (task 134)',
     async () => {
       script.status = [() => json(200, statusView({ status: 'Rejected', outcomeReasonCode: 'duplicate_invoice' }))];
       const { InvoiceSubmitPage } = await load();
@@ -355,7 +355,9 @@ describe('InvoiceSubmitPage — submit', () => {
       fireEvent.change(await toDetails(), { target: { value: 'INV-9' } });
       fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
 
-      expect(await screen.findByText(/Reason: duplicate_invoice/, {}, SLOW)).toBeTruthy();
+      // iss052 fix round 1: the SPA says the invoice was rejected; the internal reason code is not shown to the firm.
+      expect(await screen.findByText('The invoice was rejected.', {}, SLOW)).toBeTruthy();
+      expect(screen.queryByText(/duplicate_invoice|Reason:/)).toBeNull();
       const report = await screen.findByTestId('invoice-outcome-report', {}, SLOW);
       expect(report.getAttribute('data-kind')).toBe('SubmissionRejected');
       // The shared `renderSubmissionReport` (also used by the record's modal wizard) draws the wrapper.
@@ -814,7 +816,9 @@ describe('InvoiceSubmitPage — ?invoiceRecord= preselect (R4 task 007, FR-10)',
         InvoiceSubmitPage,
         `/invoices/submit?submissionId=${SUBMISSION_ID}&invoiceRecord=${encodeURIComponent(`matter:${MATTER_ID}`)}`
       );
-      expect(await screen.findByText(/Reason: po_mismatch/, {}, SLOW)).toBeTruthy();
+      // iss052 fix round 1: the SPA says the invoice was rejected; the internal reason code is not shown to the firm.
+      expect(await screen.findByText('The invoice was rejected.', {}, SLOW)).toBeTruthy();
+      expect(screen.queryByText(/po_mismatch|Reason:/)).toBeNull();
       expect(screen.queryByRole('radio')).toBeNull();
       expect(firmRecordReads()).toHaveLength(0);
       expect(projectReads()).toHaveLength(0);
@@ -957,7 +961,9 @@ describe('InvoiceSubmitPage — resume (FR-18)', () => {
       const { InvoiceSubmitPage } = await load();
       renderPage(InvoiceSubmitPage, `/invoices/submit?submissionId=${SUBMISSION_ID}`);
 
-      expect(await screen.findByText(/Reason: po_mismatch/, {}, SLOW)).toBeTruthy();
+      // iss052 fix round 1: the SPA says the invoice was rejected; the internal reason code is not shown to the firm.
+      expect(await screen.findByText('The invoice was rejected.', {}, SLOW)).toBeTruthy();
+      expect(screen.queryByText(/po_mismatch|Reason:/)).toBeNull();
       expect(screen.getByTestId('invoice-tracking-number').textContent).toBe('TRK-0001');
       expect(screen.queryByRole('radio')).toBeNull();
       expect(submitCalls()).toHaveLength(0);
@@ -982,7 +988,9 @@ describe('InvoiceSubmitPage — resume (FR-18)', () => {
       // The kill switch: the report is hidden entirely (no placeholder either: the host handed the slot).
       script.outcome = () => problem(503, undefined, 'ebilling.disabled');
       renderPage(InvoiceSubmitPage, `/invoices/submit?submissionId=${SUBMISSION_ID}`);
-      expect(await screen.findByText(/Reason: po_mismatch/, {}, SLOW)).toBeTruthy();
+      // iss052 fix round 1: the SPA says the invoice was rejected; the internal reason code is not shown to the firm.
+      expect(await screen.findByText('The invoice was rejected.', {}, SLOW)).toBeTruthy();
+      expect(screen.queryByText(/po_mismatch|Reason:/)).toBeNull();
       await waitFor(() => expect(calls.filter(c => c.url.endsWith('/outcome')).length).toBeGreaterThanOrEqual(2));
       expect(screen.queryByTestId('invoice-outcome-report')).toBeNull();
       expect(screen.queryByTestId('submission-outcome-report')).toBeNull();
@@ -1116,6 +1124,29 @@ describe('InvoiceSubmitPage — iss052 links to the invoice and its record', () 
       expect(await screen.findByText(/The invoice was accepted/i, {}, SLOW)).toBeTruthy();
       expect(screen.queryByTestId('invoice-submission-links')).toBeNull();
       expect(opener.openRecord).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it.each([
+    ['the resume view', `/invoices/submit?submissionId=${SUBMISSION_ID}`],
+    ['the wizard result', '/invoices/submit'],
+  ] as const)(
+    'fix round 1: in %s a Rejected answer with an internal code (invoice.read.unreadable) shows no code text to the firm',
+    async (_label, url) => {
+      script.status = [
+        () => json(200, statusView({ status: 'Rejected', outcomeReasonCode: 'invoice.read.unreadable' })),
+      ];
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, url);
+      if (url === '/invoices/submit') {
+        fireEvent.change(await toDetails(), { target: { value: 'INV-9' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+      }
+
+      expect(await screen.findByText('The invoice was rejected.', {}, SLOW)).toBeTruthy();
+      expect(document.body.textContent).not.toContain('invoice.read.unreadable');
+      expect(document.body.textContent).not.toContain('Reason:');
     },
     SLOW
   );

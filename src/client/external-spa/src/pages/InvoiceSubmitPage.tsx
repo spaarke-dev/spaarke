@@ -334,6 +334,7 @@ export const InvoiceSubmitPage: React.FC = () => {
             renderReport={renderSubmissionReport}
             onOpenInvoice={links.onOpenInvoice}
             onOpenRecord={links.onOpenRecord}
+            showReasonCode={false}
           />
           <div className={styles.actions}>
             <Button appearance="primary" onClick={() => navigate(INVOICE_SUBMIT_PATH)}>
@@ -377,6 +378,7 @@ export const InvoiceSubmitPage: React.FC = () => {
           onSubmitted={handleSubmitted}
           onOpenInvoice={links.onOpenInvoice}
           onOpenRecord={links.onOpenRecord}
+          showReasonCode={false}
         />
       </div>
     </PageContainer>

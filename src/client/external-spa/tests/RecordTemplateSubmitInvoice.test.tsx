@@ -501,14 +501,17 @@ interface Opened {
  * firm-records answer that lists the matter; `wizardAnswer` is what the same firm answers when the wizard asks afterwards
  * (the wizard's check reads afresh), to test a record the button offered but the wizard's check does not.
  */
-async function openWizard(opts: { wizardAnswer?: FirmAnswer } = {}): Promise<Opened> {
+async function openWizard(
+  opts: { wizardAnswer?: FirmAnswer; record?: (typeof OFFERING)[number] } = {}
+): Promise<Opened> {
+  const record = opts.record ?? MATTER;
   const net: Net = {
     me: meOf({ firms: [FIRM_A] }),
-    firmRecords: { [FIRM_A.firmId]: listing('matters', MATTER.id) },
+    firmRecords: { [FIRM_A.firmId]: listing(record.list, record.id) },
   };
   install(net);
   const onClose = vi.fn();
-  const dialog = await openRecord({ onClose });
+  const dialog = await openRecord({ onClose, entity: record.entity, ids: [record.id] });
   await waitFor(() => expect(submitButton(dialog)).not.toBeNull(), SLOW);
   // tabster's aria-hidden pass over the record settles first (project gotcha, D-8 #2704).
   await settle(350);
@@ -769,6 +772,37 @@ describe('Submit invoice: the result screen links (ebilling-r1 iss052)', () => {
     SLOW
   );
 
+  it.each([
+    ['a work assignment (no Invoices section: the child finds no row to refocus)', OFFERING[2], 2],
+    ['a matter', MATTER, 0],
+  ] as const)(
+    'fix round 1: on %s, closing the invoice opened by "Open invoice" puts focus back on the record\'s Submit invoice button',
+    async (_label, record, kindNumber) => {
+      acceptedWithLinks({ coreRecord: { kind: kindNumber, recordId: record.id } });
+      const { dialog, button, child } = await openWizard({ record });
+      await submitThroughWizard(child);
+
+      fireEvent.click(await within(child).findByRole('button', { name: 'Open invoice' }, WAIT));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);
+      // The record dialog goes aria-hidden under the invoice, so count every dialog on the page.
+      const otherDialogs = (): HTMLElement[] =>
+        screen.queryAllByRole('dialog', { hidden: true }).filter(d => d !== dialog);
+      await waitFor(() => expect(otherDialogs()).toHaveLength(1), SLOW);
+      await settle();
+      const invoice = otherDialogs()[0];
+      await waitFor(() => expect(recordReadsOf('sprk_invoice')).toEqual([INVOICE_ID]), SLOW);
+      // The Submit dialog's own focus restore ran before the invoice opened: focus is not left behind the invoice.
+      expect(invoice.contains(document.activeElement)).toBe(true);
+
+      fireEvent.click(within(invoice).getAllByRole('button', { name: 'Close', hidden: true })[0]);
+      await waitFor(() => expect(otherDialogs()).toHaveLength(0), SLOW);
+      await waitFor(() => expect(document.activeElement).toBe(button), WAIT);
+      await settle(350);
+      expect(document.activeElement).toBe(button);
+    },
+    SLOW
+  );
+
   it(
     'a Rejected result offers no "Open invoice"; "Open matter" is still offered',
     async () => {
@@ -788,6 +822,10 @@ describe('Submit invoice: the result screen links (ebilling-r1 iss052)', () => {
 
       expect(await within(child).findByRole('button', { name: 'Open matter' }, { timeout: 20000 })).toBeTruthy();
       expect(within(child).queryByRole('button', { name: 'Open invoice' })).toBeNull();
+      // Fix round 1: the modal says it was rejected and shows the firm no internal reason code.
+      expect(within(child).getByText('The invoice was rejected.')).toBeTruthy();
+      expect(child.textContent).not.toContain('duplicate_invoice');
+      expect(child.textContent).not.toContain('Reason:');
     },
     SLOW
   );
