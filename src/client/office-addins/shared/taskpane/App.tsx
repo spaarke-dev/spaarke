@@ -1,5 +1,14 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { FluentProvider, Spinner, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
+import {
+  Button,
+  FluentProvider,
+  Spinner,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
@@ -70,10 +79,18 @@ import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch'
  */
 const SIGN_IN_EXPIRED_MESSAGE = 'Your Spaarke sign-in has expired. Sign in again to continue.';
 
-/** The single-retry-on-401 config for the pane's own calls: clear the token cache, re-acquire (silently). */
+/** #1571 review F3: a contact search that failed (not "no contacts match"). */
+const CONTACT_SEARCH_FAILED_MESSAGE = 'Could not search contacts.';
+
+/** A failed contact search; its message is what the picker shows. */
+class ContactSearchError extends Error {}
+
+/**
+ * The single-retry-on-401 config for the pane's own calls: re-acquire silently. `authenticatedJsonFetch` clears the
+ * token cache first, which makes the re-acquire ask Entra for a new token (#1571 review F1).
+ */
 const paneRetry = {
   getRetryToken: async () => (await authService.getAccessToken()) ?? '',
-  onBeforeRetry: () => authService.clearCache(),
 };
 
 // Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its
@@ -170,6 +187,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalS,
   },
+  signInBanner: {
+    marginBottom: tokens.spacingVerticalS,
+  },
 });
 
 export interface AppProps {
@@ -242,6 +262,11 @@ export const App: React.FC<AppProps> = ({
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // #1571 review F2/F1: the session ended mid-use. The sign-in prompt shows as a banner ABOVE the signed-in tabs,
+  // which stay mounted, so a half-filled To Do (#2607) or Save survives the sign-in.
+  const [signInRequired, setSignInRequired] = useState(false);
+  // #1571 review F2: a Sign in click is in progress (the button is disabled; a second click does nothing).
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [, setHostContext] = useState<IHostContext | null>(null);
   // Task 133: true while the Invoice view runs a submission or shows a result that carries a tracking number. The tab
   // bar is hidden then, so a tab press cannot unmount the view and lose either. Only the Invoice tab sets it.
@@ -354,27 +379,41 @@ export const App: React.FC<AppProps> = ({
     initializeApp();
   }, [initializeApp]);
 
-  // Sign in handler
+  // Sign in handler — the one interactive sign-in (#1571). A click while one is running does nothing.
+  const signingInRef = useRef(false);
   const handleSignIn = async () => {
+    if (signingInRef.current) return;
+    signingInRef.current = true;
+    setIsSigningIn(true);
     try {
       setError(null);
       await authService.signIn();
       setIsAuthenticated(authService.isAuthenticated());
+      setSignInRequired(false);
     } catch (err) {
+      // #1571 review F2: a click that did not sign in says so (AuthService explains a blocked pop-up).
       setError(err instanceof Error ? err.message : 'Sign in failed');
+    } finally {
+      signingInRef.current = false;
+      setIsSigningIn(false);
     }
   };
 
-  // #1571: a 401 that survived the single retry — show the sign-in prompt (its click is the interactive sign-in).
+  // #1571: the session cannot be renewed silently (a 401 that survived the single retry, or no token at all) — show
+  // the sign-in prompt, whose click is the interactive sign-in. It never unmounts the signed-in tabs (review F1).
   const showSignInPrompt = useCallback(() => {
-    setError(SIGN_IN_EXPIRED_MESSAGE);
-    setIsAuthenticated(false);
+    setSignInRequired(true);
   }, []);
+
+  // #1571 review F2: ONE route to the sign-in prompt for every request the pane makes (Save, Find, Invoice, Email,
+  // the save stream): the auth service raises it when it has no token, or when a request is refused after its retry.
+  useEffect(() => authService.onSignInRequired?.(showSignInPrompt), [showSignInPrompt]);
 
   // Sign out handler
   const handleSignOut = async () => {
     await authService.signOut();
     setIsAuthenticated(false);
+    setSignInRequired(false);
     setCurrentTab('save'); // Reset to default tab
   };
 
@@ -637,12 +676,16 @@ export const App: React.FC<AppProps> = ({
           paneRetry
         );
         if (res.status === 401) {
-          // #1571: the retry could not renew the session — the sign-in prompt, not an empty result list.
+          // #1571: the retry could not renew the session — the sign-in prompt (a banner: the form stays as typed),
+          // and the search says it failed rather than showing an empty result list.
           showSignInPrompt();
-          return [];
+          throw new ContactSearchError(`${CONTACT_SEARCH_FAILED_MESSAGE} ${SIGN_IN_EXPIRED_MESSAGE}`);
         }
         if (!res.ok) {
-          return [];
+          // #1571 review F3: a refusal (403) or a server fault is not "no contacts match" — say so, with the server's
+          // own reason.
+          const described = await describeFetchFailure(res);
+          throw new ContactSearchError(`${CONTACT_SEARCH_FAILED_MESSAGE} ${described.message}`);
         }
         const data = (await res.json()) as {
           results?: { id: string; name: string; displayInfo?: string; email?: string }[];
@@ -654,8 +697,10 @@ export const App: React.FC<AppProps> = ({
           // Task 091 (UAT-2): additive, from the server's new EntitySearchResult.Email.
           ...(r.email ? { email: r.email } : {}),
         }));
-      } catch {
-        return [];
+      } catch (err) {
+        // A failed search rejects (the pickers show "could not search contacts"); never an empty list.
+        if (err instanceof ContactSearchError) throw err;
+        throw new ContactSearchError(`${CONTACT_SEARCH_FAILED_MESSAGE} Check your connection and try again.`);
       }
     },
     [savedContext, apiBaseUrl, showSignInPrompt]
@@ -888,7 +933,7 @@ export const App: React.FC<AppProps> = ({
           showErrorDetails={showErrorDetails}
           onError={handleError}
         >
-          <SignInView onSignIn={handleSignIn} error={error} />
+          <SignInView onSignIn={handleSignIn} isLoading={isSigningIn} error={error} />
         </TaskPaneShell>
       </FluentProvider>
     );
@@ -930,6 +975,28 @@ export const App: React.FC<AppProps> = ({
           : {})}
         {...(DIAGNOSTICS_ENABLED ? { onShowDiagnostics: openDiagnostics } : {})}
       >
+        {/* #1571 review F1/F2: the session ended mid-use. A banner, not the sign-in page: the tabs below stay mounted,
+            so what the user typed (a To Do, a Save) is still there after signing in. */}
+        {signInRequired && (
+          <MessageBar intent="warning" layout="multiline" className={styles.signInBanner}>
+            <MessageBarBody>
+              {SIGN_IN_EXPIRED_MESSAGE}
+              {error ? ` ${error}` : ''}
+            </MessageBarBody>
+            <MessageBarActions>
+              <Button
+                appearance="primary"
+                size="small"
+                onClick={() => void handleSignIn()}
+                disabled={isSigningIn}
+                {...(isSigningIn ? { icon: <Spinner size="tiny" /> } : {})}
+              >
+                {isSigningIn ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        )}
+
         {DIAGNOSTICS_ENABLED && showDiagnostics && (
           <Suspense fallback={<Spinner size="small" label="Loading diagnostics…" />}>
             <DiagnosticsView

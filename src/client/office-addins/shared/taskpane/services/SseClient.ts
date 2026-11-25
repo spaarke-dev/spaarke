@@ -22,6 +22,8 @@
  * D-AUTH-7 exception site.
  */
 
+import { authService } from '@shared/services/AuthService';
+
 /**
  * Function that resolves to a fresh BFF access token.
  *
@@ -158,8 +160,17 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
         await response.body?.cancel().catch(() => {
           /* best-effort drain */
         });
+        // #1571 review F1: the refused token is what the auth service's caches hold, so the re-acquire asks Entra
+        // for a new one (still silently).
+        authService.clearCache();
         // Re-enter connect — `getAccessToken()` at the top will fetch a new token.
         return connect();
+      }
+
+      if (response.status === 401) {
+        // #1571 review F2: still refused after the retries — the session cannot be renewed silently. The pane shows
+        // its sign-in prompt (the same signal every other request raises).
+        authService.notifySignInRequired?.();
       }
 
       if (!response.ok) {

@@ -5,9 +5,20 @@
  * that survives the retry shows the sign-in prompt, never a server error or a silently empty list. A 403 is a refusal
  * of the request itself and keeps the server's reason (owner decision on To Do refusals): no retry, no sign-in prompt.
  *
+ * Review fix round 1:
+ * - the auth double hands back the SAME token until a refresh is forced (`clearCache()`, which makes the real
+ *   AuthService ask Entra for a new token), so the retry tests prove the retry gets a new token, not that the double
+ *   happened to return one (F1);
+ * - the sign-in prompt after a lasting 401 is a banner above the tabs: the To Do form stays mounted, so what the user
+ *   typed survives (F1, #2607);
+ * - the auth service's "sign-in required" signal shows the same banner (F2);
+ * - a Sign in click that fails says so, and a second click while one runs does nothing (F2);
+ * - a contact search the server refused (403) or failed (5xx) rejects with "Could not search contacts", never an empty
+ *   list (F3).
+ *
  * Views are doubled to capture their props; `fetch` is the network boundary.
  */
-import { render, waitFor, act } from '@testing-library/react';
+import { render, waitFor, act, screen, fireEvent } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { App } from '../App';
 import type { IHostAdapter } from '@shared/adapters';
@@ -18,15 +29,28 @@ import * as CreateTodoViewModule from '../components/views/CreateTodoView';
 import * as SignInViewModule from '../components/views/SignInView';
 import { authService } from '@shared/services';
 
-jest.mock('@shared/services', () => ({
+const mockAuth = { authenticated: true, listeners: new Set<() => void>() };
+const mockTodoMounts = { mounted: 0, unmounted: 0 };
+
+// One auth double for the pane AND the fetch helper (which imports the AuthService module directly): the helper
+// clears the cache before a retry and raises "sign-in required" after a lasting 401, on this same object.
+jest.mock('@shared/services/AuthService', () => ({
   authService: {
-    isAuthenticated: () => true,
+    isAuthenticated: jest.fn(() => mockAuth.authenticated),
     getAccessToken: jest.fn(async () => 'token'),
     getAccount: () => ({ name: 'Guest User', username: 'guest@example.com' }),
     signIn: jest.fn(),
     signOut: jest.fn(),
     clearCache: jest.fn(),
+    onSignInRequired: jest.fn((listener: () => void) => {
+      mockAuth.listeners.add(listener);
+      return () => mockAuth.listeners.delete(listener);
+    }),
+    notifySignInRequired: jest.fn(() => mockAuth.listeners.forEach(listener => listener())),
   },
+}));
+jest.mock('@shared/services', () => ({
+  authService: jest.requireMock('@shared/services/AuthService').authService,
   apiClient: { get: jest.fn(), post: jest.fn() },
   ApiClientError: class ApiClientError extends Error {},
 }));
@@ -49,7 +73,19 @@ jest.mock('../components/SaveFlow', () => ({
 }));
 jest.mock('../components/views/SaveView', () => ({ SaveView: jest.fn(() => null) }));
 jest.mock('../components/views/FindView', () => ({ FindView: jest.fn(() => null) }));
-jest.mock('../components/views/CreateTodoView', () => ({ CreateTodoView: jest.fn(() => null) }));
+// The To Do view double counts mounts and unmounts: the sign-in prompt must not unmount it (it holds the user's input).
+jest.mock('../components/views/CreateTodoView', () => ({
+  CreateTodoView: jest.fn(() => {
+    const { useEffect: useMountEffect } = jest.requireActual<typeof import('react')>('react');
+    useMountEffect(() => {
+      mockTodoMounts.mounted += 1;
+      return () => {
+        mockTodoMounts.unmounted += 1;
+      };
+    }, []);
+    return null;
+  }),
+}));
 jest.mock('../components/views/SignInView', () => ({ SignInView: jest.fn(() => null) }));
 jest.mock('../services/documentIdentityService', () => ({
   ...jest.requireActual('../services/documentIdentityService'),
@@ -153,11 +189,24 @@ function authorizationOf(call: unknown[]): string | undefined {
   return (init.headers as Record<string, string>).Authorization;
 }
 
+const signIn = authService.signIn as jest.Mock;
+const SIGN_IN_EXPIRED = /sign-in has expired/i;
+
 beforeEach(() => {
   jest.clearAllMocks();
   fetchMock.mockReset();
   global.fetch = fetchMock as unknown as typeof fetch;
-  getAccessToken.mockResolvedValueOnce('token').mockResolvedValue('fresh-token');
+  mockAuth.authenticated = true;
+  mockAuth.listeners.clear();
+  mockTodoMounts.mounted = 0;
+  mockTodoMounts.unmounted = 0;
+  // Like MSAL: the same token until a refresh is forced. `clearCache()` is what forces it (the real AuthService then
+  // asks Entra for a new token), so a retry gets 'fresh-token' only if the code under test forced the refresh.
+  let forced = false;
+  getAccessToken.mockImplementation(async () => (forced ? 'fresh-token' : 'token'));
+  clearCache.mockImplementation(() => {
+    forced = true;
+  });
 });
 
 afterAll(() => {
@@ -182,7 +231,7 @@ describe('App — Create To Do retries once on 401 (#1571)', () => {
     expect(SignInView).not.toHaveBeenCalled();
   });
 
-  it('a 401 that survives the retry shows the sign-in prompt, not a server error', async () => {
+  it('a 401 that survives the retry shows the sign-in prompt above the To Do form, which stays mounted', async () => {
     const view = await openCreateTodo();
     fetchMock.mockResolvedValue(respond(401));
 
@@ -194,8 +243,28 @@ describe('App — Create To Do retries once on 401 (#1571)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result?.ok).toBe(false);
     expect(result?.error).toMatch(/sign in again/i);
-    await waitFor(() => expect(SignInView).toHaveBeenCalled());
-    expect(lastProps(SignInView).error).toMatch(/sign in again/i);
+    expect(await screen.findByText(SIGN_IN_EXPIRED)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+    // The user's half-filled To Do is still there (#2607): the form was never unmounted.
+    expect(mockTodoMounts.unmounted).toBe(0);
+    expect(SignInView).not.toHaveBeenCalled();
+  });
+
+  it('signing in from the prompt keeps the form and removes the prompt', async () => {
+    await openCreateTodo();
+    fetchMock.mockResolvedValue(respond(401));
+    await act(async () => {
+      await lastProps(CreateTodoView).onCreateTodo(TODO_INPUT);
+    });
+    signIn.mockResolvedValue(undefined);
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
+    });
+
+    await waitFor(() => expect(screen.queryByText(SIGN_IN_EXPIRED)).toBeNull());
+    expect(signIn).toHaveBeenCalledTimes(1);
+    expect(mockTodoMounts.unmounted).toBe(0);
   });
 
   it('negative: a 403 refusal is not retried and keeps the server reason; no sign-in prompt', async () => {
@@ -241,16 +310,85 @@ describe('App — Assigned To contact search retries once on 401 (#1571)', () =>
     expect(authorizationOf(fetchMock.mock.calls[1]!)).toBe('Bearer fresh-token');
   });
 
-  it('a 401 that survives the retry shows the sign-in prompt instead of a silently empty list', async () => {
+  it('a 401 that survives the retry shows the sign-in prompt, keeps the form, and the search says it failed', async () => {
     const view = await openCreateTodo();
     fetchMock.mockResolvedValue(respond(401));
 
+    let failure: unknown;
     await act(async () => {
-      await view.onSearchContacts('Jane');
+      failure = await view.onSearchContacts('Jane').catch((err: unknown) => err);
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((failure as Error).message).toMatch(/could not search contacts/i);
+    expect(await screen.findByText(SIGN_IN_EXPIRED)).toBeTruthy();
+    expect(mockTodoMounts.unmounted).toBe(0);
+  });
+
+  it.each([
+    [403, 'You do not have permission to search contacts.'],
+    [500, 'Search failed on the server.'],
+  ])('a %i is "could not search contacts" with the reason, never an empty list', async (status, detail) => {
+    const view = await openCreateTodo();
+    fetchMock.mockResolvedValue(respond(status, { title: 'Error', status, detail }));
+
+    let failure: unknown;
+    await act(async () => {
+      failure = await view.onSearchContacts('Jane').catch((err: unknown) => err);
+    });
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/could not search contacts/i);
+    expect(screen.queryByText(SIGN_IN_EXPIRED)).toBeNull();
+  });
+});
+
+describe('App — one sign-in route for every request (#1571 review F2)', () => {
+  it('the auth service\'s "sign-in required" signal shows the prompt without unmounting the tabs', async () => {
+    await openCreateTodo();
+    expect(mockAuth.listeners.size).toBe(1);
+
+    act(() => {
+      mockAuth.listeners.forEach(listener => listener());
+    });
+
+    expect(await screen.findByText(SIGN_IN_EXPIRED)).toBeTruthy();
+    expect(mockTodoMounts.unmounted).toBe(0);
+  });
+
+  it('a Sign in click that does not complete says why', async () => {
+    await openCreateTodo();
+    act(() => {
+      mockAuth.listeners.forEach(listener => listener());
+    });
+    signIn.mockRejectedValue(
+      new Error('Sign-in did not complete. If a pop-up was blocked, allow pop-ups for this site and try again.')
+    );
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
+    });
+
+    expect(await screen.findByText(/allow pop-ups for this site/i)).toBeTruthy();
+    expect(screen.getByText(SIGN_IN_EXPIRED)).toBeTruthy();
+  });
+
+  it('the sign-in page: a second click while signing in does nothing, and the button shows it is busy', async () => {
+    mockAuth.authenticated = false;
+    let finish: () => void = () => undefined;
+    signIn.mockImplementation(() => new Promise<void>(resolve => (finish = resolve)));
+    render(<App hostAdapter={outlookAdapter()} initialTab="createTodo" />);
     await waitFor(() => expect(SignInView).toHaveBeenCalled());
-    expect(lastProps(SignInView).error).toMatch(/sign in again/i);
+
+    act(() => {
+      void lastProps(SignInView).onSignIn();
+      void lastProps(SignInView).onSignIn();
+    });
+
+    await waitFor(() => expect(lastProps(SignInView).isLoading).toBe(true));
+    expect(signIn).toHaveBeenCalledTimes(1);
+    mockAuth.authenticated = true;
+    await act(async () => finish());
+    expect(signIn).toHaveBeenCalledTimes(1);
   });
 });

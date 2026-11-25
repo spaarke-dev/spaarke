@@ -51,6 +51,15 @@ export interface IAuthService {
    */
   clearCache(): void;
   /**
+   * #1571 review F2: subscribe to "sign-in required" — raised when the provider could not acquire a token silently,
+   * or when a request was still refused (401) after its single retry. The pane shows its sign-in prompt: nothing else
+   * can renew the session, because the only interactive sign-in is a user's click. Returns the unsubscribe. Optional
+   * so test doubles need not implement it.
+   */
+  onSignInRequired?(listener: () => void): () => void;
+  /** #1571 review F2: raise "sign-in required" (a request's 401 that survived its retry). */
+  notifySignInRequired?(): void;
+  /**
    * Task 113 (dev-only Diagnostics view): how this pane signed in — the MSAL authority and whether the Office
    * broker (NAA) or the popup fallback is in use. Optional so test doubles need not implement it.
    */
@@ -62,6 +71,10 @@ export interface SignInDiagnostics {
   authority: string | null;
   naaActive: boolean;
 }
+
+/** #1571 review F2: what a Sign in click that produced no token tells the user. */
+export const SIGN_IN_INCOMPLETE_MESSAGE =
+  'Sign-in did not complete. If a pop-up was blocked, allow pop-ups for this site and try again.';
 
 export interface AuthConfig {
   clientId: string;
@@ -75,6 +88,7 @@ class AuthService implements IAuthService {
   private provider: SpaarkeAuthProvider | null = null;
   private strategy: OfficeNaaStrategy | null = null;
   private authority: string | null = null;
+  private readonly signInRequiredListeners = new Set<() => void>();
 
   async initialize(config: AuthConfig): Promise<void> {
     const bffApiClientId = config.bffApiClientId || '1e40baad-e065-4aea-a8d4-4b7ab273458c';
@@ -116,8 +130,13 @@ class AuthService implements IAuthService {
    * the click handler, never from a timer or a load. `OfficeNaaStrategy.acquireInteractive()`
    * tries silent acquisition first, then `acquireTokenPopup` (routed through the
    * Office broker under NAA — not a real popup; a genuine popup only under the
-   * standard-client path). The provider then re-acquires silently, which MSAL
-   * answers from the account and token the prompt just cached.
+   * standard-client path). The provider's cache is then filled with the token the
+   * click returned (the strategy hands it to the provider's next acquire), not with
+   * a second request.
+   *
+   * Throws an Error with {@link SIGN_IN_INCOMPLETE_MESSAGE} when the click produced
+   * no token (the user closed the prompt, or a pop-up blocker stopped it), so the
+   * pane can say so instead of showing nothing.
    */
   async signIn(): Promise<void> {
     if (!this.provider || !this.strategy) {
@@ -125,8 +144,13 @@ class AuthService implements IAuthService {
     }
     this.provider.clearCache();
     const interactive = await this.strategy.acquireInteractive();
-    if (!interactive.accessToken) return;
-    await this.provider.getAccessToken();
+    if (!interactive.accessToken) {
+      throw new Error(SIGN_IN_INCOMPLETE_MESSAGE);
+    }
+    const token = await this.provider.getAccessToken();
+    if (!token) {
+      throw new Error(SIGN_IN_INCOMPLETE_MESSAGE);
+    }
   }
 
   async signOut(): Promise<void> {
@@ -150,7 +174,29 @@ class AuthService implements IAuthService {
       return null;
     }
     const token = await this.provider.getAccessToken();
-    return token || null;
+    if (!token) {
+      // #1571 review F2: no token silently. Only the user's Sign in click can renew the session.
+      this.notifySignInRequired();
+      return null;
+    }
+    return token;
+  }
+
+  onSignInRequired(listener: () => void): () => void {
+    this.signInRequiredListeners.add(listener);
+    return () => {
+      this.signInRequiredListeners.delete(listener);
+    };
+  }
+
+  notifySignInRequired(): void {
+    for (const listener of [...this.signInRequiredListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        console.warn('[AuthService] a sign-in-required listener failed:', err);
+      }
+    }
   }
 
   isAuthenticated(): boolean {
@@ -159,6 +205,9 @@ class AuthService implements IAuthService {
 
   clearCache(): void {
     this.provider?.clearCache();
+    // #1571 review F1: this runs before a 401 retry, and MSAL's cached token is the one the server just refused, so
+    // the re-acquire asks Entra for a new one (still silently).
+    this.strategy?.requestFreshToken();
   }
 }
 

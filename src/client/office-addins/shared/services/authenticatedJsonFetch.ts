@@ -1,3 +1,5 @@
+import { authService } from './AuthService';
+
 /**
  * Shared single-retry-on-401 fetch wrapper for JSON BFF calls (task 040 / FR-B0
  * realignment).
@@ -58,7 +60,16 @@ export async function authenticatedJsonFetch(
     return response;
   }
 
+  // #1571 review F1: the token just refused is the one the auth service would hand back from its caches, so the
+  // re-acquire asks Entra for a new one (silently) whatever the caller's retry config does.
+  authService.clearCache();
   retry.onBeforeRetry?.();
   const freshToken = await retry.getRetryToken();
-  return fetch(url, withAuth(freshToken));
+  const retried = await fetch(url, withAuth(freshToken));
+  if (retried.status === 401) {
+    // #1571 review F2: the session cannot be renewed silently. One signal for every caller (Save, Find, Invoice,
+    // Email…): the pane shows its sign-in prompt, whose click is the only interactive sign-in.
+    authService.notifySignInRequired?.();
+  }
+  return retried;
 }

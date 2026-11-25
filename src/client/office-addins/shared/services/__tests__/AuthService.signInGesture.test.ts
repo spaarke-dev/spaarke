@@ -20,6 +20,7 @@ interface FakeStrategy {
   getMsalInstance: jest.Mock;
   isNaaActive: jest.Mock;
   clearCache: jest.Mock;
+  requestFreshToken: jest.Mock;
   logout: jest.Mock;
   name: string;
 }
@@ -44,6 +45,7 @@ jest.mock('@spaarke/auth', () => {
     getMsalInstance = jest.fn(() => ({ getAllAccounts: () => [HOME_ACCOUNT, SPAARKE_ACCOUNT] }));
     isNaaActive = jest.fn(() => true);
     clearCache = jest.fn();
+    requestFreshToken = jest.fn();
     logout = jest.fn(async () => undefined);
     constructor(config: unknown) {
       this.config = config;
@@ -107,12 +109,15 @@ describe('AuthService — no interactive sign-in without a click (#1571)', () =>
     expect(authService.isAuthenticated()).toBe(true);
   });
 
-  it('signIn() that the user does not complete leaves the pane signed out without a second attempt', async () => {
+  it('signIn() that the user does not complete says so, and makes no second attempt', async () => {
     await authService.initialize(CONFIG);
     const strategy = lastStrategy();
     strategy.acquire.mockClear();
 
-    await authService.signIn();
+    // #1571 review F2: a click that produced no token must not look like nothing happened.
+    await expect(authService.signIn()).rejects.toThrow(
+      'Sign-in did not complete. If a pop-up was blocked, allow pop-ups for this site and try again.'
+    );
 
     expect(strategy.acquireInteractive).toHaveBeenCalledTimes(1);
     expect(strategy.acquire).not.toHaveBeenCalled();
