@@ -1824,7 +1824,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on task/ebilling-def046 (f8212f8429; pending merge); live full run needs the owner's go |
+| **Status** | Fixed on task/ebilling-def046 (2638f632f2; pending merge); live full run needs the owner's go |
 | **Urgency** | medium |
 | **Filed** | 2026-10-23 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2312 |
