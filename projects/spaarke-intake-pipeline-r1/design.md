@@ -240,6 +240,14 @@ That would be an **invoice harness**.
 
 The alternative, migrating before eBilling's UAT, saves one UAT cycle but tests two changes at once.
 
+**Decision (owner, 2026-11-25): as recommended.**
+- Invoice is the second harness, in **Phase 3**.
+- It starts only after eBilling's owner UAT (eBilling task 163) signs off on the current code, and before any customer rollout.
+- **Freeze:** this project makes no edits to `Services/Finance/Submission/` (or other eBilling code) before that sign-off.
+- **Regression proof:** eBilling's own tests and end-to-end run, unchanged.
+- **Status at decision time** (`work/ebilling-r1` TASK-INDEX): about 211 tasks done. Open: the four dev deploys (079 in progress, 112, 136, 153), the end-to-end tests (160), the eval (161 partial, 162), UAT (163) and the wrap-up (190).
+- **Invoice Mailbox channel:** the `AttachmentClassification` producer (issue #1920, open) is wired in the shared email door's classify step (§6). Coordinate that with eBilling.
+
 ## 8. Component justification (CLAUDE.md §11), first pass
 
 | New surface | Existing | Extension | Cost of doing nothing |
@@ -260,7 +268,7 @@ The alternative, migrating before eBilling's UAT, saves one UAT cycle but tests 
 | **0 Spikes and cleanup** | (a) Container Apps Job hosting spike for the Python engines (§5 conditions 2–3). (b) App-only `agreement-review` writing an edit plan on 3 synthetic NDAs. (c) §10 cleanup items 1–8 | Job runs the engines from blob storage with identical golden-fixture output; edit plan valid on all 3; cleanup PRs merged or filed |
 | **1 Core + NDA via Front Door and Console** | Records, orchestrator, routing key, NDA harness, approval, Front Door return, Decision Record | An NDA submitted on the Front Door comes back marked up after approval, on dev |
 | **2 Email and Copilot doors** | Intake mailbox, classify-to-request, reply with attachments (threading checked), MCP submit/status tools | Same NDA end-to-end through email and through the agent |
-| **3 Invoice harness** | Move invoice orchestration onto the model (§7) | eBilling tests and end-to-end run unchanged |
+| **3 Invoice harness** | Move invoice orchestration onto the model (§7). Starts only after eBilling UAT sign-off | eBilling tests and end-to-end run unchanged |
 | **4 Other Front Door types** | Invention, trademark, policy harnesses as the owner prioritises | — |
 
 ## 10. Cleanup found in the code review (in scope; owner: this project unless noted)
@@ -304,7 +312,7 @@ Each item: confirm, then fix or file. These are master `b005279c4d` facts. None 
 1. ~~Project slug and name~~ **Decided 2026-11-25:** `spaarke-intake-pipeline-r1`.
 2. ~~Orchestration host~~ **Decided 2026-11-25: A**, BFF ADR-004 jobs + `sprk_processingjob` as the state machine, with the written reason (§4).
 3. ~~NDA engines~~ **Decided 2026-11-25: A**, the Python engines in a Container Apps Job, with conditions and a Phase 0 hosting spike (§5). Owner approval under ADR-052:77 given.
-4. Invoice: move as phase 3, after eBilling UAT and before customer rollout (recommended), or earlier?
+4. ~~Invoice timing~~ **Decided 2026-11-25:** Phase 3, after eBilling UAT (task 163) and before customer rollout; no edits to eBilling code until then (§7).
 5. Sending identity: the shared legal mailbox (recommended)?
 6. NDA standard master: the accelerator's playbook (recommended)? Carried from the NDA note.
 7. Email door: an intake mailbox only, or also classify mail arriving at existing mailboxes?
