@@ -1954,6 +1954,37 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 ---
 
+### DEF-070 — Invoice Review: no next/previous invoice in the dialog (owner review)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-25 |
+| **Source** | Owner review of the Invoice Review page on dev, 2026-11-25 (point 1 of 4; points 2-4 fixed on branch `task/ebilling-ir-review`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3124 |
+
+**Description**
+
+The Invoice Review dialog opens one invoice and has no `<` `>` to move to the next or previous invoice of the worklist it was opened from. The page is launched with a single `invoiceId` and an optional `lineId`; the worklist launcher passes one invoice. The only "next" in the page is `nextToDecide`, which moves between lines of one invoice. Not in spec FR-31.
+
+Failure without it: a reviewer working through a queue must close the dialog and open each next invoice from the worklist. No wrong data, no access effect.
+
+**Entry-points**
+
+- `src/solutions/InvoiceReview/src/services/launch.ts` (launch parameters)
+- `src/client/shared/Spaarke.UI.Components/src/components/Worklist/openInvoiceReview.ts` (the launcher)
+- `.claude/patterns/ui/record-modal-selection.md` (use `BrowseModal` with `nav` and `onBeforeNavigate`)
+
+**Suggested fix** (if known)
+
+The worklist passes its ordered invoice ids; the page hosts the review in `BrowseModal`, guards an unsaved decision or note with `onBeforeNavigate`, and keeps the line selection per invoice. Rebuild the Console bundle for the launcher change.
+
+**Estimated effort**: 1-2 days
+**Blockers**: none
+**Related**: FR-31, ADR-050, tasks 108 and 112
+
+---
 ### DEF-069 — Rule set main form: no command that opens the Rule Review page for that rule set (D-114, second half)
 
 | Field | Value |

@@ -687,6 +687,7 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
                 new EarlierInvoiceReadability(NullLogger<EarlierInvoiceReadability>.Instance),
                 new Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner(
                     host.BannerEntities ?? host.Entities.Object, NullLogger<Sprk.Bff.Api.Services.Finance.Procedures.ProcedureChangeBanner>.Instance),
+                new CodeSetResolver(host.Entities.Object, settings.Object, Mock.Of<ICodeSetSuggestionProvider>(), NullLogger<CodeSetResolver>.Instance),
                 NullLogger<InvoiceReviewReadService>.Instance));
 
             var locks = new Mock<IIdempotencyService>();
