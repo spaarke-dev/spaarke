@@ -3,7 +3,7 @@
 > **Last Updated**: 2026-11-25 ~18:40Z (batch 217-222 ALL merged + recorded; dev checks 210/211/218 PASS on BFF a1b7db1def; next batch 223-224 being written). State only; history in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-11.md` (previous checkpoint archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..**D-226**). Deferred work: one GitHub issue per item, label `ontology-deferred`,
-> plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-176**). Sub-agents never edit this file.
+> plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-177**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
