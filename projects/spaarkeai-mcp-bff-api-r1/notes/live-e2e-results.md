@@ -29,4 +29,6 @@
   - **Set firm is an Invoice Review action, not a Decide-lane one, so it is not testable in Copilot.** The 042 list of five is corrected to four, with Send budget inquiry depending on an email.
   - A privileged item comes only from a Secure matter that qualifies.
 
+**On-demand run (ontology-r1):** `POST /api/admin/jobs/{jobId}/trigger` (SystemAdmin) runs `SignalReevaluationJob` now. Take the jobId from `GET /api/admin/jobs`. It returns 202 plus a run id, and `GET …/status` gives the outcome. It is the full nightly write run over every enabled policy, so it needs the owner's go. `POST /api/ontology/admin/authoring/dry-run` previews which matters qualify and writes nothing.
+
 Open: (1) non-billing seed for the test user; (2) whether the run was signed in as the non-admin test user (the model's reply greets the user by first name).
