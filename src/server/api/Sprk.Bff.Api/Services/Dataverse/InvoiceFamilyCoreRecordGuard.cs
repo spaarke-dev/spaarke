@@ -61,9 +61,10 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// with <c>sprk_regardinginvoice</c> regards the invoice: its pair (<c>sprk_regardingrecordid</c> and the other four
 /// fields) describes the invoice, so the D-68 alternate key (firm, type, normalized value, record) never has an empty
 /// column. The invoice is never walked to its core record (that would name a record whose lookup is empty).</para>
-/// <para><b>Completeness (DEF-064, #2643).</b> Enforced by: <c>InvoiceFamilyCoreLookupWriterGuardTests</c> (ArchTests): every BFF type
-/// that names a family table and one of these core lookups AND calls a Dataverse write must call this class, or be on that
-/// test's reviewed list with a one-line reason. A new write path of a family row's core lookups calls the guard.</para>
+/// <para><b>Completeness (DEF-064, #2643).</b> Enforced by: <c>InvoiceFamilyCoreLookupWriterGuardTests</c> (ArchTests): every type that
+/// calls a deciding member of this class is on that test's roster and must keep calling one; every method that names a family table and
+/// one of these core lookups AND calls a Dataverse write must call a deciding member in that method, or be on the test's reviewed list
+/// with a reason. A new write path of a family row's core lookups calls the guard.</para>
 /// </remarks>
 public static class InvoiceFamilyCoreRecordGuard
 {

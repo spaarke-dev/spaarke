@@ -1,107 +1,257 @@
 using System.Reflection;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
 
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// ebilling-r1 DEF-064 (#2643): every BFF type that WRITES an invoice-family row's core-record lookups calls
-/// <see cref="InvoiceFamilyCoreRecordGuard"/>. A row of an invoice-family table names exactly one core record (matter, project or
-/// work assignment); the guard is the one server-side owner of that rule (FR-05). Every known write path calls it, each pinned by its
-/// own tests, but nothing pinned the COMPLETENESS of that set: a new path that writes those lookups on a family table without the guard
-/// would pass review silently. This test is that pin.
+/// ebilling-r1 DEF-064 (#2643): the BFF writers of an invoice-family row's core-record lookups all go through
+/// <see cref="InvoiceFamilyCoreRecordGuard"/>, and a new one cannot be added without the guard. A row of a family table names exactly one
+/// core record (matter, project or work assignment); the guard is the one server-side owner of that rule (FR-05). Every write path calls it,
+/// each pinned by its own tests, but nothing pinned the COMPLETENESS of that set. Two pins here, read from the compiled IL
+/// (<see cref="IlCallScan"/>, detector in <see cref="InvoiceFamilyWriterScan"/>):
 /// </summary>
 /// <remarks>
-/// <para><b>The detection signal</b> (the compiled assembly, via <see cref="IlCallScan"/>, not the text): an outermost type is a
-/// <b>candidate writer</b> when its IL does ALL of (1) loads the name of an invoice-family table, (2) loads the name of a core-record
-/// lookup column of the family, and (3) calls a Dataverse WRITE method. The tables and columns are read from
-/// <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/> itself, so the signal follows the guard's own table list; names are
-/// compared case-insensitively (a Web API payload spells them <c>sprk_RegardingMatter</c>). A candidate must either call a member of the
-/// guard or be on <see cref="Reviewed"/>.</para>
-/// <para><b>Why that signal.</b> The compiler folds a <c>const</c>, a <c>nameof</c> and a constant concatenation into one <c>ldstr</c>, so
-/// a payload built from named constants is seen. A pure reader (a query, a select list, a filter, a mapper) never reaches (3), so it does
-/// not appear. The write methods are those of the Dataverse seams the BFF writes through: any method named <c>Create*</c>, <c>Update*</c>,
-/// <c>Upsert*</c>, <c>Patch*</c>, <c>Post*</c>, <c>BulkUpdate*</c>, <c>Associate*</c> or <c>ExecuteTransaction*</c> declared in
-/// <c>Spaarke.Dataverse</c>, <c>Microsoft.Xrm.Sdk</c> or <c>Microsoft.PowerPlatform</c>. A path that writes through
-/// <c>OwnedChildWrite</c>, <c>RecordCreationService</c> or one of the generic update cores never calls those seams itself, so it is
-/// outside the scan on purpose: it gets the guard from the core it calls, and those cores are themselves scanned.</para>
-/// <para><b>What the signal cannot see</b> (stated, not hidden): a column name that is not a string constant in the writing type (read
-/// at run time from <c>CoreRecordLookups</c>, <c>CoreAncestorResolver.CoreAncestorLookups</c> or a configuration value, or held in a
-/// <c>static readonly</c> field of another type); a write through a seam outside the three namespaces above (a hand-rolled
-/// <c>HttpClient</c> call); and a type that names a family table and a core column and writes a DIFFERENT column of that row. The last
-/// one is the reason the list below exists: it is a reviewed list, not a proof. The list, the guard's own tests and the
-/// reviewers of a new write path are the other layers.</para>
-/// <para><b>Maintaining <see cref="Reviewed"/>.</b> A failure names the type and the tables, columns and write methods that matched.
-/// First choice: call the guard (<see cref="InvoiceFamilyCoreRecordGuard.CheckWriteAsync"/>, <see cref="InvoiceFamilyCoreRecordGuard.Check(Entity)"/>
-/// or the generic-update entry points) before the write, as <c>OwnedChildWrite</c> does. Only when the type provably writes none of the
-/// family's core lookups (it names them to read, filter or map, and writes other columns or other tables), add it to
-/// <see cref="Reviewed"/> with a one-line reason that says what it writes instead. A type on the list that no longer matches the
-/// signal, or that now calls the guard, fails too, so the list only shrinks. Never add a type to silence the test without reading the
-/// writes. <b>Controls</b>: <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over the <c>InvoiceFamilyWriterControl*</c>
+/// <para><b>1. The roster (positive pin).</b> Every type that calls a deciding member of the guard
+/// (<see cref="InvoiceFamilyWriterScan.Enforcing"/>) is on <see cref="Roster"/> with a one-line "writes X" reason, and must keep calling
+/// one: removing the call from a listed type fails the test, as does a listed type that no longer exists, and so does a NEW caller that is
+/// not listed. A path that reaches the guard through another type is pinned as a <see cref="Delegates"/> entry (the type must keep
+/// referencing the type that decides).</para>
+/// <para><b>2. The scan (negative pin).</b> A type is a <b>candidate writer</b> when its IL loads the name of a family table, loads a
+/// core-lookup column name AND has a method that calls a Dataverse write without calling a deciding guard member in that same method
+/// (a lambda's body, which cannot be tied to its method, is decided when any body of the type calls one). Tables and columns come from
+/// <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>; names are compared case-insensitively. A table is its name, its entity-set
+/// plural, or either one opening a Web API path (<c>sprk_invoices(</c>, <c>sprk_invoices/</c>); a column may carry a trailing
+/// <c>@odata.bind</c>. The typed <c>sprk_matter</c> / <c>sprk_project</c> count as a column unless the
+/// load is the entity-name argument of <c>new EntityReference(...)</c>. A write is a method named <c>Create*</c>, <c>Update*</c>,
+/// <c>Upsert*</c>, <c>Patch*</c>, <c>Post*</c>, <c>BulkUpdate*</c>, <c>Associate*</c> or <c>Execute*</c> declared in
+/// <c>Spaarke.Dataverse</c>, <c>Microsoft.Xrm.Sdk</c>, <c>Microsoft.PowerPlatform</c> or <c>Sprk.Bff.Api.Infrastructure.Dataverse</c>. A
+/// candidate must be on <see cref="Reviewed"/> (by method), with a reason.</para>
+/// <para><b>Not covered:</b> a column or table name that is not a string constant in the writing type; a write through a seam outside the
+/// four namespaces; a type that names a family table and a core column and writes a DIFFERENT column of that row (that case is why the
+/// reviewed list exists); the entity-name argument heuristic reads three instructions after the string load; an overload of a method shares
+/// the guard call of a same-named one.</para>
+/// <para><b>Maintaining <see cref="Reviewed"/>.</b> A failure names the type, method, tables, columns and write that matched. First choice:
+/// call the guard in that method. Only add a reviewed entry when the method (a) writes none of the family's core lookups, (b) writes them
+/// only to restore the row's own previous values, or (c) is a post-decision writer whose every caller decides first (and is on the
+/// roster or delegates). The reason says which and what the method writes. A reviewed method that no longer matches fails, so the list only
+/// shrinks. Never add an entry without reading the write. A new deciding caller goes on <see cref="Roster"/>.</para>
+/// <para><b>Controls</b>: <see cref="Detector_MustFireAndMustNotFire"/> runs the detector over the <c>InvoiceFamilyWriterControl*</c>
 /// fixtures below. Enforced by: this guard (ArchTests in CI and the Stop hook).</para>
 /// </remarks>
 public class InvoiceFamilyCoreLookupWriterGuardTests
 {
-    private static readonly Type Guard = typeof(InvoiceFamilyCoreRecordGuard);
-
-    /// <summary>
-    /// The reviewed list: types that name a family table and a core-record column and call a Dataverse write, and were read to confirm they
-    /// write NONE of the family's core lookups (one line each). The closed set: it must equal the scan's unguarded candidates.
-    /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> Reviewed = new Dictionary<string, string>(StringComparer.Ordinal)
+    /// <summary>Every type that calls a deciding guard member today, with what it writes. The closed set (see the class remarks).</summary>
+    private static readonly IReadOnlyDictionary<string, string> Roster = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer"] =
-            "names the family tables to re-own rows; writes only ownerid (a team) with a row-version guard",
-        ["Sprk.Bff.Api.Services.Access.SecureRootInheritance"] =
-            "reads the lineage columns; writes only the access-permission / inheritance marker columns, and deletes a half-created row",
-        ["Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore"] =
-            "creates a to-do (sprk_event) with its own sprk_regarding{core} pair; the family tables appear only as regarding record types",
-        ["Sprk.Bff.Api.Services.Communication.CommunicationEnrichmentService"] =
-            "writes sprk_communication regarding fields; the family tables appear only as regarding record types",
-        ["Sprk.Bff.Api.Services.Communication.EmailUploadCaptureService"] =
-            "creates sprk_communication; the invoice appears only as a regarding record type",
-        ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver"] =
-            "the re-file owner step: writes ownerid and puts back the row's own previous values after a failed re-file; the re-file itself is OwnedChildWrite.RefileAsync, which calls the guard",
-        ["Sprk.Bff.Api.Services.Finance.ApExportService"] =
-            "creates the export batch row and writes sprk_invoice's batch lookup; reads the core columns for the export lines",
-        ["Sprk.Bff.Api.Services.Finance.EligibleApproverResolver"] =
-            "associates eligible approvers and stamps the resolved-on column of an approval; reads matter / project to pick the approver roles",
-        ["Sprk.Bff.Api.Services.Finance.InvoiceCorrectionReevaluation"] =
-            "writes a submission's findings and a line's status columns only; reads the core columns of the invoice",
-        ["Sprk.Bff.Api.Services.Finance.Submission.SubmissionCommitGate"] =
-            "writes a submission's status and failure columns, reopens a superseded invoice's status, and rolls back its own rows; reads the core columns of the submission",
-        ["Sprk.Bff.Api.Services.Finance.SubmissionOverrideService"] =
-            "writes a submission's status and an invoice's decision note and review detail in one transaction; reads the core columns of the submission",
-        ["Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence"] =
-            "writes sprk_document and its association lookups; the invoice is a document's association target, not a family row",
-        ["Sprk.Bff.Api.Services.Workspace.TodoGenerationService"] =
-            "creates sprk_event / to-do rows with their own regarding pair; the invoice and matter are query targets and regarding record types",
+        ["Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints"] =
+            "writes the field-mapping push's target row (any table, family rows included) as its caller: CheckGenericUpdateAsync before the write",
+        ["Sprk.Bff.Api.Api.Finance.InvoiceSubmissionEndpoints"] =
+            "writes the invoice submission row naming its core record on create: Check and DeriveResolverFieldsAsync",
+        ["Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordActionCore"] =
+            "writes the playbook update action's target row (any table, family rows included): CheckGenericUpdateAsync",
+        ["Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"] =
+            "derives a family row's core record from the stored row (Check) for the ancestor stamp; its own writes are access-permission columns",
+        ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler"] =
+            "writes the output orchestrator's update of any row, family rows included: CheckGenericUpdateAsync",
+        ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite"] =
+            "the create / update / re-file core of every child-record route and chat tool; writes family rows' core lookups and the resolver fields",
+        ["Sprk.Bff.Api.Services.Finance.InvoiceAdjustmentService"] =
+            "creates an adjustment line (sprk_billingevent) under an invoice: Check on the row it builds",
+        ["Sprk.Bff.Api.Services.Finance.InvoiceCorrectionService"] =
+            "creates a correction row (sprk_invoicecorrection) carrying the line's core lookups: Check on the row it builds",
+        ["Sprk.Bff.Api.Services.Finance.InvoiceLineAddService"] =
+            "creates an invoice line (sprk_billingevent) under an invoice: Check on the row it builds",
+        ["Sprk.Bff.Api.Services.Finance.InvoiceLineDecisionService"] =
+            "creates the correction rows of a line decision carrying the line's core lookups: Check on the row it builds",
+        ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister"] =
+            "creates the invoice, line and submission rows of a submission, naming their core record: Check and DeriveResolverFieldsAsync",
+        ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService"] =
+            "creates the submission row naming its core record: Check and DeriveResolverFieldsAsync",
+        ["Sprk.Bff.Api.Services.Finance.Submission.SubmitInvoiceFromEmailOperation"] =
+            "creates the submission of an invoice taken from an email: Check on the row it builds",
+        ["Sprk.Bff.Api.Services.RecordCreation.RecordTableRules"] =
+            "the create core's invoice-family pre-write step: DeriveGenericResolverFieldsAsync for every family table",
     };
 
-    [Fact(DisplayName = "DEF-064: every type that writes an invoice-family row's core-record lookups calls InvoiceFamilyCoreRecordGuard, or is on the reviewed list")]
+    /// <summary>A type that reaches the guard through another type: it must keep referencing that type's member (<c>*</c> = any member).</summary>
+    private static readonly IReadOnlyList<(string Type, string Target, string Member, string Reason)> Delegates =
+    [
+        ("Sprk.Bff.Api.Services.RecordCreation.RecordCreationService", "Sprk.Bff.Api.Services.RecordCreation.RecordTableRules", "Find",
+            "the create core: its per-table pre-write rules (RecordTableRules, which decides every family create) are looked up here"),
+        ("Sprk.Bff.Api.Api.ChildRecordEndpoints", "Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite", "*",
+            "the child-record routes: every create, update and re-file of a family row is written through OwnedChildWrite"),
+    ];
+
+    private sealed record ReviewedType(string Reason, string[] Methods);
+
+    /// <summary>
+    /// Candidate writers that were read and write none of the family's core lookups (or only restore the row's own previous values, or
+    /// follow a caller's decision). Keyed by type, with the methods reviewed; the closed set the scan must equal.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, ReviewedType> Reviewed = new Dictionary<string, ReviewedType>(StringComparer.Ordinal)
+    {
+        ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer"] = new(
+            "(a) names the family tables to re-own rows; writes only ownerid (a team) with a row-version guard", ["(closures)"]),
+        ["Sprk.Bff.Api.Services.Access.SecureRootInheritance"] = new(
+            "(a) reads the lineage columns; writes only the access-permission and inheritance-marker columns", ["WriteMarkerAsync", "WritePermissionAsync"]),
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler"] = new(
+            "(a) POSTs a search query to the search service; reads only", ["ExecuteChatAsync"]),
+        ["Sprk.Bff.Api.Services.Ai.Handlers.EmailDraftToolHandler"] = new(
+            "(a) creates the draft sprk_communication row; the family tables are only regarding record types", ["ExecuteDraftAsync"]),
+        ["Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore"] = new(
+            "(a) creates a to-do (sprk_event) with its own regarding pair; the family tables are only regarding record types", ["CreateAsync"]),
+        ["Sprk.Bff.Api.Services.Communication.CommunicationEnrichmentService"] = new(
+            "(a) writes sprk_communication triage, owner and review-log columns; the family tables are only regarding record types",
+            ["AnnotateTriageSummaryAsync", "AssignOwningTeamAsync", "CreateReviewLogAsync", "PersistTriageResultAsync"]),
+        ["Sprk.Bff.Api.Services.Communication.CommunicationService"] = new(
+            "(a) creates and updates sprk_communication and its attachment rows; the invoice is a regarding record type",
+            [
+                "ArchiveExistingAttachmentsAsync", "ArchiveOutboundAttachmentsAsync", "ArchiveToSpeAsync", "CreateAttachmentRecordsAsync",
+                "CreatePreparedRecordAsync", "PostToRecordThreadAsync", "RetirePostWithoutThreadAsync", "StampInternetMessageIdAsync",
+            ]),
+        ["Sprk.Bff.Api.Services.Communication.EmailUploadCaptureService"] = new(
+            "(a) creates sprk_communication; the invoice is only a regarding record type", ["CaptureWithOutcomeAsync"]),
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite"] = new(
+            "(c) the post-decision writer of the locked lookups, as the application, after the caller's guard decision: its callers are "
+            + "ChildRecordEndpoints (delegate: OwnedChildWrite) and FieldMappingEndpoints (roster: CheckGenericUpdateAsync)",
+            ["PatchAsCallerAsync", "UpdateExistingSplitAsync"]),
+        ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver"] = new(
+            "(b) the re-file's owner step: writes ownerid and, after a failed re-file, restores the row's own previous values; the re-file itself is "
+            + "OwnedChildWrite.RefileAsync, which calls the guard",
+            ["PutBackFilingAsync", "ReleaseOwnSecureWriteAsync", "SettleOwnerAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.ApExportService"] = new(
+            "(a) creates the export batch row and writes the invoice's batch lookup; reads the core columns for the export lines",
+            ["CompensateAsync", "CompleteAsync", "CreateBatchAsync", "ReleaseClaimAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.EligibleApproverResolver"] = new(
+            "(a) associates eligible approvers and stamps the resolved-on column of an approval", ["SyncAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.InvoiceCorrectionReevaluation"] = new(
+            "(a) writes a submission's findings and status and a line's status only",
+            ["DeriveStatusAsync", "PatchFindingsAsync", "ReconcileSignalsAsync", "RecordFollowedThroughAsync", "RederivePendingAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.SpendSnapshotService"] = new(
+            "(a) upserts its own spend-snapshot rows (its matter / project lookups are the snapshot's, not a family row's)", ["UpsertSnapshotAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.Submission.SubmissionCommitGate"] = new(
+            "(a) writes a submission's status and failure columns, reopens a superseded invoice's status and rolls back its own rows",
+            ["CompensateAsync", "NoteUndoHeldAsync", "ReopenSupersededAsync", "UndoAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.SubmissionOverrideService"] = new(
+            "(a) writes a submission's status and an invoice's decision note and review detail in one transaction",
+            ["DecideLockedAsync", "RepairReleasedColumnsAsync"]),
+        ["Sprk.Bff.Api.Services.Office.OfficeDocumentPersistence"] = new(
+            "(a) writes sprk_document and its association lookups; the invoice is a document's association target, not a family row",
+            ["CreateDocumentWithSpePointersAsync", "GraduateLinkedCopyIfDivergedAsync", "LinkEditableCopyToCanonicalAsync", "RecordNewVersionAsync"]),
+        ["Sprk.Bff.Api.Services.Ontology.OntologyAdminAuthoringService"] = new(
+            "(a) writes the ontology's own policy and version rows",
+            ["PublishVersionAsync", "SavePolicyAsync", "StampAndMoveAsync", "StampInForceToAsync"]),
+        ["Sprk.Bff.Api.Services.Workspace.TodoGenerationService"] = new(
+            "(a) creates to-do rows with their own regarding pair; the invoice and matter are query targets and regarding record types",
+            ["CreateTodoAsync"]),
+    };
+
+    /// <summary>
+    /// Methods of a type on <see cref="Roster"/> that write other things than the row the type decides. Each decides its own row in another
+    /// method of the same type (the roster pin holds that call), so these are reviewed by method like the candidates.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, ReviewedType> ReviewedOnRoster = new Dictionary<string, ReviewedType>(StringComparer.Ordinal)
+    {
+        ["Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"] = new(
+            "(a) writes the access-permission column only", ["RefreshDocumentAccessPermissionAsync", "RefreshInheritedAccessPermissionAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.InvoiceAdjustmentService"] = new(
+            "(a) writes a line's active state and the invoice totals; the added line's row is decided by Check where it is built",
+            ["ApplyRemoveAsync", "FinishAddAsync", "UndoRemovalAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.InvoiceCorrectionService"] = new(
+            "(a) submits the correction row decided by Check where it is built, with the line value updates", ["ApplyAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.InvoiceLineAddService"] = new(
+            "(a) reconciles the signal rows of the added line; the line itself is decided by Check where it is built", ["ReconcileSignalsAsync"]),
+        ["Sprk.Bff.Api.Services.Finance.InvoiceLineDecisionService"] = new(
+            "(a) writes line decision status and the correction rows decided by Check where they are built", ["ApplyAsync", "WriteUnreviewedAsync"]),
+    };
+
+    private static IReadOnlyDictionary<string, InvoiceFamilyWriterScan.TypeFindings> ScanProduct() =>
+        InvoiceFamilyWriterScan.Scan(typeof(Program).Assembly.GetTypes());
+
+    [Fact(DisplayName = "DEF-064 roster: every type that calls a deciding member of InvoiceFamilyCoreRecordGuard is listed, and keeps calling one")]
+    public void EveryDecidingCaller_IsOnTheRoster_AndEveryRosterTypeStillCalls()
+    {
+        var assembly = typeof(Program).Assembly;
+        var found = ScanProduct();
+        var callers = found.Values.Where(f => f.EnforcingCalls.Count > 0).Select(f => f.Type).ToHashSet(StringComparer.Ordinal);
+
+        var unlisted = callers.Except(Roster.Keys).OrderBy(n => n).ToList();
+        Assert.True(
+            unlisted.Count == 0,
+            "These types call a deciding member of InvoiceFamilyCoreRecordGuard but are not on the roster: " + string.Join(", ", unlisted)
+            + ". Add each with a one-line 'writes X' reason.");
+
+        var gone = Roster.Keys.Where(n => assembly.GetType(n) is null).OrderBy(n => n).ToList();
+        Assert.True(gone.Count == 0, "Roster types that no longer exist (remove or rename the entry): " + string.Join(", ", gone));
+
+        var dropped = Roster.Keys.Except(callers).OrderBy(n => n).ToList();
+        Assert.True(
+            dropped.Count == 0,
+            "These roster types no longer call a deciding member of InvoiceFamilyCoreRecordGuard (" + string.Join(", ", InvoiceFamilyWriterScan.Enforcing.Order())
+            + "): " + string.Join(", ", dropped) + ". The write they own would be unguarded: restore the call.");
+
+        Assert.All(Roster, entry => Assert.False(string.IsNullOrWhiteSpace(entry.Value), entry.Key + " needs a reason."));
+    }
+
+    [Fact(DisplayName = "DEF-064 delegates: the create core and the child-record routes keep reaching the guard through the type that decides")]
+    public void EveryDelegate_StillReferencesItsDecidingType()
+    {
+        var assembly = typeof(Program).Assembly;
+        foreach (var (typeName, target, member, _) in Delegates)
+        {
+            var type = assembly.GetType(typeName);
+            Assert.True(type is not null, typeName + " no longer exists (update Delegates).");
+            Assert.True(assembly.GetType(target) is not null, target + " no longer exists (update Delegates).");
+
+            var references = IlCallScan.MethodReferences(IlCallScan.WithNested(type!))
+                .Any(r => r.Target.DeclaringType is { } d && IlCallScan.Outermost(d).FullName == target
+                          && (member == "*" || r.Target.Name == member));
+            Assert.True(references, $"{typeName} no longer references {target}.{member}: its writes of family rows would skip the guard.");
+        }
+    }
+
+    [Fact(DisplayName = "DEF-064: every method that writes a family row's core lookups calls the guard in that method, or is reviewed")]
     public void EveryFamilyCoreLookupWriter_CallsTheGuard_OrIsReviewed()
     {
-        var unguarded = Candidates(typeof(Program).Assembly.GetTypes())
-            .Where(c => !c.CallsGuard)
-            .ToDictionary(c => c.Type, StringComparer.Ordinal);
+        var candidates = ScanProduct().Values.Where(f => f.IsCandidate).ToDictionary(f => f.Type, StringComparer.Ordinal);
+        var reviewed = Reviewed.Concat(ReviewedOnRoster).ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal);
 
-        var missing = unguarded.Keys.Except(Reviewed.Keys, StringComparer.Ordinal).OrderBy(n => n).ToList();
+        var unreviewed = new List<string>();
+        foreach (var (type, findings) in candidates)
+        {
+            reviewed.TryGetValue(type, out var entry);
+            foreach (var unit in findings.UnguardedWrites.Where(u => entry is null || !entry.Methods.Contains(u.Method)))
+            {
+                unreviewed.Add($"{type}.{unit.Method} (tables: {string.Join(",", findings.Tables)}; columns: {string.Join(",", findings.Columns)}; "
+                               + $"writes: {string.Join(",", unit.Writes)})");
+            }
+        }
+
         Assert.True(
-            missing.Count == 0,
-            "These types name an invoice-family table and a core-record lookup column AND call a Dataverse write, yet never call "
-            + "InvoiceFamilyCoreRecordGuard: " + string.Join("; ", missing.Select(n => unguarded[n].Describe()))
-            + ". An invoice-family row names exactly one core record (FR-05): call the guard before the write, or - only when the type "
-            + "provably writes none of those lookups - add it to Reviewed with a one-line reason (see the class remarks).");
+            unreviewed.Count == 0,
+            "These methods name an invoice-family table and a core-record lookup column AND call a Dataverse write, yet no deciding member of "
+            + "InvoiceFamilyCoreRecordGuard is called in them: " + string.Join("; ", unreviewed)
+            + ". An invoice-family row names exactly one core record (FR-05): call the guard before the write, or - only when the method "
+            + "meets the criteria in the class remarks - add it to Reviewed with a reason.");
 
-        var stale = Reviewed.Keys.Except(unguarded.Keys, StringComparer.Ordinal).OrderBy(n => n).ToList();
+        var stale = new List<string>();
+        foreach (var (type, entry) in reviewed)
+        {
+            candidates.TryGetValue(type, out var findings);
+            var live = findings?.UnguardedWrites.Select(u => u.Method).ToHashSet(StringComparer.Ordinal) ?? [];
+            stale.AddRange(entry.Methods.Where(m => !live.Contains(m)).Select(m => $"{type}.{m}"));
+        }
+
         Assert.True(
             stale.Count == 0,
-            "These types are on the reviewed list but no longer match the signal (or now call the guard): " + string.Join(", ", stale)
+            "Reviewed methods that no longer match the signal (gone, renamed, or now call the guard): " + string.Join(", ", stale.Order())
             + ". Remove them so the list only shrinks.");
 
-        Assert.All(Reviewed, entry => Assert.False(string.IsNullOrWhiteSpace(entry.Value), entry.Key + " needs a reason."));
+        Assert.All(reviewed, entry => Assert.False(string.IsNullOrWhiteSpace(entry.Value.Reason), entry.Key + " needs a reason."));
     }
 
     [Fact(DisplayName = "DEF-064 (controls): the detector flags an unguarded writer in any shape and passes readers, guarded writers and unrelated writers")]
@@ -112,121 +262,77 @@ public class InvoiceFamilyCoreLookupWriterGuardTests
             typeof(InvoiceFamilyWriterControlUnguardedCreate),
             typeof(InvoiceFamilyWriterControlUnguardedAsyncUpdate),
             typeof(InvoiceFamilyWriterControlUnguardedWebApiPayload),
+            typeof(InvoiceFamilyWriterControlMixedMethods),
             typeof(InvoiceFamilyWriterControlGuardedCreate),
+            typeof(InvoiceFamilyWriterControlNonDecidingGuardMember),
             typeof(InvoiceFamilyWriterControlReader),
             typeof(InvoiceFamilyWriterControlOtherTableWriter),
             typeof(InvoiceFamilyWriterControlOtherColumnWriter),
+            typeof(InvoiceFamilyWriterControlEntityNameOnly),
         }.SelectMany(IlCallScan.WithNested);
 
-        var found = Candidates(controls).ToDictionary(c => c.Type, StringComparer.Ordinal);
+        var found = InvoiceFamilyWriterScan.Scan(controls);
+        string Name(Type t) => t.FullName!;
+        IReadOnlyList<string> Unguarded(Type t) => found[Name(t)].UnguardedWrites.Select(u => u.Method).ToList();
 
-        // Must fire, unguarded: a create on an Entity (a plain method), an update from inside an async method (a state machine, attributed
-        // to its outermost type), and a Web API payload spelled in mixed case through the Web API client.
-        foreach (var fires in new[]
+        // Must fire: a create on an Entity, an update inside an async method (a state machine, attributed to its method), a Web API payload
+        // with only @odata.bind keys on an entity set, and a second unguarded method in a type whose first method is guarded.
+        Assert.Equal(["Write"], Unguarded(typeof(InvoiceFamilyWriterControlUnguardedCreate)));
+        Assert.Equal(["Refile"], Unguarded(typeof(InvoiceFamilyWriterControlUnguardedAsyncUpdate)));
+        Assert.Equal(["Write"], Unguarded(typeof(InvoiceFamilyWriterControlUnguardedWebApiPayload)));
+        Assert.Equal(["UnguardedWrite"], Unguarded(typeof(InvoiceFamilyWriterControlMixedMethods)));
+        Assert.Contains("Check", found[Name(typeof(InvoiceFamilyWriterControlMixedMethods))].EnforcingCalls);
+
+        // Must fire: a call of a guard member that decides nothing (a column list) does not satisfy the guard.
+        Assert.Equal(["Write"], Unguarded(typeof(InvoiceFamilyWriterControlNonDecidingGuardMember)));
+        Assert.Empty(found[Name(typeof(InvoiceFamilyWriterControlNonDecidingGuardMember))].EnforcingCalls);
+
+        // Must be satisfied: the first control's shape plus a deciding call in the same method; it is a roster caller, not a candidate.
+        Assert.False(found[Name(typeof(InvoiceFamilyWriterControlGuardedCreate))].IsCandidate);
+        Assert.Contains("Check", found[Name(typeof(InvoiceFamilyWriterControlGuardedCreate))].EnforcingCalls);
+
+        // Must not fire: a reader; a writer of a table outside the family; a writer of a family row that names no core lookup; a writer
+        // whose only core-table name is the entity-name argument of a reference.
+        foreach (var quiet in new[]
         {
-            typeof(InvoiceFamilyWriterControlUnguardedCreate),
-            typeof(InvoiceFamilyWriterControlUnguardedAsyncUpdate),
-            typeof(InvoiceFamilyWriterControlUnguardedWebApiPayload),
+            typeof(InvoiceFamilyWriterControlReader),
+            typeof(InvoiceFamilyWriterControlOtherTableWriter),
+            typeof(InvoiceFamilyWriterControlOtherColumnWriter),
+            typeof(InvoiceFamilyWriterControlEntityNameOnly),
         })
         {
-            Assert.True(found.TryGetValue(fires.FullName!, out var hit), fires.Name + " should be a candidate.");
-            Assert.False(hit!.CallsGuard, fires.Name + " never calls the guard.");
-        }
-
-        // Must fire but be satisfied: the same shape as the first control, plus a call of the guard.
-        Assert.True(found.TryGetValue(typeof(InvoiceFamilyWriterControlGuardedCreate).FullName!, out var guarded));
-        Assert.True(guarded!.CallsGuard);
-
-        // Must not fire: a reader (names the table and the columns, calls no write); a writer of a table outside the family; a writer of
-        // a family table that names no core lookup.
-        Assert.DoesNotContain(typeof(InvoiceFamilyWriterControlReader).FullName!, found.Keys);
-        Assert.DoesNotContain(typeof(InvoiceFamilyWriterControlOtherTableWriter).FullName!, found.Keys);
-        Assert.DoesNotContain(typeof(InvoiceFamilyWriterControlOtherColumnWriter).FullName!, found.Keys);
-        Assert.Equal(4, found.Count);
-    }
-
-    [Fact(DisplayName = "DEF-064: the signal's tables and columns come from the guard's own list")]
-    public void TheSignalFollowsTheGuardsOwnTableAndColumnList()
-    {
-        Assert.Equal(6, Tables().Count);
-        foreach (var column in new[] { "sprk_matter", "sprk_project", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment" })
-        {
-            Assert.Contains(column, Columns());
+            Assert.False(found.TryGetValue(Name(quiet), out var hit) && hit.IsCandidate, quiet.Name + " must not be a candidate.");
         }
     }
 
-    private static HashSet<string> Tables() =>
-        new(InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys, StringComparer.OrdinalIgnoreCase);
-
-    private static HashSet<string> Columns() =>
-        new(InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Values.SelectMany(l => l).Select(l => l.Column), StringComparer.OrdinalIgnoreCase);
-
-    private static readonly string[] WritePrefixes =
-        ["Create", "Update", "Upsert", "Patch", "Post", "BulkUpdate", "Associate", "ExecuteTransaction"];
-
-    private static readonly string[] WriteNamespaces = ["Spaarke.Dataverse", "Microsoft.Xrm.Sdk", "Microsoft.PowerPlatform"];
-
-    private static bool IsDataverseWrite(MethodBase target) =>
-        target.DeclaringType is { } declaring
-        && WriteNamespaces.Any(ns => (declaring.Namespace ?? string.Empty).StartsWith(ns, StringComparison.Ordinal))
-        && WritePrefixes.Any(p => target.Name.StartsWith(p, StringComparison.Ordinal));
-
-    private sealed record Candidate(
-        string Type, bool CallsGuard, IReadOnlyCollection<string> Tables, IReadOnlyCollection<string> Columns, IReadOnlyCollection<string> Writes)
+    [Fact(DisplayName = "DEF-064: the guard's static members are all classified, and the signal's tables are the guard's own")]
+    public void TheGuardsMembersAreClassified_AndTheSignalFollowsItsTableList()
     {
-        public string Describe() =>
-            $"{Type} (tables: {string.Join(",", Tables)}; columns: {string.Join(",", Columns)}; writes: {string.Join(",", Writes)})";
-    }
-
-    /// <summary>
-    /// The outermost types in <paramref name="types"/> that load a family table name, load a core-lookup column name and call a Dataverse
-    /// write, each with whether it also calls a member of the guard. The guard itself is the owner and is never a candidate.
-    /// </summary>
-    private static IReadOnlyList<Candidate> Candidates(IEnumerable<Type> types)
-    {
-        var list = types.Where(t => IlCallScan.Outermost(t) != Guard).ToList();
-        var tables = Tables();
-        var columns = Columns();
-
-        var tableHits = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        var columnHits = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        foreach (var (caller, _, value) in IlCallScan.StringLoads(list))
-        {
-            var owner = IlCallScan.Outermost(caller).FullName!;
-            if (tables.Contains(value))
-                Add(tableHits, owner, value.ToLowerInvariant());
-            if (columns.Contains(value))
-                Add(columnHits, owner, value.ToLowerInvariant());
-        }
-
-        var writeHits = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        var guardCallers = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (caller, _, target) in IlCallScan.MethodReferences(list))
-        {
-            var owner = IlCallScan.Outermost(caller).FullName!;
-            if (target.DeclaringType is { } declaring && IlCallScan.Outermost(declaring) == Guard)
-                guardCallers.Add(owner);
-            if (IsDataverseWrite(target))
-                Add(writeHits, owner, target.DeclaringType!.Name + "." + target.Name);
-        }
-
-        return tableHits.Keys
-            .Where(t => columnHits.ContainsKey(t) && writeHits.ContainsKey(t))
-            .Select(t => new Candidate(
-                t, guardCallers.Contains(t), tableHits[t].Order().ToList(), columnHits[t].Order().ToList(), writeHits[t].Order().ToList()))
-            .OrderBy(c => c.Type, StringComparer.Ordinal)
+        var members = InvoiceFamilyWriterScan.Guard
+            .GetMembers(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .Where(m => m is MethodInfo or PropertyInfo or FieldInfo && !m.Name.StartsWith('<')
+                        && m is not FieldInfo { IsLiteral: true } and not FieldInfo { IsPrivate: true } and not MethodInfo { IsPrivate: true })
+            .Select(m => m.Name)
+            .Distinct()
+            .OrderBy(n => n)
             .ToList();
 
-        static void Add(Dictionary<string, HashSet<string>> map, string key, string value)
-        {
-            if (!map.TryGetValue(key, out var set))
-                map[key] = set = new HashSet<string>(StringComparer.Ordinal);
-            set.Add(value);
-        }
+        var unclassified = members.Where(n => !InvoiceFamilyWriterScan.Enforcing.Contains(n) && !InvoiceFamilyWriterScan.NotEnforcing.Contains(n)).ToList();
+        Assert.True(
+            unclassified.Count == 0,
+            "New InvoiceFamilyCoreRecordGuard members not classified in InvoiceFamilyWriterScan (Enforcing = decides a write; NotEnforcing = anything "
+            + "else): " + string.Join(", ", unclassified));
+
+        var gone = InvoiceFamilyWriterScan.Enforcing.Where(n => !members.Contains(n)).ToList();
+        Assert.True(gone.Count == 0, "Enforcing members that no longer exist: " + string.Join(", ", gone));
+
+        var keys = InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var scanned = InvoiceFamilyWriterScan.Tables().Where(t => keys.Contains(t)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.True(keys.SetEquals(scanned), "The scan's tables must be exactly the guard's CoreRecordLookups keys (plus their entity-set plurals).");
     }
 }
 
-/// <summary>Control (must fire, unguarded): builds an invoice row naming a matter and creates it.</summary>
+/// <summary>Control (must fire): builds an invoice row naming a matter under the attribute key and creates it.</summary>
 internal static class InvoiceFamilyWriterControlUnguardedCreate
 {
     internal static Task<Guid> Write(IGenericEntityService entities, Guid matterId)
@@ -237,7 +343,7 @@ internal static class InvoiceFamilyWriterControlUnguardedCreate
     }
 }
 
-/// <summary>Control (must fire, unguarded): the write is inside an async method, so it is a state machine's body.</summary>
+/// <summary>Control (must fire): the write is inside an async method, so it is a state machine's body.</summary>
 internal static class InvoiceFamilyWriterControlUnguardedAsyncUpdate
 {
     internal static async Task Refile(IGenericEntityService entities, Guid lineId, Guid projectId)
@@ -250,17 +356,38 @@ internal static class InvoiceFamilyWriterControlUnguardedAsyncUpdate
     }
 }
 
-/// <summary>Control (must fire, unguarded): a Web API payload through the Web API client, the column spelled in mixed case.</summary>
+/// <summary>Control (must fire): a Web API write through the per-user client, an entity set and only <c>@odata.bind</c> keys.</summary>
 internal static class InvoiceFamilyWriterControlUnguardedWebApiPayload
 {
-    internal static Task Write(DataverseWebApiClient client, Guid id, string bind) =>
-        client.UpdateAsync(
-            "sprk_invoiceapprovals",
-            id,
-            new Dictionary<string, object> { ["sprk_invoiceapproval"] = "x", ["sprk_RegardingMatter@odata.bind"] = bind, ["sprk_RegardingProject"] = bind });
+    private const string EntitySet = "sprk_invoicesubmissions";
+
+    internal static Task Write(IDataverseUserClient client, Guid id, string bind, CancellationToken ct)
+    {
+        var payload = new Dictionary<string, object> { ["sprk_RegardingMatter@odata.bind"] = bind, ["sprk_RegardingProject@odata.bind"] = bind };
+        return client.PatchAsync(EntitySet + "(" + id + ")", System.Text.Json.JsonSerializer.Serialize(payload), ct);
+    }
 }
 
-/// <summary>Control (must fire, satisfied): the first control's shape plus a call of the guard.</summary>
+/// <summary>Control (must fire on the second method only): one method decides before it writes, the other writes with no decision.</summary>
+internal static class InvoiceFamilyWriterControlMixedMethods
+{
+    internal static Task<Guid> GuardedWrite(IGenericEntityService entities, Guid matterId)
+    {
+        var row = new Entity("sprk_invoicesubmission");
+        row["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
+        _ = InvoiceFamilyCoreRecordGuard.Check(row);
+        return entities.CreateAsync(row);
+    }
+
+    internal static Task<Guid> UnguardedWrite(IGenericEntityService entities, Guid projectId)
+    {
+        var row = new Entity("sprk_invoiceapproval");
+        row["sprk_regardingproject"] = new EntityReference("sprk_project", projectId);
+        return entities.CreateAsync(row);
+    }
+}
+
+/// <summary>Control (must be satisfied): a create with a deciding call of the guard in the same method.</summary>
 internal static class InvoiceFamilyWriterControlGuardedCreate
 {
     internal static Task<Guid> Write(IGenericEntityService entities, Guid matterId)
@@ -268,6 +395,18 @@ internal static class InvoiceFamilyWriterControlGuardedCreate
         var row = new Entity("sprk_invoicesubmission");
         row["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
         _ = InvoiceFamilyCoreRecordGuard.Check(row);
+        return entities.CreateAsync(row);
+    }
+}
+
+/// <summary>Control (must fire): names the guard's column list but never asks it to decide.</summary>
+internal static class InvoiceFamilyWriterControlNonDecidingGuardMember
+{
+    internal static Task<Guid> Write(IGenericEntityService entities, Guid matterId)
+    {
+        _ = InvoiceFamilyCoreRecordGuard.ColumnsToRead("sprk_invoicecorrection");
+        var row = new Entity("sprk_invoicecorrection");
+        row["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
         return entities.CreateAsync(row);
     }
 }
@@ -295,4 +434,14 @@ internal static class InvoiceFamilyWriterControlOtherColumnWriter
 {
     internal static Task Write(IGenericEntityService entities, Guid id) =>
         entities.UpdateAsync("sprk_invoice", id, new Dictionary<string, object> { ["statuscode"] = 2 });
+}
+
+/// <summary>Control (must not fire): a family row whose only mention of a core table is the entity-name argument of a reference.</summary>
+internal static class InvoiceFamilyWriterControlEntityNameOnly
+{
+    internal static Task Write(IGenericEntityService entities, Guid id, Guid matterId) =>
+        entities.UpdateAsync(
+            "sprk_invoice",
+            id,
+            new Dictionary<string, object> { ["sprk_vendororg"] = new EntityReference("sprk_matter", matterId) });
 }
