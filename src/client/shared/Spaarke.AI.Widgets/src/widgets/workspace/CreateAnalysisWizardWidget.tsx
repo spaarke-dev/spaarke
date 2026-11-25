@@ -26,19 +26,24 @@
  *   2. Creates the `sprk_analysis` record: name / description / work-type /
  *      access (owner) / the ADR-024 regarding resolver fields (via
  *      `applyResolverFields`) / `sprk_documentid` (ADR-007 hop — NEVER an SPE
- *      pointer). "Associate-to" inheritance is Field-Mapping-driven: before
- *      create, `applyFieldMappings(parent → sprk_analysis)` lets a configured
- *      profile enrich the payload (graceful no-op when no profile exists).
+ *      pointer). The payload holds only what the user entered or picked, the
+ *      document bind, the regarding keys and the wizard's own run status. The
+ *      client maps nothing: "Associate-to" inheritance is applied by the BFF
+ *      (field-mapping-server-write-path-r1, FR-16) — the create goes through
+ *      `POST /api/v1/child-records/sprk_analysis` and names the chosen
+ *      association parent as its `mappingSource`, so the server fills (fill-only,
+ *      after probing Read as the caller) what the user did not enter, and the
+ *      server's warnings are shown on the success panel.
  *   3. Marks the Analysis `InProgress` ("run the analysis" — see the
  *      "Run analysis" scoping note below) and dispatches the existing
  *      `document-viewer` workspace widget (`widget_load`) to load the file
  *      to a workspace tab.
  *   4. Applies selected next-steps: "Create To Do" reuses
- *      `createTodoRegardingChild` (already Field-Mapping-driven internally —
- *      `TodoService.createTodo` calls `applyFieldMappings`, task 021); "Send
- *      Email" applies `applyFieldMappings(sprk_analysis → sprk_communication)`
- *      to let a configured profile supply subject/body, falling back to the
- *      user-entered values when no profile is configured.
+ *      `createTodoRegardingChild` (created through the BFF, which maps
+ *      server-side); "Send Email" sends the user-typed subject/body as they are
+ *      (empty allowed) with the analysis as the association — the BFF send path
+ *      fills an EMPTY subject/body from the `sprk_analysis → sprk_communication`
+ *      mapping and never replaces a typed value (FR-17).
  *
  * Scoping note — "run the analysis" (deviation, documented per task-execute
  * Step 8): this task's declared dependencies are 011 (client type) and 012
@@ -61,7 +66,7 @@
  *
  * @see CreateRecordWizard        — upstream wizard shell (@spaarke/ui-components)
  * @see AssociateToStep           — regarding-lookup UI (rendered inline in Step 2)
- * @see FieldMappingService       — applyFieldMappings (associate-to + next-steps)
+ * @see createRecordViaBffWithWarnings — the BFF child-records create (mappingSource + warnings)
  * @see PolymorphicResolverService — applyResolverFields (ADR-024)
  * @see ADR-007  — sprk_documentid → sprk_document SPE hop; no SPE pointers on sprk_analysis
  * @see ADR-012  — Shared component library (reuse, not fork)
@@ -111,9 +116,9 @@ import {
   SendEmailFollowOnStep,
   SprkAnalysisStatus,
   SprkAnalysisWorkType,
-  applyFieldMappings,
   applyResolverFields,
   cleanGuid,
+  createRecordViaBffWithWarnings,
   createTodoRegardingChild,
   createWebApiFromDataService,
   discoverNavProps,
@@ -556,7 +561,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             onChange={setEmail}
             composeHandlers={emailComposeHandlers}
             onSearchRecipients={searchUsers}
-            subtitle="The email is sent when you finish the wizard, from the mailbox chosen in From, and is filed under the new analysis. A configured Field Mapping profile may replace the subject and message."
+            subtitle="The email is sent when you finish the wizard, from the mailbox chosen in From, and is filed under the new analysis. A configured Field Mapping profile fills a subject or message you leave empty."
           />
         ),
       },
@@ -867,6 +872,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         // Association now comes from the dedicated "Associate To" first step
         // (config.associateToStep → IFinishContext.association), not a local field.
         const finishAssociation = context.association;
+        let mappingSource: { entity: string; id: string } | undefined;
         if (finishAssociation) {
           const entitySet = REGARDING_ENTITY_SET_BY_TYPE[finishAssociation.entityType];
           const navPropHint = REGARDING_NAVPROP_HINT_BY_TYPE[finishAssociation.entityType];
@@ -890,27 +896,30 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             }
           }
 
-          if (authFetch && bffBaseUrl) {
-            const mappingResult = await applyFieldMappings({
-              sourceEntity: finishAssociation.entityType,
-              sourceId: finishAssociation.recordId,
-              targetEntity: 'sprk_analysis',
-              payload,
-              dataService,
-              authenticatedFetch: authFetch,
-              bffBaseUrl,
-            });
-            if (mappingResult.warnings.length > 0) {
-              warnings.push(...mappingResult.warnings.map(w => `[Field Mapping] ${w}`));
-            }
-          }
+          // The association parent is also the mapping source: the server maps from it (fill-only), after probing Read
+          // as the caller (FR-04). The client maps nothing.
+          mappingSource = { entity: finishAssociation.entityType, id: cleanGuid(finishAssociation.recordId) };
         }
 
         // -- Create the sprk_analysis record ---------------------------------
         // UAC-r2 task 147 r1 (owner round 28 item 1): the analysis (and its follow-on To Do) is created through the BFF
         // (G5) — the server decides the owner; nothing is created as the user. A refusal surfaces the server's message.
+        // field-mapping-server-write-path-r1 task 028 (FR-16): the association parent is named as the `mappingSource`
+        // (`?mappingSourceEntity=&mappingSourceId=`), so the server fills what the user did not enter; its warnings
+        // (a mapped value not written, a source that could not be read) are shown like any other.
+        if (!authFetch || !bffBaseUrl) {
+          throw new Error('Creating the analysis is not available right now. Please try again shortly.');
+        }
         const childWrites = withBffChildWrites(dataService, authFetch, bffBaseUrl);
-        const analysisId = await childWrites.createRecord('sprk_analysis', payload);
+        const created = await createRecordViaBffWithWarnings(
+          authFetch,
+          bffBaseUrl,
+          'sprk_analysis',
+          payload,
+          mappingSource ? { mappingSource } : undefined
+        );
+        const analysisId = created.id;
+        warnings.push(...created.warnings);
 
         // -- Follow-on: Create To Do (Field-Mapping-driven internally via
         //    TodoService.createTodo — task 021) --------------------------------
@@ -943,55 +952,24 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           }
         }
 
-        // -- Follow-on: Send Email (Field-Mapping-driven subject/body,
-        //    falling back to user-entered values when no profile is configured) --
+        // -- Follow-on: Send Email (the server fills an empty subject/body from the mapping at send) --
         if (
           context.selectedActions.includes('send-email') &&
           emailRef.current.to.length > 0 &&
           authFetch &&
           bffBaseUrl
         ) {
-          let mappedSubject: string | undefined;
-          let mappedBody: string | undefined;
-          try {
-            const emailMappingPayload: Record<string, unknown> = {};
-            const emailMappingResult = await applyFieldMappings({
-              sourceEntity: 'sprk_analysis',
-              sourceId: analysisId,
-              targetEntity: 'sprk_communication',
-              payload: emailMappingPayload,
-              dataService,
-              authenticatedFetch: authFetch,
-              bffBaseUrl,
-            });
-            if (typeof emailMappingPayload['subject'] === 'string') {
-              mappedSubject = emailMappingPayload['subject'] as string;
-            }
-            if (typeof emailMappingPayload['description'] === 'string') {
-              mappedBody = emailMappingPayload['description'] as string;
-            }
-            if (emailMappingResult.warnings.length > 0) {
-              warnings.push(...emailMappingResult.warnings.map(w => `[Field Mapping] ${w}`));
-            }
-          } catch {
-            // Graceful no-op — falls back to user-entered subject/body below.
-          }
-
+          // field-mapping-server-write-path-r1 task 028 (FR-17): the user-typed subject and body go as they are (empty
+          // allowed). The send path fills an EMPTY one from the sprk_analysis -> sprk_communication mapping; a typed
+          // value is never replaced. The client computes no mapped text.
           // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the analysis.
           const composed = emailRef.current;
-          const emailResult = await sendComposedEmail(
-            {
-              ...composed,
-              subject: mappedSubject ?? composed.subject,
-              ...(mappedBody !== undefined ? { body: mappedBody, bodyFormat: 'PlainText' as const } : {}),
-            },
-            {
-              associations: [{ entityType: 'sprk_analysis', entityId: analysisId, entityName: finishName }],
-              authenticatedFetch: authFetch,
-              bffBaseUrl,
-              onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
-            }
-          );
+          const emailResult = await sendComposedEmail(composed, {
+            associations: [{ entityType: 'sprk_analysis', entityId: analysisId, entityName: finishName }],
+            authenticatedFetch: authFetch,
+            bffBaseUrl,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
+          });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
         } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
           warnings.push(EMAIL_NOT_SENT_NO_SERVER);
