@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Update .claude/ references to the legacy agent (main session only)</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>after 001 and 002</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Edits skills, an ADR note and procedure files; explicit constraints; no code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation edits with an explicit file list and grep acceptance</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary, root CLAUDE.md §3)</parallel-reason>
+    <deps>001, 002</deps>
+    <tags>documentation, deletion</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In the main session, update every .claude/ file that still describes the legacy "Spaarke AI" agent, its /api/agent/* gateway, AgentModule, AgentTokenService or the CopilotAgent package as live, so skills and constraints no longer steer sessions toward removed code.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Spaarke AI-procedure maintenance (ai-procedure-maintenance skill).</role>
+  <goal>.claude/ skills, ADR notes and constraints match the code after 001 and 002: the agent is described as retired on 2026-11-25, and no skill instructs building or deploying it.</goal>
+
+  <context>
+    <background>Spec FR-01 ("update or delete the docs and skills that describe the agent"). Sub-agents cannot write .claude/ (root CLAUDE.md §3), so this runs in the main session after 001 and 002 have landed in the working tree.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/declarative-agent/SKILL.md</file>
+      <file role="modify">.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file role="modify">.claude/skills/adr-check/references/adr-validation-rules.md</file>
+      <file role="modify">.claude/adr/ADR-028-spaarke-auth-architecture.md (:810 agent note)</file>
+      <file role="modify">.claude/skills/INDEX.md, .claude/skills/ci-cd/SKILL.md, .claude/skills/dataverse-mcp-usage/SKILL.md, .claude/skills/foundry-agent/SKILL.md, .claude/skills/provision-environment/SKILL.md, .claude/skills/spe-integration/SKILL.md (only where they describe the agent as live)</file>
+      <file role="modify">.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md (only if it lists AgentTokenService as a live credential path)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">BFF agent code removed</dependency>
+      <dependency task="002" status="pending">Non-BFF agent artifacts removed</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Main session only: no sub-agent edits these files (root CLAUDE.md §3).</constraint>
+    <constraint source="project">Leave .claude/agent-memory/** unchanged: researcher memory files are dated history.</constraint>
+    <constraint source="ADR-028">The ADR-028 edit is limited to marking the agent/AgentTokenService note as retired (2026-11-25, this project); no other ADR-028 rule changes. A change to an auth rule is out of scope: escalate.</constraint>
+    <constraint source="project">A skill that exists only to build the legacy agent stays (declarative-agent may still be used for future declarative agents) but its agent-specific instructions are replaced by the dated retired line and a pointer to the Spaarke MCP connector (docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/legacy-agent-inventory-2026-11-25.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">git grep -lI -i "api/agent\|CopilotAgent\|copilot-agent\|AgentModule\|AgentTokenService\|Spaarke AI agent" -- .claude ':!.claude/agent-memory' and classify each hit.</step>
+    <step order="2">Edit each live-description hit per the constraints; keep the edit minimal and dated.</step>
+    <step order="3">Re-run the grep; remaining hits are retired-lines or history only.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a skill or constraint edit would change a repo-wide rule (not just remove the agent description), STOP and ask the owner (ai-procedure-maintenance governs such changes).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">git grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">Edited .claude/ files listed in relevant-files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">git grep -i "api/agent\|CopilotAgent\|AgentTokenService" -- .claude ':!.claude/agent-memory' returns only lines carrying the dated "Retired 2026-11-25" wording.</criterion>
+    <criterion testable="true">No skill instructs building, packaging or deploying the CopilotAgent package or calling /api/agent/*.</criterion>
+    <criterion testable="true">Negative: no file under .claude/agent-memory/** is modified; no ADR-028 rule other than the agent note changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01. Runs in the main session alongside Phase 0 Wave 2.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

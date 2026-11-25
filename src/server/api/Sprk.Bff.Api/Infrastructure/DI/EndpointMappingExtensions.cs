@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
-using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.Signals;
@@ -475,9 +474,6 @@ public static class EndpointMappingExtensions
         // upload) at /api/spe/... URLs reachable by any authenticated caller, with the client-supplied
         // configId unchecked across tenants. Fixed by unified-access-control-r2 task 091; guarded by
         // tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs.
-
-        // M365 Copilot Agent gateway endpoints (/api/agent/*)
-        app.MapAgentEndpoints();
 
         // External access endpoints:
         //   /api/v1/external/*        — Power Pages portal users (portal JWT auth)

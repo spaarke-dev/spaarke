@@ -47,7 +47,8 @@ namespace Spaarke.ArchTests;
 /// evidence and owned by its fix task), or <see cref="NotAuthorizationForms"/>. An unclassified form fails the
 /// build naming file:line, so the next new filter is classified before it can merge.</para>
 ///
-/// <para><b>The sweep ledger.</b> The 82 findings (90 route keys) are pinned in <see cref="SweepFindings"/>,
+/// <para><b>The sweep ledger.</b> The 79 findings (87 route keys; 82 / 90 before spaarkeai-mcp-bff-api-r2 task 001 removed
+/// the legacy agent gateway's three) are pinned in <see cref="SweepFindings"/>,
 /// each a Pending waiver owned by its fix task 159-166. A fix task resolves its entry ONLY by credit: make the
 /// route pass Rule A by a credited filter, a HandlerDecision or a SystemAdmin / SPE-admin AdminOnlyRoutes entry, delete
 /// its waiver, and set <c>ResolvedBy</c> to the task id and <c>ProofTest</c> to its behavioural deny test. A route the fix
@@ -1918,7 +1919,6 @@ public partial class RouteAuthorizationGuardTests
 
             case "AddEndpointFilter<CommunicationAuthorizationFilter>":
             case "AddEndpointFilter<WorkspaceAuthorizationFilter>":
-            case "AddAgentAuthorizationFilter":
             case "AddCallerPrincipalAuthorizationFilter":
                 return !ConsultsAny(code, decisions);
 
@@ -1984,9 +1984,12 @@ public partial class RouteAuthorizationGuardTests
     [Fact(DisplayName = "Task 167: the sweep ledger is pinned, owned by 159-166, and resolves only by credit")]
     public void TheSweepLedgerIsPinnedAndResolvesOnlyByCredit()
     {
-        Assert.Equal(90, SweepFindings.Count);
-        Assert.Equal(82, SweepFindings.Select(e => e.SweepId).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(74, SweepFindings.Count(e => e.Gap == Gap.NoDecision));
+        // spaarkeai-mcp-bff-api-r2 task 001 removed the legacy M365 Copilot gateway and with it three task-164 entries:
+        // S-18 (High), S-19 (High) and S-78 (Low), all NoDecision. Before that removal the counts were 90 / 82 / 74 / 16,
+        // 164 = 19 and High 29 / Low 6. LegacyAgentRouteRetirementTests pins the routes' absence.
+        Assert.Equal(87, SweepFindings.Count);
+        Assert.Equal(79, SweepFindings.Select(e => e.SweepId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(71, SweepFindings.Count(e => e.Gap == Gap.NoDecision));
         Assert.Equal(16, SweepFindings.Count(e => e.Gap == Gap.InsufficientDecision));
 
         var perTask = SweepFindings.GroupBy(e => e.OwningTask).ToDictionary(g => g.Key, g => g.Count());
@@ -1997,7 +2000,7 @@ public partial class RouteAuthorizationGuardTests
             ["161"] = 12,
             ["162"] = 6,
             ["163"] = 17,
-            ["164"] = 19,
+            ["164"] = 16,
             ["165"] = 9,
             ["166"] = 17,
         }, perTask);
@@ -2005,9 +2008,9 @@ public partial class RouteAuthorizationGuardTests
         var bySeverity = SweepFindings.GroupBy(e => e.SweepId).Select(g => g.First().Severity)
             .GroupBy(s => s).ToDictionary(g => g.Key, g => g.Count());
         Assert.Equal(17, bySeverity[Severity.Critical]);
-        Assert.Equal(29, bySeverity[Severity.High]);
+        Assert.Equal(27, bySeverity[Severity.High]);
         Assert.Equal(30, bySeverity[Severity.Medium]);
-        Assert.Equal(6, bySeverity[Severity.Low]);
+        Assert.Equal(5, bySeverity[Severity.Low]);
 
         // A retired entry is judged absent by the BOOTED app's endpoint table (main-session round 52 item 3).
         var violations = LedgerViolations(RealAssessments.Value, Waivers, SweepFindings, mappedAtRunTime: MappedAtRunTime);
@@ -6412,7 +6415,6 @@ public partial class RouteAuthorizationGuardTests
             ".AddEndpointFilter<AiAuthorizationFilter>()",
             ".AddTenantAuthorizationFilter()",
             ".AddEndpointFilter<WorkspaceAuthorizationFilter>()",
-            ".AddAgentAuthorizationFilter()",
             ".AddCallerPrincipalAuthorizationFilter()",
             ".AddReportingAuthorizationFilter()",
             ".AddSpeAdminTenantScopeFilter()",
@@ -6933,9 +6935,10 @@ public partial class RouteAuthorizationGuardTests
         var pin = WaiverOf("DELETE /api/memory/pins/{pinId}")!;
         Assert.Equal((WaiverKind.Permanent, PermanentBasis.OwnerComparison, "166"), (pin.Kind, pin.Basis, pin.OwningTask));
 
-        // Owner round 12 item 6: the five playbook lists are CallerScopedOnly.
+        // Owner round 12 item 6: the playbook lists are CallerScopedOnly. There were five; the legacy agent's list went with
+        // the gateway (spaarkeai-mcp-bff-api-r2 task 001).
         foreach (var key in new[] { "GET /api/ai/playbooks", "GET /api/ai/playbooks/public", "GET /api/ai/playbooks/templates",
-                                    "GET /api/ai/chat/playbooks", "GET /api/agent/playbooks" })
+                                    "GET /api/ai/chat/playbooks" })
         {
             Assert.Equal(PermanentBasis.CallerScopedOnly, WaiverOf(key)!.Basis);
         }

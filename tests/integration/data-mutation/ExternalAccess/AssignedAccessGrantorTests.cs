@@ -123,7 +123,7 @@ public sealed class AssignedAccessGrantorTests : TypedToolHandlerTestFixture
 
     private DataverseCreateRecordHandler ChatHandler(Mock<IDataverseUserClient> dataverse, Mock<IFieldMappingDataverseService> appOnly) =>
         new(dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Services.Ai.Handoff.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new RecordOwnershipResolverDouble(),
             IdentityNormalizationFixtures.NoLinkedContact(),
             Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(

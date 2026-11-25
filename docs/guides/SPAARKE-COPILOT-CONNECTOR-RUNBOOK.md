@@ -191,5 +191,5 @@ Turning the switch on in a new environment is a per-environment owner decision. 
 - [`SPAARKE-MCP-SERVER-ARCHITECTURE.md`](../architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md): the server, its auth flow and its tools.
 - [`HOW-TO-ADD-AN-MCP-TOOL.md`](HOW-TO-ADD-AN-MCP-TOOL.md): add a tool or an area.
 - [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), Amendment A10.
-- [`M365-COPILOT-DEPLOYMENT-GUIDE.md`](M365-COPILOT-DEPLOYMENT-GUIDE.md): the earlier declarative agent "Spaarke AI" (a different package type and auth plane).
+- The earlier declarative agent "Spaarke AI" and its deployment guide were retired 2026-11-25 (spaarkeai-mcp-bff-api-r2).
 - `src/solutions/CopilotPlugins/spaarke/`: the plugin package source.
