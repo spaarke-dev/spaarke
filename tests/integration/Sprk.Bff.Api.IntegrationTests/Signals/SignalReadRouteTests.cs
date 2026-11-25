@@ -30,6 +30,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
@@ -3190,6 +3191,14 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             DataverseServiceMock
                 .Setup(s => s.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string logical, CancellationToken _) => logical + "s");
+            // #3022 (fm task 056): placing a communication witness first asks whether sprk_communication has the private-message
+            // reference columns. An unanswered metadata read fails the placement closed, which withholds every witness line, so the
+            // world answers it as an environment the 056 schema has reached: the columns exist. A witness the tests seed sets none of
+            // them, so it is an ordinary filed message and the witness rule alone decides its detail.
+            DataverseServiceMock
+                .Setup(s => s.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(PrivateContextColumns.All.Append("sprk_communicationid")
+                    .ToDictionary(c => c, c => new ColumnMetadata(c, "Lookup", true, true, null), StringComparer.OrdinalIgnoreCase));
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

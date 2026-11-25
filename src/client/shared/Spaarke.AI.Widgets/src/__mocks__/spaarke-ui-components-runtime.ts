@@ -79,6 +79,9 @@ export const createXrmEmailComposeHandlers: (...args: any[]) => any = () => ({})
 export const resolveCurrentUserEmail: (...args: unknown[]) => Promise<string> = async () => '';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const searchUsersAndContacts: (...args: any[]) => Promise<any[]> = async () => [];
+// The Email surface hosts' shared wiring (#2973) — `EmailWorkspaceWidget` imports it.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const useXrmEmailHostProps: (...args: any[]) => any = () => ({});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const getXrm: (...args: any[]) => any = () => undefined;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

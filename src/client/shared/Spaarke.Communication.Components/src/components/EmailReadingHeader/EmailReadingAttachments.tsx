@@ -11,12 +11,9 @@
  *   - Presentational list: the promoted (task 021) `<AttachmentList />`.
  *   - Preview: the shared `<RichFilePreviewDialog />` (`@spaarke/ui-components`).
  *
- * Mirrors the wiring in the production `CommunicationAttachmentsApp.tsx`
- * (`src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx`)
- * — the PCF's React-16 host for the exact same service + list + dialog — adapted
- * to this package's host-agnostic `IEmailAttachmentsDataService` /
- * `IEmailAttachmentsNavigationService` props (ADR-012) instead of
- * `context.webAPI` / a raw `Xrm` frame-walk.
+ * The preview / open logic is the shared `useAttachmentPreview` hook (#2967), the same one the
+ * CommunicationAttachments PCF uses; this view supplies the host-agnostic `IEmailAttachmentsDataService` /
+ * `IEmailAttachmentsNavigationService` props (ADR-012) instead of `context.webAPI` / a raw `Xrm` frame-walk.
  *
  * React-version note (ADR-022/NFR-05): `React.FC` + standard hooks only — no
  * React-18/19-only runtime API and no `as React.ComponentType` cast. Fluent v9
@@ -35,17 +32,16 @@ import {
   MessageBarBody,
 } from '@fluentui/react-components';
 import { RichFilePreviewDialog, openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components';
-import { authenticatedFetch } from '@spaarke/auth';
 import {
   CommunicationAttachmentsService,
   AttachmentApiService,
-  fileTypeLabel,
   isInvoiceDocumentType,
   type IAttachmentItem,
   type IAttachmentRecord,
   type IAttachmentsWebApi,
 } from '../../logic/attachments';
 import { AttachmentList } from '../AttachmentList';
+import { useAttachmentPreview } from '../AttachmentPreview';
 import { isPdfFileName } from '../SubmitInvoice/invoiceAttachments';
 import type { IEmailReadingAttachmentsProps } from './EmailReadingHeader.types';
 
@@ -79,12 +75,6 @@ function toAttachmentsWebApi(dataService: {
       return { entities: result.entities as unknown as T[] };
     },
   };
-}
-
-/** Open a web URL in a new tab ("Open in desktop" uses the shared openInDesktopApp instead). */
-function openExternal(url: string | null): void {
-  if (!url) return;
-  window.open(url, '_blank', 'noopener');
 }
 
 export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = ({
@@ -138,28 +128,23 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onCountChange is a stable host callback; re-fetch keyed only on service/selection.
   }, [service, selectedId]);
 
-  // ── Preview modal (mirrors CommunicationAttachmentsApp.tsx) ────────────────
-  const [previewItem, setPreviewItem] = React.useState<IAttachmentItem | null>(null);
+  // Preview / open logic is shared with the CommunicationAttachments PCF (#2967).
   // Set when "Open in desktop" fails; shown above the list until the next attempt.
   const [openError, setOpenError] = React.useState<string | null>(null);
-
-  const navItems = React.useMemo(() => items.filter(i => !!i.documentId), [items]);
-  const previewIndex = React.useMemo(
-    () => (previewItem ? navItems.findIndex(i => i.documentId === previewItem.documentId) : -1),
-    [navItems, previewItem]
-  );
-  const handlePreviewNavigate = React.useCallback(
-    (nextIndex: number): void => {
-      if (nextIndex < 0 || nextIndex >= navItems.length) return;
-      setPreviewItem(navItems[nextIndex]);
+  const { handleRowActivate, dialogProps } = useAttachmentPreview({
+    items,
+    apiService,
+    apiBaseUrl,
+    openInDesktopApp,
+    openInDesktopFailedMessage: OPEN_IN_DESKTOP_FAILED_MESSAGE,
+    logTag: 'EmailReadingAttachments',
+    onOpenRecord: id => {
+      void navigation.openRecord('sprk_document', id);
     },
-    [navItems]
-  );
-
-  const handleRowActivate = React.useCallback((item: IAttachmentItem): void => {
-    if (!item.documentId) return;
-    setPreviewItem(item);
-  }, []);
+    onOpenDesktopError: setOpenError,
+    // The bar renders above the list; close the modal preview so the message is not hidden behind it.
+    closeOnOpenDesktopError: true,
+  });
 
   // ebilling-r1 task 118: the profile's Invoice flag (`sprk_documenttype`, read with the upload status: no extra query)
   // shows an "Invoice" badge. It is a hint only (any PDF can be submitted); a document not yet profiled shows none.
@@ -226,62 +211,7 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
         <AttachmentList items={items} onActivate={handleRowActivate} renderRowAccessory={renderInvoiceAccessory} />
       )}
 
-      {previewItem && previewItem.documentId && (
-        <RichFilePreviewDialog
-          open={!!previewItem}
-          documentName={previewItem.name || previewItem.documentName || 'Attachment'}
-          documentId={previewItem.documentId}
-          documentType={fileTypeLabel(previewItem.name)}
-          onClose={() => setPreviewItem(null)}
-          navigationTotal={navItems.length}
-          currentIndex={previewIndex}
-          onNavigate={handlePreviewNavigate}
-          fetchPreviewUrl={() => apiService.getPreviewUrl(previewItem.documentId as string)}
-          onOpenFile={mode => {
-            void (async () => {
-              const documentId = previewItem.documentId as string;
-              setOpenError(null);
-              const links = await apiService.getOpenLinks(documentId);
-              if (mode !== 'desktop') {
-                openExternal(links?.webUrl ?? null);
-                return;
-              }
-              // Office files open in the Office app; anything else downloads through the BFF (shared
-              // behaviour, ISS-004) — not the SharePoint webUrl, which a read-only user cannot open.
-              try {
-                if (!links) throw new Error('The open-links request returned nothing.');
-                await openInDesktopApp({
-                  bffBaseUrl: apiBaseUrl,
-                  documentId,
-                  links,
-                  fetch: authenticatedFetch,
-                  fallbackFileName: previewItem.name || previewItem.documentName || undefined,
-                });
-              } catch (err) {
-                console.error('[EmailReadingAttachments] Open in desktop failed:', err);
-                setOpenError(OPEN_IN_DESKTOP_FAILED_MESSAGE);
-                // The bar renders above the list; close the modal preview so the message is not hidden behind it.
-                setPreviewItem(null);
-              }
-            })();
-          }}
-          onOpenRecord={() => {
-            void navigation.openRecord('sprk_document', previewItem.documentId as string);
-          }}
-          onEmailDocument={() => {
-            /* Emailing an attachment as a new communication is out of scope for this surface. */
-          }}
-          onCopyLink={() => {
-            void (async () => {
-              const links = await apiService.getOpenLinks(previewItem.documentId as string);
-              const url = links?.webUrl;
-              if (url && navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(url);
-              }
-            })();
-          }}
-        />
-      )}
+      {dialogProps && <RichFilePreviewDialog {...dialogProps} />}
     </div>
   );
 };

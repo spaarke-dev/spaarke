@@ -6,19 +6,23 @@
  * type-ahead (`lookupTypeAhead.ts`). Everything else is the shared wizard unchanged: the steps, the draft, the discard check, the Confirm
  * and the way a refusal or a failed commit is worded (`decisionDisplay`).
  *
- * Where it shows (O-5), in order:
- *  1. An in-frame dialog: the shared modal shell (`SprkModal` through `WizardShell`, ADR-050), not a host modal (`requestModal` is not
- *     supported in Copilot). The widget asks the host for fullscreen as it opens, because an inline frame is at most about 640 px tall and
- *     a dialog needs the room. Fullscreen granted: the dialog.
+ * Where it shows (O-5; owner decision 2026-11-24, `projects/spaarkeai-mcp-bff-api-r1/notes/decisions.md`), in order:
+ *  1. An in-frame dialog, inline in the conversation over the lane, OPEN MAXIMIZED so it fills the widget frame (owner decision
+ *     2026-11-24, after a live Copilot test found the wizard-size dialog cramped; the shell's restore control returns it to the wizard
+ *     size): the shared modal shell (`SprkModal` through `WizardShell`, ADR-050),
+ *     not a host modal (`requestModal` is not supported in Copilot). The widget does NOT ask the host for a display mode: Copilot's
+ *     "fullscreen" is a side pane with the dialog over a dimmed lane, which the owner does not want. The dialog opens in whatever mode the
+ *     frame is already in (a frame the host or the user put in fullscreen keeps it), and while it is open the widget root has a minimum
+ *     height (`WIZARD_ROOM_HEIGHT`) so a short lane cannot leave an inline frame too small for it. The user browses Work Items with the
+ *     wizard's own previous / next, and X, Cancel or Escape closes it back to the lane cards.
  *  2. Master-detail: the lane stays as the master and the wizard is shown beside it (below it in a narrow frame), embedded in the page
- *     with no modal envelope. Used when fullscreen was refused or is not offered (no room for a dialog), and when the dialog threw
- *     while rendering. (The design's "master-detail in fullscreen" is read as this layout: the list stays visible beside the wizard.)
+ *     with no modal envelope. Used only when the dialog threw while rendering or the launch reported it was not opened.
  *  3. A link to the Console, opened through the host at once (`openLink`), and kept on screen in case the host does not open it: the
- *     same Work Item is in the user's Decide lane there. Used when master-detail cannot be shown either (the frame is too narrow, or it
- *     threw). The Console has no link to one item, so the link is to the Console page itself.
- * The wizard closing, after the user finished, discarded or pressed Escape, returns the frame to the display mode it was in before the wizard
- * asked for the room, reads the lane again in place (a decision may have been recorded, and an item may have left the lane), and puts the
- * focus back on the row the user opened it from.
+ *     same Work Item is in the user's Decide lane there. Used when master-detail cannot be shown either (the frame is narrower than
+ *     `MIN_DETAIL_WIDTH`, or it threw). The Console has no link to one item, so the link is to the Console page itself.
+ * The wizard closing, after the user finished, discarded or pressed Escape, reads the lane again in place (a decision may have been
+ * recorded, and an item may have left the lane) and puts the focus back on the row the user opened it from. The display mode is never
+ * changed, so closing has none to restore.
  *
  * Nothing here records a decision: `spaarke_complete_decision` is reached only by the wizard's own Record decision button. Opening,
  * moving between steps and closing call no write tool.
@@ -40,7 +44,7 @@ import { launchDecisionWizard } from '@spaarke/ui-components/components/Decision
 import type { WorklistData } from '@spaarke/ui-components/components/Worklist/worklistService';
 import { buildConsoleLinkOut, buildRecordLinkOut } from '../lane/billingLinkOut';
 import { WIZARD_OPEN_NOTICE, type OpenWizardEvent } from '../lane/DecideLane';
-import { useMcpHost, type DisplayMode } from '../mcp/mcpHostContext';
+import { useMcpHost } from '../mcp/mcpHostContext';
 import { createLookupTypeAhead } from './lookupTypeAhead';
 import { createWizardBridge } from './wizardFetch';
 import { createWizardItemLoader, findDecideGroup, ITEM_GONE_NOTICE } from './wizardItems';
@@ -73,7 +77,7 @@ export interface WizardDialogProps {
   children: React.ReactNode;
 }
 
-/** A frame narrower than this cannot hold master-detail even stacked: the Console link is used. */
+/** A frame narrower than this cannot hold master-detail even stacked: the Console link is used (when the dialog fails). */
 export const MIN_DETAIL_WIDTH = 480;
 /**
  * A frame narrower than this cannot hold the lane (320 px) and the decision (420 px) side by side, so they stack. The decision is then put
@@ -83,8 +87,16 @@ export const SIDE_BY_SIDE_MIN_WIDTH = 790;
 
 type Place = 'idle' | 'dialog' | 'detail' | 'link';
 
+/**
+ * The height the shared wizard dialog needs. An inline frame is sized from its content (at most about 640 px), so while the dialog is
+ * open the widget root is at least this tall: a short lane (one or two cards) cannot leave the frame smaller than the dialog. The same
+ * figure as the master-detail section's fixed height.
+ */
+const WIZARD_ROOM_HEIGHT = '640px';
+
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM, minWidth: 0 },
+  rootDialog: { minHeight: WIZARD_ROOM_HEIGHT },
   split: { display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: tokens.spacingHorizontalL, minWidth: 0 },
   splitStacked: { flexDirection: 'column', alignItems: 'stretch', flexWrap: 'nowrap' },
   master: { flex: '1 1 320px', minWidth: 0, outlineStyle: 'none' },
@@ -93,7 +105,7 @@ const useStyles = makeStyles({
     flex: '2 1 420px',
     minWidth: 0,
     // A fixed height: the embedded shell fills its container, and a frame sized from its content must not size itself from the viewport.
-    height: '640px',
+    height: WIZARD_ROOM_HEIGHT,
     display: 'flex',
     flexDirection: 'column',
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
@@ -130,7 +142,7 @@ export function WizardDialog({
   children,
 }: WizardDialogProps) {
   const styles = useStyles();
-  const { callTool, openLink, requestDisplayMode, hostContext } = useMcpHost();
+  const { callTool, openLink } = useMcpHost();
 
   const bridge = React.useMemo(() => createWizardBridge(callTool), [callTool]);
   const typeAhead = React.useMemo(() => createLookupTypeAhead(bridge.fetch), [bridge]);
@@ -141,13 +153,7 @@ export function WizardDialog({
   const [linkFailed, setLinkFailed] = React.useState(false);
 
   // What the current open is about, and whether a wizard is open at all (one at a time, as the host allows).
-  const active = React.useRef<{
-    event: OpenWizardEvent;
-    lane: WorklistData;
-    fullscreen: boolean;
-    /** The display mode the frame was in before the wizard asked for the room: what closing restores. */
-    previousMode: DisplayMode;
-  } | null>(null);
+  const active = React.useRef<{ event: OpenWizardEvent; lane: WorklistData } | null>(null);
   const handled = React.useRef(0);
   const launchCount = React.useRef(0);
   const unmounted = React.useRef(false);
@@ -164,10 +170,8 @@ export function WizardDialog({
     onReloadLane,
     laneReads,
     onActiveChange,
-    requestDisplayMode,
     openLink,
     consoleBaseUrl,
-    hostContext,
     typeAhead,
     bridge,
   });
@@ -177,10 +181,8 @@ export function WizardDialog({
     onReloadLane,
     laneReads,
     onActiveChange,
-    requestDisplayMode,
     openLink,
     consoleBaseUrl,
-    hostContext,
     typeAhead,
     bridge,
   };
@@ -200,9 +202,6 @@ export function WizardDialog({
     latest.current.typeAhead.cancel();
     setLinkFailed(false);
     setPlace(prev => ({ place: 'idle', launch: prev.launch }));
-    // The wizard asked for the room; the frame goes back to the mode it was in before (inline unless the host said otherwise). A frame
-    // that was already fullscreen when the wizard opened stays so.
-    if (was?.fullscreen && was.previousMode !== 'fullscreen') void latest.current.requestDisplayMode(was.previousMode);
     if (was) {
       // Whatever happened in the wizard (a decision recorded, one found gone, nothing), the lane is read again in place, so what it shows is
       // what is there; and the focus goes back to the row the user opened it from.
@@ -215,6 +214,12 @@ export function WizardDialog({
     launchCount.current += 1;
     setPlace({ place: next, launch: launchCount.current });
   }, []);
+
+  /** The next place after one failed: the dialog falls to master-detail (the link when the frame is too narrow for it), the rest to the link. */
+  const nextAfter = React.useCallback(
+    (from: Place): Place => (from === 'dialog' && window.innerWidth >= MIN_DETAIL_WIDTH ? 'detail' : 'link'),
+    []
+  );
 
   // A new request from the lane.
   React.useEffect(() => {
@@ -234,24 +239,9 @@ export function WizardDialog({
       latest.current.onReloadLane?.();
       return;
     }
-    const previousMode: DisplayMode = (latest.current.hostContext?.displayMode as DisplayMode | undefined) ?? 'inline';
-    const opening = { event: request.event, lane, fullscreen: false, previousMode };
-    setActive(opening);
-
-    void (async () => {
-      // Step 1: the dialog, and ask for the room. A host that lists its modes and leaves fullscreen out is not asked.
-      const offered = latest.current.hostContext?.availableDisplayModes;
-      const canAsk = !Array.isArray(offered) || offered.includes('fullscreen');
-      const display = canAsk ? await latest.current.requestDisplayMode('fullscreen') : null;
-      if (unmounted.current || active.current !== opening) return;
-      opening.fullscreen = display === 'fullscreen';
-
-      // Fullscreen granted: the dialog has the room. Refused (or not offered): an inline frame is too short for a dialog, so the wizard
-      // is shown beside the lane instead; a frame too narrow even for that has only the link.
-      if (opening.fullscreen) moveTo('dialog');
-      else if (window.innerWidth >= MIN_DETAIL_WIDTH) moveTo('detail');
-      else moveTo('link');
-    })();
+    setActive({ event: request.event, lane });
+    // Step 1: the dialog, in the display mode the frame is already in. No display mode is requested (owner decision 2026-11-24).
+    moveTo('dialog');
   }, [request, moveTo, setActive]);
 
   // Launch the wizard in the place chosen. The host is mounted for that place before this runs (children's effects run first).
@@ -298,22 +288,22 @@ export function WizardDialog({
           // The shared host has a wizard open that this one did not open: nothing of ours is open, so release the place it was given.
           finish();
           setNotice(WIZARD_OPEN_NOTICE);
-        } else moveTo(place.place === 'dialog' ? 'detail' : 'link');
+        } else moveTo(nextAfter(place.place));
       },
       () => {
         if (unmounted.current || launchCount.current !== mine) return;
-        moveTo(place.place === 'dialog' ? 'detail' : 'link');
+        moveTo(nextAfter(place.place));
       }
     );
-  }, [place, finish, moveTo]);
+  }, [place, finish, moveTo, nextAfter]);
 
   // The place failed while rendering: the next step of the chain.
   const failed = React.useCallback(
     (from: Place) => {
       if (unmounted.current) return;
-      moveTo(from === 'dialog' ? 'detail' : 'link');
+      moveTo(nextAfter(from));
     },
-    [moveTo]
+    [moveTo, nextAfter]
   );
 
   const consoleLink = buildConsoleLinkOut(consoleBaseUrl);
@@ -414,7 +404,7 @@ export function WizardDialog({
     ) : null;
 
   return (
-    <div className={styles.root}>
+    <div className={mergeClasses(styles.root, place.place === 'dialog' && styles.rootDialog)}>
       {notice && (
         <div role="alert" data-testid="wizard-notice">
           <MessageBar intent="warning">
@@ -440,7 +430,7 @@ export function WizardDialog({
       {/* The dialog renders in the shared shell's own layer, so it needs no place in the split. */}
       {place.place === 'dialog' && (
         <WizardBoundary key={`dialog-${place.launch}`} onError={() => failed('dialog')}>
-          <DecisionWizardHost {...wizardProps} />
+          <DecisionWizardHost {...wizardProps} defaultMaximized />
         </WizardBoundary>
       )}
 

@@ -4,7 +4,7 @@
     <title>P2 deploy (SPA to dev) + E2E (FR-11/FR-13 checks once ebilling's BFF changes are live)</title>
     <phase>2 Invoices and documents</phase>
     <gate>after 018, 020, 022, 023, 024 (021 may be deferred if ebilling slips) — owner approval to deploy</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment and E2E task (tags deploy, e2e-test); no code authored</rigor-reason>
     <model-tier>sonnet</model-tier>

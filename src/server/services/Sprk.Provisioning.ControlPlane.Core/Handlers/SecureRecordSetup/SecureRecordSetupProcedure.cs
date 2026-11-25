@@ -8,7 +8,7 @@
 // the standing-grant environment (S19 the Standing Grant Administrators profile and its lock on contact.sprk_standinggrant,
 // S20 the BFF's application users as its members, S21 the sprk_noaccessentry role split unified-access-control-r2 task 154
 // ships) — plus S22 (ISS-025 / #1803): the locks on contact.sprk_externalinvitedon and, once it ships,
-// contact.sprk_externalinvitecodehash, VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
+// contact.sprk_externalinvitecodehash (its auditing and Advanced Find also off), VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
 // contact.sprk_accesspermissiongrant, and S22 the locks on the BFF-only columns sprk_externalinvitedemailhash,
 // sprk_externalinvitedtenantid and sprk_externalaccessremovedon once they ship — plus S23: the BFF's runtime Dataverse identity (the managed identity's
 // application user) holds the "Spaarke Ontology Service" role, and no team or interactive user does — plus S24 (#2605): the
@@ -254,8 +254,9 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>
     /// S28 (task 270; field-mapping-server-write-path-r1 task 054b): the message-access columns that decide who may read a
     /// message, as (table, column) — field-secured with the BFF-managed Readers/Writers grants in SpaarkeMaster (1.3.1.0 on).
-    /// Exactly the packaged four of scripts/Set-ThreadFlagFieldSecurity.ps1's $Targets; the fifth, <see cref="DirectRecipientColumn"/>,
-    /// is not in the package. BffManagedLinkColumnLockListTests pins this list to the script and the package.
+    /// Exactly the packaged four of scripts/Set-ThreadFlagFieldSecurity.ps1's $Targets; the other four,
+    /// <see cref="OptionalMessageAccessColumns"/>, are not in the package. BffManagedLinkColumnLockListTests pins this list
+    /// and that one to the script and the package.
     /// </summary>
     public static readonly IReadOnlyList<(string Table, string Column)> MessageAccessColumns =
     [
@@ -266,11 +267,23 @@ public sealed class SecureRecordSetupProcedure
     ];
 
     /// <summary>
-    /// S28: the fifth message-access column. It exists only where scripts/Set-DirectRecipientSchema.ps1 ran, which provisioning
-    /// does not run; on a stamp without it the Direct-message feature stays off (DirectMessage:* unset — deployment guide
-    /// §7.4). When it exists, its lock must be whole like the other four.
+    /// S28: the message-access columns that are NOT in the package, as (table, column, the script that creates it). Each
+    /// exists only where that script ran, which provisioning does not do. Where a column is absent S28 notes it and goes on:
+    /// the direct recipient's absence keeps the Direct-message feature off (DirectMessage:* unset — deployment guide §7.4);
+    /// the three private-context references (field-mapping task 056b) belong to a private message, a Direct message that
+    /// names one core record, so without them the environment has no private-message context references. Where a column
+    /// exists, its lock must be whole like the packaged four.
     /// </summary>
-    public static readonly (string Table, string Column) DirectRecipientColumn = ("sprk_communication", "sprk_directrecipient");
+    public static readonly IReadOnlyList<(string Table, string Column, string CreatedBy)> OptionalMessageAccessColumns =
+    [
+        ("sprk_communication", "sprk_directrecipient", "scripts/Set-DirectRecipientSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextmatter", "scripts/Set-PrivateContextSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextproject", "scripts/Set-PrivateContextSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextworkassignment", "scripts/Set-PrivateContextSchema.ps1"),
+    ];
+
+    /// <summary>S28: the direct recipient, the optional column whose absence also keeps the Direct-message feature off.</summary>
+    internal const string DirectRecipientColumnName = "sprk_directrecipient";
 
     /// <summary>S28: the remedy an incomplete message-access lock names.</summary>
     internal const string MessageAccessLockRemedy =
@@ -1013,15 +1026,22 @@ public sealed class SecureRecordSetupProcedure
             }
         }
 
-        // S28 (task 270; field-mapping task 054b) — the message-access lock: the four packaged columns always, the direct
-        // recipient only where it exists (provisioning does not create it; the Direct-message feature then stays off).
-        foreach (var (table, column) in MessageAccessColumns.Append(DirectRecipientColumn))
+        // S28 (task 270; field-mapping tasks 054b, 056b) — the message-access lock: the four packaged columns always; the
+        // direct recipient and the three private-context references only where they exist (provisioning creates none of
+        // them), and where one exists its lock must be whole.
+        var messageAccessChecks = MessageAccessColumns
+            .Select(c => (c.Table, c.Column, CreatedBy: (string?)null))
+            .Concat(OptionalMessageAccessColumns.Select(c => (c.Table, c.Column, CreatedBy: (string?)c.CreatedBy)));
+        foreach (var (table, column, createdBy) in messageAccessChecks)
         {
-            if ((table, column) == DirectRecipientColumn
+            if (createdBy is not null
                 && await dv.IsAttributeSecuredAsync(t, table, column, ct).ConfigureAwait(false) is null)
             {
-                notes.Add($"{table}.{column}: not in this environment (scripts/Set-DirectRecipientSchema.ps1 not run), so the " +
-                          "Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset.");
+                notes.Add(column == DirectRecipientColumnName
+                    ? $"{table}.{column}: not in this environment ({createdBy} not run), so the Direct-message feature stays " +
+                      "off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset."
+                    : $"{table}.{column}: not in this environment ({createdBy} not run), so there is no private-message " +
+                      "context reference of that kind here.");
                 continue;
             }
             var refusal = await CheckBffManagedColumnLockAsync(dv, t, table, column, readerProfileId, writerProfileId,
@@ -1280,7 +1300,22 @@ public sealed class SecureRecordSetupProcedure
                     $" (the Readers profile must hold no row or 0/0/0 — every default team is its member). Only the BFF may " +
                     "touch the invite-code hash; who was granted access is an operator decision. Nothing was written.");
             }
-            notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access.");
+
+            // Verified only (never changed): auditing and Advanced Find are both OFF on the column, as the package ships it
+            // (Entity.xml IsAuditEnabled 0, no ValidForAdvancedFind in DisplayMask) and Set-ExternalInviteCodeHashSchema.ps1 sets it.
+            // The seam returning null here would mean the column vanished between two reads: not a pass.
+            var exposure = await dv.GetAttributeExposureAsync(t, InviteTable, InviteCodeHashColumn, ct).ConfigureAwait(false);
+            if (exposure is null || exposure.IsAuditEnabled || exposure.IsValidForAdvancedFind)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn,
+                    $"{InviteTable}.{InviteCodeHashColumn}: IsAuditEnabled={(exposure is null ? "(column not readable)" : exposure.IsAuditEnabled)}, " +
+                    $"IsValidForAdvancedFind={(exposure is null ? "(column not readable)" : exposure.IsValidForAdvancedFind)} " +
+                    "(expected both false). The package ships the column with auditing and Advanced Find off; turn them off — " +
+                    "run scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply for the environment (it sets both off; it takes " +
+                    "-BffApplicationIds) and check it with -Verify — then resume. A SpaarkeMaster re-import does not clear a " +
+                    "value set by hand. H7b changes no column setting. Nothing was written.");
+            }
+            notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access, auditing and Advanced Find off.");
         }
 
         // S22 (#2317) — the BFF-only columns, as the invite-code hash: ABSENT is expected until the SpaarkeMaster release that

@@ -4,7 +4,7 @@
     <title>The firm hold lives on the invoice too: a field-secured sprk_invoice.sprk_firmhold, so unlinking or deleting the submission cannot lift it</title>
     <phase>3 Rules (095c follow-up; uac-r2 2026-11-04)</phase>
     <gate>uac-r2 preferred shape, 2026-11-04; blocks the master PR</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a field-secured column and changes the approval and export guard; tags include auth.</rigor-reason>
     <model-tier>opus</model-tier>

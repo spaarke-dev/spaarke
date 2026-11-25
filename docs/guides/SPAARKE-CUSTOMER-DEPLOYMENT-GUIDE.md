@@ -1392,6 +1392,8 @@ back**: both slots must carry a GUID equal to H2a's writer, and never the stamp 
 
 **H4b session-file store (T186 follow-up).** H4b also writes `SessionFileStore__BlobEndpoint` on both slots: the stamp storage account's blob endpoint, from H2a's `storagePrimaryEndpoint` output (`InterStepState.StorageBlobEndpoint`). The container is not written — the BFF defaults to `ai-chunks`, which every stamp creates. Without it chat session-file uploads are refused (`StoreDisabled`).
 
+**H4b keyless SignalR and the three keys a stamp does not carry (ISS-022, plan D36).** Only when the stamp's SignalR was deployed (`signalrEnabled`; the resource has local auth disabled, so it has no access key), H4b writes `Notifications__SignalR__ConnectionString` as the managed-identity string `Endpoint=https://{name}.service.signalr.net;AuthType=azure.msi;ClientId={stamp UAMI client id};Version=1.0;` (from H2a's `signalrHostName` output, `InterStepState.SignalRHostName`) and `Notifications__SignalR__Enabled=true`. The UAMI holds "SignalR App Server" on the resource (`signalr.bicep`). Not deployed means neither setting is written: the BFF keeps its Null-Object delivery service and clients poll (ADR-032). The other two keys named in ISS-022 are deliberately absent on a stamp: `PowerBi__ClientSecret` (Reporting is off; the module self-gates while `PowerBi:TenantId` is unset) and `Rag__ApiKey` (`POST /api/ai/rag/enqueue-indexing` stays closed, 401). None is a Key Vault secret; the decision is recorded in `scripts/canonical-secret-catalog/manifest.yaml`.
+
 ### 7.4 Phase 4 — Dataverse Environment (H5, H6, H7)
 
 **H5** adopts the Dataverse environment the operator created (PRQ-C-09) — it never creates one (owner D4 / Q1;
@@ -1415,7 +1417,9 @@ an expectations file for every release that changes roles (the owning project su
 **Message-access columns: field security on every environment** (field-mapping-server-write-path-r1 task
 054b). Five columns decide who may read a message, and only the BFF writes them: `sprk_communicationthread.sprk_threadtype`
 and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_directrecipient` and `.sprk_communicationthread`.
-`scripts/Set-ThreadFlagFieldSecurity.ps1` secures all five, next to
+Field-mapping task 056b added three more, the private-message context references `sprk_communication.sprk_privatecontextmatter`,
+`.sprk_privatecontextproject` and `.sprk_privatecontextworkassignment` (created by `scripts/Set-PrivateContextSchema.ps1 -Apply`,
+not in the solution source). `scripts/Set-ThreadFlagFieldSecurity.ps1` secures all eight, next to
 `Set-SecureFlagFieldSecurity.ps1` ([SECURE-PROJECT-ENVIRONMENT-SETUP.md](SECURE-PROJECT-ENVIRONMENT-SETUP.md) §7d) and
 `Set-DocumentPointerFieldSecurity.ps1` (the BFF settings list above).
 - The SpaarkeMaster solution source marks four of them `IsSecured` and carries both BFF-managed profiles' permissions on
@@ -1428,7 +1432,7 @@ and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby`, `.sprk_direct
   and refuses the stamp (`secure_setup.message_access_lock_incomplete`, Resumable) where it is not whole. Provisioning does
   not run `Set-DirectRecipientSchema.ps1` either, so `sprk_directrecipient` is absent on a new stamp and the
   Direct-message feature stays off (binding rule below); H7b records that in its gate evidence and checks the column's
-  lock only where it exists. To turn the feature on for a stamp: `Set-DirectRecipientSchema.ps1 -Apply`, then this
+  lock only where it exists. The same holds for the three private-context references (H7b procedure 11). To turn the feature on for a stamp: `Set-DirectRecipientSchema.ps1 -Apply`, then this
   script (dry run, `-Apply`, `-Verify`; each must exit 0), with the owner's OK.
 - **After every SpaarkeMaster import** (an H6 run or a manual import) on an environment where `sprk_directrecipient`
   exists: run `Set-ThreadFlagFieldSecurity.ps1 -Verify`. A non-zero exit is a gap: run `-Apply`, then `-Verify` again. On
@@ -2167,8 +2171,9 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
 - the same read-only check (S28, task 270; field-mapping task 054b) on the message-access columns
   `sprk_communicationthread.sprk_threadtype` and `.sprk_isdefaultthread`, and `sprk_communication.sprk_sentby` and
   `.sprk_communicationthread` (SpaarkeMaster 1.3.1.0 carries their lock), plus `sprk_communication.sprk_directrecipient`
-  only where it exists (provisioning never creates it; its absence is recorded in the gate evidence and the
-  Direct-message feature stays off) — refusing `secure_setup.message_access_lock_incomplete` (Resumable) or
+  and the three private-context references `.sprk_privatecontextmatter`, `.sprk_privatecontextproject` and
+  `.sprk_privatecontextworkassignment` (procedure 11) only where they exist (provisioning never creates them; each absence
+  is recorded in the gate evidence, and without the direct recipient the Direct-message feature stays off) — refusing `secure_setup.message_access_lock_incomplete` (Resumable) or
   `secure_setup.message_access_lock_other_writer` (QuarantineRequired). The remedy on a stamp is a new run that imports
   SpaarkeMaster 1.3.1.0 or later at H6: `scripts/Set-ThreadFlagFieldSecurity.ps1` refuses wherever
   `sprk_directrecipient` is absent (§7.4);
@@ -3196,6 +3201,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-11-16 | Invoice-family links: from SpaarkeMaster 1.3.2.0 the import applies the #2799 lock (24 columns, Readers / Writers only) with code pages rebuilt from source; `Set-InvoiceFamilyFieldSecurity.ps1` is only for environments below 1.3.2.0 and as a repair; an existing environment deploys the #2799 BFF and current web resources before the import; H7b S27 verifies (task 270, not yet on master) | `unified-access-control-r2` #2859 |
 | 2026-11-16 | §5 H7b row, §7.4 (message-access and invoice-family locks) and §7.11: H7b procedure 10 (task 270, owner path A) adds S27, the #2799 invoice-family link lock (24 columns; SpaarkeMaster 1.3.1.0 does not carry it, so a stamp refuses until the uac-r2 release that packages it is imported or the script is run), and S28, the message-access lock (four packaged columns, the direct recipient only where it exists); §7.4 no longer claims provisioning runs Set-ThreadFlagFieldSecurity.ps1. |
 | 2026-11-16 | §5 H7b row and §7.11: S27's remedy and the L2 Worker release-ordering rule name SpaarkeMaster **1.3.2.0** (#2859, uac-r2 PR #2865), the release that carries the #2799 lock. |
+| 2026-11-23 | §7.4 and §7.11 S28: H7b procedure 11 also checks the three private-context references (field-mapping 056b) where they exist, as it does the direct recipient; `Set-ThreadFlagFieldSecurity.ps1` secures eight columns. A Worker with procedure 11 re-runs H7b on every existing stamp once (verify only). | `customer-provisioning-orchestration-r1` (master test failure after 056b) |
 
 ---
 

@@ -17,7 +17,7 @@
  */
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const h = vi.hoisted(() => ({ bffApiCall: vi.fn(), getExternalUserContext: vi.fn() }));
@@ -93,12 +93,21 @@ const NOT_IN_REVIEW = [0, 2, APPROVED, 659490001, PAID, REJECTED, 659490004, 659
 const guid = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const INVOICE_ID = guid(501);
 
-const invoiceRow = (statuscode: number, detail: number | null | undefined, over: Record<string, unknown> = {}) => ({
+/** The measured module-fetch shape of an option-set column (OptionSetValue, System.Text.Json Web defaults). */
+const sdk = (value: number | null): { value: number | null; extensionData: null } => ({ value, extensionData: null });
+
+const rawNumberOf = (raw: unknown): unknown =>
+  raw !== null && typeof raw === 'object' ? (raw as { value: unknown }).value : raw;
+
+const invoiceRow = (statuscode: unknown, detail: unknown, over: Record<string, unknown> = {}) => ({
   sprk_invoiceid: INVOICE_ID,
   sprk_invoicenumber: 'INV-1',
   sprk_name: 'Invoice name',
   statuscode,
-  '@formattedValues': { statuscode: statuscode === IN_REVIEW ? 'In Review' : statuscode === PAID ? 'Paid' : 'Other' },
+  '@formattedValues': {
+    statuscode:
+      rawNumberOf(statuscode) === IN_REVIEW ? 'In Review' : rawNumberOf(statuscode) === PAID ? 'Paid' : 'Other',
+  },
   ...(detail === undefined ? {} : { [REVIEW_DETAIL_COLUMN]: detail }),
   ...over,
 });
@@ -468,5 +477,119 @@ describe('render point (c) — the Invoice header status fact, with (d) in the s
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByTestId('record-template-header');
     expect(within(dialog).queryByTestId('record-template-fact-secondary')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The REAL wire shape: the module fetch returns option sets as { value, extensionData }, not as bare numbers
+// (measured on live data, R4 task 028). Same gate, same four render points.
+// ---------------------------------------------------------------------------
+
+describe('the module fetch SDK object shape ({ value, extensionData })', () => {
+  beforeEach(() => {
+    h.bffApiCall.mockReset();
+  });
+
+  it('the gate reads the status and the detail from the object (must-fire)', () => {
+    for (const option of OPTIONS) {
+      expect(reviewDetailOf(sdk(IN_REVIEW), sdk(option.value))).toEqual({
+        text: option.text,
+        explanation: EXPLANATION[option.value],
+      });
+    }
+    // An unset option set arrives as a plain null (not an object): a blank detail while In Review.
+    expect(reviewDetailOf(sdk(IN_REVIEW), null)).toEqual({ text: null, explanation: REVIEWING });
+  });
+
+  it('must-not-fire: a Paid / Rejected status, an unknown value and a label string render blank', () => {
+    for (const status of [PAID, REJECTED, APPROVED, 2]) {
+      expect(reviewDetailOf(sdk(status), sdk(TERMS.value)), `status ${status}`).toBeNull();
+      expect(reviewDetailOf(sdk(status), null), `status ${status}, blank`).toBeNull();
+    }
+    expect(reviewDetailOf(sdk(IN_REVIEW), sdk(659490009))).toBeNull();
+    expect(reviewDetailOf(sdk(IN_REVIEW), sdk(0))).toBeNull();
+    // An object that carries no number is not "blank": unreadable, so it renders blank (fail closed), never the reviewing line.
+    expect(reviewDetailOf(sdk(IN_REVIEW), sdk(null))).toBeNull();
+    expect(reviewDetailOf(sdk(IN_REVIEW), 'Waiting for billing terms')).toBeNull();
+    expect(reviewDetailOf('In Review', sdk(TERMS.value))).toBeNull();
+    // An object that is not the SDK shape, or whose value is not a whole number, fails closed.
+    for (const status of [{}, { value: null }, { value: 1.5 }, { value: '1' }, { foo: 1 }, sdk(null)]) {
+      expect(reviewDetailOf(status, sdk(TERMS.value)), JSON.stringify(status)).toBeNull();
+    }
+    expect(reviewDetailOf(sdk(IN_REVIEW), { value: 1.5 })).toBeNull();
+    expect(reviewDetailOf(sdk(IN_REVIEW), {})).toBeNull();
+  });
+
+  it('(a) the grid cell shows the label from an SDK-shaped row, and blank for Paid', () => {
+    const renderer = INVOICE_GRID_OVERRIDES?.columnRenderers?.[REVIEW_DETAIL_COLUMN];
+    expect(renderer?.(sdk(TERMS.value), invoiceRow(sdk(IN_REVIEW), sdk(TERMS.value)))).toBe(TERMS.text);
+    expect(renderer?.(sdk(null), invoiceRow(sdk(IN_REVIEW), sdk(null)))).toBe('');
+    expect(renderer?.(sdk(FIRM.value), invoiceRow(sdk(PAID), sdk(FIRM.value)))).toBe('');
+    expect(reviewDetailCellText(invoiceRow(sdk(IN_REVIEW), sdk(UNCHECKED.value)))).toBe(UNCHECKED.text);
+    expect(reviewDetailSecondaryLine(invoiceRow(sdk(IN_REVIEW), sdk(UNCHECKED.value)))).toBe(UNCHECKED.text);
+  });
+
+  it('(b) the record Invoices section shows the label after the status, and nothing for Paid', async () => {
+    const list = await renderInvoicesSection([
+      invoiceRow(sdk(IN_REVIEW), sdk(TERMS.value), { sprk_invoiceid: guid(900), sprk_invoicenumber: 'INV-R' }),
+      invoiceRow(sdk(PAID), sdk(FIRM.value), { sprk_invoiceid: guid(901), sprk_invoicenumber: 'INV-P' }),
+    ]);
+    expect(within(list).getByText(new RegExp(`In Review · ${TERMS.text}`))).toBeTruthy();
+    expect(list.textContent ?? '').not.toContain(FIRM.text);
+    expect(list.textContent ?? '').not.toContain(REVIEWING);
+  });
+
+  it.each(OPTIONS)('(d) Information shows "$text" and its explanation from an SDK-shaped row', option => {
+    renderFields(invoiceRow(sdk(IN_REVIEW), sdk(option.value)));
+    expect(screen.getByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}`).textContent).toContain(option.text);
+    expect(screen.getByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}-note`).textContent).toBe(
+      EXPLANATION[option.value]
+    );
+  });
+
+  it('(d) a blank detail on an In Review invoice (the live case) shows "The client is reviewing this invoice."', () => {
+    renderFields(invoiceRow(sdk(IN_REVIEW), null));
+    expect(screen.getByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}-note`).textContent).toBe(REVIEWING);
+  });
+
+  it('(d) must-not-fire: Paid with a value shows no row; an unknown value shows no row', () => {
+    renderFields(invoiceRow(sdk(PAID), sdk(FIRM.value)));
+    expect(screen.queryByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}`)).toBeNull();
+    cleanup();
+    renderFields(invoiceRow(sdk(IN_REVIEW), sdk(659490009)));
+    expect(screen.queryByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}`)).toBeNull();
+  });
+});
+
+describe('the module fetch SDK object shape in the real record modal (c + d)', () => {
+  beforeEach(() => {
+    h.bffApiCall.mockReset();
+    h.getExternalUserContext.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('(c) the header line and the Information field show a real value from the SDK shape', async () => {
+    const dialog = await openInvoice(invoiceRow(sdk(IN_REVIEW), sdk(TERMS.value)));
+    expect(within(dialog).getByTestId('record-template-fact-secondary').textContent).toBe(TERMS.text);
+    expect(within(dialog).getByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}-note`).textContent).toBe(
+      EXPLANATION[TERMS.value]
+    );
+  });
+
+  it('(c)(d) a blank detail while In Review: Information shows the reviewing line, no header line', async () => {
+    const dialog = await openInvoice(invoiceRow(sdk(IN_REVIEW), null));
+    expect(within(dialog).queryByTestId('record-template-fact-secondary')).toBeNull();
+    expect(within(dialog).getByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}-note`).textContent).toBe(REVIEWING);
+  });
+
+  it('must-not-fire: a Paid invoice (SDK shape) with a value shows nothing in the header or Information', async () => {
+    const dialog = await openInvoice(invoiceRow(sdk(PAID), sdk(659490002)));
+    expect(within(dialog).queryByTestId('record-template-fact-secondary')).toBeNull();
+    expect(within(dialog).queryByTestId(`record-detail-field-${REVIEW_DETAIL_COLUMN}`)).toBeNull();
+    const text = dialog.textContent ?? '';
+    expect(text).not.toContain(FIRM.text);
+    expect(text).not.toContain(REVIEWING);
   });
 });

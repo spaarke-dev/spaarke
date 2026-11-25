@@ -6,7 +6,8 @@
  * `row['@formattedValues'][column]` display label. The grid must show the label, never the JSON. A row with no
  * label for the column renders exactly as before.
  *
- * Precedence for a cell: @formattedValues[column] (non-blank string) -> `.name` of an object -> primitive -> JSON.
+ * Precedence for a cell: @formattedValues[column] (non-blank string) -> `.name` (then `.label`) of an object -> primitive.
+ * An object with none of those is an empty cell, never JSON (D-34, #3045).
  * Custom column renderers, the primary-name link and the date renderers are unchanged (a server-formatted date
  * would be in the server's culture and zone, and would undo the task 098 calendar-day rule).
  */
@@ -85,12 +86,39 @@ describe('formattedLabelOf', () => {
   });
 });
 
-describe('renderCellValue — without a formatted label (unchanged)', () => {
-  it('renders a lookup by name, a primitive as text, and an object as JSON', () => {
+describe('renderCellValue — without a formatted label', () => {
+  it('renders a lookup by name and a primitive as text (unchanged)', () => {
     expect(renderCellValue({ name: 'Acme', id: '1' }, 'default')).toBe('Acme');
     expect(renderCellValue(42, 'default')).toBe('42');
-    expect(renderCellValue(OPTION_SET_JSON, 'default')).toBe(JSON.stringify(OPTION_SET_JSON));
+    expect(renderCellValue(false, 'default')).toBe('false');
     expect(renderCellValue(null, 'default')).toBe('');
+  });
+
+  it('an object with no name and no label is an empty cell, never JSON or [object Object] (D-34 #3045)', () => {
+    expect(renderCellValue(OPTION_SET_JSON, 'default')).toBe('');
+    expect(renderCellValue({ id: 'c-1' }, 'default')).toBe('');
+    expect(renderCellValue({ value: 5 }, 'link')).toBe('');
+    expect(renderCellValue({}, 'default')).toBe('');
+    expect(renderCellValue(OPTION_SET_JSON, 'percentage')).toBe('');
+    expect(renderCellValue(OPTION_SET_JSON, 'date')).toBe('');
+    expect(renderCellValue({ extensionData: null }, 'currency')).toBe('');
+  });
+
+  it('an object with a label string and no name shows the label', () => {
+    expect(renderCellValue({ value: 1, label: 'Draft' }, 'default')).toBe('Draft');
+  });
+
+  it('an AliasedValue (link-entity column) shows its inner text; an unlabelled object stays empty (K5)', () => {
+    const aliased = (value: unknown) => ({ attributeLogicalName: 'name', entityLogicalName: 'account', value });
+    expect(renderCellValue(aliased('Acme'), 'default')).toBe('Acme');
+    expect(renderCellValue(aliased({ id: '1', name: 'Smith' }), 'default')).toBe('Smith');
+    expect(renderCellValue(aliased(null), 'default')).toBe('');
+    // Must-not-fire: an object that only looks similar (no attributeLogicalName) is not unwrapped.
+    expect(renderCellValue({ entityLogicalName: 'account', value: 'Acme' }, 'default')).toBe('');
+  });
+
+  it('an array shows its readable items, comma separated', () => {
+    expect(renderCellValue(['a', 2, { name: 'Acme' }, { value: 1 }, null], 'default')).toBe('a, 2, Acme');
   });
 });
 
@@ -138,13 +166,14 @@ describe('DataGrid — renders @formattedValues labels (task 061)', () => {
     expect(await screen.findByText('Draft')).toBeInTheDocument();
     expect(screen.getByText('Contact One')).toBeInTheDocument();
     expect(screen.queryByText('raw lookup')).not.toBeInTheDocument();
-    // Column with no label keeps the old rendering (JSON of the object); the labelled ones are not JSON.
-    expect(screen.getByText('{"value":5}')).toBeInTheDocument();
+    // The column with no label and no name is an empty cell (D-34 #3045), not JSON; the labelled ones are not JSON.
+    expect(container.textContent).not.toContain('{"value":5}');
     expect(container.textContent).not.toContain('extensionData');
+    expect(container.textContent).not.toContain('[object Object]');
   });
 
-  it('a row without @formattedValues renders as before (lookup name, primitive, object JSON)', async () => {
-    renderGrid([
+  it('a row without @formattedValues renders as before (lookup name, primitive); an unlabelled option set is empty, not JSON', async () => {
+    const { container } = renderGrid([
       {
         sprk_servicerequestid: 'r-2',
         sprk_name: 'SR-0002',
@@ -156,7 +185,8 @@ describe('DataGrid — renders @formattedValues labels (task 061)', () => {
 
     expect(await screen.findByText('Raw Lookup')).toBeInTheDocument();
     expect(screen.getByText('plain text')).toBeInTheDocument();
-    expect(screen.getByText(JSON.stringify(OPTION_SET_JSON))).toBeInTheDocument();
+    expect(container.textContent).not.toContain('extensionData');
+    expect(container.textContent).not.toContain('[object Object]');
   });
 
   it('sorting the Status column orders rows by the label (review F1: objects used to compare as "[object Object]")', async () => {

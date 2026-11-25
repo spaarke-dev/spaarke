@@ -1,7 +1,7 @@
 namespace Sprk.Bff.Api.Api.Office.Errors;
 
 /// <summary>
-/// Error codes for Office integration endpoints (OFFICE_001-020).
+/// Error codes for Office integration endpoints (OFFICE_001-023).
 /// Per spec.md Error Code Catalog.
 /// </summary>
 /// <remarks>
@@ -127,6 +127,17 @@ public static class OfficeErrorCodes
     public const string RecordOwnerUnresolved = "OFFICE_022";
 
     /// <summary>
+    /// OFFICE_023 (400): an Office save or quick-create that names an INVOICE as its target. Refused BEFORE any job row, email
+    /// capture, upload or Dataverse read or write (ebilling-r1 task 096, owner L, FR-17 / FR-20).
+    /// </summary>
+    /// <remarks>
+    /// An invoice is created and filed onto only by the submission operation (Submit Invoice, the finance routes). The Office add-in
+    /// removed its Invoice save target and invoice quick-create (word-add-in-r1 slice C); these server legs followed one add-in
+    /// release later. Distinct from <c>OFFICE_002</c> (an unrecognised type): the type is recognised, and the answer says where to go.
+    /// </remarks>
+    public const string InvoiceTargetRetired = "OFFICE_023";
+
+    /// <summary>
     /// The save failed in a way no other code describes: an exception the server did not expect.
     /// </summary>
     /// <remarks>
@@ -157,6 +168,7 @@ public static class OfficeErrorCodes
             BlockedFileType => "validation-error",
             VersionIntentMismatch => "validation-error",
             CorruptDocumentPackage => "validation-error",
+            InvoiceTargetRetired => "validation-error",
             AssociationNotFound => "not-found",
             JobNotFound => "not-found",
             VersionTargetNotFound => "not-found",
@@ -208,6 +220,7 @@ public static class OfficeErrorCodes
             VersionTargetLocked => "Version Target Locked",
             NameCollision => "File Already Exists",
             CorruptDocumentPackage => "Document File Unreadable",
+            InvoiceTargetRetired => "Invoice Target Not Supported",
             RecordOwnerUnresolved => "Record Owner Unresolved",
             InternalError => "Save Failed",
             _ => "Error"
@@ -231,6 +244,7 @@ public static class OfficeErrorCodes
             BlockedFileType => 400,
             VersionIntentMismatch => 400,
             CorruptDocumentPackage => 400,
+            InvoiceTargetRetired => 400,
             AssociationNotFound => 404,
             JobNotFound => 404,
             VersionTargetNotFound => 404,

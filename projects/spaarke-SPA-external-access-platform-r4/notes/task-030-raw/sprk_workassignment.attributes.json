@@ -1,0 +1,45 @@
+{
+  "@odata.context": "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/$metadata#EntityDefinitions('sprk_workassignment')/Attributes(LogicalName,AttributeType,IsSecured,IsValidForRead)",
+  "value": [
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.DateTimeAttributeMetadata",
+      "MetadataId": "e3e7d60e-5915-4891-bb8c-adcc28581bb2",
+      "AttributeType": "DateTime",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "modifiedon"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "dd90c22b-5904-4511-8f29-b4738e7de85d",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_assignedto"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.MemoAttributeMetadata",
+      "MetadataId": "3504a762-771d-f111-88b3-7ced8d1dc988",
+      "AttributeType": "Memo",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_description"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "90f677d0-62d3-4132-a677-270c490b9f9c",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_mattertype"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "05e24414-52ed-47ef-8cbb-172d723b7a4e",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_regardingmatter"
+    }
+  ]
+}

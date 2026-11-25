@@ -17,8 +17,8 @@
  */
 
 import { createContextWidgetAdapter, createNoOpHighlighter } from './ContextWidgetAdapter';
-import { CodeViewerWidget } from '@spaarke/ai-outputs';
-import type { CodeViewerData } from '@spaarke/ai-outputs';
+import { CodeViewerWidget } from '../../outputs';
+import type { CodeViewerData } from '../../outputs';
 
 // Re-export the payload type for consumers.
 export type { CodeViewerData };

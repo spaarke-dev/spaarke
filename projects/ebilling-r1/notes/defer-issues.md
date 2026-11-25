@@ -2112,7 +2112,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (fbba523806, 2026-11-24); #2878 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Sonnet review of task 084h-4 (the Note box had the same flaw and was fixed in 084h-4's fix round; the Reason boxes are pre-existing) |
@@ -2152,7 +2152,7 @@ A BFF deploy can ship code that writes index fields the live index doesn't have.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (5f75e3e930, 2026-11-24); #2880 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-17 |
 | **Source** | Opus adversarial review of task 095f-2d1 (extends existing behaviour for a changed reason or amount) |
@@ -2280,7 +2280,7 @@ The invoice stays held for good. Before ISS-031 the other verb was a wrong but w
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (263aa4c674, 2026-11-24, task iss043); closes when it reaches master |
 | **Urgency** | someday |
 | **Filed** | 2026-11-17 |
 | **Source** | 095f-2e2a review (Opus), found in passing |
@@ -2392,7 +2392,7 @@ Every firm-visibility reader trusts `sprk_ruleset.sprk_visibletofirms`, so only 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done on work (efab4736b6, task iss041); closes when the next master PR merges |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-20 |
 | **Source** | Adversarial review of task 132ui (finding 2) |
@@ -2422,7 +2422,7 @@ A reject or return carrying the reviewer-confirmed notice can stop part way: a 5
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (1b756a83d3, 2026-11-24); #2933 closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-20 |
 | **Source** | Adversarial review of task 134 (found in passing, server side) |
@@ -2448,7 +2448,7 @@ A rejected submission's firm outcome (130c) carries each rejecting finding's `va
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done in work (263aa4c674, 2026-11-24, task iss043); closes when it reaches master |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 123 adversarial review, pass B (found in passing) |
@@ -2476,7 +2476,7 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 
 | Field | Value |
 |---|---|
-| **Status** | Handed off → spaarke-ontology-platform-r1 (their DI-162; label swapped by them 2026-11-23) |
+| **Status** | Done by spaarke-ontology-platform-r1 (DI-162): fixed on master by PR #3011 (merge 33d7c6a6ad), #2982 closed 2026-11-23. Id-cursor paging, no 5,000 cap; a truncated or failed read counts as a PolicyFailure. Follow-up cost item DI-164 #3014 (one Signal query per not-in-force policy). |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-23 |
 | **Source** | Task 117 adversarial review, pass A (found in passing) |
@@ -2496,3 +2496,145 @@ Three existing multipart routes catch only `InvalidDataException` and `BadHttpRe
 **Estimated effort**: half a day.
 **Blockers**: none; ontology-r1 owns `Services/Signals/**`.
 **Related**: D-170; task 117.
+
+### ISS-045 — Invoice forms still show the retired extraction fields; PB-013 seed and verify script describe the deleted playbook
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed in work 96bcf65dbb, dev forms cleaned 2026-11-23; closes when the next eBilling master PR merges |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | ontology-r1 review of #2992 (050b follow-up 3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2997 |
+
+**Description**
+
+Task 050b deleted the legacy invoice extraction path, so nothing writes `sprk_invoice.sprk_extractionstatus` or `sprk_extractedjson` any more. Both columns are still on the invoice main and quick-create forms, so users see an "Extraction Status" that never changes. The PB-013 playbook seed and `Verify-Finance-Playbook.ps1` still describe the deleted extraction playbook. 050b notes §9 lists the rows, not the forms.
+
+**Entry-points**
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/{93aa1c69-0406-f111-8406-7c1e525abd8b}.xml` (+ `_managed`)
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/quickCreate/{c5e5807d-e20c-f111-8342-7c1e520aa4df}.xml` (+ `_managed`)
+- `scripts/seed-data/playbooks.json` (PB-013), `scripts/seed-data/Verify-Finance-Playbook.ps1`
+
+**Suggested fix**: take both controls off both forms through 079's export-to-temp procedure and publish on dev with the owner's OK; drop PB-013 from the seed and verify script. Deleting the columns is a separate, destructive owner decision.
+
+**Estimated effort**: half a day plus the dev form publish.
+**Blockers**: the dev form change is a live step (owner OK).
+**Related**: 050b, #2263.
+
+### ISS-046 — Deploy-EbillingFormsViews.ps1 Section mode would delete the invoice main form's Batch quick view on re-run
+
+| Field | Value |
+|---|---|
+| **Status** | Done in work/ebilling-r1 (task iss046, merge 234828cfb2; Sonnet review + fix round 1). #3001 closes when it reaches master |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-23 |
+| **Source** | Task 194 adversarial review, finding 7 (found in passing; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3001 |
+
+**Description**
+
+In Section mode the forms script rebuilds `section_ebilling` from its `Cols` list and replaces the whole section, which drops the `qv_billingexport` "Batch" quick view that 151e added to the source and that no script creates. Once the 151e form is on an environment, a later run there silently removes the quick view.
+
+**Entry-points**
+
+- `scripts/ebilling/Deploy-EbillingFormsViews.ps1:350-352`, `:176-186`
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/{93aa1c69-0406-f111-8406-7c1e525abd8b}.xml` (`qv_billingexport`)
+
+**Suggested fix**: keep the existing section's non-managed cells (quick views, subgrids), or list the quick view; add a re-run test.
+
+**Estimated effort**: half a day.
+**Blockers**: none. Task 194 does not use the forms script for its removal.
+
+### ISS-047 — Task-status drift check misreads iss-prefixed and hyphen-suffixed task ids
+
+| Field | Value |
+|---|---|
+| **Status** | Done on work (219c0c6207, task iss047); closes when the next master PR merges |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Index tidy-up (2026-11-24): running `scripts/check-task-status-drift.ps1` on this project |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3042 |
+
+**Description**
+
+The status-first row pattern lets `[^\s|]+` take the letters of `iss028` as a marker and reads `028` as the id. So the `iss028` and `iss040` rows overwrite the real `028` and `040` rows, which gives a phantom status drift on 028 and 040. Ids with hyphenated suffixes (`084h-1`, `095f-2e2a`, `130-0`) match neither pattern, so their POMLs are reported as having no index row: 62 unpaired entries here, mostly phantoms. The check is the task-completion gate, and noise hides real drift. The 7 real drifts were resolved by hand on 2026-11-24:
+- POML set to completed: 084d, 093, 113.
+- 053: the POML is now in-progress, and its index marker is now 🔄 (the script reads 🟡 as done).
+- 161: index marker now 🔄.
+
+**Entry-points**
+
+- `scripts/check-task-status-drift.ps1` around :134 (`$rowPattern`) and :146 (`$idFirstPattern`)
+- `pwsh scripts/check-task-status-drift.ps1` on `work/ebilling-r1`
+
+**Suggested fix**: forbid a letter right before the id (lookbehind), extend the id grammar to a letter prefix and hyphenated suffixes, add must-fire and must-not-fire cases, and compare `-All` parse counts before and after.
+
+**Estimated effort**: half a day.
+**Blockers**: none.
+**Related**: the shared script is used by every project's task-execute Steps 10-11.
+
+---
+
+### ISS-049 — Chat document, visualization and SPE admin upload routes mishandle a broken multipart body
+
+(ISS-048 is not used: the task id `iss048` was a checklist-Q fix, not an issue entry, and reusing the number would read as related.)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (AI and SPE admin routes; filed by ebilling-r1, which found it) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Task iss043 Opus adversarial review (found in passing, outside Finance) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3057 |
+
+**Description**
+
+Task iss043 fixed the Finance multipart routes. Three routes elsewhere in the BFF still mishandle a broken upload body:
+- `ChatDocumentEndpoints` and `VisualizationEndpoints` catch nothing around `ReadFormAsync`. A truncated multipart body throws `IOException`, which reaches the global handler: 500 logged at Error, instead of 400.
+- The SPE admin upload catches every exception except `SdapProblemException`, including `OperationCanceledException`, so an abandoned upload is logged at Warning with a stack trace and answered 400.
+
+Concrete failure: an authenticated caller who sends a truncated upload gets a server error, and the BFF logs an Error for a client fault.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs:377`
+- `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs:281`
+- `src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerItemEndpoints.cs:1036-1039`
+- Reference: the Finance routes after iss043 (`Api/Finance/InvoiceSubmissionHttp.cs`, `StoredFileEndpoints.cs`)
+
+**Suggested fix**: the iss043 catch (`IOException` when the request is not cancelled and is not a connection reset, answering 400 and logging a Warning with type and HResult only) on the first two; add `and not OperationCanceledException` plus the request-token check to the SPE admin catch-all. One regression test per route with a body that has no closing boundary.
+
+**Estimated effort**: 2–3 hours.
+**Blockers**: none.
+**Related**: task iss043, ISS-043 (#2978). `IFormFile`-bound routes are not affected. Not a security issue.
+
+---
+
+### ISS-050 — Line-decision lock expires after 2 minutes while a 1,000-line call can still be writing
+
+| Field | Value |
+|---|---|
+| **Status** | Done on work (7da8f29320, task iss050); closes when the next master PR merges. The 1,000-line duration on dev is still not measured |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | Task iss029 Opus adversarial review (found in passing, pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3059 |
+
+**Description**
+
+A line-decision call holds the invoice's processing lock for a fixed 2 minutes and never renews it. One call can cover up to 1,000 lines (Accept all Clean), and the record step writes one Decision Record per line with several Dataverse round trips each. If a large call outlives the lock, a second reviewer's decision can write a line the bulk call already updated but has not recorded; the bulk call then records "accept" on a line that shows Reduced, so line and record disagree. The real duration of a 1,000-line call on dev is not measured.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLineDecisionService.cs:194` (`MaxLinesPerRequest`), `:210` (`LockDuration`), `:315` (acquire), the record loop (~843)
+- The approval path shares the lock (`RunAsync`)
+
+**Suggested fix**: measure a 1,000-line Accept all Clean on dev; then renew the lock per record chunk, size it to the call, or cap lines per call to what fits.
+
+**Estimated effort**: half a day plus the measurement.
+**Blockers**: none.
+**Related**: task iss029 (its pre-check relies on the lock between check and write). Not a security issue.
+
+---

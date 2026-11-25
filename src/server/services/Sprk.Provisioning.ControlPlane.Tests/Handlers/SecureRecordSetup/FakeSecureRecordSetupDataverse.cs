@@ -75,6 +75,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
     /// <summary><c>IsSecured</c> per <c>"table.column"</c> (see <see cref="ColumnKey"/>); absent = no such column.</summary>
     internal Dictionary<string, bool?> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>S22: a column's audit / Advanced Find settings per <c>"table.column"</c> where a test sets them; a column the environment has defaults to both off.</summary>
+    internal Dictionary<string, SecureSetupAttributeExposure?> ColumnExposure { get; } = new(StringComparer.OrdinalIgnoreCase);
     internal Dictionary<string, HashSet<Guid>> NullFlagRows { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     internal int Reads { get; private set; }
@@ -188,8 +190,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         }
 
         // Task 270: the invoice-family links (#2799) and the four packaged message-access columns (field-mapping 054b) as a
-        // release carrying both locks ships them. The direct recipient is absent (provisioning never creates it):
-        // AddDirectRecipient adds it.
+        // release carrying both locks ships them. The optional columns are absent (provisioning never creates them):
+        // AddDirectRecipient / AddPrivateContextColumns add them.
         foreach (var (table, column) in SecureRecordSetupProcedure.InvoiceFamilyLinkColumns.Concat(SecureRecordSetupProcedure.MessageAccessColumns))
         {
             dv.SeedBffManagedLock(table, column);
@@ -329,7 +331,26 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
     /// <summary>Task 270: the environment ran scripts/Set-DirectRecipientSchema.ps1 and Set-ThreadFlagFieldSecurity.ps1.</summary>
     internal void AddDirectRecipient()
-        => SeedBffManagedLock(SecureRecordSetupProcedure.DirectRecipientColumn.Table, SecureRecordSetupProcedure.DirectRecipientColumn.Column);
+        => AddOptionalMessageAccessColumn(SecureRecordSetupProcedure.DirectRecipientColumnName);
+
+    /// <summary>Field-mapping task 056b: the environment ran scripts/Set-PrivateContextSchema.ps1 and Set-ThreadFlagFieldSecurity.ps1.</summary>
+    internal void AddPrivateContextColumns()
+    {
+        foreach (var (_, column, createdBy) in SecureRecordSetupProcedure.OptionalMessageAccessColumns)
+        {
+            if (createdBy.EndsWith("Set-PrivateContextSchema.ps1", StringComparison.Ordinal))
+            {
+                AddOptionalMessageAccessColumn(column);
+            }
+        }
+    }
+
+    /// <summary>One of <see cref="SecureRecordSetupProcedure.OptionalMessageAccessColumns"/> exists, with the whole BFF-managed lock.</summary>
+    internal void AddOptionalMessageAccessColumn(string column)
+    {
+        var (table, _, _) = SecureRecordSetupProcedure.OptionalMessageAccessColumns.Single(c => c.Column == column);
+        SeedBffManagedLock(table, column);
+    }
 
     /// <summary>Every permission row on <paramref name="table"/>.<paramref name="column"/> for <paramref name="profileId"/> removed.</summary>
     internal void RemoveGrant(string table, string column, Guid profileId)
@@ -602,6 +623,20 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             throw ex;
         }
         return Task.FromResult(SecuredColumns.GetValueOrDefault(key));
+    }
+
+    public Task<SecureSetupAttributeExposure?> GetAttributeExposureAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken)
+    {
+        Read(nameof(GetAttributeExposureAsync));
+        var key = ColumnKey(tableLogicalName, attributeLogicalName);
+        if (ColumnReadFault?.Invoke(key) is { } ex)
+        {
+            throw ex;
+        }
+        // A column the environment has (it has an IsSecured answer) is, as the package ships it, audit off and Advanced Find off.
+        return Task.FromResult(ColumnExposure.TryGetValue(key, out var set)
+            ? set
+            : SecuredColumns.GetValueOrDefault(key) is null ? null : new SecureSetupAttributeExposure(false, false));
     }
 
     public Task<SecureSetupTableIdentity> GetTableIdentityAsync(SecureRecordSetupTarget target, string tableLogicalName, CancellationToken cancellationToken)

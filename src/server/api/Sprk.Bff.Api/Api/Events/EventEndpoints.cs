@@ -60,7 +60,7 @@ public static class EventEndpoints
     /// <summary>
     /// The Create privilege on <c>sprk_event</c>, by its live name (spaarkedev1 <c>privileges</c>, 2026-10-03 — the table's
     /// schema name is <c>sprk_Event</c>, so the privilege is NOT all lower case; the
-    /// <c>FinanceAuthorizationFilter.CreateInvoicePrivilege</c> precedent). A misspelt name answers "not held" for every
+    /// <c>prvCreatesprk_Invoice</c> precedent). A misspelt name answers "not held" for every
     /// caller and denies every create, which is why it is pinned by a test.
     /// </summary>
     internal const string CreateEventPrivilege = "prvCreatesprk_Event";

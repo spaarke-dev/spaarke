@@ -14,14 +14,13 @@
  */
 
 import * as React from 'react';
-import { Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Spinner, Text, Textarea } from '@fluentui/react-components';
+import { Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Spinner, Text } from '@fluentui/react-components';
 import { StatusBadge } from '@spaarke/ui-components';
 import type { CoreRoute, GapView, ProcedureItem, VersionView } from '../../services/recordProceduresApi';
 import { failureText, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
 import type { DryRunApi } from '../../services/dryRunApi';
 import { gapFor, procedureState, recordNoun, recordWords, shortDate, sourceLabel, versionLabel, versionLines, type AllowedSteps } from '../../services/model';
 import {
-  MAX_REASON_CHARS,
   allowedBlocker,
   currentProcedureChoice,
   noAllowedCall,
@@ -33,7 +32,7 @@ import {
   procedureChoices,
   type ProcedureChoice,
 } from './plan';
-import { ChoiceGroup, KeyValues, useWizardStyles, type ChoiceOption } from './steps';
+import { ChoiceGroup, KeyValues, ReasonField, useWizardStyles, type ChoiceOption } from './steps';
 import { WizardFrame, type OnChanged, type WizardNav } from './WizardFrame';
 import { isPinnable, overrideWords, stampWords, versionOption } from './words';
 
@@ -209,9 +208,7 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
 
   // ── Step 2: the choices ──────────────────────────────────────────────────
   const reasonField = (
-    <Field label="Reason" required hint={`At most ${MAX_REASON_CHARS} characters.`}>
-      <Textarea value={form.reason} onChange={(_, d) => set({ reason: d.value })} resize="vertical" maxLength={MAX_REASON_CHARS} />
-    </Field>
+    <ReasonField value={form.reason} onChange={reason => set({ reason })} />
   );
 
   const latestNow = row.pinned ? (row.newerVersion ?? row.versionInForce) : row.versionInForce;

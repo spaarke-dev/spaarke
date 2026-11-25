@@ -53,7 +53,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnInvoiceFamilyWrite_GoesUpdateOnly_NeverTheUpsert(GenericPath path)
     {
@@ -64,7 +64,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Fact]
-    public async Task TheOutputOrchestrator_OnItsOptimisticPath_WritesUpdateOnly_AndRefusesARowDeletedMeanwhile()
+    public async Task TheUpdateHandler_OnItsOptimisticPath_WritesUpdateOnly_AndRefusesARowDeletedMeanwhile()
     {
         var fields = new Dictionary<string, object?> { ["sprk_name"] = "Renamed" };
 
@@ -94,7 +94,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)] // master merge (#2257): a person's output mapping writes AS that person
+    [InlineData(GenericPath.UpdateHandler)] // master merge (#2257): a person's output mapping writes AS that person
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task TheUpdateOnlyWrite_StillActsAsTheImpersonatedCaller(GenericPath path)
     {
@@ -110,7 +110,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public async Task ThePlaybookUpdateWithNoCaller_AndTheOrchestrator_WriteAppOnly()
     {
         await RunAsync(GenericPath.PlaybookUpdate, "sprk_invoice", Invoice, NoLookups, RenameOnly, InvoiceUnderAMatter().Object);
-        await RunAsync(GenericPath.OutputOrchestrator, "sprk_invoice", Invoice, NoLookups, RenameOnly, InvoiceUnderAMatter().Object);
+        await RunAsync(GenericPath.UpdateHandler, "sprk_invoice", Invoice, NoLookups, RenameOnly, InvoiceUnderAMatter().Object);
 
         Sent().Should().HaveCount(2).And.OnlyContain(w => w.As == null);
     }
@@ -122,10 +122,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoice", false)]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_billingevent", true)]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_billingevent", false)]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoice", true)] // master merge (#2257): a person's output mapping
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoice", false)]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_billingevent", true)]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_billingevent", false)]
+    [InlineData(GenericPath.UpdateHandler, "sprk_invoice", true)] // master merge (#2257): a person's output mapping
+    [InlineData(GenericPath.UpdateHandler, "sprk_invoice", false)]
+    [InlineData(GenericPath.UpdateHandler, "sprk_billingevent", true)]
+    [InlineData(GenericPath.UpdateHandler, "sprk_billingevent", false)]
     public async Task AnImpersonatedPlaybookUpdate_OfARowThatDoesNotExist_AnswersReadFailed_LikeARowItCannotRead(
         GenericPath path, string table, bool answersNull)
     {
@@ -147,8 +147,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoice")]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_billingevent")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoice")] // master merge (#2257): a person's output mapping
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_billingevent")]
+    [InlineData(GenericPath.UpdateHandler, "sprk_invoice")] // master merge (#2257): a person's output mapping
+    [InlineData(GenericPath.UpdateHandler, "sprk_billingevent")]
     public async Task AnImpersonatedPlaybookUpdate_WhoseRowIsDeletedBeforeTheWrite_AnswersReadFailed_NotNotFound(GenericPath path, string table)
     {
         TheRowIsDeletedAfterTheGuardRead();

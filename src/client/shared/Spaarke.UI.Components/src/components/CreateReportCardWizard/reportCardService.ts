@@ -2,12 +2,18 @@
  * reportCardService.ts
  * Service for the Create New Report Card wizard.
  *
- * Creates `sprk_reportcard` records in Dataverse via IDataService, mirroring
- * the canonical `WorkAssignmentService.createWorkAssignment` flow per task 040
- * (visual-host-create-button-r1):
+ * Creates `sprk_reportcard` records through the BFF (`POST /api/v1/child-records/sprk_reportcard`), mirroring the
+ * canonical `WorkAssignmentService.createWorkAssignment` flow (field-mapping-server-write-path-r1, task 027, FR-16):
  *   nav-prop discovery -> payload (manifest fields) -> applyResolverFields
- *   (host regarding, Matter/Project only) -> createRecord('sprk_reportcard') ->
- *   warnings (never throws for non-fatal side-effects).
+ *   (host regarding, Matter/Project only) -> createRecordViaBffWithWarnings ->
+ *   server warnings (never throws for non-fatal side-effects).
+ *
+ * The client does NOT map fields. The payload holds only what the user entered or picked plus the regarding keys; the
+ * server applies the field mapping (fill-only, FR-02) from the filed-under Matter/Project, which the create NAMES as its
+ * `mappingSource` (`?mappingSourceEntity=&mappingSourceId=`), as the Matter, Project, Event, To Do and Work Assignment
+ * wizards do. It must be named: the route infers a source only for the tables in `InferMappingSourceTables` (the
+ * tables BEING CREATED), and `sprk_reportcard` is not one, so a create naming none maps nothing. With no association no
+ * source is named and nothing is mapped. Reads still go through IDataService.
  *
  * NO file pipeline (owner decision — no Add Files step for this wizard; see
  * notes/field-manifests/reportcard.md). No Business-Unit-defaults cascade
@@ -35,7 +41,7 @@
  */
 
 import { describeWebApiCreateError } from '../../utils/webApiCreateError';
-import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
+import { withBffChildWrites, createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateReportCardFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
@@ -47,7 +53,6 @@ import {
   cleanGuid,
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
-import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -97,39 +102,68 @@ function _resolveLookupHint(entityLogicalName: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Assigned-resource lookup config (8 fields — manifest §, note-hints must be
-// unique among lookups sharing the same referencedEntity so findNavProp's
-// disambiguation-by-substring works correctly).
+// Assigned-resource lookup config (8 fields — manifest §). Each hint is the lookup's FULL logical column name:
+// findNavProp matches an exact column first, whereas a fragment binds the first column CONTAINING it, which is whichever
+// look-alike Dataverse lists first.
 // ---------------------------------------------------------------------------
 
 interface IResourceLookupConfig {
   idField: keyof ICreateReportCardFormState;
   referencedEntity: 'contact' | 'sprk_organization';
   entitySet: 'contacts' | 'sprk_organizations';
-  /** Hint passed to findNavProp — must be a substring unique to this column
-   * among sibling lookups referencing the same entity (see doc comment). */
+  /** Full logical column name passed to findNavProp as the hint (matched exactly; see the config comment). */
   navPropHint: string;
 }
 
 const RESOURCE_LOOKUPS: readonly IResourceLookupConfig[] = [
-  { idField: 'assignedAttorney1Id', referencedEntity: 'contact', entitySet: 'contacts', navPropHint: 'attorney1' },
-  { idField: 'assignedAttorney2Id', referencedEntity: 'contact', entitySet: 'contacts', navPropHint: 'attorney2' },
-  { idField: 'assignedParalegal1Id', referencedEntity: 'contact', entitySet: 'contacts', navPropHint: 'paralegal1' },
-  { idField: 'assignedParalegal2Id', referencedEntity: 'contact', entitySet: 'contacts', navPropHint: 'paralegal2' },
+  {
+    idField: 'assignedAttorney1Id',
+    referencedEntity: 'contact',
+    entitySet: 'contacts',
+    navPropHint: 'sprk_assignedattorney1',
+  },
+  {
+    idField: 'assignedAttorney2Id',
+    referencedEntity: 'contact',
+    entitySet: 'contacts',
+    navPropHint: 'sprk_assignedattorney2',
+  },
+  {
+    idField: 'assignedParalegal1Id',
+    referencedEntity: 'contact',
+    entitySet: 'contacts',
+    navPropHint: 'sprk_assignedparalegal1',
+  },
+  {
+    idField: 'assignedParalegal2Id',
+    referencedEntity: 'contact',
+    entitySet: 'contacts',
+    navPropHint: 'sprk_assignedparalegal2',
+  },
   {
     idField: 'assignedToLawFirm1Id',
     referencedEntity: 'sprk_organization',
     entitySet: 'sprk_organizations',
-    navPropHint: 'lawfirm1',
+    navPropHint: 'sprk_assignedtolawfirm1',
   },
   {
     idField: 'assignedLawFirm2Id',
     referencedEntity: 'sprk_organization',
     entitySet: 'sprk_organizations',
-    navPropHint: 'lawfirm2',
+    navPropHint: 'sprk_assignedlawfirm2',
   },
-  { idField: 'assignedToExternalId', referencedEntity: 'contact', entitySet: 'contacts', navPropHint: 'external' },
-  { idField: 'assignedToInternalId', referencedEntity: 'contact', entitySet: 'contacts', navPropHint: 'internal' },
+  {
+    idField: 'assignedToExternalId',
+    referencedEntity: 'contact',
+    entitySet: 'contacts',
+    navPropHint: 'sprk_assignedtoexternal',
+  },
+  {
+    idField: 'assignedToInternalId',
+    referencedEntity: 'contact',
+    entitySet: 'contacts',
+    navPropHint: 'sprk_assignedtointernal',
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -142,16 +176,16 @@ export class ReportCardService {
   private readonly _bffBaseUrl: string;
 
   /**
-   * @param authenticatedFetch Injected BFF-authenticated fetch — required so the
-   *   field-mapping engine (task 022) can fetch the {host -> Report Card}
-   *   profile. Mirrors the injected shape already used by
-   *   `InvoiceService`/`WorkAssignmentService`.
+   * @param authenticatedFetch Injected BFF-authenticated fetch — the report card is created on the BFF child-record
+   *   route with it. Mirrors the injected shape already used by `InvoiceService`/`WorkAssignmentService`.
    * @param bffBaseUrl BFF API base URL, same convention as the sibling services.
    */
   constructor(dataService: IDataService, authenticatedFetch: AuthenticatedFetchFn, bffBaseUrl: string) {
-    // UAC-r2 task 147 r1 (owner round 28 item 1): the report card is created through the BFF (G5) — the server decides
-    // the owner; nothing is created as the user.
+    // UAC-r2 task 147 r1 (owner round 28 item 1): every child create / re-file this service makes goes through the BFF
+    // (G5) — the server decides the owner; nothing is created as the user.
     this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
+    // Stored (not just forwarded to withBffChildWrites): the report card is created on the BFF route directly so the
+    // server's warnings reach the result.
     this._authenticatedFetch = authenticatedFetch;
     this._bffBaseUrl = bffBaseUrl;
   }
@@ -162,7 +196,8 @@ export class ReportCardService {
    *   2. Build payload from the manifest (name required, narrative, due date,
    *      8 assigned-resource lookups).
    *   3. Apply host regarding (Matter/Project) via applyResolverFields.
-   *   4. createRecord('sprk_reportcard', entity).
+   *   4. POST the payload to the BFF child-record route, naming the regarding parent as the mapping source; the server
+   *      maps (fill-only) from it.
    *
    * @param form         Enter Info manifest field values.
    * @param association  The host record this report card is regarding (from
@@ -214,7 +249,10 @@ export class ReportCardService {
     // Host regarding (Matter or Project only) — ADR-024 Polymorphic Resolver.
     // Writes the entity-specific @odata.bind lookup AND all 5 denormalized
     // resolver fields via the shared `applyResolverFields` primitive.
+    let mappingSource: { entity: string; id: string } | undefined;
     if (association?.recordId && association.entityType) {
+      // The regarding parent is also the mapping source; the server decides whether the caller may read it (FR-04).
+      mappingSource = { entity: association.entityType, id: cleanGuid(association.recordId) };
       const entitySet = _resolveEntitySet(association.entityType);
       const hint = _resolveLookupHint(association.entityType);
       const polyWebApi = {
@@ -231,35 +269,25 @@ export class ReportCardService {
         association.recordName,
         hint
       );
-
-      // Field-mapping engine (task 022) — apply the configured {host -> Report
-      // Card} field-mapping profile (if any) onto the SAME payload, after
-      // resolver fields and before createRecord. Graceful no-op when no
-      // profile is configured (profileFound:false) — mirrors
-      // applyResolverFields' NFR-06 no-op contract; the engine never throws.
-      // Target field names are NEVER hard-coded here — they come from the
-      // seeded profile/rules (task 030).
-      const mappingResult = await applyFieldMappings({
-        sourceEntity: association.entityType,
-        sourceId: cleanGuid(association.recordId),
-        targetEntity: 'sprk_reportcard',
-        payload: entity,
-        dataService: this._dataService,
-        authenticatedFetch: this._authenticatedFetch,
-        bffBaseUrl: this._bffBaseUrl,
-      });
-      if (mappingResult.warnings.length > 0) {
-        warnings.push(...mappingResult.warnings);
-      }
     }
 
     let reportCardId: string;
     try {
-      console.info('[ReportCardService] createRecord payload:', JSON.stringify(entity, null, 2));
-      reportCardId = await this._dataService.createRecord('sprk_reportcard', entity);
-      console.info('[ReportCardService] createRecord success, reportCardId:', reportCardId);
+      console.info('[ReportCardService] create payload:', JSON.stringify(entity, null, 2));
+      // The regarding Matter/Project is named as the mapping source (the route infers none for sprk_reportcard). A server
+      // warning (a mapped value not written, a source that could not be read) is shown like any other.
+      const created = await createRecordViaBffWithWarnings(
+        this._authenticatedFetch,
+        this._bffBaseUrl,
+        'sprk_reportcard',
+        entity,
+        mappingSource ? { mappingSource } : undefined
+      );
+      reportCardId = created.id;
+      warnings.push(...created.warnings);
+      console.info('[ReportCardService] create success, reportCardId:', reportCardId);
     } catch (err) {
-      console.error('[ReportCardService] createRecord error:', err);
+      console.error('[ReportCardService] create error:', err);
       // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
       const described = describeWebApiCreateError(err, 'report card');
       const message = described.message;

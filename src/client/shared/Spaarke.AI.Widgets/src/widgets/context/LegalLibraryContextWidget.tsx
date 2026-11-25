@@ -18,8 +18,8 @@
  */
 
 import { createContextWidgetAdapter, createLegalLibraryHighlighter } from './ContextWidgetAdapter';
-import { LegalLibraryWidget } from '@spaarke/ai-outputs';
-import type { LegalLibraryData } from '@spaarke/ai-outputs';
+import { LegalLibraryWidget } from '../../outputs';
+import type { LegalLibraryData } from '../../outputs';
 
 // Re-export the payload type for consumers.
 export type { LegalLibraryData };

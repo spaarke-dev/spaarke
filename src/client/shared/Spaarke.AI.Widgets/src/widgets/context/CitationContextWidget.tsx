@@ -23,8 +23,8 @@
  */
 
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { CitationWidget } from '@spaarke/ai-outputs';
-import type { CitationData } from '@spaarke/ai-outputs';
+import { CitationWidget } from '../../outputs';
+import type { CitationData } from '../../outputs';
 import type { ContextWidgetProps } from '../../types/widget-types';
 import type { ContextWidgetHighlightHandle } from './ContextWidgetAdapter';
 

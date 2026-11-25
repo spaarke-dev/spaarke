@@ -43,6 +43,50 @@ export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProp
 // — that is React 18+; this shell must stay React-16/17-safe (NFR-04).
 let sprkModalTitleIdCounter = 0;
 
+// Task 202 follow-up (modal swap handover). A host sometimes replaces one SprkModal with a different one in the same
+// place (RuleWizard: a "loading" modal until its catalog arrives, then the wizard's own modal). The second modal opens
+// while focus sits on the first one's Close button, so that button, not the control that opened the first, is what it
+// captures; at close the button is long gone and focus would be lost. Each open SprkModal therefore records, against its
+// surface element, the chain of elements to try at close: what had focus when it opened, then (when that element lay
+// inside another open SprkModal's surface) that modal's own chain, which a swap of a swap extends again. Module-level
+// and internal on purpose: no prop, no export.
+interface OpenerCandidate {
+  el: HTMLElement;
+  /** Surfaces that must all be gone before `el` may be used: an inherited opener belongs behind a modal that may still be open. */
+  goneSurfaces: HTMLElement[];
+}
+interface ModalFocusRecord {
+  surface: HTMLElement | null;
+  chain: OpenerCandidate[];
+}
+const modalFocusRecords = new WeakMap<HTMLElement, ModalFocusRecord>();
+
+/** The chain a modal opening now should keep: `focused` first, then the chain of the SprkModal surface it sits in, if any. */
+function openerChainOf(focused: HTMLElement | null): OpenerCandidate[] {
+  if (!focused) return [];
+  let parent: ModalFocusRecord | undefined;
+  for (let node: HTMLElement | null = focused; node && !parent; node = node.parentElement) {
+    parent = modalFocusRecords.get(node);
+  }
+  const inherited =
+    parent && parent.surface
+      ? parent.chain.map(c => ({ el: c.el, goneSurfaces: [...c.goneSurfaces, parent!.surface as HTMLElement] }))
+      : [];
+  return [{ el: focused, goneSurfaces: [] }, ...inherited];
+}
+
+/** The first element of the chain that may take focus now: connected, enabled, not inert, and its holding modals gone. */
+function firstUsableOpener(chain: OpenerCandidate[]): HTMLElement | null {
+  const usable = chain.find(
+    ({ el, goneSurfaces }) =>
+      el.isConnected &&
+      !el.closest('[inert]') &&
+      !(el as HTMLButtonElement).disabled &&
+      goneSurfaces.every(surface => !surface.isConnected)
+  );
+  return usable ? usable.el : null;
+}
+
 // Room left at the right edge for the platform's lookup side pane while
 // `yieldToSidePane` is on: at least the pane's width, more on wide windows.
 const SIDE_PANE_CLEARANCE = 'max(440px, 34vw)';
@@ -163,6 +207,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   yieldToSidePane = false,
   uiScale = 1,
   maximizable = true,
+  defaultMaximized = false,
   nav,
   headerActions,
   footerStart,
@@ -172,7 +217,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   children,
 }) => {
   const styles = useStyles();
-  const [maximized, setMaximized] = React.useState(false);
+  const [maximized, setMaximized] = React.useState(defaultMaximized && maximizable);
   // Stable per-instance title id so the surface announces its accessible name
   // (aria-labelledby) — we render a custom header, not Fluent's DialogTitle,
   // so the auto-wiring DialogTitle provides must be supplied here explicitly.
@@ -181,15 +226,21 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // The last surface element this modal rendered. `surfaceRef` is null by the time the close effect runs (the surface
   // unmounts in the same commit), and "focus is inside the closing surface" needs the element. A callback ref keeps both.
   const lastSurfaceRef = React.useRef<HTMLDivElement | null>(null);
+  // This modal's entry in `modalFocusRecords`: what a modal opened from inside this one inherits (see openerChainOf).
+  const recordRef = React.useRef<ModalFocusRecord>({ surface: null, chain: [] });
   const setSurfaceRef = React.useCallback((node: HTMLDivElement | null) => {
     surfaceRef.current = node;
-    if (node) lastSurfaceRef.current = node;
+    if (node) {
+      lastSurfaceRef.current = node;
+      recordRef.current.surface = node;
+      modalFocusRecords.set(node, recordRef.current);
+    }
   }, []);
 
   // Task 202: a SprkModal that goes open -> closed returns keyboard focus to the element that had it when the modal
   // opened. Fluent's Dialog only restores to a `DialogTrigger`; hosts open a SprkModal from state, so nothing did.
   const { targetDocument } = useFluent();
-  const openerRef = React.useRef<HTMLElement | null>(null);
+  const openerChainRef = React.useRef<OpenerCandidate[]>([]);
   const wasOpenRef = React.useRef(false);
   const cancelRestoreRef = React.useRef<(() => void) | null>(null);
 
@@ -198,27 +249,31 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // moves focus: the content mounts in the same commit as this component (the portal does not defer it), so a child's
   // layout effect or an `autoFocus` input has already focused itself by the time a layout effect of ours runs, and
   // Fluent's `useFocusFirstElement` (a passive effect) comes after both. The read has no side effect; it is committed to
-  // `openerRef` by the layout effect below. Pinned by focusRestore.test.tsx ("captures the opener before ...").
-  const openerCandidateRef = React.useRef<HTMLElement | null>(null);
+  // `openerChainRef` by the layout effect below. Pinned by focusRestore.test.tsx ("captures the opener before ...").
+  const openerCandidateRef = React.useRef<OpenerCandidate[]>([]);
   if (open && !wasOpenRef.current) {
     const doc = targetDocument ?? document;
     const focused = doc.activeElement as HTMLElement | null;
-    openerCandidateRef.current = focused && focused !== doc.body && focused !== doc.documentElement ? focused : null;
+    openerCandidateRef.current = openerChainOf(
+      focused && focused !== doc.body && focused !== doc.documentElement ? focused : null
+    );
   }
   // RESTORE. Only on a real open -> closed transition (`open` false, or this component unmounting while open):
   // `hidden` and `yieldToSidePane` keep `open` true and never reach it (task 198).
   const restoreFocusToOpener = React.useCallback(() => {
-    const opener = openerRef.current;
+    const chain = openerChainRef.current;
     const surface = lastSurfaceRef.current;
-    openerRef.current = null;
+    openerChainRef.current = [];
+    recordRef.current.chain = [];
     wasOpenRef.current = false;
-    if (!opener) return;
-    const doc = opener.ownerDocument;
+    if (chain.length === 0) return;
+    const doc = chain[0].el.ownerDocument;
     cancelRestoreRef.current?.();
     cancelRestoreRef.current = scheduleFocusReturn({
       doc,
-      // Evaluated at each attempt (the opener may re-render); not while it is disabled, detached or inert.
-      target: () => (opener.isConnected && !opener.closest('[inert]') ? opener : null),
+      // Evaluated at each attempt (the opener may re-render); the opener itself, else the one the modal it replaced
+      // had (see openerChainOf). Never one that is disabled, detached or inert.
+      target: () => firstUsableOpener(chain),
       // Focus is "lost" only on body/nothing, on a node inside this closing surface, or on a removed node. Anywhere else
       // (another dialog the host focused on purpose, the parent wizard) is kept, so a host that moved focus wins.
       isKept: active =>
@@ -236,7 +291,8 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       cancelRestoreRef.current = null;
       if (!wasOpenRef.current) {
         wasOpenRef.current = true;
-        openerRef.current = openerCandidateRef.current;
+        openerChainRef.current = openerCandidateRef.current;
+        recordRef.current.chain = openerCandidateRef.current;
       }
     } else if (wasOpenRef.current) {
       restoreFocusToOpener();
@@ -266,8 +322,8 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   const layering = useSidePaneLayering(surfaceInert && open, surfaceRef);
 
   React.useEffect(() => {
-    if (!open) setMaximized(false);
-  }, [open]);
+    if (!open) setMaximized(defaultMaximized && maximizable);
+  }, [open, defaultMaximized, maximizable]);
 
   const effectiveSize: SprkModalSize = maximized ? 'full' : size;
   const surfaceStyle: React.CSSProperties = getSurfaceStyle(effectiveSize, uiScale);

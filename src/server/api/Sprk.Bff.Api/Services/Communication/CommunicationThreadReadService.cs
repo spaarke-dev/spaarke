@@ -1590,7 +1590,9 @@ public sealed class CommunicationThreadReadService
             PrivateContext: parsed.PrivateContext is { } context && contextNames is not null
                 && contextNames.TryGetValue(context, out var contextName)
                     ? new MessagePrivateContext(context.Table, context.Id, contextName)
-                    : null);
+                    : null,
+            // task 035 / FR-22: the thread lookup the row was read with (an empty id = no thread = null).
+            ThreadId: parsed.ThreadId == Guid.Empty ? null : parsed.ThreadId);
 
     private sealed record VisibleMessage(Guid ThreadId, ThreadMessageDto Dto);
 

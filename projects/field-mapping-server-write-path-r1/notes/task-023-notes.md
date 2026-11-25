@@ -136,3 +136,21 @@ Setup, read from dev before the deploy:
 - The Assigned To bind is chosen by `findNavProp(navProps, 'contact', 'assignedto')`. The exact-match test compares the hint with `sprk_assignedto` and never matches, so the first column containing "assignedto" wins, in metadata order. Wizard events on dev so far (e.g. EVT-000025) wrote `sprk_assignedto`. The live check confirms the column again.
 
 Checks: mapped columns present at first load; `sprk_assignedto` = the picked contact and nothing else changed; owner = the Matter's owning team; `EVT-nnnnnn` autonumber; a second event with no assignee gets the server default (or stays blank, per the Event row of `RecordTableRules.cs`); dark mode.
+
+### Result: PASS, 2026-11-23 23:11–23:14Z (dev; `sprk_createeventwizard` from master 3df5ee9e3f)
+
+Run in the owner's signed-in Chrome, from the "Create Event" command on Matter PAT-176903 (`232852f8-a263-f111-ab0c-000d3a582930`). Each new row was read back with the Web API as an admin. Log: session scratchpad `live023/`.
+
+| Check | Event A "FMSWP-023 live check A" (`e6a65599-be22-42e0-9f94-a8e744dab467`) | Event B "FMSWP-023 live check B" (`4290d1ce-d191-4165-ad8a-1cf8ed848d17`) |
+|---|---|---|
+| Mapped columns at first load | **PASS**: all eight equal the matter. Six set (attorney 1/2, paralegal 1, law firm 1/2, assigned-to-internal); paralegal 2 and assigned-to-external are empty on both | **PASS**, same eight |
+| Created in one write by the BFF | **PASS**: `createdon` = `modifiedon`; created and modified by `# mi-bff-api-dev` | **PASS** |
+| User's pick kept | **PASS**: `sprk_assignedto` = Jane Doe (picked in the wizard) | n/a: no pick; `sprk_assignedto` stays blank, as the Event row's server default applies to server writers only (`RecordTableRules.cs`) |
+| Owner = the matter's owning team (FR-09) | **PASS**: Spaarke Business Unit 1, the same as the matter | **PASS** |
+| Autonumber | **PASS**: EVT-000030 | **PASS**: EVT-000031 |
+| Regarding | **PASS**: the matter, shown on the event form at first load | **PASS** |
+| Console errors | none matching event, wizard, bff or mapping | none |
+
+**Dark mode: left for the owner.** The page's `themeOption=darkmode` flag turns the form dark, but the wizard stays light. The browser holds the user's explicit Spaarke preference `spaarke-theme` = `light`, which wins by design (`themeStorage.getEffectiveDarkMode`, ADR-021). Switching it would also change the theme for another session working on the same origin, so the owner checks by setting the Spaarke theme to dark and opening the wizard.
+
+Rows left on dev for later cleanup: events `e6a65599-be22-42e0-9f94-a8e744dab467` and `4290d1ce-d191-4165-ad8a-1cf8ed848d17`.

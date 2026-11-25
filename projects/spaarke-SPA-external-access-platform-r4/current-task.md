@@ -1,41 +1,40 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-22 (task 024 done + committed; master merged; PR next)
+> **Last Updated**: 2026-11-24 ~07:40Z (wave 9 merged and closed: 033, 035; #3045 follow-up committed)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **024** ✅ — shared EmptyState (FR-17). Notes `notes/task-024-notes.md`. POML completed, TASK-INDEX ✅, drift clean, portfolio synced (#2680: 46 / 23). |
-| **Step** | Committed `65f60cf42f` (024), merged origin/master `ff65c019b2` (conflicts only = our own 023c squash → branch side), fix `eae345869a` (two tests the merge had reverted to 023c text). Verified after merge: lib tsc, DataGrid jest 20/178, client-lint ok, SPA tsc, 9 touched SPA test files green, ArchTest grid guard 231/231. Full SPA vitest 1935/1935 + build ok (pre-merge). |
-| **Status** | Push + PR in progress (body: scratchpad `pr-024.md`). Nothing from 023/024 is deployed. |
-| **Next Action** | Owner's merge go for the 024 PR, with sign-off on its two shared-grid changes (`emptyState` host option; `useHostRowSource` no-empty-flash fix). Arm auto-merge only after that go. Then tell uac-r2 024 is ready (live BFF still lacks #2941) → task 028. |
-| **Side** | #1906b → ebilling-r1; #2866 landed on master (duplication sweep). |
+| **Active** | **#3045 follow-up (D-34)**, the shared DataGrid export: every cell exports the text it shows; host-rendered columns export the renderer's text; dates export as shown (owner 2026-11-24); export text hardening (owner 2026-11-24: "fix the excel formula risk"; detail tracked outside the repo, never in public text). Committed `6dc5eba5ed` on top of merge `e288c59dc0`. Notes: `notes/task-033-followup-3045-notes.md` (round 3 is current). |
+| **Status** | **PR #3055** open (fix `6dc5eba5ed` + review fixes `b4968491ac`). Local: grid jest 299/299, tsc, eslint 0 errors, prettier, client-lint ok, external-spa tsc + 44/44. Opus review done: F1 (guard after separators) and F2 (Date Only test in the New York env) fixed; Ks in the notes. Residual hardening detail reported to the owner in chat only. Open owner question: Date Only export as shown vs `yyyy-mm-dd` (locale misread risk). |
+| **Next action** | Owner's merge go for #3055 (and the Date Only answer). After merge: D-34 → Done in `notes/defer-issues.md` (#3045 auto-closes via "Fixes"). Then tell uac-r2 the #3048 merge `b64d988625` for a later BFF candidate (threads), and plan **038** (P3 dev deploy + E2E) on the owner's per-SHA go. |
+| **Last merged** | PR #3048 at 06:14:00Z, merge `b64d988625`: tasks 033 (Money sort + export) and 035 (message threads, `threadId`). POMLs completed, TASK-INDEX ✅, drift check clean, board Tasks Completed = 30. |
+| **Next in phase 3** | **038** (P3 dev deploy + E2E). 036 is cancelled. |
+| **uac-r2** | Dev BFF `0362599b94` LIVE since ~05:21:45Z 2026-11-24; it does NOT carry 035's `threadId` (the SPA then shows ungrouped messages). Threads need a later BFF candidate that includes `b64d988625`, through uac-r2 with the owner's per-SHA go. |
+| **ebilling-r1 FYI** | Master PR #3051 changes the shared invoice submission result screen (title/icon follow the polled status); one external-spa test assertion changes. It reaches the portal with the next SPA build from master after it merges. No action needed. |
+
+## Deploy order
+Every SPA deploy builds master HEAD and needs the owner's go for the exact SHA, with rollback `9d08576e63`. For 035's threads to show, the BFF must also carry `b64d988625`.
+
+## Live on dev
+- SPA: master `9d08576e63` (rollback `2dcbe35e34`).
+- BFF: `0362599b94`, live ~05:21:45Z 2026-11-24 (uac-r2; previous `996928732e`).
+
+## For 038's E2E
+- Wave 8: Information columns (matter: Open date, Matter type, Practice area, Assigned attorney/paralegal, Description, Last modified; project: Practice area, Assigned attorney/paralegal, Description; WA: Matter, Matter type, Assigned to, Description). Grid widths/sort per browser, "Clear all". Messages Refresh + "Show new messages".
+- Wave 9: currency columns sort by amount; Export to Excel writes displayed text (labels, names, amounts, dates as shown); messages grouped into conversations (needs the threads BFF).
+- Known limits: "Open date" is a date-time; a parent's Messages keeps polling under a child modal; amounts in different currencies sort by raw amount; an unlabelled currency cell shows USD (D-35 #3046).
+
+## Owner questions open (older)
+- Should a docx preview be filed as an Idea?
+- Show "The client is reviewing this invoice." beyond the Information field?
+- Add a `useHostRowSource` row to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval)?
+
+## Filed
+- D-24 #2939 … D-30 #2975; D-31 #3008; D-32 #3009; D-33 #3010 closed.
+- D-34 #3045 (fix in progress, above); D-35 #3046 (unlabelled currency = USD); D-36 #3050 (MDA grids don't read OData label annotations; not verified live).
 
 ## Merge trap (seen 2026-11-22)
-- Merging master after a squash of our own work: a line 023c changed and 024 changed BACK looks unchanged from the merge base, so git silently takes master's 023c text. After such merges, for files where `origin/master` == the pre-squash branch tip, restore `HEAD^1`'s copy.
-
-## Owner questions open
-- Merge go for the 024 PR, with sign-off on its two shared-grid changes.
-- Older: show "The client is reviewing this invoice." beyond the Information field?
-- K: add `useHostRowSource` to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval).
-
-## Filed this session
-- D-24 #2939, D-25 #2960, D-26 #2961, D-27 #2962, D-28 #2963 (config row not applied by Deploy-Release / provisioning — do it in or before 028), D-29 #2964 (SPA suite flake; full run green this time), D-30 #2975 (remaining hand-rolled empty states, Idea).
-
-## Task 028 reminders (P2 deploy)
-- Waits for uac-r2's live notice of a dev BFF containing #2941 (`9461dc0bb3`). uac-r2 picks the SHA and asks the owner itself — never name a SHA to the owner.
-- Then, each with owner go + stated rollback: apply `scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1` (-WhatIf, apply, -Verify -RequireRow; rollback = delete row `286be8b4-f96f-4d5a-b1d5-82fd83ca9693`); grid PATCH 3ff4102c; SPA deploy of the approved SHA via `deploy-external-spa.yml` (builds master HEAD — if master moved, tell owner + uac-r2 first); E2E incl. 1000px.
-
-## Live state
-- **Dev BFF** `c8ab2cba9e` (uac-r2, 2026-11-20). Rollback `5ae2804884`. Neither has #2941. uac-r2: #2941 rides its next deploy (fm task 055 from master, or a master candidate if 055 isn't on master when we're ready — tell uac-r2 then); it pings before the swap and sends a live notice after its 30-min gate. `/healthz/catalog` 503 until ebilling seeds EB-D-256 (not a regression).
-- **Dev SPA** master `2963d1565b` (live 2026-11-19). Rollback = redeploy `ea7ba661d6`, then `ed3a5c2752`.
-
-## Coordination
-- uac-r2 reviews BFF PRs and deploys the dev BFF. Peer messages are not owner approval.
-
-## Open items
-- D-13 #2800, D-14 #2809, D-15 #2810, D-16 #2823; D-19 #2854, D-20 #2860. Older owner questions: D-1 #2686, D-2 #2687, D-4 #2693, #2786 backfill.
-- Phase 2 remaining: 028. Task 016 🔄 (owner retest 3–7).
-- CI: office-scope legs sit at their 20-min cap (known #1474/#1718/#2767). Re-run on a cancel; not ours.
+When merging master after a squash of our own work, watch for a line that one task changed and a later task changed back. It looks unchanged from the merge base, so git takes master's text. For files where `origin/master` equals the pre-squash branch tip, restore `HEAD^1`'s copy. 2026-11-24 merge `e288c59dc0`: every touched file was identical on both sides (clean).

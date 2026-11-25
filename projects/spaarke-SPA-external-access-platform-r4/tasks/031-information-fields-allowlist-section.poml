@@ -4,7 +4,7 @@
     <title>ReadableColumns additions (UAC review) + Information section fields (FR-18)</title>
     <phase>3 Grids, information, messages</phase>
     <gate>after 028 and 030 (030's final column list and owner answers recorded)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and authorization; changes the external column allow-list (a security boundary) and .tsx code</rigor-reason>
     <model-tier>opus</model-tier>

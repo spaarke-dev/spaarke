@@ -15,6 +15,10 @@
  *   - When the user skips AssociateToStep, no regarding fields are written —
  *     all 11 lookups remain null and all 4 resolver fields remain null.
  *
+ * Server write path (field-mapping-server-write-path-r1 task 024, FR-16): the create is `POST /api/v1/child-records/sprk_todo`.
+ * The payload holds only what the user entered or picked and the filing keys; mapping, the owner and the other defaults
+ * are the server's. The regarding parent is named as the mapping source (query string).
+ *
  * Dependencies are injected via constructor — no solution-specific imports.
  *
  * @see src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md
@@ -22,19 +26,19 @@
  */
 
 import { describeWebApiCreateError } from '../../utils/webApiCreateError';
-import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
+import { createRecordViaBffWithWarnings, ChildRecordWriteError } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateTodoFormState, AssociationResult } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import {
   applyResolverFields,
   discoverNavProps,
+  findNavProp,
   toNavPropMap,
   cleanGuid,
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import type { IPolymorphicWebApi } from '../../services/PolymorphicResolverService';
 import { TODO_REGARDING_CATALOG } from '../../services/TodoRegardingUpdateBuilder';
-import { applyFieldMappings } from '../../services/FieldMappingService';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
@@ -50,9 +54,9 @@ export interface ICreateTodoResult {
   success: boolean;
   errorMessage?: string;
   /**
-   * Non-fatal diagnostics accumulated during creation — currently only the
-   * Field Mapping Framework engine (task 021 / FR-12). Empty/undefined when
-   * nothing warned.
+   * Non-fatal diagnostics accumulated during creation: the server's own warnings on the create (a mapping source it
+   * could not read, a mapped value it did not write; task 024 / FR-16) and the file upload / document link warnings.
+   * Empty/undefined when nothing warned.
    */
   warnings?: string[];
 }
@@ -85,11 +89,9 @@ export class TodoService {
   constructor(
     private readonly _dataService: IDataService,
     /**
-     * Injected BFF-authenticated fetch — required only for the Field Mapping
-     * Framework engine call (task 021 / FR-12). Optional for back-compat with
-     * existing callers (e.g. the follow-on `createTodoRegardingChild` path)
-     * that don't yet thread these deps through; when omitted, the engine call
-     * is skipped (graceful no-op — same as "no profile configured").
+     * Injected BFF-authenticated fetch. The create goes to `POST /api/v1/child-records/sprk_todo` with it (task 024 /
+     * FR-16) and it backs the file upload. Optional in the type; without it (or without `bffBaseUrl`) the create is
+     * REFUSED, never sent to Xrm.WebApi (fail closed, ADR-003).
      */
     private readonly _authenticatedFetch?: AuthenticatedFetchFn,
     /** BFF API base URL — see `_authenticatedFetch` doc above. */
@@ -99,10 +101,8 @@ export class TodoService {
   /**
    * Lazily-built `EntityCreationService` used for the upload → link sequence (task 119 /
    * ISS-027). Built on first use, not in the constructor, because `_authenticatedFetch` /
-   * `_bffBaseUrl` are optional (the `createTodoRegardingChild` follow-on path constructs this
-   * service with neither, and never attaches files). Returns `undefined` when either dependency
-   * is missing — the caller treats that as a graceful "upload not configured" no-op, the same
-   * contract the field-mapping engine call already uses below.
+   * `_bffBaseUrl` are optional in the type. Returns `undefined` when either dependency is missing —
+   * the caller treats that as a graceful "upload not configured" no-op.
    */
   private _entityService?: EntityCreationService;
   private _getEntityCreationService(): EntityCreationService | undefined {
@@ -146,11 +146,12 @@ export class TodoService {
     regarding?: AssociationResult | null,
     uploadedFiles: IUploadedFile[] = []
   ): Promise<ICreateTodoResult> {
-    // Non-fatal diagnostics accumulated during creation (currently just the
-    // field-mapping engine, task 021).
+    // Non-fatal diagnostics accumulated during creation (the server's create warnings, the upload).
     const warnings: string[] = [];
 
-    // 1. Build core sprk_todo entity body (scalar fields only)
+    // 1. Build core sprk_todo entity body (scalar fields only). Task 024 (FR-16): ONLY what the user entered or picked,
+    // the filing keys and the initial state. The server maps (fill-only), owns the record and decides every other default;
+    // the key inventory is in projects/field-mapping-server-write-path-r1/notes/task-024-notes.md.
     const entity: Record<string, unknown> = {
       sprk_name: formValues.title.trim(),
       // Open / Active (per entity-schema.md: statuscode=1 Open, statecode=0 Active)
@@ -185,12 +186,13 @@ export class TodoService {
       // @odata.bind key predicate is valid (Dataverse 400 "query syntax" otherwise).
       const assignedToGuid = cleanGuid(formValues.assignedToId);
       try {
+        // Bind by the column's FULL logical name: `sprk_todo` also has `sprk_assignedtointernal` and
+        // `sprk_assignedtoexternal`, which contain the fragment 'assignedto' and are listed first. A fragment
+        // match bound the Assignee to `sprk_assignedtointernal`, so the To Do left the assignee's Smart To Do list.
         const navProps = await discoverNavProps('sprk_todo');
-        const assignedNav = navProps.find(
-          n => n.referencedEntity === 'contact' && n.columnName.toLowerCase().includes('assignedto')
-        );
+        const assignedNav = findNavProp(navProps, 'contact', 'sprk_assignedto');
         if (assignedNav) {
-          entity[`${assignedNav.navPropName}@odata.bind`] = `/contacts(${assignedToGuid})`;
+          entity[`${assignedNav}@odata.bind`] = `/contacts(${assignedToGuid})`;
         } else {
           // Fallback: use the lookup attribute name directly
           // UAT 2026-06-22 round 13: PascalCase nav-prop name required
@@ -204,6 +206,7 @@ export class TodoService {
     }
 
     // 3. Regarding (multi-entity resolution per ADR-024) — only when supplied
+    let mappingSource: { entity: string; id: string } | undefined;
     if (regarding && regarding.entityType && regarding.recordId) {
       const catalogEntry = TODO_REGARDING_CATALOG.find(c => c.entityType === regarding.entityType);
       if (!catalogEntry) {
@@ -243,43 +246,40 @@ export class TodoService {
         };
       }
 
-      // 3b. Field-mapping engine (task 021 / FR-12): apply any configured
-      // `sprk_fieldmappingprofile` rules for {parent → sprk_todo} onto the
-      // entity payload. Runs AFTER applyResolverFields and BEFORE
-      // createRecord, on the SAME `entity` payload object — same insertion
-      // point + warning-append + graceful no-op contract as task 020.
-      // Orthogonal to the To Do regarding-catalog above (a different
-      // mechanism — spec §7 note 6); deliberately NOT wrapped in a try/catch
-      // here — `applyFieldMappings` never throws, and skipped entirely when
-      // the host hasn't wired `authenticatedFetch`/`bffBaseUrl` (constructor
-      // optional deps), which is itself a graceful no-op.
-      if (this._authenticatedFetch && this._bffBaseUrl) {
-        const mappingResult = await applyFieldMappings({
-          sourceEntity: catalogEntry.entityType,
-          sourceId: regarding.recordId,
-          targetEntity: 'sprk_todo',
-          payload: entity,
-          dataService: this._dataService,
-          authenticatedFetch: this._authenticatedFetch,
-          bffBaseUrl: this._bffBaseUrl,
-        });
-        warnings.push(...mappingResult.warnings);
-      }
+      // The record the to do is filed under is also the mapping source (see step 4).
+      mappingSource = { entity: catalogEntry.entityType, id: regarding.recordId };
     }
 
-    // 4. Create the record — strictly `sprk_todo` (NEVER `sprk_event`)
+    // 4. Create the record through the BFF child-records route — strictly `sprk_todo` (NEVER `sprk_event`).
+    // Task 024 (FR-16): the create goes to `POST /api/v1/child-records/sprk_todo`, never to Xrm.WebApi. The server maps the
+    // fields fill-only (the user's own value wins), decides the owner by the caller's rules (FR-09: the Secure Record
+    // Owners team under a secure record), and a refusal surfaces the server's message. `sprk_todo` is not in the route's
+    // inferred-source set, so the wizard names the source: the record the to do is filed under, in the query string only.
+    // No regarding parent: no source, no mapping. A server warning (a source that could not be read, a mapped value that
+    // was not written) is returned with the result.
     let todoId: string;
     try {
-      // UAC-r2 task 147 r1 (owner round 28 item 1): the child create goes through the BFF (G5) — the server decides the
-      // owner (the Secure Record Owners team under a secure record); a refusal surfaces the server's message.
-      todoId = await withBffChildWrites(this._dataService, this._authenticatedFetch, this._bffBaseUrl).createRecord(
+      if (!this._authenticatedFetch || typeof this._bffBaseUrl !== 'string') {
+        throw new ChildRecordWriteError(
+          'The sprk_todo record was not saved: this screen is not connected to the Spaarke service, which must save it.',
+          0,
+          'child_record.bff_not_configured'
+        );
+      }
+      const created = await createRecordViaBffWithWarnings(
+        this._authenticatedFetch,
+        this._bffBaseUrl,
         'sprk_todo',
-        entity
+        entity,
+        mappingSource ? { mappingSource } : undefined
       );
+      todoId = created.id;
+      warnings.push(...created.warnings);
     } catch (err) {
       console.error('[TodoService] createRecord error:', err);
       // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
-      const described = describeWebApiCreateError(err, 'to do');
+      // A to do with no regarding parent is a root create: the route's uniform not-found can only be a selected value.
+      const described = describeWebApiCreateError(err, 'to do', { rootCreate: !mappingSource });
       const message = described.message;
       return {
         success: false,

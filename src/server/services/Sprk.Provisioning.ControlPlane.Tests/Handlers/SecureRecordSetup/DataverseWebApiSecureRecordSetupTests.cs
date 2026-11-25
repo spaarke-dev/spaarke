@@ -388,6 +388,64 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(kind);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task W13_GetAttributeExposure_ReadsTheManagedPropertyValues(bool audit, bool find)
+    {
+        var http = new Recorder().Respond(_ => Json(new Dictionary<string, object>
+        {
+            ["IsAuditEnabled"] = new Dictionary<string, object> { ["Value"] = audit, ["CanBeChanged"] = true, ["ManagedPropertyLogicalName"] = "canmodifyauditsettings" },
+            ["IsValidForAdvancedFind"] = new Dictionary<string, object> { ["Value"] = find, ["CanBeChanged"] = true, ["ManagedPropertyLogicalName"] = "canmodifysearchsettings" },
+        }));
+
+        var exposure = await Api(http).GetAttributeExposureAsync("contact", "sprk_externalinvitecodehash", CancellationToken.None);
+
+        exposure.Should().Be(new SecureSetupAttributeExposure(audit, find));
+        http.Requests.Single().Uri.Should().EndWith(
+            "/EntityDefinitions(LogicalName='contact')/Attributes(LogicalName='sprk_externalinvitecodehash')?$select=IsAuditEnabled,IsValidForAdvancedFind");
+        http.Requests.Should().OnlyContain(r => r.Method == HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task W13b_GetAttributeExposure_404IsAbsent()
+    {
+        var absent = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        (await Api(absent).GetAttributeExposureAsync("contact", "sprk_externalinvitecodehash", CancellationToken.None)).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("{}")]                                                                                                  // neither property
+    [InlineData("""{"IsAuditEnabled":{"Value":false},"IsValidForAdvancedFind":null}""")]                               // one null
+    [InlineData("""{"IsAuditEnabled":false,"IsValidForAdvancedFind":false}""")]                                        // not managed properties
+    [InlineData("""{"IsAuditEnabled":{"Value":"false"},"IsValidForAdvancedFind":{"Value":false}}""")]                  // not a boolean
+    public async Task W13c_GetAttributeExposure_AnUnreadableValue_Throws_NeverReadAsOff(string body)
+    {
+        var http = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+        });
+
+        var act = () => Api(http).GetAttributeExposureAsync("contact", "sprk_externalinvitecodehash", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Message.Should().Contain("no readable");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, SecureRecordSetupFaultKind.Auth)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, SecureRecordSetupFaultKind.Other)]
+    public async Task W13d_GetAttributeExposure_NonSuccessOtherThan404_Throws_NeverAbsent(HttpStatusCode status, SecureRecordSetupFaultKind kind)
+    {
+        var http = new Recorder().Respond(_ => new HttpResponseMessage(status));
+
+        var act = () => Api(http).GetAttributeExposureAsync("contact", "sprk_externalinvitecodehash", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(kind);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private static SecureRecordSetupWebApi Api(Recorder http)

@@ -255,7 +255,7 @@ Finance Intelligence Panel (VisualHost)
 **What Happens**:
 - User clicks **Confirm** or **Reject** in review queue
 - BFF API endpoint processes confirmation:
-  - **Confirm**: Updates invoice status to Confirmed, enqueues extraction job
+  - **Confirm**: Submits the document through the invoice intake (ebilling-r1 050a, D-134). The submission job (`InvoiceSubmissionProcessing`) reads it and creates the invoice (see Stage 5). The route needs eBilling switched on.
   - **Reject**: Updates invoice status to Rejected, retains record (never deleted)
 
 **User Action**: Click Confirm or Reject button

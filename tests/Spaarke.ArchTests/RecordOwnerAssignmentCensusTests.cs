@@ -669,8 +669,8 @@ public class RecordOwnerAssignmentCensusTests
             + "builder throws on an empty team and the core refuses (503/500) rather than write an application-owned row."),
         new OwnerWriteEntry("ComposeCreateOnSavePromoter.cs", "PromoteIfEphemeralAsync", 1, OwnerWriteKind.Routed,
             "Owned from the inherited filing links or the caller."),
-        new OwnerWriteEntry("OfficeService.cs", "QuickCreateAsync", 1, OwnerWriteKind.Routed,
-            "Office invoice quick-create — the resolver's team (task 080)."),
+        // (OfficeService.cs.QuickCreateAsync's invoice leg and its owner write were deleted by ebilling-r1 task 096: an
+        // invoice is created only by submission; Matter and Project quick-create go through RecordCreationService.)
         // (OfficeService.cs.CreateTodoAsync writes no owner since field-mapping task 030a: RecordCreationService.cs's
         // OwnedCreateFields, below, writes the Office To Do's.)
         new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 121: the body moved (CaptureAsync wraps it)
@@ -3127,7 +3127,7 @@ public class RecordOwnerAssignmentCensusTests
         // ebilling-r1 task 095: SaveAsync's body moved, unchanged in this respect, to SaveCoreAsync (shared with the from-email submission's
         // in-process save, IOfficeSubmissionEmailSave); SaveAsync is now a one-line delegation.
         new PersonBearingWriter("OfficeService.cs", "SaveCoreAsync", "the Office user saving a document (carried to the worker)"),
-        new PersonBearingWriter("OfficeService.cs", "QuickCreateAsync", "the Office user quick-creating an invoice"),
+        // (OfficeService.cs.QuickCreateAsync no longer writes a row itself: ebilling-r1 task 096 deleted the invoice leg.)
         // (OfficeService.ResolveTodoOwnerTeamAsync was deleted by field-mapping task 030a: the Office To Do is created through
         // RecordCreationService, whose DecideOwnerAsync names the caller via WhoAmI.)
         new PersonBearingWriter("OfficeDocumentPersistence.cs", "CreateDocumentWithSpePointersAsync", "the saving user, on the document"),

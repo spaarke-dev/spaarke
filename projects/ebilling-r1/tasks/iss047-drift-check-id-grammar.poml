@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss047" project="ebilling-r1">
+  <metadata>
+    <title>ISS-047 (#3042): the task-status drift check reads iss-prefixed and hyphen-suffixed task ids correctly</title>
+    <phase>Issue fix; filed 2026-11-24 from the index tidy-up</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One shared PowerShell script plus its tests; no product code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Regex grammar change with must-fire and must-not-fire cases; well specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>scripts, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-047. scripts/check-task-status-drift.ps1 is the task-completion gate every project's task-execute Steps 10-11 runs. Two parse faults:
+(1) The status-first row pattern ($rowPattern ~134) lets [^\s|]+ take the letters of "iss028" as a status marker and reads "028" as the id, so the iss028 and iss040 rows overwrite the real 028 and 040 rows (phantom drift).
+(2) Ids with a letter prefix or hyphenated suffix (iss029, 084h-1, 095f-2e2a, 130-0) match neither $rowPattern nor $idFirstPattern (~146), so their POMLs are reported as having no index row (62 unpaired entries on work/ebilling-r1, mostly phantoms).
+Check how the script pairs an index id with its POML (file name prefix and/or the POML task id attribute) so the new grammar pairs both sides the same way.</prompt>
+
+  <constraints>
+    <constraint>One id grammar, used by both row patterns and the POML side: optional lowercase letter prefix (iss), three digits, optional .N, optional lowercase letter suffix, optional hyphenated segments of letters and digits (084h-1, 095f-2e2a, 130-0). A letter immediately before the digits is part of the id, never a status marker (lookbehind or an anchored grammar).</constraint>
+    <constraint>Do not change what counts as a status, the exit codes, the output format or the parameters. Other projects' indexes must parse exactly as before unless they contain these id shapes: run the script with -All (or its whole-repo mode) before and after and record both parse counts and the per-project differences in the notes; every difference must be one of the two faults above.</constraint>
+    <constraint>Must-fire and must-not-fire tests: if the script has no test file, add a Pester test beside the repo's other script tests (find where scripts/*.ps1 tests live, e.g. tests/**/scripts or scripts/**/*.Tests.ps1, and declare the Pester version that location uses; never run Invoke-Pester without the declared -RequiredVersion). Cases: "| iss028 | ✅ [done] |" is id iss028 not 028; "| 028 | ✅ [done] |" still 028; "| 084h-1 | 🔄 |", "| 095f-2e2a | ✅ |", "| 130-0 | ✅ |" parse; a status-first row with a plain id still parses; a real drift (index done, POML not-started) is still reported for a prefixed and a hyphenated id.</constraint>
+    <constraint>Run the script on work/ebilling-r1 after the change: report the remaining drifts in the notes (028 and 040 phantoms must be gone). Do not edit TASK-INDEX.md or any POML status to make it pass.</constraint>
+    <constraint>Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss047-drift-check-id-grammar.md.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">iss-prefixed rows no longer overwrite plain-id rows; 028 and 040 report no drift on this project.</criterion>
+    <criterion testable="true">Hyphen-suffixed and iss-prefixed POMLs pair with their index rows.</criterion>
+    <criterion testable="true">Whole-repo parse differences before/after are only these two faults, recorded in the notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

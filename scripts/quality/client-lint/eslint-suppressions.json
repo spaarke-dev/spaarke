@@ -203,11 +203,6 @@
       "count": 4
     }
   },
-  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailWorkspaceWidget.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 4
-    }
-  },
   "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/FindSimilarWizardWidget.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 6
@@ -274,11 +269,6 @@
   "src/client/shared/Spaarke.Communication.Components/src/components/EmailComposeActions/useEmailComposeActions.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 3
-    }
-  },
-  "src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/EmailReadingAttachments.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
     }
   },
   "src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/ensureAssociationColumns.ts": {
@@ -726,7 +716,7 @@
       "count": 7
     },
     "no-restricted-syntax": {
-      "count": 3
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx": {
@@ -741,7 +731,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/HeaderCellContent.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
+      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/BoolFilterChip.tsx": {
@@ -1458,11 +1448,6 @@
   "src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
-    }
-  },
-  "src/solutions/LegalWorkspace/src/sections/email.registration.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
     }
   },
   "src/solutions/LegalWorkspace/src/sections/todo.registration.ts": {

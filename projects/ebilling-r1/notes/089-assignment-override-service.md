@@ -1045,3 +1045,10 @@ The uac-r2 design, binding. `RuleSetEndpoints.RequireAccessToTheRuleSet` runs on
   2. `scripts/Set-CustomerOwnerTeams.ps1 -CustomerBusinessUnitName 'Spaarke Business Unit 1' -Apply`: Billing Rule Reader + `prvReadsprk_ruleset` and `prvReadsprk_procedure` Deep ("APPLIED and read back: no drift"); `-Verify` PASS, exit 0. 0 holders; both owner teams drift none.
   3. Read-back: every roleprivileges row snapshotted before and after (853 roles, 34,165 to 34,168 rows). The diff is exactly the three added rows above, on the root roles, at Deep; nothing removed or changed.
 - **K3 deploy order is met on dev.** Not done: the `-AssignBillingRuleReader` runs, one per child-unit billing admin, each a separate owner go.
+
+## 089 close-out (owner answers 2026-11-23)
+
+- **K1 (row 4 above), a rule dropped by a newer Procedure Version: EB-D-265, option a.** "Change for this record" stays allowed on such a rule. Rare, but an admin may need the old rule for a record. No code change.
+- **089d live child-unit proof: EB-D-266, option b.** It waits for the first customer with child business units. Rules are generally held at the top level, and billing admins generally have access to all rules. uac-r2's gate stays in guide Phase 7a and the provisioning notice. The dev `-Apply` of the Billing Rule Reader assignment is not run now.
+- **Known limit kept (089e item 1).** A change closes the base rule's stale findings as best effort after the commit. The nightly run does not finish a close that failed. The reviewer's message says so, and the findings stay open until a reviewer resolves them. This is not escalated further; revisit at UAT (163) if reviewers see it.
+- With these, 089a-e are complete and 089 is ✅.

@@ -4,7 +4,7 @@
     <title>Assistant tools' seam: apply the external invoice firm rule</title>
     <phase>5 Partner surfaces; same batch as 130-0, before that batch reaches dev</phase>
     <gate>Branch from origin/task/ebilling-130-0 (after its fix rounds)</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tenant isolation on the assistant tools' invoice-family hiding for external callers.</rigor-reason>
     <model-tier>opus</model-tier>

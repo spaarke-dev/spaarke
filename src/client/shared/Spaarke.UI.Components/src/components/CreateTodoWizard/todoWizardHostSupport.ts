@@ -26,34 +26,46 @@ export const SPRK_TODO_CHANNEL_NAME = 'sprk_todo:lifecycle';
 export const SPRK_TODO_CREATED = 'sprk_todo:created';
 
 /**
- * Wrap an `IDataService` so successful `sprk_todo` creates broadcast `sprk_todo:created`. All other
- * operations pass through unmodified. No-op wrapper where BroadcastChannel is unavailable (the create
- * still succeeds; only the cross-surface refetch is missed).
+ * Post `sprk_todo:created` on the lifecycle channel. Never throws and is a no-op where BroadcastChannel is unavailable
+ * (the create still succeeded; only the cross-surface refetch is missed).
+ *
+ * Task 024 (FR-16): `TodoService` now posts the create to the BFF child-records route itself (it has to name the mapping
+ * source), so the create no longer passes through `IDataService.createRecord` and {@link withTodoCreatedBroadcast} never
+ * sees it. `TodoWizardDialog` calls this after a successful create instead.
+ */
+export function broadcastTodoCreated(todoId: string): void {
+  if (typeof BroadcastChannel === 'undefined') return;
+  try {
+    const channel = new BroadcastChannel(SPRK_TODO_CHANNEL_NAME);
+    try {
+      channel.postMessage({ type: SPRK_TODO_CREATED, todoId });
+    } finally {
+      channel.close();
+    }
+  } catch (err) {
+    // Non-fatal — the create succeeded; only the refetch signal failed.
+    console.warn('[CreateTodoWizard] Failed to broadcast sprk_todo:created — widget will need manual refresh', err);
+  }
+}
+
+/**
+ * Wrap an `IDataService` so successful `sprk_todo` creates made THROUGH IT broadcast `sprk_todo:created`. All other
+ * operations pass through unmodified. No-op wrapper where BroadcastChannel is unavailable.
+ *
+ * Since task 024 the wizard's own to-do create does not go through `createRecord` (see {@link broadcastTodoCreated}); the
+ * wrapper stays for any host path that still creates a `sprk_todo` through the data service, and the dialog's call and
+ * this wrapper cannot both fire for one create.
  */
 export function withTodoCreatedBroadcast(inner: IDataService): IDataService {
   if (typeof BroadcastChannel === 'undefined') return inner;
 
   // UAC-r2 task 147 r1c: the wrapper INHERITS from `inner` (Object.create) rather than spreading it, so a BFF-routed
-  // `inner` (withBffChildWrites) stays recognised as routed — `TodoService` then calls THIS createRecord instead
-  // of re-wrapping `inner` and sending the create to the BFF past the broadcast (which lost the refetch).
+  // `inner` (withBffChildWrites) stays recognised as routed.
   return Object.assign(Object.create(inner) as IDataService, {
     createRecord: async (entityName: string, data: Record<string, unknown>) => {
       const result = await inner.createRecord(entityName, data);
       if (entityName === SPRK_TODO_ENTITY && result) {
-        try {
-          const channel = new BroadcastChannel(SPRK_TODO_CHANNEL_NAME);
-          try {
-            channel.postMessage({ type: SPRK_TODO_CREATED, todoId: result });
-          } finally {
-            channel.close();
-          }
-        } catch (err) {
-          // Non-fatal — the create succeeded; only the refetch signal failed.
-          console.warn(
-            '[CreateTodoWizard] Failed to broadcast sprk_todo:created — widget will need manual refresh',
-            err
-          );
-        }
+        broadcastTodoCreated(result);
       }
       return result;
     },

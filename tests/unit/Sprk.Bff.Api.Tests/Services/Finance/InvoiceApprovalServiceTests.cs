@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// <c>sprk_systemuser</c> again. EB-D-172: <c>NoCloseRights_IsRefused_AndWritesNothing</c> fails when the close authorization is removed.
 /// Recorded in <c>projects/ebilling-r1/notes/103-approval-worklist.md</c>.</para>
 /// </remarks>
-public sealed class InvoiceApprovalServiceTests
+public sealed partial class InvoiceApprovalServiceTests
 {
     /// <summary>An extraction JSON as 049 stores it (date, hours, rate, amount, narrative extracted; task and activity coded).</summary>
     private const string Extraction =

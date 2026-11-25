@@ -171,6 +171,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     // ontology task 056 — additive props (modal-only where noted in wizardShellTypes)
     size = 'wizard',
     dismiss = 'explicit',
+    defaultMaximized,
     uiScale,
     // ontology task 194 — additive, opt-in, modal-only: yield to the host's lookup side pane (SendEmailDialog contract)
     nonBlocking,
@@ -555,6 +556,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       title={title}
       size={size}
       dismiss={dismiss}
+      defaultMaximized={defaultMaximized}
       uiScale={uiScale}
       nonBlocking={nonBlocking}
       yieldToSidePane={yieldToSidePane}

@@ -1,7 +1,8 @@
 /**
  * Where the decision wizard shows, and what happens when a place fails (task 032, O-5, ADR-050). The wizard itself is replaced here by a
- * stand-in that registers with the launcher the way the real host does, so these tests are about the CHAIN: dialog -> master-detail ->
- * a link to the Console through the host (`openLink`) -> nothing opened without a say from the user.
+ * stand-in that registers with the launcher the way the real host does, so these tests are about the CHAIN: the in-frame dialog (inline,
+ * with no display mode ever requested: owner decision 2026-11-24) -> master-detail -> a link to the Console through the host
+ * (`openLink`) -> nothing opened without a say from the user.
  *
  * (The same chain with the real wizard, and the Confirm that records, is in `wizardFlow.test.tsx`.)
  */
@@ -28,7 +29,12 @@ const stand = {
 jest.mock('@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost', () => {
   const launcher = jest.requireActual('@spaarke/ui-components/components/DecisionWizard/decisionWizardLauncher');
   return {
-    DecisionWizardHost: (props: { embedded?: boolean; collectBecause?: boolean; evidenceLinks?: boolean }) => {
+    DecisionWizardHost: (props: {
+      embedded?: boolean;
+      collectBecause?: boolean;
+      evidenceLinks?: boolean;
+      defaultMaximized?: boolean;
+    }) => {
       const place = props.embedded ? 'detail' : 'dialog';
       if (stand.throwIn.has(place)) throw new Error(`the ${place} failed`);
       React.useEffect(() => {
@@ -47,6 +53,7 @@ jest.mock('@spaarke/ui-components/components/DecisionWizard/DecisionWizardHost',
           data-testid={`stand-in-${place}`}
           data-because={String(props.collectBecause)}
           data-evidence-links={String(props.evidenceLinks)}
+          data-default-maximized={String(props.defaultMaximized === true)}
         />
       );
     },
@@ -65,7 +72,6 @@ const request = (seq: number, signalId = 'sig-1'): WizardRequest => ({
 });
 
 interface Setup {
-  displayMode: 'fullscreen' | 'inline' | null;
   offered: string[] | undefined;
   consoleBaseUrl: string | null | undefined;
   openLinkResult: boolean;
@@ -74,14 +80,14 @@ interface Setup {
 
 function mount(overrides: Partial<Setup> = {}) {
   const setup: Setup = {
-    displayMode: 'fullscreen',
     offered: ['inline', 'fullscreen'],
     consoleBaseUrl: CONSOLE_BASE,
     openLinkResult: true,
     lane: LANE,
     ...overrides,
   };
-  const requestDisplayMode = jest.fn(async () => setup.displayMode);
+  // Answers a grant if it is ever asked: the widget must not ask (the tests assert it is never called).
+  const requestDisplayMode = jest.fn(async () => 'fullscreen' as const);
   const openLink = jest.fn(async () => setup.openLinkResult);
   const onRecorded = jest.fn();
   const onActiveChange = jest.fn();
@@ -138,11 +144,11 @@ afterEach(() => {
 });
 
 describe('the places, in order', () => {
-  it("fullscreen granted: the dialog, launched for the item with the widget's own reader, type-ahead and Because box", async () => {
+  it("the dialog first, inline: launched for the item with the widget's own reader, type-ahead and Because box, with no display mode requested", async () => {
     const view = mount();
     view.open(request(1));
     await waitFor(() => expect(place()).toBe('dialog'));
-    expect(view.requestDisplayMode).toHaveBeenCalledWith('fullscreen');
+    expect(view.requestDisplayMode).not.toHaveBeenCalled();
     expect(screen.getByTestId('stand-in-dialog')).toHaveAttribute('data-because', 'true');
     await waitFor(() => expect(stand.launches).toHaveLength(1));
     expect(stand.launches[0]).toMatchObject({ itemId: 'sig-1', visibleList: ['sig-1', 'sig-2'] });
@@ -155,33 +161,56 @@ describe('the places, in order', () => {
     expect(view.openLink).not.toHaveBeenCalled();
   });
 
-  it('fullscreen refused: master-detail, embedded, with the lane still there', async () => {
-    const view = mount({ displayMode: 'inline' });
+  it('the dialog opens MAXIMIZED over the lane (owner 2026-11-24); the master-detail place does not ask for it', async () => {
+    const view = mount();
     view.open(request(1));
+    await waitFor(() => expect(place()).toBe('dialog'));
+    expect(screen.getByTestId('stand-in-dialog')).toHaveAttribute('data-default-maximized', 'true');
+    await act(async () => stand.close?.());
+    await waitFor(() => expect(place()).toBe('idle'));
+    // The same widget, with the dialog failing: the embedded detail place gets no defaultMaximized.
+    stand.throwIn = new Set(['dialog']);
+    view.open(request(2));
     await waitFor(() => expect(place()).toBe('detail'));
-    expect(screen.getByTestId('stand-in-detail')).toBeInTheDocument();
-    expect(screen.queryByTestId('stand-in-dialog')).toBeNull();
-    expect(screen.getByTestId('the-lane')).toBeInTheDocument();
-    expect(view.openLink).not.toHaveBeenCalled();
+    expect(screen.getByTestId('stand-in-detail')).toHaveAttribute('data-default-maximized', 'false');
   });
 
-  it('fullscreen not offered by the host: it is not asked, and master-detail is used', async () => {
-    const view = mount({ offered: ['inline'] });
+  it('the lane stays mounted as the master while the dialog is open over it', async () => {
+    const view = mount();
     view.open(request(1));
-    await waitFor(() => expect(place()).toBe('detail'));
+    await waitFor(() => expect(place()).toBe('dialog'));
+    expect(screen.getByTestId('the-lane')).toBeInTheDocument();
+    expect(screen.queryByTestId('stand-in-detail')).toBeNull();
+  });
+
+  it.each([
+    ['only inline is offered', ['inline']],
+    ['no modes are listed', undefined],
+    ['fullscreen is offered', ['inline', 'fullscreen']],
+  ])('%s: the dialog opens in the mode the frame is in, and the host is not asked for another', async (_n, offered) => {
+    const view = mount({ offered });
+    view.open(request(1));
+    await waitFor(() => expect(place()).toBe('dialog'));
+    await waitFor(() => expect(stand.launches).toHaveLength(1));
     expect(view.requestDisplayMode).not.toHaveBeenCalled();
   });
 
-  it('a host that lists no modes is asked (it may still say yes)', async () => {
-    const view = mount({ offered: undefined });
+  it('the dialog gives the widget room: the root has a minimum height only while the dialog place is active', async () => {
+    const view = mount();
+    const root = screen.getByTestId('wizard-place').parentElement!;
+    const idleClasses = root.className;
     view.open(request(1));
     await waitFor(() => expect(place()).toBe('dialog'));
-    expect(view.requestDisplayMode).toHaveBeenCalledWith('fullscreen');
+    expect(root.className).not.toBe(idleClasses);
+    await act(async () => stand.close?.());
+    await waitFor(() => expect(place()).toBe('idle'));
+    expect(root.className).toBe(idleClasses);
   });
 
-  it('a frame too narrow for master-detail: the Console is opened through the host and the banner stays', async () => {
+  it('the dialog failing in a frame too narrow for master-detail: the Console is opened through the host and the banner stays', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 360 });
-    const view = mount({ displayMode: 'inline' });
+    stand.throwIn = new Set(['dialog']);
+    const view = mount();
     view.open(request(1));
     await waitFor(() => expect(place()).toBe('link'));
     await waitFor(() => expect(view.openLink).toHaveBeenCalledWith(consoleUrl));
@@ -245,12 +274,12 @@ describe('the link, the last place', () => {
     expect(view.openLink).not.toHaveBeenCalled();
   });
 
-  it('Close dismisses the banner and returns the frame to inline (it had asked for fullscreen)', async () => {
+  it('Close dismisses the banner, and the display mode is not touched (the widget never changed it)', async () => {
     const view = await toLink();
     fireEvent.click(screen.getByTestId('wizard-link-close'));
     expect(screen.queryByTestId('wizard-link-fallback')).toBeNull();
     expect(place()).toBe('idle');
-    expect(view.requestDisplayMode).toHaveBeenLastCalledWith('inline');
+    expect(view.requestDisplayMode).not.toHaveBeenCalled();
   });
 });
 
@@ -274,7 +303,7 @@ describe('one wizard at a time, and closing', () => {
     expect(await screen.findByTestId('wizard-notice')).toHaveTextContent('Finish or close the open decision');
     await waitFor(() => expect(place()).toBe('idle'));
     expect(view.onActiveChange).toHaveBeenLastCalledWith(false);
-    expect(view.requestDisplayMode).toHaveBeenLastCalledWith('inline');
+    expect(view.requestDisplayMode).not.toHaveBeenCalled();
   });
 
   it('tells the lane when a decision is open and when it is not, so the lane can refuse another', async () => {
@@ -295,13 +324,14 @@ describe('one wizard at a time, and closing', () => {
     expect(view.onActiveChange).not.toHaveBeenCalled();
   });
 
-  it('the wizard closing returns the frame to inline, and the next request opens again', async () => {
+  it('the wizard closing returns to the lane with no display-mode call, and the next request opens again', async () => {
     const view = mount();
     view.open(request(1));
     await waitFor(() => expect(stand.launches).toHaveLength(1));
     await act(async () => stand.close?.());
     await waitFor(() => expect(place()).toBe('idle'));
-    expect(view.requestDisplayMode).toHaveBeenLastCalledWith('inline');
+    expect(screen.getByTestId('the-lane')).toBeInTheDocument();
+    expect(view.requestDisplayMode).not.toHaveBeenCalled();
 
     view.open(request(2, 'sig-2'));
     await waitFor(() => expect(stand.launches).toHaveLength(2));

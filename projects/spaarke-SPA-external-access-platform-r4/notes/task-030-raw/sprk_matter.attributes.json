@@ -1,0 +1,61 @@
+{
+  "@odata.context": "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/$metadata#EntityDefinitions('sprk_matter')/Attributes(LogicalName,AttributeType,IsSecured,IsValidForRead)",
+  "value": [
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.DateTimeAttributeMetadata",
+      "MetadataId": "ad44ccc0-f3b7-4b3f-8ddd-bcfb4afabd5a",
+      "AttributeType": "DateTime",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "createdon"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.DateTimeAttributeMetadata",
+      "MetadataId": "9bbd22ce-58c4-4076-bdb8-682df07f42c0",
+      "AttributeType": "DateTime",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "modifiedon"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "4d66d5a1-1b2d-4ef8-b87c-c81c2760cbfc",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_assignedattorney1"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "f6eaaa18-ae55-4c6e-85b9-373c85fdfe94",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_assignedparalegal1"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.MemoAttributeMetadata",
+      "MetadataId": "3081482a-2d79-f011-b4cc-6045bdd8b757",
+      "AttributeType": "Memo",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_matterdescription"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "400814cd-e0ca-4021-9f5b-a2aa103aa609",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_mattertype"
+    },
+    {
+      "@odata.type": "#Microsoft.Dynamics.CRM.LookupAttributeMetadata",
+      "MetadataId": "f50aba1d-e59c-40b0-bb08-972f8026cc00",
+      "AttributeType": "Lookup",
+      "IsValidForRead": true,
+      "IsSecured": false,
+      "LogicalName": "sprk_practicearea"
+    }
+  ]
+}

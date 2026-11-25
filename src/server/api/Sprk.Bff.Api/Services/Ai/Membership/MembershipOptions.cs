@@ -375,8 +375,8 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
     /// <para>
     /// <c>sprk_invoice</c>'s four attorney and paralegal columns, filled by the seeded "Matter to Invoice (Attorney Matrix)"
     /// profile. <c>sprk_assignedto1/2</c> are not listed: no seeded profile maps them. They are plain data, not display
-    /// copies: Office quick-create writes the invoice's Assigned To to <c>sprk_assignedto1</c>
-    /// (<c>OfficeService.InvoiceAssignedToAttribute</c>). With the invoice out of the registry, that column stopped targeting
+    /// copies: Office quick-create wrote the invoice's Assigned To to <c>sprk_assignedto1</c>
+    /// (until ebilling-r1 task 096 removed the invoice quick-create). With the invoice out of the registry, that column stopped targeting
     /// people (Daily Briefing, notifications); the owner has since decided it targets without conferring access (2026-11-08),
     /// so it is listed in <see cref="TargetingOnlyColumns"/>, outside the registry (task 032b-1b).
     /// </para>
@@ -397,8 +397,8 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
     /// by table; every column is a Contact lookup, resolved exactly like a registry Contact column (the caller's linked contact,
     /// no email or name fallback).
     /// <para>
-    /// <c>sprk_invoice.sprk_assignedto1/2</c>: Office quick-create writes the invoice's Assigned To to <c>sprk_assignedto1</c>
-    /// (<c>OfficeService.InvoiceAssignedToAttribute</c>), and the standing rule is "notifications target Created By and Assigned
+    /// <c>sprk_invoice.sprk_assignedto1/2</c>: Office quick-create wrote the invoice's Assigned To to <c>sprk_assignedto1</c>
+    /// (until ebilling-r1 task 096 removed the invoice quick-create), and the standing rule is "notifications target Created By and Assigned
     /// To". The invoice's four attorney and paralegal columns are display copies (<see cref="DisplayCopyColumns"/>) and are not
     /// listed: they stopped targeting when the invoice left the registry (U7, owner-accepted 2026-11-08).
     /// </para>

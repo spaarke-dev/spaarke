@@ -1636,6 +1636,9 @@ describe('service request: closed (owner decision 2026-10-12)', () => {
   it.each([
     ['statecode 1', { statecode: 1 }],
     ['statuscode 2 (the closed status reason)', { statuscode: 2 }],
+    // The module fetch serialises an option set as the SDK object, not a bare number (measured on live data).
+    ['statecode 1 as the SDK object', { statecode: { value: 1, extensionData: null } }],
+    ['statuscode 2 as the SDK object', { statuscode: { value: 2, extensionData: null } }],
   ])(
     'a closed request (%s) shows no Delete, even to its requester',
     async (_label, closedColumns) => {
@@ -1717,6 +1720,19 @@ describe('service request: closed (owner decision 2026-10-12)', () => {
     expect(isServiceRequestClosed({ statecode: 0, statuscode: 1 })).toBe(false);
     expect(isServiceRequestClosed({})).toBe(false);
     expect(isServiceRequestClosed(null)).toBe(false);
+  });
+
+  it('the closed rule reads the SDK object the module fetch returns ({ value, extensionData }), and only that shape', () => {
+    const sdk = (value: number | null) => ({ value, extensionData: null });
+    // Must-fire: the measured live shape.
+    expect(isServiceRequestClosed({ statecode: sdk(1) })).toBe(true);
+    expect(isServiceRequestClosed({ statuscode: sdk(2) })).toBe(true);
+    expect(isServiceRequestClosed({ statecode: { Value: 1 } })).toBe(true);
+    // Must-not-fire: an open request in the same shape, and values that are not whole numbers.
+    expect(isServiceRequestClosed({ statecode: sdk(0), statuscode: sdk(1) })).toBe(false);
+    expect(isServiceRequestClosed({ statecode: sdk(2), statuscode: sdk(1) })).toBe(false);
+    expect(isServiceRequestClosed({ statecode: sdk(null), statuscode: {} })).toBe(false);
+    expect(isServiceRequestClosed({ statecode: 'Inactive', statuscode: 'Closed' })).toBe(false);
   });
 });
 

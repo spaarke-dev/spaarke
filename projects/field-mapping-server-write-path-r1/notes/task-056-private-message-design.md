@@ -337,7 +337,20 @@ After `-Verify` passes and before the BFF goes live, run a read-only count of `s
 
 | Environment | Date | Schema | Field security | Count | BFF |
 |---|---|---|---|---|---|
-| dev (`spaarkedev1`) | 2026-11-23 | `-Apply` and `-Verify` PASS | `-Apply` and `-Verify` PASS (masked windows 20.0 s, 14.2 s, 16.1 s) | 0 (out of 398 rows) | Not deployed yet |
+| dev (`spaarkedev1`) | 2026-11-23 | `-Apply` and `-Verify` PASS | `-Apply` and `-Verify` PASS (masked windows 20.0 s, 14.2 s, 16.1 s) | 0 (out of 398 rows) | a48398746d live (UAC-r2 deploy; 30-minute gate PASS). Live check PASS 22:18Z, below |
+
+**Live check on dev: PASS, 2026-11-23 22:18Z.** The owner gave the go in fm's session. The caller was the owner's admin account (a delegated BFF token). Access was read with `RetrievePrincipalAccess`. The 055 notes have the run details.
+
+| Check | Result |
+|---|---|
+| Private send about matter PAT-176903 on the pair's Direct thread | 200, communication `cd34edc0-8be7-f111-84ea-00224829aef9`; `sprk_privatecontextmatter` = the matter, no regarding, owner = the Direct team, `sprk_directrecipient` = Test User 1 |
+| AC1: sender and recipient read | **PASS**: sender full access; Test User 1 `ReadAccess` |
+| AC2: a reader of the record does not read the message | **PASS**: `# UAC Child BU Test User` has full access on the matter and `None` on the message (and on the thread) |
+| Read with `?about=sprk_matter:{id}` as the sender | **PASS**: only the private message, with `privateContext` {sprk_matter, the matter's name} |
+| Never filed: `PATCH /filing` to the matter | **PASS**: 409 `sdap.communication.private.not_fileable`; the row was unchanged when read back. The title reads "Record owner unresolved": DI-038 / #3023 |
+| AC4: an ordinary message on the same thread | **PASS**: no reference, `privateContext` null (055's message) |
+
+Rows left on dev for later cleanup: communications `c0dfc7b4-8be7-f111-84ea-00224829aef9` (055) and `cd34edc0-8be7-f111-84ea-00224829aef9` (056).
 
 **Known limits.**
 - A refused private send can leave the pair's Direct thread with no message in it.

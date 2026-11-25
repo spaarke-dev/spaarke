@@ -75,10 +75,10 @@ export type HighlighterFactory<T = unknown> = (
 
 /**
  * Props accepted by the inner R1-style source widget component.
- * Matches SourceWidgetProps<T> from @spaarke/ai-outputs.
+ * Matches SourceWidgetProps<T> from ../../outputs/types.
  */
 interface SourceWidgetCompatProps<T> {
-  data: T;
+  data: T | undefined;
   isLoading?: boolean;
   error?: string;
   className?: string;
@@ -142,7 +142,7 @@ export function createContextWidgetAdapter<T = unknown>(
 
       return (
         <div ref={containerRef} style={{ height: '100%', overflow: 'hidden' }}>
-          <InnerWidget data={data as T} isLoading={isLoading} error={error} className={className} />
+          <InnerWidget data={data as T | undefined} isLoading={isLoading} error={error} className={className} />
         </div>
       );
     }

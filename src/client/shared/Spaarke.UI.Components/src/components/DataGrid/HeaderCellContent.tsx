@@ -680,6 +680,13 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
     setMenuOpen(false);
   }, [descriptor, onStateChange, state]);
 
+  // Ref to the column's chevron Button — used as the positioning target for
+  // the Filter Popover so it anchors to the column header instead of floating
+  // at the document root (Fluent v9 default when no PopoverTrigger exists).
+  // Declared before the plain-label early return so the hook order never
+  // changes when a column gains or loses its menu (rules-of-hooks).
+  const anchorRef = React.useRef<HTMLButtonElement>(null);
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render path 1 — plain label (no menu)
   // ─────────────────────────────────────────────────────────────────────────
@@ -696,11 +703,6 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
   // Render path 2 — Power-Apps-OOB chevron menu
   // ─────────────────────────────────────────────────────────────────────────
-  // Ref to the column's chevron Button — used as the positioning target for
-  // the Filter Popover so it anchors to the column header instead of floating
-  // at the document root (Fluent v9 default when no PopoverTrigger exists).
-  const anchorRef = React.useRef<HTMLButtonElement>(null);
-
   return (
     // Stop ALL pointer events at the outer span so clicks on the chevron menu
     // trigger Button (and anything inside the menu/filter popover portals)
@@ -732,7 +734,8 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
             appearance="transparent"
             size="small"
             className={styles.triggerButton}
-            aria-label={`${label} column options`}
+            // A filtered column is announced too: the Filter16Filled glyph below is aria-hidden (owner 2026-11-23).
+            aria-label={active ? `${label} column options, filtered` : `${label} column options`}
             data-testid={
               descriptor ? `header-cell-content-trigger-${descriptor.attribute}` : 'header-cell-content-trigger'
             }
@@ -792,7 +795,8 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
                     >
                       Z to A
                     </MenuItem>
-                    {(filterable || true) && <MenuDivider />}
+                    {/* Always drawn after the sort items (the old `(filterable || true) &&` was always true). */}
+                    <MenuDivider />
                   </>
                 )}
 

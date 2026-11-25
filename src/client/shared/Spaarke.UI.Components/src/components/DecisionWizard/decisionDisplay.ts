@@ -253,6 +253,9 @@ const WARNING_TEXT: Record<string, string> = {
     "The task was assigned, but no email was sent: the assignee's contact is linked to more than one user.",
   assignee_email_not_sent_unverified:
     'The task was assigned, but no email was sent: whether the assignee can see this record could not be checked.',
+  // Task 207 (#3063, DI-171): the assignee's user account is Administrative-only, so Dataverse gives it no Read on the task.
+  assignee_email_not_sent_admin_account:
+    "The task was assigned, but no email was sent: the assignee's user account is set up for administration only and cannot use the app.",
 };
 
 /** A warning from the commit answer as a sentence; a code this build does not know reads generically. */
