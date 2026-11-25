@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -26,6 +27,12 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// (<see cref="MappingSourceCopyGate.DecideAsync"/>); the values are computed by <see cref="CreateTimeFieldMapping.ApplyFillOnly"/>
 /// into a scratch row (never created) and only <c>sprk_subject</c> and <c>sprk_body</c> are taken from it. Only the rules that
 /// aim at a column the request left empty are read, so a typed subject reads nothing for the subject.</para>
+/// <para><b>External document narrowing.</b> An analysis whose source document or output file the narrowing hides from the caller
+/// is withheld exactly as the analysis routes withhold it (<see cref="AnalysisAuthorizationFilter.IsAnalysisDocumentHiddenFromCallerAsync"/>,
+/// passed as <see cref="MappingSourceReader.AnalysisShown"/>): it maps nothing, and it is asked after the caller's Read and before any
+/// app-only read of the analysis.</para>
+/// <para><b>Column lengths.</b> A mapped subject or body longer than its column is not used (the send's own validation then answers
+/// an empty subject or body), so an email is never delivered and then left without its record.</para>
 /// <para><b>Mapping-source rule.</b> The email row's owner is decided later in the send, so it is not known here: the copy gate is
 /// asked with no row owner, and a source that is secure, or whose answer cannot be told, fills nothing (fail closed).</para>
 /// <para><b>Never an error, never a leak.</b> A denied, missing, unreadable or faulted source, an absent profile or rule, and any
@@ -41,6 +48,13 @@ internal static class SendTimeFieldMapping
     private const string ScratchRowName = "scratch";
     internal const string SubjectColumn = "sprk_subject";
     internal const string BodyColumn = "sprk_body";
+
+    /// <summary>The <c>sprk_communication.sprk_subject</c> column's maximum length (docs/data-model/sprk_communication.md: Text, 2000).
+    /// A mapped subject longer than this would send the email and then fail to create its row.</summary>
+    internal const int MaxSubjectLength = 2000;
+
+    /// <summary>The <c>sprk_communication.sprk_body</c> column's maximum length (docs/data-model/sprk_communication.md: Multiline Text, 100000).</summary>
+    internal const int MaxBodyLength = 100000;
 
     private static readonly IReadOnlySet<string> NothingProtected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -104,7 +118,11 @@ internal static class SendTimeFieldMapping
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             var read = await MappingSourceReadProbe.ReadAsync(
-                    MappingSourceReader.ForCaller(probe, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
+                    MappingSourceReader.ForCaller(
+                        probe, TokenHelper.ExtractBearerTokenOrNull(httpContext),
+                        analysisShown: async (id, _) =>
+                            !await AnalysisAuthorizationFilter.IsAnalysisDocumentHiddenFromCallerAsync(httpContext, id, logger)
+                                .ConfigureAwait(false)),
                     new MappingSource(AnalysisTable, analysisId), readColumns, entities, logger, ct)
                 .ConfigureAwait(false);
             if (!read.Readable || read.Record is not { } appRead)
@@ -155,8 +173,8 @@ internal static class SendTimeFieldMapping
                     "[FIELD-MAPPING-SEND] {Count} mapping note(s) from the engine | CorrelationId: {CorrelationId}", engineWarnings.Count, correlationId);
             }
 
-            var subject = needSubject ? TextOf(scratch, SubjectColumn) : null;
-            var body = needBody ? TextOf(scratch, BodyColumn) : null;
+            var subject = needSubject ? FittingText(scratch, SubjectColumn, MaxSubjectLength, logger, correlationId) : null;
+            var body = needBody ? FittingText(scratch, BodyColumn, MaxBodyLength, logger, correlationId) : null;
             if (subject is null && body is null)
             {
                 return request;
@@ -196,7 +214,27 @@ internal static class SendTimeFieldMapping
         return analyses.Count == 1 && analyses[0].EntityId != Guid.Empty ? analyses[0].EntityId : null;
     }
 
-    /// <summary>The scratch row's text in <paramref name="column"/>, or <see langword="null"/> when the mapping left it empty.</summary>
-    private static string? TextOf(Entity scratch, string column) =>
-        scratch.Attributes.TryGetValue(column, out var value) && value is string text && !string.IsNullOrWhiteSpace(text) ? text : null;
+    /// <summary>
+    /// The scratch row's text in <paramref name="column"/>, or <see langword="null"/> when the mapping left it empty or it is
+    /// longer than the column holds (<paramref name="maxLength"/>): an over-long value is not used, so the send's own validation
+    /// answers the empty field rather than the email being delivered and its row then failing to create. The log line names no
+    /// record and no value.
+    /// </summary>
+    private static string? FittingText(Entity scratch, string column, int maxLength, ILogger logger, string correlationId)
+    {
+        if (!scratch.Attributes.TryGetValue(column, out var value) || value is not string text || string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        if (text.Length > maxLength)
+        {
+            logger.LogInformation(
+                "[FIELD-MAPPING-SEND] The mapped value for {Column} is longer than the column holds; it was not used | CorrelationId: {CorrelationId}",
+                column, correlationId);
+            return null;
+        }
+
+        return text;
+    }
 }
