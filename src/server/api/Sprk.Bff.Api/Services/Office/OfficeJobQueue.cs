@@ -43,6 +43,8 @@ public class OfficeJobQueue
     /// <param name="relatedCommunicationId">Task 130: the communication the save's email-derived document was created
     /// linked to, handed on so the worker creates every attachment child linked to it. Null for a Document save, and for
     /// an email-derived save whose document was created Restricted — the worker then creates its children Restricted.</param>
+    /// <param name="attachmentsOnly">Task 138: a re-save that adds the not-yet-saved attachments of the email already saved
+    /// as <paramref name="documentId"/> (<see cref="UploadFinalizationPayload.AttachmentsOnly"/>).</param>
     public async Task QueueUploadFinalizationAsync(
         Guid jobId,
         string idempotencyKey,
@@ -58,7 +60,8 @@ public class OfficeJobQueue
         Guid? owningTeamId,
         CancellationToken cancellationToken,
         Guid? createdByPersonId = null,
-        Guid? relatedCommunicationId = null)
+        Guid? relatedCommunicationId = null,
+        bool attachmentsOnly = false)
     {
         _logger.LogDebug(
             "Queueing upload finalization job {JobId} for {ContentType}",
@@ -133,6 +136,7 @@ public class OfficeJobQueue
             OwningTeamId = owningTeamId,
             CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — carried with the team
             RelatedCommunicationId = relatedCommunicationId, // task 130 — the children's communication link
+            AttachmentsOnly = attachmentsOnly, // task 138 — add missing attachments under the existing .eml only
         };
 
         // Create the job message

@@ -39,7 +39,7 @@ D's estimate assumes most of the lane's 17 queries can overlap. They can't: the 
 | A | `ShowDecisionsTool` + `DecidePageResult.Lane` (set by `DecisionCapability.ListDecidePageAsync`) | Built on `work/spaarkeai-mcp-bff-api-r1`; PR to master with C; ontology-r1 reviews |
 | C | `IDecisionCapability.GetPlanAndSuppressionAsync` (`DecisionCapability` asks `SignalCoreRecordAccess.AuthorizeAsync` once; REST routes unchanged) + `GetDecisionPlanTool` | Built with A |
 | B, D | `SignalReadService` (ontology-owned), branch `perf/signal-read-single-row-and-concurrent`, built to ontology's task 222 review contract (equivalence fixtures first, written dependency graph, bounded degree, Opus adversarial review by ontology) | PR #3152 (sent to ontology-r1 for Opus review 2026-11-25; no auto-merge). Notes: `signal-read-b-d-notes.md` |
-| B wiring | `GetDecisionPlanTool` reads one row instead of the lane | After B+D merges |
+| B wiring | `IDecisionCapability.GetWorkItemAsync` (`DecisionCapability`: `ReadAsync(Lanes, …, onlySignalId)`) used by `GetDecisionPlanTool` instead of the whole lane | #3146 merged `d6c607faf3`; #3152 merged `9ce92b3104`; wiring in its own PR (ontology reviews) |
 
 Measure show, plan and the Console worklist p95 on dev after the next dev BFF build that carries them.
 

@@ -201,6 +201,16 @@ public record UploadFinalizationPayload
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? RelatedCommunicationId { get; init; }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 138 (#2209): a re-save of an email ALREADY saved as the <c>.eml</c> document
+    /// <see cref="DocumentId"/> that names attachments not yet saved under it. The worker creates only those attachment
+    /// children (<see cref="EmailArtifactPayload.SelectedAttachmentFileNames"/>), skipping any the <c>.eml</c> already has,
+    /// and nothing else: no fallback create, no email artifact, no profile or index of the <c>.eml</c>.
+    /// </summary>
+    /// <remarks>Omitted from the JSON when false, so every other message is byte-identical to before.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AttachmentsOnly { get; init; }
 }
 
 /// <summary>

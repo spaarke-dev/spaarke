@@ -4,7 +4,7 @@
     <title>Migrate Document Upload and Summarize Files wizards to the server write path (FR-16)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>028 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components and two code-page hosts; tags include frontend, documents, deploy, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
