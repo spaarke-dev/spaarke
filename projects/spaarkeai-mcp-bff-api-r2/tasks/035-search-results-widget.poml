@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Search results widget (ui://spaarke/search-results.html)</title>
+    <phase>2 Long-running work, AI, widgets, task writes</phase>
+    <gate>BLOCKED until spaarkeai-mcp-bff-api-r1 PR #3161 and r1 task 042 have merged to master and master is merged into this branch (merge, never rebase)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New widget resource, embed and CI changes, React widget over a shared component</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Second widget on the scaffold 034 establishes; SearchResultsWidget is props-only</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Serialised after 034 (shared McpModule.cs, csproj, publish-bff-artifact.yml); runs beside 032 and 036</parallel-reason>
+    <deps>021, 022, 034</deps>
+    <tags>bff-api, react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>5-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a single-file widget src/client/widgets/spaarke-search-results/ that renders SearchResultsWidget (Spaarke.AI.Widgets, props only) from spaarke_search_documents / spaarke_find_records results over task 021's shared transport, served as ui://spaarke/search-results.html through McpModule with an empty CSP, embedded and verified by the publish workflow; point task 022's two tools at it with _meta.ui.resourceUri.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP Apps widgets and Fluent v9.</role>
+  <goal>Search results render in a widget in Chat and Cowork in light and dark; opening a hit uses the host's open-link; the Console's SearchResultsWidget tests pass unchanged; bundle &lt; 1 MB target, ≤ 3 MB hard.</goal>
+
+  <context>
+    <background>Spec FR-16, NFR-03, NFR-09. Component: src/client/shared/Spaarke.AI.Widgets/src/outputs/output-widgets/SearchResultsWidget.tsx (props only, per notes/reuse-scan.md). Scaffold and resource pattern from task 034 (spaarke-briefing, BriefingWidgetResource) and r1's spaarke-decisions. Tools from task 022 return the full hit payload in structuredContent.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Search/SearchResultsWidgetResource.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Search/SearchDocumentsTool.cs, FindRecordsTool.cs (_meta.ui.resourceUri only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="modify">.github/workflows/publish-bff-artifact.yml</file>
+      <file role="new">src/client/widgets/spaarke-search-results/** (scaffold copied from spaarke-briefing)</file>
+      <file role="new">src/client/widgets/spaarke-search-results/src/__tests__/App.test.tsx</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Search/SearchResultsWidgetResourceTests.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/outputs/output-widgets/SearchResultsWidget.tsx</file>
+      <file role="canonical-reference">src/client/widgets/spaarke-briefing/ (task 034)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Briefing/BriefingWidgetResource.cs (task 034)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Shared widget transport</dependency>
+      <dependency task="022" status="pending">Search tools</dependency>
+      <dependency task="034" status="pending">Widget scaffold and shared-file ordering</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">BLOCKED until r1 PR #3161 and r1 task 042 are merged to master and master is merged into this branch (merge, never rebase).</constraint>
+    <constraint source="project">Widget: SearchResultsWidget used as-is through props (no edit to Spaarke.AI.Widgets); transport from src/client/widgets/shared/mcp/; _meta.ui.csp empty; no fetch, MSAL or Xrm; open-in-Spaarke links go through the host's openLink; Fluent v9 semantic tokens; host light/dark; keyboard operable. Bundle &lt; 1 MB target, 3 MB hard ceiling.</constraint>
+    <constraint source="project">022's tools change only by adding _meta.ui.resourceUri; their model-visible text and structuredContent stay as 022 left them (022's contract tests pass unchanged). Mcp:Enabled=false removes the resource (ADR-032).</constraint>
+    <constraint source="ADR-012">If SearchResultsWidget needs a prop change to work outside the Console, STOP and escalate instead of editing the shared component.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**, or the widget's own jest suite), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Node install: npm install --legacy-peer-deps --no-audit --no-fund (not npm ci). Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and 021, 022, 034; read SearchResultsWidget's props and map 022's structuredContent onto them (note gaps).</step>
+    <step order="2">Write SearchResultsWidgetResource, register it, add the embed and CI steps, set resourceUri on 022's tools.</step>
+    <step order="3">Scaffold spaarke-search-results; write App.test.tsx; build; run check-bundle-size.mjs.</step>
+    <step order="4">Run the AI.Widgets tests, MCP suites, ArchTests and conformance; measure the publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the bundle exceeds 3 MB, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SearchResultsWidget (Spaarke.AI.Widgets); r1/034 widget scaffold and resource pattern; notes/reuse-scan.md row "Search results component" (props only).</existing>
+    <extension>The component is reused unchanged; a new resource and widget folder are required because each MCP App widget is a separate ui:// single-file resource (owner Q5).</extension>
+    <cost-of-doing-nothing>Search results appear only as text in Copilot, and FR-16's search-results widget acceptance fails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Search results widget in Copilot Chat and Cowork">
+      <steps>
+        <step>After deploy 039, ask "Find Spaarke documents about indemnification" with the Spaarke MCP source</step>
+        <step>Verify the widget lists hits with names, matters and snippets; activate a hit with the keyboard and confirm the host opens the link</step>
+        <step>Repeat in Cowork; check the widget console for errors</step>
+      </steps>
+      <expected>Hits render and open; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host to dark theme</step>
+        <step>Verify the widget follows the host theme</step>
+      </steps>
+      <expected>Fluent v9 semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">build, jest and check-bundle-size in src/client/widgets/spaarke-search-results</tool>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Search/SearchResultsWidgetResource.cs</output>
+    <output type="code">src/client/widgets/spaarke-search-results/</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Search/SearchResultsWidgetResourceTests.cs</output>
+    <output type="test">src/client/widgets/spaarke-search-results/src/__tests__/App.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">resources/list includes ui://spaarke/search-results.html with an empty _meta.ui.csp; both search tools carry that resourceUri.</criterion>
+    <criterion testable="true">Widget jest: renders fixture hits through a fake transport; zero fetch/Xrm calls; activating a hit calls the host openLink.</criterion>
+    <criterion testable="true">check-bundle-size.mjs passes (size recorded; ≤ 3 MB).</criterion>
+    <criterion testable="true">Negative: no file under src/client/shared/Spaarke.AI.Widgets changed; 022's contract tests pass unchanged.</criterion>
+    <criterion testable="true">ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16, NFR-03, NFR-09.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
