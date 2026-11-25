@@ -11,7 +11,7 @@
  * Output shape is unchanged from the per-page copies this replaced: a single-file
  * HTML (`dist/index.html`, JS/CSS inlined) for Dataverse web-resource deployment.
  *
- * The e-billing pages use the same factory through `_ebilling-shared/vite.ebilling.ts` with the options below (#2965). With no options the
+ * The e-billing pages use the same factory through `src/solutions/vite.ebilling.shared.ts` with the options below (#2965). With no options the
  * config is exactly what it was before them, so the wizard pages are unchanged.
  *
  * @param pageDir absolute path of the page folder (its `node_modules` and `src` are used).

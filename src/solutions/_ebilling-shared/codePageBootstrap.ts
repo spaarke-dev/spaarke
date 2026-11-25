@@ -78,6 +78,11 @@ export function useCodePageBootstrap({
   const [bootstrapError, setBootstrapError] = React.useState<unknown>(null);
   const [attempt, setAttempt] = React.useState(0);
 
+  // The page's two auth functions are read through a ref (latest value), so a caller that passes inline lambdas does not re-run the
+  // bootstrap on every render: it re-runs only for a retry, or when `enabled` or `label` change.
+  const authDeps = React.useRef<CodePageAuthDeps>({ setRuntimeConfig, ensureAuthInitialized });
+  authDeps.current = { setRuntimeConfig, ensureAuthInitialized };
+
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
   }, []);
@@ -92,7 +97,10 @@ export function useCodePageBootstrap({
     let cancelled = false;
     setBootstrapError(null);
     setReady(false);
-    bootstrapAuth({ setRuntimeConfig, ensureAuthInitialized })
+    bootstrapAuth({
+      setRuntimeConfig: config => authDeps.current.setRuntimeConfig(config),
+      ensureAuthInitialized: () => authDeps.current.ensureAuthInitialized(),
+    })
       .then(() => {
         if (!cancelled) setReady(true);
       })
@@ -103,7 +111,7 @@ export function useCodePageBootstrap({
     return () => {
       cancelled = true;
     };
-  }, [attempt, enabled, label, setRuntimeConfig, ensureAuthInitialized]);
+  }, [attempt, enabled, label]);
 
   const retry = React.useCallback(() => setAttempt(n => n + 1), []);
 

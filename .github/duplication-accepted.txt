@@ -27,6 +27,12 @@ src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage
 
 # --- Tracked: code-page scaffolding, more pairs (#3052) ---
 src/solutions/CalendarSidePane/vite.config.ts | src/solutions/vite.wizard.shared.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/CommunicationReconciliation/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/DailyBriefing/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/Reporting/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/Notepad/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 src/solutions/CommunicationReconciliation/vite.config.ts | src/solutions/EmailPage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 src/solutions/DocumentUploadWizard/vite.config.ts | src/solutions/PlaybookLibrary/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
 src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_communicationspage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.

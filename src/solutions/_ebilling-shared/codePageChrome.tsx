@@ -1,6 +1,6 @@
 /**
- * The chrome the e-billing code pages share (issue 2965): the themed surface with its error boundary, the centred message and spinner states,
- * and the mount into `#root`.
+ * The chrome the e-billing code pages share (issue 2965): the themed surface with its error boundary, and the centred message and spinner
+ * states. The mount into `#root` is `mountWizardPage` from `@spaarke/ui-components/utils/mountWizardPage` (same render and same log).
  *
  * Two densities, because the pages differ in where they sit: `roomy` for a page or dialog that owns its window (AP Export, Rule Review),
  * `compact` for a section embedded in a form or a tighter review page (Invoice Files, Record Procedures, Invoice Review).
@@ -9,7 +9,6 @@
  */
 
 import * as React from 'react';
-import { createRoot } from 'react-dom/client';
 import { FluentProvider, Spinner, Text, Button, makeStyles, tokens, type Theme } from '@fluentui/react-components';
 import { AppErrorBoundary } from '@spaarke/ui-components';
 
@@ -119,14 +118,3 @@ export const CodePageSpinner: React.FC<CodePageSpinnerProps> = ({ testId, label,
     </div>
   );
 };
-
-/** Render the page into `#root` under StrictMode; log (never throw) when the host page has no root element. */
-export function mountCodePage(label: string, page: React.ReactElement): void {
-  const rootElement = document.getElementById('root');
-  if (rootElement) {
-    createRoot(rootElement).render(<React.StrictMode>{page}</React.StrictMode>);
-  } else {
-    // eslint-disable-next-line no-console
-    console.error(`[${label}] Root element not found`);
-  }
-}

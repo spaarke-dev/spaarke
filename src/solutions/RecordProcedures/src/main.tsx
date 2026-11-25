@@ -21,7 +21,8 @@
 import * as React from 'react';
 import { parseDataParams, getXrm } from '@spaarke/ui-components';
 import { useCodePageBootstrap } from '../../_ebilling-shared/codePageBootstrap';
-import { CodePageMessage, CodePageSpinner, CodePageSurface, mountCodePage } from '../../_ebilling-shared/codePageChrome';
+import { CodePageMessage, CodePageSpinner, CodePageSurface } from '../../_ebilling-shared/codePageChrome';
+import { mountWizardPage } from '@spaarke/ui-components/utils/mountWizardPage';
 import { ProceduresPanel } from './components/ProceduresPanel';
 import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
@@ -85,4 +86,4 @@ function Root() {
   );
 }
 
-mountCodePage('RecordProcedures', <Root />);
+mountWizardPage('RecordProcedures', Root);

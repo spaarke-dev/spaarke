@@ -18,7 +18,8 @@
 import * as React from 'react';
 import { parseDataParams, createXrmNavigationService } from '@spaarke/ui-components';
 import { useCodePageBootstrap } from '../../_ebilling-shared/codePageBootstrap';
-import { CodePageMessage, CodePageSpinner, CodePageSurface, mountCodePage } from '../../_ebilling-shared/codePageChrome';
+import { CodePageMessage, CodePageSpinner, CodePageSurface } from '../../_ebilling-shared/codePageChrome';
+import { mountWizardPage } from '@spaarke/ui-components/utils/mountWizardPage';
 import { InvoiceFilesPanel } from './components/InvoiceFilesPanel';
 import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
@@ -84,4 +85,4 @@ function Root() {
   );
 }
 
-mountCodePage('InvoiceFiles', <Root />);
+mountWizardPage('InvoiceFiles', Root);

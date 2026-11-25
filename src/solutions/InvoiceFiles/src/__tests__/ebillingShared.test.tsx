@@ -107,6 +107,21 @@ describe('useCodePageBootstrap', () => {
     expect(d.ensureAuthInitialized).toHaveBeenCalledTimes(2);
   });
 
+  it('does not re-run the bootstrap when the caller passes inline lambdas that change identity on every render', async () => {
+    mockResolveRuntimeConfig.mockResolvedValue(config);
+    const ensure = jest.fn(async () => undefined);
+    const { result, rerender } = renderHook(() =>
+      useCodePageBootstrap({ label: 'Test', setRuntimeConfig: () => undefined, ensureAuthInitialized: () => ensure() })
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    rerender();
+    rerender();
+    await act(async () => undefined);
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(mockResolveRuntimeConfig).toHaveBeenCalledTimes(1);
+    expect(result.current.ready).toBe(true);
+  });
+
   it('does not start auth when the page is not enabled (an unsaved or foreign record)', async () => {
     const d = deps();
     const { result } = renderHook(() => useCodePageBootstrap({ label: 'Test', enabled: false, ...d }));
