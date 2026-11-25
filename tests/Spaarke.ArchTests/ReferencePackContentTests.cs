@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Xunit;
 
@@ -131,6 +132,62 @@ public sealed class ReferencePackContentTests
 
         return problems;
     }
+
+    /// <summary>
+    /// Wording that belongs to the authoring project, not the customer: pack rows are copied into every stamp and never updated, so a
+    /// wave/task reference, a column name or an authoring-process note would be permanent customer-visible text.
+    /// </summary>
+    private static readonly Regex DevInternalMarkers = new(
+        @"\bWave\b|\bD[0-9]\b|\bLayer ?[0-9]\b|sprk_|\bNULL\b|\bseeds?\b|canonical|\btask \d+",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>The text values (other than the id) of a pack file that carry dev-internal wording.</summary>
+    internal static IReadOnlyList<string> DevInternalWording(string packJson)
+    {
+        using var doc = JsonDocument.Parse(packJson);
+        var root = doc.RootElement;
+        var table = root.GetProperty("table").GetString()!;
+        var primaryKey = root.GetProperty("primaryKey").GetString()!;
+        var found = new List<string>();
+        var rowNumber = 0;
+        foreach (var row in root.GetProperty("rows").EnumerateArray())
+        {
+            rowNumber++;
+            foreach (var property in row.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String && p.Name != primaryKey))
+            {
+                var hit = DevInternalMarkers.Match(property.Value.GetString()!);
+                if (hit.Success)
+                {
+                    found.Add($"{table} row {rowNumber}: '{property.Name}' contains dev-internal wording '{hit.Value}'.");
+                }
+            }
+        }
+
+        return found;
+    }
+
+    [Fact(DisplayName = "D4: no starter-taxonomy pack text carries dev-internal wording (it is copied into every customer stamp)")]
+    public void NoPackFile_CarriesDevInternalWording()
+    {
+        var problems = Directory.EnumerateFiles(Abs(PacksDirectory), "*.json", SearchOption.AllDirectories)
+            .SelectMany(file => DevInternalWording(File.ReadAllText(file)).Select(p => $"{Path.GetRelativePath(Abs(PacksDirectory), file)}: {p}"))
+            .ToList();
+
+        Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
+    }
+
+    [Fact(DisplayName = "D4 control (must fire): wave, layer, column-name, NULL, seeds and canonical wording in a pack text is reported")]
+    public void Control_DevInternalWording_Fires()
+    {
+        foreach (var text in new[] { "Wave D3 priority 1.", "Layer 2 required", "when sprk_layer2actioncode is set", "gate = NULL", "Wave D1 seeds this", "the canonical example", "see task 12" })
+        {
+            Assert.NotEmpty(DevInternalWording(WidgetPack("{ \"sprk_widgetid\": \"11111111-0000-4000-8000-000000000001\", \"sprk_code\": \"AA\", \"sprk_name\": \"" + text + "\" }")));
+        }
+    }
+
+    [Fact(DisplayName = "D4 control (must not fire): a customer-facing description is not reported")]
+    public void Control_CustomerFacingWording_DoesNotFire()
+        => Assert.Empty(DevInternalWording(WidgetPack("{ \"sprk_widgetid\": \"11111111-0000-4000-8000-000000000001\", \"sprk_code\": \"AA\", \"sprk_name\": \"Non-disclosure agreement: effective date, parties, term and scope.\" }")));
 
     private static string EntityXmlPath(string table)
     {
