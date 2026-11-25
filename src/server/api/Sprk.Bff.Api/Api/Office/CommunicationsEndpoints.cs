@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Infrastructure.Auth;
@@ -63,6 +64,15 @@ namespace Sprk.Bff.Api.Api.Office;
 /// ⚠️ Do not "restore" <c>IGenericEntityService</c> on these handlers to fix a permissions complaint.
 /// If a caller cannot see a communication, that is the control working.
 /// </para>
+/// <para>
+/// <b>A broken delegated context is an auth failure, not a 500 (#1571, word-add-in-r1 task 136).</b> When the read
+/// cannot run as the caller at all — no usable caller token or a refused On-Behalf-Of exchange, or Dataverse answering
+/// the query itself with 401 — the route answers 401; Dataverse refusing the query with 403 (no read privilege on the
+/// table, or no Dataverse user) answers 403. Both carry <see cref="OfficeErrorCodes.AccessDenied"/>, the code Office
+/// routes already use for an unusable caller identity (401) and a refused downstream (403). Neither says anything about
+/// a ROW: a communication the caller cannot read is still the ordinary 404 above. Missing OBO configuration is the
+/// server's fault and stays a 500.
+/// </para>
 /// </remarks>
 public static class OfficeCommunicationsEndpoints
 {
@@ -97,6 +107,7 @@ public static class OfficeCommunicationsEndpoints
             .Produces<CommunicationLookupResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
@@ -119,6 +130,7 @@ public static class OfficeCommunicationsEndpoints
             .Produces<CommunicationSuggestionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
@@ -133,6 +145,7 @@ public static class OfficeCommunicationsEndpoints
                 $"{LinkedTodosTopCount}).")
             .Produces<LinkedTodosResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
@@ -212,6 +225,10 @@ public static class OfficeCommunicationsEndpoints
                 Subject = subject
             });
         }
+        catch (DelegatedContextRefusedException refused)
+        {
+            return DelegatedContextRefusal(refused, "FindCommunicationByMessageId", logger, userId, traceId);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -266,16 +283,11 @@ public static class OfficeCommunicationsEndpoints
 
         if (!response.IsSuccess)
         {
-            // 401/403 means the delegated context itself is broken. Returning null would present that
-            // as "this email was never captured", which the add-in shows as a normal no-preselection
-            // state — a broken security context silently rendering as a working feature.
-            if (response.StatusCode is 401 or 403)
-            {
-                throw new InvalidOperationException(
-                    $"Communication lookup could not run under the caller's Dataverse security context "
-                    + $"(HTTP {response.StatusCode}, {response.ErrorCode}).");
-            }
-
+            // A broken delegated context must not be returned as null: that would present it as "this email was
+            // never captured", which the add-in shows as a normal no-preselection state — a broken security context
+            // silently rendering as a working feature. The caller's refusal is their 401/403 (#1571); missing OBO
+            // configuration is the server's 500.
+            ThrowIfDelegatedContextBroken(response, "Communication lookup");
             return null;
         }
 
@@ -311,6 +323,95 @@ public static class OfficeCommunicationsEndpoints
            && Guid.TryParse(v.GetString(), out var g)
             ? g
             : Guid.Empty;
+
+    /// <summary>
+    /// The status a failed delegated read answers when the CALLER's context is what failed (#1571): 401 when the read
+    /// could not run as the caller (no usable caller token, a refused On-Behalf-Of exchange, or Dataverse answering
+    /// 401), 403 when Dataverse refused the query itself (no read privilege on the table, no Dataverse user). Null for
+    /// every other failure.
+    /// </summary>
+    /// <remarks>
+    /// Every read on this surface is a QUERY (a filtered collection), never a by-id read, so a 403 here is never about
+    /// one row: Dataverse answers a row the caller may not read by leaving it out of the page, which the handlers turn
+    /// into their ordinary 404 / empty list. That is what keeps these answers from being an existence oracle.
+    /// </remarks>
+    private static int? DelegatedRefusalStatus(DataverseUserResponse response) => response switch
+    {
+        { IsSuccess: true } => null,
+        { StatusCode: StatusCodes.Status401Unauthorized } => StatusCodes.Status401Unauthorized,
+        { StatusCode: StatusCodes.Status403Forbidden } => StatusCodes.Status403Forbidden,
+        {
+            StatusCode: 0,
+            ErrorCode: DataverseUserClientErrorCodes.UserContextRequired or DataverseUserClientErrorCodes.OboExchangeFailed
+        } => StatusCodes.Status401Unauthorized,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Throws when a failed delegated read means the caller's context is broken (<see cref="DelegatedContextRefusedException"/>,
+    /// answered 401/403) or the server cannot act for any caller (missing OBO configuration: an
+    /// <see cref="InvalidOperationException"/>, answered 500 by the handler's catch-all). Returns for any other failure.
+    /// </summary>
+    private static void ThrowIfDelegatedContextBroken(DataverseUserResponse response, string operation)
+    {
+        if (DelegatedRefusalStatus(response) is { } status)
+        {
+            throw new DelegatedContextRefusedException(status, response.StatusCode, response.ErrorCode, operation);
+        }
+
+        if (response.ErrorCode == DataverseUserClientErrorCodes.OboNotConfigured)
+        {
+            throw new InvalidOperationException(
+                $"{operation} could not run: the server's On-Behalf-Of configuration is missing ({response.ErrorCode}).");
+        }
+    }
+
+    /// <summary>
+    /// The ProblemDetails for a broken delegated context: 401 or 403 with <see cref="OfficeErrorCodes.AccessDenied"/>.
+    /// Fixed text only: nothing from Dataverse's message reaches the caller (ADR-019).
+    /// </summary>
+    private static IResult DelegatedContextRefusal(
+        DelegatedContextRefusedException refused,
+        string route,
+        ILogger logger,
+        string? userId,
+        string traceId)
+    {
+        logger.LogWarning(
+            "{Route}: the delegated Dataverse read was refused for the caller | Answer={Status}, " +
+            "DataverseStatus={DataverseStatus}, ClientErrorCode={ClientErrorCode}, UserId={UserId}, CorrelationId={CorrelationId}",
+            route, refused.Status, refused.DataverseStatus, refused.ClientErrorCode, userId, traceId);
+
+        var unauthorized = refused.Status == StatusCodes.Status401Unauthorized;
+        return Results.Problem(
+            title: unauthorized ? "Unauthorized" : OfficeErrorCodes.GetTitle(OfficeErrorCodes.AccessDenied),
+            detail: unauthorized
+                ? "Spaarke could not read your data with your current sign-in. Sign in again, then retry."
+                : "Your Spaarke account is not allowed to read this information. Ask your administrator to check your access.",
+            statusCode: refused.Status,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = OfficeErrorCodes.AccessDenied,
+                ["correlationId"] = traceId
+            });
+    }
+
+    /// <summary>
+    /// A delegated read the caller's own context refused (#1571). Private to this surface: thrown by the read helpers and
+    /// caught by each handler before its catch-all, so it can never surface as the generic 500.
+    /// </summary>
+    private sealed class DelegatedContextRefusedException(int status, int dataverseStatus, string? clientErrorCode, string operation)
+        : Exception($"{operation} was refused under the caller's Dataverse security context (HTTP {dataverseStatus}, {clientErrorCode}).")
+    {
+        /// <summary>The status the route answers: 401 or 403.</summary>
+        public int Status { get; } = status;
+
+        /// <summary>The status Dataverse returned; 0 when the request never left the BFF (no token, a refused exchange).</summary>
+        public int DataverseStatus { get; } = dataverseStatus;
+
+        /// <summary>The delegated client's mapped error code (<see cref="DataverseUserClientErrorCodes"/>).</summary>
+        public string? ClientErrorCode { get; } = clientErrorCode;
+    }
 
     /// <summary>
     /// Handler for <c>GET /api/office/communications/by-message-id/{internetMessageId}/suggestions</c>.
@@ -400,6 +501,10 @@ public static class OfficeCommunicationsEndpoints
                 Names = names,
                 FilingAccess = filingAccess
             });
+        }
+        catch (DelegatedContextRefusedException refused)
+        {
+            return DelegatedContextRefusal(refused, "GetCommunicationSuggestionsByMessageId", logger, userId, traceId);
         }
         catch (Exception ex)
         {
@@ -503,12 +608,7 @@ public static class OfficeCommunicationsEndpoints
 
             if (!response.IsSuccess)
             {
-                if (response.StatusCode is 401 or 403)
-                {
-                    throw new InvalidOperationException(
-                        $"Linked-todos lookup could not run under the caller's Dataverse security "
-                        + $"context (HTTP {response.StatusCode}, {response.ErrorCode}).");
-                }
+                ThrowIfDelegatedContextBroken(response, "Linked-todos lookup");
 
                 logger.LogWarning(
                     "Linked-todos lookup failed for {CommunicationId}: HTTP {StatusCode} {ErrorCode}",
@@ -544,6 +644,10 @@ public static class OfficeCommunicationsEndpoints
                 Count = todos.Count,
                 Todos = todos.ToArray()
             });
+        }
+        catch (DelegatedContextRefusedException refused)
+        {
+            return DelegatedContextRefusal(refused, "GetLinkedTodosForCommunication", logger, userId, traceId);
         }
         catch (Exception ex)
         {
