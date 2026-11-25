@@ -4,7 +4,7 @@
     <title>Durable playbook run status in sprk_playbookrun / sprk_playbooknoderun</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>code startable; the dev Dataverse schema step needs the owner's explicit go</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and dataverse; modifies PlaybookOrchestrationService (.cs) on the live run path and adds Dataverse columns</rigor-reason>
     <model-tier>opus</model-tier>
@@ -127,7 +127,11 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-13, success criterion 3. The live restart check on dev is in task 039. Ask the main session to add a CAPABILITY-INDEX row proposal to notes/capability-index-pending.md for the run record store.</notes>
+  <notes>Spec FR-13, success criterion 3. The live restart check on dev is in task 039. Ask the main session to add a CAPABILITY-INDEX row proposal to notes/capability-index-pending.md for the run record store.
+
+    2026-11-25 execution: CODE COMPLETE, PENDING OWNER GO. Status is blocked (not completed) only because the dev schema step needs the owner's explicit go, which was not given: scripts/dataverse/Add-PlaybookRunColumns.ps1 is written, parse-checked and reviewed but NOT run against any environment. Until it runs, every Person run's two record writes fail safe (logged playbook_run_persist_failed). Unblock: owner approves running the script on dev (https://spaarkedev1.crm.dynamics.com) (notes/005-schema.md §2), then record the go date and result there and mark this task completed. Owner decision also needed on acceptance criterion 3 (notes/005-schema.md §4: identical except the documented differences). Issues to file: orphaned Running runs (§4 item 4, owner task 030 / FR-14) and run-record retention (§4 item 6). CAPABILITY-INDEX row proposal: notes/005-schema.md §5.
+    rework: one fix round after the adversarial review (bounded store calls via WaitAsync, upsert final write, read failure = 500, owner check before node rows, node confidence column, stricter tests) task 005
+    Test scope beyond the named cases: owner-scope and System-run tests (route ledger property, Person-only decision); hung-write and read-failure tests (review findings F1-1..F1-3).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
