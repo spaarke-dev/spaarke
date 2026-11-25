@@ -8,7 +8,7 @@
 |---|---|
 | **Active work** | None in progress. `design.md` v0.3 holds every review decision (§4, §5, §7, §3.5, §13, §10.1) |
 | **Next action** | Wait for the owner's go, then `/design-to-spec` |
-| **Coordination owed** | (1) Tell the accelerator project its design §6.3 "C# twins in the BFF" plan changes: the server hosts the same Python engines in a Container Apps Job. (2) Provisioning needs a per-stamp Container Apps environment/Job/registry step. (3) eBilling: #1920 producer lands in our Phase 2 (comment posted) |
+| **Coordination owed** | (1) Accelerator told (2026-11-25) that its §6.3 "C# twins" plan changes to "the server hosts the same Python engines"; it confirmed Q6 (pinned version) and that PR #3163 lands `src/accelerators` on master. Phase 0 spike waits for #3163; don't copy the engines; Python 3.11, stdlib + lxml. (2) Provisioning needs a per-stamp Container Apps environment/Job/registry step. (3) eBilling: #1920 producer lands in our Phase 2 (comment posted) |
 | **§10 evidence** | `notes/section10-verification-2026-11-25.md` |
 | **Issues** | Filed #3162 (email ingestor seam, §10 item 5b). Commented #1920 (AttachmentClassification producer) |
 | **Uncommitted** | none |

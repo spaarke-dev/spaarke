@@ -199,7 +199,7 @@ The platform's C# engine (`ComposeShadowPatchEngine`) anchors by paragraph id, a
 **Conditions:**
 1. **A pure engine.** No BFF code, no AI, no secrets, no network beyond blob storage. It runs as the stamp's user-assigned managed identity, app-only, and never calls BFF endpoints (`ADR-052:66`).
 2. **The flow.** The BFF run job stages the source `.docx` and the edit plan in blob storage. A queue message carries ids only, never document content (ADR-004), and the job is triggered by a KEDA Service Bus scaler. The job runs `segment_clauses` / `ooxml_redline` / `summary_table` / `check_outputs` and writes the redline, external and clean `.docx` files plus the check report to blob storage. It then posts a completion message, and the BFF run job resumes at Persist. The engines' JSON-in/JSON-out CLI contract is the interface.
-3. **A Phase 0 spike proves the hosting:** start-up latency, the `lxml` image, the managed-identity blob read and write, a CVE-clean image, and identical output to the accelerator's golden fixtures.
+3. **A Phase 0 spike proves the hosting:** start-up latency, a Python 3.11 + `lxml` image built from `src/accelerators/core/engines/` on master (after PR #3163; no copied engines), the managed-identity blob read and write, a CVE-clean image, and identical output to the accelerator's golden fixtures.
 4. **Coordinate with the accelerator.** Its design §6.3 plans "C# twins in the BFF". That changes to "the server hosts the same Python engines", and Cowork may later call this hosted engine through the connector.
 
 Rejected: **B** (C# port: two implementations to keep identical, slower to a first output, untrusted parsing in-process). Also rejected: **C** (`ComposeShadowPatchEngine`: a different anchoring model, and no plan-to-anchor step, table or checks).
@@ -209,7 +209,7 @@ Rejected: **B** (C# port: two implementations to keep identical, slower to a fir
 **Decision (owner, 2026-11-25):**
 - **The standard:** the accelerator's topic-keyed playbook "Spaarke NDA – Mutual" v1.2 (24 topics keyed by `topics.yaml`) is the one NDA standard. The platform's KNW-011 "Baseline NDA Standard v0.1" is rendered from it, not maintained separately.
 - **Ownership:** the accelerator owns the content until `specialist-legal-agents-r1` stands up the T3 Dataverse master (its design Q2: a Playbook, ontology D-209).
-- **This project consumes it:** it reads the current version and stamps it on every output.
+- **This project consumes it at a pinned version.** It reads the version stamp, records it on every run and output, and moves to a new version (for example v1.3) only by a deliberate change here. Changes to the standard go through the accelerator's build (one Markdown master → all renders, gates and tests), never through this project. Confirmed by the accelerator project, 2026-11-25.
 - **Gate:** counsel ratifies the standard before any customer rollout. Dev phases use synthetic NDAs against the unratified version.
 - **Why:** the §5 engines are keyed by topic id (`edit-plan.schema.json:52-58,88`; `summary_table.py` "# | Topic | Rating | Recommended action"), and Word and Cowork already read this playbook. The two standards differ in content (NDA note §4), and neither is counsel-approved yet. Today's model step is the `agreement-review` Action, which must become callable app-only: `agreement-classify` and `agreement-review` run only inside a chat session (`SessionDispatchOrchestrator`) today. The step must write an edit plan rather than flagged sections alone. Later, `specialist-legal-agents-r1` supplies the attorney profile layers.
 
@@ -340,7 +340,7 @@ All eight were re-verified on master `4af7aaecb5`. The evidence is in `notes/sec
 ## 12. Dependencies and coordination
 
 - **specialist-legal-agents-r1:** the NDA specialist and attorney profiles plug into the NDA harness later. That program's design §3.6 "Autonomous runs" is delivered here.
-- **Accelerator r1:** the engines, edit-plan schema and NDA standard (not on master yet; merge or vendor them). It owns the one NDA standard's content (§5, decided) until the specialist program's T3 master exists. **Its design §6.3 ("C# twins in the BFF") changes:** the server hosts the same Python engines in a Container Apps Job (§5). Tell the accelerator.
+- **Accelerator r1:** the engines, the edit-plan schema and the NDA standard. **PR #3163** puts `src/accelerators` on master by itself: engines with 65 tests, the legal-playbook, review-result and edit-plan schemas, the NDA and legal-hold standards, and builds with 63 tests. Once it merges, this project uses them from master. **Don't copy the engines.** The Container Apps Job image is built from `src/accelerators/core/engines/` in the repo. Keep it **Python 3.11-compatible, standard library + `lxml` only**, because the r2 accelerator uses the same engines. It owns the one NDA standard's content (§5, decided) until the specialist program's T3 master exists. **Its design §6.3 ("C# twins in the BFF") changes:** the server hosts the same Python engines in a Container Apps Job (§5). Tell the accelerator.
 - **Customer provisioning r1:** the per-stamp Container Apps environment, Job and registry need a provisioning step.
 - **Ontology r1:** columns on `sprk_servicerequest`; the request vs Inquiry distinction (owner: different concepts).
 - **eBilling r1:** §7 timing and the regression proof.
