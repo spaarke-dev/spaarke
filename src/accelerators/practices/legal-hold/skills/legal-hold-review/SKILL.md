@@ -108,8 +108,11 @@ Write `edit-plan.json` (`references/edit-plan.schema.json`):
 Check first: `python scripts/ooxml_redline.py edit-plan.json <notice.docx> out.docx --dry-run`.
 Exit 3 names the edit that does not fit: fix the plan and repeat.
 
-**Show the plan before building any file.** In chat: the table of changes (topic, section, rating,
-one-line revision) and the open questions. Then ONE question card: Approve and build / Change
+**Show the review and the plan before building any file.** Write them as text in your chat reply,
+before the card: the review from step 3 (header, table, conclusion), then the table of changes
+(topic, section, rating, one-line revision) and the open questions. The card shows only its question,
+and the user does not see text you put in a file or a tool step, so a card that says "changes listed
+above" with nothing above it is a failure. Then ONE question card: Approve and build / Change
 something / Review only. Build only after approval; on a change, update the plan and show it again.
 
 ## 5. Build and check

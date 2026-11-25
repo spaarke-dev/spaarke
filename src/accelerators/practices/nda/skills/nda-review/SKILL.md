@@ -84,7 +84,8 @@ Exit 3 names the edit that does not fit; fix the plan and repeat.
 
 **Show the plan before building any file.** In chat: the provenance line, a table of the changes
 (number, section, topic, priority, one-line revision) High first, the escalations, and the open
-questions. Then ONE question card: Approve and build / Change something. Build only after
+questions, as text in your chat reply before the card (the card shows only its question, and the
+user does not see text in a file or a tool step). Then ONE question card: Approve and build / Change something. Build only after
 approval; on a change, update `review.json` and the plan and show it again. Under an automation
 (no user present), skip the card and say so on page 1.
 

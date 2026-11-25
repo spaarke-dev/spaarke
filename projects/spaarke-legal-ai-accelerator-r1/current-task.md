@@ -1,21 +1,21 @@
 # Current Task State - spaarke-legal-ai-accelerator-r1 (tiered package: individual base/advanced)
 
-> **Last Updated**: 2026-11-12 (Claude Desktop session `acclerator-r1`)
+> **Last Updated**: 2026-11-25 (Claude Desktop session `acclerator-r1`, after tier tests round 2)
 > **Recovery**: Read "Quick Recovery" section first
 > **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (unmerged)
 > Earlier checkpoints (verbatim): `notes/handoff-history/2026-11.md`. Session narrative: `git log`.
 
 ---
 
-## IN PROGRESS 2026-11-25: Claude runs the Cowork + Agent Builder tests in Chrome (owner said "Yes, start")
+## 2026-11-25: Claude ran tier tests round 2 in Chrome (done; results in `notes/poc-e2e/results.md` "Tier tests round 2")
 
-- Package rebuilt (engine fix e5c90f34b4) and uploaded to OneDrive via the browser (SharePoint REST, zip parsed in JS). **OneDrive gotcha:** the user's `Documents/` is a FOLDER inside the drive root (server path `/personal/ralph_schroeder_spaarke_com/Documents/Documents/...`). Old Cowork/Skills, Cowork/Playbooks and Spaarke Test Documents moved to `Spaarke test archive (not current)/2026-11-25 before Cowork tests/`.
-- **C-1 PASS:** `/` lists the 4 skills without a plugin, plus `/spaarke-visual-probe` (still registered, though not in `Cowork/Skills`). Env check OK; profile saved `Documents/Cowork/Profile/legal-profile.md`; playbook folder `Cowork/Playbooks/NDA/Playbook master/`.
-- **C-2 PASS:** provenance `Spaarke NDA – Mutual v1.2 (customer playbook)`, read from `Playbook master/`; 12 changes; 5 files, checks pass; No email. Finding: outputs went to the Cowork task output folder, not next to the original (our notes say next to it). Profile said baseline but the saved playbook took priority (by design).
-- **C-3 PASS with a defect:** the approval card appeared WITHOUT the review table ("8 changes listed above" with nothing above). After asking, it showed 13 rows (5 Meets / 1 fallback / 1 Does not meet / 6 Escalate) + 8-change plan. Redline next to the original: 8 comments all `lh.*`, 7 ins / 7 del, 13-row summary, `[CONFIRM DATE]` placeholders. → fix legal-hold-review SKILL.md (print the review before the card).
-- **Owner Qs answered:** agents carried **v0.1** (`NDAR-1109-A`), not v0.3; DA packages appear uploaded (`spaarke-legal-g8p2-dd/-org-learn/-sl-learn` in the Agents list); visual probe still registered.
-- **A-2 in progress:** editing the EXISTING "Spaarke NDA Review" agent (Agent Builder edit page). v0.3 text set in the instructions textarea via JS (NDAR-1112-A, 5,927 chars) — NOT yet saved (click **Update**, then verify). Knowledge is currently SharePoint `Spaarke NDA – Mutual v1.2.docx` (four-column copy); A-1 wants OneDrive `Cowork/Playbooks/NDA/Spaarke NDA – Mutual v1.2 (agent knowledge).docx`. Then same for "Spaarke Legal Hold Review", then A-2 chat tests, then WP-0 (send copilot-platform-coordination a row BEFORE the probe upload).
-- Then record all of this as "Tier tests round 2 (Cowork, run by Claude)" in `notes/poc-e2e/results.md`.
+- **OneDrive gotcha:** the user's `Documents/` is a FOLDER inside the drive root (server path `/personal/ralph_schroeder_spaarke_com/Documents/Documents/...`). Package uploaded via SharePoint REST; old files in `Spaarke test archive (not current)/2026-11-25 before Cowork tests/`.
+- **Passed:** C-1, C-2, C-3 (defect fixed: skills print review + plan in chat before the card, commit `72fdc9ab98` on PR #3163, mirrored here), A-1 both agents (24 / 13 topics), A-2 both (chat-only review, no file changed), A-3 (knowledge edit visible after about 15 min; marker removed by restoring v1.0), WP-0 (probe works in Cowork).
+- **Both agents now carry v0.3** (NDAR-1112-A / LHR-1112-A) with the OneDrive `(agent knowledge).docx` as knowledge (pasting the file link into Add knowledge works). Edit URLs: NDA `agents/edit/T_a428b503-…e46b9389…`, Legal hold `agents/edit/T_c7a9abfd-…514e6b6c…`.
+- **WP-2b (Word for the web):** probe listed (plugin + both skills), but no WPI/WPS code in (a) or (b); every prompt with "Spaarke" is routed to the Spaarke connector / Spaarke MCP (MCP prompts declined). The test is **confounded by our name**. Follow-up offered: rename the probe trigger phrases (`build/build_word_probe.py`) and re-upload (new inventory row).
+- **Probe plugin P1 is still uploaded (Only you)**, for the owner's Word desktop WP-1/WP-2. copilot-platform-coordination recorded it (`45022ea1c6`) and expects a message when it's removed (planned the same day) or a new date. The owner removes it in Cowork › Customize › Plugins.
+- **Side finding:** the owner's saved custom instruction (names `Spaarke Review Method.docx`) leaks into both agents ("could not be located").
+- **Still the owner's:** WP-1, WP-2 (Word desktop), WP-3, contract steps, P-1 placement check, remove `/spaarke-visual-probe` from the Cowork skills list.
 
 ## Quick Recovery (READ THIS FIRST)
 

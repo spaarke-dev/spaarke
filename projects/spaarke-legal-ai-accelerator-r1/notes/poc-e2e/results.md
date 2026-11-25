@@ -585,3 +585,45 @@ copies should be renamed before the first run, so the original stays clean.
 3. **Attaching the method next to the playbook works for non-contracts** (code, colours, complete, key totals).
    For contracts Word's Review contract route takes exactly one file, so the method can only be a second step.
 4. **A second-step chart can misstate the playbook version** (v1.3). Provenance from the model is not reliable.
+
+## Tier tests round 2: Cowork, agents and Word for the web (run by Claude in Chrome, 2026-11-25)
+
+Run by Claude through Claude in Chrome as the owner (owner approved in chat: rebuild and upload, Cowork cards with
+"No email", agent edits, probe upload "Only you", A-3 marker). Package rebuilt after engine fix `e5c90f34b4` and
+uploaded to OneDrive through SharePoint REST; earlier files moved to
+`Spaarke test archive (not current)/2026-11-25 before Cowork tests/`. Inventory row sent to
+copilot-platform-coordination before the probe upload (recorded there, commit `45022ea1c6`).
+
+| Test | Setup | Result |
+|---|---|---|
+| C-1 | Cowork, `/` | The 4 custom skills listed without a plugin, plus `/spaarke-visual-probe` (still registered though not in `Cowork/Skills`; owner removes it from the skills list). Environment check OK; profile saved to `Cowork/Profile/legal-profile.md`. **Pass** |
+| C-2 | `/nda-review` on Brightwater | Provenance *Spaarke NDA – Mutual v1.2 (customer playbook)*, read from `Playbook master/`; 12 Meets, 5 fallback, 7 short or escalate; 12 changes; 5 files; checks pass; "No email". Outputs saved in the Cowork task output folder, **not next to the original** (our notes said next to it). The saved playbook beat the profile's "baseline" (by design). **Pass** |
+| C-3 | `/legal-hold-review` on draft A | The approval card ("8 changes listed above") came **with no review table in chat**; the table (5 Meets, 1 fallback, 1 Does not meet, 6 Escalate; SRM-1110-A) appeared only when asked. After approval: redline saved next to the original; 8 comments `lh.*` by the user, 7 ins / 7 del, 14-row summary table, placeholders `[CONFIRM DATE]`. **Pass with defect** (skill must print the review before the card) |
+| Agent update | Agent Builder, both existing agents | Instructions replaced with v0.3 (NDAR-1112-A / LHR-1112-A); knowledge switched from the SharePoint four-column copies to the OneDrive `(agent knowledge).docx` files (pasting the file link into Add knowledge works); suggested prompts fixed (the NDA agent had a legal-hold prompt). Update confirmed. Shared with the whole org (pre-existing). |
+| A-1 NDA | "Which playbook and version are you using? List all its topics with their Topic IDs." | v1.2 from `(agent knowledge)`, effective 2026-11-07, owner, status line, agent v0.3, **NDAR-1112-A**, **24 topics** in order with IDs, cites the knowledge file. **Pass** |
+| A-1 Legal hold | same | v1.0 from `(agent knowledge)`, **LHR-1112-A**, **13 topics** with IDs, cites the knowledge file. **Pass** |
+| A-2 NDA | Attach Brightwater (cloud file), "Review this NDA", then "Apply these changes to the Word file" | Header (doc, counterparty, playbook, v0.3, NDAR-1112-A), **24 rows** with 🟢🟡🔴: 12 Meets, 4 Acceptable fallback, 1 Needs review, 0 Does not meet, 7 Escalate; disposition Escalate; open questions; ends with the `/nda-review` line. "Apply" → points to `/nda-review` (Cowork) and Review contract (Word); **no file changed** (v1.0, last modified at upload). **Pass** |
+| A-2 Legal hold | Attach draft A, same two prompts | **13 rows**: 5 Meets, 1 fallback, 1 Needs review, 6 Escalate (C-3 had the same split, with Does not meet for the one Needs review); placeholders, no invented dates; ends with the `/legal-hold-review` line. "Apply" → points to the skill; **no file changed**. **Pass** |
+| A-2 side finding | both agents | Both headers say *"Spaarke Review Method.docx could not be located"*. Source: the owner's saved custom instruction (P-1 text) tells every review to read that file, and agents follow it but cannot reach OneDrive outside their knowledge. Harmless here (they fell back to their own instructions), but the custom instruction and the agents conflict |
+| A-3 | Marker "Test marker A3: three years is preferred." added under 16. Term and survival in the NDA `(agent knowledge).docx` (OneDrive version 2.0, 20:10Z) | At **+16 min** (20:26Z), asked to quote topic 16 verbatim: the agent quoted the marker line in place and flagged it as inconsistent with the 2-year instruction. **Pass: knowledge edits reach the agent within about 15 minutes**, so the +1 h check was dropped. Marker removed by restoring version 1.0 (now version 3.0, original length 40,229 bytes) |
+| WP-0 | Cowork, probe uploaded (Only you) | "Run the Spaarke Word probe." → `Spaarke Word probe · instructions loaded · WPI-1112-A`; "Run the Spaarke script probe." → `WPS-1112-A 528452740 python 3.12 Linux`. **Pass** (probe works) |
+| WP-2b script (a) | Word for the web, Brightwater (view mode), typed | Plugin and both skills listed under + › Choose plugins (as "Shared skill"). Answer: no `WPS` code; Word went to the **Spaarke connector** ("only operation … Decide lane") and said it can't run scripts in Chat mode. **Skill not loaded** |
+| WP-2b script (b) | skill chip `spaarke-word-probe-script` + same text | No `WPS` code; same connector routing; Word then said "Spaarke Word Probe is now on". **Skill not loaded** |
+| WP-2b instructions (a) | page reloaded after the plugin was on; typed | Copilot asked for **Spaarke MCP** access (declined: out of scope); answer: no `WPI` code. **Skill not loaded** |
+| WP-2b instructions (b) | skill chip `spaarke-word-probe` + text | Again the Spaarke MCP prompt (declined); "I ran the Spaarke probe" but via the connector; no `WPI` code. **Skill not loaded** |
+| WP-2b (c) | agent mode | Not offered: the document was in view mode and agent mode needs editing on a copy. Not run |
+
+**Findings.**
+1. **Cowork works end to end from the package as built** (C-1 to C-3), with one skill defect (C-3 card before the
+   review) and one doc error (C-2 output location).
+2. **The v0.3 agents behave as designed**: complete reviews in chat, the right codes, no file changes, and a pointer
+   to the skill for redlines. The two surfaces agree closely on ratings (A-2 vs C-2 and C-3).
+3. **Word for the web still does not load a third-party skill**, now with a probe that works in Cowork (WP-0). But
+   the test is **confounded by our own name**: with the Spaarke MCP and Spaarke connectors installed for this user,
+   any prompt containing "Spaarke" is routed to them, even with the skill chip. The Word desktop runs (WP-1, WP-2,
+   owner) and any re-run should use a probe phrase without "Spaarke" (follow-up: rename the probe trigger), or a user
+   without the Spaarke connectors.
+4. **The custom instruction leaks into agents** (A-2 side finding).
+5. **Fixed after this round:** both Cowork skills now say the review and plan go in the chat reply before the card
+   (C-3 defect; commit `72fdc9ab98` on PR #3163, mirrored here); `copilot-app-components.md` now says where outputs
+   really land (C-2).

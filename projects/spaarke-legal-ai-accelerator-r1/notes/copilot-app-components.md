@@ -33,7 +33,10 @@ and §10 without renumbering. Instructions alone did not hold the redline rules;
 | Templates and precedents | `Documents/Cowork/Playbooks/<type>/Templates` (owner decision, 2026-11-19) | Word drafting (attached). No drafting skill yet | Word R-2/R-3 in round 2 |
 | More review guides, as skills | `Documents/Cowork/Skills/` when built | Cowork | Candidates only. They can't go in an agent: an agent can't carry skills or scripts |
 
-**Hand-off to Word.** The skill saves its files next to the original in OneDrive. To keep working with the Legal
+**Hand-off to Word.** The skill saves its files either next to the original in OneDrive or in the Cowork task's
+output folder (under `Documents/Cowork/`), and names the place in its reply. Both happen: on 2026-11-25 the NDA run
+saved to the task folder and the legal hold run saved next to the original (`results.md`, Tier tests round 2; the
+skills allow both, design decision 13). To keep working with the Legal
 plugin, open the redline in Word for Windows: from the browser, **Editing › Open in Desktop App**. Word for the web
 has no Legal plugin.
 
