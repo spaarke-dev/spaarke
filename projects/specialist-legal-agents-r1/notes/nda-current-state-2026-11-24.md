@@ -197,3 +197,14 @@ Owner points: separate how a request starts (email, Teams or Front Door form, Co
 **Same AI components for every door.** The door changes only intake and return. The attorney's own desk tools (Word legal plugin, Cowork `nda-review`) run in Microsoft's runtime and share the **content** (the one standard, the profile export), not the server code. That is why the one standard and the shared golden set matter.
 
 **Output:** the redlined `.docx` (comments + tracked changes) and a clause table (the review's per-topic result). The OOXML engine under Compose is server-side; whether it runs without a Compose session is **not yet checked**. The attorney opens the `.docx` in Word to edit and approves from the Work Item.
+
+**The request record is shared ground (checked 2026-11-24, for the owner discussion):**
+- `sprk_servicerequest` already ships (External Access r3):
+  - the four Front Door request types and the answers as field-secured JSON;
+  - `sprk_direction = Inbound`;
+  - requesters see their own rows (`sprk_requestedby` = the caller's contact, `ServiceRequestsWidget`);
+  - documents upload to it from the SPA;
+  - it is an email association target (`sprk_communication.sprk_regardingservicerequest`).
+- `spaarke-legal-front-door-r1` (pre-spec, last change 2026-10-05) proposed a new `sprk_legalrequest` spine.
+- The ontology project's open **CM-5** ("are Inquiry and Request one object?") "would also settle `sprk_servicerequest` vs `sprk_legalrequest`". The ontology is adding `sprk_direction` / `sprk_disposition` / `sprk_responseduedate` to `sprk_servicerequest`.
+- **Proposal:** `sprk_servicerequest` is the one request record. It adds a channel, an assigned attorney and a stage. Each AI run stays on the existing analysis records (`sprk_analysis` / `sprk_analysisoutput`) linked to the request's document. A counterparty's revised draft is a new run on the same request. This needs agreement from front-door-r1 and the ontology (CM-5) before any spec.
