@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-25 — ADR-004 A2: queue consumers outside the BFF
+
+The `spaarke-intake-pipeline-r1` design review found that ADR-004's "MUST implement handlers as `IJobHandler`" could not be met by any Service Bus consumer outside the BFF. A1 made every queue consumer ADR-004 work, but `IJobHandler`/`JobContract`/`JobOutcome` live only in `Sprk.Bff.Api`, which ADR-052 forbids non-BFF hosts to reference.
+
+Amendment **A2** (path B, owner decision 2026-11-25):
+- scopes `IJobHandler` to the BFF;
+- states the equivalent guarantees for a Function or Container Apps Job: the Job Contract JSON envelope, a deterministic key plus an atomic marker, `correlationId`, a `Completed`/`Failed`/`Poisoned` outcome, `MaxDeliveryCount` → monitored DLQ;
+- leaves the payload rule unchanged, adding only that staged content is stamp-private and lifecycle-deleted.
+
+Files: `docs/adr/ADR-004-async-job-contract.md` (A2 section), `.claude/adr/ADR-004-job-contract.md`, `.claude/constraints/jobs.md`, and the ADR-004 row of `.claude/adr/ADR-052-workload-placement.md`.
+
 ###### 2026-11-25 — ADR-026: ribbon/command scripts live in `src/client/webresources/js/`
 
 #3074 (2026-11-24) removed the last files under `src/dataverse/webresources/`, so ADR-026's surface matrix named a folder that no longer exists (`Test-InstructionPaths` new miss). Both copies (`.claude/adr/` and `docs/adr/`) now name `src/client/webresources/js/`, where the ribbon and command scripts are. Wording fix only; no rule changed. Found and fixed by spaarkeai-mcp-bff-api-r1 (owner: "Fix it here").

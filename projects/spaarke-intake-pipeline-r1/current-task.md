@@ -10,6 +10,7 @@
 | **Next action** | Wait for the owner's go, then `/design-to-spec` |
 | **Coordination owed** | (1) Accelerator told (2026-11-25) that its §6.3 "C# twins" plan changes to "the server hosts the same Python engines"; it confirmed Q6 (pinned version) and that PR #3163 lands `src/accelerators` on master. Phase 0 spike waits for #3163; don't copy the engines; Python 3.11, stdlib + lxml. (2) Provisioning needs a per-stamp Container Apps environment/Job/registry step. (3) eBilling: #1920 producer lands in our Phase 2 (comment posted) |
 | **§10 evidence** | `notes/section10-verification-2026-11-25.md` |
+| **ADR amendment** | ADR-004 A2 (queue consumers outside the BFF) drafted on this branch, owner-approved path B 2026-11-25. Must merge before or with the Phase 0 hosting spike. Files: docs/adr/ADR-004-async-job-contract.md, .claude/adr/ADR-004-job-contract.md, .claude/constraints/jobs.md, .claude/adr/ADR-052 (related row), .claude/CHANGELOG.md |
 | **Issues** | Filed #3162 (email ingestor seam, §10 item 5b). Commented #1920 (AttachmentClassification producer) |
 | **Uncommitted** | none |
 
@@ -22,7 +23,7 @@
 - Q5: returns send from the shared legal mailbox, app-only, as the queued Return stage; attorney named + Cc'd.
 - Q6: one NDA standard = accelerator "Spaarke NDA – Mutual" v1.2 (topic-keyed); KNW-011 rendered from it; owned by accelerator → specialist-legal-agents T3; we consume + version-stamp; counsel ratification gates customer rollout.
 - Q7: email door = intake mailboxes (flag on `sprk_communicationaccount`) + suggest-only "Submit as request" elsewhere via the existing triage Action output. Both Phase 2.
-- §10.1: Phase 0 one cleanup PR = 1b delete 3 dead handlers, 2 StartupDiagnostics, 4 profile doc, 5a idempotency keys + test, 6 ConsumerTypes, 7 reply threading via createReply, 8 ADR-036/data-model docs. Phase 1 = 3 DLQ re-drive in run admin view, 8 `sprk_backgroundjob` description. Phase 2 = 1a #1920 producer. 5b filed #3162.
+- §10.1: Phase 0 one cleanup PR = 1b delete 3 dead handlers, 2 StartupDiagnostics, 4 profile doc, 5a idempotency keys + test, 6 ConsumerTypes, 7 reply threading via createReply, 8 ADR-036/data-model docs. ADR-004: payload rule complied with (ids-only plus stamp-private, TTL-deleted staging); "IJobHandler" rule amended as A2 (path B). Phase 1 = 3 DLQ re-drive in run admin view, 8 `sprk_backgroundjob` description. Phase 2 = 1a #1920 producer. 5b filed #3162.
 
 ## Standing directives
 - Never `git stash`; never `python3` in Bash; every Agent launch names a model.

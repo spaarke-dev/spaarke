@@ -1,8 +1,8 @@
 # ADR-004: Async Job Contract (Concise)
 
-> **Status**: Accepted, as amended (A1, 2026-09-12)
+> **Status**: Accepted, as amended (A1, 2026-09-12; A2, 2026-11-25)
 > **Domain**: Background Processing
-> **Last Updated**: 2026-09-12 (Amendment A1 — queue-only scope, orchestration hosting → ADR-052, atomic idempotency)
+> **Last Updated**: 2026-11-25 (Amendment A2 — queue consumers outside the BFF). A1 2026-09-12: queue-only scope, orchestration hosting → ADR-052, atomic idempotency
 
 ---
 
@@ -24,7 +24,8 @@ Where either runs → [ADR-052](ADR-052-workload-placement.md). A queue or topic
 ### ✅ MUST
 
 - **MUST** use Job Contract schema for all queue-driven async work
-- **MUST** implement handlers as `IJobHandler` (non-generic — `Services/Jobs/IJobHandler.cs`), idempotent under at-least-once
+- **MUST**, inside the BFF, implement handlers as `IJobHandler` (non-generic — `Services/Jobs/IJobHandler.cs`), idempotent under at-least-once
+- **MUST**, for a consumer outside the BFF (a Function or Container Apps Job, ADR-052), give the same guarantees in its own runtime (A2): accept the Job Contract JSON envelope (anything else → DLQ); deterministic key plus an atomic per-message marker (e.g. a conditional create keyed by `idempotencyKey`) and deterministic output locations; `correlationId` propagated; `Completed` / `Failed` / `Poisoned` reported (plus a completion message when the producer waits); `MaxDeliveryCount` → monitored DLQ. Shared types are optional; it never references `Sprk.Bff.Api`
 - **MUST** mark receive-side idempotency **atomically** per message — SET NX, or a conditional upsert on a natural key. `IIdempotencyService` as built is check-then-set and fails open; not sufficient on its own until fixed (#984)
 - **MUST** use deterministic IdempotencyKey patterns
 - **MUST** propagate CorrelationId from original request
@@ -33,7 +34,7 @@ Where either runs → [ADR-052](ADR-052-workload-placement.md). A queue or topic
 
 ### ❌ MUST NOT
 
-- **MUST NOT** place document bytes or large blobs in payload (this applies to orchestration inputs too)
+- **MUST NOT** place document bytes or large blobs in payload (this applies to orchestration inputs too, and to consumers outside the BFF). Content a consumer needs is fetched at processing time; content staged for that is private to the stamp and deleted by a lifecycle rule (A2 §3)
 - **MUST NOT** assume exactly-once delivery
 - **MUST NOT** rely on `MessageId = IdempotencyKey` for de-duplication unless the queue has duplicate detection enabled — Service Bus fixes that **at queue creation**, and it is off on the BFF queues (`service-bus.bicep`)
 
@@ -85,4 +86,4 @@ exceptions to "a consumer is ADR-004 work", until migrated (#977).
 
 ## Source Documentation
 
-**Full ADR**: [docs/adr/ADR-004-async-job-contract.md](../../docs/adr/ADR-004-async-job-contract.md) (Amendment A1 in full)
+**Full ADR**: [docs/adr/ADR-004-async-job-contract.md](../../docs/adr/ADR-004-async-job-contract.md) (Amendments A1 and A2 in full)
