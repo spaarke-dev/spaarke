@@ -88,6 +88,7 @@ Full log: `notes/decisions.md`.
 - 2026-11-25 — The agent's start/poll shape (`AgentEndpoints.cs:461-481`, `PlaybookStatusEndpoints.cs`) and playbook de-duplication (`AgentEndpoints.cs:62`, `:334`, `:357`) are deleted by 001; later tasks read them with `git show 37f0864afe:<path>`.
 - 2026-11-25 — `IPlaybookOrchestrationService.cs:724` and `PlaybookParameterPolicy.cs:18` mention `/api/agent/*` in comments; 001 owns those comment edits, 005 does not edit the interface file.
 - 2026-11-25 — The widget bundle gate is `src/client/widgets/spaarke-decisions/scripts/check-bundle-size.mjs` (not `scripts/check-bundle-size.mjs` at repo root).
+- 2026-11-25 — The matter summary lives in `sprk_matter.sprk_recordsummary` (registry row `matter-summary/single`, TTL 60 min), not a new column. The `matter-summary` Binding has no `sprk_playbook` Guid, so `InsightsPlaybookExecutionCache` (keyed by playbook id) cannot serve it: task 032 reads the persisted `sprk_recordsummary` envelope, else starts a run (`notes/012-matter-summary-topic.md`).
 
 ## 7. Key documents
 

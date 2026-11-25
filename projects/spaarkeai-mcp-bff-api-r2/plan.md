@@ -106,9 +106,9 @@
 **Dataverse schema findings (discovery, 2026-11-25):**
 - `sprk_playbookrun` exists (0 rows) but lacks: correlation/idempotency id, error code, regarding-record lookup, short summary. Confirm `sprk_status` option values and that `sprk_triggeredby` targets `systemuser`. → task 005.
 - `sprk_playbooknoderun` lacks started/completed timestamps and a sequence. → task 005.
-- Binding row `matter-summary` (SUM-CHAT@v1) has no `sprk_aitopicregistry` row and no target column (matter-health writes `sprk_matter.sprk_performancesummary` via `Services/Ai/WorkProductRecordPersister.cs`). → task 012.
+- ~~Binding row `matter-summary` (SUM-CHAT@v1) has no `sprk_aitopicregistry` row and no target column.~~ **Corrected by task 012 (2026-11-25):** dev already has the registry row `matter-summary/single` targeting `sprk_matter.sprk_recordsummary` (Memo, TTL 60 min) and the persister already writes it; only the row's `sprk_playbookname` key (`chat-summarize` → `matter-summary`) needs the owner's go (`notes/012-matter-summary-topic.md`).
 
-**§11 flags.** None unjustified at project level: every new surface in spec "New Components" cites `notes/reuse-scan.md`. Two additions found in discovery, both justified in their tasks: the `sprk_matter` summary column (012) and the schema gap columns (005).
+**§11 flags.** None unjustified at project level: every new surface in spec "New Components" cites `notes/reuse-scan.md`. One addition found in discovery, justified in its task: the run-record schema gap columns (005). (The `sprk_matter` summary column first listed for 012 already exists as `sprk_recordsummary`.)
 
 **Hot-path result (HARD WARNING).** BFF is touched by many active projects; the direct overlaps are `spaarkeai-mcp-bff-api-r1` (`Api/Mcp/`, ledger, Decisions widget; PR #3161 open) and `specialist-legal-agents-r1` (future `/mcp/patents`). `design.md` lacks a `<hot-path-declaration>` block; the block is in `spec.md` ("Hot-Path Declaration"). The owner may add it to design.md.
 
