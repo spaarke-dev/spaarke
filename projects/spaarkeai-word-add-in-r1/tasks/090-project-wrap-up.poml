@@ -4,7 +4,7 @@
     <title>Project wrap-up, lessons learned, test-diet gate</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>042 complete — the add-in and BFF are deployed and UAT has been run</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation, reconciliation and archival. No application code is created or modified. Quality gates skipped per the MINIMAL default; the `/test-diet` gate is separately mandatory per root CLAUDE.md §7.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -117,6 +117,14 @@
 
   <notes>
     Root CLAUDE.md §7 (project-close test-diet gate, binding since 2026-06-26) and the project CLAUDE.md deferral-tracking obligation. plan.md §3 lists the six findings this task must report back on. The wrap-up PR description must cite `notes/test-diet-report.md` or document why the gate was skipped.
+
+    2026-11-24 (owner: "042 passes - proceed to 090"). Done:
+    - 042 closed (12 PASS, 1 FAIL SC-12 #996).
+    - /test-diet ran BEFORE close, reading 2792 methods in 215 files (notes/test-diet-report.md): 30 SCAFFOLDING, 62 AMBIGUOUS, 21 PATH-VIOLATION, 0 ESCALATE (the NFR-02 tests are MAINTAIN), and 1 stale registry entry. None of its commands was executed.
+    - defer-issues.md reconciled both ways (2026-11-24 register): #1005 closed after the live re-check; 17 project-filed issues that were missing from the log were added; ISS-029 #1571 (routed to us, never logged) found.
+    - lessons-learned.md written (F-a..F-g verdicts, spikes, tiering).
+    - Drift check: 2 docs stale, filed #3123 (ISS-039).
+    STOPPED at escalation trigger 2: project-owned open items touch spec requirements (SC-12 #996, FR-08 #1090, #2209, sign-in #1571), and tasks 125/135 still await owner checks. Not marked complete; awaiting the owner's decision.
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

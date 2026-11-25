@@ -4,6 +4,57 @@
 > File via `/project-defer-issue-tracking` (alias `/defer`) — it writes both places in one step.
 > Per CLAUDE.md §11, every entry names a concrete behavior or contract that fails. "Future flexibility" is not a reason.
 
+## Register — reconciled 2026-11-24 by task 090 (supersedes the 2026-10-02 table below)
+
+GitHub states were read live on 2026-11-24. "Ours" means this project owns the fix. "Spec gap?" asks whether the item leaves a requirement of THIS project's `spec.md` unfinished, which is task 090's escalation trigger 2.
+
+**Changes since 2026-10-02:**
+- ISS-006 / #1005 was CLOSED today. The owner's final UAT re-checked it live (`042-uat-results.md` §0).
+- ISS-010, ISS-011, ISS-013, ISS-014, ISS-016, ISS-017, ISS-018, ISS-027 (#2412) and ISS-028 (#2416) are closed on GitHub, as are #1014 and #1015.
+
+### Open, owned by this project
+
+| ID | Issue | What fails | Spec gap? |
+|---|---|---|---|
+| ISS-004 | [#996](https://github.com/spaarke-dev/spaarke/issues/996) | No CI job typechecks `office-addins`, so a new type error ships unseen. Production is at 0 errors; the test files are at the 68 baseline. | **Yes, SC-12** (the only FAIL in the 042 tally). The fix is a CI workflow change, which 090 must not make. |
+| ISS-021 | [#1090](https://github.com/spaarke-dev/spaarke/issues/1090) | After Generate Profile, the pane reads the record once and does not poll. The finished profile appears only on the next read. | **Partly, FR-08.** The owner's UAT passed "Generate Profile completes". |
+| ISS-022 | [#2209](https://github.com/spaarke-dev/spaarke/issues/2209) | Re-saving an email to the same record to add attachments answers "already saved". | Partly, FR-11/FR-12 save behaviour for email. |
+| ISS-023 | [#2306](https://github.com/spaarke-dev/spaarke/issues/2306) | The newest-copy identity rule can hide the caller's own readable saved copy. Task 135 met a variant of this. | No (an edge of FR-01 email identity) |
+| ISS-024 | [#2307](https://github.com/spaarke-dev/spaarke/issues/2307) | A communication filed to an unsupported record type reads as unfiled. | No |
+| ISS-025 | [#2355](https://github.com/spaarke-dev/spaarke/issues/2355) | Inline images lose their cid link in the saved .eml. | No (pre-existing) |
+| ISS-026 | [#2356](https://github.com/spaarke-dev/spaarke/issues/2356) | Quick-create entity type parsing accepts numbers and comma-joined names. | No (pre-existing) |
+| ISS-029 | [#1571](https://github.com/spaarke-dev/spaarke/issues/1571) | Routed to us by spaarke-auth-system-of-record-r1. `/api/office/communications/*` turns an OBO 401/403 into a 500 "Lookup Failed". `OfficeNaaStrategy` can open a popup with no user gesture and picks `accounts[0]`; both are still present on master 9211656b6e (`OfficeNaaStrategy.ts:436`, `CommunicationsEndpoints.cs:222`). | **Possibly, the NFR sign-in reliability.** Never logged here until today. |
+| ISS-030 | [#1504](https://github.com/spaarke-dev/spaarke/issues/1504) | "Server tests (office scope)" runs into its 20-min cap and is cancelled on master and on every PR, so the office server suite gives no signal. The job's own comment says to narrow the filter. | No (CI) |
+| D-043-1 | [#1039](https://github.com/spaarke-dev/spaarke/issues/1039) | The `deploy-office-addins.yml` path filter misses `provenance.ts`. A change there alone does not redeploy the add-in. One line. | No |
+| D-043-2 | [#1040](https://github.com/spaarke-dev/spaarke/issues/1040) | jest maps CSS to `identity-obj-proxy`, which is not a dependency, so a clean install fails CSS imports. One line. | No |
+| ISS-039 | [#3123](https://github.com/spaarke-dev/spaarke/issues/3123) | Found by task 090's drift check. `docs/architecture/office-outlook-teams-integration-architecture.md` still says a To Do is owned by its caller (it is owned by the team since task 080), still lists Invoice as a save target (refused since 096), and does not describe the Invoice or Email tabs. `src/client/office-addins/CLAUDE.md` says package 1.1.1 is installed; it is 1.1.4. Engineers routed there get wrong facts. | No (docs) |
+| ISS-031 | [#1505](https://github.com/spaarke-dev/spaarke/issues/1505) | The Office email save's Graph fallback sends an EWS-format item id without `convertToRestId`, so the fallback fetch fails. Found by task 121; pre-existing. | No (a fallback; the pane sends the body, task 116) |
+
+### Open, filed by this project, owned elsewhere (tracked there)
+
+| ID | Issue | Owner | What fails |
+|---|---|---|---|
+| ISS-007 | [#1034](https://github.com/spaarke-dev/spaarke/issues/1034) | Communication, Compose, Finance, Events and Playbook owners | About 20 writers outside Office do not apply I-6 (the owner is the BU default team). |
+| ISS-008 | [#1035](https://github.com/spaarke-dev/spaarke/issues/1035) | Work-assignment owner | Writes two non-existent columns |
+| ISS-009 | [#1036](https://github.com/spaarke-dev/spaarke/issues/1036) | Playbook owner | Create and clone set no owner, so ownership checks fail. |
+| ISS-012 | [#1044](https://github.com/spaarke-dev/spaarke/issues/1044) | UAC-r2 (the briefing half); our writer half is done (task 083) | Team-owned To Dos drop out of the Daily Briefing. |
+| ISS-015 | [#1079](https://github.com/spaarke-dev/spaarke/issues/1079) | The other owners named there; our half is done (085) | Three non-Office sites write `sprk_invoicename`. |
+| ISS-019 | [#1088](https://github.com/spaarke-dev/spaarke/issues/1088) | email-communication-intelligence-r2 | A seam test is flaky under load. |
+| ISS-020 | [#1089](https://github.com/spaarke-dev/spaarke/issues/1089) | Owners of six sdap-jobs handlers | A crashed job is dropped. |
+| D-063-1 | [#1041](https://github.com/spaarke-dev/spaarke/issues/1041) | UAC-r2 (taken over by #1102) | The RAG index routes authorize no document. |
+| D-063-2 | [#1042](https://github.com/spaarke-dev/spaarke/issues/1042) | Main session, `.claude/constraints/auth.md` | The doc misstates `RetrievePrincipalAccess` call sites. |
+| ISS-032 | [#1468](https://github.com/spaarke-dev/spaarke/issues/1468), [#1469](https://github.com/spaarke-dev/spaarke/issues/1469), [#1470](https://github.com/spaarke-dev/spaarke/issues/1470) | PCF owners (task 124 found them) | Deployed PCFs have no source; the orphan gate missed live bindings; `sprk_MsalClientId` defaults to the BFF app id. |
+| ISS-033 | [#1464](https://github.com/spaarke-dev/spaarke/issues/1464), [#1471](https://github.com/spaarke-dev/spaarke/issues/1471), [#1477](https://github.com/spaarke-dev/spaarke/issues/1477) | spaarke-auth / SPA owners (tasks 122–123) | Graph mail "as the user" fails for guests; the cached MSAL account is not matched to the Dataverse user; guest sign-in follow-ups. |
+| ISS-034 | [#1537](https://github.com/spaarke-dev/spaarke/issues/1537), [#1551](https://github.com/spaarke-dev/spaarke/issues/1551) | Code-page owners. #1537's PCF half was delivered by task 127; verify, then close. | Builds carry the dev App Insights key. |
+| ISS-035 | [#1591](https://github.com/spaarke-dev/spaarke/issues/1591), [#1540](https://github.com/spaarke-dev/spaarke/issues/1540), [#1832](https://github.com/spaarke-dev/spaarke/issues/1832), [#1476](https://github.com/spaarke-dev/spaarke/issues/1476) | Deploy-tooling / PCF owners | A failed import is reported as success; `pack.ps1` resolves the path against the caller's directory; `customcontrols.version` does not move; PCF toolchains pin vulnerable packages. |
+| ISS-036 | [#1016](https://github.com/spaarke-dev/spaarke/issues/1016) | Whoever retires `sdap-ci.yml` | A guard test would then run in no blocking job. |
+| ISS-037 | [#2172](https://github.com/spaarke-dev/spaarke/issues/2172) | Communication owner | AI task-candidate subjects derived from email text are logged. |
+| ISS-038 | [#2421](https://github.com/spaarke-dev/spaarke/issues/2421) | Communication owner | Suggestions ignore an existing filing when re-evaluating. |
+
+Not ours, and not filed by this project, though they mention it: #1564, #2178, #2226 (UAC-r2), #1102 and #1105 (UAC-r2 route sweeps).
+
+"Not filed (operator)" items ISS-001 and ISS-002 are unchanged: ISS-001 was routed to UAC-r2 out of band, and ISS-002 is resolved.
+
 ## Register — reconciled 2026-10-02 by task 079
 
 The surface task 090's escalation trigger 2 runs against (*"deferred entries that describe unfinished spec

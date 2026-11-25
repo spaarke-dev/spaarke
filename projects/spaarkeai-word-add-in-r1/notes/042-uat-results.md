@@ -7,6 +7,23 @@
 >
 > **Both deploys are complete and verified. The UAT half is NOT complete** — it requires a live Office host,
 > which no agent has. This task is therefore **🔄, not ✅**. §7 is the operator hand-off.
+>
+> **✅ CLOSED 2026-11-24: the owner ran the final UAT list on the live build and reported "042 passes".** See §0.
+
+## 0. Final owner UAT — 2026-11-24 (live dev build)
+
+The add-in on dev came from master at the time (package 1.1.4, deploy run for 089796eef5, 2026-11-25T01:07Z). The BFF was `spaarke-bff-dev` 996928732e. The owner ran the six-item final list handed out on 2026-11-23 and reported all of it passing.
+
+| Final-list item | Spec criterion | Result |
+|---|---|---|
+| Word desktop: a Spaarke document opens as "in Spaarke" with its matter | SC-1 (manual half) | **PASS** |
+| Save a new Word document, download it, reopen it from disk: the pane recognises it | SC-3 | **PASS** |
+| Profile fields show; Generate Profile completes | SC-7 (manual half) | **PASS** |
+| Find as Test User 1 is permission-trimmed | SC-9 (deployed-build half) | **PASS** |
+| Word and Outlook desktop parity: Save, Find, To Do, Open in Spaarke | SC-11 | **PASS** (the remaining host-specific rows were already owner-checked in UAT rounds 1–12 and tasks 133/134) |
+| "Save as new version" on a name clash lands on the right document | SC-6 live re-check of #1005 | **PASS** |
+
+**Final tally: 12 PASS · 1 FAIL.** The one FAIL is SC-12: no CI job typechecks `office-addins`. It is filed as [#996](https://github.com/spaarke-dev/spaarke/issues/996) / ISS-004 and is still open. Production code is at 0 type errors, and the test-file errors are at the accepted 68 baseline. The fix needs a CI workflow change, which wrap-up 090 must not make, so it stays a filed follow-up. Everything below is the historical record.
 
 ---
 
