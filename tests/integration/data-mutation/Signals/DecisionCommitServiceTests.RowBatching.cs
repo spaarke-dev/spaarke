@@ -1,9 +1,11 @@
+using System.Diagnostics.Metrics;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Telemetry;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
@@ -120,17 +122,105 @@ public sealed partial class DecisionCommitServiceTests
         var result = await rig.CommitAsync(PathBReview(also: RowAlso(18)));
 
         result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
-        // The outcome origin/master gives a row that changes again after its re-read (the second mismatch is reported as a failed close).
-        // DI-167 (#3028): CloseSignalAsync's own signal_changed outcome for this case is unreachable; this pins today's behaviour.
-        result.Signals.Single(s => s.SignalId == busy).Should().Be(new DecisionCommitSignal(busy, "Unchanged", "signal_close_failed"));
+        // A row that changes again after its re-read gets the declared signal_changed outcome (DI-167, #3028), not a failed close.
+        result.Signals.Single(s => s.SignalId == busy).Should().Be(new DecisionCommitSignal(busy, "Unchanged", "signal_changed"));
         result.Signals.Where(s => s.SignalId != busy).Should().HaveCount(17).And.OnlyContain(s => s.State == "Acted" && s.Warning == null);
-        result.Warnings.Should().Equal(["signal_close_failed"]);
+        result.Warnings.Should().Equal(["signal_changed"]);
         rig.Status(busy).Should().Be(Open);
         foreach (var id in RowAlso(18).Where(id => id != busy).Prepend(Primary))
         {
             rig.Status(id).Should().Be(Resolved);
             rig.LinkedRecord(id).Should().Be(RecordId);
         }
+    }
+
+    private static readonly AsyncLocal<Guid> CloseMetricScope = new();
+
+    /// <summary>The reasons metered on <c>ontology.writer.failures</c> by commits running in this test's async scope.</summary>
+    private static (MeterListener Listener, List<string?> Reasons) ListenCloseFailures(Guid scope)
+    {
+        CloseMetricScope.Value = scope;
+        var reasons = new List<string?>();
+        var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, l) =>
+            {
+                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == "ontology.writer.failures")
+                    l.EnableMeasurementEvents(instrument);
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            if (CloseMetricScope.Value != scope) return;
+            foreach (var tag in tags)
+                if (tag.Key == "reason") lock (reasons) reasons.Add(tag.Value as string);
+        });
+        listener.Start();
+        return (listener, reasons);
+    }
+
+    [Fact]
+    [Trait("status", "new")]
+    public async Task T208_AnItemThatChangesTwiceWhileItIsClosed_ReportsSignalChanged_AndIsNotCountedAsAWriterFailure()
+    {
+        var rig = new Rig();
+        rig.BeforeSignalUpdate = id => rig.Versions[id]++; // changed again between every read and its update
+        var (listener, reasons) = ListenCloseFailures(Guid.NewGuid());
+        using var _ = listener;
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Signals.Single().Should().Be(new DecisionCommitSignal(Primary, "Unchanged", "signal_changed"));
+        result.Warnings.Should().Equal(["signal_changed"]);
+        rig.Status(Primary).Should().Be(Open);
+        rig.SignalUpdates.Should().BeEmpty("the item was left as it is");
+        reasons.Should().NotContain("decision_commit_signal_close_failed", "an expected race is not a writer failure");
+    }
+
+    [Fact]
+    [Trait("status", "new")]
+    public async Task T208_OneMismatchThenSuccess_StillClosesTheItem_AndMetersNothing()
+    {
+        var rig = new Rig();
+        rig.BeforeSignalUpdate = id =>
+        {
+            rig.BeforeSignalUpdate = null;
+            rig.Versions[id]++; // changed once only
+        };
+        var (listener, reasons) = ListenCloseFailures(Guid.NewGuid());
+        using var _ = listener;
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Signals.Single().Should().Be(new DecisionCommitSignal(Primary, "Acted", null));
+        rig.Status(Primary).Should().Be(Resolved);
+        reasons.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("status", "new")]
+    public async Task T208_AMismatchThenAnotherKindOfFailure_IsStillASignalCloseFailed_AndCounted()
+    {
+        var rig = new Rig();
+        var calls = 0;
+        rig.BeforeSignalUpdate = id =>
+        {
+            if (calls++ == 0)
+                rig.Versions[id]++; // attempt 0: a mismatch, so the item is read again
+            else
+                throw new TimeoutException("no answer"); // attempt 1: not a mismatch
+        };
+        var (listener, reasons) = ListenCloseFailures(Guid.NewGuid());
+        using var _ = listener;
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Signals.Single().Should().Be(new DecisionCommitSignal(Primary, "Unchanged", "signal_close_failed"));
+        rig.Status(Primary).Should().Be(Open);
+        reasons.Should().Equal(["decision_commit_signal_close_failed"]);
     }
 
     [Fact]
