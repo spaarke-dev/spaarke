@@ -40,3 +40,6 @@ Paths are relative to the package `src/`; lines are as of the pre-change file.
 ## Consumer type-check
 
 `tsc --noEmit` in `src/solutions/DailyBriefing` and `src/solutions/LegalWorkspace` was not run: neither has `node_modules`, and `@spaarke/ui-components` / `@spaarke/auth` have no built `dist` in this worktree. Every change is additive or loosening (new optional props, previously required callbacks made optional, one extra optional argument on two hooks), the consumers import only `DailyBriefingApp`, `utils` and `widgets`, and the package type-checks clean (`tsc --noEmit` with the package's test tsconfig, errors only in files outside the package). The main session should run the two consumer checks where dependencies are built.
+
+## Consumer type-check (task 010)
+`tsc --noEmit` for `src/solutions/DailyBriefing` and `src/solutions/LegalWorkspace` not run locally (no node_modules/dist in the worktrees); CI on the PR covers it. Change is additive/loosening only.
