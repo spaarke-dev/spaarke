@@ -98,6 +98,17 @@ public sealed partial class DecisionCapability : IDecisionCapability
     }
 
     /// <inheritdoc />
+    public async Task<SignalReadResult> GetWorkItemAsync(ClaimsPrincipal? user, Guid signalId, CancellationToken ct)
+    {
+        if (!HasSignedInCaller(user))
+        {
+            return UserContextRequiredReadResult;
+        }
+
+        return await _signalRead.ReadAsync(WorklistSet.Lanes, user, ct, extras: null, onlySignalId: signalId);
+    }
+
+    /// <inheritdoc />
     public async Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct)
     {
         if (!HasSignedInCaller(user))

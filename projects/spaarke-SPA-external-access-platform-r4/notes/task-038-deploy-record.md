@@ -127,3 +127,75 @@ Sent to uac-r2 to look for in the logs. **uac-r2 then confirmed (b) PASS.** Only
 - Sorting works only through a click on the header cell outside that button.
 - Present since datagrid-framework-r1 (`c1c428e92b`, 2026-06-05); not introduced by R4.
 - R4's jsdom tests click the header cell itself, so they pass.
+
+## Step 7: sort fix and SPA redeploy
+
+- Owner go "Yes fix here". The fix is PR #3113, squash-merged as `0267ee64a2` (32 checks passing).
+  - DataGrid holds the sort and always passes Fluent a controlled `sortState`.
+  - The column menu sorts only when the config enables sorting.
+  - HeaderCellContent stops Enter (key down) and Space (key up) on the menu trigger. This was found in review: opening the menu from the keyboard toggled the sort.
+  - Test: `DataGrid.headerMenuSort.test.tsx`, 5 tests.
+- Dev BFF in the meantime (uac-r2, owner go given in uac-r2's session): `ef0c566d2c` live since 04:42:34Z; **GATE PASS** at 05:13Z.
+  - 197 requests, none external.
+  - The only 5xx is the known catalog drift.
+- uac-r2 FYI: about 151 core records (matters and others) were deleted on dev around 04:50Z by someone outside this project, and the reconcile job revoked 650 grant rows. Some of the records used in Step 6 may be gone.
+- **SPA plan:**
+  - SHA `0267ee64a2` (master HEAD). Since `3067fb3bdc` it adds:
+    - #3113;
+    - #3071 (sdap-client folded into ui-components);
+    - #3086 (LookupField secondary text);
+    - small shared-lib wizard fixes.
+  - No BFF dependency. Rollback `3067fb3bdc`.
+  - Owner go: "Yes, deploy 0267ee64a2". HEAD re-checked unchanged before dispatch; uac-r2 told before and at dispatch.
+- Run 45552869227 (dev, ref master, head `0267ee64a2`) dispatched 05:20:17Z: **success**, done 05:43:01Z.
+- **Served build check:**
+  - `/` answers 200;
+  - `/assets/app.js` is 1,621,782 bytes, SHA-256 starts `AF0C295524F8EE0B`;
+  - the 031/032/034/035 markers are still present.
+- Live now: SPA `0267ee64a2`, BFF `ef0c566d2c`. Rollback: SPA `3067fb3bdc`.
+
+**Re-test (2026-11-25 ~05:45Z, owner's Chrome, same partner account):**
+
+| Check | Result | Evidence |
+|---|---|---|
+| Menu "Z to A" on a text column | Pass | Projects grid (7 rows): a click on the "Project Name" label opens the menu; Z to A gives `aria-sort` descending, names Z…A. |
+| Menu "A to Z" | Pass | Ascending; names A…Z. |
+| Enter on the column name | Pass | Opens the menu; sort stays ascending, row order unchanged. |
+| Menu sort persisted | Pass | Ascending restored after reload. |
+| Menu sort on a Money column (FR-20) | Pass | Invoices (8 rows, 10 at the Step 6 run; the dev deletions are the likely cause): A to Z gives ($0.03) < $77.25 < $234.80 < $306.00 < $7,763.31 < $7,920.00 < $18,463.59 < $28,784.99. Z to A is the reverse. |
+
+- Clean-up: Invoices left on Total Amount (Local) descending, as found. Projects "Clear all" applied, back to no sort, as found.
+- FR-19/FR-20 sort is now **Pass** through the column menu, not only through the edge of the header cell.
+
+## Step 8: View Only and FR-21 (2026-11-25 ~12:45–12:52Z, owner's Chrome, same partner account)
+
+Owner go: "run them and approved for view and test message". Before starting, the served build was re-checked: `/assets/app.js` was still 1,621,782 bytes, SHA-256 `AF0C295524F8EE0B…` (SPA `0267ee64a2`).
+
+**View Only.**
+- Setup: in Matter Management, the PRJ-000047 Tracking card's "Grant access" (Manage Access) gave CIAM Test User **View Only** at about 12:47Z. PRJ-000047 had no grants before; the partner could not see it.
+  - On the way there, Access ▸ "Update Access" was clicked by mistake. It reported "Access is up to date" and changed nothing.
+  - The built-in Share panel was also opened by mistake and closed without changes.
+- Rollback: Revoke in the same dialog. Done at about 12:48Z ("Revoked access for CIAM Test User"). The partner's project list was back to 7 rows, without PRJ-000047.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Record appears with the grant | Pass | Projects grid 8 rows, PRJ-000047 included. |
+| "Your access" | Pass | Header shows "View Only". |
+| No create actions | Pass | The record has only Refresh, Copy link, section toggles, column options, Download, Version history, Refresh messages and Open event. There is no Upload, New message, Add event, Submit invoice or Delete. |
+| Read-only lines | Pass | "You can view these documents. Uploading needs Collaborate access." / "You can read this thread. Posting needs Collaborate access." / "You can view these events. Adding one needs Collaborate access." |
+| Event at View Only | Pass | The event opens with Refresh and Copy link only; no Edit, Change status or Delete. |
+| Nothing offered is refused | Pass | 0 API responses ≥ 400 in the session. |
+
+**FR-21 "Show new messages".**
+- Tab A opened PRJ-000046 (Collaborate) at 12:49:21Z. Tab B, same partner, posted "Test message from the R4 E2E check (task 038, FR-21). Please ignore." at about 12:50:15Z (POST 201). The message stays in the thread.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Hidden tab makes no request | Pass | Tab A was hidden from +21 s to +66 s; no thread read in that time. |
+| Check on return after the interval | Pass | One read (200) right after the tab became visible at +66 s. |
+| Indicator | Pass | "New messages are available. Show new messages" under the thread. The new message was not inserted until asked. |
+| Show new messages | Pass | Re-read 200. The message shows as the 3rd in "3 messages in this conversation"; the notice cleared; focus stayed on the status region. |
+
+**Observation (told to the owner, not filed yet):** an older system email in PRJ-000046's thread shows its raw filing-reference footer to the external user.
+
+**Task 038 E2E: all checks pass.**

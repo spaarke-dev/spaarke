@@ -1,8 +1,7 @@
 /**
  * Jest config for DocumentUploadWizard code-page.
  *
- * Scope (minimal): unit-tests for pure-TS helpers like
- * `src/components/searchIndexResolver.ts` (FR-WIZ-06), and `*.test.tsx` for a step that is rendered
+ * Scope (minimal): unit-tests for pure-TS helpers like `src/services/uploadOrchestrator.ts`, and `*.test.tsx` for a step that is rendered
  * with `react-dom/server` (node environment, no DOM; `DocumentEmailStep.richText.test.tsx`, task 197).
  * Interactive DOM tests belong to the shared lib `@spaarke/ui-components` jest suite.
  *

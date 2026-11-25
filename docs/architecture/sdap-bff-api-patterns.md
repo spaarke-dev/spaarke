@@ -176,7 +176,6 @@ Authorization is enforced per-endpoint via `IEndpointFilter` implementations (AD
 | Consumed by | PCF Controls | REST endpoints (OBO auth) | Field-bound controls call BFF with `user_impersonation` scope |
 | Consumed by | React Code Pages | REST endpoints (OBO or MSAL ssoSilent) | Standalone dialogs call BFF for AI, documents, uploads |
 | Consumed by | Office Add-ins | REST endpoints (OBO auth) | Outlook/Word save and search |
-| Consumed by | M365 Copilot Agent | `/api/agent/*` endpoints | Bot framework gateway via AgentModule |
 | Consumed by | Power Pages Portal | `/api/v1/external/*` endpoints | Portal JWT auth (not Azure AD) |
 | ~~Consumed by~~ | ~~Dataverse Webhooks~~ | ~~`/api/v1/emails/webhook-trigger`~~ | **Retired** — `MapEmailEndpoints` removed (email-communication-solution-r4 task 007); inbound email is Graph-only via `IncomingCommunicationProcessor`. `scripts/Register-EmailWebhook.ps1` deleted 2026-09-25. A future generic Dataverse → BFF change signal (ADR-002 WP-5) is described in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §6 |
 | Depends on | Microsoft Graph | `GraphClientFactory` (OBO + app-only) | SPE file operations, email fetch |

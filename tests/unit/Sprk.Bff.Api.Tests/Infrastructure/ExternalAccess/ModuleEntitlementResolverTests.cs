@@ -232,6 +232,75 @@ public class ModuleEntitlementResolverTests
         resolver.MapReads.Should().Be(0, "the roles claim of a home principal is never read, so neither is the map");
     }
 
+    // R4 task 040 (FR-24, #2508): a WorkforceHome CONTACT that can read a record also gets the record tabs; the same home
+    // sign-in resolved as a licensed systemuser does not. The roles claim is still ignored either way.
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task ResolveAsync_WorkforceHomeContactWithAReadableMatter_GetsTheRecordTabs_SystemUserDoesNot(
+        bool systemUser, bool expected)
+    {
+        var resolver = new TestResolver(new[] { new AppRoleModuleMapping { AppRoleName = "AdminUser", ModuleCode = "admin" } });
+        var home = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("roles", "AdminUser") }, AuthSchemes.WorkforceHome));
+        var caller = WithReadableMatter(systemUser ? WorkforceSystemUser() : WorkforceContact());
+
+        var result = await resolver.ResolveAsync(caller, home);
+
+        result.Contains(ModuleEntitlementResolver.AssignedWorkModule).Should().Be(expected);
+        result.Should().NotContain("admin");
+        resolver.MapReads.Should().Be(0);
+    }
+
+    // R4 task 040: on the workforce plane the record-tab code comes only from the contact rule, never from a role-map row,
+    // so the map can neither give a licensed user the record tabs nor give them to a contact with no grants.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveAsync_WorkforceCaller_RoleMapRowNamingTheRecordTabs_IsIgnored(bool systemUser)
+    {
+        var map = new[] { new AppRoleModuleMapping { AppRoleName = "Staff", ModuleCode = "ASSIGNED-WORK" } };
+        var resolver = new TestResolver(map);
+
+        var result = await resolver.ResolveAsync(systemUser ? WorkforceSystemUser() : WorkforceContact(), UserWithRoles("Staff"));
+
+        result.Should().BeEquivalentTo(new[] { "legal-front-door", "policy-library" });
+        resolver.MapReads.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_GrantedWorkforceContactWithAppRoles_GetsTheRecordTabsOnceWithTheExtras()
+    {
+        var map = new[]
+        {
+            new AppRoleModuleMapping { AppRoleName = "AdminUser", ModuleCode = "admin" },
+            new AppRoleModuleMapping { AppRoleName = "AdminUser", ModuleCode = "assigned-work" },
+        };
+        var resolver = new TestResolver(map);
+
+        var result = await resolver.ResolveAsync(WithReadableMatter(WorkforceContact()), UserWithRoles("AdminUser"));
+
+        result.Should().BeEquivalentTo(new[] { "admin", "assigned-work", "legal-front-door", "policy-library" });
+        result.Should().OnlyHaveUniqueItems();
+    }
+
+    // A matter entry without Read (task 136: such entries are not readable) does not count as a grant.
+    [Fact]
+    public void IsGrantedWorkforceContact_OnlyAnEntryWithoutRead_IsFalse()
+    {
+        var contact = WorkforceContact();
+        var noRead = new CallerPrincipal
+        {
+            Plane = contact.Plane,
+            ContactId = contact.ContactId,
+            Email = contact.Email,
+            ProjectAccess = new[] { new CallerProjectAccess { ProjectId = Guid.NewGuid(), Rights = Spaarke.Dataverse.AccessRights.Write } },
+            MatterAccess = new Dictionary<Guid, Spaarke.Dataverse.AccessRights> { [Guid.NewGuid()] = Spaarke.Dataverse.AccessRights.None },
+        };
+
+        ModuleEntitlementResolver.IsGrantedWorkforceContact(noRead).Should().BeFalse();
+        ModuleEntitlementResolver.IsGrantedWorkforceContact(WithReadableMatter(contact)).Should().BeTrue();
+    }
+
     // (7) CIAM — assigned-work only with the switch off (today's behaviour), never reading the map.
     [Fact]
     public async Task ResolveAsync_Ciam_SwitchOff_AssignedWorkOnly_AndNeverReadsTheMap()
@@ -525,6 +594,17 @@ public class ModuleEntitlementResolverTests
         SystemUserId = null,
         Email = "staff@contoso.com",
         ProjectAccess = Array.Empty<CallerProjectAccess>(),
+    };
+
+    /// <summary><paramref name="caller"/> with Read on one matter (R4 task 040).</summary>
+    private static CallerPrincipal WithReadableMatter(CallerPrincipal caller) => new()
+    {
+        Plane = caller.Plane,
+        ContactId = caller.ContactId,
+        SystemUserId = caller.SystemUserId,
+        Email = caller.Email,
+        ProjectAccess = caller.ProjectAccess,
+        MatterAccess = new Dictionary<Guid, Spaarke.Dataverse.AccessRights> { [Guid.NewGuid()] = Spaarke.Dataverse.AccessRights.Read },
     };
 
     /// <summary>A projected sprk_servicerequest row; sprk_requestedby carries the SDK's EntityReference shape.</summary>

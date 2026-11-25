@@ -1,31 +1,35 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-25 ~01:45Z (task 038: deploys done, E2E mostly passed, fixing grid sort defect)
+> **Last Updated**: 2026-11-25 ~18:40Z (task 040 completed; PR being opened)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Active** | **Task 038** (P3 dev deploy + E2E), STANDARD rigor, prescriptive. Steps 0-5 done. Step 6 (E2E) mostly done. Record: `notes/task-038-deploy-record.md`. |
-| **Live on dev** | SPA `3067fb3bdc` (run 45506591396; owner go "Yes, deploy 3067fb3bdc"; rollback `9d08576e63`). BFF `3067fb3bdc` (uac-r2, live 00:09:50Z 2026-11-25, GATE PASS). |
-| **E2E results** | uac-r2's (a)-(c) all PASS; uac-r2 confirmed (b) after the 01:22Z probe; its missing App Insights rows are #2158. FR-18, FR-19 (widths, sort persisted, Clear all), FR-20 (money sort, export text), FR-22 threads, dark theme: PASS. **Not run:** View Only (the test account has no View Only grant), FR-21 "Show new messages" (needs a message posted from a second session; that sends a message, so it needs the owner's OK). |
-| **Owner go (2026-11-25)** | "Yes fix here": fix the grid sort defect before closing 038. |
-| **In progress** | Sort fix in shared DataGrid. A normal click on a column name opens the column menu (`HeaderCellContent` stops the click), and the menu's "A to Z"/"Z to A" were no-ops, so sort was reachable only from the header-cell edge. Pre-existing since `c1c428e92b` (2026-06-05). |
-| **Committed** | Sort fix `55801fbfbb` on the work branch: DataGrid holds the sort and always hands Fluent a controlled `sortState`; the menu sorts only when `enableSorting`; HeaderCellContent stops Enter (keydown) / Space (keyup) on the menu trigger (review finding: keyboard re-sorted). `__tests__/DataGrid.headerMenuSort.test.tsx` 5 tests. DataGrid folder 304/304, SPA grid tests 95/95, tsc clean in both. |
-| **Next action** | Merge origin/master, push, open the PR from the work branch (regression note); merge only on the owner's go. Then a SPA redeploy (owner go per SHA, uac-r2 told) and re-test the menu sort in Chrome (tab 1800355809 in the MCP group). Then close 038: TASK-INDEX ✅, POML completed, drift check, `task-038-notes.md`, defer View Only + FR-21 if the owner says so, portfolio sync (Tasks Completed → 31). |
-| **Other observations (tell the owner, not yet filed)** | Excel export follows the loaded order, not the on-screen sort. |
-| **ebilling-r1** | PR #3084 (SPA invoice-result links, `recordAccess.ts` export) waits on the owner's merge go; no conflict; ebilling will tell us when it merges. It ships only with a later SPA deploy. |
+| **Active** | None. Task 040 (FR-24, #2508) is ✅ completed: code, tests, reviews, notes (`notes/task-040-notes.md`), TASK-INDEX/POML, portfolio (32/46). |
+| **In flight** | Task 040's PR to master: merge only on the owner's go. Then the dev deploy for its ui-tests: BFF through uac-r2 (owner go on the exact merged SHA in uac-r2's session), SPA with the owner's go. |
+| **Next action** | After the PR: next 🔲 in `tasks/TASK-INDEX.md` through task-execute, when the owner says so. |
 
-## Owner questions open (older)
-- Track the residual export-hardening gaps privately (chat only, never in the repo)?
-- Should a docx preview be filed as an Idea?
-- Show "The client is reviewing this invoice." beyond the Information field?
-- Add a `useHostRowSource` row to `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval)?
+## Task 040 outcome (details in notes/task-040-notes.md)
+- Server: `ModuleEntitlementResolver.IsGrantedWorkforceContact` adds `assigned-work` for a workforce contact that can read ≥ 1 project, matter or WA. The code is stripped from role-map extras, so a systemuser never gets it. No new endpoint, field, DI or package.
+- SPA: the five record tabs share `RECORD_TAB_GATE` (ciam + workforce).
+- Review F1 (owner 2026-11-25: hide it for now): Submit invoice is hidden on the workforce plane (`callerMaySubmitInvoices` in `recordAccess.ts`, plane from `activePlaneOrNull()`). The question went to ebilling as D-41 #3159.
+- Known limits filed: D-39 #3153 (the ceiling maps one table to five tabs), D-40 #3154 (K3). K2 is unchanged.
+- uac-r2 review: no objection (quoted in the notes).
+
+## Live on dev
+SPA `0267ee64a2` (rollback `3067fb3bdc`); BFF `a1b7db1def` since 2026-11-25 15:58:53Z (rollback `ef0c566d2c`; uac-r2 deploys; owner go per SHA). Task 040 is not in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal.
+
+## Owner questions open
+- Track the raw filing-reference footer seen in an older PRJ-000046 system email? (Told to the owner; not filed. The repo is public.)
+- Track the residual export-hardening gaps privately?
+- Docx preview as an Idea?
+- "The client is reviewing this invoice." beyond the Information field?
+- `useHostRowSource` row in `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval)?
 
 ## Filed
-- D-24 #2939 … D-30 #2975; D-31 #3008; D-32 #3009; D-33 #3010 closed.
-- D-34 #3045 done (PR #3055); D-35 #3046 (unlabelled currency = USD); D-36 #3050 (MDA grids don't read OData label annotations).
+- D-24 #2939 … D-33 #3010; D-34 #3045 done; D-35 #3046; D-36 #3050; D-37 #3129; D-38 #3149; D-39 #3153; D-40 #3154; D-41 #3159.
 
-## Merge trap (seen 2026-11-22)
-When merging master after a squash of our own work, watch for a line that one task changed and a later task changed back: it looks unchanged from the merge base, so git takes master's text. For files where `origin/master` equals the pre-squash branch tip, restore `HEAD^1`'s copy.
+## Merge trap (seen 2026-11-22, again 2026-11-25)
+Master holds older squashes of this project's notes. On a master merge, keep the branch's copies of `projects/spaarke-SPA-external-access-platform-r4/**` (`git checkout --ours`).

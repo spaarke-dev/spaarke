@@ -42,10 +42,9 @@ import type { EntityConfigResolver } from "@spaarke/ui-components/services/docum
 // SdapApiClient is the shared upload client. On 2026-09-03 ui-components' own parallel SdapApiClient
 // was deleted in favour of @spaarke/sdap-client's; on 2026-11-24 (DEF-001) that package was folded
 // back into ui-components (services/sdap), so there is still exactly one, imported from the main barrel.
-import { cleanGuid, getXrm, SdapApiClient, type ConflictBehaviorOption } from "@spaarke/ui-components";
+import { cleanGuid, SdapApiClient, type ConflictBehaviorOption } from "@spaarke/ui-components";
 
 import { authenticatedFetch } from "@spaarke/auth";
-import { resolveSearchIndexNameForRecord } from "../components/AssociateToStep";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,6 +106,11 @@ export interface OrchestratorFileResult {
     success: boolean;
     /** Error message if any critical phase failed. */
     errorMessage?: string;
+    /**
+     * The server's non-fatal warnings on this file's document create (a mapping source it could not read, a mapped value
+     * it did not write). Present only when non-empty; the file still succeeded.
+     */
+    warnings?: string[];
     /** Set when the file stopped on a recoverable name collision — see OrchestratorFileProgress. */
     nameConflict?: { fileName: string };
 }
@@ -216,8 +220,16 @@ export async function orchestrateUpload(
 
     // UAC-r2 task 147 r1 (owner round 28 item 1): the document rows are created through the BFF (G5) — the server decides
     // their owner (the Secure Record Owners team when the parent is secure); nothing is created as the user.
+    //
+    // field-mapping-server-write-path-r1 (FR-16): the create sends only the user's values and the filing parent's bind.
+    // The server applies the field mapping, owner and I-1 stamp. The route infers a mapping source only for a matter or
+    // project create, so the parent the documents are filed under is NAMED as the mapping source (query parameters,
+    // nothing added to the body). An unfiled upload names none and maps nothing.
+    const parentEntity = config.parentContext.parentEntityName?.trim() ?? "";
+    const parentRecordId = cleanGuid(config.parentContext.parentRecordId ?? "");
+    const mappingSource = parentEntity && parentRecordId ? { entity: parentEntity, id: parentRecordId } : undefined;
     const documentRecordService = new DocumentRecordService({
-        dataverseClient: withBffChildCreates(config.dataverseClient, authenticatedFetch, config.bffBaseUrl),
+        dataverseClient: withBffChildCreates(config.dataverseClient, authenticatedFetch, config.bffBaseUrl, mappingSource),
         navMapClient,
         getEntityConfig: config.entityConfigResolver,
         // unified-access-control-r2 task 166 f1: the row is created WITHOUT its SPE pointer; the BFF attaches the
@@ -343,46 +355,13 @@ export async function orchestrateUpload(
             documentName: "", // Will fall back to file name per file in DocumentRecordService
         };
 
-        // FR-WIZ-07 (multi-container-multi-index-r1): resolve `sprk_searchindexname`
-        // via the 3-step chain (parent's value → parent-owning-BU's value → empty)
-        // and pass it through to DocumentRecordService so each Document gets the
-        // correct index identifier persisted at create time. Non-fatal: any error
-        // resolves to empty → BFF tenant-default chain applies server-side.
-        let resolvedSearchIndexName: string = "";
-        try {
-            // Resolver expects host-context Xrm.WebApi — this code runs inside a
-            // code-page hosted in Power Apps, so Xrm is available on window/parent/top.
-            // Shared cross-frame walker (task 081 / C-8).
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const xrm: any = getXrm();
-            if (xrm?.WebApi) {
-                resolvedSearchIndexName = await resolveSearchIndexNameForRecord(
-                    xrm.WebApi,
-                    config.parentContext.parentEntityName,
-                    config.parentContext.parentRecordId,
-                );
-                logger.info(
-                    "UploadOrchestrator",
-                    `Resolved sprk_searchindexname: ${resolvedSearchIndexName || "(empty — tenant default applies)"}`,
-                );
-            } else {
-                logger.warn(
-                    "UploadOrchestrator",
-                    "Xrm.WebApi unavailable — skipping sprk_searchindexname resolution; BFF tenant-default chain will apply",
-                );
-            }
-        } catch (err) {
-            logger.warn(
-                "UploadOrchestrator",
-                `sprk_searchindexname resolution failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
-            );
-        }
-
+        // No search index is resolved or sent here (field-mapping-server-write-path-r1, FR-16 / FR-40): the index
+        // follows the content type and the server owns it, so neither the record payload nor the index-file body
+        // carries one. The server also applies the field mapping, the owner and the I-1 stamp.
         const createResults = await documentRecordService.createDocuments(
             successfulUploads,
             config.parentContext,
             formData,
-            resolvedSearchIndexName || undefined,
         );
 
         // Map creation results back to fileResults. `createDocuments` creates sequentially and
@@ -406,6 +385,9 @@ export async function orchestrateUpload(
                 if (cr.success) {
                     fileResults[idx].success = true;
                     fileResults[idx].errorMessage = undefined;
+                    if (cr.warnings && cr.warnings.length > 0) {
+                        fileResults[idx].warnings = [...cr.warnings];
+                    }
                     onProgress?.({
                         fileName: sourceFileName,
                         phase: "creating-record",
@@ -450,7 +432,6 @@ export async function orchestrateUpload(
                 successfulRecords,
                 config,
                 logger,
-                resolvedSearchIndexName || undefined,
             ).then(() => {
                 // Update progress to "complete" for all successful files
                 emitForSuccessful("complete");
@@ -495,7 +476,6 @@ async function kickOffBackgroundTasks(
     successfulRecords: CreateResult[],
     config: UploadOrchestratorConfig,
     logger: ILogger,
-    searchIndexName?: string,
 ): Promise<void> {
     const tasks: Promise<void>[] = [];
 
@@ -539,7 +519,6 @@ async function kickOffBackgroundTasks(
                 config.parentContext,
                 config,
                 logger,
-                searchIndexName,
             ).catch((err) => {
                 logger.warn("UploadOrchestrator", `RAG indexing failed for ${record.fileName} (non-critical)`, err);
             }),
@@ -572,7 +551,6 @@ async function triggerRagIndexing(
     parentContext: UploadOrchestratorConfig["parentContext"],
     config: UploadOrchestratorConfig,
     logger: ILogger,
-    searchIndexName?: string,
 ): Promise<void> {
     // Map Dataverse logical name (e.g., "sprk_matter") to the short form the BFF stores
     // ("matter"). Mirrors the convention used by RagEndpoints.SendToIndex when building
@@ -603,7 +581,6 @@ async function triggerRagIndexing(
                     tenantId,
                     documentId,
                     parentEntity,
-                    searchIndexName,
                 }),
             },
         );
