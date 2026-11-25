@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-24 (checkpoint: #3073 merged at fa96792811; work synced with master; checklist Q re-run pending with the owner) running in agents; checklist Q re-run pending with the owner)
+> **Last Updated:** 2026-11-25 ~01:00Z (checkpoint: batch 3 merged into work and synced with master; master PR next)
 > Older detail: `notes/handoff-history/current-task-2026-11-24a.md` (the previous state, verbatim), plus `-2026-11-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,21 +10,13 @@
 
 ## Quick recovery
 
-- **NOW (2026-11-24 ~22:30Z): owner ran checklist Q; answering owner questions + issue batch 3 running.**
-  - **Q result:** accepted on MAT-000113. Invoice `5d9d271b-5f4e-c3b3-8543-981f2d947710`, "Morrison Foerster LLP - INV-123.1", tracking INV-123.1.1. It is In Review with 42 lines (41 Clean, 1 Flagged) and 1 approval portion. Coding JSON says Coded (UTBMS Litigation, FirmCodes). **053 can close.** Still TODO: mark the Q items, set 053 to ✅, and say that 079 is unblocked; 079 needs the owner's OK for its live steps.
-  - **Finding to investigate and file (not yet filed):** no BFF code writes the resolved-code lookups `sprk_taskcode`, `sprk_activitycode` and `sprk_expensecode` on `sprk_billingevent`; 0 lines on dev have them. The review reads the resolved code from the `coding` JSON in `sprk_extractionconfidence` (`InvoiceReviewReadService` ~275, ~846). `ApExportService.CodeAsync` (~1287) falls back to the as-billed text when the lookup is empty, so the AP export probably sends the firm's as-billed code, not the resolved one. Check the spec for FR-22, FR-30 and the AP export section, then fix or file.
-  - **Owner questions to answer:**
-    - (1) The "Invoice received" screen needs links to the invoice and to the related record. This is a new SPA feature (external SPA, result screen from iss048); propose a task, and copy spa-r4.
-    - (2) Where are the line items? The Invoice Review page.
-    - (3) Reject and flag checks: published billing rules with a Reject consequence (FR-26); dev has none until 079 step 10. Flags are findings on lines (1 Flagged here).
-    - (4) The Invoice Review page is blank because the web resource `sprk_invoicereviewpage` does NOT exist on dev (never deployed; that is task 112). The Console worklist (`openInvoiceReview.ts`) opens it. Option: deploy the page early, with the owner's go.
-  - **Batch 3 agents (base 72f2e54503):**
-    - iss049 (Sonnet): multipart handling on the chat, visualization and SPE admin routes;
-    - iss015 (Sonnet): client-lint for the 5 eBilling pages, plus the drift Pester in CI;
-    - iss025 (Opus): job retry back-off (also covers DEF-055 #2600).
-
-    Branches are `task/ebilling-iss049`, `-iss015` and `-iss025`. Next: review each (Sonnet for iss049/iss015, Opus for iss025), fix rounds, `--no-ff` merge, master PR.
-  - **Reconciled 095d-1 and 095d-2** as done (15398ea098). The 095d parent stays 🔄 because the 095d-3 UI is unverified (the Set firm UI exists in the Office add-in pane).
+- **NOW (2026-11-25 ~01:00Z): issue batch 3 is merged into work and synced with master (907fff43c6); preparing the master PR.**
+  - **Batch 3 on work:** iss049 7affeb4768 (#3057), iss025 6e9054434c (#2876, DEF-055 #2600; re-check PASS), iss015 dbbad24b09 (#2743, #2877), iss051 be99e31311 (#3080), iss052 45e2db2bb8 (#3082; uac-r2 PASS on the route, "include the route in the master PR's authorization note"). `.claude/constraints/jobs.md` updated (db3cee05b0). Master 3067fb3bdc merged in at 907fff43c6; BFF build 0/0.
+  - **Running now:** a combined filtered test pass over all batch-3 classes (background shell). Next: the publish-size delta (fresh worktrees `C:\wtb3m` = origin/master 3067fb3bdc and `C:\wtb3b` = 907fff43c6; canonical command, Compress-Archive Optimal, PDBs included, file counts equal; remove both with `& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path <paths>`), `dotnet list package --vulnerable` (no package changes), then the master PR (body: placement unchanged, authorization note naming GET /api/v1/external/invoice-submissions/{id}, publish size, closes #3057 #2876 #2600 #2743 #2877 #3080 #3082). Ask the owner for the merge go. Overlaps: #3071 (ci-standalone-checks.yml), #3060 (eslint-suppressions.json), both small.
+  - **After the PR merges:** iss051 backfill `-Apply` + re-index sweep need the owner's typed OK, and run only after a dev BFF carrying iss051 is live (checklist T). ISS-052 needs the next BFF + external SPA deploy (checklist U; copy spa-r4 on the SPA change).
+  - **Invoice Review page on dev** since 22:48Z (see below); owner check = checklist S. uac-r2 is preparing a dev BFF candidate from master 3067fb3bdc (has #3073), owner names the SHA there.
+  - **Open, not started:** 079 live steps (owner OK); the 095d parent stays 🔄 (095d-3 Set firm UI is in the Office add-in InvoiceView pane, unverified).
+  - **Agent worktrees to remove later** (Remove-WorktreeSafe, all pushed): agent-a38ba0b796285b0ce (iss049), agent-a81991fa0126f70aa (iss025), agent-ab8be5f18e499ec7d (iss015), agent-af1fc20670038b2c3 (iss051), agent-ad31105130a993f0c (iss052), plus the older locked three below.
 - **Dev BFF 20129e985c** live since 2026-11-24 21:36Z (uac-r2's deploy, owner's go). It carries #3038, #3051 and #3065 (ISS-029, -042, -043/035), but not #3073 (ISS-050). Read-only checks at about 21:45Z: `/healthz` 200; unauthenticated `POST .../invoice-review/confirm` and `.../lines/decisions` both 401. The ISS-029 and ISS-050 behaviour shows only in the Invoice Review page (task 112). The firm labels (ISS-042) show in the portal after the external SPA deploy (checklist O).
 - **Invoice Review page deployed to dev 2026-11-24 22:48Z** (owner go "Yes, deploy it" in this session; uac-r2 BEFORE/AFTER sent, its read-back matches): `sprk_invoicereviewpage` id d1f2a11a-59e8-f111-84ea-7ced8dda31f8, from master fa96792811, sha256 08b373e03de91a0738b0e2b3193b1b188f31484b4455d197899d409ccaae43ee. Default solution only: task 112 must still AddSolutionComponent (type 61, SpaarkeMaster). Owner checks it via checklist S.
 - **Master PR #3073 MERGED** 2026-11-24 21:32Z at fa96792811 (owner: "Yes, auto-merge"; required checks passed; the advisory Tier 2 api-office shard shows "fail" because its job was cancelled after its tests ran: verdict artifact = pass, 583/0). #3059, #2930, #3042 closed. Work fast-forwarded to master. Batch 2:
