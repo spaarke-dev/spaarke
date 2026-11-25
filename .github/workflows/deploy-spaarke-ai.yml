@@ -38,7 +38,6 @@ on:
       - 'src/client/shared/Spaarke.SmartTodo.Components/**'
       - 'src/client/shared/Spaarke.DailyBriefing.Components/**'
       - 'src/client/shared/Spaarke.Auth/**'
-      - 'src/client/shared/Spaarke.SdapClient/**'
       # Keep in step with the source roots in src/solutions/SpaarkeAi/vite.config.ts:
       # a folder missing here means a merged fix to it never reaches the Console (ISS-006).
       - 'src/client/shared/Spaarke.Communication.Components/**'

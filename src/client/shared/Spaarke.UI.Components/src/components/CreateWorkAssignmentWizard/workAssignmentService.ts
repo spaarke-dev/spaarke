@@ -524,7 +524,7 @@ export class WorkAssignmentService {
           }
 
           // Trigger RAG indexing per file (canonical sync OBO path via
-          // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal.
+          // SdapApiClient.indexFile in services/sdap). Non-fatal.
           const indexingWarnings = await this._entityService.indexUploadedFiles(
             uploadResult.uploadedFiles,
             this._tenantId,

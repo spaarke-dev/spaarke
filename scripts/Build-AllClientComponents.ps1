@@ -93,8 +93,7 @@ Import-Module (Join-Path $PSScriptRoot "PcfBuildResult.psm1") -Force   # PCF bui
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
     @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep -> builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry -> fresh-master SpaarkeAi builds failed on the unbuilt lib).
-    @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
-    @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
+    @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth (SdapClient folded in 2026-11-24, DEF-001)
     # Events.Components and SmartTodo.Components MUST come AFTER UI.Components (moved 2026-10-04,
     # spaarke-ontology-platform-r1 task 094). Events.Components imports UI.Components SOURCE by relative
     # path (CalendarWorkspaceWidget -> ../Spaarke.UI.Components/src/...), so tsc needs UI.Components'

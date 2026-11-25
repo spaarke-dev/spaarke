@@ -16,7 +16,8 @@
  * passing. It provides a no-op `NotificationsClient` whose `registerHandler` returns
  * an unregister function (the one surface the ConversationPane wiring calls).
  *
- * Mirrors the existing `@spaarke/auth` / `@spaarke/sdap-client` jest-mock pattern.
+ * Mirrors the existing `@spaarke/auth` jest-mock pattern (and the `@spaarke/sdap-client` one, retired
+ * 2026-11-24 when that client moved into ui-components).
  *
  * @see jest.config.ts moduleNameMapper — wires this file to `@spaarke/notifications`
  */

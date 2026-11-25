@@ -16,12 +16,8 @@
  *   3. `module.rules[1]` — Tree-shaking marker for `@fluentui/react-icons` so
  *      the bundle doesn't pull in the ~6.8MB icon set.
  *
- *   4. `@spaarke/sdap-client$: false` — the shared lib's services barrel
- *      re-exports EntityCreationService (imports @spaarke/sdap-client); this
- *      PCF only consumes RichFilePreviewDialog (via its deep path) +
- *      @spaarke/auth. Stub the unused package so webpack tree-shakes the dead
- *      import path (same workaround as CommunicationConnections /
- *      RegardingResolver).
+ *   (A fourth item, a `@spaarke/sdap-client$: false` stub, was removed on
+ *   2026-11-24: that client moved into @spaarke/ui-components itself.)
  */
 const path = require('path');
 
@@ -36,7 +32,6 @@ module.exports = {
     alias: {
       'react/jsx-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
-      '@spaarke/sdap-client$': false,
     },
   },
   module: {

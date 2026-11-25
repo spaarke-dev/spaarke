@@ -59,7 +59,8 @@ public class SharedPackageCensusTests
         // ---- Sanctioned -----------------------------------------------------------------------
         new CensusEntry("@spaarke/ui-components", "Spaarke.UI.Components", PackageStatus.Sanctioned, "ADR-012",
             "The default home for reusable UI: UX components and abstracted-I/O services behind IDataService. "
-            + "Every other package must justify itself against extending this one."),
+            + "Every other package must justify itself against extending this one. Since 2026-11-24 it also "
+            + "holds the SDAP client (src/services/sdap) of the retired @spaarke/sdap-client."),
         new CensusEntry("@spaarke/visuals", "Spaarke.Visuals", PackageStatus.Sanctioned, "ADR-012",
             "Presentational data-viz with no I/O. Quarantines @fluentui/react-charting and pins @types/react@18 "
             + "so PCF and Code Pages can both use it without casts (2026-07-12 amendment)."),
@@ -92,9 +93,8 @@ public class SharedPackageCensusTests
             + "(2026-11-24 amendment; quarantine and entity-map scans below)."),
 
         // ---- Grandfathered — under review (baseline 2026-11-10; may shrink, never grow) ----------
-        new CensusEntry("@spaarke/sdap-client", "Spaarke.SdapClient", PackageStatus.Grandfathered, "ADR-012",
-            "SDAP API client used by 18 PCF controls and TS apps. Pre-dates the census; whether it overlaps "
-            + "the BFF adapters in @spaarke/ui-components has not been assessed."),
+        // None left since 2026-11-24. The baseline is empty; it stays empty.
+        // @spaarke/sdap-client: retired 2026-11-24; the client moved to @spaarke/ui-components (src/services/sdap).
         // smart-todo, communication and daily-briefing components: sanctioned 2026-11-18 (Pattern D amendment).
         // compose-components: sanctioned 2026-11-24 (Compose amendment).
         // @spaarke/document-operations: retired 2026-11-13; useDocumentActions moved to @spaarke/ui-components (src/hooks).

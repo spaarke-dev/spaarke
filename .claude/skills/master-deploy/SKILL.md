@@ -103,13 +103,12 @@ Master is the only deploy source, but sessions do deploy branch builds while the
 Order matters (each later one consumes earlier ones via path-mapped dist):
 
 1. `src/client/shared/Spaarke.Auth` — `npm install --legacy-peer-deps --no-audit --no-fund && npm run build`
-2. `src/client/shared/Spaarke.SdapClient` — same. **Important**: this lib's `tsconfig.json` must have `declarationMap: false` and `sourceMap: false` (see Failure Mode F-1). The current source-tree version has this set correctly.
-3. `src/client/shared/Spaarke.UI.Components` — same. Path map for `@spaarke/sdap-client` must point to `dist/index.d.ts` not `src/index.ts` (Failure Mode F-1).
-4. `src/client/shared/Spaarke.AI.Widgets` — same. tsc may report 70+ TS2307 errors in shared-lib path resolution; these are advisory and the emitted dist is still usable.
-5. `src/client/shared/Spaarke.Events.Components` — same. Build script is `tsc --noEmit`; the lib is consumed via Vite source aliasing.
-6. `src/client/shared/Spaarke.SmartTodo.Components` — same. Build script is `tsc --noEmit`; consumed via source aliasing.
+2. `src/client/shared/Spaarke.UI.Components` — same. (It includes the SDAP client, `src/services/sdap`, which was the separate `Spaarke.SdapClient` package built before it until 2026-11-24.)
+3. `src/client/shared/Spaarke.AI.Widgets` — same. tsc may report 70+ TS2307 errors in shared-lib path resolution; these are advisory and the emitted dist is still usable.
+4. `src/client/shared/Spaarke.Events.Components` — same. Build script is `tsc --noEmit`; the lib is consumed via Vite source aliasing.
+5. `src/client/shared/Spaarke.SmartTodo.Components` — same. Build script is `tsc --noEmit`; consumed via source aliasing.
 
-The list above is the core; on 2026-10-11 a clean worktree needed **all** `src/client/shared/*` libs (15 then; 11 since `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` were retired on 2026-11-13 and `@spaarke/ai-outputs` was folded into `@spaarke/ai-widgets` on 2026-11-24) installed and built before the solutions resolved (`@spaarke/ui-components` resolves to `dist/index.js`). Also build Notifications, Compose.Components, DailyBriefing.Components, Visuals, Communication.Components and SdapClient. `tsc` failures in AI.Widgets are peer-dependency resolution only (`react`/`@fluentui/*` not installed in the lib under `--legacy-peer-deps`); the emitted `dist` is usable.
+The list above is the core; on 2026-10-11 a clean worktree needed **all** `src/client/shared/*` libs (15 then; 10 since `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` were retired on 2026-11-13, `@spaarke/ai-outputs` was folded into `@spaarke/ai-widgets` and `@spaarke/sdap-client` into `@spaarke/ui-components` on 2026-11-24) installed and built before the solutions resolved (`@spaarke/ui-components` resolves to `dist/index.js`). Also build Notifications, Compose.Components, DailyBriefing.Components, Visuals and Communication.Components. `tsc` failures in AI.Widgets are peer-dependency resolution only (`react`/`@fluentui/*` not installed in the lib under `--legacy-peer-deps`); the emitted `dist` is usable.
 
 ## Step 2 — Build all Vite solutions
 
@@ -211,11 +210,11 @@ The user should hard-refresh **`spaarkedev1`** in Incognito to verify SpaarkeAi 
 
 ## Failure modes (encoded fixes — no user prompts)
 
-### F-1: Transitive `@spaarke/sdap-client` or `@spaarke/smart-todo-components` not resolved by vite
+### F-1: Transitive `@spaarke/smart-todo-components` not resolved by vite
 
-**Cause**: A solution's `package.json` declares `@spaarke/ui-components` but not its transitive deps. After PR #369 (multi-container, added `@spaarke/sdap-client` import to `EntityCreationService.ts`) and PR #377 (smart-todo-r4, added `@spaarke/smart-todo-components` import to LegalWorkspace's `todo.registration.ts`), every Vite solution needs both as DIRECT deps even though they're transitive in source.
+**Cause**: A solution's `package.json` declares `@spaarke/ui-components` but not its transitive deps. After PR #377 (smart-todo-r4, added `@spaarke/smart-todo-components` import to LegalWorkspace's `todo.registration.ts`), every Vite solution needs it as a DIRECT dep even though it is transitive in source. (`@spaarke/sdap-client` used to need the same treatment; since 2026-11-24 it is part of `@spaarke/ui-components`, so it is not a dependency at all.)
 
-**Fix**: Run `node scripts/master-deploy/fix-vite-transitive-deps.mjs` — it walks every `src/solutions/*/package.json` that has `@spaarke/ui-components`, adds both transitive deps if missing, sorts the dependencies map. Then `npm install --legacy-peer-deps --no-audit --no-fund` in any solution that was just touched. Commit + PR the package.json changes after the deploy succeeds (don't block the deploy on the PR).
+**Fix**: Run `node scripts/master-deploy/fix-vite-transitive-deps.mjs` — it walks every `src/solutions/*/package.json` that has `@spaarke/ui-components`, adds the transitive dep if missing, sorts the dependencies map. Then `npm install --legacy-peer-deps --no-audit --no-fund` in any solution that was just touched. Commit + PR the package.json changes after the deploy succeeds (don't block the deploy on the PR).
 
 ### F-2: `Build-AllClientComponents.ps1` reports all Vite solutions FAILED
 

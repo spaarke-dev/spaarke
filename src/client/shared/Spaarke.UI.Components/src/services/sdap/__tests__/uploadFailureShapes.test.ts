@@ -1,4 +1,9 @@
 /**
+ * @jest-environment node
+ *
+ * (Node, not this package's default jsdom: the suite builds real `Response` objects, which jsdom
+ * does not provide. It ran under node in the former `@spaarke/sdap-client` package.)
+ *
  * An injected `authenticatedFetch` has TWO shapes in production, and this package's failure
  * translation must produce IDENTICAL typed outcomes under both:
  *
@@ -110,10 +115,15 @@ describe.each([
     expect((error as SdapHttpError).message).toContain('Container could not be resolved');
   });
 
-  it('translates a delete failure the same way', async () => {
+  // Re-targeted 2026-11-24 (DEF-001): this drove `deleteFile`, which is deleted with its retired
+  // route. The invariant it guarded — a non-upload request translates failures through the same
+  // `requestOrThrow` — still applies, so it now drives `attachDocumentFile`, the surviving one.
+  it('translates a non-upload failure the same way', async () => {
     const client = clientWith(makeFetch(404, 'not found'));
 
-    const error = await client.deleteFile('drive-1', 'item-1').catch((e: unknown) => e);
+    const error = await client
+      .attachDocumentFile('doc-1', { id: 'item-1', driveId: 'drive-1' })
+      .catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(SdapHttpError);
     expect((error as SdapHttpError).status).toBe(404);
