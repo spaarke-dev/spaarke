@@ -20,7 +20,10 @@ import { Dismiss24Regular, DocumentFlowchart24Regular } from '@fluentui/react-ic
 import { DocumentGraph } from './DocumentGraph';
 import { ControlPanel, FilterSettings, DEFAULT_FILTER_SETTINGS } from './ControlPanel';
 import { NodeActionBar } from './NodeActionBar';
-import type { DocumentNode, DocumentEdge } from '../types/graph';
+import type {
+  DocumentGraphNode as DocumentNode,
+  DocumentGraphEdge as DocumentEdge,
+} from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
 
 /**
  * Props for RelationshipViewerModal component
@@ -163,7 +166,7 @@ const useStyles = makeStyles({
 });
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = '1.0.16';
+const CONTROL_VERSION = '1.0.39';
 
 /**
  * RelationshipViewerModal - Full-screen modal for document relationship visualization

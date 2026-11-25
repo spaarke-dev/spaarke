@@ -37,7 +37,7 @@ import {
   DocumentQuestionMark20Regular,
   Eye20Regular,
 } from '@fluentui/react-icons';
-import type { DocumentNode, DocumentNodeData } from '../types/graph';
+import type { DocumentGraphNode as DocumentNode, DocumentNodeData } from '@spaarke/ui-components';
 
 export interface GridRow {
   id: string;

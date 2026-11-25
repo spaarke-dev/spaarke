@@ -8,6 +8,15 @@ module.exports = {
         // Handle CSS modules and static assets
         '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
         '\\.(jpg|jpeg|png|gif|svg)$': '<rootDir>/__mocks__/fileMock.js',
+        // Deep shared-lib imports (`@spaarke/ui-components/dist/...`, #3093) resolve to compiled ESM that
+        // ts-jest skips under node_modules; map them onto the shared TS source instead (same fix as
+        // SemanticSearchControl/jest.config.js and RegardingResolver/jest.config.js).
+        '^@spaarke/ui-components/dist/(.*)$': '<rootDir>/../../shared/Spaarke.UI.Components/src/$1',
+        // The shared lib has its own React 19 node_modules; pin React to this PCF's React 16 so a
+        // shared source file does not load a second React instance (breaks hooks).
+        '^react$': '<rootDir>/node_modules/react',
+        '^react-dom$': '<rootDir>/node_modules/react-dom',
+        '^react/jsx-runtime$': '<rootDir>/node_modules/react/jsx-runtime',
     },
     setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
     transform: {
