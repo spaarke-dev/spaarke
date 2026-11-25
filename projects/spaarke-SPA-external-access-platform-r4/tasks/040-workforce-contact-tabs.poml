@@ -4,7 +4,7 @@
     <title>Workforce-contact tabs scoped by grants; none when no grants (FR-24, #2508)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 038 (P3 deploy)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx (and likely one BFF .cs) on an access-scoping path (tag authorization)</rigor-reason>
     <model-tier>opus</model-tier>
