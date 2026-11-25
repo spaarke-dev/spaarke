@@ -304,6 +304,28 @@ public static class SecureRecordSetupRejectionCodes
     /// </summary>
     public const string OntologyServiceRoleHumanOrTeamHolder = "secure_setup.ontology_service_role_human_or_team_holder";
 
+    /// <summary>
+    /// S29 (ebilling-r1 DEF-059): "Spaarke Decision Record Reader" is not exactly one role in the root unit and in the customer's
+    /// unit (Resumable). It ships in SpaarkeMaster 1.3.1.0: import SpaarkeMaster (H6), then resume.
+    /// </summary>
+    public const string DecisionRecordReaderRoleUnresolved = "secure_setup.decision_record_reader_role_unresolved";
+
+    /// <summary>
+    /// S29: the role in the root unit does not hold exactly <c>prvReadsprk_DecisionRecord</c> at Global (a privilege Dataverse
+    /// added, or the declared one missing or at another depth). Verified, never written: Resumable, remedy
+    /// <c>scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -Apply</c>.
+    /// </summary>
+    public const string DecisionRecordReaderRoleDrift = "secure_setup.decision_record_reader_role_drift";
+
+    /// <summary>
+    /// S29: a team, or a user that is not one of the BFF's two application users (a person or another application user), holds a
+    /// copy of the role (QuarantineRequired: nothing is removed here; who holds the role is an operator decision).
+    /// </summary>
+    public const string DecisionRecordReaderRoleForeignHolder = "secure_setup.decision_record_reader_role_foreign_holder";
+
+    /// <summary>S29: the re-read shows a BFF application user does not hold the role after the association (Resumable).</summary>
+    public const string DecisionRecordReaderRoleNotHeld = "secure_setup.decision_record_reader_role_not_held";
+
     /// <summary>S23: the re-read shows the runtime identity does not hold the role after the association (Resumable).</summary>
     public const string OntologyServiceRoleNotHeld = "secure_setup.ontology_service_role_not_held";
 

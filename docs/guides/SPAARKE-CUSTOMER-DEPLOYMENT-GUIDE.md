@@ -1771,7 +1771,11 @@ no error, an under-grant that looks like a correct answer.
 a SpaarkeMaster role rather than only through System Administrator. It is separate from `Spaarke Ontology Service` on
 purpose: that role also creates Decision Records and creates and writes Signals, and only the server writer identity may
 hold it, so "written by the server writer" stays true. Never assign the reader role to people, teams or the writer identity.
-H10 does not assign it yet; after H6 imports SpaarkeMaster run
+H10 does not assign it (H10 runs before H6, so the role does not exist yet on a new stamp): **H7b step S29** assigns it,
+after H6 imports SpaarkeMaster 1.3.1.0 or later. S29 gives each App User its own business unit's copy, verifies that the
+root role holds only that one read at Global, and refuses with a Resumable failure (naming the script below) if it holds
+more, or with QuarantineRequired if any other principal (a person, a team, another App User) holds the role; it never
+removes a privilege or a holder. For a stamp H7b has not reached, or to clear that drift, run
 `scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -EnvironmentUrl <stamp> -BffApplicationIds <bff-app-id>,<bff-uami-client-id> -Apply`,
 then the same with `-Verify` (exit 0 = both App Users hold it, the role holds only that read, and nobody else holds it).
 `-Apply` strips privileges Dataverse adds to the role outside its one declared privilege.
