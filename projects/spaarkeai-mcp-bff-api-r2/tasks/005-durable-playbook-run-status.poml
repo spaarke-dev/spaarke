@@ -4,7 +4,7 @@
     <title>Durable playbook run status in sprk_playbookrun / sprk_playbooknoderun</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>code startable; the dev Dataverse schema step needs the owner's explicit go</gate>
-    <status>blocked</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and dataverse; modifies PlaybookOrchestrationService (.cs) on the live run path and adds Dataverse columns</rigor-reason>
     <model-tier>opus</model-tier>

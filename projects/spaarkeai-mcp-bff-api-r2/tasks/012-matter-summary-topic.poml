@@ -4,7 +4,7 @@
     <title>Complete the matter-summary Insights topic (column, registry row, persister check)</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>scripts startable; the dev schema change and registry seed need the owner's explicit go</gate>
-    <status>blocked</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a Dataverse column and a configuration row consumed by the live persister; may touch WorkProductRecordPersister (.cs) if the data path does not write it</rigor-reason>
     <model-tier>sonnet</model-tier>
