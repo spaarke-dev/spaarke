@@ -24,12 +24,22 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
     /// </remarks>
     internal const int AuthFailureUnhealthyThreshold = 3;
 
+    /// <summary>
+    /// The logical delivery count at which a message whose processing threw (not a handler <c>Failure</c>) is dead-lettered as
+    /// <c>ProcessingError</c>.
+    /// </summary>
+    internal const int MaxUnexpectedErrorDeliveries = 3;
+
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ServiceBusJobProcessor> _logger;
+    private readonly TimeProvider _time;
     private readonly string _queueName;
     private readonly int _maxConcurrentCalls;
     private ServiceBusProcessor? _processor;
+
+    // ISS-025: the sender of scheduled retry copies to the processor's own queue.
+    private readonly JobMessageRetry.RetrySender _retrySender;
 
     // Auth-failure state, read by CheckHealthAsync on the health-check thread.
     private int _consecutiveAuthFailures;
@@ -39,15 +49,18 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
         ServiceBusClient serviceBusClient,
         IServiceProvider serviceProvider,
         ILogger<ServiceBusJobProcessor> logger,
-        IOptions<ServiceBusOptions> serviceBusOptions)
+        IOptions<ServiceBusOptions> serviceBusOptions,
+        TimeProvider? timeProvider = null)
     {
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _time = timeProvider ?? TimeProvider.System;
 
         var options = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
         _queueName = options.QueueName;
         _maxConcurrentCalls = options.MaxConcurrentCalls;
+        _retrySender = new JobMessageRetry.RetrySender(_serviceBusClient, _queueName);
 
         // Log the queue name at construction to help diagnose configuration issues
         _logger.LogInformation(
@@ -120,11 +133,26 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
                     _logger.LogWarning(ex, "Error disposing processor during shutdown");
                 }
             }
+
+            // After the processor has stopped, so no in-flight message is still scheduling a retry copy.
+            await _retrySender.DisposeAsync(_logger);
             _logger.LogInformation("Service Bus Job Processor stopped");
         }
     }
 
-    private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
+    /// <remarks>
+    /// <para><b>Retry with back-off (ISS-025 #2876, DEF-055 #2600).</b> A retryable failure is not abandoned (the broker would
+    /// redeliver it at once, spending every delivery within seconds, so an outage of a minute dead-lettered the job). The processor
+    /// schedules a COPY of the message on its own queue <see cref="JobContract.RetryDelay"/> later, carrying the logical delivery
+    /// count in <see cref="JobContract.PriorDeliveryCountProperty"/>, then completes the original
+    /// (<see cref="JobMessageRetry.RetryLaterAsync"/>, shared with <c>CommunicationJobProcessor</c>).
+    /// <see cref="JobContract.DeliveryCount"/> is that logical count, so <see cref="JobContract.IsFinalDelivery"/> and the dead-letter
+    /// rules below count every delivery of the job, not of the copy.</para>
+    /// <para><b>Settlement failures</b> (a complete or dead-letter that throws) are logged where they happen and never become a
+    /// retry copy (<see cref="JobMessageRetry.TrySettleAsync"/>); the broker redelivers the message when its lock lapses. A lost
+    /// message lock reaching the outer catch is not retried either.</para>
+    /// </remarks>
+    internal async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
         // Receiving a message at all proves the credential and its RBAC are working.
         Interlocked.Exchange(ref _consecutiveAuthFailures, 0);
@@ -132,6 +160,9 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
 
         using var scope = _serviceProvider.CreateScope();
         var startTime = DateTime.UtcNow;
+
+        // The logical delivery: what earlier copies of this job spent, plus this message's own broker deliveries.
+        var deliveryCount = JobMessageRetry.LogicalDeliveryCount(args.Message);
 
         try
         {
@@ -145,20 +176,17 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
             if (job == null)
             {
                 _logger.LogError("Failed to deserialize job from message {MessageId}", args.Message.MessageId);
-                await args.DeadLetterMessageAsync(args.Message,
-                    "InvalidFormat",
-                    "Failed to deserialize job contract from message body",
-                    args.CancellationToken);
+                await DeadLetterAsync(args, "InvalidFormat", "Failed to deserialize job contract from message body");
                 return;
             }
 
-            // The broker's delivery count reaches the handler, so a handler's "last chance" logic (the inbound email HOLD)
-            // sees the same dead-letter condition this processor applies below (task 146 r2).
-            job.DeliveryCount = args.Message.DeliveryCount;
+            // The logical delivery count reaches the handler, so a handler's "last chance" logic (the inbound email HOLD)
+            // sees the same dead-letter condition this processor applies below (task 146 r2; logical since ISS-025).
+            job.DeliveryCount = deliveryCount;
 
             _logger.LogInformation(
-                "Processing job {JobId} of type {JobType}, attempt {Attempt}/{MaxAttempts}, delivery count {DeliveryCount}",
-                job.JobId, job.JobType, job.Attempt, job.MaxAttempts, args.Message.DeliveryCount);
+                "Processing job {JobId} of type {JobType}, attempt {Attempt}/{MaxAttempts}, delivery count {DeliveryCount} (broker delivery {BrokerDeliveryCount})",
+                job.JobId, job.JobType, job.Attempt, job.MaxAttempts, deliveryCount, args.Message.DeliveryCount);
 
             // Find appropriate handler with detailed diagnostics
             List<IJobHandler> handlers;
@@ -184,10 +212,7 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
                     innerEx = innerEx.InnerException;
                 }
 
-                await args.DeadLetterMessageAsync(args.Message,
-                    "HandlerResolutionFailed",
-                    $"Failed to resolve job handlers: {ex.Message}",
-                    args.CancellationToken);
+                await DeadLetterAsync(args, "HandlerResolutionFailed", $"Failed to resolve job handlers: {ex.Message}");
                 return;
             }
 
@@ -200,10 +225,7 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
                     job.JobType,
                     string.Join(", ", handlers.Select(h => h.JobType)));
 
-                await args.DeadLetterMessageAsync(args.Message,
-                    "NoHandler",
-                    $"No handler registered for job type '{job.JobType}'",
-                    args.CancellationToken);
+                await DeadLetterAsync(args, "NoHandler", $"No handler registered for job type '{job.JobType}'");
                 return;
             }
 
@@ -213,39 +235,49 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
             // Handle outcome
             if (outcome.Status == JobStatus.Completed)
             {
-                await args.CompleteMessageAsync(args.Message, args.CancellationToken);
-                _logger.LogInformation(
-                    "Job {JobId} completed successfully in {Duration}ms",
-                    job.JobId, outcome.Duration.TotalMilliseconds);
+                if (await JobMessageRetry.TrySettleAsync(
+                        () => args.CompleteMessageAsync(args.Message, args.CancellationToken), "complete", args.Message, _logger))
+                {
+                    _logger.LogInformation(
+                        "Job {JobId} completed successfully in {Duration}ms",
+                        job.JobId, outcome.Duration.TotalMilliseconds);
+                }
             }
             else if (outcome.Status == JobStatus.Poisoned || job.IsFinalDelivery)
             {
                 // Dead-letter: poisoned, max attempts, or delivery count exceeded
-                await args.DeadLetterMessageAsync(args.Message,
-                    outcome.Status == JobStatus.Poisoned ? "Poisoned" : "MaxRetriesExceeded",
-                    outcome.ErrorMessage ?? "Job failed after maximum attempts",
-                    args.CancellationToken);
-
-                _logger.LogError(
-                    "Job {JobId} dead-lettered after {Attempts} attempts (delivery count: {DeliveryCount}): {Error}",
-                    job.JobId, job.Attempt, args.Message.DeliveryCount, outcome.ErrorMessage);
+                if (await DeadLetterAsync(args,
+                        outcome.Status == JobStatus.Poisoned ? "Poisoned" : "MaxRetriesExceeded",
+                        outcome.ErrorMessage ?? "Job failed after maximum attempts"))
+                {
+                    _logger.LogError(
+                        "Job {JobId} dead-lettered after {Attempts} attempts (delivery count: {DeliveryCount}): {Error}",
+                        job.JobId, job.Attempt, deliveryCount, outcome.ErrorMessage);
+                }
             }
             else
             {
-                // Retry - abandon message (will be redelivered)
-                await args.AbandonMessageAsync(args.Message, null, args.CancellationToken);
+                // Retry later: a scheduled copy, then complete this message (ISS-025).
                 _logger.LogWarning(
                     "Job {JobId} failed on attempt {Attempt}, will retry (delivery count: {DeliveryCount}): {Error}",
-                    job.JobId, job.Attempt, args.Message.DeliveryCount, outcome.ErrorMessage);
+                    job.JobId, job.Attempt, deliveryCount, outcome.ErrorMessage);
+                await JobMessageRetry.RetryLaterAsync(args, _retrySender, deliveryCount, _time, _logger);
             }
+        }
+        catch (Exception ex) when (JobMessageRetry.IsLockLost(ex))
+        {
+            // This receiver no longer holds the message: no settlement and no retry copy can follow. The broker redelivers it.
+            _logger.LogWarning(ex,
+                "Lost the lock on message {MessageId} (delivery count: {DeliveryCount}); the broker redelivers it",
+                args.Message.MessageId, deliveryCount);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error processing message {MessageId}: {Error}",
                 args.Message.MessageId, ex.Message);
 
-            // Dead-letter after 3 delivery attempts
-            if (args.Message.DeliveryCount >= 3)
+            // Dead-letter after 3 logical deliveries
+            if (deliveryCount >= MaxUnexpectedErrorDeliveries)
             {
                 await args.DeadLetterMessageAsync(args.Message,
                     "ProcessingError",
@@ -253,17 +285,22 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
                     args.CancellationToken);
 
                 _logger.LogError("Message {MessageId} dead-lettered after {DeliveryCount} delivery attempts",
-                    args.Message.MessageId, args.Message.DeliveryCount);
+                    args.Message.MessageId, deliveryCount);
             }
             else
             {
-                // Retry
-                await args.AbandonMessageAsync(args.Message, null, args.CancellationToken);
-                _logger.LogWarning("Message {MessageId} abandoned, will retry (delivery count: {DeliveryCount})",
-                    args.Message.MessageId, args.Message.DeliveryCount);
+                // Retry later, as for a handler Failure (ISS-025)
+                _logger.LogWarning("Message {MessageId} failed, will retry (delivery count: {DeliveryCount})",
+                    args.Message.MessageId, deliveryCount);
+                await JobMessageRetry.RetryLaterAsync(args, _retrySender, deliveryCount, _time, _logger);
             }
         }
     }
+
+    private Task<bool> DeadLetterAsync(ProcessMessageEventArgs args, string reason, string description) =>
+        JobMessageRetry.TrySettleAsync(
+            () => args.DeadLetterMessageAsync(args.Message, reason, description, args.CancellationToken),
+            $"dead-letter ({reason})", args.Message, _logger);
 
     private Task ProcessErrorAsync(ProcessErrorEventArgs args)
     {

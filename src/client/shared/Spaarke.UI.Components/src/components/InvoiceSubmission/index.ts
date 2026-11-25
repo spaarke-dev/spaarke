@@ -23,6 +23,8 @@ export {
   CORRECTION_UNAVAILABLE_ERROR_CODE,
   isEbillingDisabledError,
   isTerminalStatus,
+  invoiceSubmissionInvoiceIdOf,
+  invoiceSubmissionRecordOf,
 } from './types';
 export type {
   InvoiceCoreRecordKind,
@@ -36,6 +38,8 @@ export type {
   InvoiceSubmissionAccepted,
   InvoiceSubmissionStatusName,
   InvoiceSubmissionStatusView,
+  InvoiceSubmissionStatusCoreRecord,
+  InvoiceSubmissionRecordRef,
   InvoiceSubmissionWarning,
   InvoiceSubmissionCallbacks,
 } from './types';

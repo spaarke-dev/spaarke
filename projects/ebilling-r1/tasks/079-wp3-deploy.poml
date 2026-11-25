@@ -4,7 +4,7 @@
     <title>Deploy WP3 to dev: Procedure and Stored File schema, rule types, storage settings, solution sync, BFF and SPA via SPA-r3</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-G</phase>
     <gate>Every dependency done; the owner's OK before each live step (listed in the live-step constraint).</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment and smoke verification of already-reviewed tasks; edits only SpaarkeMaster source (additive) and the forms/views spec script; no new code.</rigor-reason>
     <model-tier>sonnet</model-tier>

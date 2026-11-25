@@ -176,6 +176,12 @@ detection enabled** (Standard/Premium; it cannot be switched on later without re
 the BFF queues (`service-bus.bicep`). The BFF still sets `MessageId = IdempotencyKey` on every enqueued message, so
 the de-duplication applies wherever it is enabled; receive-side idempotency (above) is the guarantee.
 
+**Retry copies depend on it staying off** (ebilling-r1 iss025): a retryable `Failure` is no longer abandoned. Both
+processors (`ServiceBusJobProcessor`, `CommunicationJobProcessor`) schedule a copy with the same `MessageId` and a
+`PriorDeliveryCount` property, back off 1, 2, 4, 8 min (capped at 15), then complete the original
+(`Services/Jobs/JobMessageRetry.cs`). Handlers read the **logical** attempt from `JobContract.DeliveryCount` /
+`IsFinalDelivery`, never the broker's count. Turning duplicate detection on would make the broker drop every retry copy.
+
 **SHA-256 hashing rule**: Service Bus limits `MessageId` to 128 characters. If the IdempotencyKey exceeds this, hash it:
 
 ```csharp

@@ -281,6 +281,24 @@ public sealed partial class InvoiceLineAddServiceTests
         extraction["resolutionChange"]!["after"]!["timekeeperReason"]!.GetValue<string>().Should().NotBeNullOrEmpty();
     }
 
+    [Fact(DisplayName = "ISS-051: an added line's typed codes set its code lookups to their rows in the invoice's set, as its coding JSON records; no code, no lookup")]
+    public async Task AnAddedLine_SetsItsCodeLookups()
+    {
+        var add = new AddLineWorld();
+        Guid RowOf(string code) => add.World.Codes.Single(c => c.GetAttributeValue<string>("sprk_code") == code).Id;
+
+        var result = await add.Service().AddAsync(Fee(), CancellationToken.None);
+
+        result.Status.Should().Be(AddLineStatus.Applied, result.Detail);
+        var row = add.World.Lines.Single(l => l.Id == ExpectedLineId());
+        row.GetAttributeValue<EntityReference>("sprk_taskcode").Should().BeEquivalentTo(new EntityReference("sprk_billingcode", RowOf("L110")));
+        row.GetAttributeValue<EntityReference>("sprk_activitycode").Should().BeEquivalentTo(new EntityReference("sprk_billingcode", RowOf("A101")));
+        row.Contains("sprk_expensecode").Should().BeFalse("a Fee line has no expense code");
+        var coding = JsonNode.Parse(row.GetAttributeValue<string>("sprk_extractionconfidence"))!["coding"]!;
+        coding["task"]!["codeId"]!.GetValue<string>().Should().Be(RowOf("L110").ToString("D"));
+        coding["expense"]!.AsObject().ContainsKey("codeId").Should().BeFalse();
+    }
+
     [Fact(DisplayName = "EB-D-198: a repeat of the same request answers alreadyApplied and writes nothing more")]
     public async Task ARepeat_IsAlreadyApplied_AndWritesNothingMore()
     {

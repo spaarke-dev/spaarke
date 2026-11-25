@@ -42,8 +42,8 @@ namespace Sprk.Bff.Api.Services.Jobs.Insights;
 ///   per-field Observations failed the D-P10 confidence + grounding gates).</item>
 ///   <item><b>Retry</b> → <see cref="JobOutcome.Failure"/>: transient failures
 ///   (HTTP 429 throttling, network timeouts, transient Azure Search availability).
-///   The <see cref="ServiceBusJobProcessor"/> abandons the message which Service Bus
-///   redelivers; on delivery count >= 5 it dead-letters.</item>
+///   The <see cref="ServiceBusJobProcessor"/> retries it with back-off (a copy scheduled
+///   <see cref="JobContract.RetryDelay"/> later); on logical delivery count >= 5 it dead-letters.</item>
 ///   <item><b>DeadLetter</b> → <see cref="JobOutcome.Poisoned"/>: unrecoverable
 ///   conditions (invalid payload, document not in <c>spaarke-files-index</c>, missing
 ///   MatterId, malformed configuration). Sent directly to DLQ without further retry.</item>
@@ -221,7 +221,7 @@ public sealed class InsightsIngestJobHandler : IJobHandler
         }
         catch (Exception ex) when (IsTransient(ex))
         {
-            // Transient failure → allow Service Bus to redeliver (counts toward DeliveryCount).
+            // Transient failure → the processor retries it with back-off (counts toward the logical DeliveryCount).
             stopwatch.Stop();
             _logger.LogWarning(
                 ex,

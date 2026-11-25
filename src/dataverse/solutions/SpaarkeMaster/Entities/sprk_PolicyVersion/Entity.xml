@@ -819,6 +819,45 @@
             <Description description="JSON: ordered multi-action plan (D-16/D-18/D-19)." languagecode="1033" />
           </Descriptions>
         </attribute>
+        <attribute PhysicalName="sprk_FirmDescription">
+          <Type>ntext</Type>
+          <Name>sprk_firmdescription</Name>
+          <LogicalName>sprk_firmdescription</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.2.3.1</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>textarea</Format>
+          <MaxLength>2000</MaxLength>
+          <displaynames>
+            <displayname description="Firm Description" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="The one sentence the firm reads when this rule flags an invoice line (130e-1). Copied onto the billing Signal it creates. At most 200 characters; no braces, markup or invisible characters; does not name the rule set or the rule. Fixed once the version is published." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_InForceFrom">
           <Type>datetime</Type>
           <Name>sprk_inforcefrom</Name>
@@ -1215,6 +1254,45 @@
           </displaynames>
           <Descriptions>
             <Description description="Draft or Published. Only Published policy versions are loaded by the resolver (model 7.2). Optional, no default: existing rows stay empty (dev data is recreated, O-13)." languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_RejectionReason">
+          <Type>ntext</Type>
+          <Name>sprk_rejectionreason</Name>
+          <LogicalName>sprk_rejectionreason</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.2.3.1</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>textarea</Format>
+          <MaxLength>2000</MaxLength>
+          <displaynames>
+            <displayname description="Rejection Reason" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="Why an admin rejected this drafted billing rule (1 to 2,000 characters). Written server-side only; admin-only, never shown to firms (D-113)." languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="sprk_RuleBody">

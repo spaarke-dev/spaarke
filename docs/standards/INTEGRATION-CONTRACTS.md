@@ -1,6 +1,6 @@
 # Integration Contracts
 
-> **Last Updated**: April 5, 2026
+> **Last Updated**: 2026-11-24 (ebilling-r1 ISS-025: job retry back-off)
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: New
@@ -175,8 +175,8 @@ Policy composition order (inner to outer): Timeout -> Retry -> Circuit Breaker.
 | Outcome | Action | Condition |
 |---------|--------|-----------|
 | **Completed** | `CompleteMessageAsync` | Handler returns `JobStatus.Completed` |
-| **Retry** | `AbandonMessageAsync` (redelivered) | Handler fails but `attempt < maxAttempts` and `deliveryCount < 5` |
-| **Dead-letter** | `DeadLetterMessageAsync` with reason code | `JobStatus.Poisoned`, `maxAttempts` reached, or `deliveryCount >= 5` |
+| **Retry** | Schedule a copy (`ScheduleMessageAsync`) `JobContract.RetryDelay` later (1, 2, 4, 8 min; 15 min in all) with application property `PriorDeliveryCount`, then `CompleteMessageAsync`; if the complete fails, peek the queue at the original's sequence number and cancel the copy (`CancelScheduledMessageAsync`) only if the original is still there (gone, or the peek fails: keep the copy); `AbandonMessageAsync` (immediate redelivery) only if the schedule fails. A failed complete or dead-letter of a settled outcome, or a lost lock, is logged and never retried. Same rules in `CommunicationJobProcessor` (shared `JobMessageRetry`) | Handler fails (or throws) but `attempt < maxAttempts` and logical `deliveryCount < 5` (`< 3` for a throw) |
+| **Dead-letter** | `DeadLetterMessageAsync` with reason code | `JobStatus.Poisoned`, `maxAttempts` reached, or logical `deliveryCount >= 5` (`PriorDeliveryCount` + broker delivery count) |
 
 Dead-letter reason codes: `InvalidFormat`, `NoHandler`, `HandlerResolutionFailed`, `MaxRetriesExceeded`, `Poisoned`, `ProcessingError`.
 
@@ -185,10 +185,11 @@ Dead-letter reason codes: `InvalidFormat`, `NoHandler`, `HandlerResolutionFailed
 | Setting | Value |
 |---------|-------|
 | **Receive mode** | PeekLock |
-| **Auto-complete** | false (explicit complete/abandon/dead-letter) |
+| **Auto-complete** | false (explicit complete/schedule-copy/abandon/dead-letter) |
 | **Max auto-lock renewal** | 10 minutes |
-| **Dead-letter threshold** | `deliveryCount >= 3` for unhandled exceptions; `deliveryCount >= 5` or `attempt >= maxAttempts` for handler failures |
-| **Duplicate detection** | Via `IdempotencyKey` as `MessageId` |
+| **Dead-letter threshold** | logical `deliveryCount >= 3` for unhandled exceptions; logical `deliveryCount >= 5` or `attempt >= maxAttempts` for handler failures |
+| **Retry back-off** | `JobContract.RetryDelay`: 1 min doubled per delivery, capped at 15 min; 15 min in all before the 5th delivery (ISS-025) |
+| **Duplicate detection** | OFF on the BFF queues (`service-bus.bicep`; create-time only). `MessageId` = `IdempotencyKey` is still set, but the broker does not de-duplicate on it: receive-side idempotency in each handler (per-job claim + completion marker, ADR-004 A1) is the guarantee. The retry copy reuses the `MessageId`, so it depends on duplicate detection staying off |
 
 ### Queues
 
