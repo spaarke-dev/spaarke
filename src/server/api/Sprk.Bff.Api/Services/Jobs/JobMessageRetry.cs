@@ -15,6 +15,9 @@ namespace Sprk.Bff.Api.Services.Jobs;
 /// <see cref="JobContract.DeliveryCount"/> holds and what the processors' dead-letter rules count.</para>
 /// <para><b>Retry later</b> (<see cref="RetryLaterAsync"/>): schedule the copy, then complete the original. See that method for what
 /// happens when either step fails.</para>
+/// <para><b>Precondition: duplicate detection is OFF on both queues.</b> The copy reuses the original's <c>MessageId</c>; with
+/// detection ON the broker would silently drop it after the original is completed, losing the job. Enforced by:
+/// <c>JobQueueDuplicateDetectionOffGuardTests</c> (<c>tests/Spaarke.ArchTests</c>), which scans the bicep queue resources.</para>
 /// </remarks>
 internal static class JobMessageRetry
 {
