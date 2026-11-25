@@ -28,7 +28,7 @@
 
 - mcp-r1: agreed R1 rationale; R8 already met by `spaarke_complete_decision`. S-1 approved by the owner (per mcp-r1, 2026-11-23): runs after 040, before C2 is deleted. Still waiting: 040 ship date, T10 + S-1 results (mcp-r1 sends both).
 - acclerator-r1: P1 Word probe upload/removal.
-- specialist-legal-agents-r1: G8 interim = Agent Builder agent cannot use C1 (2026-11-23). R1′ proposed (agent-private actions). Owner: G8-P2 waits until specialist finishes its current steps, then decide. Still to come: G8-p (P1) result, G8-a removal (latest 2026-11-30); D-A11.
+- specialist-legal-agents-r1 (2026-11-25): Phase 0 agent tests done. V2 passed for the owner and demo@. demo@ is identified by the owner's report and timing, not by logs: BFF requests are sampled at ~25% and no caller identity is logged. V1a (`?pkg=`) dropped, so no artifact. V3 (second tenant) deferred to provisioning D3, so no artifact. G11 optional, not planned. Still to come: the owner removes the five G8 artifacts (latest 2026-11-30) and the specialist confirms; D-A11; R4 rows before any G1/G5/G6 test agent.
 
 ## Standing directives
 
