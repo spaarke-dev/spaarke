@@ -105,7 +105,7 @@ describe('SendEmailPage — a failed send shows a descriptive dialog (no onError
     clickSend();
     const dialog = await screen.findByRole('alertdialog', { name: 'Email may not have been sent' });
     expect(dialog.textContent).toContain(
-      "Couldn't get a response from the Spaarke server. Check your network connection."
+      'The connection to the Spaarke server failed before it answered. Check your network connection.'
     );
     expect(dialog.textContent).not.toContain('Failed to fetch');
     expect(screen.getByDisplayValue(SUBJECT)).toBeInTheDocument();

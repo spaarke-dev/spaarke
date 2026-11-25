@@ -29,6 +29,7 @@ import type {
   IEmailTemplateRenderResult,
   IEmailAiDraftRequest,
   IEmailAiDraftResult,
+  IUploadedLocalAttachment,
 } from './EmailComposer.types';
 
 /**
@@ -76,8 +77,10 @@ export interface XrmEmailComposeHandlers {
    * `authenticatedFetch` + `bffBaseUrl` are supplied — omitted otherwise (local
    * picks stay display-only). Reuses the proven wizard upload path (single SPE
    * container per deployment, resolved from the current user's owning BU).
+   * The result's `discard` deletes that `sprk_document` row again (task 220): the composer calls it only for a
+   * document it uploaded that no email can reference.
    */
-  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  onUploadLocalAttachment?: (file: File) => Promise<IUploadedLocalAttachment>;
   /**
    * List OOB Dataverse `template` records for the compose template picker (Wave E). Xrm-only —
    * always present. The composer's template button also needs {@link onRenderEmailTemplate}
@@ -259,7 +262,7 @@ export function createXrmEmailComposeHandlers(options?: {
   const { authenticatedFetch, bffBaseUrl } = options ?? {};
   const onUploadLocalAttachment =
     authenticatedFetch && bffBaseUrl
-      ? async (file: File): Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }> => {
+      ? async (file: File): Promise<IUploadedLocalAttachment> => {
           const xrm = getXrm(['webApi', 'utility']);
           if (!xrm?.WebApi) throw new Error('Dataverse is unavailable — cannot upload the attachment.');
 
@@ -313,7 +316,17 @@ export function createXrmEmailComposeHandlers(options?: {
             throw attachErr;
           }
 
-          return { documentId, driveItemId: meta.id, linkUrl: meta.webUrl };
+          return {
+            documentId,
+            driveItemId: meta.id,
+            linkUrl: meta.webUrl,
+            // Task 220 (#2813): the same delete this handler already runs above when the attach step fails — the row this
+            // call just created, nothing else. Like that path it removes the Dataverse row, not the uploaded file.
+            // Dataverse still refuses it when a Restrict relationship names the document (e.g. a child document).
+            discard: async () => {
+              await xrm.WebApi.deleteRecord('sprk_document', documentId);
+            },
+          };
         }
       : undefined;
 
