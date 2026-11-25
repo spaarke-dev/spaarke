@@ -33,3 +33,13 @@ Recommendation:
 - The 043 criteria apply to `analysisService.ts` / `PlaybookLibraryShell`: show the 201 `warnings`, and keep that path on `/api/ai/analysis/create`.
 - Known limit: a Document -> Analysis profile is not applied to an analysis the widget creates. This is the same as today, since the widget maps only from the association parent.
 - Moving the widget onto `/api/ai/analysis/create` would need a BFF contract change for six fields. That is out of scope.
+
+**Owner decision (2026-11-25): as recommended.**
+
+## Execution
+
+- Master was merged into the work branch first: 83543888fe, `--no-verify`, a master merge. The BFF builds with 0 errors.
+- Open PRs: none touch `CommunicationService.cs`, the widget, `createXrmEmailComposeHandlers.ts`, `analysisService.ts`, `PlaybookLibraryShell.tsx` or `composeOnlySend.ts` (checked 2026-11-25).
+- The send path refuses an empty Subject or Body in `ValidateRequest`, in both the send-as-user and shared-mailbox branches. The fill step therefore runs in `SendAsync` before either branch.
+- Dev has no `* -> Analysis` and no `Analysis -> Communication` profile. The live check needs temporary profiles, as task 024 did; each needs the owner's go.
+- One implementer agent (Sonnet) works on `task/fm-028` from 83543888fe.
