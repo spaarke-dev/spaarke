@@ -116,14 +116,17 @@ internal sealed class StampWorld
     private readonly Dictionary<(string Entity, Guid Id), Exception> _writeFaults = new();
     private readonly Dictionary<string, Exception> _scanFaults = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <param name="seam">ISS-010 (#3184): wraps the world's Dataverse (a counting seam); none by default.</param>
     /// <param name="resolverLogger">
     /// The real <see cref="CoreAncestorResolver"/>'s logger (default: none) — GitHub #2049 asserts the level of its
     /// no-ancestor line when the job's scan resolves an intermediate with no root.
     /// </param>
-    public StampWorld(Microsoft.Extensions.Logging.ILogger<CoreAncestorResolver>? resolverLogger = null)
+    public StampWorld(
+        Microsoft.Extensions.Logging.ILogger<CoreAncestorResolver>? resolverLogger = null,
+        Func<IGenericEntityService, IGenericEntityService>? seam = null)
     {
         var service = new Mock<IGenericEntityService>();
-        Service = service.Object;
+        Service = seam?.Invoke(service.Object) ?? service.Object; // ISS-010: a counting seam, when given
 
         service.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string entity, Guid id, string[] columns, CancellationToken _) =>
