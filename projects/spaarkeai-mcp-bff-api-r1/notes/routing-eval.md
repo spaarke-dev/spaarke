@@ -43,9 +43,14 @@ Prompts 1–15 are **targets**: they should call the tool. Prompts 16–20 are *
 
 ## Result
 
-- Target hit rate: __ / 15 (prompts 1–8 without "Spaarke": __ / 8; prompts 9–15 with it: __ / 7)
-- Control false-call rate: __ / 5
-- Category correct, where an expected category is given (4, 6, 8, 12): __ / 4
+- Target hit rate: **15 / 15** (prompts 1–8 without "Spaarke": 8 / 8; prompts 9–15 with it: 7 / 7). Every target returned the Decide lane widget.
+- Control false-call rate: **0 / 5 confirmed, 1 unclear**. 16: answered with standard NDA risks, but the sources listed Power Platform and "MCP", so a Spaarke tool may have been read (not confirmed). 17: "insufficient permissions" plus general guidance (Outlook/draft side, not Spaarke). 18: correct answer, no tool. 19: answered from Outlook (Work IQ), not Spaarke. 20: explanation, no tool.
+- Category correct, where an expected category is given (4, 6, 8, 12): the owner reports the answer wording matched each (4 invoices; 6 "no items asking outside counsel"); which card the widget opened on was not recorded.
 - Privileged-marker check (FR-04, step 5): for any answer that called the tool, did the text show only "N privileged items — open to review" and no privileged detail? Record only yes or no; no screenshots of privileged content.
 
 Pass bar: the spec sets none beyond "the rate is recorded" (success criterion 4). Prompt 9 must call the tool; if it does not, escalate.
+
+## Run (owner, as the non-admin test user, 2026-11-25 ~21:00–21:40Z)
+
+- Results above, from the owner's report. Prompt 9 (the spec's own example) called the tool: pass.
+- Off-sheet miss: "what decisions do i have open in Spaarke" did NOT call the tool. Copilot answered from the Power Platform (Dataverse) knowledge source with the Decision Record views ("My Decision Records", "Active Decision Records"), read "open decisions" as open Decision Records, and said the Spaarke MCP tools it could see were "Phase 0 test tools". So the old spike plugin (C2) is still connected beside "Spaarke MCP" and the model saw its tools; that is the S-1 check and the spike removal.

@@ -57,3 +57,17 @@ Open: (1) non-billing seed for the test user; (2) whether the run was signed in 
 - Signed in as the licensed non-admin user, the owner ran `/spaarke-decision` in Cowork and the `spaarke-legal-g8p2-dd` agent in Chat; both work. Connect-once and non-admin access: pass.
 - FR-04 live spot-check: not testable on dev (owner 2026-11-25, `notes/decisions.md`); covered by the automated tests.
 - Still to check: resolving items (one per action type, with a because rationale), a Chat resolve, the routing eval, widget-frame console errors, the Console smoke afterwards, NFR-01 (after the deploy carrying #3146/#3152/#3161) and the runbook re-run.
+
+## Run 3: non-admin test user, 2026-11-25 ~21:00–21:40Z (owner report + App Insights)
+- **Cowork resolve (Create budget, Assign Task, Add To Do, Assign Work; "Targeted Protein Degradation Patent Application").** The first Confirm showed "The decision may not have been recorded"; Try again finished at once.
+  - Server: `spaarke_complete_decision` at 21:09:27Z took **26,924 ms**, outcome ok. The decision WAS recorded on the first attempt; the Copilot host gave up waiting before the answer came back (the widget sets no timeout of its own).
+  - Retry at 21:09:57Z: 697 ms, outcome ok, 13 reads and **0 writes**: the server-side replay (idempotency key) answered. One Decision Record, no duplicate writes or email. The safety path worked as designed.
+  - Where the 27 s went (one call): 113 SDK (Organization.svc) calls, 13.3 s; 51 caller-access calls on `systemusers(…)`, 5.1 s; ~40 uncached `EntityDefinitions` metadata reads, ~3.5 s; four writes (budget, event, to-do, work assignment); then in the same request a notification email (Key Vault, token, `sendMail`, sent-items read, SPE archive PUT, ~3 s) and two Azure OpenAI calls (~1 s).
+  - **NFR-01 complete target 15 s: missed (26.9 s), and close to the 30 s hard bound.** The 30 s bound is not safe while follow-ups run inside the request.
+- **Chat.** "what decisions do i have open in Spaarke" did not call the tool (see `routing-eval.md` "Off-sheet miss"): the old spike plugin is still connected and the model read "open decisions" as Decision Records.
+- **Routing eval:** 15 / 15 targets, controls 0 / 5 confirmed (16 unclear). `routing-eval.md`.
+- **Console smoke after the runs:** pass (owner).
+- **Owner UX feedback (widget row card and wizard; shared components, so the Console too):**
+  - The wizard's first step leads with a "What was found" heading; the finding itself ("Matter has no active budget") should lead, with no title-level "What was found" heading.
+  - The row card's first line should be the finding ("Matter has no budget"), the second line the record name and number.
+- **Timings seen (before the NFR-01 fixes reached dev):** show 3.1–6.5 s, page 1.5–3.3 s, plan 3.3–4.6 s, lookup 0.42–0.54 s, complete 26.9 s (n=1).
