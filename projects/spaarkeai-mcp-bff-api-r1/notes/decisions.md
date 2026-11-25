@@ -494,3 +494,18 @@ Everything below is in the widget unless it says "shared". Every shared change i
 - The Decision wizard's first step drops the title-level "What was found" heading; the finding ("Matter has no active budget") is the top line (`DecisionWizard/steps/FoundStep.tsx:124-127`).
 - The row card's first line is the finding; the second line is the record name and number (`Worklist/IssueLine.tsx`, `composeIssueLine.ts`; today the headline is the subject name).
 - Both are ontology-owned shared components (`Spaarke.UI.Components`), and the row layout is ontology's binding v4 (HANDOFF §1.2), so ontology-r1 agrees the change and reviews it. It reaches the Console, the Copilot widget and every other host of the components. mcp-r2 is told before the widget tests change.
+
+### ontology-r1's answers (2026-11-25)
+- **Email:**
+  - Agreed: a bell to the assigner when the system-mailbox job finally gives up, scoped with the ISS-010 email part after A+B. It links to the task or matter, names no internal mailbox, and goes once per decision, not once per retry.
+  - The fallback never emails anyone the Q1 gate refused, and the job stays idempotent.
+  - Task 043 fixes only the order (D-17). D-199 is the rule that applies: "the outcome records why no email was sent".
+  - Optional: an informational "being sent from the shared mailbox" note while the job is pending. A new warning code needs the owner.
+- **Heading:** mcp-r1 builds it on a branch from master; ontology reviews. **Hold the build until ontology's go (D-227, confirming with the owner).**
+  - Finding for a row: `ruleShortName`, then `title`, then the subject name. Never `sprk_sentence`.
+  - A Work Item has no number of its own. The name and number are on the core record in the MatterCard header (`WorklistCoreRecord`), so line 2 is `subjectName`. A per-item number needs a SignalReadService change plus a contract-baseline update; only if the owner asks.
+  - Do not change `composeIssueLine().headline`. Its consumers are DecisionItemWizard.tsx:549, ConfirmStep.tsx:375, FoundStep.tsx:233 and templatedDrafts.ts:47 (email text). Change the rendering, or add a field to IssueLineView.
+  - Wizard: drop the FoundStep h2. The finding becomes the top line, with the subject and record in the meta line. The stepper label stays.
+  - Tests: Worklist, DecisionWizard and `node scripts/quality/client-lint/client-lint.mjs check`.
+  - The PR lists the hosts needing their own deploys (LegalWorkspace, external SPA, Copilot widget).
+- **mcp-r2:** no collision. r2 task 021 (Phase 1) changes the widget's transport files and build configs only, and requires every spaarke-decisions test to pass unchanged. So tell r2 before the heading branch opens and when it merges; r2 holds 021 until then.
