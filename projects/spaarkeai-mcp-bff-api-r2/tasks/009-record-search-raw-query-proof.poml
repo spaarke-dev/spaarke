@@ -4,7 +4,7 @@
     <title>Record search: no query built from raw query text (proof)</title>
     <phase>0 Removal, prerequisites and seams</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and security; adds guard tests and fixes RecordSearchService (.cs) if the proof fails</rigor-reason>
     <model-tier>opus</model-tier>
@@ -97,7 +97,10 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-02, FR-15. Two adversarial-verifier passes (security). uac-r2 reviews.</notes>
+  <notes>Spec FR-02, FR-15. Two adversarial-verifier passes (security). uac-r2 reviews.
+
+Completed 2026-11-25. Proof verdict: clean. No OData or FetchXML is built from request.Query; it reaches only searchText (rrf, keywordOnly; "*" in vectorOnly) and the embedding input. Added tests/integration/regression/RecordSearch/RecordSearchQueryConstructionTests.cs (26 cases: 8 hostile queries x 3 modes with exact-filter equality, plus escaping of recordTypes in both branches, organizations, people, referenceNumbers). Seeding proof: query appended to the filter fails 26/26; no-op EscapeODataValue fails the 2 escaping tests; restored code passes. RecordSearchServiceTests (29), RecordSearchEndpointsTests (40) and RecordSearchRowAuthorizationContractTests (1) pass unchanged. No BFF change, so no publish-size delta. Out of scope (F2, to file): stale "records index has no tenantId" comments in IRecordSearchService.cs and RecordSearchService.cs. Verifier passes: 0 here, main session runs two. review pending: unified-access-control-r2. Detail: notes/009-decisions.md.
+rework: none task 009</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
