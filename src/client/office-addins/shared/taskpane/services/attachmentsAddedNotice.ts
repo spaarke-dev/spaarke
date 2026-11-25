@@ -45,6 +45,6 @@ export function describeAttachmentsNotStored(names: readonly string[] | undefine
   if (!names || names.length < 1) return null;
   const list = names.join(', ');
   return names.length === 1
-    ? `This attachment could not be added because it was not saved with the email: ${list}. Save the email again as a new copy to include it.`
-    : `These attachments could not be added because they were not saved with the email: ${list}. Save the email again as a new copy to include them.`;
+    ? `This attachment could not be added because it was not saved with the email: ${list}. To include it, choose "Save again as a new document", which saves a second copy of the email.`
+    : `These attachments could not be added because they were not saved with the email: ${list}. To include them, choose "Save again as a new document", which saves a second copy of the email.`;
 }

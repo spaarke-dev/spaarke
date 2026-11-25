@@ -262,7 +262,8 @@ public static class OfficeEndpoints
         // Task 055 found OfficeService had no authorization concern. Since task 138 (#2209) it has one, for ONE path: an email
         // re-save that would add attachments checks the caller's current "write" on the saved .eml before anything runs
         // (OfficeService.AuthorizeEmailAttachmentAddAsync), because that path is decided inside the save, after the
-        // idempotency lookup, where no route filter can see it. Every other check stays at the endpoint.
+        // idempotency lookup, where no route filter can see it — ADR-008 Amendment A1 (a resource only the service's own
+        // lookup identifies is checked where it is found). Every other check stays at the endpoint.
         AuthorizationService authorizationService,
         CancellationToken cancellationToken)
     {

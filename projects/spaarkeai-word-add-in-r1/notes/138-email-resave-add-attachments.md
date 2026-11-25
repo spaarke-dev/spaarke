@@ -206,9 +206,10 @@ only by `ProcessSingleAttachmentAsync`, whose create call is unchanged.
   when the selection is null or names a file with no child yet.
 - **G. A ticked attachment the stored `.eml` does not hold** (the first save left it out: unreadable or too big then). The
   answer lists those names in `attachmentsNotStored` (omitted when empty), on the add answer and on the duplicate one. The
-  pane says so in plain words ("These attachments could not be added because they were not saved with the email: B. Save
-  the email again as a new copy to include them."). Nothing is created for them from the request's bytes: the app creates
-  children only from the stored `.eml`.
+  pane says so in plain words ("These attachments could not be added because they were not saved with the email: B. To
+  include them, choose "Save again as a new document", which saves a second copy of the email."). That names the pane's
+  existing link (task 120's `handleSaveAsNewInstead`), not a new flow. Nothing is created for them from the request's
+  bytes: the app creates children only from the stored `.eml`.
 - **H1. Honest wording.** The save marks the job Completed when the finalization is queued, before the worker runs, so the
   pane never says "Added". It says "Adding N attachment(s) to the saved email. If they don't appear on the record in a few
   minutes, save the email again." A failed add leaves its names without children (and no processed mark), so the next
@@ -224,7 +225,17 @@ only by `ProcessSingleAttachmentAsync`, whose create call is unchanged.
 - **I. Fail-closed branches tested:** a faulting access decision, a changed container and an unreadable stored file each end
   in a refusal or the duplicate answer with nothing queued.
 
-## 7. Open with the owner
+## 7. ADR-008: resolved by Amendment A1 (owner, 2026-11-25)
 
-The service-level rights check on the existing `.eml` (`AuthorizeEmailAttachmentAddAsync`) exists, and how it is resolved
-under ADR-008 is pending the owner's decision. This note records no path.
+The service-level rights check on the existing `.eml` (`AuthorizeEmailAttachmentAddAsync`) is an ADR-008 Amendment A1 case
+(Path B, chosen by the owner and wording approved 2026-11-25; reviewed by uac-r2 and field-mapping-r1). The `.eml` is not
+named by the request: only the idempotency match inside the service identifies it. A filter could check it only by repeating
+that lookup, and two lookups can disagree. So the check runs where the lookup finds it:
+- as the caller;
+- before the planner's reads and before the add job's row;
+- on the exact id the add then uses;
+- failing closed;
+- through `AuthorizeDocumentsAsync`.
+
+Task 121's `ReconciledEmailFiling` is the other instance. Text: `docs/adr/ADR-008-authorization-endpoint-filters.md`
+§ Amendment A1.

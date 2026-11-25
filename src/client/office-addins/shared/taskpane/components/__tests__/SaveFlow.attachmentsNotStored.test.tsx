@@ -100,7 +100,7 @@ describe('SaveFlow — attachments the stored email does not hold (task 138)', (
     expect(await screen.findByText(/^Adding 1 attachment to the saved email\./)).toBeInTheDocument();
     expect(
       await screen.findByText(
-        'This attachment could not be added because it was not saved with the email: Exhibit B.pdf. Save the email again as a new copy to include it.'
+        'This attachment could not be added because it was not saved with the email: Exhibit B.pdf. To include it, choose "Save again as a new document", which saves a second copy of the email.'
       )
     ).toBeInTheDocument();
   });
