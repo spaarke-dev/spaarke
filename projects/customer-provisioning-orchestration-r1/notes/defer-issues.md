@@ -10,11 +10,75 @@
 
 ## Open (in priority order)
 
-### ISS-039 — New stamps get no product-configuration reference rows, while product code hard-codes dev event-type row ids
+### ISS-040 — EventsPage config names a "Communication" event type id that exists on no environment
 
 | Field | Value |
 |---|---|
 | **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | PR #3088 (ISS-039 D1+D2): the export of dev's `sprk_eventtype_ref` has no row with this id |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3089 |
+
+**Description**
+
+`src/solutions/EventsPage/src/config/eventConfig.ts` lists "Communication" with id `348f8195-99ff-f011-8406-7c1e525abd8b`.
+Dev has no such row; it has Email, Phone Call, Teams Message, Text Message and Postal Mail instead. On every environment
+that entry matches nothing, so it is dead configuration. PR #3088's ArchTest baselines the id.
+
+**Entry-points**
+
+- `src/solutions/EventsPage/src/config/eventConfig.ts` (search `348f8195`)
+- `tests/Spaarke.ArchTests/ReferenceRowIdLiteral.baseline.txt`
+
+**Suggested fix**
+
+Owner decision: retire the entry (and map the five communication types), or add the row on dev, re-export with
+`scripts/seed-data/reference/Export-ReferenceData.ps1`, and drop the baseline line.
+
+**Estimated effort**: 1–2 h after the decision
+**Blockers**: owner decision
+**Related**: ISS-039 #3075, PR #3088
+
+---
+
+### ISS-041 — 86 hard-coded dev row ids outside the seeded set are invisible to the reference-row guard
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-24 |
+| **Source** | PR #3088 (ISS-039 D1+D2): widening the guard's pattern from `-f011-8406-` to `-f011-`/`-f111-` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3090 |
+
+**Description**
+
+The guard added by PR #3088 sees only the `-f011-8406-` id shape. A wider pattern finds 86 distinct row-id literals in
+product code that no provisioning step seeds, e.g. the External Access SPA widgets' grid-configuration ids
+(`3af4102c-1092-f111-…`). On a stamp the feature reading each one finds no row.
+
+**Entry-points**
+
+- `git grep -nE "[0-9a-f]{8}-[0-9a-f]{4}-f[01]11-[0-9a-f]{4}-[0-9a-f]{12}" -- src/server src/solutions src/client`
+- `tests/Spaarke.ArchTests/ReferenceRowIdLiteralGuardTests.cs`
+
+**Suggested fix**
+
+Classify the ids by table: product configuration → seed file (ISS-039 pattern) or name/alternate-key lookup; solution
+components → allow-list; the rest are bugs. Then widen the pattern with a ratchet baseline.
+
+**Estimated effort**: 1–2 days
+**Blockers**: none
+**Related**: ISS-039 #3075, PR #3088, `notes/data-setup-plan.md`
+
+---
+
+### ISS-039 — New stamps get no product-configuration reference rows, while product code hard-codes dev event-type row ids
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress — PR #3088 (D1+D2: seed files, H12b seeder, ArchTest guard) open, in review 2026-11-24; ACME gets the rows only at the D7 live run. `KNW-011`/`KNW-012` knowledge-pack refs in `sprk_agreementtype` resolve only once L56 seeds knowledge |
 | **Urgency** | now (ACME, the demo stamp, has no event types; Events page, Daily Briefing and Portfolio depend on them) |
 | **Filed** | 2026-11-24 |
 | **Source** | Data-setup review 2026-11-24 (read-only row counts, spaarkedev1 vs spaarke-acme); plan `notes/data-setup-plan.md` |
