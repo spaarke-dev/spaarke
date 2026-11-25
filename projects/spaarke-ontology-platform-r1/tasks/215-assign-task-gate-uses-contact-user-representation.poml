@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="215" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Assign Task recipient gate uses the shared ContactUserRepresentation instead of its copied logic (#2457)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-relevant recipient decision (who is emailed); the swap must keep the D-199 differences and fail closed; uac-r2 owns the shared mechanism.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>AssignTaskRecipientGate.cs only (reads ContactUserRepresentation); no other wave task touches it.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, auth, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Continue with next tasks". Issue #2457 (read it in full: gh issue view 2457 --comments). `src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs` (task 168, PR #2418; task 207 added AdministrativeAccount) copies "which internal user represents this contact" from `Api/ExternalAccess/GrantAccessNotifier.cs` because uac-r2's shared `ContactUserRepresentation` was not on master. It now is: `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ContactUserRepresentation.cs`. uac-r2's guidance (in the issue): call `ContactUserRepresentation.ResolveAsync` with `BindingColumnMissingPolicy.DecideOnLink`; its per-user `ClassifyEligibility` takes `rootIsRestricted` directly, so read the Restricted flag once up front; keep the gate's two intended differences from the notifier (D-199): `SeveralUsers` refuses (no email), and eligibility is applied after the count.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF (Signals, ExternalAccess).</role>
+  <goal>The gate decides who represents the assignee contact through ContactUserRepresentation, with exactly the same email/no-email outcome and warning code as today for every input, and no copied representation logic remains in the gate.</goal>
+  <context>
+    <background>This is a reuse swap, not a behaviour change. Before editing: fetch master; read ContactUserRepresentation, GrantAccessNotifier (its caller) and the gate; list each branch of the gate's copied logic and the matching ContactUserRepresentation outcome in notes/task-215-notes.md; any input where they would disagree is an escalation, not a silent change. Task 207's AdministrativeAccount refinement and the rights-answer decider stay. uac-r2 owns ContactUserRepresentation: do not edit it; if it lacks something the gate needs, STOP and report. Run the gate and notifier tests unmodified first as the behaviour baseline.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+    <constraint source="ADR-028">Security fails closed; two independent review passes (auth tag).</constraint>
+    <constraint source="uac-r2 coordination">uac-r2 owns ContactUserRepresentation; their review before merge (project CLAUDE.md §4).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue and entry points; record findings in notes/task-215-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #2457"; notes in notes/task-215-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Every existing AssignTaskRecipientGate / AssignTaskNotifier test passes unmodified (the behaviour baseline), including task 207's Administrative cases.</criterion>
+    <criterion testable="true">The gate calls ContactUserRepresentation.ResolveAsync with DecideOnLink; the copied representation code is removed; SeveralUsers still refuses; eligibility still after the count; Restricted read once.</criterion>
+    <criterion testable="true">A table test over the representation outcomes (none, one active, one inactive, several, column missing, bound oid resolving elsewhere) gives the same warning codes as on origin/master.</criterion>
+    <criterion testable="true">Build, filtered tests (AssignTask, Signals, ExternalAccess) and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>Any input would change who is emailed or which warning is given, or ContactUserRepresentation needs a change: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt215); PR to master.</protocol>
+  </execution>
+</task>

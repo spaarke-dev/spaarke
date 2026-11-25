@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="213" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Arrival notifications read only columns the thread has, so they fan out and deep-link instead of falling back to private (#2775, DI-151)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One column list fix reusing an existing exclusion.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>CommunicationArrivedProducer.cs (plus the shared exclusion if hoisted); no other wave task touches it.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Continue with next tasks". Issue #2775 (gh issue view 2775) and DI-151 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationArrivedProducer.cs` `ThreadColumns` (~106) appends `RegardingFieldMap.AllRegardingFields`, which includes `sprk_regardingreportcard`; `sprk_communicationthread` has no such column, so the thread read (~182 `RetrieveAsync`) faults and every arrival notification is treated as private (under-fans, no deep link). `CommunicationThreadReadService.cs` (~51-56, `ThreadRegardingFields`) already excludes that column for the same reason. Search by name; origin/master.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF (Communication, Microsoft Graph SDK).</role>
+  <goal>The arrival producer reads only columns that exist on sprk_communicationthread, so a thread with a regarding record notifies its normal audience and deep-links to the regarding record; privacy behaviour for a genuinely private thread is unchanged.</goal>
+  <context>
+    <background>Reuse, do not fork: one definition of "the regarding lookups the thread has" used by both CommunicationThreadReadService and the producer (hoist it next to RegardingFieldMap or expose it from one of them). Pair the column list with the real schema (project testing rule): a test that the thread column list matches src/dataverse/solutions/SpaarkeMaster/Entities/sprk_CommunicationThread/Entity.xml (or the existing schema-agreement guard pattern), so a new regarding field on communication but not thread is caught. Read why a failed read means "private" and keep that fail-closed behaviour for a real read failure.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue and entry points; record findings in notes/task-213-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #2775"; notes in notes/task-213-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: the producer's thread read does not ask for sprk_regardingreportcard; a guard test ties the thread regarding columns to the SpaarkeMaster thread Entity.xml.</criterion>
+    <criterion testable="true">A thread with a regarding record yields the non-private fan-out and deep link; a real read failure still falls back to private (fail closed).</criterion>
+    <criterion testable="true">CommunicationThreadReadService behaviour unchanged; build, filtered tests (Communication) and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a schema change or changes who is notified for a private thread: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt213); PR to master.</protocol>
+  </execution>
+</task>

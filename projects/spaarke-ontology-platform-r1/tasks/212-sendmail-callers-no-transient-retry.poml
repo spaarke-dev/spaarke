@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="212" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The two remaining sendMail callers do not retry a send on 5xx/408, so a message Graph accepted is not delivered twice (#2779, DI-153)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copy of an existing pattern (NoTransientRetryOption) to two located call sites.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SendEmailNodeExecutor.cs and MailboxVerificationService.cs only; no other wave task touches them.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Continue with next tasks". Issue #2779 (read it in full with comments: gh issue view 2779 --comments) and DI-153 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. Task 191 (#2792, e5f5c9a6df) fixed the decision-wizard send path: `Services/Communication/Channels/EmailChannelSender.cs` passes a `NoTransientRetryOption` so the Graph handler retries a sendMail only on 429, and classifies a failure as NotSent or Unknown. Two sendMail callers still use the standard retry (5xx, 408, 429 in `Infrastructure/Http/GraphHttpMessageHandler.cs`) and can deliver a message up to four times: `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs` (~237, the playbook Send Email node) and `src/server/api/Sprk.Bff.Api/Services/Communication/MailboxVerificationService.cs` (~185, the mailbox verification email). Line numbers on origin/master; search by name.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF (Communication, Microsoft Graph SDK).</role>
+  <goal>Every sendMail call in the BFF opts out of transient retry exactly as EmailChannelSender does; a 5xx/408 on send is reported once as a failure (or unknown outcome) by each caller's existing error path, never silently retried.</goal>
+  <context>
+    <background>Copy EmailChannelSender's use of NoTransientRetryOption (and the ContainerOperations.cs pattern it came from). Do not change GraphHttpMessageHandler's defaults for other calls. Each caller keeps its own result/exception contract: read how each reports a failed send today and keep that shape; if a caller would now surface an error it previously hid by retrying, describe it in the notes. Services/Ai is not core code (D-66): only the send call changes there. Grep `SendMail.PostAsync` across src after the change to prove no caller is left. Name in the notes any other non-idempotent Graph POST you see with the standard retry (do not change them).</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue and entry points; record findings in notes/task-212-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #2779"; notes in notes/task-212-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test per caller fails on origin/master: a Graph 503 on sendMail results in exactly one send attempt (the handler is not asked to retry) and the caller's existing failure outcome.</criterion>
+    <criterion testable="true">A 429 is still retried per the handler's policy; a success still succeeds; EmailChannelSender is unchanged.</criterion>
+    <criterion testable="true">`git grep "SendMail.PostAsync" -- src` lists only callers that pass NoTransientRetryOption; build, filtered tests (Communication, SendEmailNode, MailboxVerification) and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a handler default change, a new package, or changes a caller's public result shape: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt212); PR to master.</protocol>
+  </execution>
+</task>

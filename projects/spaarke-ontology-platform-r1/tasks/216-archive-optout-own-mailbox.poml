@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="216" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A user who opted out of archiving outgoing mail is not archived when sending from their own mailbox (#2672, DI-149)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One located gate in the send-as-user path, mirroring the app-only path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>CommunicationService.cs send-as-user archive gate only; tasks 212-214 do not touch it.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Continue with next tasks". Issue #2672 (gh issue view 2672) and DI-149 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. In `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs` the send-as-user path reads the sender's `ArchiveOutgoingOptIn` (`sprk_archiveoutgoingoptin`, via `_accountService.GetSendAccountByEmailAsync`) only `if (archive &amp;&amp; request.FromMailbox is not null)` (~2989-2994 on origin/master), so a user sending from their own mailbox always archives. The shared-mailbox/app-only path (~2637-2665) always resolves the sender account and honours the switch (default true; a read failure defaults to true with a warning). Search by name.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF (Communication, Microsoft Graph SDK).</role>
+  <goal>A send-as-user from the user's own mailbox honours that user's ArchiveOutgoingOptIn exactly as the app-only path does; every other archive decision is unchanged.</goal>
+  <context>
+    <background>Resolve the sender account for the own-mailbox case from the address the send actually uses (the signed-in user's mailbox as the code already knows it, never a client-supplied value), mirror the app-only path's default-true and failure-default-true handling, and set the same archivalWarning when skipped. No account row means default true (archive), as today. Check task 177 notes (filed sends archive by default) so the default is not inverted. One extra account read per send-as-user is acceptable only when archive is true; say so in the PR.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue and entry points; record findings in notes/task-216-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #2672"; notes in notes/task-216-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: send-as-user from the own mailbox with ArchiveOutgoingOptIn false does not archive and returns the same archivalWarning as the app-only path.</criterion>
+    <criterion testable="true">Opt-in true or no account row still archives; an account read failure still archives with the warning log; FromMailbox sends unchanged; app-only path unchanged.</criterion>
+    <criterion testable="true">Build, filtered tests (Communication) and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a client-supplied address, a schema change, or changes the default for users with no account row: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt216); PR to master.</protocol>
+  </execution>
+</task>

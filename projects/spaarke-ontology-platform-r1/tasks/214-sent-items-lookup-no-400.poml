@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="214" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>After a send, the Sent Items lookup finds the message instead of returning 400, so the Internet-Message-Id reaches reply matching and the archive (#2774, DI-150)</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One located Graph query fix in two branches.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>deferred-fixes-2026-11-25b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>EmailChannelSender.cs Sent Items lookup only; task 212 does not touch EmailChannelSender.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-25: "Continue with next tasks". Issue #2774 (gh issue view 2774) and DI-150 in projects/spaarke-ontology-platform-r1/notes/defer-issues.md. `src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs` (~265-290 on origin/master; both the `Me` and `Users[sender]` branches) reads `mailFolders/sentitems/messages` with `$filter=subject eq '...'` and `$orderby=sentDateTime desc`. Graph answers 400 for that combination (an $orderby property must also appear in the $filter, first), so after every send the Internet-Message-Id is lost for reply-thread matching and the archive. App Insights on dev shows `GET /v1.0/me/mailFolders/sentitems/messages` with resultCode 400 after sends.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF (Communication, Microsoft Graph SDK).</role>
+  <goal>The Sent Items lookup returns the just-sent message (or a clean not-found) without a 400, in both branches, and the Internet-Message-Id is passed on as the code intends.</goal>
+  <context>
+    <background>Check Microsoft Graph's documented rule for $filter with $orderby on messages before choosing (Microsoft Learn: microsoft_docs_search "list messages filter orderby InefficientFilter"). Options: put sentDateTime first in the filter (sentDateTime ge {send time minus a margin} and subject eq ...) with the same $orderby, or drop $orderby and pick the newest client-side from a small $top. Keep the subject escaping (safeSubject) and the existing retry/delay behaviour for a message not yet in Sent Items. Keep what happens when nothing is found.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (for Signals code "FullyQualifiedName~Signals", which includes contract baselines; for Communication code "FullyQualifiedName~Communication"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene: publish-size delta vs fresh master (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses or tenant names in code, tests, notes or the PR.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue and entry points; record findings in notes/task-214-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Filtered tests, full ArchTests, BFF build, publish-size delta.</step>
+    <step order="5">PR to master, body "Closes #2774"; notes in notes/task-214-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: the lookup request built for both branches satisfies Graph's filter/orderby rule (asserted on the request the fake receives), and a found message's Internet-Message-Id is returned.</criterion>
+    <criterion testable="true">Not-found and Graph-error paths behave as before (no new exception escapes the send); subject escaping unchanged.</criterion>
+    <criterion testable="true">Build, filtered tests (Communication, EmailChannelSender) and full ArchTests pass; publish-size delta reported.</criterion>
+    <criterion testable="false">(Not testable here) Main session confirms on dev after deploy that the sentitems GET no longer returns 400.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a new Graph permission, a change to the send itself, or a new package: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt214); PR to master.</protocol>
+  </execution>
+</task>
