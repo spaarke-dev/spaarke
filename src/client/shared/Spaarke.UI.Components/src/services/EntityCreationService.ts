@@ -37,7 +37,7 @@
 import { createChildRecordViaBff, isBffChildCreateTable } from '../utils/adapters/bffChildWriteAdapter';
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
-import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
+import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from './sdap';
 import { cleanGuid } from '../utils/guid';
 import type { ResponseFetchFn } from '../utils/fetchTypes';
 // PolymorphicResolverService not needed — document records use canonical field set only
@@ -206,7 +206,7 @@ export class EntityCreationService {
    * Trigger RAG indexing for files uploaded via {@link uploadFilesToSpe}.
    *
    * Iterates `uploadedFiles` and posts one `POST /api/ai/rag/index-file` per file
-   * via `@spaarke/sdap-client.SdapApiClient.indexFile()`. Indexing runs under
+   * via `SdapApiClient.indexFile()` (`services/sdap`). Indexing runs under
    * the caller's OBO identity inside the BFF request — same canonical path as
    * DocumentUploadWizard's `triggerRagIndexing` and the "Send to Index" ribbon
    * command. Pattern 4 compliant (writer-identity matching).

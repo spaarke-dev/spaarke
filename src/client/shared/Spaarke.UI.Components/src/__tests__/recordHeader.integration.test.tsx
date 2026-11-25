@@ -67,9 +67,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // Imports go through the sub-barrels rather than the top-level `../index`
-// barrel because the top-level barrel re-exports `services/` which pulls in
-// `EntityCreationService.ts` → `@spaarke/sdap-client` (an unrelated workspace
-// package not installed for the shared-lib jest environment). We assert the
+// barrel. The original reason — the top-level barrel's `services/` pulled in
+// `EntityCreationService.ts` → `@spaarke/sdap-client`, a separate workspace
+// package not installed for the shared-lib jest environment — went away on
+// 2026-11-24 when that client moved into `services/sdap`; the narrower
+// imports are kept because they cost nothing. We assert the
 // SAME symbol identities the top-level barrel re-exports (see
 // `src/index.ts` + `src/components/index.ts` + `src/hooks/index.ts` — each
 // re-exports the imports below verbatim). This preserves the integration

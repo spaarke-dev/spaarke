@@ -64,7 +64,7 @@ import { getEffectiveDarkMode } from '../providers/ThemeProvider';
 // pattern `src/client/webresources/js/sprk_wizard_commands.js` uses for every
 // other ribbon-launched Create wizard. This REPLACES the previous inline
 // `React.lazy` embedding, which dragged the shared-lib wizard components (and
-// their `@spaarke/auth` / `@spaarke/sdap-client` transitive deps + the React
+// their `@spaarke/auth` / SDAP-client transitive deps + the React
 // 18/19 types skew) into the PCF bundle. The Code Page owns auth (ADR-028);
 // the PCF only marshals the launch envelope.
 //

@@ -24,9 +24,10 @@ jest.mock('@spaarke/ui-components', () => ({
   getXrm: () => (global as unknown as { Xrm?: unknown }).Xrm,
 }));
 
-jest.mock('../CommunicationActions/authInit', () => ({
+// The shared auth bootstrap (#2967) is covered in @spaarke/communication-components; here auth is simply ready.
+jest.mock('@spaarke/communication-components/logic/pcf-host', () => ({
   __esModule: true,
-  initializeAuth: jest.fn().mockResolvedValue(undefined),
+  usePcfAuthBootstrap: () => ({ authReady: true, authError: null, bffBaseUrl: 'https://bff.example' }),
   resolveDataverseUrl: () => 'https://test.crm.dynamics.com',
 }));
 

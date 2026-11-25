@@ -60,10 +60,12 @@ public sealed class H7bSecureRecordSetupHandlerTests
         var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        dv.UserRoles.Keys.Should().BeEquivalentTo(new[] { dv.MiAppUser, dv.WriterAppUser },
-            "systemUserId is the managed identity's application user; (T266 S24) ontologyWriterSystemUserId is the writer's");
-        dv.UserRoles.Should().NotContainKey(dv.BffAppUser);
-        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+        dv.UserRoles.Keys.Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser, dv.WriterAppUser },
+            "systemUserId is the managed identity's application user; (T266 S24) ontologyWriterSystemUserId is the writer's; " +
+            "(S29) both BFF users hold the Decision Record Reader");
+        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { dv.DecisionReaderRoleId },
+            "the app registration's user never gets the ontology role, only the reader");
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId, dv.DecisionReaderRoleId });
         dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.WriterOntologyRoleId }, "task 267: its own unit's copy");
     }
 
@@ -514,6 +516,69 @@ public sealed class H7bSecureRecordSetupHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete);
         dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion11_DoesNotShortCircuit_AndChecksTheInviteCodeHashExposure()
+    {
+        // ISS-025 / #1803: an environment H7b configured before S22 verified audit and Advanced Find on the invite-code hash,
+        // where either has since been turned on. The re-run reaches S22 and refuses; nothing is written.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        dv.AddInviteCodeHash();
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+            new SecureSetupAttributeExposure(IsAuditEnabled: true, IsValidForAdvancedFind: false);
+        dv.Writes.Clear();
+        var v11Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=11\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v11Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion12_DoesNotShortCircuit_AndAssignsTheDecisionRecordReader()
+    {
+        // DEF-059: an environment H7b configured before S29 has the BFF's two application users without the reader role.
+        // The re-run must reach S29 and assign it (the version is part of the idempotency hash).
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles[dv.BffAppUser].Remove(dv.DecisionReaderRoleId);
+        dv.UserRoles[dv.MiAppUser].Remove(dv.DecisionReaderRoleId);
+        dv.Writes.Clear();
+        var v12Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=12\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v12Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        dv.Writes.Should().Contain($"AssociateUserRole {dv.BffAppUser} {dv.DecisionReaderRoleId}");
+        dv.Writes.Should().Contain($"AssociateUserRole {dv.MiAppUser} {dv.DecisionReaderRoleId}");
+        H7bSecureRecordSetupHandler.ProcedureVersion.Should().Be("secure-setup-procedure=13");
     }
 
     [Theory]

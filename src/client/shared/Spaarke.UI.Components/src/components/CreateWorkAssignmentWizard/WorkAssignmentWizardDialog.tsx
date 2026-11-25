@@ -124,7 +124,7 @@ export interface IWorkAssignmentWizardDialogProps {
   resolveSpeContainerId?: () => Promise<string>;
   /**
    * AAD tenant ID. Forwarded to `WorkAssignmentService` so post-upload RAG
-   * indexing via `@spaarke/sdap-client` routes to the correct multi-tenant
+   * indexing via the SDAP client (`services/sdap`) routes to the correct multi-tenant
    * index. When omitted, indexing is skipped (files still upload to SPE).
    */
   tenantId?: string;
@@ -639,7 +639,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     // 3. Execute follow-on: Create Event
     if (actions.includes('create-event')) {
-      const eventResult = await service.createFollowOnEvent(waId, followOnEventStateRef.current);
+      const eventResult = await service.createFollowOnEvent(waId, followOnEventStateRef.current, form.name);
       if (!eventResult.success && eventResult.warning) {
         warnings.push(eventResult.warning);
       }

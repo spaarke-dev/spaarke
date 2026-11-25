@@ -88,8 +88,12 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// 10 = task 270: S27 — the lock on the invoice family's core-record lookups and invoice links (unified-access-control-r2
     ///      #2799); S28 — the lock on the message-access columns (field-mapping task 054b); both verified only.
     /// 11 = S28 also verifies the three optional private-context columns where they exist (field-mapping 056b).
+    /// 12 = S22 also verifies that auditing and Advanced Find are off on contact.sprk_externalinvitecodehash where it exists
+    ///      (ISS-025 / #1803), verified only.
+    /// 13 = S29 — the BFF's two application users hold "Spaarke Decision Record Reader" (DEF-059); the role's one privilege and
+    ///      its holders are verified only, and only the user-to-role association is written.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=11";
+    internal const string ProcedureVersion = "secure-setup-procedure=13";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;

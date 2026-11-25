@@ -4,7 +4,7 @@
     <title>DEF-060 writer (server): per-rule firm description on the policy version, copied onto the billing Signal's firm reason</title>
     <phase>5 Partner surfaces; after 116 (on master) and the 130 batch (on work)</phase>
     <gate>Branch from work/ebilling-r1 at the sha named in the agent brief</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Partner-visible free text; changes ontology-r1's SignalWriter; the writer-identity-only column (sprk_signal.sprk_firmreason).</rigor-reason>
     <model-tier>opus</model-tier>

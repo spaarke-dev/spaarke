@@ -9,11 +9,10 @@
  *
  * TYPES ONLY: this package's `tsc` cannot type-check the shared source directly. Its compiler options are
  * stricter than the shared library's own (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`: 56 errors
- * across the engine's files, none a runtime defect), and the engine's type graph reaches
- * `services/EntityCreationService.ts`, which imports `@spaarke/sdap-client` — a package this add-in does not
- * install. CI's production-typecheck job counts every non-test error, so pulling the shared source into this
- * program would read as production debt. Same mechanism and reason as
- * `src/client/external-spa/src/types/sdap-client.d.ts`.
+ * across the engine's files, none a runtime defect). CI's production-typecheck job counts every non-test
+ * error, so pulling the shared source into this program would read as production debt. (A second reason —
+ * the type graph reaching `@spaarke/sdap-client`, a package this add-in did not install — went away on
+ * 2026-11-24, when that client moved into the shared library as `services/sdap`.)
  *
  * SCOPE: declares ONLY the props the Email tab passes, with the shared library's own names and shapes
  * (`EmailComposer.types.ts`, `wrappers/SendEmailPane.tsx`, `services/communicationApi.ts`,

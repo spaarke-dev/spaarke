@@ -33,7 +33,7 @@ public interface ISolutionImporter
     /// Domain failures do NOT throw; infrastructure faults MAY throw.
     /// </summary>
     /// <param name="request">Import inputs (customerId, tenantId, clientId, clientSecret, target env URL, package type).</param>
-    /// <param name="cancellationToken">Cancellation token — the long-running (up to 60 min) import MUST honor it.</param>
+    /// <param name="cancellationToken">Cancellation token — the long-running (up to ImportTimeout, 120 min by default) import MUST honor it.</param>
     Task<SolutionImportOutcome> ImportAsync(
         SolutionImportRequest request,
         CancellationToken cancellationToken);

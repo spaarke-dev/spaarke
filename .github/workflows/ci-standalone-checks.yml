@@ -281,14 +281,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx tsc
 
-      - name: Install Spaarke.SdapClient deps
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.SdapClient
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npx tsc
-
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -379,28 +371,12 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx tsc
 
-      - name: Install Spaarke.SdapClient deps
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.SdapClient
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npx tsc
-
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Build Spaarke.UI.Components
         working-directory: src/client/shared/Spaarke.UI.Components
-        run: npx tsc
-
-      - name: Install Spaarke.AI.Outputs deps
-        working-directory: src/client/shared/Spaarke.AI.Outputs
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Outputs
-        working-directory: src/client/shared/Spaarke.AI.Outputs
         run: npx tsc
 
       # MUST come after Spaarke.UI.Components: it type-checks against that package's dist.

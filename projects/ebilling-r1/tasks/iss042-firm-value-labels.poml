@@ -4,7 +4,7 @@
     <title>ISS-042 (#2933): firm rejection findings show firm labels ("Rate"), not raw valuesRead keys ("line.rate")</title>
     <phase>Issue fix; filed 2026-11-20 from the task 134 review (server side, found in passing)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs that shapes firm-visible output (D-66, EB-D-210).</rigor-reason>
     <model-tier>sonnet</model-tier>

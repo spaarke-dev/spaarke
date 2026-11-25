@@ -46,6 +46,9 @@ public sealed record SecureSetupRoleUser(Guid UserId, Guid? ApplicationId);
 /// <summary>One field permission on a column: which profile, which table, and its Read/Create/Update grants (4 = allowed).</summary>
 public sealed record SecureSetupFieldPermission(Guid ProfileId, string EntityName, int CanRead, int CanCreate, int CanUpdate);
 
+/// <summary>A column's attribute-metadata exposure settings (S22): is it audited, and is it valid for Advanced Find.</summary>
+public sealed record SecureSetupAttributeExposure(bool IsAuditEnabled, bool IsValidForAdvancedFind);
+
 /// <summary>A table's Web API entity set and primary key.</summary>
 public sealed record SecureSetupTableIdentity(string LogicalName, string EntitySetName, string PrimaryIdAttribute);
 
@@ -167,6 +170,12 @@ public interface ISecureRecordSetupDataverse
 
     /// <summary>S14: the column's <c>IsSecured</c>, or null when the table or column does not exist.</summary>
     Task<bool?> IsAttributeSecuredAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// S22 (ISS-025 / #1803): the column's audit and Advanced Find settings (the <c>Value</c> of each managed property), or null
+    /// when the table or column does not exist. A response that carries neither value throws (never read as "off").
+    /// </summary>
+    Task<SecureSetupAttributeExposure?> GetAttributeExposureAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken);
 
     /// <summary>S13: the table's entity set and primary key.</summary>
     Task<SecureSetupTableIdentity> GetTableIdentityAsync(SecureRecordSetupTarget target, string tableLogicalName, CancellationToken cancellationToken);

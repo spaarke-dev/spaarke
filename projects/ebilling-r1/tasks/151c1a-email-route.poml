@@ -4,7 +4,7 @@
     <title>Email to AP and Mark Sent to AP: server side</title>
     <phase>6 Export and index (WP6) — wave W6-2 (split from 151c, EB-D-181 / EB-D-182)</phase>
     <gate>startable after 151a</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Sends mail as the signed-in user with financial files attached, touches the shared communication send path, adds two routes behind the Finance route gate and two Dataverse columns. Tags include bff-api, auth and security (access review by uac-r2).</rigor-reason>
     <model-tier>sonnet</model-tier>

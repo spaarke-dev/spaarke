@@ -2529,7 +2529,7 @@ public sealed class DecisionCommitService
     /// <summary>
     /// Closes (or links) one Signal with the record. Applied only to a Signal still open, or one the SYSTEM resolved since the
     /// review started (re-closed with this decision, so Signal and record agree). A Signal a person resolved is left alone.
-    /// Row-version conditional; a concurrent change is re-read once. Task 205: <paramref name="alreadyRead"/>, when given, is this row as
+    /// Row-version conditional; a concurrent change is re-read once, and a second one is reported as signal_changed (not metered as a failure). Task 205: <paramref name="alreadyRead"/>, when given, is this row as
     /// read after the record was written (<see cref="CloseAllAsync"/>'s paged read) and stands in for the first attempt's read; the retry
     /// after a version mismatch always reads the row again by id.
     /// </summary>
@@ -2587,6 +2587,10 @@ public sealed class DecisionCommitService
             {
                 continue; // changed since read: read again and decide again
             }
+            catch (Exception ex) when (IsVersionMismatch(ex))
+            {
+                break; // changed again after the re-read: reported below as signal_changed (DI-167), not as a failed close
+            }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogWarning(DecisionCommitEvents.SignalCloseFailed, ex,
@@ -2596,13 +2600,15 @@ public sealed class DecisionCommitService
             }
         }
 
-        return Warn(signalId, "signal_changed", "The item kept changing while it was being closed; it was left as it is.");
+        // An expected race (the item changed twice while it was closed), not a writer failure: logged, never metered on ontology.writer.failures.
+        return Warn(signalId, "signal_changed", "The item kept changing while it was being closed; it was left as it is.", countAsFailure: false);
 
-        DecisionCommitSignal Warn(Guid id, string code, string why)
+        DecisionCommitSignal Warn(Guid id, string code, string why, bool countAsFailure = true)
         {
             _logger.LogWarning(DecisionCommitEvents.SignalCloseFailed,
                 "Decision commit: Signal {SignalId} not closed with record {RecordId}: {Code}.", id, recordId, code);
-            OntologyWriterTelemetry.RecordFailure("decision_commit_signal_close_failed");
+            if (countAsFailure)
+                OntologyWriterTelemetry.RecordFailure("decision_commit_signal_close_failed");
             return new DecisionCommitSignal(id, Unchanged, code);
         }
     }

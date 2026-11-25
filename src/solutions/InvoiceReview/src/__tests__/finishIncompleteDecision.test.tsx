@@ -30,6 +30,7 @@ import {
   decidedReview,
   decisionRecord,
   failed,
+  firmNoticeDraft,
   forbidden,
   line,
   mockApi,
@@ -97,10 +98,16 @@ const submitBtn = (d: HTMLElement) => within(d).getByRole('button', { name: 'Fin
 const incomplete = (detail = 'The invoice was rejected but a later step did not finish. Repeat the call to complete it.') =>
   failed(problem(503, 'ebilling.invoice.decision_incomplete', { detail, failedStep: 'record' }));
 
+// ISS-041: after a reload (no notice kept in memory) a reject or return finish offers the Notify step; its draft is asked for when the form opens.
+const draftOf = (verb: Verb) => firmNoticeDraft({ kind: verb === 'Return' ? 'ReturnedToFirm' : 'InvoiceRejected' });
+const noticeOf = (verb: Verb) => ({ subject: draftOf(verb).subject, prose: draftOf(verb).prose });
+const draftLoaded = (d: HTMLElement) => within(d).findByTestId('notice-subject');
+
 async function openFinish(decision: MockDecisionApi, verb: Verb = 'Reject') {
   const r = renderDecisions(decidedReview(verb), decision);
   fireEvent.click(await screen.findByTestId('finish-decision'));
   const dialog = await finishDialog();
+  if (verb !== 'Approve') await draftLoaded(dialog);
   return { dialog, ...r };
 }
 
@@ -222,7 +229,8 @@ describe('Finish decision: the repeat', () => {
     expect(await screen.findByTestId('view-decision')).toBeInTheDocument();
     const repeat = repeatOf(decision, verb);
     expect(repeat).toHaveBeenCalledTimes(1);
-    expect(repeat).toHaveBeenCalledWith(INVOICE_ID, 'Rate card not followed');
+    // ISS-041: no notice was kept (a reload), so the form offered the Notify step with its draft on, and the repeat carries it.
+    expect(repeat).toHaveBeenCalledWith(INVOICE_ID, 'Rate card not followed', undefined, noticeOf(verb));
     expect(decision.approve).not.toHaveBeenCalled();
     expect(api.getReview.mock.calls.length).toBeGreaterThan(reads);
     await waitFor(() => expect(anyFinishDialog()).toBeNull());
@@ -247,7 +255,7 @@ describe('Finish decision: the repeat', () => {
     fireEvent.change(reasonOf(dialog), { target: { value: 'Please correct the task codes' } });
     fireEvent.change(noteOf(dialog), { target: { value: 'Second attempt after the outage' } });
     fireEvent.click(submitBtn(dialog));
-    await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledWith(INVOICE_ID, 'Please correct the task codes', 'Second attempt after the outage'));
+    await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledWith(INVOICE_ID, 'Please correct the task codes', 'Second attempt after the outage', noticeOf('Return')));
   });
 
   it('the Finish button is disabled while the repeat is in flight, and a second click sends nothing', async () => {
@@ -422,6 +430,7 @@ describe('Finish decision after the record ("link"): the follow-up steps', () =>
       expect(reasonOf(dialog)).toHaveValue(RECORDED_REASON);
       expect(reasonOf(dialog)).toHaveAttribute('readonly');
       expect(within(dialog).queryByTestId('finish-decision-note')).not.toBeInTheDocument();
+      await draftLoaded(dialog);
       expect(submitBtn(dialog)).toBeEnabled();
 
       fireEvent.click(submitBtn(dialog));
@@ -431,7 +440,7 @@ describe('Finish decision after the record ("link"): the follow-up steps', () =>
       expect(await screen.findByTestId('view-decision')).toBeInTheDocument();
       const repeat = repeatOf(decision, verb);
       expect(repeat).toHaveBeenCalledTimes(1);
-      expect(repeat).toHaveBeenCalledWith(INVOICE_ID, RECORDED_REASON);
+      expect(repeat).toHaveBeenCalledWith(INVOICE_ID, RECORDED_REASON, undefined, noticeOf(verb));
     }
   );
 
@@ -458,5 +467,331 @@ describe('Finish decision after the record ("link"): the follow-up steps', () =>
     expect(submitBtn(dialog)).toBeDisabled();
     fireEvent.click(submitBtn(dialog));
     expect(decision.reject).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ISS-041 (#2930): after a reload the notice kept in memory is gone, so the Finish form offers the Notify step
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sendSwitch = (d: HTMLElement) => within(d).getByRole('switch', { name: 'Send this notice to the firm', hidden: true });
+const subjectBox = (d: HTMLElement) => within(d).getByLabelText('Notice subject') as HTMLInputElement;
+const proseBox = (d: HTMLElement) => within(d).getByLabelText('Notice message') as HTMLTextAreaElement;
+const refusal = () =>
+  failed(problem(400, 'ebilling.notice_refused', { detail: 'The notice to the firm was not accepted (prose.digit). Nothing was decided. Edit the notice and try again.' }));
+
+describe('ISS-041: Finish decision after a reload offers the Notify step for a reject or return', () => {
+  it.each(['Reject', 'Return'] as const)(
+    '%s: the form offers the Notify step with the server draft (asked once, for this kind); an edited notice is what the repeat carries, trimmed',
+    async verb => {
+      const { decision } = strandedApi(verb);
+      const { dialog } = await openFinish(decision, verb);
+      expect(within(dialog).getByTestId('notify-step')).toBeInTheDocument();
+      expect(sendSwitch(dialog)).toBeChecked();
+      expect(decision.getFirmNoticeDraft).toHaveBeenCalledTimes(1);
+      expect(decision.getFirmNoticeDraft).toHaveBeenCalledWith(INVOICE_ID, verb === 'Return' ? 'ReturnedToFirm' : 'InvoiceRejected');
+      // The notice is the wizard's step: the same fields, counters and limits.
+      expect(within(dialog).getByTestId('notice-subject-count')).toBeInTheDocument();
+      expect(within(dialog).queryByTestId('finish-decision-notice')).not.toBeInTheDocument();
+
+      fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+      fireEvent.change(subjectBox(dialog), { target: { value: '  Edited subject (INV-2025-78232.1)  ' } });
+      fireEvent.change(proseBox(dialog), { target: { value: '  Edited message.  ' } });
+      fireEvent.click(submitBtn(dialog));
+
+      await waitFor(() => expect(repeatOf(decision, verb)).toHaveBeenCalledTimes(1));
+      expect(repeatOf(decision, verb)).toHaveBeenCalledWith(INVOICE_ID, 'Rate card not followed', undefined, {
+        subject: 'Edited subject (INV-2025-78232.1)',
+        prose: 'Edited message.',
+      });
+      expect(await screen.findByTestId('view-decision')).toBeInTheDocument();
+    }
+  );
+
+  it.each(['Reject', 'Return'] as const)('%s: choosing to send no notice sends none (the old two-argument call), and the form says so', async verb => {
+    const { decision } = strandedApi(verb);
+    const { dialog } = await openFinish(decision, verb);
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    fireEvent.click(sendSwitch(dialog));
+    expect(within(dialog).getByTestId('notice-off')).toHaveTextContent('The firm gets no email');
+    expect(submitBtn(dialog)).toBeEnabled();
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(repeatOf(decision, verb)).toHaveBeenCalledTimes(1));
+    expect(repeatOf(decision, verb).mock.calls[0]).toEqual([INVOICE_ID, 'Rate card not followed']);
+  });
+
+  it('Finish is held while the draft loads, so the repeat cannot go out before the reviewer has seen the notice', async () => {
+    const { decision } = strandedApi('Reject');
+    let answer: (r: ApiResult<unknown>) => void = () => undefined;
+    decision.getFirmNoticeDraft.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          answer = resolve as never;
+        })
+    );
+    renderDecisions(decidedReview('Reject'), decision);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    expect(await within(dialog).findByTestId('notice-loading')).toBeInTheDocument();
+    expect(submitBtn(dialog)).toBeDisabled();
+    fireEvent.click(submitBtn(dialog));
+    expect(decision.reject).not.toHaveBeenCalled();
+
+    answer(ok(draftOf('Reject')));
+    await draftLoaded(dialog);
+    expect(submitBtn(dialog)).toBeEnabled();
+  });
+
+  it('a blank or over-limit notice with sending on holds Finish (the Notify step\'s own limits); turning it off releases it', async () => {
+    const { decision } = strandedApi('Reject');
+    const { dialog } = await openFinish(decision, 'Reject');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    fireEvent.change(subjectBox(dialog), { target: { value: '   ' } });
+    expect(submitBtn(dialog)).toBeDisabled();
+    fireEvent.change(subjectBox(dialog), { target: { value: 'Fine subject' } });
+    fireEvent.change(proseBox(dialog), { target: { value: 'x'.repeat(1501) } });
+    expect(submitBtn(dialog)).toBeDisabled();
+    fireEvent.click(sendSwitch(dialog));
+    expect(submitBtn(dialog)).toBeEnabled();
+  });
+
+  it('a draft that could not be fetched is shown with Retry and does not block Finish; the repeat then carries no notice', async () => {
+    const { decision } = strandedApi('Reject');
+    decision.getFirmNoticeDraft.mockResolvedValueOnce(failed(problem(503, 'ebilling.firm_notice.unavailable', { detail: 'The notice could not be drafted.' })));
+    renderDecisions(decidedReview('Reject'), decision);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    expect(await within(dialog).findByTestId('notice-draft-error')).toHaveTextContent('could not be drafted');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    expect(submitBtn(dialog)).toBeEnabled();
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(1));
+    expect(decision.reject.mock.calls[0]).toEqual([INVOICE_ID, 'Rate card not followed']);
+  });
+
+  it('(must-not-fire) an approve finish shows no Notify fields and asks for no draft', async () => {
+    const { decision } = strandedApi('Approve');
+    const { dialog } = await openFinish(decision, 'Approve');
+    expect(within(dialog).queryByTestId('notify-step')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('finish-decision-notice')).not.toBeInTheDocument();
+    expect(decision.getFirmNoticeDraft).not.toHaveBeenCalled();
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.approve).toHaveBeenCalledTimes(1));
+    expect(decision.approve).toHaveBeenCalledWith(INVOICE_ID);
+  });
+
+  it('a refused notice is shown under the notice fields (once), nothing is locked, and editing it then finishing sends the edited notice', async () => {
+    const { decision } = strandedApi('Reject');
+    decision.reject.mockResolvedValueOnce(refusal());
+    const { dialog } = await openFinish(decision, 'Reject');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    const reads = decision.getApproval.mock.calls.length;
+    fireEvent.click(submitBtn(dialog));
+    expect(await within(dialog).findByTestId('notice-refused')).toHaveTextContent('(prose.digit)');
+    expect(within(dialog).queryByTestId('finish-decision-notice-refused')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('finish-decision-error')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('finish-decision-locked')).not.toBeInTheDocument();
+    expect(decision.getApproval.mock.calls.length).toBe(reads);
+    expect(subjectBox(dialog)).not.toHaveAttribute('readonly');
+
+    fireEvent.change(proseBox(dialog), { target: { value: 'A corrected message.' } });
+    expect(within(dialog).queryByTestId('notice-refused')).not.toBeInTheDocument();
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
+    expect(decision.reject.mock.calls[1][3]).toEqual({ subject: draftOf('Reject').subject, prose: 'A corrected message.' });
+  });
+
+  it('an unsure send from the offered form keeps what it sent: reopened, the notice is shown read-only and the repeat is the same request', async () => {
+    const { decision, world } = strandedApi('Reject');
+    decision.reject.mockResolvedValueOnce(incomplete());
+    const { dialog } = await openFinish(decision, 'Reject');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    fireEvent.click(submitBtn(dialog));
+    expect(await within(dialog).findByTestId('finish-decision-error')).toHaveTextContent('repeat it to finish');
+    // The lock now holds the notice, so the form shows it as a kept one (no second draft, no editing).
+    expect(within(dialog).queryByTestId('notify-step')).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId('finish-decision-notice')).toHaveTextContent('The firm will be emailed this notice');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel', hidden: true }));
+    await waitFor(() => expect(anyFinishDialog()).toBeNull());
+    fireEvent.click(screen.getByTestId('finish-decision'));
+    const again = await finishDialog();
+    expect(within(again).queryByTestId('notify-step')).not.toBeInTheDocument();
+    expect(within(again).getByTestId('finish-decision-notice')).toHaveTextContent(draftOf('Reject').subject);
+    expect(decision.getFirmNoticeDraft).toHaveBeenCalledTimes(1);
+
+    decision.reject.mockImplementation(async () => {
+      world.current = decidedApproval('Reject');
+      return ok({ outcome: 'decided', decision: 'Rejected', decisionId: 'd2', decisionRecordId: 'rec-20' });
+    });
+    fireEvent.click(submitBtn(again));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
+    expect(decision.reject.mock.calls[1]).toEqual(decision.reject.mock.calls[0]);
+    expect(decision.reject.mock.calls[1][3]).toEqual(noticeOf('Reject'));
+  });
+
+  it('an unsure send with the notice turned off keeps that choice: the repeat still carries none', async () => {
+    const { decision } = strandedApi('Return');
+    decision.returnToFirm.mockResolvedValueOnce(incomplete());
+    const { dialog } = await openFinish(decision, 'Return');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Please correct the task codes' } });
+    fireEvent.click(sendSwitch(dialog));
+    fireEvent.click(submitBtn(dialog));
+    await within(dialog).findByTestId('finish-decision-error');
+    expect(within(dialog).getByTestId('finish-decision-notice')).toHaveTextContent('No email is sent to the firm');
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledTimes(2));
+    expect(decision.returnToFirm.mock.calls[1]).toEqual(decision.returnToFirm.mock.calls[0]);
+    expect(decision.returnToFirm.mock.calls[1]).toHaveLength(2);
+  });
+
+  it('closing and reopening a form that was not sent asks for a fresh draft and forgets the edits', async () => {
+    const { decision } = strandedApi('Reject');
+    const { dialog } = await openFinish(decision, 'Reject');
+    fireEvent.change(proseBox(dialog), { target: { value: 'Edited and abandoned.' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel', hidden: true }));
+    await waitFor(() => expect(anyFinishDialog()).toBeNull());
+    fireEvent.click(screen.getByTestId('finish-decision'));
+    const again = await finishDialog();
+    await draftLoaded(again);
+    expect(proseBox(again).value).toBe(draftOf('Reject').prose);
+    expect(decision.getFirmNoticeDraft).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ISS-041 fix round 1
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ISS-041 fix round 1 F1: a refusal of a notice kept from an unsure send gets the form out of its lock', () => {
+  it('unsure send, then the repeat is refused: the Notify step is back with the text as sent, the reason is editable, and the edited notice is what the next Finish sends', async () => {
+    const { decision } = strandedApi('Reject');
+    decision.reject.mockResolvedValueOnce(failed(new Error('Failed to fetch')));
+    const { dialog } = await openFinish(decision, 'Reject');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    fireEvent.click(submitBtn(dialog));
+    await within(dialog).findByTestId('finish-decision-locked');
+    // Locked: no Notify step, the reason is read-only, the notice is the kept one.
+    expect(within(dialog).queryByTestId('notify-step')).not.toBeInTheDocument();
+    expect(reasonOf(dialog)).toHaveAttribute('readonly');
+
+    // The repeat is refused (it was never screened the first time).
+    decision.reject.mockResolvedValueOnce(refusal());
+    fireEvent.click(submitBtn(dialog));
+    expect(await within(dialog).findByTestId('notice-refused')).toHaveTextContent('(prose.digit)');
+    expect(decision.reject).toHaveBeenCalledTimes(2);
+    expect(within(dialog).getByTestId('notify-step')).toBeInTheDocument();
+    expect(subjectBox(dialog).value).toBe(draftOf('Reject').subject);
+    expect(proseBox(dialog)).not.toHaveAttribute('readonly');
+    expect(reasonOf(dialog)).not.toHaveAttribute('readonly');
+    expect(within(dialog).queryByTestId('finish-decision-locked')).not.toBeInTheDocument();
+    expect(decision.getFirmNoticeDraft).toHaveBeenCalledTimes(1);
+
+    // Edit the notice: the refusal clears, and the next Finish carries the edited text (not the refused one).
+    fireEvent.change(proseBox(dialog), { target: { value: 'A corrected message.' } });
+    expect(within(dialog).queryByTestId('notice-refused')).not.toBeInTheDocument();
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(3));
+    expect(decision.reject.mock.calls[2][3]).toEqual({ subject: draftOf('Reject').subject, prose: 'A corrected message.' });
+  });
+
+  it('the same, and the notice turned off after the refusal: the next Finish carries none', async () => {
+    const { decision } = strandedApi('Return');
+    decision.returnToFirm.mockResolvedValueOnce(failed(new Error('Failed to fetch')));
+    const { dialog } = await openFinish(decision, 'Return');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Please correct the task codes' } });
+    fireEvent.click(submitBtn(dialog));
+    await within(dialog).findByTestId('finish-decision-locked');
+    decision.returnToFirm.mockResolvedValueOnce(refusal());
+    fireEvent.click(submitBtn(dialog));
+    await within(dialog).findByTestId('notice-refused');
+    fireEvent.click(sendSwitch(dialog));
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.returnToFirm).toHaveBeenCalledTimes(3));
+    expect(decision.returnToFirm.mock.calls[2]).toEqual([INVOICE_ID, 'Please correct the task codes']);
+  });
+
+  it('(must-not-fire) an unsure send that is not refused stays locked: no Notify step, the reason read-only', async () => {
+    const { decision } = strandedApi('Reject');
+    decision.reject.mockResolvedValueOnce(failed(new Error('Failed to fetch')));
+    decision.reject.mockResolvedValueOnce(failed(new Error('Failed to fetch')));
+    const { dialog } = await openFinish(decision, 'Reject');
+    fireEvent.change(reasonOf(dialog), { target: { value: 'Rate card not followed' } });
+    fireEvent.click(submitBtn(dialog));
+    await within(dialog).findByTestId('finish-decision-locked');
+    fireEvent.click(submitBtn(dialog));
+    await waitFor(() => expect(decision.reject).toHaveBeenCalledTimes(2));
+    await within(dialog).findByTestId('finish-decision-error');
+    expect(within(dialog).queryByTestId('notify-step')).not.toBeInTheDocument();
+    expect(reasonOf(dialog)).toHaveAttribute('readonly');
+  });
+});
+
+describe('ISS-041 fix round 1 F2: the recorded stage', () => {
+  it('the intro says the notice can still be set when Notify is offered, and keeps "nothing can be changed" when it is not', () => {
+    expect(finishDecisionIntro('reject', false, true, true)).toMatch(/notice to the firm can still be set below/);
+    expect(finishDecisionIntro('reject', false, true, true)).not.toMatch(/nothing can be changed/);
+    expect(finishDecisionIntro('reject', false, true)).toMatch(/nothing can be changed/);
+    expect(finishDecisionIntro('reject', false, true)).not.toMatch(/notice/);
+    expect(finishDecisionIntro('approve', false, true)).toMatch(/nothing can be changed/);
+  });
+
+  it('a recorded reject: the form shows the new intro with the Notify step', async () => {
+    const { decision } = strandedApi('Reject', 'link');
+    renderDecisions(recordedReview('Reject'), decision);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    await draftLoaded(dialog);
+    expect(within(dialog).getByTestId('finish-decision-intro')).toHaveTextContent('The notice to the firm can still be set below');
+    expect(within(dialog).getByTestId('finish-decision-intro')).not.toHaveTextContent('nothing can be changed');
+  });
+
+  it('a recorded reject whose reason the page cannot read offers no Notify step, asks for no draft, and keeps "nothing can be changed"', async () => {
+    const { decision } = strandedApi('Reject', 'link');
+    renderDecisions(decidedReview('Reject'), decision);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const dialog = await finishDialog();
+    expect(within(dialog).getByTestId('finish-decision-no-reason')).toBeInTheDocument();
+    expect(within(dialog).queryByTestId('notify-step')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('finish-decision-notice')).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId('finish-decision-intro')).toHaveTextContent('nothing can be changed');
+    expect(submitBtn(dialog)).toBeDisabled();
+    expect(decision.getFirmNoticeDraft).not.toHaveBeenCalled();
+  });
+});
+
+describe('ISS-041 fix round 1 K: a draft still in flight from an earlier opening does not settle the next one', () => {
+  it('cancel while the draft is out, reopen, then the old answer (a 429) arrives: the new opening is still loading, then gets its own draft', async () => {
+    const { decision } = strandedApi('Reject');
+    const pending: Array<(r: ApiResult<unknown>) => void> = [];
+    decision.getFirmNoticeDraft.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          pending.push(resolve as never);
+        })
+    );
+    renderDecisions(decidedReview('Reject'), decision);
+    fireEvent.click(await screen.findByTestId('finish-decision'));
+    const first = await finishDialog();
+    await within(first).findByTestId('notice-loading');
+    expect(pending).toHaveLength(1);
+    fireEvent.click(within(first).getByRole('button', { name: 'Cancel', hidden: true }));
+    await waitFor(() => expect(anyFinishDialog()).toBeNull());
+
+    fireEvent.click(screen.getByTestId('finish-decision'));
+    const second = await finishDialog();
+    await within(second).findByTestId('notice-loading');
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    // The first opening's answer arrives late, as a failure.
+    pending[0](failed(problem(429, null, { detail: 'Too many requests.' })));
+    await new Promise(r => setTimeout(r, 50));
+    expect(within(second).queryByTestId('notice-draft-error')).not.toBeInTheDocument();
+    expect(within(second).getByTestId('notice-loading')).toBeInTheDocument();
+
+    pending[1](ok(draftOf('Reject')));
+    await draftLoaded(second);
+    expect(subjectBox(second).value).toBe(draftOf('Reject').subject);
   });
 });

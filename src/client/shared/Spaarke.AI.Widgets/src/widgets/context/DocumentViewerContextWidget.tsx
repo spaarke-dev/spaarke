@@ -18,8 +18,8 @@
  */
 
 import { createContextWidgetAdapter, createDocumentViewerHighlighter } from './ContextWidgetAdapter';
-import { DocumentViewerWidget } from '@spaarke/ai-outputs';
-import type { DocumentViewerData } from '@spaarke/ai-outputs';
+import { DocumentViewerWidget } from '../../outputs';
+import type { DocumentViewerData } from '../../outputs';
 
 // Re-export the payload type for consumers.
 export type { DocumentViewerData };

@@ -42,10 +42,10 @@
 import React from 'react';
 import type * as WorkspaceWidgetRegistryModule from '../registry/WorkspaceWidgetRegistry';
 
-// register-workspace-widgets.ts lazily `import()`s several `@spaarke/ai-outputs`
+// register-workspace-widgets.ts lazily `import()`s several `src/outputs`
 // output-widget modules inside factory closures — never invoked by this
-// metadata-only suite, but Jest still needs `@spaarke/ai-outputs`'s package
-// entry to resolve when the *type-only* re-exports in this package's own
+// metadata-only suite, but Jest still needs those modules
+// to resolve when the *type-only* re-exports in this package's own
 // barrel are evaluated. Mirrors the minimal mock set already used by
 // `register-workspace-widgets.test.ts` for the same reason.
 const MockGenericText: React.FC = () => null;

@@ -40,7 +40,6 @@ const config: Config = {
     // source so component tests can import the widgets by package name.
     '^@spaarke/compose-components$': '<rootDir>/../../client/shared/Spaarke.Compose.Components/src/index.ts',
     '^@spaarke/compose-components/(.*)$': '<rootDir>/../../client/shared/Spaarke.Compose.Components/src/$1',
-    '^@spaarke/ai-outputs$': '<rootDir>/../../client/shared/Spaarke.AI.Outputs/src/index.ts',
     // spaarke-notification-spine-r1 task 051: `@spaarke/notifications` ships ESM `dist`
     // (Jest can't transform it) and drives a live SignalR connection. ConversationPane
     // now imports it (via notificationsBootstrap). Map to a no-op stub — the unit tests
@@ -62,14 +61,6 @@ const config: Config = {
     // marked.esm.js parse time. Map to a pass-through stub so tests don't need
     // a Markdown render. (R6 Hotfix Wave B-G9c3, 2026-06-10.)
     '^marked$': '<rootDir>/src/__mocks__/marked.ts',
-    // `@spaarke/sdap-client` is not resolvable from the SpaarkeAi workspace
-    // (it lives on the PCF / Office Add-in module-resolution paths). Every
-    // test transitively importing `@spaarke/ui-components/services/index`
-    // fails because EntityCreationService.ts has a top-level
-    // `import { SdapApiClient } from '@spaarke/sdap-client'`. The 057
-    // affordance tests (Send/AddToAssistant/Pin) all touch this chain. Map
-    // to a tiny stub. (R6 Wave C-G3 gap-fill, 2026-06-11.)
-    '^@spaarke/sdap-client$': '<rootDir>/src/__mocks__/sdap-client.ts',
     // Dedupe React — the workspace-linked shared libraries each have their own
     // node_modules/react copy. Without forcing a single instance, hooks fail
     // with "Cannot read properties of null (reading 'useRef')" because the

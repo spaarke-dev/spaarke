@@ -28,7 +28,6 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
-    path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
     // Task 114 (2026-05-22): @spaarke/events-components hosts the
     // CalendarSection/GridSection/filter components consumed by both the
     // standalone EventsPage code page AND the Calendar workspace widget
@@ -116,8 +115,6 @@ export default defineConfig({
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.ts"),
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.ts"),
-        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src/**/*.tsx"),
-        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src/**/*.ts"),
         // Task 114 (2026-05-22): transpile Spaarke.Events.Components source
         // so SpaarkeAi can embed Events components via the
         // @spaarke/events-components alias (Calendar widget — task 115).
@@ -166,8 +163,6 @@ export default defineConfig({
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
       "@spaarke/ai-widgets/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
       "@spaarke/ai-widgets": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
-      "@spaarke/ai-outputs/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
-      "@spaarke/ai-outputs": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
       // Task 114 (2026-05-22): @spaarke/events-components is the shared
       // library that hosts CalendarSection/GridSection/filters/etc consumed
       // by both EventsPage and the SpaarkeAi Calendar workspace widget
@@ -217,17 +212,6 @@ export default defineConfig({
       // solution's `exports` entry (src/index.ts). R2 FR-10 (2026-07-02) replaced the raw source
       // alias; task 032 of reuse-governance-tightening-r1 (2026-11-13) retired the facade package
       // FR-10 had put in between.
-      // R4 task 102 (E-1, 2026-06-18): @spaarke/sdap-client — pulled in
-      // transitively via @spaarke/ui-components/services/EntityCreationService.ts
-      // (Phase G of multi-container-multi-index-r1 / PR #369). Mirrors the
-      // alias already present in CreateMatter/Project/Event/WorkAssignmentWizard
-      // + SmartTodo + LegalWorkspace + CreateTodoWizard. SpaarkeAi is the
-      // 7th surface needing this workaround; the project-wide tsconfig refs
-      // fix is tracked in `current-task.md` follow-ups (deferred to task 092/098).
-      "@spaarke/sdap-client": path.resolve(
-        __dirname,
-        "../../client/shared/Spaarke.SdapClient/src",
-      ),
     },
     // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
     // .gitignore) never silently shadow source. See Task 112 (2026-05-22).

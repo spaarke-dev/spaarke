@@ -73,6 +73,7 @@ public sealed class ArmTemplateInspectorTests
         var mapped = System.Text.RegularExpressions.Regex.Matches(source, @"ReadString\(root, ""([A-Za-z]+)""\)")
             .Select(m => m.Groups[1].Value)
             .Where(n => n != "resourceGroupName")
+            .Where(n => n != "signalrHostName")   // ISS-022: optional - customer.bicep emits '' unless signalrEnabled; H2a requires it only when SignalR deployed
             .Distinct();
 
         mapped.Should().BeEquivalentTo(ArmDeploymentRunner.RequiredOutputNames);

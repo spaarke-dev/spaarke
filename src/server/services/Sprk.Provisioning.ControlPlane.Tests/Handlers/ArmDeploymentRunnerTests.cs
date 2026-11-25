@@ -108,6 +108,7 @@ public sealed class ArmDeploymentRunnerTests
         success.Outputs.ResourceGroupName.Should().Be("rg-spaarke-acme-prod");
         success.Outputs.CosmosEndpoint.Should().Be("https://spaarke-acme-prod-cosmos.documents.azure.com:443/");
         success.Outputs.SignalRDeployed.Should().BeFalse();
+        success.Outputs.SignalRHostName.Should().BeEmpty("signalrEnabled=false: customer.bicep emits an empty signalrHostName");
         // Task 245a — customer.bicep outputs H2a now persists for downstream handlers.
         success.Outputs.KeyVaultName.Should().Be("sprk-acme-prod-kv");
         success.Outputs.KeyVaultUri.Should().Be("https://sprk-acme-prod-kv.vault.azure.net/");
@@ -126,6 +127,25 @@ public sealed class ArmDeploymentRunnerTests
         handler.RequestedUris.Should().Contain(
             uri => uri.AbsolutePath.Contains("Microsoft.Resources/deployments", StringComparison.OrdinalIgnoreCase),
             "asserts the ARM deployment CreateOrUpdate call was actually invoked over HTTP, not a hard-coded Success");
+    }
+
+    [Fact]
+    public async Task Iss022_SignalREnabled_ReadsTheSignalRHostNameOutput()
+    {
+        var handler = ArmSdkTestFakes.NewHandler(request => RespondHappyPath(request,
+            "\"signalrEnabled\": { \"type\": \"Bool\", \"value\": true }, \"signalrHostName\": { \"type\": \"String\", \"value\": \"sprk-acme-prod-signalr.service.signalr.net\" }"));
+        var runner = new ArmDeploymentRunner(
+            ArmSdkTestFakes.NewArmClient(handler),
+            ArmSdkTestFakes.NewBlobContainerClient(handler),
+            Options.Create(NewOptions()),
+            Identity(),
+            NullLogger<ArmDeploymentRunner>.Instance);
+
+        var outcome = await runner.DeployAsync(NewRequest(), CancellationToken.None);
+
+        var success = outcome.Should().BeOfType<BicepDeployOutcome.Success>().Subject;
+        success.Outputs.SignalRDeployed.Should().BeTrue();
+        success.Outputs.SignalRHostName.Should().Be("sprk-acme-prod-signalr.service.signalr.net");
     }
 
     [Theory]
@@ -384,6 +404,9 @@ public sealed class ArmDeploymentRunnerTests
         NullLogger<ArmDeploymentRunner>.Instance);
 
     private static HttpResponseMessage RespondHappyPath(HttpRequestMessage request)
+        => RespondHappyPath(request, "\"signalrEnabled\": { \"type\": \"Bool\", \"value\": false }, \"signalrHostName\": { \"type\": \"String\", \"value\": \"\" }");
+
+    private static HttpResponseMessage RespondHappyPath(HttpRequestMessage request, string signalrOutputs)
     {
         var path = request.RequestUri!.AbsolutePath;
         if (path.EndsWith("provisioning-arm-latest.json"))
@@ -414,9 +437,9 @@ public sealed class ArmDeploymentRunnerTests
                   "redisEndpoint": { "type": "String", "value": "sprk-acme-prod-redis.westus2.redis.azure.net:10000" },
                   "contentSafetyEndpoint": { "type": "String", "value": "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/" },
                   "storagePrimaryEndpoint": { "type": "String", "value": "https://sprkacmeprod.blob.core.windows.net/" },
-                  "signalrEnabled": { "type": "Bool", "value": false }
+                  SIGNALR_OUTPUTS
                 }
-                """));
+                """.Replace("SIGNALR_OUTPUTS", signalrOutputs)));
         }
         throw new InvalidOperationException("unexpected request: " + path);
     }

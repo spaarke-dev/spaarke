@@ -198,12 +198,15 @@ export function incompleteDecisionText(outcome: InvoiceOutcome, recorded = false
  * The Finish dialog's sentence. Before the record (`recorded` false) a reject or return needs its reason again: the server keeps it only
  * in the Decision Record, which was not written. When this page still holds the request it sent (`repeatsSent`: an unsure send in this
  * session), that request is repeated as it was and nothing is asked again. Once the record exists (`recorded`), nothing is asked: the
- * server finishes from the record, and the reason shown is the one it holds.
+ * server finishes from the record, and the reason shown is the one it holds. ISS-041: `noticeOffered` (the form shows the Notify step, a
+ * reject or return with no notice kept) adds that the notice to the firm can still be set, which is the one thing a recorded decision lets you change.
  */
-export function finishDecisionIntro(outcome: InvoiceOutcome, repeatsSent: boolean, recorded = false): string {
+export function finishDecisionIntro(outcome: InvoiceOutcome, repeatsSent: boolean, recorded = false, noticeOffered = false): string {
   if (recorded) {
     const kept = outcome === 'approve' ? 'its recorded note is kept' : 'its recorded reason (shown below) and note are kept';
-    return `The ${NOUN_WORDS[outcome]} is already recorded. Finishing completes its follow-up steps; ${kept}, and nothing can be changed.`;
+    return noticeOffered
+      ? `The ${NOUN_WORDS[outcome]} is already recorded. Finishing completes its follow-up steps; ${kept}, and cannot be changed. The notice to the firm can still be set below.`
+      : `The ${NOUN_WORDS[outcome]} is already recorded. Finishing completes its follow-up steps; ${kept}, and nothing can be changed.`;
   }
   const head = `Finishing records the ${NOUN_WORDS[outcome]} with your name.`;
   if (repeatsSent) return `${head} It repeats the request you sent, with the same ${outcome === 'approve' ? 'note' : 'reason and note'}.`;

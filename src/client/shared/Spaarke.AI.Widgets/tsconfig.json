@@ -22,13 +22,11 @@
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
     "paths": {
-      "@spaarke/ai-outputs": ["../Spaarke.AI.Outputs/dist/index.d.ts"],
-      "@spaarke/ai-outputs/*": ["../Spaarke.AI.Outputs/dist/*"],
       "@spaarke/ui-components": ["../Spaarke.UI.Components/dist/index.d.ts"],
       "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"],
       "@spaarke/auth": ["../Spaarke.Auth/dist/index.d.ts"],
       // @spaarke/communication-components — declaration-only build (mirrors
-      // @spaarke/ai-outputs' dist-based mapping above); required because
+      // the ui-components dist-based mapping above); required because
       // this package's own build is a REAL `tsc` emit with an explicit
       // `rootDir` — mapping to raw SOURCE pulled files outside that rootDir
       // into the program (TS6059). messaging-communication-app-r2 task 030.

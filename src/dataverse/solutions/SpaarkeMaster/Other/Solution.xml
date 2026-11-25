@@ -408,7 +408,6 @@
       <RootComponent type="61" schemaName="sprk_createworkassignmentwizard" behavior="0" />
       <RootComponent type="61" schemaName="sprk_dailyupdate" behavior="0" />
       <RootComponent type="61" schemaName="sprk_docscard" behavior="0" />
-      <RootComponent type="61" schemaName="sprk_DocumentDelete.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_DocumentOperations.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_documentrelationshipviewer" behavior="0" />
       <RootComponent type="61" schemaName="sprk_documentuploadwizard" behavior="0" />

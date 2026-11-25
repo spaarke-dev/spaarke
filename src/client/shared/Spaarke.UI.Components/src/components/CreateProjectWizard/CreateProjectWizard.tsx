@@ -179,7 +179,7 @@ export interface ICreateProjectWizardProps {
   resolveSpeContainerId?: () => Promise<string>;
   /**
    * AAD tenant ID. Forwarded to `EntityCreationService.indexUploadedFiles()` so
-   * post-upload RAG indexing via `@spaarke/sdap-client` can route to the
+   * post-upload RAG indexing via the SDAP client (`services/sdap`) can route to the
    * correct multi-tenant index. When omitted, indexing is skipped (files still
    * upload to SPE successfully). Typically sourced from solution
    * `config.tenantId` in `main.tsx`.
@@ -808,7 +808,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               }
 
               // Trigger RAG indexing per file (canonical sync OBO path via
-              // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal —
+              // SdapApiClient.indexFile in services/sdap). Non-fatal —
               // file uploads already succeeded; indexing is best-effort. No index is named (task 022, as task 021
               // fix round 1): the server's FileIndexRequest has no searchIndexName, the index follows the content
               // type (FR-40).

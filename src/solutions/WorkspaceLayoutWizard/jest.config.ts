@@ -10,7 +10,7 @@ import type { Config } from 'jest';
  * Modeled after `src/solutions/SpaarkeAi/jest.config.ts` (established pattern
  * for Vite React 18 Code Pages). Simplified because the wizard's dependency
  * graph is smaller — only @spaarke/ui-components + @spaarke/auth are used,
- * and no shared-lib mocks (marked, d3-force, sdap-client) are needed.
+ * and the only shared-lib mocks are `marked` and `d3-force`.
  *
  * Tests are placed alongside components in __tests__ directories.
  * Module mapping resolves @spaarke/* packages to their source trees so
@@ -42,12 +42,6 @@ const config: Config = {
     // marked.esm.js parse time. Map to a pass-through stub. (Pattern proven
     // in SpaarkeAi — R6 Hotfix Wave B-G9c3.)
     '^marked$': '<rootDir>/src/__mocks__/marked.ts',
-    // `@spaarke/sdap-client` ships from dist/ as ESM. Every test transitively
-    // importing @spaarke/ui-components/services (barrel) hits
-    // EntityCreationService.ts which imports `SdapApiClient` — parse fails at
-    // dist/index.js `export { ... }`. Map to a tiny stub. (Pattern proven in
-    // SpaarkeAi — R6 Wave C-G3.)
-    '^@spaarke/sdap-client$': '<rootDir>/src/__mocks__/sdap-client.ts',
     // Dedupe React — the workspace-linked shared libraries each have their own
     // node_modules/react copy. Without forcing a single instance, hooks fail
     // with "Cannot read properties of null (reading 'useRef')" because the
