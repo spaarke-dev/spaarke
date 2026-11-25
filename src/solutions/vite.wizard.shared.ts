@@ -31,7 +31,6 @@ function resolveSharedLibDeps(pageDir: string): import("vite").Plugin {
   const sharedLibPaths = [
     path.resolve(sharedRoot, "Spaarke.UI.Components/src"),
     path.resolve(sharedRoot, "Spaarke.Auth/src"),
-    path.resolve(sharedRoot, "Spaarke.SdapClient/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(pageDir, "node_modules");
@@ -76,7 +75,6 @@ export function createWizardViteConfig(pageDir: string) {
           path.resolve(sharedRoot, "Spaarke.UI.Components/src/**/*.ts"),
           path.resolve(sharedRoot, "Spaarke.Auth/src/**/*.tsx"),
           path.resolve(sharedRoot, "Spaarke.Auth/src/**/*.ts"),
-          path.resolve(sharedRoot, "Spaarke.SdapClient/src/**/*.ts"),
         ],
       }),
       // Inline all JS/CSS into HTML for simple Dataverse web resource deployment
@@ -87,7 +85,6 @@ export function createWizardViteConfig(pageDir: string) {
         "@": path.resolve(pageDir, "./src"),
         "@spaarke/ui-components": path.resolve(sharedRoot, "Spaarke.UI.Components/src"),
         "@spaarke/auth": path.resolve(sharedRoot, "Spaarke.Auth/src"),
-        "@spaarke/sdap-client": path.resolve(sharedRoot, "Spaarke.SdapClient/src"),
         "@fluentui/react-components": path.resolve(pageDir, "node_modules/@fluentui/react-components"),
         "@fluentui/react-icons": path.resolve(pageDir, "node_modules/@fluentui/react-icons"),
       },

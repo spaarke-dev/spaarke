@@ -20,7 +20,9 @@
 // plus S26 (task 268; ebilling-r1 task 166, EB-D-200): the shipped lock on the invoice amounts and firm, VERIFIED ONLY —
 // plus S27 (task 270; unified-access-control-r2 #2799): the shipped lock on the invoice family's core-record lookups and
 // invoice links, and S28 (task 270; field-mapping task 054b): the shipped lock on the message-access columns, both VERIFIED
-// ONLY (S26–S28 share CheckBffManagedColumnLockAsync).
+// ONLY (S26–S28 share CheckBffManagedColumnLockAsync) — plus S29 (ebilling-r1 DEF-059): the BFF's two application users hold
+// "Spaarke Decision Record Reader" (Read on sprk_decisionrecord, nothing else), shipped in SpaarkeMaster 1.3.1.0; the role's
+// one privilege and its holders are verified only, and only the user-to-role association is written.
 // Every step READS first and writes only what is missing, so a second run against a configured environment performs no
 // write at all.
 //
@@ -36,7 +38,7 @@
 //      application users → S16 identity-link reader profile ↔ every default team but the ontology writer unit's → S17
 //      identity-link writer profile ↔ the BFF's application users → S20 standing-grant profile → S23 runtime role → S24
 //      ontology writer role (its unit's copy) and profiles → S25 "Spaarke Basic User" on the customer unit's default team
-//      → S13 NULL flags.
+//      → S29 "Spaarke Decision Record Reader" on the BFF's application users → S13 NULL flags.
 //   3. Verify (S9): re-read the end state; anything but the codified state is a refusal.
 //
 // IDENTITY-LINK WRITERS. The BFF writes contact.sprk_externalobjectid and systemuser.sprk_primarycontact app-only with
@@ -313,6 +315,45 @@ public sealed class SecureRecordSetupProcedure
     /// ontology tables. Only application users may hold it: no team and no interactive user.
     /// </summary>
     public const string OntologyServiceRoleName = "Spaarke Ontology Service";
+
+    /// <summary>
+    /// S29 (ebilling-r1 DEF-059): the role (shipped in SpaarkeMaster 1.3.1.0, copied into every unit) that gives the BFF's two
+    /// application users organization-wide Read on <c>sprk_decisionrecord</c> and nothing else. Only those two users may hold it
+    /// (never a person, a team, or another application user such as the ontology writer); it is assigned beside System
+    /// Administrator, which is never removed.
+    /// </summary>
+    public const string DecisionRecordReaderRoleName = "Spaarke Decision Record Reader";
+
+    /// <summary>S29: the one privilege the reader role holds (the role file and the role-privilege expectations pin the same).</summary>
+    public const string DecisionRecordReaderPrivilege = "prvReadsprk_DecisionRecord";
+
+    /// <summary>S29: the depth it holds it at.</summary>
+    public const string DecisionRecordReaderPrivilegeDepth = "Global";
+
+    /// <summary>S29: the SpaarkeMaster release that first ships the reader role.</summary>
+    public const string DecisionRecordReaderRoleMinimumRelease = "1.3.1.0";
+
+    /// <summary>
+    /// S29: the privileges the PLATFORM adds to a Spaarke role, which the exact-set check tolerates and reports on the
+    /// "Spaarke Decision Record Reader" root role at any depth (they are never required, never stripped here, and any other
+    /// privilege is still drift). Source: ebilling-r1 notes/120-billing-admin-role.md ("Platform defaults on the role" —
+    /// Dataverse puts the 5 plugin-metadata reads on every role it creates; <c>AddPrivilegesRole</c> re-injects the SharePoint
+    /// four, docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md section 5.4) and the same 9 names pinned in
+    /// scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1 (<c>$PlatformDefaults</c>). The four SharePoint privileges were
+    /// observed on the managed stamp ACME after a SpaarkeMaster 1.3.2.1 import (all Global).
+    /// </summary>
+    public static readonly IReadOnlyList<string> DecisionRecordReaderPlatformAddedPrivileges =
+    [
+        "prvReadPluginAssembly",
+        "prvReadPluginType",
+        "prvReadSdkMessage",
+        "prvReadSdkMessageProcessingStep",
+        "prvReadSdkMessageProcessingStepImage",
+        "prvCreateSharePointData",
+        "prvReadSharePointData",
+        "prvWriteSharePointData",
+        "prvReadSharePointDocument",
+    ];
 
     /// <summary>
     /// Task 267 (#2618): the business unit the ontology writer's application user lives in, ALONE — a direct child of the
@@ -1460,6 +1501,95 @@ public sealed class SecureRecordSetupProcedure
         }
         var customerDefaultTeamRoles = await dv.ListTeamRolesAsync(t, customerDefaultTeam.Id, ct).ConfigureAwait(false);
 
+        // S29 (read half, ebilling-r1 DEF-059) — the BFF's two application users hold the customer-unit copy of "Spaarke Decision
+        // Record Reader" (Read on sprk_decisionrecord at Global, plus only the platform-added privileges in DecisionRecordReaderPlatformAddedPrivileges). The rules of
+        // scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1: the role in the ROOT unit holds that one privilege at Global and nothing outside the platform-added allow-list; any
+        // holder that is not one of the two BFF users (a person, another application user, a team) is drift. Verified only:
+        // this procedure strips a privilege from a role it creates (S6), never from one SpaarkeMaster ships, and removes no
+        // holder. Every refusal is before any write.
+        var readerRootRoles = await dv.FindRolesAsync(t, DecisionRecordReaderRoleName, root.Id, ct).ConfigureAwait(false);
+        if (readerRootRoles.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleUnresolved,
+                $"The root business unit has {readerRootRoles.Count} roles named '{DecisionRecordReaderRoleName}' (expected exactly " +
+                $"one). It ships in SpaarkeMaster {DecisionRecordReaderRoleMinimumRelease} or later: import SpaarkeMaster (H6), then " +
+                "resume. Nothing was written.");
+        }
+        var readerPrivilegeProblems = new List<string>();
+        var readerHeld = await dv.GetRolePrivilegesAsync(t, readerRootRoles[0].Id, ct).ConfigureAwait(false);
+        if (readerHeld.Count(h => Same(h.Name, DecisionRecordReaderPrivilege) && Same(h.Depth, DecisionRecordReaderPrivilegeDepth)) != 1)
+        {
+            readerPrivilegeProblems.Add($"it does not hold {DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth}");
+        }
+        var readerTolerated = readerHeld
+            .Where(h => DecisionRecordReaderPlatformAddedPrivileges.Any(p => Same(p, h.Name)))
+            .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        readerPrivilegeProblems.AddRange(readerHeld
+            .Where(h => !Same(h.Name, DecisionRecordReaderPrivilege)
+                        && !DecisionRecordReaderPlatformAddedPrivileges.Any(p => Same(p, h.Name)))
+            .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(NamedPrincipalLimit)
+            .Select(h => $"it holds {h.Name ?? h.PrivilegeId.ToString()} at {h.Depth}, outside its one-privilege set"));
+        if (readerPrivilegeProblems.Count > 0)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift,
+                $"The '{DecisionRecordReaderRoleName}' role ({readerRootRoles[0].Id}) is not " +
+                $"{DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth} plus only the platform-added privileges: {string.Join("; ", readerPrivilegeProblems)}. " +
+                "H7b changes no privilege of a role SpaarkeMaster ships: run " +
+                "scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -EnvironmentUrl <stamp> -BffApplicationIds <app-ids> -Apply " +
+                "(it strips what Dataverse added outside the declared privilege), then -Verify, then resume. Nothing was written.");
+        }
+        if (readerTolerated.Length > 0)
+        {
+            // Reported, not failed: the platform adds these to every Spaarke role; this step is verify-only on a managed role.
+            notes.Add($"'{DecisionRecordReaderRoleName}': tolerated platform-added privileges (verify-only, not stripped): " +
+                      string.Join(", ", readerTolerated.Select(h => $"{h.Name} at {h.Depth}")) + ".");
+        }
+        var readerHolderProblems = new List<string>();
+        foreach (var copy in await dv.FindRoleCopiesAsync(t, DecisionRecordReaderRoleName, ct).ConfigureAwait(false))
+        {
+            var holderTeams = await dv.ListRoleTeamHoldersAsync(t, copy.Id, ct).ConfigureAwait(false);
+            if (holderTeams.Count > 0)
+            {
+                readerHolderProblems.Add($"teams [{Ids(holderTeams)}] hold the copy {copy.Id}");
+            }
+            var foreignUsers = (await dv.ListRoleUsersAsync(t, copy.Id, ct).ConfigureAwait(false))
+                .Where(u => !bffUsers.Contains(u.UserId))
+                .ToArray();
+            if (foreignUsers.Length > 0)
+            {
+                readerHolderProblems.Add(
+                    $"{string.Join(", ", foreignUsers.Take(NamedPrincipalLimit).Select(u => u.ApplicationId is null ? $"person {u.UserId}" : $"application user {u.UserId}"))} " +
+                    $"hold the copy {copy.Id}");
+            }
+        }
+        if (readerHolderProblems.Count > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleForeignHolder,
+                $"'{DecisionRecordReaderRoleName}' may be held only by the BFF's two application users, but " +
+                string.Join("; ", readerHolderProblems) +
+                ". Who holds the role is an operator decision; nothing is removed here. Nothing was written.");
+        }
+        var readerCopies = await dv.FindRolesAsync(t, DecisionRecordReaderRoleName, customerUnit.Id, ct).ConfigureAwait(false);
+        if (readerCopies.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleUnresolved,
+                $"Business unit '{customerUnit.Name}' ({customerUnit.Id}) has {readerCopies.Count} roles named " +
+                $"'{DecisionRecordReaderRoleName}' (expected exactly one). It ships in SpaarkeMaster " +
+                $"{DecisionRecordReaderRoleMinimumRelease} or later: import SpaarkeMaster (H6), then resume (Dataverse copies a root " +
+                "role into a unit asynchronously). Nothing was written.");
+        }
+        var readerCopyId = readerCopies[0].Id;
+        var readerPending = new List<Guid>();
+        foreach (var bffUser in bffUsers)
+        {
+            if ((await dv.ListUserRolesAsync(t, bffUser, ct).ConfigureAwait(false)).All(r => r.Id != readerCopyId))
+            {
+                readerPending.Add(bffUser);
+            }
+        }
+
         // S13 (read half) — the tables carrying the lock, and their identity for the NULL-flag repair.
         var lockedIdentities = new List<SecureSetupTableIdentity>(lockedTables.Length);
         foreach (var table in lockedTables)
@@ -1657,6 +1787,14 @@ public sealed class SecureRecordSetupProcedure
                 () => dv.AssociateTeamRoleAsync(t, customerDefaultTeam.Id, basicUserRole.Id, ct)).ConfigureAwait(false);
         }
 
+        // S29 - each BFF application user (the app registration's and the managed identity's) holds the customer-unit copy of
+        // "Spaarke Decision Record Reader", beside System Administrator. Only the missing association is written; nothing is removed.
+        foreach (var bffUser in readerPending)
+        {
+            await Write($"give BFF application user {bffUser} the role '{DecisionRecordReaderRoleName}' (its unit's copy {readerCopyId})",
+                () => dv.AssociateUserRoleAsync(t, bffUser, readerCopyId, ct)).ConfigureAwait(false);
+        }
+
         // S13 — no NULL secure flag may remain (a new environment has none; an upgraded one has the pre-column rows). It
         // runs before the BFF deploy because H9 waits for H7b, and a task-150 BFF refuses an EMPTY flag.
         foreach (var table in lockedIdentities)
@@ -1686,6 +1824,16 @@ public sealed class SecureRecordSetupProcedure
         {
             problems.Add($"the customer unit's default team {customerDefaultTeam.Id} does not hold '{BasicUserRoleName}' " +
                          $"({basicUserRole.Id}) after it was given");
+        }
+        // S29 verify: every BFF application user shows the reader role (missing = a write not yet visible, Resumable).
+        var readerNotHeld = new List<Guid>();
+        foreach (var bffUser in bffUsers)
+        {
+            if ((await dv.ListUserRolesAsync(t, bffUser, ct).ConfigureAwait(false)).All(r => r.Id != readerCopyId))
+            {
+                readerNotHeld.Add(bffUser);
+                problems.Add($"BFF application user {bffUser} does not hold '{DecisionRecordReaderRoleName}' ({readerCopyId}) after it was assigned");
+            }
         }
         var ontologyNotHeld = (await dv.ListUserRolesAsync(t, runtimeUser, ct).ConfigureAwait(false)).All(r => r.Id != ontologyRoleId);
         if (ontologyNotHeld)
@@ -1743,6 +1891,8 @@ public sealed class SecureRecordSetupProcedure
             return Refuse(FailureClass.Resumable,
                 ontologyNotHeld && problems.Count == 1
                     ? SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld
+                    : readerNotHeld.Count > 0 && readerNotHeld.Count == problems.Count
+                        ? SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleNotHeld
                     : writerProblems.Count == problems.Count
                         ? SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured
                         : SecureRecordSetupRejectionCodes.VerifyFailed,

@@ -32,8 +32,6 @@
       "@spaarke/daily-briefing-components/*": ["../../client/shared/Spaarke.DailyBriefing.Components/src/*"],
       "@spaarke/compose-components": ["../../client/shared/Spaarke.Compose.Components/src/index.ts"],
       "@spaarke/compose-components/*": ["../../client/shared/Spaarke.Compose.Components/src/*"],
-      "@spaarke/sdap-client": ["../../client/shared/Spaarke.SdapClient/src/index.ts"],
-      "@spaarke/sdap-client/*": ["../../client/shared/Spaarke.SdapClient/src/*"],
       "*": ["./node_modules/@types/*", "./node_modules/*"]
     },
     "typeRoots": ["./node_modules/@types"],

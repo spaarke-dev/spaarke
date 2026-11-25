@@ -24,8 +24,6 @@ module.exports = {
     '^@spaarke/ui-components/(.*)$': '<rootDir>/../../shared/Spaarke.UI.Components/src/$1',
     '^@fluentui/react-components$': '<rootDir>/node_modules/@fluentui/react-components',
     '^@fluentui/react-icons$': '<rootDir>/node_modules/@fluentui/react-icons',
-    // Reached only through the type graph today (EntityCreationService); mapped so a future runtime import resolves.
-    '^@spaarke/sdap-client$': '<rootDir>/../../shared/Spaarke.SdapClient/src/index.ts',
     // One lexical for every package that imports it (see `modulePaths`).
     '^lexical$': '<rootDir>/node_modules/lexical',
     '^react$': '<rootDir>/node_modules/react',

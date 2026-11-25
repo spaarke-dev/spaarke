@@ -143,8 +143,9 @@ describe('cross-surface parity (import graph)', () => {
     'utf8'
   );
 
+  // The quick-add lives in the shared board since #2907 (the SmartTodo code page's fork was removed).
   const smartToDoSrc = fs.readFileSync(
-    path.join(repoRoot, 'src/solutions/SmartTodo/src/components/SmartToDo.tsx'),
+    path.join(repoRoot, 'src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/SmartToDo.tsx'),
     'utf8'
   );
 

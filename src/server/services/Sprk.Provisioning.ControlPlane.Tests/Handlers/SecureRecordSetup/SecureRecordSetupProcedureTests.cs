@@ -1684,9 +1684,10 @@ public sealed class SecureRecordSetupProcedureTests
         var outcome = await RunAsync(dv);
 
         var applied = outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
-        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId }, "the copy in the user's own (customer) business unit");
-        dv.UserRoles.Should().NotContainKey(dv.BffAppUser, "only the managed identity's application user gets the role");
-        dv.Writes.Should().ContainSingle(w => w.StartsWith($"AssociateUserRole {dv.MiAppUser}", StringComparison.Ordinal));
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId, dv.DecisionReaderRoleId },
+            "the copy in the user's own (customer) business unit (and, since S29, the Decision Record Reader copy)");
+        dv.UserRoles[dv.BffAppUser].Should().NotContain(dv.OntologyRoleId, "only the managed identity's application user gets the ontology role");
+        dv.Writes.Should().ContainSingle(w => w.StartsWith($"AssociateUserRole {dv.MiAppUser} {dv.OntologyRoleId}", StringComparison.Ordinal));
         applied.Actions.Should().Contain($"give BFF runtime user {dv.MiAppUser} the role '{OntologyRole}'");
     }
 
@@ -1699,7 +1700,7 @@ public sealed class SecureRecordSetupProcedureTests
         var outcome = await RunAsync(dv);
 
         outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
-        dv.Writes.Should().NotContain(w => w.StartsWith($"AssociateUserRole {dv.MiAppUser}", StringComparison.Ordinal));
+        dv.Writes.Should().NotContain(w => w.StartsWith($"AssociateUserRole {dv.MiAppUser} {dv.OntologyRoleId}", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1811,8 +1812,9 @@ public sealed class SecureRecordSetupProcedureTests
         var outcome = await RunAsync(dv);
 
         outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
-        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId }, "an application user may hold it and is left alone");
-        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId, dv.DecisionReaderRoleId },
+            "an application user may hold it and is left alone (S29 adds the Decision Record Reader copy)");
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId, dv.DecisionReaderRoleId });
         dv.Writes.Should().NotContain(w => w.Contains(dv.BffAppUser.ToString(), StringComparison.Ordinal) && w.Contains(dv.OntologyRoleId.ToString(), StringComparison.Ordinal));
     }
 
@@ -1820,6 +1822,7 @@ public sealed class SecureRecordSetupProcedureTests
     public async Task S23_AssociationThatDoesNotStick_FailsTheStep_WithTheNotHeldCode()
     {
         var dv = NewEnv();
+        dv.UserRoles[dv.MiAppUser] = [dv.DecisionReaderRoleId]; // S29 is satisfied, so only the S23 association is the problem
         dv.UserRoleAssociationsIgnoredFor.Add(dv.MiAppUser);
 
         var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld, FailureClass.Resumable);
@@ -2388,6 +2391,309 @@ public sealed class SecureRecordSetupProcedureTests
         var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable);
 
         refused.Diagnostic.Should().Contain(BasicUser).And.Contain(dv.CustomerDefaultTeamId.ToString());
+    }
+
+    // ------------------------------------------------------------ S29 (DEF-059): Decision Record Reader on the BFF's application users
+
+    private static readonly string DecisionReader = SecureRecordSetupProcedure.DecisionRecordReaderRoleName;
+
+    [Fact]
+    public async Task S29_GivesBothBffApplicationUsersTheirOwnUnitsCopyOfTheReader_AndNobodyElse()
+    {
+        var dv = NewEnv();
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        dv.UserRoles[dv.BffAppUser].Should().Contain(dv.DecisionReaderRoleId, "the customer-unit copy, in the user's own unit");
+        dv.UserRoles[dv.MiAppUser].Should().Contain(dv.DecisionReaderRoleId);
+        dv.Writes.Should().Contain($"AssociateUserRole {dv.BffAppUser} {dv.DecisionReaderRoleId}");
+        dv.Writes.Should().Contain($"AssociateUserRole {dv.MiAppUser} {dv.DecisionReaderRoleId}");
+        applied.Actions.Count(a => a.Contains(DecisionReader, StringComparison.Ordinal)).Should().Be(2);
+        dv.UserRoles.Values.SelectMany(r => r).Should().NotContain(new[] { dv.RootDecisionReaderRoleId, dv.WriterDecisionReaderRoleId },
+            "neither the root copy nor another unit's copy is ever assigned");
+        dv.UserRoles.GetValueOrDefault(dv.WriterAppUser, []).Should().NotContain(dv.DecisionReaderRoleId, "the ontology writer is never given it");
+        dv.TeamRoles.Values.SelectMany(r => r).Should().NotContain(new[] { dv.RootDecisionReaderRoleId, dv.DecisionReaderRoleId, dv.WriterDecisionReaderRoleId });
+        dv.Writes.Should().NotContain(w => w.StartsWith("Disassociate", StringComparison.Ordinal)
+                                           && (w.Contains(dv.RootDecisionReaderRoleId.ToString(), StringComparison.Ordinal)
+                                               || w.Contains(dv.DecisionReaderRoleId.ToString(), StringComparison.Ordinal)
+                                               || w.Contains(dv.WriterDecisionReaderRoleId.ToString(), StringComparison.Ordinal)),
+            "S29 removes nothing");
+    }
+
+    [Fact]
+    public async Task S29_RoleAlreadyHeldByBoth_WritesNothingForIt()
+    {
+        var dv = NewEnv();
+        dv.UserRoles[dv.BffAppUser] = [dv.DecisionReaderRoleId];
+        dv.UserRoles[dv.MiAppUser] = [dv.DecisionReaderRoleId];
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.Writes.Should().NotContain(w => w.Contains(dv.DecisionReaderRoleId.ToString(), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S29_OneUserAlreadyHoldingIt_OnlyTheOtherIsWritten()
+    {
+        var dv = NewEnv();
+        dv.UserRoles[dv.BffAppUser] = [dv.DecisionReaderRoleId];
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.Writes.Should().NotContain($"AssociateUserRole {dv.BffAppUser} {dv.DecisionReaderRoleId}");
+        dv.Writes.Should().Contain($"AssociateUserRole {dv.MiAppUser} {dv.DecisionReaderRoleId}");
+    }
+
+    [Fact]
+    public async Task S29_DryRun_PlansTheAssignments_WithoutWriting()
+    {
+        var dv = NewEnv();
+
+        var plan = (await RunAsync(dv, dryRun: true)).Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
+
+        plan.Count(a => a.Contains(DecisionReader, StringComparison.Ordinal)).Should().Be(2);
+        dv.UserRoles.GetValueOrDefault(dv.BffAppUser, []).Should().NotContain(dv.DecisionReaderRoleId);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("root")]
+    [InlineData("copy0")]
+    [InlineData("copy2")]
+    public async Task S29_RoleNotShipped_IsResumable_NamingTheSpaarkeMasterRelease_AndWritesNothing(string missing)
+    {
+        var dv = NewEnv();
+        switch (missing)
+        {
+            case "root":
+                dv.Roles.RemoveAll(r => r.Name == DecisionReader);
+                break;
+            case "copy0":
+                dv.Roles.RemoveAll(r => r.Id == dv.DecisionReaderRoleId);
+                break;
+            default:
+                dv.AddRole(dv.CustomerUnitId, DecisionReader, parentRootRoleId: dv.RootDecisionReaderRoleId);
+                break;
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(DecisionReader).And.Contain("1.3.1.0").And.Contain("H6");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S29_RootRoleWithAnExtraPrivilege_IsResumable_NamingTheScript_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = ("prvReadsprk_matter", "Basic");
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("prvReadsprk_matter").And.Contain("Set-BffDecisionRecordReaderRole.ps1");
+        dv.Writes.Should().BeEmpty("H7b removes no privilege from a role SpaarkeMaster ships");
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId].Should().HaveCount(2);
+    }
+
+    private static readonly string[] AcmeSharePointFour =
+        ["prvReadSharePointDocument", "prvReadSharePointData", "prvWriteSharePointData", "prvCreateSharePointData"];
+
+    [Fact]
+    public async Task S29_RootRoleWithTheAcmeFivePrivilegeSet_Passes_ReportsTheFourPlatformAdded_AndWritesNoStrip()
+    {
+        // The managed stamp ACME after a SpaarkeMaster 1.3.2.1 import: the declared privilege plus the SharePoint four, all Global.
+        var dv = NewEnv();
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        var note = applied.State.Notes!.Should().ContainSingle(n => n.Contains("tolerated platform-added", StringComparison.Ordinal)).Subject;
+        note.Should().Contain(DecisionReader);
+        foreach (var name in AcmeSharePointFour)
+        {
+            note.Should().Contain($"{name} at Global");
+        }
+        note.Should().NotContain(SecureRecordSetupProcedure.DecisionRecordReaderPrivilege, "the declared privilege is not 'platform-added'");
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId].Should().HaveCount(5, "S29 is verify-only: nothing is stripped");
+        dv.Writes.Should().NotContain(w => w.Contains(dv.RootDecisionReaderRoleId.ToString(), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S29_RootRoleHoldingOnlyTheDeclaredPrivilege_ReportsNoToleratedPrivileges()
+    {
+        var applied = (await RunAsync(NewEnv())).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes.Should().NotContain(n => n.Contains("tolerated platform-added", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("Basic")]
+    [InlineData("Local")]
+    [InlineData("Deep")]
+    public async Task S29_ToleratedPlatformPrivilege_IsTolerated_AtAnyDepth(string depth)
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = ("prvReadPluginAssembly", depth);
+
+        var applied = (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+
+        applied.State.Notes!.Should().ContainSingle(n => n.Contains($"prvReadPluginAssembly at {depth}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S29_ExtraPrivilegeOutsideTheAllowList_BesideTheTolerated_IsDrift_NamingOnlyTheNonAllowListed()
+    {
+        var dv = NewEnv();
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = ("prvWritesprk_DecisionRecord", "Global");
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("prvWritesprk_DecisionRecord at Global");
+        refused.Diagnostic.Should().NotContain("prvReadSharePointData at", "a tolerated privilege is not named as drift");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S29_DeclaredPrivilegeMissing_WithTheTolerated_IsDrift()
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId].Clear();
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("does not hold prvReadsprk_DecisionRecord at Global");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S29_DeclaredPrivilegeAtLocal_WithTheTolerated_IsDrift()
+    {
+        var dv = NewEnv();
+        var declared = dv.RolePrivileges[dv.RootDecisionReaderRoleId].Single();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][declared.Key] = (declared.Value.Name, "Local");
+        foreach (var name in AcmeSharePointFour)
+        {
+            dv.RolePrivileges[dv.RootDecisionReaderRoleId][Guid.NewGuid()] = (name, "Global");
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("does not hold prvReadsprk_DecisionRecord at Global");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void S29_PlatformAddedAllowList_IsExactlyTheNineNamedInTheEbillingNotes_AndExcludesTheDeclaredPrivilege()
+    {
+        SecureRecordSetupProcedure.DecisionRecordReaderPlatformAddedPrivileges.Should().BeEquivalentTo(
+            "prvReadPluginAssembly", "prvReadPluginType", "prvReadSdkMessage", "prvReadSdkMessageProcessingStep",
+            "prvReadSdkMessageProcessingStepImage", "prvCreateSharePointData", "prvReadSharePointData",
+            "prvWriteSharePointData", "prvReadSharePointDocument");
+        SecureRecordSetupProcedure.DecisionRecordReaderPlatformAddedPrivileges.Should()
+            .NotContain(SecureRecordSetupProcedure.DecisionRecordReaderPrivilege);
+    }
+
+    [Theory]
+    [InlineData("Basic")]
+    [InlineData("Deep")]
+    [InlineData("Local")]
+    public async Task S29_RootRoleHoldingItsPrivilegeBelowGlobal_IsResumable_AndWritesNothing(string depth)
+    {
+        var dv = NewEnv();
+        var privilege = dv.RolePrivileges[dv.RootDecisionReaderRoleId].Single();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId][privilege.Key] = (privilege.Value.Name, depth);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("prvReadsprk_DecisionRecord").And.Contain("Global");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S29_RootRoleHoldingNothing_IsResumable_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.RootDecisionReaderRoleId].Clear();
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift, FailureClass.Resumable);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("person")]
+    [InlineData("otherAppUser")]
+    [InlineData("team")]
+    [InlineData("holderOfAnotherUnitsCopy")]
+    public async Task S29_AnyOtherHolder_IsDrift_Reported_NeverRemoved_AndNothingIsWritten(string holder)
+    {
+        var dv = NewEnv();
+        Guid foreign;
+        switch (holder)
+        {
+            case "person":
+                foreign = dv.AddUser(dv.CustomerUnitId, isApplicationUser: false);
+                dv.UserRoles[foreign] = [dv.DecisionReaderRoleId];
+                break;
+            case "otherAppUser":
+                foreign = dv.AddUser(dv.CustomerUnitId, isApplicationUser: true);
+                dv.UserApplicationId[foreign] = Guid.NewGuid();
+                dv.UserRoles[foreign] = [dv.DecisionReaderRoleId];
+                break;
+            case "team":
+                foreign = dv.CustomerDefaultTeamId;
+                dv.TeamRoles[foreign].Add(dv.DecisionReaderRoleId);
+                break;
+            default:
+                // A person holding ANOTHER unit's copy is a holder too (every copy is checked, not only the customer unit's).
+                foreign = dv.AddUser(dv.RootUnitId, isApplicationUser: false);
+                dv.UserRoles[foreign] = [dv.WriterDecisionReaderRoleId];
+                break;
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleForeignHolder,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(foreign.ToString()).And.Contain(DecisionReader);
+        dv.Writes.Should().BeEmpty("the foreign holder is reported and never removed, and nothing else is written either");
+        (dv.UserRoles.Values.SelectMany(r => r).Concat(dv.TeamRoles.Values.SelectMany(r => r)))
+            .Should().Contain(id => id == dv.DecisionReaderRoleId || id == dv.WriterDecisionReaderRoleId, "the holder stays");
+    }
+
+    [Fact]
+    public async Task S29_SystemAdministrator_IsNeverTouched()
+    {
+        var dv = NewEnv();
+        var admin = dv.SystemAdministratorRoleIn(dv.CustomerUnitId);
+        dv.UserRoles[dv.BffAppUser] = [admin];
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { admin, dv.DecisionReaderRoleId });
+        dv.Writes.Should().NotContain(w => w.Contains(admin.ToString(), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S29_AssignmentThatDoesNotStick_FailsTheVerify_Resumable_WithItsOwnCode()
+    {
+        var dv = NewEnv();
+        dv.UserRoles[dv.MiAppUser] = [dv.OntologyRoleId]; // S23 is satisfied, so only the S29 association is the problem
+        dv.UserRoleAssociationsIgnoredFor.Add(dv.MiAppUser);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleNotHeld, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(dv.MiAppUser.ToString()).And.Contain(DecisionReader);
     }
 
     private static Guid SecureUnit(FakeSecureRecordSetupDataverse dv)

@@ -27,4 +27,11 @@ export interface ILookupItem {
    * so a resolved recipient carries its typed identity through to the caller.
    */
   entityType?: 'contact' | 'systemuser';
+  /**
+   * An optional second line `LookupField` shows under {@link name} in its result list (for a person: their email), so two options
+   * with the same name can be told apart. Display only: the picked item's {@link id} is what a consumer commits. Absent: the option
+   * renders as the name alone, exactly as before, so every consumer that does not set it is unchanged.
+   * (spaarke-ontology-platform-r1 task 211, #3062.)
+   */
+  secondaryText?: string;
 }

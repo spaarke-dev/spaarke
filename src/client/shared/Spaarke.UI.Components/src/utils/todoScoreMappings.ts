@@ -13,10 +13,10 @@
  *
  * 1. **CreateTodoWizard** (`../components/CreateTodoWizard/CreateTodoStep.tsx`)
  *    — imports this module directly (same package).
- * 2. **SmartTodo Code Page quick-add** (`src/solutions/SmartTodo/src/components/SmartToDo.tsx`
- *    `handleAdd`) — imports this module via the `@spaarke/ui-components` barrel
- *    (SmartToDo already depends on `@spaarke/ui-components` for `KanbanBoard` /
- *    `OrientationToggle`, so no new cross-package dependency edge is introduced).
+ * 2. **Smart To Do quick-add** (`Spaarke.SmartTodo.Components/src/components/SmartToDo/SmartToDo.tsx`
+ *    `handleAdd`, used by the SmartTodo Code Page and LegalWorkspace since #2907) — imports this module via the
+ *    `@spaarke/ui-components` barrel (SmartToDo already depends on `@spaarke/ui-components` for `KanbanBoard`,
+ *    so no new cross-package dependency edge is introduced).
  * 3. **`sprk_todo` form OnChange webresource**
  *    (`src/client/webresources/js/sprk_todo_score_onchange.js`) — Dataverse
  *    webresources cannot import npm packages, so that file MIRRORS the two
