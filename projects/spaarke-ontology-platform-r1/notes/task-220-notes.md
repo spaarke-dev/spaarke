@@ -151,3 +151,27 @@ closed without telling anyone. Conflict check first: no open PR other than #3145
 - **Every Finish sends the same items.** Matter (`followOnActions.sendEmail.email`), Project, Event, To Do
   (`context.followOn.email`), Work Assignment (`service.sendEmail(..., email)`), Summarize, Document Email, Analysis and
   Report Card (`emailRef.current`) all pass the composed email itself, so a sent document is always kept.
+
+## Fix round 2 (independent review FAIL, 2026-11-25)
+
+- **F1-1 link-only items.** `buildBodyWithAttachmentLinks` writes a body link for every `linkSelected` item whether or
+  not it is attached, and Xrm hosts resolve it to the `sprk_document` row. A send now holds (and on a possible send
+  keeps) every attachment that has a document, attached or not, in both the composer (`send()`) and `sendComposedEmail`.
+- **F1-2 close during "Creating…".** WizardShell's window x is live during Finish, and every host creates its record
+  before `sendComposedEmail` runs. The gate gained holds: `holdComposedEmailUploadsDuring(emailRef.current, finish)`
+  holds the step's uploads from the first, synchronous moment of Finish; a delete asked for while held (the close hook,
+  or an unmount) is deferred and runs when the hold ends, unless the send kept the document. Wired at every host's
+  Finish (CreateRecordWizard, WorkAssignment, SummarizeFiles, DocumentEmail at `onFinish=`; CreateReportCard and
+  CreateAnalysisWizardWidget wrap their `config.onFinish`). WizardShell is unchanged (task 219's behaviour kept).
+- **F1-3 retry releases earlier keeps.** There is no release any more: `keepUploads` is permanent, and a send only holds
+  what it carries while it runs. A later refused attempt cannot undo an earlier possible send's keep (same effect as the
+  reviewer's "release only what this attempt newly kept", without a second bookkeeping list).
+- **F4-4.** Once an attempt may have sent the email, "Discard this email?" says only "What you have written will be lost."
+- **F4-5.** Tests for all three F1s, SENT_UNCONFIRMED in the composer and wizard paths, and a source-scan guard
+  (`src/__tests__/wizardEmailUploadCleanupGuard.test.ts`, must-fire and must-not-fire controls, live scan must find the 6
+  hosts) that fails when a host renders the step without the close hook or the Finish hold.
+- **K3 (real).** An untouched reply prefill with `&quot;` / `&#39;` and a `<style>` block prompted: the editor drops the
+  style text and writes entities back as characters. `bodyWords` now drops style/script blocks and decodes entities.
+- **K4 (known limit, recorded).** A 5xx still reads "Email not sent" while the cleanup treats 5xx as possibly sent. The
+  task's acceptance criteria pin the HTTP 500 wording ("an HTTP 500 keeps the existing wording"), so it is not a one-line
+  fix inside this task; the cleanup errs on the safe side (keeps the documents).
