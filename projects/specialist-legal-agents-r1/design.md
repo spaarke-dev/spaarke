@@ -1,6 +1,6 @@
 # Specialist Legal Agents — Program Design (`specialist-legal-agents-r1`)
 
-> **Status:** Draft v0.7, umbrella program design. **v0.7 (2026-11-25, owner):** the first specialist archetype is the **patent attorney**, not NDA (OD-2 amended); long-form drafting runs in Cowork and the area agent (OD-4); every attorney sees and edits their profile on a Dataverse-backed page (OD-5, §3.14); the surfaces model moved to `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (OD-6). **v0.6 (2026-11-23)** adds:
+> **Status:** Draft v0.7, umbrella program design. **v0.7 (2026-11-25, owner):** the first specialist archetype is the **patent attorney**, not NDA (OD-2 amended); long-form drafting runs in Cowork and the area agent (OD-4); every attorney sees and edits their profile on a Dataverse-backed page built on the existing `sprk_userprofile` (OD-5, §3.14, Fable reuse review); chaining is designed for but not built (D-A8, §3.15); the surfaces model moved to `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (OD-6). **v0.6 (2026-11-23)** adds:
 > - §0.5, the Ask/Do/Practice user model and agent-creation rule, from Copilot's synopsis with corrections;
 > - §3.12, the agent build paths, including the code we already have and the verdict on "Spaarke AI";
 > - the G8 result (an agent cannot use the tenant connector), with G8-P2, G9 and G10;
@@ -495,13 +495,49 @@ That avoids both the per-customer upload and the version lag we saw in V1. **G11
 - edit their own layer directly, and review the **proposed diffs** that the setup interview, conversational tuning, correction harvesting and exemplar analysis produce (§3.3);
 - see the golden-set result for a proposed diff before approving it, and the version history, with one-action rollback.
 
-Entity placement (a related `sprk_` profile entity 1:1 with `systemuser`, or columns on the user record) is a Phase 1 spec decision. A related entity is the likely answer, because the profile is versioned, layered and larger than a few columns. The page follows the code-page standards (Navigator registration, `docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md`).
+**Build on what exists** (Fable reuse review, 2026-11-25: [notes/profile-reuse-review-2026-11-25.md](notes/profile-reuse-review-2026-11-25.md)). A per-user profile entity already exists, and it already reaches the chat prompt:
+- **Anchor: `sprk_userprofile`.** It is already 1:1 with `systemuser` (alternate key `sprk_systemuser`), already on the SystemUser main form, and already holds `sprk_primaryrole`, `sprk_focusareas`, `sprk_assistantpreferences` and an N:N to `sprk_practicearea_ref`. `StatedProfileReader` already renders it into the chat context. It stays the attorney's entry point, and the page opens from it.
+- **Reuse as keys and ceilings, not copies:**
+  - `sprk_aipersona` (or the playbook's persona link) identifies the L1 archetype;
+  - `sprk_practicearea_ref` scopes L2, and `sprk_matter` scopes L4;
+  - position keys reuse `sprk_playbookcode` / `sprk_actioncode`;
+  - tool, model-tier and risk ceilings are read from the existing `sprk_analysistool` / `sprk_analysisaction` / `sprk_playbookconsumer` columns and `ConfirmationPolicyEngine`;
+  - exemplars use `sprk_analysisknowledge` and JPS `Examples`;
+  - conversational capture reuses the memory `Preference` items and their confirm step.
+- **Reuse as patterns:**
+  - versioning and one-step rollback from `sprk_procedureversion` and `sprk_policy` / `sprk_policyversion`;
+  - propose, then approve from `sprk_policyversion.sprk_proposalstatus` and `RuleSetService.DecideAsync`;
+  - the "Now / If saved now" dry run from `RecordProcedureReadService`;
+  - matter pinning from `sprk_procedureassignment`.
+- **Reuse for the page:** `MyAssistantDialog`, and the shared `DiffCompareView`, `DecisionRecords` and `Wizard` components, plus the `RuleReview` and `RecordProcedures` code pages as models.
+- **Do not reuse:**
+  - `PromptSchemaOverrideMerger` as the layer compiler (a lower layer could loosen anything; style only);
+  - `sprk_userprofile` columns for the profile body (client-written, so no ratchet or approval can be enforced);
+  - `sprk_userpreferences` (UI settings);
+  - Policy tables as storage (predicates);
+  - the session ledger as the run record (erasable).
+- **New, and only this:** one server-written entity pair modelled on the policy and procedure versions.
+  - `sprk_agentprofile` (one row per layer instance: layer, parent, archetype, practice area, user profile, matter, current version);
+  - `sprk_agentprofileversion` (immutable: status Draft / Proposed / Active / Superseded / Rejected, previous version, body JSON, diff source, golden-set result).
+
+  Also add a profile-version lookup and a parent-run lookup on the existing `sprk_playbookrun`. CLAUDE.md §11 is answered in the review note §3: without these, no run can record its profile version, rollback has no target, and a direct write could raise the attorney's own authority.
+
+The page follows the code-page standards (Navigator registration, `docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md`). Owner questions from the review are D-A18 (§12).
 
 **How the agent uses it.** A practice-area declarative agent's instructions are the same for every user. So the agent calls a tool that returns the attorney's **compiled** profile (all layers merged under the ratchet), and every run records the profile version (§3.1). Phase 0 must test whether Copilot follows instructions returned by a tool reliably enough (with G1 and G5).
 
 **Where it runs (OD-4).** Patent drafting is long-form document generation. It runs in **Cowork** (Word canvas beside the conversation) and in the **patents area agent's** session; engines that must also work outside Cowork live in the BFF (§3.11). Phase 0 adds a spike: draft a patent application section in Cowork from a test disclosure, using a skill plus the profile, and check that the output is a usable Word document.
 
 **Practice content does not exist yet.** Patents follows the §0.4 pattern: topic catalogue, baseline standards, references, golden-set cases (reviewed by a patent attorney), schemas, then functions and the archetype.
+
+### 3.15 Chaining agents: designed for, not built (owner, 2026-11-25)
+
+Later, agents will be chained. For example, an associate profile's draft is reviewed by a partner profile's agent, or one practice area's output feeds another's. Phase 1 does **not** build the supervision protocol (D-A8), but must not block it:
+- **Typed output.** Every function's output is a typed artifact (its output contract, §3.9) that another function can take as input. JPS already has `PromptSchema.PriorOutputReference`.
+- **Linked runs.** Each run records its own profile version and an optional parent run, so a chain is a tree of runs. Add a parent-run lookup on `sprk_playbookrun` (§3.14).
+- **The ratchet holds across a chain.** A downstream agent can never act with more authority than its own profile allows. An external effect still needs human review at the end of the chain (L0).
+- **Role is a profile setting** (§3.9), so "associate" and "supervising partner" are two profiles on the same archetype, not separate machinery.
+- **Intake.** The same linking applies when `spaarke-intake-pipeline-r1` runs a specialist inside a request run (`sprk_processingjob`).
 
 ## 4. Program structure (OD-3)
 
@@ -513,7 +549,7 @@ This folder is the umbrella. It holds this design, the decision log, the coordin
 | 1 | `specialist-legal-agents-patents-r1` (was `-nda-r1`; OD-2 amended 2026-11-25) | Role Profile schema, layer compiler with ratchet, Agent Instance, the profile page (OD-5), **patent-attorney archetype** end to end (Cowork + the area agent, OD-4), run ledger binding | Patent golden set passes for two attorney profiles; ratchet tests pass |
 | 2 | `specialist-legal-agents-tuning-r1` | Profile diff review, golden-set gate, versioning and rollback, then correction harvesting and the Coach | Diff-gate eval; no silent change path |
 | 3 | `specialist-legal-agents-governance-r1` | Agent 365 plugin governance, background identity (after T-2), per-archetype budgets (ADR-016), dashboards. **Autonomous NDA intake moved out (owner, 2026-11-25)** to `spaarke-intake-pipeline-r1` (#3128; design on `work/spaarke-intake-pipeline-r1`); this program supplies the NDA specialist and profiles to its NDA harness | Owner and counsel sign-off on autonomy |
-| 4 | `specialist-legal-agents-archetypes-r1` | Further archetypes (commercial contracts, with NDA review as a function; CRE partner), the supervision protocol if not pulled into Phase 1 (D-A8), L2 firm-policy editor, template distribution | — |
+| 4 | `specialist-legal-agents-archetypes-r1` | Further archetypes (commercial contracts, with NDA review as a function; CRE partner), agent chaining and the supervision protocol (D-A8, §3.15), L2 firm-policy editor, template distribution | — |
 
 Slugs are proposals, to be confirmed when each child is created. Phase 0's design is §7–§8 of this document.
 
@@ -533,6 +569,16 @@ Slugs are proposals, to be confirmed when each child is created. Phase 0's desig
 **Not adopted:** Copilot Studio as the agent environment; Copilot memory as a profile store; dependence on Cowork invoking declarative agents (Frontier private preview); auto-send before counsel's view on supervision and privilege.
 
 ## 6. Primitives — corrected against code `[Code]`
+
+> **Corrected 2026-11-25** by the Fable reuse review ([notes/profile-reuse-review-2026-11-25.md](notes/profile-reuse-review-2026-11-25.md) §4). The table below predates it:
+> - "Agent Instance: Absent" and "Role Profile: no per-user overlay, 0 hits" are **wrong**. `sprk_userprofile`, `StatedProfileReader`, `PreferenceDirectiveProducer` and user-scope memory exist.
+> - `PromptSchema` is in `Services/Ai/Models/`.
+> - The playbook entity is `sprk_analysisplaybook` (not `sprk_aiplaybook`).
+> - `GateDecisionRecordJob` records the communications gate, not the chat confirmation gate.
+> - Ontology-area Procedures are document-only in R1.
+> - `sprk_playbookrun` / `sprk_playbooknoderun` exist but the BFF never writes them.
+>
+> §3.14 holds the current reuse plan.
 
 The inventory ran on 2026-11-23 against master `1aedc9ea74` (read-only `code-mapper` pass). Paths are relative to `src/server/api/Sprk.Bff.Api/` unless stated otherwise. The verdicts are Exists, Partial, Absent and Design-only.
 
@@ -790,12 +836,13 @@ The paths are proposals. The human chooses the path for each tension before the 
 |---|---|---|---|
 | **D-A1** | **The Practice front door: coded declarative agent, Spaarke runtime agent, or both** (revised v0.6; §0.5, §3.12) | **Both, by tier.** The default is a **coded declarative agent with its own MCP action**: within the licence, alongside Microsoft's legal skills, generated from the persona definition, covered by A10. Add a **Spaarke runtime agent** for T3 governed work, where the profile is enforced in code, as an optional **Chat/Teams-only** channel: G9 found custom engine agents are not supported in Word or Outlook and are undocumented in Cowork. Copilot Studio only if G10 shows a capability the coded agent lacks. Agent Builder is out (G8). Ask/Do need **no** agent | **Owner**, after G1 and G8-P2 (G9 done 2026-11-23; G10 if run) |
 | D-A2 | Identity for chat vs background | Delegated attorney for chat (T5 ✅); background per T-1/T-2 | ADR-028 owners |
-| D-A3 | Profile storage | One versioned JSON document with indexed header fields | Phase 1 spec |
+| D-A3 | Profile storage | One versioned JSON body per layer version, in a new server-written `sprk_agentprofile` / `sprk_agentprofileversion` pair, anchored on the existing `sprk_userprofile` (§3.14, reuse review 2026-11-25) | Phase 1 spec; D-A18 first |
 | D-A4 | Consent and privilege for correction harvesting | Owner-scoped, matter-restricted, opt-in per matter | Counsel + owner, Phase 2 |
 | D-A5 | Per-agent pricing and Agent 365 licensing | `[Verify]` with Microsoft contacts; Copilot licence required (T11); Cowork 185 credits per library review (accelerator POC) | Owner |
 | D-A6 | Firm-authored Copilot Studio agents as A2A peers | Defer to Phase 4 | — |
 | **D-A7** | **Where profile application and gates run** | **Server-side** (G1 variant c) unless G1 shows ≥ 95% adherence for (a)/(b). Recommended by the mcp-r1 session from T7/T3/T6 | **Owner, at the G1 gate.** Not yet decided |
-| D-A8 | Supervision protocol timing | **Re-open (2026-11-25):** with the patent attorney now first (OD-2 amended), decide whether Phase 1 includes an associate profile under a supervising partner, or the supervision protocol stays in Phase 4 | Owner |
+| D-A8 | Supervision protocol timing | **Decided 2026-11-25 (owner):** not in Phase 1 ("don't overly complicate"). The design must support chaining agents later (§3.15); the supervision protocol is built when chaining is | **Decided** |
+| **D-A18** | **Profile data questions from the reuse review** (notes/profile-reuse-review-2026-11-25.md §5) | (1) New `sprk_agentprofile` pair (recommended) vs extending the Procedure tables. (2) Archetype = `sprk_aipersona` row, template playbook, or an L1 profile row pointing at both. (3) If role drives authority, `sprk_primaryrole` can't stay self-declared. (4) Fold `sprk_assistantpreferences` / `sprk_focusareas` into L3 style, or keep them chat-only. (5) Where diff approvals are recorded. (6) Golden-set run as a BFF job over the existing JSON case files, or CI only. (7) Start writing `sprk_playbookrun` as the durable run record. (8) Position key: playbook/action code or `topics.yaml` IDs | Owner, before the Phase 1 spec |
 | D-A9 | Archetype vs Action Engine Template | Phase 1 defines Archetype minimally; the Action Engine adopts it if and when it resumes | Owner, with action-engine-r1 |
 | D-A10 | What "Skill" means here | Both: the `SKILL.md` package component (shared with the accelerator) and server-side `sprk_analysisskill` prompt fragments; name them differently in the spec | Phase 0 spec |
 | D-A11 | Ownership of the NDA declarative agent | This program owns the profile-driven NDA specialist (T2/T3, connector); the accelerator keeps the file-based packaged tiers (T0/T1) | **Decided 2026-11-24 (owner): split by layer.** Tell accelerator r1 |
