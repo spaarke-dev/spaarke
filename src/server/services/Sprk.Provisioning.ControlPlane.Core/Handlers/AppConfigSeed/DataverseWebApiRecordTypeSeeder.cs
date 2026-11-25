@@ -58,6 +58,11 @@ public sealed class DataverseWebApiRecordTypeSeeder : IAppConfigSeeder
         new RecordTypeSeedItem("contact", "Person", "Person", "PERS", "fullname", "sprk_regardingcontact", null),
         new RecordTypeSeedItem("sprk_analysis", "Analysis", "Analysis", "ANA", "sprk_analysisname", "sprk_regardinganalysis", "sprk_analysis_number"),
         new RecordTypeSeedItem("sprk_budget", "Budget", "Budget", "BDGT", "sprk_budgetname", "sprk_regardingbudget", "sprk_budgetnumber"),
+        // field-mapping-server-write-path-r1 task 028 (FR-17): a field-mapping profile names its tables through this catalog, so an
+        // Analysis -> Communication profile (the send-time subject/body fill) needs a Communication row. It also gives a record filed
+        // under a communication (To Do, Event, Memo, ...) its pair type, which was left empty without it. Communication has no
+        // record-number column, so it is never an identifier reverse-lookup target; it is not a core record type.
+        new RecordTypeSeedItem("sprk_communication", "Communication", "Communication", "COMM", "sprk_name", "sprk_regardingcommunication", null),
         new RecordTypeSeedItem("sprk_document", "Document", "Document", "DOC", "sprk_documentname", "sprk_regardingdocument", "sprk_document_number"),
         new RecordTypeSeedItem("sprk_event", "Event", "Event", "EVT", "sprk_eventname", "sprk_regardingevent", "sprk_eventnumber"),
         new RecordTypeSeedItem("sprk_invoice", "Invoice", "Invoice", "INV", "sprk_invoicename", "sprk_regardinginvoice", "sprk_invoicenumber"),
