@@ -53,6 +53,7 @@ GitHub states were read live on 2026-11-24. "Ours" means this project owns the f
 | ISS-037 | [#2172](https://github.com/spaarke-dev/spaarke/issues/2172) | Communication owner | AI task-candidate subjects derived from email text are logged. |
 | ISS-038 | [#2421](https://github.com/spaarke-dev/spaarke/issues/2421) | Communication owner | Suggestions ignore an existing filing when re-evaluating. |
 | ISS-042 | [#3137](https://github.com/spaarke-dev/spaarke/issues/3137) | Owners of `ChildRecordEndpoints` and `OntologyAdminCapabilityProbe` | Every MSAL OBO failure there is treated alike, so consent / policy blocks answer "sign in again" (a loop) and server faults look like caller faults. Office routes fixed in task 136. |
+| ISS-043 | [#3194](https://github.com/spaarke-dev/spaarke/issues/3194) | Communication owner (project closed; the owner to name who takes it) | A Suggested inbound email with its regarding written stays in Needs Review, and its panel shows "No confident match". Details below. |
 
 Not ours, and not filed by this project, though they mention it: #1564, #2178, #2226 (UAC-r2), #1102 and #1105 (UAC-r2 route sweeps).
 
@@ -1357,3 +1358,19 @@ The owner saved an email to CMRCL-464674 whose body carried a signed tracking to
 | **GitHub Issue** | [#2416](https://github.com/spaarke-dev/spaarke/issues/2416) |
 
 The typed name became the .eml Subject header, sprk_emailsubject and sprk_documentdescription, and the communication's subject, name and thread. Fix: the server takes an optional `email.documentName` for the file name only (PR #2419). The client then sends the real subject plus `documentName` (PR #2420). Release order: server first, then an R3 dev deploy, then the client merge. Review round 1 also fixed: a blank typed name gets the unique suffix; email Keep both stores a suffixed file and keeps the typed name; an id-less key includes the typed name.
+## ISS-043 — Needs Review keeps a filed email: status stays Suggested and the review panel shows "No confident match"
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owned elsewhere: the communications area; the owner names who takes it) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-25 (owner's dev check of tasks 136–138; pre-existing, not caused by them) |
+| **Source** | Owner screenshots + a read of the `sprk_communication` row on dev |
+| **GitHub Issue** | [#3194](https://github.com/spaarke-dev/spaarke/issues/3194) |
+
+An inbound email's decision was **Suggested** (`sprk_associationstatus` 100000003, `autoFiled=false`, top confidence 0.9895, reached only through rungs outside the auto-file set). Its matter regarding IS written, so the grid shows the link chip. But it stays in **Needs Review**, and the reconcile panel's Related-to says **"No confident match"**: `derivePrimaryReview` gives a primary only for Resolved, autoFiled, or a candidate at confidence >= 1. Failure: a reviewer treats a filed email as unmatched and may file it again, or accept the pending create-new-record proposal and make a duplicate.
+
+Ours to note: `ReconciledEmailFiling` (task 121) files only an UNFILED communication, so an Office save to the same record does not confirm a Suggested row as Resolved (sends do, via `CommunicationService.MarkFiledBySender`). Changing that changes the owner's task 121 rule, so it is the owner's decision.
+
+**Entry-points**: `src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts` (`derivePrimaryReview`); `.../EmailAssociationsAndTracking/EmailConnectionsReview.tsx`; `src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs` (`BuildDecisionFieldsAsync`); `src/server/api/Sprk.Bff.Api/Services/Office/ReconciledEmailFiling.cs`.
+**Related**: #2421 (ISS-038).

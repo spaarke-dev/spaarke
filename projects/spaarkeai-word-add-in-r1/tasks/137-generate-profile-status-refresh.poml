@@ -3,7 +3,7 @@
   <metadata>
     <title>#1090: after Generate Profile the pane follows the job to its end instead of reading once</title>
     <phase>Phase 7: fixes before close (from task 090's escalation, owner go 2026-11-25)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a .ts hook and a small BFF write; tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

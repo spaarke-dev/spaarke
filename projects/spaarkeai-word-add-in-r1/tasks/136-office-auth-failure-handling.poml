@@ -3,7 +3,7 @@
   <metadata>
     <title>#1571: Office sign-in reliability. Auth refusals are not 500s, no popup without a click, and the right cached account</title>
     <phase>Phase 7: fixes before close (from task 090's escalation, owner go 2026-11-25)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth code in the shared @spaarke/auth Office strategy and a BFF route; .ts/.cs changes.</rigor-reason>
     <model-tier>opus</model-tier>

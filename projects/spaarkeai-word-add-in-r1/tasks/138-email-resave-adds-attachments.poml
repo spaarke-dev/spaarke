@@ -3,7 +3,7 @@
   <metadata>
     <title>#2209: re-saving an email to the same record adds the attachments that were not saved the first time</title>
     <phase>Phase 7: fixes before close (from task 090's escalation, owner go 2026-11-25)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF save path and worker (.cs), contract and integration tests.</rigor-reason>
     <model-tier>opus</model-tier>
