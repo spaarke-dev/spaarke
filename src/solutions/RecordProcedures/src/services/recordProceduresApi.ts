@@ -24,7 +24,8 @@
  * dry run (`raceTimeout`); its failures are the panel's (`toFailure`, `failureKind`), so a 503 is the panel's "unavailable".
  */
 
-import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from '@spaarke/auth';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import { toFailure, type ApiFailure, type ApiResult } from '../../../_ebilling-shared/apiFailure';
 import { ABANDONED_FAILURE, READ_TIMEOUT_MS, TIMED_OUT_FAILURE, raceTimeout } from './readRace';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,45 +231,12 @@ export interface RecordRulesInForceView {
 // Failures
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Everything the page needs of a failed call, whatever raised it. */
-export interface ApiFailure {
-  /** HTTP status; 0 when no response arrived (network, or a token that could not be acquired). */
-  status: number;
-  /** The stable `errorCode` of ProblemDetails (ADR-019), when there is one. */
-  errorCode: string | null;
-  detail: string | null;
-  /** True when sign-in failed (an exhausted 401 or no token). */
-  signInFailed: boolean;
-}
-
-export type ApiResult<T> = { ok: true; value: T } | { ok: false; failure: ApiFailure };
+// `ApiFailure`, `ApiResult` and `toFailure` are the e-billing pages' shared copy (#2965); re-exported so this module's importers are unchanged.
+export { toFailure, type ApiFailure, type ApiResult };
 
 export const CODE_EBILLING_DISABLED = 'ebilling.disabled';
 export const CODE_PROCEDURES_UNAVAILABLE = 'procedures.unavailable';
 export const CODE_INVALID_QUERY = 'procedures.invalid_query';
-
-function str(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-/** Turn whatever `authenticatedFetch` threw into an {@link ApiFailure}. Exported for the tests. */
-export function toFailure(err: unknown): ApiFailure {
-  if (isApiError(err)) {
-    const p = problemOf(err) as Record<string, unknown> | null;
-    return {
-      status: err.status,
-      errorCode: str(p?.errorCode),
-      detail: str(p?.detail) ?? str(err.message),
-      signInFailed: isAuthFailure(err),
-    };
-  }
-  return {
-    status: 0,
-    errorCode: null,
-    detail: err instanceof Error ? err.message : null,
-    signInFailed: isAuthFailure(err),
-  };
-}
 
 /** What the panel shows when it cannot show the lists. Every kind shows NO rows. */
 export type PanelFailureKind = 'signin' | 'notAvailable' | 'ebillingOff' | 'unavailable' | 'invalidQuery' | 'network' | 'other';

@@ -1362,8 +1362,15 @@ describe('source guards', () => {
     }
   });
 
-  it('registers the Navigator side pane on mount', () => {
+  it('registers the Navigator side pane on mount (through the e-billing shared bootstrap, issue 2965)', () => {
     const main = fs.readFileSync(path.join(srcDir, 'main.tsx'), 'utf8');
-    expect(main).toMatch(/React\.useEffect\(\(\) => \{\s*ensureNavigatorSidePane\(\);\s*\}, \[\]\);/);
+    expect(main).toMatch(/useCodePageBootstrap\(\{[^}]*registerNavigator: true/);
+    const shared = fs.readFileSync(path.resolve(srcDir, '../../_ebilling-shared/codePageBootstrap.ts'), 'utf8');
+    expect(shared).toMatch(/React\.useEffect\(\(\) => \{\s*if \(registerNavigator\) ensureNavigatorSidePane\(\);\s*\}, \[registerNavigator\]\);/);
+  });
+
+  it('uses no colour literal in the shared chrome the page now mounts through (issue 2965)', () => {
+    const chrome = fs.readFileSync(path.resolve(srcDir, '../../_ebilling-shared/codePageChrome.tsx'), 'utf8');
+    expect(findColourLiterals(chrome)).toEqual([]);
   });
 });
