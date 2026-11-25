@@ -42,6 +42,7 @@ An enterprise AI-directed legal operations platform on Power Apps/Dataverse, Sha
 | Spaarke Matter Management | The model-driven app | — |
 | Spaarke External Access | The external SPA | — |
 | Spaarke Connect (SKU) / Connection Engine | Third-party data binding | `Sprk.Connect.*` |
+| Spaarke for Microsoft 365 Copilot (Copilot connector "Spaarke MCP") | Decide lane and Decision wizard in Copilot Chat and Cowork; terms: `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §1.1 | `/mcp/legal-operations`, `Api/Mcp/`, `spaarke_*` tools, `ui://spaarke/decisions.html`, `src/client/widgets/spaarke-decisions/`, `src/solutions/CopilotPlugins/spaarke/` |
 | Decision Record | The append-only record of decisions | "ledger" stays correct in engineering docs |
 
 Product names and engineering identifiers deliberately differ. Read "SpaarkeAi" in code and older docs as the Console, and do not sweep-rename it (tracked as #1095). Terminology changes originate only in `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3.

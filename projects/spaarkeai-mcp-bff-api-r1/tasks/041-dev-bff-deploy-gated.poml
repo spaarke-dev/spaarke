@@ -4,7 +4,7 @@
     <title>Dev BFF deploy (gated on ontology pair)</title>
     <phase>D Registration, deploy and live E2E</phase>
     <gate>BLOCKED until ontology's #2580/#2579 pair has deployed to dev AND the owner gives a go for the exact SHA</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment task (Phase D, integration/deployment)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -102,7 +102,9 @@
     <criterion testable="true">No setting changed in any environment other than dev.</criterion>
   </acceptance-criteria>
 
-  <notes>Plan risk R11. The widget is part of the BFF artifact, so this one deploy covers both deliverables (task-create Step 3.6).</notes>
+  <notes>Plan risk R11. The widget is part of the BFF artifact, so this one deploy covers both deliverables (task-create Step 3.6).
+
+Completed 2026-11-24 (owner: "Yes, close 041"). Deployed master (not this branch: #2587 merged first) through uac-r2 with the owner per-SHA go: 22c42efad6 (2026-11-23 ~23:49Z, rollback a48398746d), Mcp__Enabled=true in dev 2026-11-24 00:22Z, then 996928732e (~03:01Z, #3036). Ontology pair (#2580/#2579) first reached dev in the same build as the MCP code. 401/503/healthz, five tools, Console smoke and live Copilot checks passed. Known gap accepted: tools/list not recorded as the test user (042 covers it). Record: notes/deploy-dev-041.md. rework: none task 041</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

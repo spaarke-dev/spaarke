@@ -56,4 +56,6 @@ Closed 2026-11-23: the owner waived both items when closing Phase 0.
 - ~~What did the test user see at **Connect**: sign-in only, or a consent screen too? (T5 follow-up)~~ Waived.
 - ~~Save the T1 Chat screenshot to `notes/spikes/evidence/`~~ Waived; the evidence stays "shared in session" plus App Insights.
 
+Review opens maximized (#3043, dev `0362599b94`): ✅ owner, 2026-11-24 ~14:40Z. Start review opened the wizard maximized over the lane, the restore control works, and a full Approve-or-rebudget decision (Create budget + Assign Task) recorded in Copilot. Two follow-ups from that run: ISS-008 #3062 (the person picker shows only names) and ISS-009 #3063 (the Assign Task email was refused as "no access" though Dataverse grants the assignee Read).
+
 Tenant clean-up: ✅ the owner deleted the "Spaarke MCP spike" plugin (connectors A and B) on 2026-11-24, after S-1, and uploaded the 040 package `spaarke-plugin.zip` (skills only) the same day. A tenant-wide Copilot tidy-up and cross-project coordination are proposed as one coordinating project/session.
