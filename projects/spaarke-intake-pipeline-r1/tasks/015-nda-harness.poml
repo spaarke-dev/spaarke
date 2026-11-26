@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-09: NDA harness — edit plan → engine → redline/external/clean + clause table → check_outputs → sprk_document + sprk_analysis on the run; pinned standard version stamped; prior markup preserved</title>
     <phase>1 Pipeline core and first doors</phase>
-    <gate>blocked — tasks 014, 004, 008; Clean-copy resolution (spec Unresolved Q1) recorded by the owner</gate>
+    <gate>blocked — tasks 014, 004, 008 (Clean-copy resolution recorded by the owner 2026-11-26)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF harness (.cs) writing documents and analyses on the persist path; depends on 3 tasks; high-risk item R1 in the plan.</rigor-reason>
@@ -22,7 +22,7 @@
   <goal>`Services/Intake/Harnesses/Nda/NdaIntakeHarness.cs` registered with key `nda` (one DI line; the Binding row exists from task 012), with Analyse = edit plan (persisted before Build), Build = engine dispatch/await via 014, Persist = SPE upload + `sprk_document` + `sprk_analysis`/`sprk_analysisoutput` in one Dataverse transaction with deterministic ids, approval-required = true, a return payload of document ids; tests on the synthetic corpus for clean NDA, counterparty-markup NDA, check failure and version stamp.</goal>
 
   <context>
-    <background>Spec FR-09 (acceptance a–e), NFR-09 (pinned "Spaarke NDA – Mutual" v1.2), NFR-10, Unresolved Q1 (Clean copy with prior markup) and Q2 (ADR-049 scope, Path C, confirm in `/adr-check`); project CLAUDE.md §2 "Existing redlines and comments are preserved … do not ship an accept-all Clean copy". The engine guarantees preservation and refuses crossing edits (task 001 / FR-01g); this harness surfaces each refused edit as a comment plus a "manual" clause-table row (the engine's report drives it) and must not post-process the .docx. The Phase 0 spike report (`notes/spikes/phase0-spike-report.md`, task 008) records the Clean-copy behaviour and the owner's resolution. Classification is already persisted by the orchestrator's Classify stage (task 013); the harness reuses it and never re-classifies. Corpus: `src/accelerators/practices/nda/evals/corpus/nda-01` (clean), `nda-02` (counterparty markup), `nda-03` (injection), `msa-01` (non-NDA).</background>
+    <background>Spec FR-09 (acceptance a–f), NFR-09 (pinned "Spaarke NDA – Mutual" v1.2), NFR-10, Unresolved Q1 (resolved 2026-11-26: Clean accepts all revisions from all sides) and Q2 (ADR-049 scope, Path C, confirm in `/adr-check`); project CLAUDE.md §2 (prior markup preserved; redline/external lose no edit and never auto-accept; refused edits "A with B as backup"). On master the engine refuses the WHOLE plan (exit 3) when one edit cannot be placed, and task 001 reports that as `plan_does_not_fit` with the refused edit index + reason code; the harness repairs that edit once through IAgreementAi and re-dispatches, then turns a still-refused edit into a comment plus a "manual" clause-table row; with the accelerator skip-and-report mode (asked 2026-11-26) the engine reports refused edits itself. The harness must not post-process the .docx. The Phase 0 spike report (`notes/spikes/phase0-spike-report.md`, task 008) records the Clean-copy behaviour and the owner's resolution. Classification is already persisted by the orchestrator's Classify stage (task 013); the harness reuses it and never re-classifies. Corpus: `src/accelerators/practices/nda/evals/corpus/nda-01` (clean), `nda-02` (counterparty markup), `nda-03` (injection), `msa-01` (non-NDA).</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/Nda/NdaIntakeHarness.cs</file>
       <file role="new">tests/integration/seam/Intake/NdaIntakeHarnessSeamTests.cs</file>
@@ -46,7 +46,7 @@
     <constraint source="ADR-039">Scope: AI used by the harness. Catalogued Actions only (`agreement-classify`, `agreement-edit-plan`), resolved by ConsumerTypes key.</constraint>
     <constraint source="ADR-049">Scope: output authoring. Outputs are new documents produced by the engine, never authored through Compose or ComposeShadowPatchEngine; no fuzzy text search or .docx post-processing in this harness (Path C; confirm in `/adr-check`, Unresolved Q2).</constraint>
     <constraint source="ADR-002">Scope: Persist. Documents and analyses are created by the BFF write path in one transaction with deterministic ids, so a redelivered Persist creates nothing new (FR-07b).</constraint>
-    <constraint source="project">Scope: prior markup. Existing tracked changes and comments are never accepted, rejected or removed; refused/crossing edits appear as a comment plus a "manual" clause-table row; no accept-all Clean copy for drafts with prior markup unless the owner's recorded resolution allows it (FR-09e).</constraint>
+    <constraint source="project">Scope: prior markup. Existing tracked changes and comments are never accepted, rejected or removed; refused/crossing edits get one AI rewrite, then appear as a comment plus a "manual" clause-table row (FR-09f); the redline and external outputs lose no edit and accept none; the Clean copy accepts all revisions from all sides (FR-09e, owner 2026-11-26).</constraint>
     <constraint source="project">Scope: version stamping. The pinned standard name and version (v1.2) are written on the run and on every output record (NFR-09).</constraint>
     <constraint source="project">Scope: tests and fixtures. Synthetic corpus only; never `answer-key/` or a real NDA (NFR-10). No edits under `Services/Finance/Submission/`.</constraint>
     <constraint source="ADR-015">Scope: logs and run fields. Ids, outcome codes and counts only; no clause text.</constraint>
@@ -87,7 +87,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Read the 008 spike report; confirm the owner's Clean-copy resolution is recorded. If not, STOP (escalation).</step>
+    <step order="1">Read the 008 spike report and notes/decisions.md rows of 2026-11-26 (Clean copy; refused edits "A with B as backup").</step>
     <step order="2">Analyse: call BuildEditPlanAsync; persist the plan reference on the run (blob/staging id, not content) before advancing.</step>
     <step order="3">Build: dispatch via IntakeEngineDispatcher and await completion through the run state (014).</step>
     <step order="4">Persist: on check pass, upload outputs to the request's SPE container via SpeFileStore and create `sprk_document`s + `sprk_analysis`/`sprk_analysisoutput` (clause table) in one transaction with deterministic ids; stamp the standard version; on check failure hold with admin attention.</step>
@@ -100,7 +100,7 @@
   </steps>
 
   <escalation>
-    <trigger>If the Clean-copy-with-prior-markup question (spec Unresolved Q1) has no recorded owner resolution, STOP and escalate; do not ship an accept-all Clean copy and do not decide it yourself.</trigger>
+    <trigger>If the redline or external output loses or accepts any prior or new edit, STOP and escalate (owner rule 2026-11-26); do not post-process the .docx to hide it.</trigger>
     <trigger>If `/adr-check` does not confirm ADR-049 I-5/I-7 are Compose-scoped (Unresolved Q2), STOP and raise the 🔔 ADR Conflict per root CLAUDE.md §6.5.</trigger>
     <trigger>If preserving prior markup would need harness-side .docx edits (beyond what the engine outputs), STOP and coordinate with the accelerator session "acclerator-r1"; never edit the engines.</trigger>
   </escalation>
@@ -126,7 +126,8 @@
     <criterion testable="true">Given synthetic nda-02 (counterparty revisions and comments), every prior revision and comment remains in the redline and external outputs, and each refused edit appears as a comment plus a "manual" clause-table row (FR-09b).</criterion>
     <criterion testable="true">Negative: a `check_outputs` failure holds the run with admin attention and nothing is sent for approval (FR-09c).</criterion>
     <criterion testable="true">The run and every output record carry the pinned standard version v1.2 (FR-09d, NFR-09).</criterion>
-    <criterion testable="true">The Clean output follows the recorded owner resolution of Unresolved Q1; no accept-all Clean copy is produced for drafts with prior markup unless that resolution allows it (FR-09e).</criterion>
+    <criterion testable="true">The Clean output accepts all revisions from all sides; the redline and external outputs keep every prior and new edit and accept none (FR-09e, owner 2026-11-26).</criterion>
+    <criterion testable="true">Refused edits (FR-09f, owner "A with B as backup"): given a plan with one unplaceable edit, the harness gives that edit one AI rewrite and one more engine pass; if still refused it becomes a comment plus a "manual" clause-table row and the other edits are applied; with the accelerator skip-and-report mode available the harness uses it instead of whole-plan refusal. Negative: the run never fails because of a single refused edit, and no clause text from engine errors is logged.</criterion>
     <criterion testable="true">Negative: a redelivered Persist creates no second document or analysis; resume after Analyse does not call BuildEditPlanAsync again.</criterion>
     <criterion testable="true">`/adr-check` records the ADR-049 Path C confirmation; no Compose code is referenced.</criterion>
     <criterion testable="true">No test reads `answer-key/` or a real NDA; PR states Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE).</criterion>
