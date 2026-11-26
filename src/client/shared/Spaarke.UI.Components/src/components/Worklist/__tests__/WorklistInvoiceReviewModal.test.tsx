@@ -180,9 +180,9 @@ describe('with a client URL (design C)', () => {
     expect(screen.getByRole('button', { name: 'Next record' })).toBeDisabled();
   });
 
-  it('follows the count filter in force (fix round 1, F5): M and the order come from the FILTERED list, not the whole lane', async () => {
-    // Do lane, three billing items on three invoices: Coming due, Finish or reschedule, Coming due.
-    const doLane = body(
+  // Do lane, three billing items on three invoices: Coming due, Finish or reschedule, Coming due.
+  const doLane = () =>
+    body(
       'lanes',
       [],
       [
@@ -193,18 +193,22 @@ describe('with a client URL (design C)', () => {
         ]),
       ]
     );
-    renderWidget({ invoiceReviewClientUrl: CLIENT }, doLane);
-    await ready();
 
-    // No filter: the whole lane, three invoices.
+  it('with no count filter the set is the whole lane (fix round 1, F5 control): three invoices', async () => {
+    renderWidget({ invoiceReviewClientUrl: CLIENT }, doLane());
+    await ready();
     await userEvent.click(line(DO_B3, 'Do'));
     await screen.findByRole('dialog', undefined, SETTLE);
     expect(screen.getByText('3 of 3')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), SETTLE);
+    expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_5));
+  });
 
-    // Select the Coming due count filter, then activate the same item: the set is the two Coming due invoices, in the order shown.
+  it('follows the count filter in force (fix round 1, F5): M and the order come from the FILTERED list, not the whole lane', async () => {
+    renderWidget({ invoiceReviewClientUrl: CLIENT }, doLane());
+    await ready();
+    // Select the Coming due count filter, then activate an item: the set is the two Coming due invoices, in the order shown.
     fireEvent.click(await screen.findByRole('button', { name: /^Coming due/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Coming due/ })).toHaveAttribute('aria-pressed', 'true'));
     await userEvent.click(line(DO_B3, 'Do'));
     await screen.findByRole('dialog', undefined, SETTLE);
     expect(screen.getByText('2 of 2')).toBeInTheDocument();
