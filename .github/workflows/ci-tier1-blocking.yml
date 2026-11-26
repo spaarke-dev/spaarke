@@ -222,6 +222,8 @@ jobs:
               - 'src/client/widgets/spaarke-briefing/**'
               - 'src/client/widgets/shared/**'
               - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
+              # The briefing widget's build shims re-export deep paths of the shared library, so a change there changes the built page.
+              - 'src/client/shared/Spaarke.UI.Components/src/**'
               - 'src/client/shared/Spaarke.DailyBriefing.Components/**'
               - 'tests/integration/Mcp.Conformance.Host/**'
               - 'tests/integration/contract/Api/Mcp/McpProgramHostFactory.cs'

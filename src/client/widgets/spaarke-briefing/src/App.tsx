@@ -6,7 +6,16 @@
  * preferences service), inline To Do, dismiss, email share and document preview. Fluent v9 semantic tokens only; no colour is written here.
  */
 import * as React from 'react';
-import { FluentProvider, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  FluentProvider,
+  MessageBar,
+  MessageBarBody,
+  Spinner,
+  Text,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
 import { DailyBriefingApp } from '@spaarke/daily-briefing-components/components/DailyBriefingApp';
 import type { BriefingNavigationHandler } from '@spaarke/daily-briefing-components/services/briefingDataService';
 import { useMcpHost } from '../../shared/mcp/mcpHostContext';
@@ -30,6 +39,12 @@ const useStyles = makeStyles({
 // DailyBriefingApp takes its params from the Dataverse page it is hosted in; a widget has none.
 const NO_PARAMS: Record<string, string> = {};
 
+/** The one notice the widget adds to the Console's component: the tool trimmed this briefing to fit its result limit. */
+export function omittedNotice(omitted: number): string {
+  const what = omitted === 1 ? '1 highlight was' : `${omitted} highlights were`;
+  return `${what} left out; open the Spaarke Console for all of them.`;
+}
+
 function Shell({ openingWaitMs }: { openingWaitMs?: number }) {
   const styles = useStyles();
   const { isConnected, error, openLink, toolResult } = useMcpHost();
@@ -39,9 +54,12 @@ function Shell({ openingWaitMs }: { openingWaitMs?: number }) {
   const [opening] = React.useState(() => new OpeningResult());
   React.useEffect(() => opening.offer(toolResult), [opening, toolResult]);
 
+  // How many highlights the tool left out of the briefing now shown (0: none). Set by every read, by the service below.
+  const [omitted, setOmitted] = React.useState(0);
+
   // Supplied on the component's FIRST render (it decides injected vs Xrm when it mounts), so both are built before it is shown.
   const dataService = React.useMemo(
-    () => createBriefingMcpService({ transport, opening, openingWaitMs }),
+    () => createBriefingMcpService({ transport, opening, openingWaitMs, onOmittedHighlights: setOmitted }),
     [transport, opening, openingWaitMs]
   );
   const navigation = React.useMemo<BriefingNavigationHandler>(
@@ -60,7 +78,14 @@ function Shell({ openingWaitMs }: { openingWaitMs?: number }) {
           The widget could not connect to the host.
         </Text>
       ) : isConnected ? (
-        <DailyBriefingApp params={NO_PARAMS} dataService={dataService} navigation={navigation} />
+        <>
+          {omitted > 0 ? (
+            <MessageBar intent="warning">
+              <MessageBarBody>{omittedNotice(omitted)}</MessageBarBody>
+            </MessageBar>
+          ) : null}
+          <DailyBriefingApp params={NO_PARAMS} dataService={dataService} navigation={navigation} />
+        </>
       ) : (
         <Spinner className={styles.status} size="tiny" label="Connecting to the host" labelPosition="after" />
       )}

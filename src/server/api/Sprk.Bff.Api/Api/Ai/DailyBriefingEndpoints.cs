@@ -413,6 +413,12 @@ public static class DailyBriefingEndpoints
             }
             return (lookup.Entities[0].GetAttributeValue<Guid>("systemuserid"), null);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // An aborted request or an exhausted tool budget is not a lookup failure: let the caller see the cancellation instead of
+            // logging an error and answering 500. (Every non-cancelled outcome below is unchanged.)
+            throw;
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Daily briefing {Leg}: systemuser lookup failed for AAD oid {AadOid}", leg, aadOid);

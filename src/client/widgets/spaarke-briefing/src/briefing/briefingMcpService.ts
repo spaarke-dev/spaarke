@@ -60,6 +60,16 @@ export function mapBriefingResult(
   return { status: 'error', message: text && text.trim() ? text : COULD_NOT_LOAD };
 }
 
+/**
+ * How many highlights the tool left out to keep its result small (`structuredContent.omittedHighlights`, present only on a trimmed briefing),
+ * or 0. The Console never receives this field: only a tool result for a briefing too large for the 64 KiB limit carries it.
+ */
+export function omittedHighlightsOf(structured: unknown): number {
+  if (!isRecord(structured)) return 0;
+  const n = structured.omittedHighlights;
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : 0;
+}
+
 /** The Console's `fetchBriefingLive` defaults for the TL;DR fields, so an omitted field never reaches the render code undefined. */
 function normalise(data: NarrateResponse): NarrateResponse {
   const tldr = data.tldr;
@@ -118,6 +128,11 @@ export interface BriefingMcpServiceOptions {
   opening: OpeningResult;
   /** Override for tests. */
   openingWaitMs?: number;
+  /**
+   * Called after every read with how many highlights that briefing left out (0 when none, and for a failed read), so the shell can say so.
+   * The component has no place to show it: the seam's result type is the Console's.
+   */
+  onOmittedHighlights?: (omitted: number) => void;
 }
 
 /** The seam over the tool: `renderBriefing` only. No preferences, so the component hides its Preferences menu; nothing else is offered. */
@@ -125,18 +140,27 @@ export function createBriefingMcpService({
   transport,
   opening,
   openingWaitMs = OPENING_RESULT_WAIT_MS,
+  onOmittedHighlights,
 }: BriefingMcpServiceOptions): BriefingDataService {
+  const finish = (structured: unknown, result: NarrationResult): NarrationResult => {
+    onOmittedHighlights?.(result.status === 'success' ? omittedHighlightsOf(structured) : 0);
+    return result;
+  };
+
   return {
     async renderBriefing(windows?: BriefingWindowParams): Promise<NarrationResult> {
       const openedWith = await opening.take(openingWaitMs);
-      if (openedWith !== undefined) return mapBriefingResult(openedWith);
+      if (openedWith !== undefined) return finish(openedWith, mapBriefingResult(openedWith));
 
       const result = await transport.callTool(
         GET_BRIEFING_TOOL,
         windows ? { dueWithinDays: windows.dueWithinDays, recencyHours: windows.recencyHours } : {}
       );
       const text = result.content?.find(block => block.type === 'text')?.text;
-      return mapBriefingResult(result.structuredContent, { isError: result.isError, message: text });
+      return finish(
+        result.structuredContent,
+        mapBriefingResult(result.structuredContent, { isError: result.isError, message: text })
+      );
     },
   };
 }

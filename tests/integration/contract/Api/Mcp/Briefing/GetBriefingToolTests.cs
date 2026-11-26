@@ -83,6 +83,11 @@ public sealed class GetBriefingToolTests : IClassFixture<BriefingProgramHostFact
         properties.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["dueWithinDays", "recencyHours"]);
         properties.GetProperty("dueWithinDays").GetProperty("maximum").GetInt32().Should().Be(31);
         properties.GetProperty("recencyHours").GetProperty("maximum").GetInt32().Should().Be(744);
+
+        // The defaults the model reads are the defaults the tool applies (the Console's: 5 days, 168 hours), not the collector's 120.
+        description.Should().Contain("dueWithinDays (1 to 31, default 5)").And.Contain("recencyHours (1 to 744, default 168").And.NotContain("120");
+        properties.GetProperty("dueWithinDays").GetProperty("description").GetString().Should().Contain("Default: 5");
+        properties.GetProperty("recencyHours").GetProperty("description").GetString().Should().Contain("Default: 168").And.NotContain("120");
     }
 
     // ---- parity with REST --------------------------------------------------------------------------------------------------------------
@@ -117,10 +122,11 @@ public sealed class GetBriefingToolTests : IClassFixture<BriefingProgramHostFact
         structured.GetProperty("tldr").GetProperty("summary").GetString().Should().Be("Two things need you today.");
         structured.GetProperty("channelNarratives").EnumerateArray().Should().HaveCount(2);
         structured.GetRawText().Should().Contain(SecretMatter, "the widget draws the per-channel detail from structuredContent");
+        structured.TryGetProperty(GetBriefingTool.OmittedHighlightsProperty, out _).Should().BeFalse("an untrimmed briefing is the route's body, nothing added");
     }
 
     [Fact]
-    public async Task GetBriefing_ForwardsTheWindowsLikeTheRoute_AndDefaultsWhenNoneAreGiven()
+    public async Task GetBriefing_ForwardsTheWindowsLikeTheRoute_AndDefaultsToTheConsolesDefaultsWhenNoneAreGiven()
     {
         using var client = _factory.CreateClient();
         var token = BriefingProgramHostFactory.MintToken(OidA);
@@ -128,13 +134,19 @@ public sealed class GetBriefingToolTests : IClassFixture<BriefingProgramHostFact
         await McpCall.CallAsync(client, GetBriefingTool.Name, new { dueWithinDays = 9, recencyHours = 36 }, token);
         _factory.LastWindows.Should().BeEquivalentTo(new { DueWithinDays = 9, RecencyHours = 36 });
 
+        // FR-09: with no arguments the tool shows what the Console shows a user with no saved preferences (5 days, 7 days = 168 hours),
+        // NOT the collector's own default (120 hours), which the email and scheduled paths keep.
         await McpCall.CallAsync(client, GetBriefingTool.Name, null, token);
-        var defaults = DailyBriefingCollector.BriefingWindowOptions.Default;
-        _factory.LastWindows.Should().BeEquivalentTo(new { defaults.DueWithinDays, defaults.RecencyHours });
+        _factory.LastWindows.Should().BeEquivalentTo(new { DueWithinDays = 5, RecencyHours = 168 });
+        DailyBriefingCollector.BriefingWindowOptions.Default.RecencyHours.Should().Be(120, "control: the collector's default is deliberately unchanged");
 
         await McpCall.CallAsync(client, GetBriefingTool.Name, new { dueWithinDays = 2 }, token);
         _factory.LastWindows!.DueWithinDays.Should().Be(2);
-        _factory.LastWindows.RecencyHours.Should().Be(defaults.RecencyHours, "an omitted window is the route's default");
+        _factory.LastWindows.RecencyHours.Should().Be(168, "an omitted window is the Console's default");
+
+        await McpCall.CallAsync(client, GetBriefingTool.Name, new { recencyHours = 36 }, token);
+        _factory.LastWindows!.DueWithinDays.Should().Be(5, "an omitted window is the Console's default");
+        _factory.LastWindows.RecencyHours.Should().Be(36);
     }
 
     [Fact]
@@ -344,14 +356,15 @@ public sealed class GetBriefingToolTests : IClassFixture<BriefingProgramHostFact
         _factory.Hang = true;
         var http = AuthenticatedContext(scope, OidA);
 
-        var started = DateTimeOffset.UtcNow;
+        // No wall-clock assertion: a hang would stall this test until the runner's own timeout, which is the failure signal.
         var result = await GetBriefingTool.RunAsync(null, http, TimeSpan.FromMilliseconds(150), CancellationToken.None);
 
-        (DateTimeOffset.UtcNow - started).Should().BeLessThan(TimeSpan.FromSeconds(10));
         result.IsError.Should().BeTrue();
         var body = result.StructuredContent!.Value;
         body.GetProperty("reasonCode").GetString().Should().Be(GetBriefingTool.TimeoutReason);
         body.GetProperty("status").GetInt32().Should().Be(504);
+        // The render stops with the budget, so "ask again in a moment" would mislead: ask again, or use the Console.
+        body.GetProperty("message").GetString().Should().Contain("Ask again, or open it in the Spaarke Console.").And.NotContain("in a moment");
         GetBriefingTool.GenerationBudget.Should().BeLessThan(McpLongRunning.Budget, "FR-14: the render stops before the 30 s tool budget");
     }
 
@@ -366,6 +379,56 @@ public sealed class GetBriefingToolTests : IClassFixture<BriefingProgramHostFact
         var act = () => GetBriefingTool.RunAsync(null, http, TimeSpan.FromSeconds(30), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task GetBriefing_WhenTheCallerLookupIsCancelledByTheBudget_IsATimeoutResult_NotAFailure_AndLogsNoError()
+    {
+        var logs = new PortfolioProgramHostFactory.CapturedLogs();
+        using var factory = _factory.WithWebHostBuilder(b => b.ConfigureLogging(l => l.AddProvider(logs)));
+        using var scope = factory.Services.CreateScope();
+        _factory.HangLookup = true;
+        var http = AuthenticatedContext(scope, OidA);
+
+        var result = await GetBriefingTool.RunAsync(null, http, TimeSpan.FromMilliseconds(150), CancellationToken.None);
+
+        result.IsError.Should().BeTrue();
+        var body = result.StructuredContent!.Value;
+        body.GetProperty("reasonCode").GetString().Should().Be(GetBriefingTool.TimeoutReason, "a lookup the budget cancelled is a timeout, not briefing.failed");
+        body.GetProperty("status").GetInt32().Should().Be(504);
+        logs.Messages.Should().NotContain(m => m.Contains("systemuser lookup failed", StringComparison.Ordinal), "a cancelled lookup is not an error");
+        _factory.RenderCalls.Should().BeEmpty("the briefing was never reached");
+    }
+
+    [Fact]
+    public async Task GetBriefing_WhenTheClientCancelsDuringTheCallerLookup_TheCancellationPropagates()
+    {
+        using var scope = _factory.Services.CreateScope();
+        _factory.HangLookup = true;
+        var http = AuthenticatedContext(scope, OidA);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        var act = () => GetBriefingTool.RunAsync(null, http, TimeSpan.FromSeconds(30), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ACallerLookupThatFailsForAnyOtherReason_IsStillTheRoutes500_ForTheRouteAndTheTool()
+    {
+        using var client = _factory.CreateClient();
+        var token = BriefingProgramHostFactory.MintToken(OidA);
+        _factory.LookupFault = new InvalidOperationException("dataverse-down-secret-detail");
+
+        using var restResponse = await client.SendAsync(RestRequest(token, null));
+        var tool = await McpCall.CallAsync(client, GetBriefingTool.Name, null, token);
+
+        restResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError, "unchanged: only a cancelled lookup now propagates");
+        var restBody = await restResponse.Content.ReadAsStringAsync();
+        restBody.Should().Contain("Failed to resolve caller identity.").And.NotContain("secret");
+        tool.GetProperty("isError").GetBoolean().Should().BeTrue();
+        tool.GetProperty("structuredContent").GetProperty("reasonCode").GetString().Should().Be(GetBriefingTool.FailedReason);
+        tool.GetRawText().Should().NotContain("secret");
     }
 
     // ---- result size (NFR-02: under 64 KiB at the route's worst case) -----------------------------------------------------------------------------
@@ -399,6 +462,35 @@ public sealed class GetBriefingToolTests : IClassFixture<BriefingProgramHostFact
         kept.Should().BeLessThan(WorstCaseChannels * WorstCaseBullets);
         var text = result.GetProperty("content").EnumerateArray().Single().GetProperty("text").GetString()!;
         text.Should().Contain($"{WorstCaseChannels * WorstCaseBullets - kept} more were left out");
+        structured.GetProperty(GetBriefingTool.OmittedHighlightsProperty).GetInt32().Should().Be(
+            WorstCaseChannels * WorstCaseBullets - kept, "the widget tells the user how many highlights were left out");
+    }
+
+    [Fact]
+    public async Task GetBriefing_ABriefingTrimmedOnlyOfDescriptions_CarriesNoOmittedHighlights()
+    {
+        using var client = _factory.CreateClient();
+        _factory.Briefing = WorstCaseBriefing(descriptionLength: 1500, bullets: 12);
+
+        var result = await McpCall.CallAsync(client, GetBriefingTool.Name, null, BriefingProgramHostFactory.MintToken(OidA));
+
+        var structured = result.GetProperty("structuredContent");
+        structured.GetProperty("channelNarratives").EnumerateArray().Sum(c => c.GetProperty("bullets").GetArrayLength())
+            .Should().Be(WorstCaseChannels * 12, "control: every highlight is kept");
+        structured.TryGetProperty(GetBriefingTool.OmittedHighlightsProperty, out _).Should().BeFalse("no highlight was left out");
+    }
+
+    [Fact]
+    public void Structured_AddsOmittedHighlightsOnlyWhenSomeWereLeftOut_AndKeepsEverythingElse()
+    {
+        var briefing = SmallBriefing();
+
+        GetBriefingTool.Structured(briefing, 0).Should().BeSameAs(briefing);
+
+        var trimmed = JsonSerializer.SerializeToElement(GetBriefingTool.Structured(briefing, 7));
+        trimmed.GetProperty(GetBriefingTool.OmittedHighlightsProperty).GetInt32().Should().Be(7);
+        trimmed.GetProperty("tldr").GetProperty("summary").GetString().Should().Be("Two things need you today.");
+        trimmed.GetProperty("channelNarratives").GetArrayLength().Should().Be(2);
     }
 
     [Fact]
@@ -614,6 +706,12 @@ public sealed class BriefingProgramHostFactory : McpProgramHostFactory
     /// <summary>When true the composite never answers until cancelled.</summary>
     internal bool Hang { get; set; }
 
+    /// <summary>When true the systemuser lookup never answers until cancelled.</summary>
+    internal bool HangLookup { get; set; }
+
+    /// <summary>When set the systemuser lookup throws it.</summary>
+    internal Exception? LookupFault { get; set; }
+
     internal IReadOnlyList<RenderCall> RenderCalls
     {
         get
@@ -655,6 +753,8 @@ public sealed class BriefingProgramHostFactory : McpProgramHostFactory
         Briefing = null;
         Fault = null;
         Hang = false;
+        HangLookup = false;
+        LookupFault = null;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -680,8 +780,18 @@ public sealed class BriefingProgramHostFactory : McpProgramHostFactory
         var entities = new Mock<IGenericEntityService>();
         entities
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((FetchExpression fetch, CancellationToken _) =>
+            .Returns(async (FetchExpression fetch, CancellationToken ct) =>
             {
+                if (HangLookup)
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+
+                if (LookupFault is { } lookupFault)
+                {
+                    throw lookupFault;
+                }
+
                 Guid? found = null;
                 lock (_gate)
                 {

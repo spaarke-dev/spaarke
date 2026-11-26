@@ -235,12 +235,17 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   run record to poll, so FR-14's start/status pair was not built. At the dev deploy, record p50/p95 of `/render` for real users; if p95 is near
   27 s, either add a run-record-backed start/status or cache the last briefing. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
 
-## D-034-2 — the first view of the widget uses the BFF default windows (5 d / 120 h); the Console's default preference is 7 d (168 h)
-- **Status**: deferred (owner's call; known limit K2 in `notes/034-decisions.md`).
-- **Draft issue** — title: `Align the Daily Briefing default recency window (BFF 120 h vs Console preference 168 h)`.
-  Body: `DailyBriefingCollector.DefaultRecencyHours = 120`, `DEFAULT_DAILY_DIGEST_PREFERENCES.timeWindow = '7d'`. A no-argument tool call (what Copilot makes) and
-  the widget's later Refresh therefore cover different windows. Options: raise the BFF default to 168, or have the tool descriptor tell the model to pass
-  `recencyHours`. Labels: spaarkeai-mcp-bff-api-r2; Type=Bug.
+## D-034-2 — saved preferences not applied: the tool and the widget's first view ignore the user's saved Daily Digest preferences
+- **Status**: deferred (draft issue for the main session to file; the owner may instead narrow FR-09 to "default preferences"). The default-window half (BFF 120 h vs
+  Console 168 h) is FIXED in task 034's verifier fixes: a call with no arguments now gets the Console's defaults, 5 days and 168 hours. See `notes/034-decisions.md`, F4.
+- **Draft issue** — title: `spaarke_get_briefing: apply the caller's saved Daily Digest preferences (windows and disabled channels)`.
+  Body: the Console reads the caller's `sprk_userpreference` row (`sprk_preferencetype` = 100000002) in the browser with `Xrm.WebApi`, sends its `dueWithinDays` and
+  `timeWindow` as the `/render` windows, and drops `disabledChannels` client-side (`DailyBriefingApp`). No BFF service reads that row as the caller (searched
+  `src/server`: only a comment in `DailyBriefingCollector`, a name list in `OwnedChildWrite`, and a never-populated `PlaybookRunContext.UserPreferences`). So a user who saved
+  a narrower window or disabled channels sees a different briefing from `spaarke_get_briefing` (and the widget's first view) than from the Console; the widget's Refresh
+  sends only the component's default windows because its Preferences menu is hidden. Fix: one BFF reader of the caller's Daily Digest row (new surface: justify under
+  CLAUDE.md section 11, and keep ADR-013/ADR-028: read as the caller, fail closed), used by the tool and applied through the same rules as the Console
+  (windows, then `disabledChannels`). Labels: spaarkeai-mcp-bff-api-r2; Type=Bug.
 
 ## D-034-3 — one factory for the widget resources, and the Decisions widget adopting the shared `hostTheme` → #3227
 - **Status**: deferred (the third and fourth copies land in tasks 035 and 040; r1's Decisions files were not touched).

@@ -8,7 +8,7 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { webDarkTheme, webLightTheme } from '@fluentui/react-components';
-import { App } from '../App';
+import { App, omittedNotice } from '../App';
 import { DISCONNECTED, McpHostContext, type McpHostConnection } from '../../../shared/mcp/mcpHostContext';
 
 const mockAuthenticatedFetch = jest.fn();
@@ -163,7 +163,9 @@ describe('Briefing widget: no opening result', () => {
 
     expect(await screen.findByText('Acme v. Globex')).toBeInTheDocument();
     expect(callTool).toHaveBeenCalledTimes(1);
-    // The component asks for its default windows (5 days, 7 days of recency), which are the tool's own defaults.
+    // The component asks for its default windows (5 days, 7 days = 168 hours of recency). The tool's own defaults for an absent window are
+    // the same two values (GetBriefingTool.DefaultDueWithinDays / DefaultRecencyHours; GetBriefingToolTests pins them), so this read and a
+    // model's call with no arguments show the same briefing.
     expect(callTool).toHaveBeenCalledWith('spaarke_get_briefing', { dueWithinDays: 5, recencyHours: 168 });
     noNetworkOrXrm();
   });
@@ -179,6 +181,49 @@ describe('Briefing widget: no opening result', () => {
     await waitFor(() => expect(callTool).toHaveBeenCalledTimes(1));
     expect(callTool).toHaveBeenCalledWith('spaarke_get_briefing', expect.any(Object));
     noNetworkOrXrm();
+  });
+});
+
+describe('Briefing widget: a briefing the tool trimmed', () => {
+  const NOTICE = '12 highlights were left out; open the Spaarke Console for all of them.';
+
+  it('shows one warning that says how many highlights were left out, above the briefing', async () => {
+    renderWith({
+      isConnected: true,
+      toolResult: { ...fixtureBriefing(), omittedHighlights: 12 },
+      callTool: hostCalling(fixtureBriefing()),
+    });
+
+    expect(await screen.findByText(NOTICE)).toBeInTheDocument();
+    expect(screen.getAllByText(/left out/)).toHaveLength(1);
+    expect(screen.getByText('Acme v. Globex')).toBeInTheDocument();
+  });
+
+  it('shows no notice for a briefing that was not trimmed', async () => {
+    renderWith({ isConnected: true, toolResult: fixtureBriefing(), callTool: hostCalling(fixtureBriefing()) });
+
+    await screen.findByText('Acme v. Globex');
+
+    expect(screen.queryByText(/left out/)).not.toBeInTheDocument();
+  });
+
+  it('follows Refresh: the notice goes when the next briefing is whole, and comes when it is trimmed', async () => {
+    const callTool = jest
+      .fn()
+      .mockResolvedValueOnce({ structuredContent: fixtureBriefing(), content: [] })
+      .mockResolvedValueOnce({ structuredContent: { ...fixtureBriefing(), omittedHighlights: 5 }, content: [] });
+    renderWith({ isConnected: true, toolResult: { ...fixtureBriefing(), omittedHighlights: 12 }, callTool });
+    await screen.findByText(NOTICE);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh notifications' }));
+    await waitFor(() => expect(screen.queryByText(/left out/)).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh notifications' }));
+    expect(await screen.findByText(omittedNotice(5))).toBeInTheDocument();
+  });
+
+  it('says "1 highlight was left out" for one', () => {
+    expect(omittedNotice(1)).toBe('1 highlight was left out; open the Spaarke Console for all of them.');
   });
 });
 
