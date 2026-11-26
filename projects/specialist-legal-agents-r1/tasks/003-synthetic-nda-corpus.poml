@@ -4,7 +4,7 @@
     <title>Synthetic NDA corpus and ratchet probes</title>
     <phase>1 Test kits, content and desk items</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates new files (test kit) with explicit project constraints</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,7 +84,10 @@
     <criterion testable="true">Negative: no corpus file contains text from answer-key/ or the real NDAs; a grep for "Corteva", "RPX", "Helios" and "answer-key" over the corpus returns nothing.</criterion>
   </acceptance-criteria>
 
-  <notes>See spec.md for the FR this task implements.</notes>
+  <notes>See spec.md for the FR this task implements.
+Completed 2026-11-26. Wrote phase0/g1-nda/corpus/ nda-01..nda-10.md, README.md and ratchet-probes.md. Ten fictional NDAs (status: test, synthetic: true); README maps each to the five positions with clause numbers and adds a by-reference row B-1 for the accelerator's Bluefin Harbor mutual NDA (values read from the generator source build_corpus.py, nothing copied); ten ratchet probes (RP-03 is the accelerator injection pattern, paraphrased, also embedded in nda-10 clause 11). Forbidden-pattern grep (answer-key, Corteva, RPX, Helios) over the corpus returns nothing. No out-of-scope defects filed.
+Decisions for the main session: README/probes should not be uploaded to test agents; RP-10 runs only if the spike build returns an imperative test field; B-1 values are not in the accelerator's expected/ sheet and were taken from the generator source.
+rework: none task 003</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

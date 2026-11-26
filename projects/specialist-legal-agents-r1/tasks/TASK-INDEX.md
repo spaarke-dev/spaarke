@@ -9,14 +9,14 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel | Model / effort | Rigor |
 |-----|-------|-------|--------|--------------|----------|----------------|-------|
-| 001 | Phase 0 index and artifact inventory | 1 | 🔲 [open] | none | Group A | sonnet / medium | MINIMAL |
-| 002 | G1-NDA kit: test profiles A and B, prompt script, results sheet | 1 | 🔲 [open] | none | Group A | sonnet / high | STANDARD |
-| 003 | Synthetic NDA corpus and ratchet probes | 1 | 🔲 [open] | none | Group A | sonnet / high | STANDARD |
-| 004 | G5 routing kit and G2 packaging questions | 1 | 🔲 [open] | none | Group A | sonnet / medium | MINIMAL |
-| 005 | G6 coexistence kit (extends T-P2) | 1 | 🔲 [open] | none | Group A | sonnet / medium | MINIMAL |
-| 006 | Patent test content, drafting skill and patent kits | 1 | 🔲 [open] | none | Group A | opus / high | STANDARD |
-| 007 | Desk items I-1 to I-4 with file:line evidence | 1 | 🔲 [open] | none | Group B | opus / high | STANDARD |
-| 010 | Check the agreement-review Action row and its input schema in DEV | 2 | 🔲 [open] | none | Group B | sonnet / high | STANDARD |
+| 001 | Phase 0 index and artifact inventory | 1 | ✅ [done] | none | Group A | sonnet / medium | MINIMAL |
+| 002 | G1-NDA kit: test profiles A and B, prompt script, results sheet | 1 | ✅ [done] | none | Group A | sonnet / high | STANDARD |
+| 003 | Synthetic NDA corpus and ratchet probes | 1 | ✅ [done] | none | Group A | sonnet / high | STANDARD |
+| 004 | G5 routing kit and G2 packaging questions | 1 | ✅ [done] | none | Group A | sonnet / medium | MINIMAL |
+| 005 | G6 coexistence kit (extends T-P2) | 1 | ✅ [done] | none | Group A | sonnet / medium | MINIMAL |
+| 006 | Patent test content, drafting skill and patent kits | 1 | ✅ [done] | none | Group A | opus / high | STANDARD |
+| 007 | Desk items I-1 to I-4 with file:line evidence | 1 | ✅ [done] | none | Group B | opus / high | STANDARD |
+| 010 | Check the agreement-review Action row and its input schema in DEV (waiting on the owner go for the DEV spike row) | 2 | 🔄 [wip] | none | Group B | sonnet / high | STANDARD |
 | 011 | Spike branch: spike_get_profile and spike_review_nda (never merged) | 2 | 🔲 [open] | 002, 006, 010 | alone | opus / high | FULL |
 | 015 | Spike dev deploy through uac-r2 | 2 | 🔲 [open] | 011 | alone (owner go) | sonnet / high | STANDARD |
 | 020 | Test agent packages for G1, G5 and G2 | 3 | 🔲 [open] | 002, 004, 015 | alone (owner uploads) | sonnet / high | STANDARD |

@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella), Phase 0
 
-> **Last Updated**: 2026-11-26 (project-pipeline Steps 2–4 done; Wave 1 about to start)
+> **Last Updated**: 2026-11-26 (Wave 1 + 007 done; 010 waiting on the owner go)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Recovery**: read this file, then `CLAUDE.md` (binding rules, gotchas), then `tasks/TASK-INDEX.md`.
 
@@ -9,15 +9,15 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 0 in execution. `spec.md` (2026-11-25), `plan.md`, project `CLAUDE.md`, 20 POMLs + `tasks/TASK-INDEX.md` (2026-11-26, lint PASS, no drift) |
-| **Active task** | Wave 1: 001–006 (Group A, parallel task-execute sub-agents; 006 on opus). Then Wave 2: 007, 010 |
+| **Active task** | 001–007 ✅. 010 🔄 waiting on the owner go to create the DEV-only `agreement-review-spike` row (command in `phase0/g1-nda/action-check.md`, `$apply = $false` until go). Next: 011 (spike branch, opus, FULL) once 010 is done |
 | **Stop points** | 010 DEV write (`agreement-review-spike`) needs the owner's go; 015 dev deploy needs the owner's per-SHA go via uac-r2 |
 | **Uncommitted** | see `git status` |
 
 ## Next action (exact)
 
-1. Run Wave 1 (001–006) as task-execute sub-agents; review each result; update TASK-INDEX (`✅ [done]`) and run `pwsh scripts/check-task-status-drift.ps1`.
-2. Run Wave 2 (007, 010). Stop at the 010 owner step if a spike copy is needed.
-3. Then 011 (spike branch, FULL rigor, opus) once 002, 006 and 010 are done.
+1. Owner go on the DEV `agreement-review-spike` row (task 010). On go: set `$apply = $true` in the `action-check.md` command, run it, record the created id, mark 010 done.
+2. Task 011 (spike branch) — inputs from `notes/decisions.md` 2026-11-26: indemnity flag as a declared input; `spike_get_profile` returns `returnedInstructions` (C1–C3).
+3. Task 015 needs the owner per-SHA go via uac-r2.
 
 ## Open items outside the task list
 

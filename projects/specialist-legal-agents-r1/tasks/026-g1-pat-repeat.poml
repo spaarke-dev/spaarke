@@ -56,7 +56,7 @@
   <steps mode="directional">
     <step order="1">Read the G1-NDA verdict; list the variants in contention</step>
     <step order="2">If none, record "not run" with the reason and finish</step>
-    <step order="3">Otherwise hand over the G1-PAT script; score with the FR-04 thresholds</step>
+    <step order="3">Otherwise build the patent (a)/(b) agent and skill variants for the variants in contention (the way task 020 builds the NDA ones: fresh app id, FORBIDDEN_IN_PACKAGE check, R4 row sent and quoted, inventory row), ask the owner to upload, then hand over the G1-PAT script; score with the FR-04 thresholds</step>
     <step order="4">State confirms or contradicts</step>
     <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
     <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>

@@ -4,7 +4,7 @@
     <title>G1-NDA kit: test profiles A and B, prompt script, results sheet</title>
     <phase>1 Test kits, content and desk items</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates new files (test kit) with explicit project constraints</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -92,7 +92,7 @@
     <criterion testable="true">Negative: no file references answer-key/ or a real NDA; a grep for "answer-key", "Corteva", "RPX" and "Helios" over phase0/g1-nda/ returns nothing.</criterion>
   </acceptance-criteria>
 
-  <notes>Task 003 writes the corpus the prompt script references; agree file names by using corpus/nda-NN.md (NN = 01..10) and bluefin-harbor as the existing corpus name.</notes>
+  <notes>Completed 2026-11-26: README.md, profile-a.json, profile-b.json written; rubric aligned to corpus/README.md values. rework: none task 002. Task 003 writes the corpus the prompt script references; agree file names by using corpus/nda-NN.md (NN = 01..10) and bluefin-harbor as the existing corpus name.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

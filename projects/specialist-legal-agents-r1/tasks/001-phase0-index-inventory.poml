@@ -4,7 +4,7 @@
     <title>Phase 0 index and artifact inventory</title>
     <phase>1 Test kits, content and desk items</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation and inventory/checklist creation only</rigor-reason>
     <model-tier>sonnet</model-tier>

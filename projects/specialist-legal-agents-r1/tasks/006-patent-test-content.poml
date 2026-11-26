@@ -4,7 +4,7 @@
     <title>Patent test content, drafting skill and patent kits</title>
     <phase>1 Test kits, content and desk items</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates new files (test kit) with explicit project constraints</rigor-reason>
     <model-tier>opus</model-tier>

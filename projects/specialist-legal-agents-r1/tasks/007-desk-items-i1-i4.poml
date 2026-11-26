@@ -4,7 +4,7 @@
     <title>Desk items I-1 to I-4 with file:line evidence</title>
     <phase>1 Test kits, content and desk items</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new analysis file with explicit ADR constraints (ADR-039, ADR-040)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -91,7 +91,10 @@
     <criterion testable="true">Negative: no section proposes a second gate, a second run store or a playbook-engine path.</criterion>
   </acceptance-criteria>
 
-  <notes>See spec.md for the FR this task implements.</notes>
+  <notes>See spec.md for the FR this task implements.
+    Completed 2026-11-26 (wave B agent): notes/phase0-desk-items.md written. I-1 MCP catalogue, SideEffectGateAIFunction not on MCP; I-2 yes as escalate-only input to RiskTierResolver/BindingRisk; I-3 decided sprk_playbookrun via PlaybookRunRecordStore, LinearRunContext has no run id; I-4 IRetrievalAccessTrim on document retrieval only, not on ActionRunner reference grounding.
+    Steps 6-7 (TASK-INDEX, drift check, decisions.md) left to the main session per wave rules. Documentation-only: Step 9.5 skipped (no code).
+    rework: none task 007</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
