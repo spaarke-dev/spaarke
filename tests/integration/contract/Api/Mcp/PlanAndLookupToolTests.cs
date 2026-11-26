@@ -251,9 +251,10 @@ public sealed class PlanAndLookupToolTests
         await host.CallAsync("spaarke_search_decision_lookup", new { signalId = SignalId, parameterCode = "budget", query = "Out" });
 
         host.Script.SameContext.Should().BeEquivalentTo(
-            [new ContextUse("GetPlan", true), new ContextUse("GetSuppression", true), new ContextUse("ListDecide", true), new ContextUse("Lookup", true)],
+            [new ContextUse("GetPlan", true), new ContextUse("GetSuppression", true), new ContextUse("GetWorkItem", true), new ContextUse("Lookup", true)],
             options => options.WithStrictOrdering(),
-            "the tools pass IHttpContextAccessor.HttpContext itself (its User for the list read), never a context they built or cached");
+            "the tools pass IHttpContextAccessor.HttpContext itself (its User for the row read), never a context they built or cached");
+        host.Script.RowSignalIds.Should().Equal([SignalId], "the plan tool reads the opened item's row only, never the whole lane (NFR-01)");
     }
 
     [Fact]
@@ -482,7 +483,11 @@ internal sealed class PlanAndLookupScript
     /// <summary>The caller's unfinished review, as the plan read returns it (the capability's own read of it needs the commit store, which is not scripted here).</summary>
     public UnfinishedDecision? Unfinished { get; set; }
 
+    /// <summary>Worklist reads of any kind: the whole lane or one Work Item.</summary>
     public int ListCalls { get; set; }
+
+    /// <summary>The Signal each single Work Item read asked for, in call order.</summary>
+    public List<Guid> RowSignalIds { get; } = [];
 
     public int SuppressionCalls { get; set; }
 
@@ -536,6 +541,15 @@ internal sealed class PlanAndLookupCapability(DecisionCapability real, IHttpCont
     {
         script.ListCalls++;
         script.SameContext.Add(new("ListDecide", ReferenceEquals(user, accessor.HttpContext?.User)));
+        return Task.FromResult(script.Lane());
+    }
+
+    /// <summary>The plan tool's row read. Counted with the list reads (any worklist read), with the Signal it asked for.</summary>
+    public Task<SignalReadResult> GetWorkItemAsync(ClaimsPrincipal? user, Guid signalId, CancellationToken ct)
+    {
+        script.ListCalls++;
+        script.RowSignalIds.Add(signalId);
+        script.SameContext.Add(new("GetWorkItem", ReferenceEquals(user, accessor.HttpContext?.User)));
         return Task.FromResult(script.Lane());
     }
 

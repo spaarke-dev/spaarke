@@ -56,7 +56,11 @@
 [CmdletBinding()]
 param(
     [string]$EnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com',
-    [string]$OutputDirectory = $PSScriptRoot
+    [string]$OutputDirectory = $PSScriptRoot,
+
+    # Export only these tables (logical names). Default: every table below. Use it to add one table without
+    # re-exporting (and re-diffing) the others.
+    [string[]]$OnlyTable = @()
 )
 
 Set-StrictMode -Version Latest
@@ -66,8 +70,27 @@ $ErrorActionPreference = 'Stop'
 $tables = @(
     @{ LogicalName = 'sprk_eventtype_ref'; Exclude = @() },
     @{ LogicalName = 'sprk_agreementtype'; Exclude = @() },
-    @{ LogicalName = 'sprk_triagecategory'; Exclude = @('sprk_labelledsetsize', 'sprk_measuredrecall', 'sprk_recallmeasuredon') }
+    @{ LogicalName = 'sprk_triagecategory'; Exclude = @('sprk_labelledsetsize', 'sprk_measuredrecall', 'sprk_recallmeasuredon') },
+    # ISS-045: ONLY the 17 grid configurations that product code hard-codes by dev row id (external-SPA widgets and the BFF
+    # external-grant allow-list, the workspace/assistant widgets, the Events/Calendar/KPI/Invoices/Communications pages, the
+    # Analysis Hub). Not the whole table: the 4 Communication Reconciliation rows have their own seeder (DataGrid scope), and a
+    # customer's own grid configurations are not product configuration. When product code starts hard-coding another grid
+    # configuration id, add it here and re-export; the ReferenceRowIdLiteral guard fails until you do.
+    @{
+        LogicalName = 'sprk_gridconfiguration'; Exclude = @()
+        Ids = @(
+            '113ad380-9e63-f111-ab0c-70a8a53ec687', '1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6', '3019a06e-9b5e-f111-ab0c-7c1e521545d7',
+            '3af4102c-1092-f111-b8dc-7ced8ddc4a05', '3ff4102c-1092-f111-b8dc-7ced8ddc4a05', '403e5d37-cb94-f111-b8db-00224835447a',
+            '42f4102c-1092-f111-b8dc-7ced8ddc4a05', '5294c28a-f078-f111-ab0e-7ced8ddc4a05', '583a2a33-1092-f111-b8dc-7ced8ddc4a05',
+            '61711823-1092-f111-b8dc-7ced8ddc4a05', '97ee98e7-7a63-f111-ab0c-70a8a53ec687', '9c5b0ee7-7a63-f111-ab0c-000d3a4d8152',
+            'ac05e4f1-8d85-f111-8075-7c1e5268570d', 'd021827b-9b5e-f111-ab0c-7c1e521545d7', 'e15c2b93-a05f-f111-a825-70a8a59455f4',
+            'e1826c4c-9575-f111-ab0e-7ced8ddc4a05', 'e7c8126a-968b-f111-8077-7ced8ddc4a05'
+        )
+    }
 )
+if ($OnlyTable.Count -gt 0) {
+    $tables = @($tables | Where-Object { $_.LogicalName -in $OnlyTable })
+}
 
 $baseUrl = $EnvironmentUrl.TrimEnd('/')
 $api = "$baseUrl/api/data/v9.2"
@@ -126,7 +149,12 @@ foreach ($table in $tables) {
     )
 
     $select = (@($primaryKey) + $columns) -join ','
-    $uri = "$api/${entitySet}?`$select=$select&`$filter=statecode eq 0&`$orderby=$primaryKey"
+    $filter = 'statecode eq 0'
+    if ($table.ContainsKey('Ids')) {
+        $idFilter = ($table.Ids | ForEach-Object { "$primaryKey eq $_" }) -join ' or '
+        $filter = "statecode eq 0 and ($idFilter)"
+    }
+    $uri = "$api/${entitySet}?`$select=$select&`$filter=$filter&`$orderby=$primaryKey"
     $rawRows = New-Object System.Collections.Generic.List[object]
     while ($uri) {
         $page = Get-DataverseJson $uri
@@ -135,6 +163,15 @@ foreach ($table in $tables) {
     }
 
     $rows = @($rawRows | Sort-Object { ([string]$_.$primaryKey).ToLowerInvariant() } -CaseSensitive)
+
+    if ($table.ContainsKey('Ids')) {
+        # A named id that is absent (or inactive) on the source environment is an error, never a silently smaller seed.
+        $found = @($rows | ForEach-Object { ([string]$_.$primaryKey).ToLowerInvariant() })
+        $missing = @($table.Ids | Where-Object { $_.ToLowerInvariant() -notin $found })
+        if ($missing.Count -gt 0) {
+            throw "$logicalName : $($missing.Count) of $($table.Ids.Count) named row(s) are not active on $baseUrl : $($missing -join ', ')"
+        }
+    }
 
     # Hand-written writer: PowerShell wraps values in PSObject, which System.Text.Json cannot
     # serialise as a whole document, so each scalar is serialised on its own as a plain .NET type.

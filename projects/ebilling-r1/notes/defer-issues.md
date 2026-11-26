@@ -238,7 +238,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (master PR #3174, fbde7ef9a1, 2026-11-25 23:06Z; #2643 closed). Was: fixed on work (merged 2d8aa1d59b from task/ebilling-def064 cde47c85a9; review + 2 fix rounds + re-check).  Enforced by: `InvoiceFamilyCoreLookupWriterGuardTests` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 task 130b fix round 4, review question Q1 (uac-r2 ruling (ii)) |
@@ -260,7 +260,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed). Was: fixed on work (merged 2026-11-25 from task/ebilling-def063 32a5f8a388: -AllowNothingToPublish on the import paths; exit 0 'Nothing to publish; import complete'; app-settings-only plans still throw; Pester 96/0). |
 | **Urgency** | someday |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 DEF-059 dev apply (a role-only solution import) |
@@ -452,7 +452,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed; BFF part reaches dev with the next dev BFF deploy). Job: over-limit source document is Failed `ebilling.submission.too_large` (permanent, refused before download when `sprk_filesize` is over). From-email: a marked file over the limit is 413 `too_large` at step 1 (`FromEmailMarkRules.Check`), before the `.eml`, its `sprk_document` row or its Communication row is written (the reader check stays as a backstop). Regression: `tests/integration/regression/Ebilling/Issue2553_SubmissionFileSizeLimitTests.cs` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-03 |
 | **Source** | 118b adversarial review (finding 2, parity) |
@@ -728,7 +728,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (master PR #3174, fbde7ef9a1, 2026-11-25 23:06Z; #2755 closed). Was: fixed on work (merged 6444b25adb from task/ebilling-iss016 8d802b9102; review + fix round 1). |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 084b adversarial review (finding 2) |
@@ -770,7 +770,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed). Was: fixed on work (merged 2026-11-25 from task/ebilling-iss014 aa80d83b99: approval re-read every pollIntervalMs while firmNeeded, one review re-read when it clears; jest 667/0).; reaches dev with the next Invoice Review page deploy. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 095d0 review (Codex P2 fix `546296be5c` covers only the re-read case) |
@@ -791,7 +791,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (fixed by task 015, e0df773395: the resolver reads sprk_totalamount and statuscode; closed 2026-11-25) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-15 |
 | **Source** | `/project-pipeline` task authoring (POML 015 discovery) |
@@ -1824,7 +1824,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Open; worked around by task 122's -FormsOnly |
+| **Status** | Done (master PR #3174, fbde7ef9a1, 2026-11-25 23:06Z; #2312 closed; a live full run still needs the owner's go). Was: fixed on work (merged caac9a518d from task/ebilling-def046 3c91bceba7: navigation anchors in the Invoice group, read-only preflight of both sitemaps, early refusal; Pester 49/0) |
 | **Urgency** | medium |
 | **Filed** | 2026-10-23 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2312 |
@@ -2676,11 +2676,39 @@ Concrete failure: an authenticated caller who sends a truncated upload gets a se
 
 ---
 
-### ISS-053 — Nothing checks that duplicate detection stays off on the BFF job queues (ISS-025's retry copy relies on it)
+### ISS-054 — External-visibility registry: no marker for never-external reference tables outside the lineage (sprk_procedure, sprk_procedureversion)
 
 | Field | Value |
 |---|---|
 | **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-25 |
+| **Source** | Task 189 (docs) model-vs-code check; option (c) agreed with uac-r2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3143 |
+
+**Description**
+
+`sprk_procedure` and `sprk_procedureversion` sit outside the secure-child lineage, and the external-visibility registry declares no marker for them. Today this fails closed: `SecureChildLineage.ExternalMarkerOf` returns null, `ExternalVisibility` decides the row Undecided (`UnknownTable`), and every consumer treats Undecided as hidden. They cannot be added as `ExternalMarker.Never`, because there "Never" means communication content: the 191b duplicate-list ArchTest flags nine BFF types that name the Procedure tables, three unit tests pin the set, and `ExternalCallerCommunicationGuard.RefusedContentTables` is the same set. The concrete gap: the registry is meant to be the one map of never-external tables, and these two rely on the unknown-table default instead, so a consumer that reads the markers directly would not see them as never-external.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs` (`OutsideLineage`, `ExternalMarkerOf`, `NeverExternalTables`)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalVisibility.cs` (`DecideAsync`)
+- `tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs`; `tests/unit/domain/Access/SecureChildLineageTests.cs`
+
+**Suggested fix**: a separate "outside the lineage, never external, not communication content" marker, kept out of `RefusedContentTables` and the duplicate-list guard; declare both tables with it and test `ExternalMarkerOf` for both. Revisit with or after task 121.
+
+**Estimated effort**: half a day, including the registry decision (uac-r2 reviews).
+**Blockers**: the registry semantics decision (uac-r2).
+**Related**: task 189, task 121. Not a security exposure (fails closed).
+
+---
+
+### ISS-053 — Nothing checks that duplicate detection stays off on the BFF job queues (ISS-025's retry copy relies on it)
+
+| Field | Value |
+|---|---|
+| **Status** | Done (master PR #3155, 6a968b2a00, 2026-11-25; issue closed). Was: fixed on work (merged 2026-11-25 from task/ebilling-iss053 8b9d8c0aa6: ArchTest JobQueueDuplicateDetectionOffGuardTests, 8/0; jobs.md names it). Live stamps checked 2026-11-25 by customer-provisioning-orchestration-r1: ACME (the only live stamp) is false on all 7 queues; new stamps are covered by the Bicep guard (create-time property), so no per-run check. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 |
 | **Source** | uac-r2 review of master PR #3084 (ISS-025), 2026-11-25 |

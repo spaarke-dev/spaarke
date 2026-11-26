@@ -867,15 +867,7 @@ public sealed class CoreAncestorResolver
 
     /// <summary>A read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
     private static bool IsRecordNotFound(Exception ex)
-    {
-        for (var e = ex; e is not null; e = e.InnerException)
-        {
-            if (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
-                return true;
-        }
-
-        return false;
-    }
+        => Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFoundInChain(ex);
 
     /// <summary>
     /// Apply derived ancestor stamps to a child entity being written, skipping any the host cannot store.

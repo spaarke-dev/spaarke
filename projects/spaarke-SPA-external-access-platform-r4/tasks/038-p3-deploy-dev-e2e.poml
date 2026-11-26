@@ -4,7 +4,7 @@
     <title>P3 deploy: BFF changes via uac-r2, SPA to dev, E2E</title>
     <phase>3 Grids, information, messages</phase>
     <gate>after 031, 032, 033, 034, 035, 036 — BFF via uac-r2 with the owner's go per SHA; owner approval for the SPA deploy. HARD ORDER (wave-8 review, 2026-11-23): the BFF carrying task 031's ReadableColumns must be LIVE on dev BEFORE any SPA build that contains 031's RecordDetailFields.tsx is deployed — otherwise every matter/project/work-assignment record read answers 400 DV_FETCHXML_COLUMN_NOT_PERMITTED and no record opens. This holds for ANY SPA deploy after 031 merges (deploy-external-spa.yml builds master HEAD), not only 038's.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment and E2E task (tags deploy, e2e-test); no code authored</rigor-reason>
     <model-tier>sonnet</model-tier>

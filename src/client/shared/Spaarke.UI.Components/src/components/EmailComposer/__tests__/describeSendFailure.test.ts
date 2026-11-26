@@ -6,8 +6,10 @@ import { SendCommunicationError } from '../../../services/communicationApi';
 import {
   describeDraftSaveFailure,
   describeSendFailure,
+  mayHaveBeenSent,
   meaningfulDetail,
   toSendCommunicationError,
+  toSendRequestError,
   SEND_FAILURE_CLIENT_CODE,
   SEND_FAILURE_NETWORK_CODE,
   SEND_FAILURE_UNCONFIRMED_CODE,
@@ -119,7 +121,7 @@ describe('describeSendFailure — one row per status', () => {
     expect(describeSendFailure(sce(0, 'Failed to fetch', SEND_FAILURE_NETWORK_CODE))).toEqual({
       title: 'Email may not have been sent',
       message:
-        "Couldn't get a response from the Spaarke server. Check your network connection. " +
+        'The connection to the Spaarke server failed before it answered. Check your network connection. ' +
         "If you're not sure whether it went out, check your Sent Items before sending again. " +
         DRAFT_KEPT,
     });
@@ -127,7 +129,7 @@ describe('describeSendFailure — one row per status', () => {
 
   it('a raw fetch TypeError (not yet normalized) → the network sentence, not the browser wording', () => {
     const { message } = describeSendFailure(new TypeError('Failed to fetch'));
-    expect(message).toMatch(/^Couldn't get a response from the Spaarke server/);
+    expect(message).toMatch(/^The connection to the Spaarke server failed/);
     expect(message).not.toMatch(/Failed to fetch/);
   });
 
@@ -239,5 +241,62 @@ describe('describeDraftSaveFailure', () => {
         "The draft couldn't be saved. Dataverse rejected the update. Your message is still here — nothing was lost.",
       reference: 'r-9',
     });
+  });
+});
+
+// Task 220 (#2946): a send that got no response is a connection failure whatever the browser or frame called it.
+describe('network classification (task 220)', () => {
+  it.each(['The Internet connection appears to be offline.', 'The network connection was lost.'])(
+    'toSendCommunicationError: WebKit wording %p → NETWORK',
+    msg => {
+      expect(toSendCommunicationError(new TypeError(msg)).code).toBe(SEND_FAILURE_NETWORK_CODE);
+    }
+  );
+
+  it('toSendCommunicationError: a fetch TypeError from another frame (fails instanceof) → NETWORK', () => {
+    const foreign = { name: 'TypeError', message: 'Failed to fetch' };
+    expect(foreign instanceof TypeError).toBe(false);
+    expect(toSendCommunicationError(foreign).code).toBe(SEND_FAILURE_NETWORK_CODE);
+  });
+
+  it('toSendRequestError: anything the request threw without a response → NETWORK', () => {
+    for (const thrown of [
+      new TypeError('Some new browser wording'),
+      { name: 'TypeError', message: 'Failed to fetch' },
+      new Error('socket hang up'),
+      'offline',
+    ]) {
+      const e = toSendRequestError(thrown);
+      expect(e).toBeInstanceOf(SendCommunicationError);
+      expect(e).toMatchObject({ status: 0, code: SEND_FAILURE_NETWORK_CODE });
+    }
+  });
+
+  it("toSendRequestError: sendCommunication's own errors and HTTP outcomes keep their meaning", () => {
+    expect(toSendRequestError(new Error('sendCommunication: subject is required.')).code).toBe(
+      SEND_FAILURE_CLIENT_CODE
+    );
+    expect(toSendRequestError(new Error('sendCommunication: response did not include communicationId.')).code).toBe(
+      SEND_FAILURE_UNCONFIRMED_CODE
+    );
+    const refused = sce(422, 'Sender not approved');
+    expect(toSendRequestError(refused)).toBe(refused);
+    expect(toSendRequestError(apiErrorFor(500)).status).toBe(500);
+    expect(toSendRequestError(authExhausted()).status).toBe(401);
+  });
+
+  it.each([
+    ['no response', sce(0, 'Failed to fetch', SEND_FAILURE_NETWORK_CODE), true],
+    ['2xx without an id', sce(0, 'x', SEND_FAILURE_UNCONFIRMED_CODE), true],
+    ['500', sce(500, 'x'), true],
+    ['503', sce(503, 'x'), true],
+    ['client-side, never left', sce(0, 'x', SEND_FAILURE_CLIENT_CODE), false],
+    ['400', sce(400, 'x'), false],
+    ['401', sce(401, 'x'), false],
+    ['403', sce(403, 'x'), false],
+    ['422', sce(422, 'x'), false],
+    ['429', sce(429, 'x'), false],
+  ])('mayHaveBeenSent: %s', (_label, err, expected) => {
+    expect(mayHaveBeenSent(err)).toBe(expected);
   });
 });

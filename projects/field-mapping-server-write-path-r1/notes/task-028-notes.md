@@ -145,3 +145,49 @@ Every other reader looks up a row by name or id. `OwnedChildWrite.RegardingPairT
   - `sprk_name` → `sprk_subject` (`7059ba77-dee8-f111-84e8-7ced8d1d8f6b`);
   - `sprk_description` → `sprk_body` (`b14beb75-dee8-f111-84ea-7ced8ddb6f85`).
   - Deactivate the profile after the check.
+
+**UAC-r2 review of #3148: no objection.**
+- `SecureRootInheritance` treats a Communication pair as `NotAFilingParent`, and the typed lookup still carries lineage. Before, the type was `Unknown`.
+- `NoAccessShareEnforcer` sees `NotASecureRoot`, as before.
+
+Their one ask is the pair-agreement rule: a pair typed to Communication must come with `sprk_regardingcommunication` holding the same id. Checked in code:
+- `TodoRegardingBuilder` sets the typed lookup before `ApplyResolverPairAsync`.
+- `TaskActionCore` (event tasks) sets `entity[regardingField]` before the same call.
+- The client `applyResolverFields` binds the typed lookup when its navigation property exists. The wizard target lists (`TODO_REGARDING_TARGETS`, `EVENT_REGARDING_TARGETS`, `COMMUNICATION_REGARDING_TARGETS`) are matched to each table's live schema, so Communication is offered only where the lookup exists.
+
+Still to do: one live create on dev each of a To Do and an Event under a communication, with the live check, on the owner's go.
+
+## Live check on dev (2026-11-25 16:35–16:46Z, owner: "Yes, run it")
+
+Run in the owner's Chrome from the Console (`sprk_spaarkeai` from master 7f13cf2e26): Quick Start → Analysis → NDA Analysis, an existing document (Brightwater Mutual NDA - Test 3.docx), the description left empty, Assigned Attorney picked as Chelsea Friez, follow-on Send Notification Email to the owner's work address. Dev BFF a1b7db1def (UAC-r2's deploy, 30-minute gate passed 16:29Z).
+
+| Run | Matter | Analysis | Result |
+|---|---|---|---|
+| A | PAT-176903 (Access Permission **Restricted** since 2026-11-12) | `672f06d4-989e-4178-b175-b2cc9cefb5ba` | **Correct refusal to copy.** Wizard warning: fields not copied because the source is Restricted (022's `MappingSourceCopyGate`: a Restricted record's values go only into a record that is Restricted when created). Analysis: attorney Chelsea kept, no description, no internal, owner = the Matter's team. The email had an empty subject and body; with no description the body stayed empty, so the send was refused ("Body is required") and no communication row was written. This matches the wizard's stated rule: if nothing fills it, the email is not sent. |
+| B | MAT-000113 (Standard; attorney 1 and internal Ralph Schroeder; has a description) | `d9eb3a64-4e69-44d2-b1a3-9a684fe059db` | **PASS.** Description = the Matter's description; internal = Ralph Schroeder (filled); attorney 1 = Chelsea Friez (picked value kept); owner = Spaarke Business Unit 1 (the Matter's team). No warnings. Email (empty subject and body) → communication `a66483b3-eee8-f111-84ea-00224829aef9`, status Send: subject = "FM-028 live check B" (the analysis name), body = the analysis description; `sprk_regardinganalysis` = the analysis; core Matter MAT-000113 stamped. |
+| C | MAT-000113 | `641664b0-bee7-4cdb-99e4-8a63cd11eef7` | **PASS.** Email with typed subject "FM-028 typed subject C" and empty body → communication `a81a180b-efe8-f111-84ea-00224829aef9`, status Send: the typed subject was kept and the body was filled from the analysis description. |
+
+**UAC-r2's ask (pair agreement): PASS.** Both were created from communication B's form, through its Related To Dos and Events lists, which open the To Do and Event wizards. Neither was refused.
+- To Do `3de575e9-5fa3-4b26-b689-5dd59c6d3df6`;
+- Event `b63bdc13-dba8-4533-98e1-bc719ddfb385`.
+
+Both rows have:
+- `sprk_regardingrecordtype` = Communication (`6b59ba77…`);
+- `sprk_regardingrecordid` = `sprk_regardingcommunication` = `a66483b3…`;
+- core Matter MAT-000113;
+- owner = the Matter's team.
+
+**Observation, not a defect:** the outbound communication rows carry `sprk_regardingrecordid` and the typed `sprk_regardinganalysis`, but no `sprk_regardingrecordtype`. The outbound sender never writes that column, by design (`CommunicationContainerResolver` remarks; `CommunicationService.MapAssociationFieldsAsync`). The pair id still matches the typed column.
+
+**Cleanup:** both temporary profiles were deactivated at 16:47Z (`62bac40d…`, `4e88e776…`: state Inactive). The catalog row `6b59ba77…` stays as product reference data. Test rows left on dev: analyses A, B and C; communications B and C; the To Do; the Event. The Compose tabs the wizard opened in the Console were not saved.
+
+The PAT-176903 note under "Live-check setup" above was written before the Restricted flag was noticed. For a mapping check, use a Standard Matter such as MAT-000113.
+
+Task 028 is done except for the owner's dark-mode look.
+- 2026-11-25: the final 138 diff (3bb88235bc, PR #3157) was checked against the four conditions.
+  - All four pass; ArchTests 2823/2823 at its head.
+  - Known limits sent to word-add-in-r1:
+    - no guard scans the attachment-add planner for creates;
+    - the fault test is weak;
+    - add-job children take the current record-first owner, not the parent .eml's;
+    - an untested null access decision fails closed.

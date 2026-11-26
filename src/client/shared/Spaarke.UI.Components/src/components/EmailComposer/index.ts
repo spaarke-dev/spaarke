@@ -94,12 +94,15 @@ export {
   EMAIL_NOT_SENT_NO_SERVER,
   EMPTY_COMPOSED_EMAIL,
   composedEmailFromState,
+  discardComposedEmailUploads,
   pendingAttachments,
   invalidRecipients,
   isComposedEmailReady,
   joinRecipientAddresses,
   sendComposedEmail,
 } from './composeOnlySend';
+// Task 220 (#2813): a compose-only wizard deletes its Send Email step's unsent uploads when it closes.
+export { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from './uploadDiscard';
 export type {
   IComposedEmail,
   IEmailComposeHandlers,
@@ -155,4 +158,5 @@ export type {
   IEmailComposerProps,
   IEmailComposerHandle,
   EmailComposerRef,
+  IUploadedLocalAttachment,
 } from './EmailComposer.types';

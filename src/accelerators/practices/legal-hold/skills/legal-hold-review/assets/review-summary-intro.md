@@ -1,0 +1,1 @@
+This page is an internal review aid. It rates each topic of the legal hold notice playbook against {{review_basis}}. The colour of each Rating cell follows the rating: green meets, yellow needs a look or is an accepted fallback, red does not meet or must be escalated. Draft for attorney review; not legal advice. Remove this page and the margin comments before the notice is sent.

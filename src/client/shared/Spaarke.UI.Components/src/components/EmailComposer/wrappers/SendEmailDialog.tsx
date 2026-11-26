@@ -9,7 +9,8 @@
  * pre-seam source of double chrome). The `ComposerActionBar` stays in the body
  * (Messages-shape: smart body, dumb frame). Callback mapping unchanged:
  *   - engine `onSent(result)` → `props.onSent?.(communicationId)` then `onClose()`
- *   - engine `onCancel` / shell × → `onClose`
+ *   - engine `onCancel` / shell × → `onClose` (the × through the engine's `requestCancel`, so a typed draft
+ *     asks "Discard this email?" first and the session's uploads are cleaned up — task 220)
  *   - `alert` dismiss: no Esc/backdrop close (owner UAT 2026-07-30 item 12)
  *
  * This is THE canonical dialog wrapper (design §5.1.1) — it supersedes the legacy
@@ -38,6 +39,8 @@ import type {
   IEmailAiDraftAction,
   IEmailAiDraftRequest,
   IEmailAiDraftResult,
+  IEmailComposerHandle,
+  IUploadedLocalAttachment,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type {
@@ -137,9 +140,11 @@ export interface ISendEmailDialogProps {
   /**
    * Resolve a locally-picked file to a governed `sprk_document` (item 9b) so it
    * flows into the send payload. Forwarded verbatim to the engine via the
-   * `...composerProps` spread; omitted → local picks stay display-only.
+   * `...composerProps` spread; omitted → local picks stay display-only. A
+   * `discard` on the result lets the composer remove that document again when
+   * the email is not sent (task 220; see `IUploadedLocalAttachment`).
    */
-  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  onUploadLocalAttachment?: (file: File) => Promise<IUploadedLocalAttachment>;
   /**
    * Resolve a recipient-openable SPE sharing link for a linked document (R2 item 12). Forwarded to
    * the engine via `...composerProps`; omitted → links keep their original internal URL.
@@ -332,8 +337,17 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     [nonBlocking]
   );
 
+  // The shell's × goes through the composer (task 220, #2946): a typed draft asks "Discard this email?" first, and on
+  // discard the documents the composer uploaded are cleaned up before `onClose` runs — the same path as its Cancel.
+  const composerRef = React.useRef<IEmailComposerHandle>(null);
+  const requestClose = React.useCallback(() => {
+    if (composerRef.current) composerRef.current.requestCancel();
+    else onClose();
+  }, [onClose]);
+
   const composer = (
     <EmailComposer
+      ref={composerRef}
       {...composerProps}
       // Wrap the native-lookup callbacks so the modal auto-hides while the
       // Xrm lookup pane is open (#2A/#2B). No-op when not nonBlocking.
@@ -357,7 +371,7 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
   return (
     <SprkModal
       open={open}
-      onClose={onClose}
+      onClose={requestClose}
       yieldToSidePane={lookupHidden}
       title={title}
       // fullBleed hosts (record-modal reply, dedicated compose window) start —

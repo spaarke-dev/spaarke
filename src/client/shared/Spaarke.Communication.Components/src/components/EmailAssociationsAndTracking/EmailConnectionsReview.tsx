@@ -55,6 +55,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     regardingRecordName,
     regardingRecordNumber,
     regardingRecordType,
+    regardingRecordId,
     filedAssociations = [],
     writeContext,
     linkAnotherCatalog,
@@ -93,6 +94,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
         recordName: regardingRecordName,
         recordNumber: regardingRecordNumber,
         recordTypeLabel: regardingRecordType,
+        recordId: regardingRecordId,
       }),
     [
       associationProvenanceJson,
@@ -101,6 +103,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       regardingRecordName,
       regardingRecordNumber,
       regardingRecordType,
+      regardingRecordId,
     ]
   );
 

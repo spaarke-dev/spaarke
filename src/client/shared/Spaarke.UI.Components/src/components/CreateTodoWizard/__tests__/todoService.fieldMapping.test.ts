@@ -11,7 +11,7 @@
  *   - the create goes to the BFF route, never `dataService.createRecord('sprk_todo', ...)` (Xrm.WebApi);
  *   - the regarding parent travels as the explicit mapping source in the QUERY STRING, and the body is the same with or
  *     without it; no parent, no query string;
- *   - `applyFieldMappings` is never imported and never called, and no field-mapping profile is read;
+ *   - no client mapping engine is imported or called, and no field-mapping profile is read;
  *   - the route's warnings reach the result; a refusal is a hard error; a service with no BFF connection creates nothing.
  */
 
@@ -26,12 +26,7 @@ import {
   _resetRecordNumberFieldCacheForTests,
   _resetDisplayNameFieldCacheForTests,
 } from '../../../services/PolymorphicResolverService';
-import { applyFieldMappings } from '../../../services/FieldMappingService';
 import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
-
-jest.mock('../../../services/FieldMappingService', () => ({
-  applyFieldMappings: jest.fn(),
-}));
 
 const BFF_BASE = 'https://example.test';
 const ROUTE = `${BFF_BASE}/api/v1/child-records/sprk_todo`;
@@ -291,17 +286,15 @@ describe('TodoService — creates through the server write path (task 024, FR-16
     }
   });
 
-  it('does not map on the client: applyFieldMappings is never called and no field-mapping profile is read', async () => {
+  it('does not map on the client: no field-mapping profile is read', async () => {
     const fetchMock = makeFetch();
     await new TodoService(makeDataService(), fetchMock, BFF_BASE).createTodo(makeForm(), MATTER);
 
-    expect(applyFieldMappings).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/field-mappings/'))).toEqual([]);
   });
 
-  it('todoService.ts neither imports nor mentions applyFieldMappings or FieldMappingService, and does not use withBffChildWrites', () => {
+  it('todoService.ts neither imports nor mentions FieldMappingService, and does not use withBffChildWrites', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../todoService.ts'), 'utf8');
-    expect(source).not.toMatch(/applyFieldMappings/);
     expect(source).not.toMatch(/FieldMappingService/);
     expect(source).not.toMatch(/withBffChildWrites/);
   });

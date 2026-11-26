@@ -77,7 +77,7 @@ beforeEach(() => {
 });
 
 describe('useSaveFlow — the email filing outcome (task 131)', () => {
-  it.each([['NotPermitted'], ['Failed']])(
+  it.each([['NotPermitted'], ['Failed'], ['FiledUnconfirmed']])(
     'emailFiling %s is handed to onComplete as its third argument',
     async outcome => {
       serverAnswers({ emailFiling: outcome });

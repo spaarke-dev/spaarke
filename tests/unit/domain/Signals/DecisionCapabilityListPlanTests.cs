@@ -5,6 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Domain.Signals.DecisionCapabilityFixtures;
@@ -66,6 +67,58 @@ public sealed class DecisionCapabilityListPlanTests
         cache.Writes.Should().BeEmpty("a refused plan was not read, so no review started");
         DecisionResultMapper.ToToolError(result)!.ReasonCode.Should().Be(DecisionPlanEndpoints.PlanRefusedReasonCode);
     }
+
+    [Fact]
+    public async Task GetPlanAndSuppressionAsync_ForAReadableSignal_AnswersAsTheTwoReadsDo_WithOneAccessCheck()
+    {
+        // NFR-01 (2026-11-25): the plan tool asked the Signal access question twice per item opened (plan, then suppression). The combined
+        // read asks it once and answers what the two separate reads answer. The suppression service is a stand-in whose count read faults,
+        // so both paths answer Unavailable: the point is the same answer from one access check, not the count itself.
+        var (access, plans, users, _) = DecideSignalOnAMatter();
+        var cache = new StampCache();
+        var capability = Capability(access, plans, Describer(), planReadStamp: cache.Stamp);
+
+        var (plan, suppression) = await capability.GetPlanAndSuppressionAsync(SignedIn(), SignalId, CancellationToken.None);
+        var combinedSignalReads = SignalReads(users);
+
+        var separatePlan = await capability.GetPlanAsync(SignedIn(), SignalId, CancellationToken.None);
+        var separateSuppression = await capability.GetSuppressionAsync(SignedIn(), SignalId, CancellationToken.None);
+
+        plan.Outcome.Should().Be(DecisionPlanReadOutcome.Ok);
+        plan.Plan.Should().BeEquivalentTo(separatePlan.Plan, "the same plan the REST route returns");
+        suppression.Should().NotBeNull().And.BeEquivalentTo(separateSuppression);
+        combinedSignalReads.Should().Be(1, "one access check for both reads");
+        (SignalReads(users) - combinedSignalReads).Should().Be(2, "the two REST reads each still check access themselves");
+        cache.Writes.Should().HaveCount(2, "the combined read writes the plan-read stamp as GetPlanAsync does");
+    }
+
+    [Fact]
+    public async Task GetPlanAndSuppressionAsync_WhenThePlanIsRefused_ReadsNoSuppression_AndWritesNoStamp()
+    {
+        var (access, plans, users, _) = DecideSignalOnAMatter(matterReadable: false);
+        var cache = new StampCache();
+        var capability = Capability(access, plans, Describer(), planReadStamp: cache.Stamp); // no suppression service: a call would throw
+
+        var (plan, suppression) = await capability.GetPlanAndSuppressionAsync(SignedIn(), SignalId, CancellationToken.None);
+
+        plan.Outcome.Should().Be(DecisionPlanReadOutcome.NotAllowed);
+        plan.Should().BeEquivalentTo(await capability.GetPlanAsync(SignedIn(), SignalId, CancellationToken.None), "the REST route's refusal");
+        suppression.Should().BeNull("nothing more is read once the plan is refused");
+        cache.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetPlanAndSuppressionAsync_WithNoSignedInCaller_IsUserContextRequired_AndReadsNothing()
+    {
+        var (plan, suppression) = await Capability().GetPlanAndSuppressionAsync(null, SignalId, CancellationToken.None);
+
+        plan.Outcome.Should().Be(DecisionPlanReadOutcome.UserContextRequired);
+        suppression.Should().BeNull();
+    }
+
+    private static int SignalReads(Mock<IDataverseUserClient> users) =>
+        users.Invocations.Count(i => i.Method.Name == nameof(IDataverseUserClient.GetAsync)
+                                     && ((string)i.Arguments[0]).StartsWith("sprk_signals(", StringComparison.Ordinal));
 
     private sealed record StampWrite(string Tenant, string Resource, string Key, int Version, DateTimeOffset ReadOn, TimeSpan? Ttl);
 

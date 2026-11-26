@@ -208,47 +208,28 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## Demo & Sample Data Scripts
 
 ### `Load-DemoSampleData.ps1`
-**Purpose:** Load non-confidential sample data into a Spaarke demo environment — contacts, matters, projects, events, documents, chart definitions, and AI seed data. Orchestrates all data loading steps including optional SPE document upload and AI Search indexing.
-**Usage:** 🟡 Occasional - Demo environment setup or refresh
+**Purpose:** Load (or reset) the demo dataset v2 on a **demo customer stamp**: typed organizations, contacts, matters, projects, events, to-dos, communications and document records for one coherent legal-department story. Operator script; never part of provisioning. Full usage, the tag, ownership and the dataset shape: `scripts/demo-data/README.md`.
+**Usage:** 🟡 Occasional - Demo stamp setup or refresh
 **Lifecycle:** ✅ Maintained
-**Dependencies:** Azure CLI (`az login`), Dataverse access, Spaarke managed solutions imported
+**Dependencies:** Azure CLI signed in as yourself (`az login`; no service principal), Dataverse access, the stamp's taxonomy and event types seeded (data plan D2/D4)
 **Owner:** DevOps Team
-**Last Used:** March 2026
-
-**When to Use:**
-- After provisioning a new demo environment (task 024)
-- After importing managed solutions into Dataverse
-- Refreshing demo data after a reset
-- Setting up demo environments for sales presentations
 
 **Command:**
 ```powershell
-# -EnvironmentUrl is required: the old demo environment was retired 2026-10-14 and the demo is now the
-# ACME stamp built by the provisioning control plane (no static default URL).
+# Preview (nothing is written; lists every reference missing on the target)
+.\Load-DemoSampleData.ps1 -CustomerId acme -WhatIf
 
-# Preview what would be created (recommended first)
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -DryRun
-
-# Load all sample data
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
-
-# Skip optional steps
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
-
-# Force recreate existing records
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -Force
+# Load (idempotent: tag + natural key), then remove only the tagged rows
+.\Load-DemoSampleData.ps1 -CustomerId acme
+.\Load-DemoSampleData.ps1 -CustomerId acme -Reset
 ```
 
-**Data Sources:**
-- `scripts/demo-data/demo-records.json` — Record definitions (contacts, matters, projects, events, documents, charts)
-- `scripts/demo-data/sample-documents/` — 8 sample text documents for SPE upload
-- `scripts/seed-data/` — AI seed data (actions, tools, skills, knowledge, playbooks)
+Refuses unless the registry row for the target is Demo and active (`-AllowNonDemo` overrides, with a warning; Production
+is always refused). AI seed data, chart definitions, SPE upload, AI Search indexing and `-Force` were removed in v2.
 
-**Features:**
-- Idempotent: Existing records skipped (matched by name)
-- Graceful degradation: If solutions not imported, creates only contacts (standard entity)
-- Modular: Each data type can be skipped independently
-- DryRun mode for safe preview
+**Data Sources:**
+- `scripts/demo-data/demo-records.json` — the dataset (`datasetVersion` 2.0.0)
+- `scripts/demo-data/sample-documents/` — 8 sample files (not uploaded yet; document rows are metadata only)
 
 ---
 

@@ -52,6 +52,7 @@ import type { SprkModalSize } from '../SprkModal/sizes';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { SendEmailFollowOnStep } from '../WizardFollowOns/steps/SendEmailFollowOnStep';
+import { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady, sendComposedEmail } from '../EmailComposer/composeOnlySend';
 import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 import type { IAttachmentItem } from '../EmailComposer/EmailComposer.types';
@@ -597,6 +598,9 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   attachFilesRef.current = attachFiles;
   const emailRef = React.useRef(email);
   emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
 
   // -- Recipient picker bridge --------------------------------------------
   const handleSearchRecipients = React.useCallback(
@@ -1080,7 +1084,9 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       ariaLabel="Email documents"
       steps={stepConfigs}
       onClose={onClose}
-      onFinish={handleFinish}
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish={() => holdComposedEmailUploadsDuring(emailRef.current, handleFinish)}
       finishingLabel="Sending…"
       finishLabel={FINISH_LABEL}
       embedded={embedded}

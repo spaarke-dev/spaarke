@@ -896,7 +896,8 @@ public sealed class DecisionRecordWriter
             query.Criteria.AddCondition("sprk_confirmedby", ConditionOperator.Null);
             // Task 153 (adversarial pass 2 F1): and only a record the writer itself created. A Console user may create a Decision Record
             // (Deep create) carrying this key and no confirmer; without this condition it would stop the gate's record being written.
-            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+            // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
+            WriterCreatedRecord.AddConditions(query.Criteria, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty ? row.Id : null;
         }
@@ -1202,7 +1203,8 @@ public sealed class DecisionRecordWriter
             // Adversarial pass 2 F1: and only a record the writer itself created. The key is computable from the Signal id and episode, and a
             // Console user may create a Decision Record (Deep create): a user's row with this key, this code and a confirmer of their choosing
             // would otherwise be taken as the closure's record, and its confirmer copied to the Signal's sprk_resolvedby.
-            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+            // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
+            WriterCreatedRecord.AddConditions(query.Criteria, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty
                 ? (row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id)
@@ -1976,11 +1978,12 @@ public sealed class DecisionRecordWriter
         return query;
     }
 
-    /// <summary>The body of <see cref="AddBillingWriterFilterAsync"/>, moved here unchanged (task 084h-1): created by the writer identity,
-    /// <c>sprk_actioncode</c> in <paramref name="codes"/>.</summary>
+    /// <summary>The body of <see cref="AddBillingWriterFilterAsync"/>, moved here unchanged (task 084h-1): created by the writer identity
+    /// (task 223, DI-144: <see cref="WriterCreatedRecord"/>, so <c>createdonbehalfby</c> empty as well), <c>sprk_actioncode</c> in
+    /// <paramref name="codes"/>.</summary>
     private async Task AddWriterFilterAsync(QueryExpression query, object[] codes, CancellationToken ct)
     {
-        query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+        WriterCreatedRecord.AddConditions(query.Criteria, await WriterUserIdAsync(ct).ConfigureAwait(false));
         // K4 (ontology-r1): only billing records count against the cap. Signals reviews that reused the id would otherwise fill the 10
         // rows and hide this decision's record, and a second record would be written. (084h-1: the same holds for the Procedure codes.)
         query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, codes);

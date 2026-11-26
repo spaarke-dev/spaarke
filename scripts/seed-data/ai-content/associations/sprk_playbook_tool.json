@@ -1,0 +1,10 @@
+{
+  "relationship": "sprk_playbook_tool",
+  "source": "sprk_analysisplaybook",
+  "navigationProperty": "sprk_playbook_tool",
+  "target": "sprk_analysistool",
+  "pairs": [
+    { "source": "fc343e9c-3460-f111-ab0b-7c1e521b425f", "target": "16956329-d310-f111-8342-7ced8d1dc988" },
+    { "source": "fc343e9c-3460-f111-ab0b-7c1e521b425f", "target": "23434c23-d310-f111-8342-7ced8d1dc988" }
+  ]
+}

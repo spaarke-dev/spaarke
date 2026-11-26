@@ -1,0 +1,26 @@
+{
+  "relationship": "sprk_analysisplaybook_action",
+  "source": "sprk_analysisplaybook",
+  "navigationProperty": "sprk_analysisplaybook_action",
+  "target": "sprk_analysisaction",
+  "pairs": [
+    { "source": "18cf3cc8-02ec-f011-8406-7c1e520aa4df", "target": "58c91c65-ebe9-f011-8406-7c1e520aa4df" },
+    { "source": "18cf3cc8-02ec-f011-8406-7c1e520aa4df", "target": "ba356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "18cf3cc8-02ec-f011-8406-7c1e520aa4df", "target": "bb356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "1e657651-9308-f111-8407-7c1e520aa4df", "target": "58c91c65-ebe9-f011-8406-7c1e520aa4df" },
+    { "source": "1e657651-9308-f111-8407-7c1e520aa4df", "target": "5dc91c65-ebe9-f011-8406-7c1e520aa4df" },
+    { "source": "5ece14f7-8a17-f111-8343-7ced8d1dc988", "target": "3c03edf0-8a17-f111-8343-7ced8d1dc988" },
+    { "source": "bc71facf-6af1-f011-8406-7ced8d1dc988", "target": "58c91c65-ebe9-f011-8406-7c1e520aa4df" },
+    { "source": "bc71facf-6af1-f011-8406-7ced8d1dc988", "target": "ba356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "bc71facf-6af1-f011-8406-7ced8d1dc988", "target": "bb356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "58c91c65-ebe9-f011-8406-7c1e520aa4df" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "5ac91c65-ebe9-f011-8406-7c1e520aa4df" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "b9356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "ba356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "bb356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "bc356968-ebe9-f011-8406-7ced8d1dc988" },
+    { "source": "fc343e9c-3460-f111-ab0b-7c1e521b425f", "target": "41c9ecf2-cb10-f111-8342-7ced8d1dc988" },
+    { "source": "fe3e5acc-4aea-f011-8406-7c1e520aa4df", "target": "58c91c65-ebe9-f011-8406-7c1e520aa4df" },
+    { "source": "fe3e5acc-4aea-f011-8406-7c1e520aa4df", "target": "bc356968-ebe9-f011-8406-7ced8d1dc988" }
+  ]
+}

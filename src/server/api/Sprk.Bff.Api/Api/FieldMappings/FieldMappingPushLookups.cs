@@ -40,9 +40,9 @@ internal sealed record LookupBindPlan(string? BindKey, string? BindValue, string
 /// whether it can be selected at all, is read from the SOURCE's attribute metadata and the TARGET's many-to-one
 /// relationships. A rule field that is not a readable Web API attribute of the source never enters <c>$select</c> —
 /// its rule is skipped, and the other rules still run.</para>
-/// <para><b>Mirrors the client engine</b> (<c>Spaarke.UI.Components/src/services/FieldMappingService.ts</c>,
+/// <para><b>Mirrors the former client engine</b> (deleted in field-mapping-server-write-path-r1 task 035; its
 /// <c>applyCopyLookup</c>): select <c>_x_value</c>, bind through the target's navigation property, skip a null lookup
-/// silently, and skip (never throw) a lookup whose referent cannot be resolved. The client reads the referent from the
+/// silently, and skip (never throw) a lookup whose referent cannot be resolved. The former client engine read the referent from the
 /// <c>lookuplogicalname</c> annotation; the impersonated seam here does not request that annotation, so the referent
 /// comes from the source lookup's relationship metadata instead — exactly one relationship names it. A lookup that can
 /// reference several tables (Customer, Owner, multi-table) is therefore skipped with a stated reason.</para>

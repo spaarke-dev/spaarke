@@ -1416,24 +1416,6 @@ public sealed class InvoiceLineDecisionService
     }
 
     /// <summary>
-    /// The invoice's first core record found (matter, project, else work assignment); null when it names none. NOT the single-core rule: with
-    /// two lookups set it returns the first. The line decisions and corrections use <see cref="SingleCoreOf"/>; the remaining callers are
-    /// <c>InvoiceAdjustmentService</c> and <c>SubmissionOverrideService</c> (#2455 follow-up).
-    /// </summary>
-    internal static (string Entity, Guid Id)? CoreOf(Entity invoice)
-    {
-        foreach (var (column, entity) in new[] { ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"), ("sprk_regardingworkassignment", "sprk_workassignment") })
-        {
-            if (invoice.GetAttributeValue<EntityReference>(column) is { } reference && reference.Id != Guid.Empty)
-            {
-                return (entity, reference.Id);
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// The "Accepted in bulk" rows of one line (D-64): one per AI-sourced field, <c>sprk_islabel</c> false. A field is AI-sourced when the stored
     /// extraction JSON has a confidence for it and the line holds a value; the coded task, activity and expense codes count when the line was coded.
     /// The row id is deterministic (decision, line, field), so a repeat upserts the same row.

@@ -222,9 +222,10 @@ describe('useSemanticSearch', () => {
           documentTypes: ['Contract'],
           fileTypes: ['pdf'],
           entityTypes: ['matter'],
+          // #3093: the local day '2025-01-01' is sent as the UTC instant of local midnight.
           dateRange: {
             field: 'createdAt',
-            from: '2025-01-01',
+            from: new Date(2025, 0, 1).toISOString(),
             to: undefined,
           },
         },
@@ -235,6 +236,19 @@ describe('useSemanticSearch', () => {
           hybridMode: 'rrf',
         },
       });
+    });
+
+    // #3165: the Matter Type selection was kept in the page's filters but never sent.
+    it('sends the chosen matter types', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useSemanticSearch());
+
+      await act(async () => {
+        result.current.search('lease', { ...defaultFilters, matterTypes: ['mt-1'] });
+      });
+
+      const body = mockSearch.mock.calls[0][0] as { filters?: Record<string, unknown> };
+      expect(body.filters).toEqual({ matterTypes: ['mt-1'] });
     });
 
     // FR-CP-04 — searchIndexName forwarding (Task 042)

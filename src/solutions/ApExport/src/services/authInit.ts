@@ -10,7 +10,7 @@
  *
  * Lazy factory construction (mirrors EmailPage): runtime config
  * (`getMsalClientId`, `getBffBaseUrl`, `getBffOAuthScope`) is NOT available at
- * module load — it's populated by `setRuntimeConfig(...)` in `main.tsx` AFTER
+ * module load — it's populated by `setRuntimeConfig(...)` in `_ebilling-shared/codePageBootstrap.ts` AFTER
  * `resolveRuntimeConfig()` resolves. The factory captures config values
  * eagerly in its closure, so factory construction is deferred until first use
  * of any exported method.
@@ -25,7 +25,7 @@ let _initializer: CodePageAuthInitializer | null = null;
  * Build the factory once, on first use. By this time, the caller MUST have
  * arranged for `setRuntimeConfig(...)` to be called before any auth method
  * actually fires `initAuth(...)` — which is exactly what `bootstrapAuth()` in
- * `main.tsx` does (it `setRuntimeConfig`s, THEN awaits `ensureAuthInitialized`).
+ * `_ebilling-shared/codePageBootstrap.ts` does (it `setRuntimeConfig`s, THEN awaits `ensureAuthInitialized`).
  *
  * The factory's `beforeInit: waitForConfig` provides a second line of defense:
  * even if a caller invokes `ensureAuthInitialized()` before `setRuntimeConfig`,
@@ -47,7 +47,7 @@ function getInitializer(): CodePageAuthInitializer {
       // auth-error state instead of an out-of-context popup.
       requireSilentOnly: true,
       logLabel: "ApExport",
-      beforeInit: waitForConfig, // Wait for runtimeConfig.setRuntimeConfig() in main.tsx
+      beforeInit: waitForConfig, // Wait for runtimeConfig.setRuntimeConfig() in _ebilling-shared/codePageBootstrap.ts
     });
   }
   return _initializer;

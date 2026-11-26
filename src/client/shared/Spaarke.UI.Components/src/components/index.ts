@@ -45,6 +45,13 @@ export * from './FindSimilarViewer';
 // RelationshipCountCard - Document relationship count with drill-through
 export * from './RelationshipCountCard';
 
+// DocumentRelationshipGraph - graph data, API hook and node card shared by the
+// DocumentRelationshipViewer code page and PCF (#3093)
+export * from './DocumentRelationshipGraph';
+
+// SearchFilters - FilterDropdown + DateRangeFilter shared by the SemanticSearch code page and PCF (#3093)
+export * from './SearchFilters';
+
 // Playbook - Shared playbook card grid, scope configuration, and analysis services
 export * from './Playbook';
 

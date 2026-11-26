@@ -138,6 +138,7 @@
     <RolePrivilege name="prvAppendTosprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationThread" level="Basic" />
+    <RolePrivilege name="prvAppendTosprk_ContactType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Document" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_documenttype_ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />

@@ -72,7 +72,14 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
 
     private readonly WorklistFactory _factory;
 
-    public SignalReadRouteTests(WorklistFactory factory) => _factory = factory;
+    /// <summary>Task 222: the latency harness reports its round trips and wall-clock here.</summary>
+    private readonly Xunit.Abstractions.ITestOutputHelper? _output;
+
+    public SignalReadRouteTests(WorklistFactory factory, Xunit.Abstractions.ITestOutputHelper output)
+    {
+        _factory = factory;
+        _output = output;
+    }
 
     // ---------------------------------------------------------------------------------------------------------------
     // Authentication, the single 403, faults
@@ -2414,6 +2421,66 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
         public Guid? ActingAs { get; set; }
         public int PageSize { get; init; } = 5000;
 
+        // ── task 222: latency, in-flight count and cancellation hooks on every caller and app-only call ────────────────
+
+        /// <summary>Task 222: how long every caller and app-only call waits before it answers. Zero (the default): answered synchronously,
+        /// as before.</summary>
+        public TimeSpan Latency { get; set; }
+
+        /// <summary>Task 222: a per-call latency by call name (the caller's path, or <c>app:{table}</c> / <c>app:entityset:{table}</c>),
+        /// overriding <see cref="Latency"/>; a test reverses or shuffles the completion order with it.</summary>
+        public Func<string, TimeSpan>? LatencyOf { get; set; }
+
+        /// <summary>Task 222: runs as each call starts, before its latency (a test cancels the read from here).</summary>
+        public Action<string>? OnCall { get; set; }
+
+        /// <summary>Task 222: the "sprk_signals" fetch of this set (decide, do, ...) answers 500.</summary>
+        public string? FaultSignalSet { get; set; }
+
+        private int _inFlight;
+        private int _peakInFlight;
+
+        /// <summary>Task 222: calls started and not yet answered, now.</summary>
+        public int InFlight => Volatile.Read(ref _inFlight);
+
+        /// <summary>Task 222: the most calls in flight at once since the world was built.</summary>
+        public int PeakInFlight => Volatile.Read(ref _peakInFlight);
+
+        /// <summary>Task 222: starts a new peak count (after a warm-up read).</summary>
+        public void ResetPeakInFlight() => Volatile.Write(ref _peakInFlight, 0);
+
+        private int _appCalls;
+
+        /// <summary>Task 222: the app-only calls made (the caller's are <see cref="Requests"/>).</summary>
+        public int AppCalls => Volatile.Read(ref _appCalls);
+
+        /// <summary>Task 222: one Dataverse call: counted in flight, delayed by its latency, then answered.</summary>
+        internal async Task<T> CallAsync<T>(string name, Func<T> answer, CancellationToken ct)
+        {
+            if (name.StartsWith("app:", StringComparison.Ordinal)) Interlocked.Increment(ref _appCalls);
+            var now = Interlocked.Increment(ref _inFlight);
+            for (var peak = Volatile.Read(ref _peakInFlight); now > peak; peak = Volatile.Read(ref _peakInFlight))
+            {
+                if (Interlocked.CompareExchange(ref _peakInFlight, now, peak) == peak) break;
+            }
+
+            try
+            {
+                OnCall?.Invoke(name);
+                var delay = LatencyOf?.Invoke(name) ?? Latency;
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, ct).ConfigureAwait(false);
+                }
+
+                return answer();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
+
         /// <summary>The route's clock (TimeProvider): noon UTC by default, so "today" never flakes around midnight.</summary>
         public DateTimeOffset Now { get; init; } = DateTimeOffset.Parse("2026-10-14T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -2454,6 +2521,9 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
         /// <summary>Who created each Decision Record (the row's createdby): the writer's service identity for a genuine one.</summary>
         public Dictionary<Guid, Guid> DecisionRecordCreator { get; } = [];
 
+        /// <summary>Task 223 (DI-144): who each Decision Record was created on behalf of (createdonbehalfby); absent for one the writer created itself.</summary>
+        public Dictionary<Guid, Guid> DecisionRecordOnBehalfOf { get; } = [];
+
         public Guid Decision(
             Guid[] readers,
             string number = "DR-00001",
@@ -2464,10 +2534,12 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             string? reason = null,
             string? steps = null,
             string? followOns = null,
-            Guid? createdBy = null)
+            Guid? createdBy = null,
+            Guid? createdOnBehalfBy = null)
         {
             var id = Guid.NewGuid();
             DecisionRecordCreator[id] = createdBy ?? WriterUser;
+            if (createdOnBehalfBy is { } onBehalfOf) DecisionRecordOnBehalfOf[id] = onBehalfOf;
             DecisionRecords[id] = (readers, new Dictionary<string, object?>
             {
                 ["sprk_decisionrecordid"] = id,
@@ -2914,11 +2986,14 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 // systemuser on sprk_confirmedby (so a link on any other column returns no name).
                 var createdByCondition = drFetch.Descendants("condition").FirstOrDefault(c => (string?)c.Attribute("attribute") == "createdby" && (string?)c.Attribute("operator") == "eq");
                 var createdBy = createdByCondition is null ? (Guid?)null : Guid.Parse((string)createdByCondition.Attribute("value")!);
+                var onBehalfOfEmpty = drFetch.Descendants("condition").Any(c => (string?)c.Attribute("attribute") == "createdonbehalfby" && (string?)c.Attribute("operator") == "null");
                 var nameLinked = drFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "systemuser"
                     && (string?)l.Attribute("to") == "sprk_confirmedby" && (string?)l.Attribute("link-type") == "outer" && (string?)l.Attribute("alias") == "by");
                 var found = DecisionRecords
                     .Where(r => wanted.Contains(r.Key) && r.Value.Readers.Contains(me2))
                     .Where(r => createdBy is null || DecisionRecordCreator[r.Key] == createdBy)
+                    // Task 223 (DI-144): and the createdonbehalfby-is-empty half of WriterCreatedRecord, as Dataverse evaluates it.
+                    .Where(r => !onBehalfOfEmpty || !DecisionRecordOnBehalfOf.ContainsKey(r.Key))
                     .Select(r => nameLinked ? r.Value.Row : r.Value.Row.Where(kv => kv.Key != "by.fullname").ToDictionary(kv => kv.Key, kv => kv.Value))
                     .ToList();
                 return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = found }));
@@ -3007,7 +3082,14 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 : text.Contains("\"sprk_lane\" operator=\"eq\" value=\"100000000\"") ? "decide"
                 : text.Contains("\"sprk_lane\" operator=\"eq\" value=\"100000001\"") ? "do"
                 : throw new InvalidOperationException("unrecognised worklist query");
+            if (FaultSignalSet == set) return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+            // Task 222 (B): like Dataverse, a sprk_signalid condition narrows the query to that one Signal (the single-row read).
+            var only = fetch.Descendants("condition")
+                .Where(c => (string?)c.Attribute("attribute") == "sprk_signalid" && (string?)c.Attribute("operator") == "eq")
+                .Select(c => Guid.Parse((string)c.Attribute("value")!)).ToList();
             var all = Signals.Where(s => s.Sets.Contains(set))
+                .Where(s => only.All(id => id == s.Id))
                 .Where(s => !SignalReaders.TryGetValue(s.Id, out var readers) || readers.Contains(me))
                 .Select(s => s.Row)
                 // Task 045: the Decided query asks for Signals that HAVE a Decision Record, like Dataverse evaluating not-null.
@@ -3058,7 +3140,7 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
     private sealed class FakeUserClient(WorklistFactory factory) : IDataverseUserClient
     {
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
-            Task.FromResult(factory.World.Answer(relativePath));
+            factory.World.CallAsync(relativePath, () => factory.World.Answer(relativePath), cancellationToken);
 
         public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("The read route never writes.");
@@ -3167,7 +3249,7 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             var config = File.ReadAllText(ConfigPath);
             DataverseServiceMock
                 .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
+                .Returns((QueryExpression q, CancellationToken ct) => World.CallAsync("app:" + q.EntityName, () => q.EntityName switch
                 {
                     "sprk_gridconfiguration" => new EntityCollection([new Entity("sprk_gridconfiguration", SignalReadService.WorklistConfigurationId)
                     {
@@ -3183,14 +3265,14 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                             ["sprk_regardingrecordnumberfield"] = World.Catalog[id].Number,
                         }).ToList()),
                     _ => World.AppOnly(q),
-                });
+                }, ct));
             DataverseServiceMock
                 .Setup(s => s.RetrieveAsync("usersettings", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string _, Guid user, string[] _, CancellationToken _) =>
-                    World.ZoneCodeOfUser.TryGetValue(user, out var code) ? new Entity("usersettings", user) { ["timezonecode"] = code } : null!);
+                .Returns((string _, Guid user, string[] _, CancellationToken ct) => World.CallAsync("app:usersettings", () =>
+                    World.ZoneCodeOfUser.TryGetValue(user, out var code) ? new Entity("usersettings", user) { ["timezonecode"] = code } : null!, ct));
             DataverseServiceMock
                 .Setup(s => s.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string logical, CancellationToken _) => logical + "s");
+                .Returns((string logical, CancellationToken ct) => World.CallAsync("app:entityset:" + logical, () => logical + "s", ct));
             // #3022 (fm task 056): placing a communication witness first asks whether sprk_communication has the private-message
             // reference columns. An unanswered metadata read fails the placement closed, which withholds every witness line, so the
             // world answers it as an environment the 056 schema has reached: the columns exist. A witness the tests seed sets none of

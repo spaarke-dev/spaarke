@@ -48,7 +48,7 @@ $EntityConfigs = @{
         NameField         = "sprk_mattername"
         DescriptionField  = "sprk_matterdescription"
         ReferenceField    = "sprk_matternumber"
-        SelectFields      = "sprk_matterid,sprk_mattername,sprk_matterdescription,sprk_matternumber,modifiedon"
+        SelectFields      = "sprk_matterid,sprk_mattername,sprk_matterdescription,sprk_matternumber,modifiedon,_sprk_mattertype_value"
     }
     "project" = @{
         EntityLogicalName = "sprk_project"
@@ -57,7 +57,7 @@ $EntityConfigs = @{
         NameField         = "sprk_projectname"
         DescriptionField  = "sprk_projectdescription"
         ReferenceField    = "sprk_projectnumber"
-        SelectFields      = "sprk_projectid,sprk_projectname,sprk_projectdescription,sprk_projectnumber,modifiedon"
+        SelectFields      = "sprk_projectid,sprk_projectname,sprk_projectdescription,sprk_projectnumber,modifiedon,_sprk_mattertype_value"
     }
     "invoice" = @{
         EntityLogicalName = "sprk_invoice"
@@ -162,6 +162,10 @@ function Transform-ToIndexDocument {
         recordDescription   = if ($description) { $description } else { "" }
         lastModified        = $modifiedOn
     }
+
+    # Matter type (matters and projects only; other entity types select no such column -> $null clears it)
+    $matterType = $Record._sprk_mattertype_value
+    $doc.matterTypeId = if ($matterType) { "$matterType".ToLowerInvariant() } else { $null }
 
     # Reference numbers
     if ($reference) {

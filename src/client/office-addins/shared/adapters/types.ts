@@ -306,6 +306,7 @@ export interface HostAdapterError {
 export type HostAdapterErrorCode =
   | 'NOT_INITIALIZED'
   | 'NO_ITEM_SELECTED'
+  | 'ITEM_CHANGED'
   | 'INVALID_HOST'
   | 'CAPABILITY_NOT_SUPPORTED'
   | 'ATTACHMENT_NOT_FOUND'

@@ -483,12 +483,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        # The last path: Set-BffDecisionRecordReaderRole.Tests.ps1 reads the platform-added privilege list from the S29
+        # source (SecureRecordSetupProcedure.cs) and checks it equals the two scripts' copies; without it that check fails.
         with:
           sparse-checkout: |
             scripts
             config
             tests/scripts
             src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse
+            src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup
 
       - name: Pester
         shell: pwsh

@@ -141,7 +141,7 @@ public sealed class ShowDecisionsToolTests
         await host.CallAsync(ShowDecisionsTool.Name, null, token);
         await host.CallAsync(ListDecisionPageTool.Name, null, token);
 
-        lane.Users.Should().HaveCount(3, "show reads the lane and page 1; the paging tool reads one page");
+        lane.Users.Should().HaveCount(3, "show reads the lane once, through page 1 (NFR-01), and the closed-today set once (FR-13); the paging tool reads one page");
         lane.Users.Should().AllSatisfy(user =>
         {
             user.Should().NotBeNull();
@@ -240,6 +240,212 @@ public sealed class ShowDecisionsToolTests
         top.Should().Equal("Subject A-3", "Subject A-8", "Subject A-13", "Subject A-18", "Subject A-23");
     }
 
+    // ---- done today (FR-13, DEF-001 #2832) ------------------------------------------------------------------------------------------------
+    // The Console's "done today" is the number of the Decide lane's items in the caller's closedToday set (WorklistWidget.doneToday). The set
+    // itself (what "today" is, whose items) is SignalReadService's, pinned by SignalReadRouteTests; the tool only reads that set as the caller
+    // and partitions it by category, which is what these pin.
+
+    private const string ClosedMarker = "ZQX-CLOSED-9921";
+
+    private static WorklistItemRow Closed(string lane, string? workType, bool billing) =>
+        new(
+            SignalId: Guid.NewGuid(),
+            Lane: lane,
+            Status: "Resolved",
+            Title: $"{ClosedMarker} title",
+            SubjectName: $"{ClosedMarker} subject",
+            RuleShortName: $"{ClosedMarker} reason",
+            WorkType: billing ? null : workType,
+            PastDueWording: "late",
+            RaisedOn: DateTimeOffset.Parse("2026-09-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture),
+            DueDate: null,
+            EvidenceRefs: null,
+            PolicyVersionId: null,
+            ResolvedOn: DateTimeOffset.Parse("2026-11-26T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture),
+            InvoiceReview: billing ? new WorklistInvoiceReview(Guid.NewGuid(), null) : null);
+
+    private static WorklistGroup ClosedGroup(params WorklistItemRow[] items) =>
+        new(new WorklistCoreRecord("sprk_matter", Guid.NewGuid(), "Matter", $"{ClosedMarker} matter", $"{ClosedMarker}-NUM"), false, items);
+
+    private static IReadOnlyDictionary<string, int> ClosedToday(JsonElement result) =>
+        result.GetProperty("structuredContent").GetProperty("closedToday").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetInt32());
+
+    [Fact]
+    public async Task ShowDecisions_ClosedToday_IsTheCountPerCategoryOfTheClosedTodaySet_AndAllIsTheLanesTotal()
+    {
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build());
+        lane.ClosedTodayGroups.Add(ClosedGroup(
+            Closed("Decide", null, billing: true), Closed("Decide", null, billing: true), Closed("Decide", null, billing: true),
+            Closed("Decide", "askOutsideCounsel", false), Closed("Decide", "askOutsideCounsel", false),
+            Closed("Decide", "approveOrRebudget", false),
+            Closed("Decide", null, false),
+            Closed("Decide", "finishOrReschedule", false)));
+        lane.ClosedTodayGroups.Add(ClosedGroup(Closed("Decide", "chaseReply", false)));
+        // The Do lane is the Console's other lane: it is not "done today" of the Decide cards.
+        lane.ClosedTodayGroups.Add(ClosedGroup(Closed("Do", "chaseReply", false), Closed("Do", null, false)));
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        AssertNotError(result);
+        ClosedToday(result).Should().Equal(new Dictionary<string, int>
+        {
+            ["all"] = 9,
+            ["invoiceDecisions"] = 3,
+            ["askOutsideCounsel"] = 2,
+            ["approveOrRebudget"] = 1,
+            ["chaseReply"] = 1,
+            ["other"] = 2, // no work type, and a work type the Decide cards do not have
+        });
+        lane.ClosedTodayReads.Should().Be(1, "one extra read of the caller's closed-today set per call");
+        // The open counts are the lane's, unchanged by it.
+        result.GetProperty("structuredContent").GetProperty("total").GetInt32().Should().Be(200);
+        lane.LaneReads.Should().Be(0);
+        lane.PageReads.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ShowDecisions_ClosedToday_IsZeroForEveryCategory_WhenNothingWasClosedToday_AndItemsClosedEarlierAreNotCounted()
+    {
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build());
+        // Closed yesterday: the closedEarlier set holds them. Only a read of that set would see them.
+        lane.ClosedEarlierGroups.Add(ClosedGroup(Closed("Decide", "chaseReply", false), Closed("Decide", null, billing: true)));
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        ClosedToday(result).Should().Equal(DecideLaneCategories.Keys.ToDictionary(k => k, _ => 0), "a zero is an answer; the widget shows 0 done");
+        lane.OtherSetReads.Should().Be(0, "the closedEarlier set is never read, so an item closed yesterday cannot be counted");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_ClosedToday_IsReadAsTheRequestsCaller_SoAnotherUsersClosedItemIsNotCounted()
+    {
+        var alice = Guid.Parse("0220aaaa-0000-4000-8000-0000000000a1");
+        var bob = Guid.Parse("0220bbbb-0000-4000-8000-0000000000b2");
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build())
+        {
+            // The capability answers for the principal it is handed; each user has their own closed-today set.
+            ClosedTodayFor = principal => OidOf(principal) == alice
+                ? [ClosedGroup(Closed("Decide", "chaseReply", false), Closed("Decide", "chaseReply", false))]
+                : [ClosedGroup(Closed("Decide", "askOutsideCounsel", false), Closed("Decide", null, true), Closed("Decide", null, false), Closed("Decide", "chaseReply", false), Closed("Decide", "approveOrRebudget", false))],
+        };
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var forAlice = await host.CallAsync(ShowDecisionsTool.Name, null, DecisionToolsTestHost.MintToken(alice));
+        var forBob = await host.CallAsync(ShowDecisionsTool.Name, null, DecisionToolsTestHost.MintToken(bob));
+
+        ClosedToday(forAlice)["all"].Should().Be(2, "Alice's items only: Bob's five are not hers");
+        ClosedToday(forAlice)["chaseReply"].Should().Be(2);
+        ClosedToday(forBob)["all"].Should().Be(5, "Bob's items only");
+        ClosedToday(forBob)["chaseReply"].Should().Be(1);
+        lane.Users.Where(u => OidOf(u) == alice).Should().HaveCount(2, "Alice's page read and Alice's closed-today read, both as Alice");
+        lane.Users.Where(u => OidOf(u) == bob).Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task ShowDecisions_ClosedToday_CarriesCountsOnly_NoClosedItemTextNorId_InTheResultTheModelSees()
+    {
+        var closed = new[] { Closed("Decide", "chaseReply", false), Closed("Decide", null, billing: true) };
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build());
+        lane.ClosedTodayGroups.Add(ClosedGroup(closed));
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        var member = result.GetProperty("structuredContent").GetProperty("closedToday");
+        member.EnumerateObject().Select(p => p.Name).Should().Equal(DecideLaneCategories.Keys, "one entry per category key, nothing else");
+        member.EnumerateObject().Should().AllSatisfy(p => p.Value.ValueKind.Should().Be(JsonValueKind.Number));
+        var raw = result.GetRawText();
+        raw.Should().NotContain(ClosedMarker, "no title, subject, reason or matter of a closed item");
+        foreach (var row in closed)
+        {
+            raw.Should().NotContain(row.SignalId.ToString(), "no closed item's id");
+        }
+    }
+
+    [Theory]
+    [InlineData("too_many_signals")]
+    [InlineData("fault")]
+    public async Task ShowDecisions_WhenTheClosedTodayReadFails_TheLaneIsStillAnswered_AndClosedTodayIsAbsent(string reason)
+    {
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build()) { ClosedTodayFailure = SignalReadResult.Unavailable(reason) };
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        AssertNotError(result);
+        var structured = result.GetProperty("structuredContent");
+        structured.GetProperty("total").GetInt32().Should().Be(200);
+        lane.ClosedTodayReads.Should().Be(1, "the read was made and failed; it is not skipped");
+        structured.TryGetProperty("closedToday", out _).Should().BeFalse("absent, not zero: the widget shows no line, as the Console does when its set did not load");
+    }
+
+    public static TheoryData<Exception> ClosedTodayFaults() => new()
+    {
+        new InvalidOperationException("ZQX-FAULT-4410 unexpected"),
+        new HttpRequestException("ZQX-FAULT-4410 dataverse"),
+        // A timeout surfaces as a cancellation the caller did not ask for: it is a fault, not the caller's cancel.
+        new TaskCanceledException("ZQX-FAULT-4410 timeout"),
+    };
+
+    [Theory]
+    [MemberData(nameof(ClosedTodayFaults))]
+    public async Task ShowDecisions_WhenTheClosedTodayReadThrows_TheLaneIsStillAnswered_AndClosedTodayIsAbsent(Exception fault)
+    {
+        // mcp-r2 review: Task.WhenAll rethrows a faulted closed read, so without the catch the whole call failed for the closed figure.
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build()) { ClosedTodayThrows = fault };
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        AssertNotError(result);
+        var structured = result.GetProperty("structuredContent");
+        structured.GetProperty("total").GetInt32().Should().Be(200, "the lane is answered in full");
+        lane.ClosedTodayReads.Should().Be(1);
+        structured.TryGetProperty("closedToday", out _).Should().BeFalse("absent, as for a failed read");
+        result.GetRawText().Should().NotContain("ZQX-FAULT-4410", "the exception's message never reaches the result");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_WhenTheCallerCancels_TheCancellationFromTheClosedTodayReadIsNotSwallowed()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build()) { ClosedTodayThrows = new OperationCanceledException(cts.Token) };
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", Guid.NewGuid().ToString())], authenticationType: "test")),
+        };
+
+        var run = () => ShowDecisionsTool.RunAsync(null, http, lane, DecisionToolsTestHost.EnvironmentUrl, cts.Token);
+
+        await run.Should().ThrowAsync<OperationCanceledException>("the caller's own cancellation ends the call; it is not a closed-read fault");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_ClosedToday_CountsPrivilegedItemsExactlyAsTheCategoryCardsDo()
+    {
+        // FR-04 parity (mcp-r2 review): the seed's lane holds privileged items (all of matter P and three of A). Given the same items as its
+        // closed-today set, the closed-today counts must equal the cards' counts key for key: both include a privileged item as a bare count.
+        var seed = DecideLaneSeed.Build();
+        var lane = new DecideLaneDouble(seed);
+        lane.ClosedTodayGroups.AddRange(seed.Groups);
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        AssertNotError(result);
+        var cards = result.GetProperty("structuredContent").GetProperty("categories").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("key").GetString()!, c => c.GetProperty("count").GetInt32());
+        seed.Privileged.Should().NotBeEmpty("the parity is only shown over a set that holds privileged items");
+        cards["all"].Should().Be(200, "the cards count the privileged items");
+        ClosedToday(result).Should().Equal(cards);
+    }
+
+    private static Guid? OidOf(ClaimsPrincipal? user) =>
+        Guid.TryParse((user?.FindFirst("oid") ?? user?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier"))?.Value, out var oid) ? oid : null;
+
     // ---- size and paging (FR-05, NFR-02) ----------------------------------------------------------------------------------------------------
 
     [Fact]
@@ -332,7 +538,20 @@ public sealed class ShowDecisionsToolTests
         var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
 
         AssertWorklistUnavailable(result, reason);
-        lane.PageReads.Should().Be(0, "no page is read once the lane failed");
+        lane.LaneReads.Should().Be(0, "show reads the lane once, through the page (NFR-01)");
+        lane.PageReads.Should().Be(1, "the one read of the lane is the page's");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_WhenAnOkPageCarriesNoLane_IsTheWorklistUnavailableError_NeverCountsOfZero()
+    {
+        var seed = DecideLaneSeed.Build();
+        var (items, cores, next) = DecideLanePaging.Page(seed.Groups, seed.Extras, null);
+        var lane = new DecideLaneDouble(seed) { PageFailure = DecidePageResult.Ok(items, cores, next) }; // no lane
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        AssertWorklistUnavailable(await host.CallAsync(ShowDecisionsTool.Name, null, Token), "fault");
+        lane.LaneReads.Should().Be(0, "the tool never falls back to a second read of the lane");
     }
 
     [Theory]

@@ -14,6 +14,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
+import { toUtcDateRangeBounds } from '@spaarke/ui-components/components/SearchFilters';
 import { search as searchDocuments } from '../services/SemanticSearchApiService';
 import type {
   DocumentSearchRequest,
@@ -101,14 +102,20 @@ function buildDocumentFilters(filters: SearchFilters) {
   if (filters.fileTypes.length > 0) {
     docFilters.fileTypes = filters.fileTypes;
   }
+  // Matter type record ids; the index carries the matter type of each document's matter or
+  // project (#3165). Before, the selection was never sent.
+  if (filters.matterTypes.length > 0) {
+    docFilters.matterTypes = filters.matterTypes;
+  }
   if (filters.entityTypes && filters.entityTypes.length > 0) {
     docFilters.entityTypes = filters.entityTypes;
   }
   if (filters.dateRange.from || filters.dateRange.to) {
+    // The filter's dates are the user's LOCAL days; send local midnight .. 23:59:59.999 as UTC
+    // instants (#3093 — a bare `to` date was read as midnight, excluding that whole day).
     docFilters.dateRange = {
       field: 'createdAt',
-      from: filters.dateRange.from ?? undefined,
-      to: filters.dateRange.to ?? undefined,
+      ...toUtcDateRangeBounds(filters.dateRange),
     };
   }
 

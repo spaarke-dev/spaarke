@@ -7,9 +7,11 @@
  */
 
 import React from 'react';
-import { type EdgeProps, getBezierPath } from '@xyflow/react';
+import { type Edge, type EdgeProps, getBezierPath } from '@xyflow/react';
 import { tokens } from '@fluentui/react-components';
-import type { DocumentEdge as TDocumentEdge } from '../types/graph';
+import type { DocumentEdgeData } from '@spaarke/ui-components';
+
+type TDocumentEdge = Edge<DocumentEdgeData>;
 
 interface EdgeStyle {
   strokeWidth: number;

@@ -754,15 +754,58 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<WorkforcePrincipalStrategy> _logger;
+    private readonly IContactIdentityStore? _identityStore;
 
+    /// <param name="identityStore">
+    /// The A9 licensed-user email read for the <c>registration_required</c> answer's <c>licensedUser</c> routing hint (R4
+    /// task 041, FR-25, #2192). Optional only so the strategy's existing unit constructions keep compiling: the host
+    /// always resolves it (the store is a registered singleton, <c>ExternalAccessModule</c>). Without it the hint is
+    /// <c>false</c>, which is the behaviour before FR-25 (the form shows and the registration POST decides).
+    /// </param>
     public WorkforcePrincipalStrategy(
         IWorkforcePrincipalResolver resolver,
         IAccessibleRecordSetService accessibleSet,
-        ILogger<WorkforcePrincipalStrategy> logger)
+        ILogger<WorkforcePrincipalStrategy> logger,
+        IContactIdentityStore? identityStore = null)
     {
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _accessibleSet = accessibleSet ?? throw new ArgumentNullException(nameof(accessibleSet));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _identityStore = identityStore;
+    }
+
+    /// <summary>
+    /// R4 FR-25 (#2192): whether the caller's OWN home-token email belongs to an enabled licensed user, decided exactly as the
+    /// registration route decides its <c>licensed_user_link_required</c> refusal: the same email rule
+    /// (<see cref="Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail"/>, the email claim only), the same read
+    /// (<see cref="IContactIdentityStore.FindEnabledSystemUsersByEmailAsync"/>) and the same decision
+    /// (<see cref="ContactBindingDecision.DecideLicensedUserEmail"/>). A ROUTING hint only: it tells the SPA to show the
+    /// "Link my account" step instead of the profile form. It grants nothing, chooses no link target and authorizes nothing;
+    /// the link route still proves the Spaarke-tenant guest server-side. No email, Unknown, NotLicensed or a failed read →
+    /// <c>false</c> (the form shows, and the registration POST answers as before). The log carries only the outcome.
+    /// Unlike the POST, the hint does not run the binder's column-readability probes first: in a mis-provisioned
+    /// environment a licensed user reaches the link step (whose route makes its own checks) rather than the POST's
+    /// "registration environment" refusal. Deliberate; the hint never grants.
+    /// </summary>
+    /// <param name="email">The caller's registration email (<see cref="Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail"/>), or null.</param>
+    private async Task<bool> IsLicensedUserEmailAsync(string? email, CancellationToken ct)
+    {
+        if (_identityStore is null || email is null) return false;
+        try
+        {
+            var lookup = await _identityStore.FindEnabledSystemUsersByEmailAsync(email, ct).ConfigureAwait(false);
+            return ContactBindingDecision.DecideLicensedUserEmail(lookup, email) == LicensedUserEmailOutcome.LicensedUser;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[WF-AUTH] Licensed-user hint unavailable ({ExceptionType}); the registration form is shown", ex.GetType().Name);
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -798,6 +841,15 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         ? new ClaimsPrincipal(homeIdentity)
                         : httpContext.User;
                     var prefill = WorkforceCallerClaims.From(home);
+                    // R4 FR-27 (#2449): the prefill email is the one the registration route would use
+                    // (ExternalRegistrationEndpoints.TokenEmail: the email claim only, exactly one value), NOT
+                    // WorkforceCallerClaims.TokenEmail, whose preferred_username / upn fallback showed an address the
+                    // registration then refused. No usable email → null, and the SPA shows its email-missing screen
+                    // instead of a form that cannot succeed. The names stay as WorkforceCallerClaims reads them.
+                    var registrationEmail = Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail(home);
+                    // R4 FR-25: the routing hint (see IsLicensedUserEmailAsync). Only the caller's own token email is read.
+                    var licensedUser = await IsLicensedUserEmailAsync(registrationEmail, httpContext.RequestAborted)
+                        .ConfigureAwait(false);
                     return CallerPrincipalResolution.Denied(Results.Problem(
                         statusCode: StatusCodes.Status403Forbidden,
                         title: "Forbidden",
@@ -807,7 +859,8 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                             ["reasonCode"] = resolution.DenyCode,
                             ["givenName"] = prefill.GivenName,
                             ["familyName"] = prefill.FamilyName,
-                            ["email"] = prefill.Email,
+                            ["email"] = registrationEmail,
+                            ["licensedUser"] = licensedUser,
                         }));
 
                 case WorkforceDenyReason.PrincipalNotResolved

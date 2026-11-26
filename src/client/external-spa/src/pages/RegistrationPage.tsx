@@ -6,6 +6,8 @@
  *
  * The gate (`WorkforceHomeGate`) shows it after `GET /api/v1/external/me` answered `registration_required` and the silent
  * link did not apply. The email is read-only and comes from the BFF's prefill (the token decides it, never this form).
+ * When the prefill's `licensedUser` hint is true (R4 FR-25, #2192: the caller's own token email belongs to a licensed user),
+ * the page opens on the licensed-user step instead of the form; the popup still opens only from the click.
  * Sub-states, each a fixed screen (a server message is never shown):
  *
  *   form                           first name, last name, department (optional); validated here and by the BFF
@@ -13,7 +15,10 @@
  *   licensed user (403)            "Link my account": the Spaarke sign-in popup opens ONLY from that click; a closed
  *                                  popup leaves the page as it was, with an explanation, and sends nothing
  *   contact conflict (403)         an administrator must resolve the record
- *   email missing (403)            the sign-in carried no email address
+ *   email missing (403)            the sign-in carried no email address: ask the organization's IT administrator to set
+ *                                  the Email on the Entra account, then sign in again (FR-26). Also the FIRST screen when
+ *                                  the prefill has no email (FR-27): the BFF prefills with the registration's own email
+ *                                  rule, so an empty one means the registration could only refuse
  *   not invited (403)              no current invitation names this sign-in: ask for a new invitation
  *   not configured (500)           the organization's set-up is unfinished: an administrator must finish it; no retry
  *   error                          anything else: "Try again" repeats the same request
@@ -62,6 +67,11 @@ export interface RegistrationPageProps {
   loginHint?: string;
   /** Registration or linking completed: the gate re-reads `/me`. */
   onDone: () => void;
+  /**
+   * The shell's sign-out. When given, the email-missing screen offers "Sign out": a reload alone keeps the cached token,
+   * which still has no email, so the person signs out to get a new one after the admin's fix (R4 task 042). Absent in Teams.
+   */
+  onSignOut?: () => void;
 }
 
 type View =
@@ -135,6 +145,14 @@ export const LinkBlockedNotice: React.FC = () => {
   );
 };
 
+/**
+ * R4 FR-26 (#2155): what the person can do about a sign-in with no email address. Their organization's IT administrator sets
+ * the Email on their Entra account; a new sign-in then carries it. Plain language: no claim names, no server text.
+ */
+const EMAIL_MISSING_MESSAGE =
+  "Your sign-in did not include an email address, so we cannot register you. Ask your organization's IT administrator " +
+  'to set the Email on your Microsoft Entra account, then sign in again.';
+
 function refusalView(reason: RegistrationRefusal, confirm: boolean): View {
   switch (reason) {
     case 'existing_record_found':
@@ -160,9 +178,20 @@ function refusalView(reason: RegistrationRefusal, confirm: boolean): View {
   }
 }
 
-export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, loginHint, onDone }) => {
+export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, loginHint, onDone, onSignOut }) => {
   const s = useStyles();
-  const [view, setView] = React.useState<View>({ kind: 'form' });
+  // R4 FR-25 (#2192): a licensed user's email can never be registered, so the page opens on the link step (the same view the
+  // registration POST's `licensed_user_link_required` leads to). No popup opens here: only the "Link my account" click does.
+  // R4 FR-27 (#2449): the prefill email is the one the registration would use (the BFF applies the registration route's
+  // rule). With none, the registration can only refuse `registration_email_missing`, so the page opens on that screen
+  // instead of a form that cannot succeed.
+  const [view, setView] = React.useState<View>(() =>
+    prefill.licensedUser
+      ? { kind: 'linkRequired', busy: false }
+      : prefill.email.trim() === ''
+        ? { kind: 'emailMissing' }
+        : { kind: 'form' }
+  );
   const [firstName, setFirstName] = React.useState(prefill.givenName);
   const [lastName, setLastName] = React.useState(prefill.familyName);
   const [department, setDepartment] = React.useState('');
@@ -318,7 +347,12 @@ export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, log
       return message(
         <Warning48Regular className={s.iconWarning} />,
         'We could not read your email address',
-        'Your sign-in did not include an email address, so we cannot register you. Contact your administrator.'
+        EMAIL_MISSING_MESSAGE,
+        onSignOut ? (
+          <Button appearance="primary" onClick={onSignOut}>
+            Sign out
+          </Button>
+        ) : undefined
       );
 
     case 'notInvited':

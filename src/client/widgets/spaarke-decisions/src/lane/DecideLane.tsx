@@ -6,8 +6,9 @@
  * (`decideLaneFetch.ts`). The panel is not in the Worklist barrel, so it is imported by deep path (ADR-012).
  *
  *  - Counts: the lane is read to the end before it is shown, so the heading count and the cards describe the whole lane, as the Console's
- *    do. "Done today" is not shown: no tool returns the items closed today (the Console reads that set from a route the widget has no tool
- *    for), so the All card carries no progress line until one does (`doneToday` is an optional prop for that day).
+ *    do. "Done today" is the optional `doneToday` prop: the shell passes `closedToday.all` of `spaarke_show_decisions` (DEF-001, FR-13), the
+ *    count the Console's closed-today set gives, and the All card then says "n of m done today". Absent (an older server, or a read that
+ *    did not answer), the card carries no progress line, as the Console's does not.
  *  - A billing Work Item (its row carries `invoiceReview`) is decided only in Invoice Review (EB-D-194). Its row is replaced, through the
  *    panel's `renderItem` seam, by a "Finding" row with a link out (`billingLinkOut.ts`) that the host opens (`openLink`). It has no decide
  *    action, never raises `onOpenWizard`, and is left out of Start review and of the wizard's browse set.
@@ -70,7 +71,7 @@ export interface DecideLaneProps {
   openLink: (url: string) => Promise<boolean>;
   /** A non-billing row was opened, or Start review stepped. Task 032 opens the wizard; absent, nothing opens. */
   onOpenWizard?: (event: OpenWizardEvent) => void;
-  /** Items finished today, for the All card's progress line; no tool provides it yet, so absent shows none. */
+  /** Items finished today, for the All card's progress line (`closedToday.all` of `spaarke_show_decisions`); absent shows none. */
   doneToday?: number;
   /** "Now" for ages; tests inject a fixed date. Defaults to the time the lane was read. */
   today?: Date;
@@ -140,9 +141,11 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
-  headline: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  /** The finding over the subject, as on the shared row (IssueLine): one column that takes the free width, so neither
+   * line can squeeze the other to nothing; the badge, timing and link stay on the right. */
+  text: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' },
+  headline: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   reason: {
-    flexShrink: 1,
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -331,16 +334,22 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     if (!hasInvoiceReview(item)) return undefined;
     const href = buildBillingLinkOut(item.invoiceReview, consoleBaseUrl);
     const line = composeIssueLine(item, today);
+    const showSubject = line.headline !== line.finding;
+    // Two findings on one invoice share a subject, so the link is named after the finding and the subject.
+    const linkName = showSubject ? `${line.finding}, ${line.headline}` : line.finding;
     return (
       <div className={styles.finding} data-testid="billing-finding" data-signal-id={item.signalId}>
-        <Text className={styles.headline} size={300} title={line.headline}>
-          {line.headline}
-        </Text>
-        {line.ruleShortName && (
-          <Caption1 className={styles.reason} data-testid="billing-finding-reason">
-            {line.ruleShortName}
-          </Caption1>
-        )}
+        {/* D-227 (owner: "all surfaces"): the finding leads, the subject sits under it, as on the shared row (IssueLine). */}
+        <span className={styles.text} data-testid="billing-finding-lines">
+          <Text className={styles.headline} size={300} title={line.finding} data-testid="billing-finding-text">
+            {line.finding}
+          </Text>
+          {showSubject && (
+            <Caption1 className={styles.reason} title={line.headline} data-testid="billing-finding-subject">
+              {line.headline}
+            </Caption1>
+          )}
+        </span>
         <Badge appearance="tint" color="informative" size="small" data-testid="billing-finding-label">
           Finding
         </Badge>
@@ -350,7 +359,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
         {href ? (
           <Link
             href={href}
-            aria-label={`Open in Invoice Review: ${line.headline}`}
+            aria-label={`Open in Invoice Review: ${linkName}`}
             data-testid="billing-finding-link"
             onClick={event => {
               // The widget never navigates itself: the host opens the page.

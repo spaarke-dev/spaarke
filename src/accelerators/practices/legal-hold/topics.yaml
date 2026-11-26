@@ -1,0 +1,70 @@
+# Legal hold notice (to employee custodians): the topic catalogue the playbook is validated against.
+# Non-contract type: no parties' sides, so every topic has `sides: []` (playbook_parse require_side=False).
+practice: legal-hold
+version: "1.0"
+topics:
+  - id: lh.matter
+    title: Matter identification
+    question: Does the notice identify the dispute or investigation clearly enough for recipients to recognise relevant information?
+    sides: []
+    default_priority: High
+  - id: lh.time-period
+    title: Relevant time period
+    question: Does the hold start early enough to cover the underlying events and continue to cover new information?
+    sides: []
+    default_priority: High
+  - id: lh.subject-scope
+    title: Subject matter to preserve
+    question: Does the notice describe the categories of relevant information in plain language?
+    sides: []
+    default_priority: High
+  - id: lh.data-types
+    title: Forms and locations of information
+    question: Does the notice cover every form and location, including chat, text messages and personal devices used for work?
+    sides: []
+    default_priority: High
+  - id: lh.preserve-instruction
+    title: Preservation instruction
+    question: Does the notice tell recipients plainly not to delete, alter or move relevant information, without inviting clean-up?
+    sides: []
+    default_priority: High
+  - id: lh.auto-deletion
+    title: Automatic deletion
+    question: Does the notice tell recipients to turn off automatic deletion they control and say that technical holds are being placed?
+    sides: []
+    default_priority: High
+  - id: lh.overrides-retention
+    title: Retention schedules
+    question: Does the notice say the hold overrides the records-retention schedule?
+    sides: []
+    default_priority: High
+  - id: lh.other-custodians
+    title: Other custodians and departures
+    question: Does the notice ask for other people with relevant information and for notice before a custodian leaves or changes role?
+    sides: []
+    default_priority: High
+  - id: lh.duration-release
+    title: Duration and release
+    question: Does the hold last until Legal releases it in writing?
+    sides: []
+    default_priority: High
+  - id: lh.acknowledgment
+    title: Acknowledgment
+    question: Does each recipient have to confirm in writing by a stated date?
+    sides: []
+    default_priority: High
+  - id: lh.contact
+    title: Legal contact
+    question: Does the notice name a person or mailbox in Legal for questions?
+    sides: []
+    default_priority: High
+  - id: lh.privilege-content
+    title: Privilege and content
+    question: Is the notice marked privileged and limited to what recipients need to preserve, with no assessment of the merits?
+    sides: []
+    default_priority: High
+  - id: lh.consequences
+    title: Importance and consequences
+    question: Does the notice explain in a neutral tone why preservation matters and what failing to preserve can lead to?
+    sides: []
+    default_priority: High

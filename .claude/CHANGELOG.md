@@ -14,6 +14,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 - **`.claude/FAILURE-MODES.md`**: G-26.
 - **Root `CLAUDE.md` §16**: one sentence added to the existing `startup|resume` bullet. **Budget:** 219 lines (unchanged), 22,232 → 22,522 bytes (**+290 bytes**, LF), under the 30 KB ceiling.
 
+###### 2026-11-25 — ADR-004 A2: queue consumers outside the BFF
+
+The `spaarke-intake-pipeline-r1` design review found that ADR-004's "MUST implement handlers as `IJobHandler`" could not be met by any Service Bus consumer outside the BFF. A1 made every queue consumer ADR-004 work, but `IJobHandler`/`JobContract`/`JobOutcome` live only in `Sprk.Bff.Api`, which ADR-052 forbids non-BFF hosts to reference.
+
+Amendment **A2** (path B, owner decision 2026-11-25):
+- scopes `IJobHandler` to the BFF;
+- states the equivalent guarantees for a Function or Container Apps Job: the Job Contract JSON envelope, a deterministic key plus an atomic marker, `correlationId`, a `Completed`/`Failed`/`Poisoned` outcome, `MaxDeliveryCount` → monitored DLQ;
+- leaves the payload rule unchanged, adding only that staged content is stamp-private and lifecycle-deleted.
+
+Files: `docs/adr/ADR-004-async-job-contract.md` (A2 section), `.claude/adr/ADR-004-job-contract.md`, `.claude/constraints/jobs.md`, and the ADR-004 row of `.claude/adr/ADR-052-workload-placement.md`.
+
 ###### 2026-11-25 — Root CLAUDE.md §17: Copilot surfaces pointer
 
 The §17 row "Wire a new AI capability …" now also covers exposing a capability to Copilot (tool, skill, agent) and points at the new `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (what Spaarke builds for each AI surface, why MCP, when to create an agent). The row was extended rather than added, so the line count is unchanged. **Budget:** 219 lines (unchanged), 22,340 → 22,451 bytes (**+111 bytes**), under the 30 KB ceiling. Owner request (2026-11-25: "yes we need to do this now").

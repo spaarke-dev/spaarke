@@ -1,0 +1,168 @@
+{
+  "table": "sprk_gridconfiguration",
+  "entitySet": "sprk_gridconfigurations",
+  "primaryKey": "sprk_gridconfigurationid",
+  "columns": [
+    "sprk_configjson",
+    "sprk_entitylogicalname",
+    "sprk_gridid",
+    "sprk_isdefault",
+    "sprk_name",
+    "sprk_sortorder"
+  ],
+  "rows": [
+    {
+      "sprk_gridconfigurationid": "113ad380-9e63-f111-ab0c-70a8a53ec687",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery\",\"savedQueryId\":\"3ba2301f-692e-4a29-be2e-365c923b01dd\"},\"display\":{\"title\":\"Active Matters\"},\"behavior\":{\"pageSize\":5000}}",
+      "sprk_entitylogicalname": "sprk_matter",
+      "sprk_gridid": null,
+      "sprk_isdefault": false,
+      "sprk_name": "Active Matters (Workspace)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"savedQueryId\":\"82d75343-f530-4743-ac74-c2d13e83b1c0\",\"type\":\"savedquery\"},\"display\":{\"title\":\"Active Documents\"},\"behavior\":{\"pageSize\":5000}}",
+      "sprk_entitylogicalname": "sprk_document",
+      "sprk_gridid": "1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6",
+      "sprk_isdefault": false,
+      "sprk_name": "Active Documents (Workspace)",
+      "sprk_sortorder": null
+    },
+    {
+      "sprk_gridconfigurationid": "3019a06e-9b5e-f111-ab0c-7c1e521545d7",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery\",\"savedQueryId\":\"a3f6d045-9a5e-f111-ab0c-7c1e521545d7\"},\"display\":{\"title\":\"KPI Assessments\",\"densityDefault\":\"compact\",\"emptyStateMessage\":\"No KPI assessments for this matter.\"},\"filterChips\":{\"mode\":\"auto\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":true,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"rowOpen\":{\"type\":\"formDialog\"},\"secondaryActions\":[{\"id\":\"ask-sprkchat-kpi\",\"label\":\"Ask Sprkchat\",\"icon\":\"Chat20Regular\",\"kind\":\"ai-assistant\",\"requiresSelection\":\"single\",\"aiAssistantId\":\"default\"}],\"behavior\":{\"selectionMode\":\"multi\",\"pageSize\":100,\"enableSorting\":true,\"enableColumnResize\":true,\"enableKeyboardNavigation\":true,\"parentContextFilter\":{\"attribute\":\"sprk_matter\",\"parentContextKey\":\"matterId\",\"operator\":\"eq\"}}}",
+      "sprk_entitylogicalname": "sprk_kpiassessment",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "KPI Assessment Matter Health",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "3af4102c-1092-f111-b8dc-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"inline\",\"fetchXml\":\"<fetch><entity name='sprk_document'><attribute name='sprk_documentid' /><attribute name='sprk_documentname' /><attribute name='sprk_documenttype' /><attribute name='createdon' /><attribute name='sprk_project' /><attribute name='sprk_matter' /><attribute name='sprk_workassignment' /><attribute name='sprk_filetype' /><attribute name='modifiedon' /><order attribute='createdon' descending='true' /></entity></fetch>\",\"layoutXml\":\"<grid name=\\\"result\\\" object=\\\"1\\\" jump=\\\"sprk_documentname\\\" select=\\\"1\\\" icon=\\\"1\\\" preview=\\\"1\\\"><row name=\\\"result\\\" id=\\\"sprk_documentid\\\"><cell name=\\\"sprk_documentname\\\" width=\\\"300\\\" /><cell name=\\\"sprk_documenttype\\\" width=\\\"200\\\" /><cell name=\\\"sprk_filetype\\\" width=\\\"200\\\" /><cell name=\\\"createdon\\\" width=\\\"100\\\" /><cell name=\\\"modifiedon\\\" width=\\\"100\\\" /></row></grid>\"},\"display\":{\"title\":\"Documents\",\"emptyStateMessage\":\"No documents found across the records you can access.\"},\"rowOpen\":{\"type\":\"formDialog\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":false,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"columns\":{\"sprk_documenttype\":{\"renderer\":\"badge\",\"label\":\"Type\",\"width\":200},\"createdon\":{\"renderer\":\"date\",\"label\":\"Created\",\"width\":100},\"sprk_project\":{\"hidden\":true},\"sprk_matter\":{\"hidden\":true},\"sprk_workassignment\":{\"hidden\":true},\"sprk_documentname\":{\"label\":\"Document Name\",\"width\":300},\"sprk_filetype\":{\"label\":\"File Type\",\"renderer\":\"default\",\"width\":200},\"modifiedon\":{\"label\":\"Last Activity\",\"width\":100,\"renderer\":\"date\"}},\"behavior\":{\"selectionMode\":\"none\",\"pageSize\":250,\"enableSorting\":true,\"enableColumnResize\":true}}",
+      "sprk_entitylogicalname": "sprk_document",
+      "sprk_gridid": "3af4102c-1092-f111-b8dc-7ced8ddc4a05",
+      "sprk_isdefault": true,
+      "sprk_name": "Outside Counsel — Documents (external widget)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "3ff4102c-1092-f111-b8dc-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"inline\",\"fetchXml\":\"<fetch><entity name='sprk_invoice'><attribute name='sprk_reviewdetail'/><attribute name='sprk_invoiceid' /><attribute name='sprk_name' /><attribute name='sprk_invoicenumber' /><attribute name='sprk_invoicedate' /><attribute name='statuscode' /><attribute name='sprk_totalamount' /><attribute name='sprk_project' /><attribute name='sprk_matter' /><attribute name='sprk_totalamount_base' /><order attribute='sprk_invoicedate' descending='true' /></entity></fetch>\",\"layoutXml\":\"<grid name=\\\"result\\\" object=\\\"1\\\" jump=\\\"sprk_invoicenumber\\\" select=\\\"1\\\" icon=\\\"1\\\" preview=\\\"1\\\"><row name=\\\"result\\\" id=\\\"sprk_invoiceid\\\"><cell name=\\\"sprk_invoicenumber\\\" width=\\\"200\\\" /><cell name=\\\"sprk_name\\\" width=\\\"300\\\" /><cell name=\\\"sprk_invoicedate\\\" width=\\\"100\\\" /><cell name=\\\"statuscode\\\" width=\\\"100\\\" /><cell name=\\\"sprk_reviewdetail\\\" width=\\\"200\\\" /><cell name=\\\"sprk_totalamount\\\" width=\\\"100\\\" /><cell name=\\\"sprk_totalamount_base\\\" width=\\\"100\\\" /></row></grid>\"},\"display\":{\"title\":\"Invoices\",\"emptyStateMessage\":\"No invoices found across the records you can access.\"},\"rowOpen\":{\"type\":\"formDialog\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":false,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"columns\":{\"sprk_invoicedate\":{\"renderer\":\"date\",\"label\":\"Invoice Date\",\"width\":100},\"statuscode\":{\"renderer\":\"badge\",\"label\":\"Status\",\"width\":100},\"sprk_totalamount\":{\"renderer\":\"currency\",\"align\":\"right\",\"label\":\"Total Amount (Local)\",\"width\":100},\"sprk_project\":{\"hidden\":true},\"sprk_matter\":{\"hidden\":true},\"sprk_invoicenumber\":{\"label\":\"Invoice Number\",\"width\":200},\"sprk_name\":{\"label\":\"Invoice Name\",\"width\":300},\"sprk_totalamount_base\":{\"label\":\"Total Amount (Base)\",\"width\":100,\"renderer\":\"currency\",\"align\":\"right\"},\"sprk_reviewdetail\":{\"label\":\"Review detail\"}},\"behavior\":{\"selectionMode\":\"none\",\"pageSize\":250,\"enableSorting\":true,\"enableColumnResize\":true},\"filterChips\":{\"mode\":\"denylist\",\"denylist\":[\"sprk_reviewdetail\"]}}",
+      "sprk_entitylogicalname": "sprk_invoice",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "Outside Counsel — Invoices (external widget)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "403e5d37-cb94-f111-b8db-00224835447a",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"inline\",\"fetchXml\":\"<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid' /><attribute name='sprk_servicerequestnumber' /><attribute name='sprk_name' /><attribute name='statuscode' /><attribute name='createdon' /><attribute name='sprk_requestedby' /><attribute name='modifiedon' /><order attribute='createdon' descending='true' /></entity></fetch>\",\"layoutXml\":\"<grid name=\\\"result\\\" object=\\\"1\\\" jump=\\\"sprk_name\\\" select=\\\"1\\\" icon=\\\"1\\\" preview=\\\"1\\\"><row name=\\\"result\\\" id=\\\"sprk_servicerequestid\\\"><cell name=\\\"sprk_servicerequestnumber\\\" width=\\\"200\\\" /><cell name=\\\"sprk_name\\\" width=\\\"300\\\" /><cell name=\\\"statuscode\\\" width=\\\"100\\\" /><cell name=\\\"createdon\\\" width=\\\"100\\\" /><cell name=\\\"modifiedon\\\" width=\\\"100\\\" /></row></grid>\"},\"display\":{\"title\":\"Service Requests\",\"emptyStateMessage\":\"You have not submitted any service requests yet.\"},\"rowOpen\":{\"type\":\"formDialog\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":false,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"columns\":{\"statuscode\":{\"renderer\":\"badge\",\"label\":\"Request Status\",\"width\":100},\"createdon\":{\"renderer\":\"date\",\"label\":\"Submitted Date\",\"width\":100},\"sprk_requestedby\":{\"hidden\":true},\"sprk_servicerequestnumber\":{\"label\":\"Request Number\",\"width\":200},\"sprk_name\":{\"label\":\"Request Name\",\"width\":300},\"modifiedon\":{\"label\":\"Last Activity\",\"width\":100,\"renderer\":\"date\"}},\"behavior\":{\"selectionMode\":\"none\",\"pageSize\":250,\"enableSorting\":true,\"enableColumnResize\":true}}",
+      "sprk_entitylogicalname": "sprk_servicerequest",
+      "sprk_gridid": "403e5d37-cb94-f111-b8db-00224835447a",
+      "sprk_isdefault": true,
+      "sprk_name": "Internal — Service Requests (external widget)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "42f4102c-1092-f111-b8dc-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"inline\",\"fetchXml\":\"<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid' /><attribute name='sprk_name' /><attribute name='sprk_workassignmentnumber' /><attribute name='sprk_priority' /><attribute name='sprk_responseduedate' /><attribute name='statuscode' /><attribute name='sprk_regardingproject' /><attribute name='sprk_mattertype' /><attribute name='modifiedon' /><order attribute='sprk_responseduedate' descending='false' /></entity></fetch>\",\"layoutXml\":\"<grid name=\\\"result\\\" object=\\\"1\\\" jump=\\\"sprk_workassignmentnumber\\\" select=\\\"1\\\" icon=\\\"1\\\" preview=\\\"1\\\"><row name=\\\"result\\\" id=\\\"sprk_workassignmentid\\\"><cell name=\\\"sprk_workassignmentnumber\\\" width=\\\"200\\\" /><cell name=\\\"sprk_name\\\" width=\\\"300\\\" /><cell name=\\\"sprk_mattertype\\\" width=\\\"200\\\" /><cell name=\\\"statuscode\\\" width=\\\"100\\\" /><cell name=\\\"modifiedon\\\" width=\\\"100\\\" /></row></grid>\"},\"display\":{\"title\":\"Work Assignments\",\"emptyStateMessage\":\"The law department has not assigned you any tasks.\"},\"rowOpen\":{\"type\":\"formDialog\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":false,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"columns\":{\"statuscode\":{\"renderer\":\"badge\",\"label\":\"Status\",\"width\":100},\"sprk_regardingproject\":{\"hidden\":true},\"sprk_workassignmentnumber\":{\"label\":\"Assignment Number\",\"width\":200},\"sprk_name\":{\"label\":\"Work Assignment Name\",\"width\":300},\"sprk_mattertype\":{\"label\":\"Matter Type\",\"renderer\":\"default\",\"width\":200},\"modifiedon\":{\"label\":\"Last Activity\",\"width\":100,\"renderer\":\"date\"}},\"behavior\":{\"selectionMode\":\"none\",\"pageSize\":25,\"enableSorting\":true,\"enableColumnResize\":true}}",
+      "sprk_entitylogicalname": "sprk_workassignment",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "Outside Counsel — Work Assignments (external widget)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "5294c28a-f078-f111-ab0e-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery\",\"savedQueryId\":\"e0d27d71-ba02-f111-8407-7c1e520aa4df\",\"availableViews\":[\"32c1041a-ba02-f111-8407-7c1e520aa4df\",\"e0d27d71-ba02-f111-8407-7c1e520aa4df\",\"491e5733-fb04-f111-8407-7ced8d1dc988\",\"12a510e4-2517-f111-8343-7ced8d1dc988\",\"1e26ed14-0512-f111-8342-7ced8d1dc988\",\"db70b5a9-ea78-f111-ab0e-7ced8ddc4a05\"]},\"display\":{\"title\":\"Events\",\"icon\":\"CalendarLtr24Regular\"},\"filterChips\":{\"mode\":\"allowlist\",\"allowlist\":[\"_ownerid_value\",\"sprk_eventtype_ref\",\"sprk_eventstatus\",\"sprk_duedate\"]},\"commandBar\":{\"primary\":[{\"id\":\"new\",\"label\":\"+ New\",\"icon\":\"Add24Regular\",\"action\":\"create-form\"},{\"id\":\"delete\",\"label\":\"Delete\",\"icon\":\"Delete24Regular\",\"action\":\"delete-selected\",\"requiresSelection\":\"multi\",\"privilege\":\"Delete\"},{\"id\":\"complete\",\"label\":\"Complete\",\"icon\":\"CheckmarkCircle24Regular\",\"action\":\"custom\",\"customHandlerId\":\"CompleteEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"close\",\"label\":\"Close\",\"icon\":\"Dismiss24Regular\",\"action\":\"custom\",\"customHandlerId\":\"CloseEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"cancel\",\"label\":\"Cancel\",\"icon\":\"DismissCircle24Regular\",\"action\":\"custom\",\"customHandlerId\":\"CancelEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"onhold\",\"label\":\"On Hold\",\"icon\":\"Pause24Regular\",\"action\":\"custom\",\"customHandlerId\":\"OnHoldEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"archive\",\"label\":\"Archive\",\"icon\":\"Archive24Regular\",\"action\":\"custom\",\"customHandlerId\":\"ArchiveEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"refresh\",\"label\":\"Refresh\",\"icon\":\"ArrowClockwise24Regular\",\"action\":\"refresh\"}]},\"rowOpen\":{\"type\":\"formDialog\"},\"secondaryActions\":[{\"id\":\"sprkchat-event\",\"label\":\"Ask sprkchat\",\"icon\":\"Sparkle24Regular\",\"kind\":\"ai-assistant\",\"visible\":\"row-hover\"}],\"behavior\":{\"parentContextFilter\":{\"attribute\":\"sprk_regardingmatter\",\"parentContextKey\":\"matterId\",\"operator\":\"eq\"}}}",
+      "sprk_entitylogicalname": "sprk_event",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "Event Default - Calendar Widget",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "583a2a33-1092-f111-b8dc-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"inline\",\"fetchXml\":\"<fetch><entity name='sprk_matter'><attribute name='sprk_matterid' /><attribute name='sprk_mattername' /><attribute name='sprk_matternumber' /><attribute name='statuscode' /><attribute name='sprk_mattertype' /><attribute name='modifiedon' /><order attribute='sprk_mattername' descending='false' /></entity></fetch>\",\"layoutXml\":\"<grid name=\\\"result\\\" object=\\\"1\\\" jump=\\\"sprk_mattername\\\" select=\\\"1\\\" icon=\\\"1\\\" preview=\\\"1\\\"><row name=\\\"result\\\" id=\\\"sprk_matterid\\\"><cell name=\\\"sprk_matternumber\\\" width=\\\"200\\\" /><cell name=\\\"sprk_mattername\\\" width=\\\"300\\\" /><cell name=\\\"sprk_mattertype\\\" width=\\\"200\\\" /><cell name=\\\"statuscode\\\" width=\\\"100\\\" /><cell name=\\\"modifiedon\\\" width=\\\"100\\\" /></row></grid>\"},\"display\":{\"title\":\"Matters\",\"emptyStateMessage\":\"No matters found for the records you can access.\"},\"rowOpen\":{\"type\":\"formDialog\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":false,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"columns\":{\"statuscode\":{\"renderer\":\"badge\",\"label\":\"Status\",\"width\":100},\"sprk_matternumber\":{\"label\":\"Matter Number\",\"width\":200},\"sprk_mattername\":{\"label\":\"Matter Name\",\"width\":300},\"sprk_mattertype\":{\"label\":\"Matter Type\",\"renderer\":\"default\",\"width\":200},\"modifiedon\":{\"label\":\"Last Activity\",\"width\":100,\"renderer\":\"date\"}},\"behavior\":{\"selectionMode\":\"none\",\"pageSize\":25,\"enableSorting\":true,\"enableColumnResize\":true}}",
+      "sprk_entitylogicalname": "sprk_matter",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "Outside Counsel — Matters (external widget)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "61711823-1092-f111-b8dc-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"inline\",\"fetchXml\":\"<fetch><entity name='sprk_project'><attribute name='sprk_projectid' /><attribute name='sprk_projectname' /><attribute name='sprk_projectnumber' /><attribute name='statuscode' /><attribute name='modifiedon' /><attribute name='sprk_projecttype_ref' /><order attribute='sprk_projectname' descending='false' /></entity></fetch>\",\"layoutXml\":\"<grid name=\\\"result\\\" object=\\\"1\\\" jump=\\\"sprk_projectname\\\" select=\\\"1\\\" icon=\\\"1\\\" preview=\\\"1\\\"><row name=\\\"result\\\" id=\\\"sprk_projectid\\\"><cell name=\\\"sprk_projectnumber\\\" width=\\\"200\\\" /><cell name=\\\"sprk_projectname\\\" width=\\\"300\\\" /><cell name=\\\"sprk_projecttype_ref\\\" width=\\\"200\\\" /><cell name=\\\"statuscode\\\" width=\\\"100\\\" /><cell name=\\\"modifiedon\\\" width=\\\"100\\\" /></row></grid>\"},\"display\":{\"title\":\"Projects\",\"emptyStateMessage\":\"You do not have access to any projects yet. Contact your administrator to request access.\"},\"rowOpen\":{\"type\":\"formDialog\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":false,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"columns\":{\"statuscode\":{\"renderer\":\"badge\",\"label\":\"Status\",\"width\":100},\"modifiedon\":{\"renderer\":\"date\",\"label\":\"Last Activity\",\"width\":100},\"sprk_projectnumber\":{\"label\":\"Project Number\",\"width\":200},\"sprk_projectname\":{\"label\":\"Project Name\",\"width\":300},\"sprk_projecttype_ref\":{\"label\":\"Project Type\",\"renderer\":\"default\",\"width\":200}},\"behavior\":{\"selectionMode\":\"none\",\"pageSize\":25,\"enableSorting\":true,\"enableColumnResize\":true}}",
+      "sprk_entitylogicalname": "sprk_project",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "Outside Counsel — Projects (external widget)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "97ee98e7-7a63-f111-ab0c-70a8a53ec687",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"savedQueryId\":\"195ab203-233e-4285-a34d-4acb5c0869ef\",\"type\":\"savedquery\"},\"display\":{\"title\":\"Active Projects\"},\"behavior\":{\"pageSize\":5000}}",
+      "sprk_entitylogicalname": "sprk_project",
+      "sprk_gridid": null,
+      "sprk_isdefault": false,
+      "sprk_name": "Active Projects (Workspace)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "9c5b0ee7-7a63-f111-ab0c-000d3a4d8152",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"savedQueryId\":\"c8391ddf-35f3-4e10-a98c-06869362e01a\",\"type\":\"savedquery\"},\"display\":{\"title\":\"Active Work Assignments\"},\"behavior\":{\"pageSize\":5000}}",
+      "sprk_entitylogicalname": "sprk_workassignment",
+      "sprk_gridid": null,
+      "sprk_isdefault": false,
+      "sprk_name": "Active Work Assignments (Workspace)",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "ac05e4f1-8d85-f111-8075-7c1e5268570d",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery\",\"savedQueryId\":\"12a510e4-2517-f111-8343-7ced8d1dc988\"},\"display\":{\"title\":\"My Tasks\",\"icon\":\"TaskListSquareLtr24Regular\",\"emptyStateMessage\":\"You have no open tasks assigned to you.\"},\"rowOpen\":{\"type\":\"formDialog\"},\"behavior\":{\"pageSize\":100,\"selectionMode\":\"multi\",\"membershipFilter\":true}}",
+      "sprk_entitylogicalname": "sprk_event",
+      "sprk_gridid": null,
+      "sprk_isdefault": false,
+      "sprk_name": "My Tasks (Assistant)",
+      "sprk_sortorder": null
+    },
+    {
+      "sprk_gridconfigurationid": "d021827b-9b5e-f111-ab0c-7c1e521545d7",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery\",\"savedQueryId\":\"b9f6d045-9a5e-f111-ab0c-7c1e521545d7\"},\"display\":{\"title\":\"Invoices\",\"densityDefault\":\"compact\",\"emptyStateMessage\":\"No invoices for this matter.\"},\"filterChips\":{\"mode\":\"auto\"},\"commandBar\":{\"showDefaultCommands\":{\"newRecord\":true,\"refresh\":true,\"exportExcel\":true,\"delete\":false,\"editColumns\":false,\"editFilters\":false}},\"rowOpen\":{\"type\":\"formDialog\"},\"secondaryActions\":[{\"id\":\"ask-sprkchat-invoice\",\"label\":\"Ask Sprkchat\",\"icon\":\"Chat20Regular\",\"kind\":\"ai-assistant\",\"requiresSelection\":\"single\",\"aiAssistantId\":\"default\"},{\"id\":\"review-playbook\",\"label\":\"Review\",\"icon\":\"DocumentSearch20Regular\",\"kind\":\"playbook\",\"requiresSelection\":\"single\",\"playbookId\":\"invoice-review-default\"}],\"behavior\":{\"selectionMode\":\"multi\",\"pageSize\":5000,\"enableSorting\":true,\"enableColumnResize\":true,\"enableKeyboardNavigation\":true,\"parentContextFilter\":{\"attribute\":\"sprk_matter\",\"parentContextKey\":\"matterId\",\"operator\":\"eq\"}}}",
+      "sprk_entitylogicalname": "sprk_invoice",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "Invoice Matter Budget Performance",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "e15c2b93-a05f-f111-a825-70a8a59455f4",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery-set\",\"entityLogicalName\":\"sprk_event\"},\"display\":{\"title\":\"Events\",\"icon\":\"CalendarLtr24Regular\"},\"filterChips\":{\"mode\":\"allowlist\",\"allowlist\":[\"_ownerid_value\",\"sprk_eventtype_ref\",\"sprk_eventstatus\",\"sprk_duedate\"]},\"commandBar\":{\"primary\":[{\"id\":\"new\",\"label\":\"+ New\",\"icon\":\"Add24Regular\",\"action\":\"create-form\"},{\"id\":\"delete\",\"label\":\"Delete\",\"icon\":\"Delete24Regular\",\"action\":\"delete-selected\",\"requiresSelection\":\"multi\",\"privilege\":\"Delete\"},{\"id\":\"complete\",\"label\":\"Complete\",\"icon\":\"CheckmarkCircle24Regular\",\"action\":\"custom\",\"customHandlerId\":\"CompleteEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"close\",\"label\":\"Close\",\"icon\":\"Dismiss24Regular\",\"action\":\"custom\",\"customHandlerId\":\"CloseEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"cancel\",\"label\":\"Cancel\",\"icon\":\"DismissCircle24Regular\",\"action\":\"custom\",\"customHandlerId\":\"CancelEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"onhold\",\"label\":\"On Hold\",\"icon\":\"Pause24Regular\",\"action\":\"custom\",\"customHandlerId\":\"OnHoldEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"archive\",\"label\":\"Archive\",\"icon\":\"Archive24Regular\",\"action\":\"custom\",\"customHandlerId\":\"ArchiveEvents\",\"requiresSelection\":\"multi\",\"privilege\":\"Write\"},{\"id\":\"refresh\",\"label\":\"Refresh\",\"icon\":\"ArrowClockwise24Regular\",\"action\":\"refresh\"}]},\"rowOpen\":{\"type\":\"formDialog\"},\"secondaryActions\":[{\"id\":\"sprkchat-event\",\"label\":\"Ask sprkchat\",\"icon\":\"Sparkle24Regular\",\"kind\":\"ai-assistant\",\"visible\":\"row-hover\"}],\"behavior\":{\"parentContextFilter\":{\"attribute\":\"sprk_regardingmatter\",\"parentContextKey\":\"matterId\",\"operator\":\"eq\"}}}",
+      "sprk_entitylogicalname": "sprk_event",
+      "sprk_gridid": null,
+      "sprk_isdefault": true,
+      "sprk_name": "Event Default",
+      "sprk_sortorder": 100
+    },
+    {
+      "sprk_gridconfigurationid": "e1826c4c-9575-f111-ab0e-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery\",\"savedQueryId\":\"2bf1c5a5-0eca-4f37-92df-2e3c386dee98\"},\"display\":{\"title\":\"Active Communications\"},\"rowOpen\":{\"type\":\"formDialog\"},\"behavior\":{\"pageSize\":5000}}",
+      "sprk_entitylogicalname": "sprk_communication",
+      "sprk_gridid": "e1826c4c-9575-f111-ab0e-7ced8ddc4a05",
+      "sprk_isdefault": false,
+      "sprk_name": "Active Communications (Workspace)",
+      "sprk_sortorder": null
+    },
+    {
+      "sprk_gridconfigurationid": "e7c8126a-968b-f111-8077-7ced8ddc4a05",
+      "sprk_configjson": "{\"_version\":\"1.0\",\"source\":{\"type\":\"savedquery\",\"savedQueryId\":\"f6252a4e-968b-f111-8077-7ced8ddc4a05\",\"availableViews\":[\"f6252a4e-968b-f111-8077-7ced8ddc4a05\",\"50130256-968b-f111-8077-7ced8ddc4a05\",\"53130256-968b-f111-8077-7ced8ddc4a05\",\"58130256-968b-f111-8077-7ced8ddc4a05\"]},\"display\":{\"title\":\"Analyses\"},\"behavior\":{\"pageSize\":5000}}",
+      "sprk_entitylogicalname": "sprk_analysis",
+      "sprk_gridid": null,
+      "sprk_isdefault": false,
+      "sprk_name": "Analysis Hub",
+      "sprk_sortorder": 0
+    }
+  ]
+}

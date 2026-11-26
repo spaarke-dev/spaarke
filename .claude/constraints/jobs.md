@@ -30,7 +30,8 @@ Load when:
 ### Job Contract — queue-driven work (ADR-004)
 
 - ✅ **MUST** use Job Contract schema for all **queue-driven** async work (schedule-driven → ADR-036)
-- ✅ **MUST** implement handlers as the non-generic `IJobHandler` (`JobType` + `ProcessAsync(JobContract, ct)` → `JobOutcome`)
+- ✅ **MUST**, inside the BFF, implement handlers as the non-generic `IJobHandler` (`JobType` + `ProcessAsync(JobContract, ct)` → `JobOutcome`)
+- ✅ **MUST**, for a queue consumer outside the BFF (a Function or Container Apps Job), meet the same guarantees in its own runtime without referencing `Sprk.Bff.Api` (ADR-004 A2): the Job Contract JSON envelope (anything else → DLQ), deterministic key + atomic marker + deterministic output locations, `correlationId` propagated, `Completed` / `Failed` / `Poisoned` reported (plus a completion message when the producer waits), `MaxDeliveryCount` → monitored DLQ
 - ✅ **MUST** take an **atomic** per-message claim before the side effect and write a completion marker after it (ADR-004 A1 §4). `IIdempotencyService` as built is check-then-set and fails open — not sufficient on its own until fixed
 - ✅ **MUST** use deterministic IdempotencyKey patterns
 - ✅ **MUST** set Service Bus `MessageId` = `IdempotencyKey` — but it de-duplicates only where the queue has duplicate detection enabled, a create-time property that is **off** on the BFF queues (ADR-004 A1 §5). Receive-side idempotency is what protects you
@@ -181,6 +182,9 @@ processors (`ServiceBusJobProcessor`, `CommunicationJobProcessor`) schedule a co
 `PriorDeliveryCount` property, back off 1, 2, 4, 8 min (capped at 15), then complete the original
 (`Services/Jobs/JobMessageRetry.cs`). Handlers read the **logical** attempt from `JobContract.DeliveryCount` /
 `IsFinalDelivery`, never the broker's count. Turning duplicate detection on would make the broker drop every retry copy.
+Enforced by: `JobQueueDuplicateDetectionOffGuardTests` (`tests/Spaarke.ArchTests`; every queue resource in
+`infrastructure/**/*.bicep` must set `requiresDuplicateDetection: false`; the only exemption is `sprk-provisioning-jobs`,
+which no BFF processor reads). Live stamps are not covered by the scan; their read-only check belongs to provisioning.
 
 **SHA-256 hashing rule**: Service Bus limits `MessageId` to 128 characters. If the IdempotencyKey exceeds this, hash it:
 

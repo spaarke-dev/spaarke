@@ -15,7 +15,7 @@
 import * as React from 'react';
 import { EdgeProps, getBezierPath, getEdgeCenter } from 'react-flow-renderer';
 import { tokens } from '@fluentui/react-components';
-import type { DocumentEdgeData } from '../types/graph';
+import type { DocumentEdgeData } from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
 
 /**
  * Edge style configuration based on similarity score

@@ -75,7 +75,7 @@ Status lives in `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (**
   - The preview `2026-06-01` is allowed only as spike arm (c′) in task 005.
 - **Firm-visible output (D-66):**
   - It carries the rule set name and version, the section reference and the quoted clause text.
-  - It never carries a Procedure Library document link.
+  - It never carries a Procedure document link.
   - Rule sets with "visible to firms" off are never shown to CIAM users.
 - **Corrections are data (D-64).** Every line value or code change made in review writes a correction record with:
   - the AI value and the final value;
@@ -105,10 +105,9 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-14 — D-33 / D-40 / D-54: approvers are resolved from `sprk_billingapproverrole` on the core record. Any one eligible approver approves. An empty role means the settings default, seeded as Assigned Attorney 1 + Assigned To Internal.
 - 2026-10-14 — D-37 / D-43: resubmission keeps the firm invoice number and gets a new `.n`. Return to Firm closes the invoice; the accepted resubmission is a new invoice linked as superseding it.
 - 2026-10-14 — D-42: approved total = billed − line adjustments − invoice adjustments. A percent adjustment applies to fees *after* line adjustments.
-- 2026-10-14 — D-44 / D-55: invoice PDFs go in the core record's general (or secure) container and the files index.
-  - Guidelines, rate cards and procedures go in **Procedure Library** (internal only, indexed).
-  - Export files go in **E-Billing Output Files** (not indexed).
-  - Both use SPE, never Blob.
+- 2026-10-14 — D-44 / D-55 (**superseded by EB-D-148**): invoice PDFs go in the core record's general (or secure) container and the files index.
+  - **Current rule (EB-D-148):** every e-billing file (Procedure source, invoice PDF, supporting file, export file) is a Stored File in the Finance file store, bytes in Azure Blob; see `docs/architecture/EBILLING-FILE-STORE.md`. Do not add a SharePoint Embedded container for these files.
+  - Superseded text: guidelines, rate cards and procedures went in **Procedure Library** (internal only, indexed); export files went in **E-Billing Output Files** (not indexed); both used SPE, never Blob.
   - **Superseded for files by EB-D-148 (2026-10-21, `notes/procedure-and-file-model.md` 3.4, 4):** invoice PDFs, supporting files, Procedure sources and export files are Stored Files in the Finance file store (090, provisioned with the stamp by 091). 092 retired `Finance:EbillingOutputContainerId`; task 124 retires `Finance:ProcedureLibraryContainerId` after 116 (EB-D-163). No new reader of either container.
 - 2026-10-14 — D-46 / D-49 / D-51 / D-53: extraction (Content Understanding custom analyzer `sprk_invoice_vN`, gpt-5.2) is separate from coding (`INVOICE-LINE-CODE@v1`, gpt-5.4-mini; gpt-5.6-luna is compared in 005).
 - 2026-10-14 — D-47: field confidence is combined from four signals: analyzer confidence, arithmetic consistency, reference-data match and model self-report.
@@ -126,7 +125,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-66 (confirmed): firms see guideline *content* — clause quotes on findings plus the SPA Billing Guidelines view — never the documents.
 - 2026-10-15 — Pipeline: WP1 schema tasks (010–028) each write their own idempotent Web API script under `scripts/ebilling/` and apply it to dev. **Only task 029** syncs SpaarkeMaster solution source, forms and views. After 029, `src/dataverse/solutions/SpaarkeMaster/**` is edited only by serial tasks: 015 and 026 (their entities), 070 (billing values on the `sprk_policyversion.sprk_ruletype` option set) and the deploy tasks 053, 079, 112, 136 and 153 (sitemap / navigation entries for the pages they deploy, plus any columns or tables their phase added after 029, using 029's export-to-temp procedure). No parallel task edits it.
 
-- 2026-10-15 — D-67: Procedure Library and Output Files container keys join `GraphModule.StampContainerSettingKeys` (app-only SPE writes allowed). Being retired with the keys (092, 124; EB-D-163).
+- 2026-10-15 — D-67 (**superseded by EB-D-148**): Procedure Library and Output Files container keys joined `GraphModule.StampContainerSettingKeys` (app-only SPE writes allowed). Retired with the keys (092, 124; EB-D-163); nothing is added to the stamp for e-billing files.
 - 2026-10-15 — D-68: external-identifier key = (firm, type, normalized value, core record).
 - 2026-10-15 — D-69: confidence weights seeded provisionally; validated in 161 / 162 and checked at UAT (163).
 - 2026-10-15 — D-70: CIAM users see only their own firm's invoices (`sprk_vendororg`), in addition to core-record and secure-root scoping (task 130; uac-r2 reviews).
@@ -195,7 +194,7 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
   - Dataverse dev;
   - `spaarke-bff-dev`;
   - Content Understanding resource `spaarke-docintel-invoices-dev` (AIServices, West US, `rg-spaarke-dev`);
-  - containers per D-55 (Procedure Library `b!tqSgSM13R06R6O5ymHDynNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y`, E-Billing Output Files `b!1m_ZuA0VWUKCsWg44OvUtNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y`, container type `8a6ce34c-6055-4681-8f87-2f4f9f921c06`).
+  - the Finance file store's blob containers (`procedures`, `invoice-files`, `billing-exports`; `docs/architecture/EBILLING-FILE-STORE.md`). The two dev SharePoint Embedded containers D-55 created are no longer used (EB-D-148); the owner removes them (O-13).
 - **Additive dev schema** (new tables or columns via the task's idempotent script) is part of the schema task.
   - **Destructive changes need explicit owner OK before running:** deleting a table, column, option set or data. This covers 011 `sprk_invoicelineitem` and 015 `sprk_invoicestatus`.
 - **Azure model deployments, analyzer creation and BFF / code-page / SPA deploys:**

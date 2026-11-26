@@ -1,6 +1,8 @@
 /**
- * FoundStep - "What was found": the rule's sentence (literal), the evidence behind it, how it was determined, and the other
- * open items on the same core record in the same lane.
+ * FoundStep - the first step (its stepper label is "What was found"): the finding as the heading (the rule's short name,
+ * else the Signal's title, else the subject; owner decision D-227), a meta line (the subject when it adds something, the
+ * timing, the core record), the rule's sentence (literal), the evidence behind it, how it was determined, and the other
+ * open items on the same core record in the same lane. The step has no "What was found" heading: the finding is the heading.
  *
  * D-23: the sentence stays literal and carries no witness value; the values are EVIDENCE LINES (FR-48). A closed item shows the
  * Decision Record's fact snapshot - the facts as they stood when the record was written - NOT today's data. A fact that is
@@ -24,7 +26,6 @@ import {
   Body1,
   Caption1,
   Link,
-  Subtitle2,
   Text,
   makeStyles,
   tokens,
@@ -103,8 +104,10 @@ export const FoundStep: React.FC = () => {
     }
   };
   const openSubject = () => open(coreType, coreId);
+  // The subject's name goes in the meta line only when it adds something: not when it is the finding, nor the core record's name.
+  const subjectName = line.headline !== line.finding && line.headline !== coreName ? line.headline : null;
   const metaParts: React.ReactNode[] = [
-    ...[line.ruleShortName, line.timing.text].filter(Boolean),
+    ...[subjectName, line.timing.text].filter(Boolean),
     coreName ? (
       canOpenSubject ? (
         <React.Fragment key="subject">
@@ -121,10 +124,9 @@ export const FoundStep: React.FC = () => {
   return (
     <div className={styles.root} data-testid="step-found">
       <div className={styles.header}>
-        <Text as="h2" size={500} weight="semibold">
-          What was found
+        <Text as="h2" size={500} weight="semibold" data-testid="found-finding">
+          {line.finding}
         </Text>
-        <Subtitle2>{line.headline}</Subtitle2>
         <Caption1 className={styles.meta} data-testid="found-meta">
           {metaParts.map((part, i) => (
             <React.Fragment key={i}>

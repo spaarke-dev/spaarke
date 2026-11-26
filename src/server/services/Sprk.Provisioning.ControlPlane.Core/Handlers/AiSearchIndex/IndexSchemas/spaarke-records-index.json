@@ -121,6 +121,16 @@
       "facetable": false
     },
     {
+      "// matter type filter": "record id of the matter type (sprk_mattertype) of a matter or project; null for other record types",
+      "name": "matterTypeId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
+    },
+    {
       "name": "dataverseRecordId",
       "type": "Edm.String",
       "searchable": false,

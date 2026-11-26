@@ -23,10 +23,17 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { useForceSimulation, type ForceNode, type ForceEdge } from '@spaarke/ui-components';
+import {
+  useForceSimulation,
+  type ForceNode,
+  type ForceEdge,
+  type DocumentGraphNode as DocumentNode,
+  type DocumentGraphEdge as DocumentEdge,
+  type DocumentNodeData,
+  type ForceLayoutOptions,
+} from '@spaarke/ui-components';
 import { DocumentNode as DocumentNodeComponent } from './DocumentNode';
 import { DocumentEdge as DocumentEdgeComponent } from './DocumentEdge';
-import type { DocumentNode, DocumentEdge, DocumentNodeData, ForceLayoutOptions } from '../types/graph';
 
 export interface DocumentGraphProps {
   nodes: DocumentNode[];
