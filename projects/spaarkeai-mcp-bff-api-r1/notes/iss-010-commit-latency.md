@@ -91,3 +91,31 @@
   - must-not-fire: two steps with no write between them make one call;
   - fault path: a fault is not cached.
 - **Sequence:** part 2 PR after part 1 (A+B). The design note goes to uac-r2 first.
+
+## Part D scoping: where the ~64 unmodelled SDK calls come from (code-mapper, Sonnet, read-only, 2026-11-25; counts inferred from call sites)
+
+**Main finding: the Assign Task email's post-send work runs inside the commit request, and it is most of the unmodelled block: an estimated 55–80 SDK calls, which brackets the 64-call gap.** It is far more than the "~3 s email" first estimated. `CommunicationService` runs it after a successful send. Estimated calls per stage:
+
+| Stage | Where | Est. SDK calls |
+|---|---|---|
+| Archive the `.eml`: owner resolve, container, `sprk_document` create, permission refresh | `CommunicationService.ArchiveToSpeAsync` :3804 (called :3045) | 13–16 |
+| Thread resolve, create and assign | `ThreadResolver.ResolveAndAssignCoreAsync` :144 (via :844) | 8–11 |
+| **AI enrichment (triage and propose; the 2 `gpt-4o-mini` calls are likely here, not a queued job)** | `CommunicationEnrichmentService.EnrichAsync` :205 (called :3139) | 6–10 |
+| Participant index | `CommunicationParticipantIndexer` (called :3160) | 7–9 |
+| "Communication arrived" notification | `CommunicationArrivedProducer` (called :3168) | 5–7 |
+| Filing stamp and owner resolve before the send | `BuildDataverseRecordForUserAsync` :2939/:3260 | 5–6 |
+| Notifier and send tail: contact read, sender check, record create, message-id stamp, bell | `AssignTaskNotifier`, `CommunicationService` :1468/:1573/:4979 | 5 |
+| Secure families read before the first write | `DecisionCommitFollowUps.SecureFamiliesAsync` (`DecisionCommitService.cs:1573`) | 3–5 |
+| Budget currency (secure BU, BU, currency) | `DecisionParameterSources.ResolveBudgetCurrencyAsync` :239 | 3–4 |
+
+**Harness mislabel:** `DecisionCommitCallProfile.Sdk()` counts `IFieldMappingDataverseService` as SDK, but it is Web API live (`GraphModule.cs:152`), so the true gap may be ~68–70.
+
+**Fix candidates, biggest first:**
+1. **E: the email's post-send work off the request.**
+   - Archive, thread, AI enrichment, participant index and the arrived notification move to a queued, idempotent job.
+   - The send stays inline, so a failed send still returns `assignee_email_not_sent` (owner rule 2026-11-25).
+   - It removes most of the ~55–80 calls plus the AI, and is likely the largest single saving.
+   - Touches `CommunicationService` (communication owners) and needs their review.
+2. **D1:** a request-scoped memo of business-unit and team config reads (owner resolver, share sync, secure BU, currency). ~30–35 repeats; safe, since the commit never writes those rows.
+3. **D2:** pass the in-memory `sprk_communication` row forward instead of re-reading it. ~8–10 reads. Unsafe as a read cache, because the row is written several times.
+4. **D3:** share the `sprk_recordtype_refs` and matter stamp reads between the creates and the communication, per request.
